@@ -49,7 +49,7 @@ function Get-MemoryItems {
 
 # ------------------------------------------------------------------ exclusions
 
-$script:ExcludeDirNames = @('__pycache__', 'node_modules', '.git')
+$script:ExcludeDirNames = @('__pycache__', '.pytest_cache', 'node_modules', '.git')
 $script:ExcludeFileGlobs = @(
     '*.bak-*', '*.bak', '*.pyc', '*.log',
     '.credentials.json', '.clasprc.json', '*.pem', '*.key', '*.p12', '*.json.bak'
