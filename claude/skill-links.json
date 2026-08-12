@@ -80,11 +80,35 @@
         "Target":  "__USERHOME__\\.agents\\skills\\triage"
     },
     {
+        "Name":  "vercel-composition-patterns",
+        "Target":  "__USERHOME__\\.agents\\skills\\vercel-composition-patterns"
+    },
+    {
+        "Name":  "vercel-react-best-practices",
+        "Target":  "__USERHOME__\\.agents\\skills\\vercel-react-best-practices"
+    },
+    {
+        "Name":  "vercel-react-native-skills",
+        "Target":  "__USERHOME__\\.agents\\skills\\vercel-react-native-skills"
+    },
+    {
+        "Name":  "vercel-react-view-transitions",
+        "Target":  "__USERHOME__\\.agents\\skills\\vercel-react-view-transitions"
+    },
+    {
         "Name":  "wayfinder",
         "Target":  "__USERHOME__\\.agents\\skills\\wayfinder"
     },
     {
+        "Name":  "web-design-guidelines",
+        "Target":  "__USERHOME__\\.agents\\skills\\web-design-guidelines"
+    },
+    {
         "Name":  "writing-great-skills",
         "Target":  "__USERHOME__\\.agents\\skills\\writing-great-skills"
+    },
+    {
+        "Name":  "writing-guidelines",
+        "Target":  "__USERHOME__\\.agents\\skills\\writing-guidelines"
     }
 ]
