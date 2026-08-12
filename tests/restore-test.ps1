@@ -125,9 +125,13 @@ if ($Fault -eq 'secret') {
     Note 'fault: planted a credential value in the repo'
 }
 if ($Fault -eq 'dead-link') {
-    $victim = Get-ChildItem -Path (Join-Path $Clone 'agents\skills') -Directory | Select-Object -First 1
-    Remove-Item -Path $victim.FullName -Recurse -Force
-    Note ('fault: removed a junction target from the repo - ' + $victim.Name)
+    # Has to be a directory something actually links TO. agents/skills holds more skills than
+    # ~/.claude/skills junctions to, so picking the first directory there hits a non-linked one
+    # and the fault quietly does nothing - which it did, the first time.
+    $link   = (Read-JsonArray -Path (Join-Path $Clone 'claude\skill-links.json'))[0]
+    $victim = Join-Path $Clone ('agents\skills\' + (Split-Path $link.Target -Leaf))
+    Remove-Item -Path $victim -Recurse -Force
+    Note ('fault: removed a junction target from the repo - ' + $link.Name)
 }
 Write-Host ''
 
