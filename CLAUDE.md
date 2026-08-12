@@ -15,8 +15,9 @@ They are copies. Edit the real file in `~/.claude` or `~/.codex`, then:
 ```
 
 A hand edit here is silently overwritten by the next push, and — worse — looks committed while the
-machine it came from never changed. Only `sync.ps1`, `install.ps1`, `lib/manifest.ps1`, `README.md`,
-`.gitignore` and this file are hand-written.
+machine it came from never changed. Only `sync.ps1`, `install.ps1`, `lib/manifest.ps1`,
+`tests/restore-test.ps1`, `README.md`, `.gitignore` and this file are hand-written. `agents/` and
+`claude/skill-links.json` are generated too.
 
 ## Layout
 
@@ -42,8 +43,30 @@ file must go through `Copy-OneFile`, or it will bake this machine's paths into t
 
 ## Testing a change to the scripts
 
-`-DryRun` on both, then a real `push` — it is idempotent and the repo's git status shows exactly what
-moved. For the templating, round-trip a real file:
+Run the restore test. It is the only thing here that checks the *pull* half end to end:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+```
+
+It clones the pushed remote and installs it into a fake home under a different username, then runs
+19 checks — including executing the restored hooks from their new location. Use `-From local` while
+iterating (it clones the working tree's committed state, so **commit first** or the clone will not
+contain your change), and `-Fault <name>` to watch a specific check fail. Add a check whenever you
+add something to the whitelist; a whitelist entry with no assertion behind it is how 24 skills went
+missing without a single error message.
+
+Three traps that cost time here, all Windows PowerShell 5.1:
+
+- `DirectoryInfo.Target` is a `string[]`, not a string — binding it to a `[string]` parameter throws
+  "cannot convert value to type System.String".
+- `@(Get-Content x -Raw | ConvertFrom-Json)` does not reliably enumerate: a 22-entry file can arrive
+  as one element whose every property is an array. Use `Read-JsonArray`.
+- `$ErrorActionPreference = 'Stop'` turns git's stderr into a terminating error, and git writes
+  line-ending warnings there. That broke `-Commit` between the add and the commit.
+
+Then `-DryRun` on both scripts, then a real `push` — it is idempotent and the repo's git status shows
+exactly what moved. For the templating, round-trip a real file:
 
 ```powershell
 . .\lib\manifest.ps1

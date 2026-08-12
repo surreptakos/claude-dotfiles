@@ -1,0 +1,46 @@
+{
+  "description": "Global Ask Matt route gate for every Codex turn.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/ask_matt_gate.py\" prompt",
+            "commandWindows": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" prompt",
+            "timeout": 5,
+            "statusMessage": "Starting Ask Matt route gate",
+            "additionalContextLimit": 1200
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/ask_matt_gate.py\" pre-tool",
+            "commandWindows": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" pre-tool",
+            "timeout": 5,
+            "statusMessage": "Checking Ask Matt route"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.codex/hooks/ask_matt_gate.py\" stop",
+            "commandWindows": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" stop",
+            "timeout": 5,
+            "statusMessage": "Verifying Ask Matt route"
+          }
+        ]
+      }
+    ]
+  }
+}

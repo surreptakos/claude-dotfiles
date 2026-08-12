@@ -16,7 +16,11 @@ end of a run.
 | `claude/skills/` | `~/.claude/skills/` | the skills the flows in CLAUDE.md refer to |
 | `claude/hooks/` | `~/.claude/hooks/` | `session-gate.js`, `governance-reminder.js`, the stop-slop pair |
 | `claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache |
+| `agents/skills/` | `~/.agents/skills/` | where most flow skills actually live; `~/.claude/skills` only junctions to them |
+| `claude/skill-links.json` | (recreated junctions) | which skills are junctions and what they point at |
 | `codex/hooks/` | `~/.codex/hooks/` | `ask_matt_gate.py`, which the pre-send lint and the governance gate both call |
+| `codex/hooks.json` | `~/.codex/hooks.json` | the wiring that calls it — without this the script above is inert |
+| `codex/AGENTS.md` | `~/.codex/AGENTS.md` | Codex's half of the global rules |
 | `memory/<slug>/` | `~/.claude/projects/<slug>/memory/` | per-project memory files |
 
 Nothing else is read. `sync.ps1` copies the whitelist in `lib/manifest.ps1` by name, so a credential
@@ -64,6 +68,48 @@ occur in practice — `C:\Users\Dan`, the JSON-escaped `C:\\Users\\Dan`, the for
 `C:/Users/Dan`, and the Git-Bash `/c/Users/Dan`. Directory slugs get `__USERHOME_SLUG__`. Pull
 substitutes the local home back. A machine with the same username sees no difference; one with a
 different username still works.
+
+## Junctioned skills
+
+Twenty of the skills under `~/.claude/skills` are junctions into `~/.agents/skills` —
+`implement`, `tdd`, `triage`, `handoff`, `to-spec`, `code-review` and the rest of the flow map the
+global `CLAUDE.md` names. `Get-ChildItem -Recurse -File` does not traverse a reparse point, so a
+file copy walks straight past them **without an error**: the repo carried 13 of 37 skills for its
+first eight commits and nothing said so.
+
+So the targets travel as `agents/skills/`, and the junctions travel as data in
+`claude/skill-links.json`. Pull restores the trees first and recreates the junctions afterwards —
+a junction whose target is not on disk yet would be skipped as missing. A real directory sitting
+where a junction should go is left alone; that is someone's local edit.
+
+Not following reparse points is now the deliberate half of the arrangement: it is what stops a
+junctioned skill being stored twice, once under each path.
+
+## Proving the restore, without a second machine
+
+```powershell
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+```
+
+Both scripts take `-UserHome`, so a restore can be aimed anywhere. The test clones the **pushed
+remote** — what is in your working tree is not what a new machine gets — and installs it into
+`C:\dotfiles-restore-test\Users\Restored`: a different username, outside the real profile, so any
+occurrence of the real home path in the output is unambiguously a leak rather than the scratch
+directory's own name.
+
+Nineteen checks. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
+still parses and every path in it points at a file that exists; every junction resolves to a real
+`SKILL.md`; every file survives the round trip byte-for-byte; nothing credential-shaped came
+along; and the restored hooks and skills **run** from the new home — `session-gate.js` passes its
+own test suite there, `ask_matt_gate.py` lints, `session-check` reports on a repo. That last group
+is the difference between proving bytes moved and proving the machine would work.
+
+`-Fault missing|home-leak|secret|drift|broken-hook|dead-link` breaks one thing on purpose so the
+matching check can be watched going red. A check that has only ever passed is not yet a check —
+`dead-link` passed on its first attempt because it deleted a directory nothing linked to.
+
+What it does **not** prove: that Claude Code itself authenticates and boots from the restored
+config. That needs `/login`, which is item 1 of the by-hand list `install.ps1` prints.
 
 ## The secret guard
 

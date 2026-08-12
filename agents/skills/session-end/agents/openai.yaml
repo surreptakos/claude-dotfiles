@@ -1,0 +1,4 @@
+interface:
+  display_name: "Session End"
+  short_description: "Verify repository state before wrapping up"
+  default_prompt: "Use $session-end to verify this repository before wrapping up."
