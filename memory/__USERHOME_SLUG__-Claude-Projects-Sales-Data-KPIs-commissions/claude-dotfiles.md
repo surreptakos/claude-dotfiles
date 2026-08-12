@@ -1,14 +1,15 @@
 ---
 name: claude-dotfiles
-description: Meta/claude-dotfiles carries ~/.claude + ~/.codex/hooks between machines; push after editing a skill or global CLAUDE.md
+description: Meta/claude-dotfiles (private repo surreptakos/claude-dotfiles) carries ~/.claude + ~/.codex/hooks between machines; push after editing a skill or global CLAUDE.md
 metadata: 
   node_type: memory
   type: project
   originSessionId: ab9ced42-0bad-436d-b16d-73cdd97e4941
-  modified: 2026-08-12T20:32:57.231Z
+  modified: 2026-08-12T20:39:51.469Z
 ---
 
-`__USERHOME__\Claude\Projects\Meta\claude-dotfiles` (built 2026-08-12, git, **no remote yet**) carries
+`__USERHOME__\Claude\Projects\Meta\claude-dotfiles` (built 2026-08-12, remote
+**`surreptakos/claude-dotfiles`, private**, default branch `master`) carries
 the half of the setup no project repo holds: global `CLAUDE.md`, `settings.json`, `skills/`,
 `~/.claude/hooks/`, `~/.codex/hooks/ask_matt_gate.py`, plugin manifests, and per-project `memory/`
 for 9 projects — 256 files.
