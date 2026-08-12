@@ -1,0 +1,11 @@
+#!/bin/sh
+# Repo test gate, installed by the project-harness skill. Activate per clone:
+#   git config core.hooksPath .githooks
+# Bypass for a genuine emergency: git commit --no-verify (CI still gates).
+# TEST_COMMAND is substituted by the harness skill at install time.
+echo "pre-commit: TEST_COMMAND"
+TEST_COMMAND || {
+  echo ""
+  echo "pre-commit: test suite failed — commit blocked."
+  exit 1
+}

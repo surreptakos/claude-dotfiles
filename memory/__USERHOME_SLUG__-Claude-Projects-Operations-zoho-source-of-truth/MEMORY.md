@@ -1,0 +1,1 @@
+- [Answers at 10% length](answer-length-10-percent.md) — lead with the point, push detail into artifacts

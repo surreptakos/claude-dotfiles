@@ -1,0 +1,41 @@
+# Memory index
+
+- [aac-routines replaces aacx](aac-routines-replaces-aacx.md) — 2026-08-05: stop building the engine, imitate Cowork's scheduled tasks in Meta/aac-routines; all AACX automation off.
+
+- [p1 escalation boundary](p1-escalation-boundary.md) — hygiene escalates p2→p1 at strictly <7 days; +7 stays p2 (Dan parks there).
+- [MCP returns text not JSON](mcp-text-vs-json.md) — live MCP connectors return formatted text; ingest adapters expect raw JSON. FETCH needs a shim.
+- [reschedule needs existing due](reschedule-needs-existing-due.md) — Todoist reschedule-tasks can't add a due date; undated p2→p1 escalations need update-tasks dueString.
+- [hygiene contract regex over-match](hygiene-contract-regex-overmatch.md) — contract/schedule p1 rule fires on bare "lease"/"schedule review"/"contract review"; caused 6 spurious backlog p1 promotions on 2026-07-17 (held, not executed).
+- [STEP 3 stage backfill explosion](step3-stage-backfill-explosion.md) — billing/triage fire on whole historical backlog on first wired run (86 billing p1 + 2 triage noise) and hygiene mass-escalates the +7 parked batch (~50); ~140 p1 vs ≈10 target. Held entire action list on 2026-07-20.
+- [python interpreter path](python-interpreter-path.md) — bare `python` now works (real 3.12.10, stub no longer shadows it); `python3` absent; full Python312 path still safest for scheduled tasks.
+- [O3 routines = full playbook](o3-routines-full-playbook.md) — 5 weekly O3-prep tasks run the full investigative playbook (not aacx render o3); daily+wrap are aacx; daily disabled.
+- [one-brain plan](one-brain-plan.md) — north star: one store, all deliverables are views; Phase 1 merged, Phase 2 go-live machinery built (flag OFF); detail in docs/CONTEXT.md + ADR 0006.
+- [sweep manages priority not dates](sweep-manages-priority-not-dates.md) — sweep changes priority only; escalation raises p2→p1 but never touches due/deadline (Dan owns dates).
+- [O3 form project redaction](o3-form-project-redaction.md) — Phase 3 O3 rule: task in a direct's project → their O3 form; non-shared version → eyes-only form, never shared.
+- [sweep needs full board resync](sweep-needs-full-board-resync.md) — first live sweep on a stale store computed 23 spurious escalations; full board re-sync is a hard pre-req before flipping live_writes.
+- [enrich owner is actor not referent](enrich-owner-is-actor-not-referent.md) — owner_id = who does the task, not a direct merely named; wrong owner makes plan auto-delegate Dan's own tasks.
+- [stale pending actions persist](stale-pending-actions-persist.md) — re-running plan doesn't retract prior pending rows; golive-actions still returns superseded ones — void them before executing.
+- [delivery send capability gap](delivery-send-capability-gap.md) — step-15 self-send WORKS via the clasp Gmail token (mail.google.com scope): djgatsakos@gmail.com → dgatsakos@activealarm.com. MCP connectors are read-only.
+- [first live-writes run 2026-07-23](first-live-run-2026-07-23.md) — flag ON; net Todoist board writes = 0 (board already GREEN/synced); comms delta reviewed but not ingested (mostly noise).
+- [todoist sync script](todoist-sync-script.md) — scripts/todoist_sync.py moves Todoist fetch/ingest/reconcile/writes off Claude (kills the sweep's token cost); needs TODOIST_API_TOKEN.
+- [teams mcp no paging](teams-mcp-no-paging.md) — Teams read_resource returns ~20 newest msgs, no paging, ignores since/$top; stale-watermark chats lose the gap. Ingest daily.
+- [chat items need null priority](chat-items-need-null-priority.md) — triage treats any non-null priority as actionable; Teams chatter must be enriched priority_suggested=null or it spawns 1 task per fragment (96 spurious on 2026-07-23).
+- [classify script](classify-script.md) — scripts/classify.py moves enrich (Sonnet 5) + dedup (Haiku 4.5) judgment off the interactive sweep onto a metered Anthropic Batch call; shipped 2026-07-27.
+- [closure authority pivot](closure-authority-pivot.md) — ADR 0007: Dan declares closure via Todoist checkoff (terminal); evidence closure is an assist; Todoist filter is the working surface, not the brief doc.
+- [open work must be ticketed](open-work-must-be-ticketed.md) — remaining work = a spec-backed ticket or a triaged bug; prose follow-ons don't count. Tracker is GitHub Issues since 2026-07-28; local trackers (.scratch/, issues/, HANDOFF.md) deleted 2026-07-29, issues are self-contained.
+- [always commit, merge, deploy](always-commit-merge-deploy.md) — never park a commit on a branch awaiting permission; merge to master and fast-forward the main checkout the sweep runs from.
+- [tracker audit tool](tracker-audit-tool.md) — `node tools/tracker-audit.js` catches tracker drift (unticked boxes on closed issues, board-vs-state); run before claiming the tracker is clean.
+- [parallel implement wave 2026-07-29](parallel-implement-wave-2026-07-29.md) — 15 PRs shipped whole backlog in one day via 9 worktree agents; concurrent green PRs combined red (schema dup), replay reviews catch what unit tests miss, PRDs #9/#27/#28 open on owner gates only.
+- [live_writes ON but noise gate open](live-writes-on-noise-gate-open.md) — flag is ON; 2026-07-29 run computed 103 creates from chat fragments + notification mail. Inspect every create before --execute-writes. Issue #44.
+- [legacy OneDrive folder mined](legacy-onedrive-folder-mined.md) — all 146 files audited; read docs/audit/legacy-onedrive-ledger.md, don't re-mine the folder. 3 real gaps left (#83/#84/#85), 30 files deletable.
+- [three queues, not colours](three-queues-not-colours.md) — ADR 0008: ASSIGN/DO/CHASE replace front colours; queues are a rendered view, never board state. PRD #90, tickets #93-#98.
+- [verify inferences against the store](verify-inferences-against-the-store.md) — the reads were sound, five conclusions drawn from them were wrong; grep the repo and query data/aac.db before ticketing anything sourced from a document.
+- [milestones and usable test](milestones-and-usable-test.md) — M0-M5 gate usability; usable = the manual routine it replaced got switched off. Target M1.
+- [uncertainty goes to inbox](uncertainty-goes-to-inbox.md) — write unsure items to the Inbox board and let Dan delete; no gates, no caps. Grade the artifact, not the plumbing.
+- [M365 transport: flows to Google Drive](m365-graph-blocked-power-automate.md) — Graph AND the OneDrive drop folder are dead ends; step 2 is gdrive_fetch.py, all 19 sources live.
+- [classify.py uses the Console wallet](enrich-starves-dedup-on-credit.md) — the API key's prepaid balance is separate from Claude Code usage credits; top up in Console, not the subscription. Key is a fallback chain since 0cbbbd8.
+- [surface has no intra-run dedup](surface-has-no-intra-run-dedup.md) — FIXED 2026-08-10 (#117): surfacer batch_key collapses within a batch; wo pattern widened to 9-digit WOs.
+- [gh output is UTF-8](gh-output-is-utf8.md) — Python subprocess text=True decodes it as cp1252 and silently mojibakes em dashes into issue bodies.
+- [O3 render not at parity](o3-render-not-at-parity.md) — #56 canary FAILED: 0/48 coverage, render doesn't move with the date; O3 prep stays manual.
+- [noise-impact collateral must be independent](noise-impact-collateral-must-be-independent.md) — inferred loops are circular evidence; judge an entry on enrich/p1p2/completed only.
+- [June 15 shells promoted to projects](june-15-shells-promoted-to-projects.md) — 53 [AAC]/[Home] shells are now real Todoist projects; Work backlog 303→211, Personal 219→68.

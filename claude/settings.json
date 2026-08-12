@@ -1,0 +1,117 @@
+{
+  "enabledPlugins": {
+    "yes@sstklen": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "caveman@caveman": true
+  },
+  "extraKnownMarketplaces": {
+    "sstklen": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/sstklen/yes.md.git"
+      }
+    },
+    "mattpocock": {
+      "source": {
+        "source": "github",
+        "repo": "mattpocock/skills"
+      }
+    },
+    "claude-plugins-official": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/anthropics/claude-plugins-official.git"
+      }
+    },
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    }
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "powershell -ExecutionPolicy Bypass -File \"__USERHOME_JSON__\\.claude\\plugins\\cache\\caveman\\caveman\\0d95a81d35a9\\src\\hooks\\caveman-statusline.ps1\""
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\session-gate.js\" start",
+            "timeout": 200,
+            "statusMessage": "Running session-start checks..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\session-gate.js\" end",
+            "timeout": 200,
+            "statusMessage": "Recording session-end checks..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\governance-reminder.js\"",
+            "timeout": 5,
+            "statusMessage": "Asserting governance..."
+          },
+          {
+            "type": "command",
+            "command": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" claude-prompt",
+            "timeout": 5,
+            "statusMessage": "Locking Ask Matt, Yes, and caveman ultra..."
+          },
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\session-gate.js\" prompt",
+            "timeout": 200,
+            "statusMessage": "Checking session gate..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" claude-pre-tool",
+            "timeout": 5,
+            "statusMessage": "Checking governance gate..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" claude-stop",
+            "timeout": 5,
+            "statusMessage": "Verifying governance gate..."
+          }
+        ]
+      }
+    ]
+  },
+  "autoUpdatesChannel": "latest",
+  "skipWorkflowUsageWarning": true,
+  "theme": "dark",
+  "inputNeededNotifEnabled": true,
+  "agentPushNotifEnabled": true
+}

@@ -1,0 +1,1 @@
+- [O3 prep date discipline](o3-prep-date-discipline.md) — absolute dates only, verify O3 date from calendar, applies to all directs

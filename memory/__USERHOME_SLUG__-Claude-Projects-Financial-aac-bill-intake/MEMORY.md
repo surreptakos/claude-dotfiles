@@ -1,0 +1,24 @@
+- [GAS testing architecture](gas-testing-architecture.md) — core.js (pure, dual-env) + node --test; node --check on temp .js; split-coded threshold 0.10
+- [clasp run autonomy](clasp-run-autonomy.md) — headless GAS execution: GCP link + project scopes + deployment; run functions + Gmail connector caveats
+- [GAS verification loop](gas-verification-loop.md) — deploy+verify against BILL sandbox: clasp push -f / ping / reprocessReview / tailLog; Log sheet is source of truth
+- [Eval fixture ground-truth gap](eval-fixture-ground-truth-gap.md) — RESOLVED 2026-07-17: fixtures corrected from real PDFs; decision-eval 8/8, evalExtraction 100%
+- [Zoho Desk access](zoho-desk-access.md) — admin MCP/API access; prod org 874367220 + sandbox 882152284, ZohoOne; MCP is ops-only, provisioning needs Desk REST + settings scope
+- [Zoho Desk token scope](zoho-desk-token-scope.md) — token is PROD-bound since #61; sandbox 932165744 unreachable (403 OAUTH_ORG_MISMATCH); portal-bound, needs own grant
+- [Desk provisioning API facts](desk-provisioning-api-facts.md) — what Desk REST can/can't provision: fields+writes+comments+webhooks yes; department/picklist-choices/custom-statuses need UI; model gate state as a custom field not native status
+- [Desk-channel intake progress](desk-channel-intake-progress.md) — issues 1/4/5/6/9-digest/10/11/12 done+verified in sandbox (134 tests); AP department + prod (#3/#13/#7/#8) human-gated
+- [clasp login scope trap](clasp-login-scope-trap.md) — plain `clasp login` uses clasp's client → "This app is blocked" on restricted scopes; use --creds project client + --use-project-scopes; /exec web app is the run fallback
+- [Zoho token cache gotcha](zoho-token-cache-gotcha.md) — Zoho access token cached ~55m; re-minted grant looks wrong until cache cleared (fixed 2026-07-23); prod Desk org=874367220, not 875376555
+- [Intake queue live](intake-queue-live.md) — 2026-07-28 go-live: 4 triggers installed, /exec enqueue-only, BILL PRODUCTION; quota is the open risk
+- [Worktree is stale, work in main](worktree-is-stale-work-in-main.md) — session cwd is a stale worktree; real work is the MAIN checkout, now on branch main (ea8b80f, pushed)
+- [Ask questions in plain language](ask-questions-in-plain-language.md) — decision questions are exempt from caveman; concrete story first, mechanism last
+- [BILL note API facts](bill-notes-api-facts.md) — notes are v2-only: SendMessage.json writes, List/Note.json reads, nothing deletes
+- [Approved BILL note voice](bill-note-voice-approved.md) — Dan-approved note wording; stop-slop AND write-like-dan, both
+- [BILL approver routing](bill-approver-routing.md) — PR #34 comments are the source of record (65.4% holdout, 96.8% GL→approver); 5 live policies; BILL cannot see the job board
+- [Desk ticket ids exceed 2^53](desk-ticket-ids-exceed-2p53.md) — never coerce a Desk id to a JS Number; it silently rounds to a different valid-looking id
+- [Pollers run workday only](pollers-run-workday-only.md) — drain/payment/relay skip outside Mon-Fri 06:00-18:00 Central; a quiet weekend queue is the gate, not an outage
+- [Desk Blueprint API facts](desk-blueprint-api-facts.md) — criteria is UI-only (500s every spelling); mimic a dumped accepted artifact, not the spec; POST creates ACTIVE; blueprints don't block API status writes
+- [Tax-exempt property spelling](tax-exempt-property-spelling.md) — TAX_EXEMPT_CUSTOMERS property carries "Chicago Park District"; core default doesn't; property is authoritative
+- [Handed-off work is yours](handed-off-work-is-yours.md) — a handed-over PR/branch/ticket transfers wholesale; clear mechanical blockers, don't ask for rulings on its prior state
+- [ask-matt gate nonce](ask-matt-gate-nonce.md) — nonce is per-prompt and declare must be the turn's first tool call; stale nonce blocks every tool with a misleading "missing" message
+- [Stubbed dup gate diagnostic trap](stubbed-dup-gate-diagnostic-trap.md) — testGlOverridePrecedenceLive always says CREATE (stubbed dupSource); ask dupCheckPairs instead
+- [Trashed ticket API signature](trashed-ticket-api-signature.md) — binned ticket: GET+comments 200 but threads 404, empty Attachments; read isTrashed first; queueDismissParked is human-only

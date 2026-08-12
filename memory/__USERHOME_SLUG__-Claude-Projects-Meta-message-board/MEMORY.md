@@ -1,0 +1,4 @@
+- [Message Board Google access](message-board-google-access.md) — the claude-code service account is a dead end; use the clasp token.
+- [Message Board backup copies](message-board-backup-copies.md) — 20 historical snapshots the SA can read, and how to match a row across them without getting it wrong.
+- [Never hand-write a clasp login](clasp-login-never-hand-write.md) — run `npm run auth` and paste it; a bare `clasp login` silently makes a wrong credential.
+- [Message Board trigger timings](message-board-trigger-timings.md) — the trigger fires every 5 min and normally takes ~14s; check this before calling a timeout a regression.
