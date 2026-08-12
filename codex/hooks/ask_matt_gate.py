@@ -267,10 +267,142 @@ def _is_claude_declaration_command(
     return re.fullmatch(pattern, command, flags=re.IGNORECASE) is not None
 
 
+TICKET_FLOWS = {"to-tickets", "to-spec", "triage"}
+ISSUE_CREATE_PATTERN = re.compile(
+    # Anchored: this is matched against ONE segment of a command line, so it fires on a command
+    # actually being run, not on the same words appearing inside quoted text. `/issues` must also END
+    # the path — `issues/19/sub_issues` and `issues/15/dependencies/...` link issues that exist.
+    r"gh\s+issue\s+create\b"
+    r"|gh\s+api\b[^\n]*--method\s+POST[^\n]*?/issues(?![/\w])",
+    re.IGNORECASE,
+)
+HEREDOC_PATTERN = re.compile(
+    r"<<-?\s*[\"']?(?P<tag>[A-Za-z_][A-Za-z0-9_]*)[\"']?\n.*?^(?P=tag)\s*$",
+    re.DOTALL | re.MULTILINE,
+)
+
+
+def _command_segments(command: str) -> list[str]:
+    """Split a shell command into the segments a shell would actually execute.
+
+    Heredoc bodies come out first. Writing a file whose CONTENT mentions `gh issue create` is not
+    running it — that false positive blocked a plain `cat > file` the first time this gate ran, which
+    is the whole reason this function exists rather than a bare substring search.
+    """
+    stripped = HEREDOC_PATTERN.sub(" ", command)
+    # Blank the CONTENT of quoted strings before splitting. Without this, a separator inside an
+    # argument splits the line and the tail reads as a command of its own: `mk 'cd /tmp && gh issue
+    # create -t x'` produced a segment starting with `gh`. A real command still keeps its head,
+    # because the head is never inside quotes.
+    stripped = re.sub(r"'[^']*'", "''", stripped)
+    stripped = re.sub(r'"[^"]*"', '""', stripped)
+    return [seg.strip() for seg in re.split(r"[\n;]|&&|\|\||\|", stripped) if seg.strip()]
+
+
+def _command_of(event: dict[str, Any]) -> str:
+    if str(event.get("tool_name") or "") not in {"Bash", "PowerShell"}:
+        return ""
+    tool_input = event.get("tool_input")
+    command = tool_input.get("command") if isinstance(tool_input, dict) else None
+    return command if isinstance(command, str) else ""
+
+
+def _publish_count_path(session_id: str) -> Path:
+    return STATE_DIR / f"{_safe_id(session_id)}--published.json"
+
+
+def _read_publish_count(session_id: str) -> int:
+    try:
+        with open(_publish_count_path(session_id), encoding="utf-8") as handle:
+            return int(json.load(handle).get("issues_created") or 0)
+    except Exception:
+        return 0
+
+
+def _bump_publish_count(session_id: str) -> None:
+    """Survives a turn boundary on purpose. `declare-claude` rewrites the turn state from scratch
+    every turn, so a counter living there resets exactly when a multi-turn ticket run needs it most."""
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        count = _read_publish_count(session_id) + 1
+        with open(_publish_count_path(session_id), "w", encoding="utf-8") as handle:
+            json.dump({"issues_created": count}, handle)
+    except Exception:
+        pass
+
+
+def _transcript_used_tool(transcript_path: str, tool_name: str) -> bool:
+    if not transcript_path:
+        return False
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("type") != "assistant":
+                    continue
+                for item in (record.get("message") or {}).get("content") or []:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type") == "tool_use"
+                        and item.get("name") == tool_name
+                    ):
+                        return True
+    except Exception:
+        return False
+    return False
+
+
+def _publish_gate(
+    event: dict[str, Any], session_id: str, state: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Filing ONE issue is triage. Filing a SET is /to-tickets, whose step 4 says the breakdown is
+    approved by the user before anything is published.
+
+    Declaring a route was never enough to enforce that: the gate only checked that a flow string
+    existed, so `triage` (or any other route) published a whole ticket set unchallenged. This keys off
+    what is actually happening instead of what was declared — the second `gh issue create` in a
+    session IS a ticket set — and it demands evidence the user was asked, in the form of an
+    AskUserQuestion in the transcript. Self-assertion is not accepted: a stamp the model writes is a
+    stamp the model can write while skipping the step.
+    """
+    command = _command_of(event)
+    if not command:
+        return None
+    if not any(
+        ISSUE_CREATE_PATTERN.match(segment) for segment in _command_segments(command)
+    ):
+        return None
+    flow = (state or {}).get("flow") or (state or {}).get("last_flow")
+    if flow not in TICKET_FLOWS:
+        return _deny(
+            f"Publishing an issue under route `{flow}`. Declare one of: "
+            + ", ".join(sorted(TICKET_FLOWS))
+            + "."
+        )
+    already = _read_publish_count(session_id)
+    if already >= 1 and not _transcript_used_tool(
+        str(event.get("transcript_path") or ""), "AskUserQuestion"
+    ):
+        return _deny(
+            f"This is issue #{already + 1} this session, so it is a ticket SET, not a one-off. "
+            "/to-tickets step 4: present the numbered breakdown with each ticket's blocking edges "
+            "and what it delivers, ask the user about granularity and edges via AskUserQuestion, "
+            "and iterate until approved. Publish after that."
+        )
+    _bump_publish_count(session_id)
+    return None
+
+
 def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
     state = _read_state("claude", session_id)
     nonce = str(state.get("nonce") or "") if state else ""
+    blocked = _publish_gate(event, session_id, state)
+    if blocked is not None:
+        return blocked
     if (
         state
         and state.get("flow")

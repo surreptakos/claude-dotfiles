@@ -9,3 +9,8 @@
 - [Zoho writes + deploy verification](zoho-write-and-deploy-verify.md) — `trigger: []` suppresses Zoho workflows, `skip_feature_execution` max 2; `runAllSilent` prints "No response." on success (returns void) so verify by reading sheets; SA reads occasionally flaky
 - [Claude dotfiles](claude-dotfiles.md) — private repo `surreptakos/claude-dotfiles` carries ~/.claude + ~/.codex/hooks between machines; `sync.ps1 -Mode push` after editing a skill or global CLAUDE.md
 - [Unmatched-rep hardening](unmatched-rep-hardening.md) — 2026-07-30 auto-run fix SHIPPED + merged (`c3ad8cc`); the Split Credit Partner ERROR is load-bearing, do NOT mirror the severity change; open work in `.scratch/unmatched-rep-hardening/`
+- [Deal_Number join DEPLOYED](deal-number-join-deployed.md) — PR #17 live 2026-08-12, #16 closed, #15 unblocked; clasp token CLEAN again (sheet-rest-api-access stale); OSH-Patterson CO1 skip is correct
+- [CO attribution build](co-attribution-build.md) — PRD #19, tickets #21-#27, ADRs 0004/0005; GP = Sales − Total Cost (quoted); Deal Owner = attribution; Dan adding Total Cost field
+- [Zoho field traps](zoho-field-traps.md) — AAC_Projects.Owner = PM, Project_Manager = sales rep (labels crossed); Project_GPM is formula-derived
+- [Publish gate hook](publish-gate-hook.md) — gh issue create gated by flow + AskUserQuestion evidence; Dan wants general policy gates; Fable: trim to one governance injection
+
