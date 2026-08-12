@@ -60,7 +60,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ''
-Write-Host 'Still to do by hand — a repo cannot carry these:'
+Write-Host 'Still to do by hand - a repo cannot carry these:'
 Write-Host ''
 Write-Host '  1. Secrets. Copy over a secure channel (password manager or encrypted drive),'
 Write-Host '     never email and never a repo:'
@@ -70,7 +70,7 @@ Write-Host ''
 Write-Host '  2. Logins:'
 Write-Host '       claude            then /login'
 Write-Host '       gh auth login'
-Write-Host '       node tools/clasp-auth.js   (from a project repo — never a bare clasp login)'
+Write-Host '       node tools/clasp-auth.js   (from a project repo - never a bare clasp login)'
 Write-Host ''
 Write-Host '  3. Plugins reinstall themselves from the marketplaces in claude/settings.json on'
 Write-Host '     first launch. The statusLine command points into plugins\cache\... with a build'

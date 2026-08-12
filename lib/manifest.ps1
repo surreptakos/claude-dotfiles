@@ -242,7 +242,7 @@ function Assert-NoSecrets {
 
     if ($hits.Count -gt 0) {
         Write-Host ''
-        Write-Host 'SECRET GUARD FAILED — these files look like they contain live credentials:' -ForegroundColor Red
+        Write-Host 'SECRET GUARD FAILED - these files look like they contain live credentials:' -ForegroundColor Red
         $hits | ForEach-Object { Write-Host ("  {0}" -f $_) -ForegroundColor Red }
         Write-Host 'Nothing was committed. Remove the values, then re-run.' -ForegroundColor Red
         return $false
