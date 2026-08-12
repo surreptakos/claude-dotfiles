@@ -1,0 +1,4 @@
+interface:
+  display_name: "Project Harness"
+  short_description: "Install or upgrade the repository harness"
+  default_prompt: "Use $project-harness to install or upgrade the organization harness in this repository."

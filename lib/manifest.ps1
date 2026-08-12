@@ -16,6 +16,7 @@ function Get-DotfileItems {
 
     $claude = Join-Path $UserHome '.claude'
     $codex  = Join-Path $UserHome '.codex'
+    $agents = Join-Path $UserHome '.agents'
 
     @(
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/CLAUDE.md';                       Local = (Join-Path $claude 'CLAUDE.md') }
@@ -24,8 +25,116 @@ function Get-DotfileItems {
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/skills';                          Local = (Join-Path $claude 'skills') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/hooks';                           Local = (Join-Path $claude 'hooks') }
+        # Most of the flow skills the global CLAUDE.md names (implement, tdd, triage, handoff,
+        # to-spec...) live here and reach ~/.claude/skills through junctions. Carrying only
+        # ~/.claude/skills captured 13 of 37 skills and said nothing about the other 24.
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'agents/skills';                          Local = (Join-Path $agents 'skills') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'codex/hooks';                            Local = (Join-Path $codex  'hooks') }
+        # Without hooks.json the carried ask_matt_gate.py is inert on the Codex side: the script
+        # is there and nothing calls it. AGENTS.md is Codex's half of the global rules.
+        [pscustomobject]@{ Type = 'File'; Repo = 'codex/hooks.json';                       Local = (Join-Path $codex  'hooks.json') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'codex/AGENTS.md';                        Local = (Join-Path $codex  'AGENTS.md') }
     )
+}
+
+# ------------------------------------------------------------------- skill links
+
+# Junctions are the reason a skill can be installed and invisible to a file copy:
+# Get-ChildItem -Recurse -File does not traverse a reparse point, so Copy-Tree walks straight
+# past one and reports a smaller count with no error. Record them as data instead, and recreate
+# them on pull once their targets are back.
+$script:SkillLinkFile = 'claude/skill-links.json'
+
+function Test-IsLink {
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+    return (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+# DirectoryInfo.Target is a string[] on Windows PowerShell 5.1 and a string on PowerShell 7.
+# Binding the array straight into a [string] parameter throws "cannot convert value to type
+# System.String", which is a confusing way to learn that.
+function Get-LinkTarget {
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+    $target = $Item.Target
+    if ($null -eq $target) { return '' }
+    if ($target -is [array]) {
+        if ($target.Count -eq 0) { return '' }
+        return [string]$target[0]
+    }
+    return [string]$target
+}
+
+function Get-SkillLinks {
+    param([Parameter(Mandatory = $true)][string]$UserHome)
+
+    $skills = Join-Path $UserHome '.claude\skills'
+    if (-not (Test-Path $skills)) { return @() }
+
+    Get-ChildItem -Path $skills -Directory -Force |
+        Where-Object { Test-IsLink -Item $_ } |
+        ForEach-Object {
+            [pscustomobject]@{ Name = $_.Name; Target = (Get-LinkTarget -Item $_) }
+        } |
+        Where-Object { $_.Target -ne '' }
+}
+
+function Save-SkillLinks {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$UserHome,
+        [switch]$DryRun
+    )
+
+    $links = @(Get-SkillLinks -UserHome $UserHome | ForEach-Object {
+        [pscustomobject]@{ Name = $_.Name; Target = (ConvertTo-Tokens -Text $_.Target -UserHome $UserHome) }
+    })
+    $path = Join-Path $RepoRoot ($script:SkillLinkFile -replace '/', '\')
+    if ($DryRun) {
+        Write-Host ("  would write {0}  ({1} links)" -f $path, $links.Count)
+        return $links.Count
+    }
+    $json = ConvertTo-Json -InputObject $links -Depth 3
+    [System.IO.File]::WriteAllText($path, $json, $script:Utf8NoBom)
+    return $links.Count
+}
+
+function Restore-SkillLinks {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$UserHome,
+        [switch]$DryRun
+    )
+
+    $path = Join-Path $RepoRoot ($script:SkillLinkFile -replace '/', '\')
+    if (-not (Test-Path $path)) { return 0 }
+
+    $links = @(Get-Content $path -Raw | ConvertFrom-Json)
+    $made  = 0
+    foreach ($link in $links) {
+        $target = ConvertFrom-Tokens -Text $link.Target -UserHome $UserHome
+        $linkPath = Join-Path $UserHome (".claude\skills\" + $link.Name)
+
+        if (-not (Test-Path $target)) {
+            Write-Host ("  skip link (no target): {0} -> {1}" -f $link.Name, $target) -ForegroundColor Yellow
+            continue
+        }
+        if ($DryRun) { Write-Host ("  would link {0} -> {1}" -f $linkPath, $target); $made++; continue }
+
+        # A real directory already sitting there is somebody's local edit, not ours to replace.
+        if (Test-Path $linkPath) {
+            $existing = Get-Item $linkPath -Force
+            if (-not (Test-IsLink -Item $existing)) {
+                Write-Host ("  skip link (real directory in the way): {0}" -f $linkPath) -ForegroundColor Yellow
+                continue
+            }
+            Remove-Item -Path $linkPath -Force -Recurse
+        }
+        $parent = Split-Path $linkPath -Parent
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        New-Item -ItemType Junction -Path $linkPath -Target $target | Out-Null
+        $made++
+    }
+    return $made
 }
 
 # Per-project memory lives under ~/.claude/projects/<slug>/memory. The slug is the
@@ -196,6 +305,9 @@ function Copy-Tree {
         return 0
     }
 
+    # -Recurse does not traverse reparse points, and that is load-bearing rather than incidental:
+    # it is what stops a junctioned skill being copied twice, once under claude/skills and again
+    # under agents/skills. The junctions themselves travel as data - see Get-SkillLinks.
     $count = 0
     Get-ChildItem -Path $Source -Recurse -File | ForEach-Object {
         $relative = $_.FullName.Substring($Source.Length).TrimStart('\', '/')

@@ -32,7 +32,7 @@ Write-Host ("{0}  (home: {1}){2}" -f $Mode.ToUpper(), $UserHome, $(if ($DryRun) 
 Write-Host ''
 
 $items       = Get-DotfileItems -RepoRoot $RepoRoot -UserHome $UserHome
-$mirrorRoots = @('claude\skills', 'claude\hooks', 'codex\hooks', 'memory')
+$mirrorRoots = @('claude\skills', 'claude\hooks', 'agents\skills', 'codex\hooks', 'memory')
 
 function Backup-LocalTargets {
     $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -45,7 +45,13 @@ function Backup-LocalTargets {
         $destination = Join-Path $backup ($item.Repo -replace '/', '\')
         $parent = Split-Path $destination -Parent
         if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        Copy-Item -Path $item.Local -Destination $destination -Recurse -Force
+        # A junction inside the tree can make Copy-Item throw. Losing the backup of one item is
+        # bad; aborting the restore because the backup of one item failed is worse.
+        try {
+            Copy-Item -Path $item.Local -Destination $destination -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Host ("  backup incomplete for {0}: {1}" -f $item.Repo, $_.Exception.Message) -ForegroundColor Yellow
+        }
     }
     foreach ($memory in (Get-MemoryItems -UserHome $UserHome)) {
         $destination = Join-Path $backup ("memory\" + $memory.Slug)
@@ -95,6 +101,9 @@ if ($Mode -eq 'push') {
         Write-Host ("  memory/{0}  ({1} files)" -f $slug, $n)
     }
 
+    $links = Save-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
+    Write-Host ("  claude/skill-links.json  ({0} junctions recorded)" -f $links)
+
     Write-Host ''
     Write-Host ("{0} files staged in the repo." -f $total)
 
@@ -107,14 +116,34 @@ if ($Mode -eq 'push') {
         # chaining `sync.ps1 ; git commit` runs the commit even when the guard exits 1,
         # because a non-zero exit does not stop the next statement in a PowerShell chain.
         if ($PSBoundParameters.ContainsKey('Commit')) {
-            git -C $RepoRoot add -A
-            git -C $RepoRoot commit -m $Commit
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host 'Commit failed (or there was nothing to commit).' -ForegroundColor Yellow
-                exit $LASTEXITCODE
+            # git reports line-ending normalisation on stderr, and under
+            # $ErrorActionPreference = 'Stop' PowerShell turns any native stderr into a
+            # terminating NativeCommandError. That killed this block between the add and the
+            # commit - leaving everything staged and nothing committed - on a checkout whose
+            # only sin was mixed line endings. Exit codes are the signal here, not stderr.
+            $previous = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                git -C $RepoRoot add -A 2>&1 |
+                    Where-Object { $_ -notmatch 'will be replaced by CRLF' } |
+                    ForEach-Object { Write-Host ("  git: {0}" -f $_) }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host 'git add failed; nothing was committed.' -ForegroundColor Yellow
+                    exit $LASTEXITCODE
+                }
+
+                git -C $RepoRoot commit -m $Commit 2>&1 |
+                    Where-Object { $_ -notmatch 'will be replaced by CRLF' } |
+                    ForEach-Object { Write-Host ("  git: {0}" -f $_) }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host 'Commit failed (or there was nothing to commit).' -ForegroundColor Yellow
+                    exit $LASTEXITCODE
+                }
+                Write-Host ''
+                Write-Host ('Committed: ' + (git -C $RepoRoot log --oneline -1))
+            } finally {
+                $ErrorActionPreference = $previous
             }
-            Write-Host ''
-            Write-Host ('Committed: ' + (git -C $RepoRoot log --oneline -1))
         } else {
             Write-Host 'Review and commit:'
             Write-Host ('  git -C "{0}" status --short' -f $RepoRoot)
@@ -161,6 +190,11 @@ if ($Mode -eq 'pull') {
             Write-Host ("  {0}  ({1} files)" -f $destination, $n)
         }
     }
+
+    # After the trees, never before: a junction to a directory that has not been restored yet
+    # would be skipped as a missing target.
+    $links = Restore-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
+    Write-Host ("  {0} skill junctions recreated" -f $links)
 
     Write-Host ''
     Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)
