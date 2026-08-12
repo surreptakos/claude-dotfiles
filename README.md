@@ -26,9 +26,13 @@ file or a session transcript cannot be swept up by a pattern that was slightly t
 ## Daily use
 
 ```powershell
-.\sync.ps1 -Mode push     # this machine  -> repo, then commit
-.\sync.ps1 -Mode pull     # repo -> this machine, backing up what was there
+.\sync.ps1 -Mode push -Commit "chore: sync"   # this machine -> repo, guard, commit
+.\sync.ps1 -Mode pull                         # repo -> this machine, backing up first
 ```
+
+Pass `-Commit` rather than chaining your own `git commit`. A non-zero exit does not stop the next
+statement in a PowerShell chain, so `sync.ps1 ; git commit` commits even when the secret guard
+failed — which is how the guard got overridden the first time it ever fired.
 
 Push after editing a skill, the global `CLAUDE.md`, or a hook. Pull on the other machine. Add
 `-DryRun` to either to see the file list without writing anything.
