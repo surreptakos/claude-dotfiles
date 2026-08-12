@@ -51,9 +51,11 @@ $o = [System.IO.File]::ReadAllText("$env:USERPROFILE\.claude\settings.json")
 (ConvertFrom-Tokens -Text (ConvertTo-Tokens -Text $o -UserHome $env:USERPROFILE) -UserHome $env:USERPROFILE) -ceq $o
 ```
 
-To exercise the secret guard, plant a file containing `"refresh_token": "<20 junk chars>"`, run
-`Assert-NoSecrets`, and delete it. The guard matches credential *values*, not the words — prose in
-the global `CLAUDE.md` names `refresh_token`, and a guard that fires on documentation gets disabled.
+To exercise the secret guard, plant a file holding a JSON `refresh_token` key whose value is twenty
+junk characters, run `Assert-NoSecrets`, and delete it. The guard matches credential *values*, not
+the words — prose in the global `CLAUDE.md` names `refresh_token`, and a guard that fires on
+documentation gets disabled. Writing that example out as a literal JSON pair is enough to trip it,
+which is how this paragraph got its current wording.
 
 ## Related
 

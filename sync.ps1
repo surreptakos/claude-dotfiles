@@ -17,6 +17,7 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('push', 'pull')][string]$Mode,
     [switch]$DryRun,
+    [string]$Commit,
     [string]$UserHome = $env:USERPROFILE
 )
 
@@ -101,8 +102,24 @@ if ($Mode -eq 'push') {
         if (-not (Assert-NoSecrets -Root $RepoRoot)) { exit 1 }
         Write-Host 'Secret guard passed.'
         Write-Host ''
-        Write-Host 'Review and commit:'
-        Write-Host '  git -C "' -NoNewline; Write-Host $RepoRoot -NoNewline; Write-Host '" status --short'
+
+        # Committing here rather than in a follow-up command is the point: a caller
+        # chaining `sync.ps1 ; git commit` runs the commit even when the guard exits 1,
+        # because a non-zero exit does not stop the next statement in a PowerShell chain.
+        if ($PSBoundParameters.ContainsKey('Commit')) {
+            git -C $RepoRoot add -A
+            git -C $RepoRoot commit -m $Commit
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host 'Commit failed (or there was nothing to commit).' -ForegroundColor Yellow
+                exit $LASTEXITCODE
+            }
+            Write-Host ''
+            Write-Host ('Committed: ' + (git -C $RepoRoot log --oneline -1))
+        } else {
+            Write-Host 'Review and commit:'
+            Write-Host ('  git -C "{0}" status --short' -f $RepoRoot)
+            Write-Host '  (or re-run with -Commit "<message>" so the guard gates the commit)'
+        }
     }
     exit 0
 }
