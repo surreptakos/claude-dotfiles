@@ -46,3 +46,4 @@
 - [Prod freeze, Thursday promote](prod-freeze-thursday-promote.md) - board is live; pushes hit TEST deployment, prod changes Thursdays only (Dan 2026-08-10).
 - [Skills live in session-scoped paths](skills-live-in-session-scoped-paths.md) — a skill missing from `~/.claude` is not missing; three tiers, and how to make one durable.
 - [Design projects on the work account](design-projects-on-the-work-account.md) — which project is live, which design system is stale, and why the two transports disagree about what exists.
+- [Measurement tools must assert their subject](measurement-tools-must-assert-their-subject.md) — a diff tool that can't confirm WHAT it measured reports coverage it doesn't have; it must throw, not fall back.

@@ -297,7 +297,8 @@ $linkFile = Join-Path $Clone 'claude\skill-links.json'
 if (-not (Test-Path $linkFile)) {
     Check 'claude/skill-links.json is in the repo' $false @('push never recorded the junctions')
 } else {
-    $links = @(Get-Content $linkFile -Raw | ConvertFrom-Json)
+    $links = Read-JsonArray -Path $linkFile
+    Check 'skill-links.json lists the junctions' ($links.Count -gt 0)
     $broken = @()
     foreach ($link in $links) {
         $linkPath = Join-Path $FakeHome (".claude\skills\" + $link.Name)

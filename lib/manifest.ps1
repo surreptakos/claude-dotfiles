@@ -98,6 +98,18 @@ function Save-SkillLinks {
     return $links.Count
 }
 
+# @(Get-Content x -Raw | ConvertFrom-Json) does NOT reliably give you N elements on Windows
+# PowerShell 5.1: the deserialised array can arrive as a single pipeline object, so @() wraps it
+# into one nested element and a 22-entry file reads as one entry whose every property is an
+# array. Piping through ForEach-Object enumerates it either way.
+function Read-JsonArray {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path $Path)) { return @() }
+    $parsed = Get-Content $Path -Raw | ConvertFrom-Json
+    if ($null -eq $parsed) { return @() }
+    return @($parsed | ForEach-Object { $_ })
+}
+
 function Restore-SkillLinks {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -106,10 +118,9 @@ function Restore-SkillLinks {
     )
 
     $path = Join-Path $RepoRoot ($script:SkillLinkFile -replace '/', '\')
-    if (-not (Test-Path $path)) { return 0 }
-
-    $links = @(Get-Content $path -Raw | ConvertFrom-Json)
-    $made  = 0
+    $links = Read-JsonArray -Path $path
+    if ($links.Count -eq 0) { return 0 }
+    $made = 0
     foreach ($link in $links) {
         $target = ConvertFrom-Tokens -Text $link.Target -UserHome $UserHome
         $linkPath = Join-Path $UserHome (".claude\skills\" + $link.Name)
