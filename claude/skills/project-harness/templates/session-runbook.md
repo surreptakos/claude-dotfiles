@@ -63,6 +63,12 @@ deploy or a ruling. Verify every issue the session touched, and reopen with a re
 **Closing means verified, not merged.** A box needing a live run stays unticked and the issue stays
 open, however finished the code is.
 
+**File what outlives the session.** A finding you leave in a chat message is lost the moment the
+session closes — the open question nobody owns, the contradiction found in passing, the thing that
+needs a ruling. It goes on the tracker before you finish, with the evidence attached, or it did not
+happen. File it with what you found, not just the question — the next reader has none of your
+context, and a bare question gets closed as stale.
+
 **Tracker drift** — `node tools/tracker-audit.js`. Exit 1 means it found something; exit 2 means it
 could not audit, which is not a pass.
 
