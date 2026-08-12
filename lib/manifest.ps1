@@ -1,0 +1,251 @@
+# Shared manifest + helpers for sync.ps1 and install.ps1.
+# Dot-source this; it defines the whitelist of what travels and the path-templating rules.
+
+Set-StrictMode -Version Latest
+
+# ---------------------------------------------------------------- what travels
+
+# Every entry is copied by name. Nothing outside this list is ever read, which is
+# what keeps credentials, transcripts and caches out of the repo — a .gitignore
+# alone would only catch what someone remembered to list.
+function Get-DotfileItems {
+    param(
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [Parameter(Mandatory = $true)][string]$UserHome
+    )
+
+    $claude = Join-Path $UserHome '.claude'
+    $codex  = Join-Path $UserHome '.codex'
+
+    @(
+        [pscustomobject]@{ Type = 'File'; Repo = 'claude/CLAUDE.md';                       Local = (Join-Path $claude 'CLAUDE.md') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'claude/settings.json';                   Local = (Join-Path $claude 'settings.json') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/skills';                          Local = (Join-Path $claude 'skills') }
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/hooks';                           Local = (Join-Path $claude 'hooks') }
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'codex/hooks';                            Local = (Join-Path $codex  'hooks') }
+    )
+}
+
+# Per-project memory lives under ~/.claude/projects/<slug>/memory. The slug is the
+# project's absolute path with every non-alphanumeric character replaced by "-",
+# so it embeds the username and has to be re-slugged on a machine with a different one.
+function Get-MemoryItems {
+    param(
+        [Parameter(Mandatory = $true)][string]$UserHome
+    )
+
+    $projects = Join-Path $UserHome '.claude\projects'
+    if (-not (Test-Path $projects)) { return @() }
+
+    Get-ChildItem -Path $projects -Directory | ForEach-Object {
+        $memory = Join-Path $_.FullName 'memory'
+        if (Test-Path $memory) {
+            [pscustomobject]@{ Type = 'Dir'; Slug = $_.Name; Local = $memory }
+        }
+    }
+}
+
+# ------------------------------------------------------------------ exclusions
+
+$script:ExcludeDirNames = @('__pycache__', 'node_modules', '.git')
+$script:ExcludeFileGlobs = @(
+    '*.bak-*', '*.bak', '*.pyc', '*.log',
+    '.credentials.json', '.clasprc.json', '*.pem', '*.key', '*.p12', '*.json.bak'
+)
+
+function Test-Excluded {
+    param([Parameter(Mandatory = $true)][string]$RelativePath)
+
+    foreach ($segment in ($RelativePath -split '[\\/]')) {
+        if ($script:ExcludeDirNames -contains $segment) { return $true }
+    }
+    $leaf = Split-Path $RelativePath -Leaf
+    foreach ($glob in $script:ExcludeFileGlobs) {
+        if ($leaf -like $glob) { return $true }
+    }
+    return $false
+}
+
+# ------------------------------------------------------------------ templating
+
+# Absolute home paths are stored as tokens so a machine with a different username
+# still works. settings.json hard-codes C:\Users\<you>\... in five hook commands.
+$script:TextExtensions = @(
+    '.md', '.json', '.jsonl', '.js', '.mjs', '.cjs', '.ts', '.ps1', '.psm1',
+    '.py', '.sh', '.cmd', '.bat', '.txt', '.yml', '.yaml', '.toml', '.css', '.html'
+)
+
+function Test-TextFile {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return $script:TextExtensions -contains ([System.IO.Path]::GetExtension($Path).ToLower())
+}
+
+function ConvertTo-Slug {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    return ($Path -replace '[^A-Za-z0-9]', '-')
+}
+
+function Get-HomeForms {
+    param([Parameter(Mandatory = $true)][string]$UserHome)
+
+    $trimmed = $UserHome.TrimEnd('\', '/')
+    [pscustomobject]@{
+        Raw   = $trimmed                                                                   # C:\Users\Dan
+        Json  = $trimmed.Replace('\', '\\')                                                # C:\\Users\\Dan
+        Fwd   = $trimmed.Replace('\', '/')                                                 # C:/Users/Dan
+        Posix = '/' + $trimmed.Substring(0, 1).ToLower() + $trimmed.Substring(2).Replace('\', '/')  # /c/Users/Dan
+        Slug  = (ConvertTo-Slug $trimmed)                                                  # C--Users-Dan
+    }
+}
+
+# Order matters only in that the JSON form must go first; it contains a doubled
+# backslash the raw form cannot match, but replacing raw first would still leave
+# a half-converted string behind if that ever changed.
+function ConvertTo-Tokens {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][string]$UserHome
+    )
+    $h = Get-HomeForms -UserHome $UserHome
+    $out = $Text
+    $out = $out.Replace($h.Json,  '__USERHOME_JSON__')
+    $out = $out.Replace($h.Posix, '__USERHOME_POSIX__')
+    $out = $out.Replace($h.Fwd,   '__USERHOME_FWD__')
+    $out = $out.Replace($h.Raw,   '__USERHOME__')
+    return $out
+}
+
+function ConvertFrom-Tokens {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
+        [Parameter(Mandatory = $true)][string]$UserHome
+    )
+    $h = Get-HomeForms -UserHome $UserHome
+    $out = $Text
+    $out = $out.Replace('__USERHOME_JSON__',  $h.Json)
+    $out = $out.Replace('__USERHOME_POSIX__', $h.Posix)
+    $out = $out.Replace('__USERHOME_FWD__',   $h.Fwd)
+    $out = $out.Replace('__USERHOME__',       $h.Raw)
+    return $out
+}
+
+function ConvertTo-TokenSlug {
+    param(
+        [Parameter(Mandatory = $true)][string]$Slug,
+        [Parameter(Mandatory = $true)][string]$UserHome
+    )
+    $h = Get-HomeForms -UserHome $UserHome
+    return $Slug.Replace($h.Slug, '__USERHOME_SLUG__')
+}
+
+function ConvertFrom-TokenSlug {
+    param(
+        [Parameter(Mandatory = $true)][string]$Slug,
+        [Parameter(Mandatory = $true)][string]$UserHome
+    )
+    $h = Get-HomeForms -UserHome $UserHome
+    return $Slug.Replace('__USERHOME_SLUG__', $h.Slug)
+}
+
+# ------------------------------------------------------------------- file copy
+
+$script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+function Copy-OneFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][ValidateSet('Tokenize', 'Detokenize')][string]$Direction,
+        [Parameter(Mandatory = $true)][string]$UserHome,
+        [switch]$DryRun
+    )
+
+    $parent = Split-Path $Destination -Parent
+    if ($DryRun) {
+        Write-Host ("  would write {0}" -f $Destination)
+        return
+    }
+    if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+
+    if (Test-TextFile -Path $Source) {
+        $text = [System.IO.File]::ReadAllText($Source)
+        if ($Direction -eq 'Tokenize') {
+            $text = ConvertTo-Tokens   -Text $text -UserHome $UserHome
+        } else {
+            $text = ConvertFrom-Tokens -Text $text -UserHome $UserHome
+        }
+        [System.IO.File]::WriteAllText($Destination, $text, $script:Utf8NoBom)
+    } else {
+        Copy-Item -Path $Source -Destination $Destination -Force
+    }
+}
+
+function Copy-Tree {
+    param(
+        [Parameter(Mandatory = $true)][string]$Source,
+        [Parameter(Mandatory = $true)][string]$Destination,
+        [Parameter(Mandatory = $true)][ValidateSet('Tokenize', 'Detokenize')][string]$Direction,
+        [Parameter(Mandatory = $true)][string]$UserHome,
+        [switch]$DryRun
+    )
+
+    if (-not (Test-Path $Source)) {
+        Write-Host ("  skip (missing): {0}" -f $Source)
+        return 0
+    }
+
+    $count = 0
+    Get-ChildItem -Path $Source -Recurse -File | ForEach-Object {
+        $relative = $_.FullName.Substring($Source.Length).TrimStart('\', '/')
+        if (Test-Excluded -RelativePath $relative) { return }
+        Copy-OneFile -Source $_.FullName -Destination (Join-Path $Destination $relative) `
+                     -Direction $Direction -UserHome $UserHome -DryRun:$DryRun
+        $count++
+    }
+    return $count
+}
+
+# ---------------------------------------------------------------- secret guard
+
+# Value-shaped patterns only. Prose that merely names a credential ("refresh at
+# oauth2.googleapis.com/token with client_id/secret/refresh_token from that file"
+# in the global CLAUDE.md) must not trip this, or the guard gets disabled and
+# stops guarding.
+$script:SecretPatterns = @(
+    '"refresh_token"\s*:\s*"[^"]{10,}"',
+    '"access_token"\s*:\s*"[^"]{10,}"',
+    '"client_secret"\s*:\s*"[^"]{10,}"',
+    '"private_key"\s*:\s*"[^"]{10,}"',
+    '-----BEGIN [A-Z ]*PRIVATE KEY-----',
+    'sk-ant-[A-Za-z0-9]{8,}',
+    'ya29\.[A-Za-z0-9_\-]{10,}'
+)
+
+function Assert-NoSecrets {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $hits = @()
+    Get-ChildItem -Path $Root -Recurse -File |
+        Where-Object { $_.FullName -notmatch '\\\.git\\' } |
+        ForEach-Object {
+            $file = $_
+            if (-not (Test-TextFile -Path $file.FullName)) { return }
+            $content = [System.IO.File]::ReadAllText($file.FullName)
+            foreach ($pattern in $script:SecretPatterns) {
+                if ($content -match $pattern) {
+                    $hits += ("{0}  ({1})" -f $file.FullName, $pattern)
+                }
+            }
+        }
+
+    if ($hits.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'SECRET GUARD FAILED — these files look like they contain live credentials:' -ForegroundColor Red
+        $hits | ForEach-Object { Write-Host ("  {0}" -f $_) -ForegroundColor Red }
+        Write-Host 'Nothing was committed. Remove the values, then re-run.' -ForegroundColor Red
+        return $false
+    }
+    return $true
+}

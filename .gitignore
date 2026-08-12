@@ -1,0 +1,29 @@
+# The whitelist in lib/manifest.ps1 is the real guard — sync.ps1 only ever reads
+# the files named there. This is the backstop for anything copied in by hand.
+
+.credentials.json
+.clasprc.json
+.claude.json
+client_secret*.json
+*gpt-sheets-access*.json
+*.pem
+*.key
+*.p12
+credentials*.json
+token*.json
+
+# machine state, not configuration
+sessions/
+shell-snapshots/
+history.jsonl
+telemetry/
+cache/
+tmp/
+downloads/
+hook-state/
+node_modules/
+__pycache__/
+*.pyc
+*.log
+*.bak
+*.bak-*
