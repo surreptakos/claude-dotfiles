@@ -1,10 +1,10 @@
 # claude-dotfiles — working dashboard
 
-_Generated 2026-08-13T00:11:29.890Z at commit `a1a179f` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
+_Generated 2026-08-13T00:38:36.421Z at commit `abc0e2a` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
 
 ## Needs your attention
 
-_Nothing waiting on you._
+- **open bug:** [#1](https://github.com/surreptakos/claude-dotfiles/issues/1) Pin line endings so a clone materializes the bytes that were pushed _(updated today)_
 
 ## Pipeline health
 
@@ -16,7 +16,11 @@ _None._
 
 ## Open issues
 
-_None._
+| Issue | Title | Type | Triage | From PRD | Updated |
+| --- | --- | --- | --- | --- | --- |
+| [#3](https://github.com/surreptakos/claude-dotfiles/issues/3) | Collapse four skills that exist twice with divergent content | chore | ready-for-agent | — | today |
+| [#2](https://github.com/surreptakos/claude-dotfiles/issues/2) | Decide whether ~/.codex/config.toml joins the whitelist | chore | ready-for-agent | — | today |
+| [#1](https://github.com/surreptakos/claude-dotfiles/issues/1) | Pin line endings so a clone materializes the bytes that were pushed | bug | ready-for-agent | — | today |
 
 ## Where the rest lives
 
