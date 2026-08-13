@@ -22,3 +22,7 @@
 - [ask-matt gate nonce](ask-matt-gate-nonce.md) — nonce is per-prompt and declare must be the turn's first tool call; stale nonce blocks every tool with a misleading "missing" message
 - [Stubbed dup gate diagnostic trap](stubbed-dup-gate-diagnostic-trap.md) — testGlOverridePrecedenceLive always says CREATE (stubbed dupSource); ask dupCheckPairs instead
 - [Trashed ticket API signature](trashed-ticket-api-signature.md) — binned ticket: GET+comments 200 but threads 404, empty Attachments; read isTrashed first; queueDismissParked is human-only
+- [Triage, don't solve, mid-turn reports](triage-not-solve-midturn-reports.md) — owner reports/rulings become GitHub issues via /triage; never fix inline; 2nd issue in a session needs the ticket-set breakdown approved
+- [Owner rulings 2026-08-12: hold less](owner-rulings-2026-08-12-hold-less.md) — "almost NEVER Data Verify"; issues 120-125 (WO subjects, service/order defaults, inspection⇒Services, zero-total≠credit, dup auto-reject, per-cause tags)
+- [Registry-membership W/O ruling](owner-ruling-registry-membership-wo.md) — invert detection to board membership (issue 126); registry-validated subject W/O may waive tax hold
+- [UrlFetch quota is the ceiling](urlfetch-quota-is-the-ceiling.md) — 64-ticket sweep exhausted the daily quota 2026-08-13; resets 02:00 Central; check the exception before diagnosing code
