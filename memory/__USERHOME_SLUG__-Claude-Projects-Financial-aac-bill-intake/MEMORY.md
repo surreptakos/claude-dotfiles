@@ -26,3 +26,4 @@
 - [Owner rulings 2026-08-12: hold less](owner-rulings-2026-08-12-hold-less.md) — "almost NEVER Data Verify"; issues 120-125 (WO subjects, service/order defaults, inspection⇒Services, zero-total≠credit, dup auto-reject, per-cause tags)
 - [Registry-membership W/O ruling](owner-ruling-registry-membership-wo.md) — invert detection to board membership (issue 126); registry-validated subject W/O may waive tax hold
 - [UrlFetch quota is the ceiling](urlfetch-quota-is-the-ceiling.md) — 64-ticket sweep exhausted the daily quota 2026-08-13; resets 02:00 Central; check the exception before diagnosing code
+- [Overnight shift 2026-08-13](overnight-shift-2026-08-13.md) — 12 issues closed live-verified, 7 releases, Data-verify 60 to 34; Blueprint/perform API facts; subagent runner recipe
