@@ -22,9 +22,17 @@
       7  round trip is lossless: re-tokenizing each restored file reproduces the repo file
       8  nothing credential-shaped was restored (the guard, pointed at the output)
       9  the restored hooks and skills actually RUN from their new home
+     10  two overlapping runs do not delete each other's scratch directory
 
     Check 9 is the one that separates this from a file-copy test. Everything up to 8 proves
     bytes moved; only 9 proves the machine would work.
+
+    Check 10 exists because the scratch root used to be a constant, and the whole of it is
+    deleted at startup. Two runs that overlap - the SessionStart hook and the first
+    UserPromptSubmit hook, 8 seconds apart on 2026-08-13 - therefore wiped each other mid-run and
+    BOTH reported failure on a repo that was fine. A false failure on session start is worse than
+    no check, because it teaches the reader to ignore the real one. The scratch root is now derived
+    per run, so concurrent runs never share a directory.
 
     -Fault injects a known break so a check can be watched going red. A monitor that has only
     ever passed is not yet a monitor. Every fault is expected to exit 1; see the table in the
@@ -43,7 +51,11 @@ param(
     #          the automation mode: a pre-commit gate that cloned HEAD would be testing the PREVIOUS
     #          commit, and CI cannot clone a private remote from inside the runner.
     [ValidateSet('origin', 'local', 'worktree')][string]$From = 'origin',
-    [string]$FakeHome = 'C:\dotfiles-restore-test\Users\Restored',
+
+    # Empty means "derive one per run", which is what keeps concurrent runs apart. Passing a path
+    # explicitly pins it, and two runs given the SAME path still collide - that is the escape hatch
+    # check 10 uses to watch itself fail.
+    [string]$FakeHome = '',
     [switch]$Keep,
 
     # Deliberate breakage, to watch a check fail:
@@ -53,15 +65,33 @@ param(
     #   drift        a restored file does not round-trip              -> check 7
     #   broken-hook  a restored hook is present but not runnable      -> check 9
     #   dead-link    a junctioned skill's target never travelled      -> check 6b
-    [ValidateSet('none', 'missing', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link')]
-    [string]$Fault = 'none'
+    #   collision    two overlapping runs share one scratch root      -> check 10
+    #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
+    [ValidateSet('none', 'missing', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
+                 'collision', 'locked-scratch')]
+    [string]$Fault = 'none',
+
+    # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
+    # holds a marker file for -ProbeHoldMs and reports whether it survived. That is the exact code
+    # path that used to clobber a concurrent run, without paying for a second full install.
+    [switch]$Probe,
+    [int]$ProbeHoldMs = 2000
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$SelfPath = $MyInvocation.MyCommand.Path
 $RealHome = $env:USERPROFILE.TrimEnd('\', '/')
+
+$ScratchBase = 'C:\dotfiles-restore-test'
+if (-not $FakeHome) {
+    # Per run, not per machine. The whole of $FakeRoot is deleted below, so two runs sharing it
+    # destroy each other; the pid plus a random tail keeps them apart even when the pid is reused.
+    $runId    = "run-{0}-{1}" -f $PID, ([guid]::NewGuid().ToString('N').Substring(0, 6))
+    $FakeHome = Join-Path $ScratchBase ("{0}\Users\Restored" -f $runId)
+}
 
 # The script deletes $FakeHome outright. Anything inside the real profile is off limits, or a
 # typo in -FakeHome turns this test into a way to lose the configuration it is testing.
@@ -70,11 +100,36 @@ if ($FakeHome.TrimEnd('\').ToLower().StartsWith($RealHome.ToLower())) {
     exit 2
 }
 
-$FakeRoot = Split-Path -Parent (Split-Path -Parent $FakeHome)   # C:\dotfiles-restore-test
+$FakeRoot = Split-Path -Parent (Split-Path -Parent $FakeHome)   # C:\dotfiles-restore-test\run-...
 $Clone    = Join-Path $FakeRoot 'clone'
+
+# ------------------------------------------------------------------ probe mode (check 10's child)
+
+if ($Probe) {
+    if (Test-Path $FakeRoot) { Remove-Item -Path $FakeRoot -Recurse -Force }
+    New-Item -ItemType Directory -Path $FakeRoot -Force | Out-Null
+    $marker = Join-Path $FakeRoot ("probe-{0}.marker" -f $PID)
+    Set-Content -Path $marker -Value $PID -Encoding utf8
+    Start-Sleep -Milliseconds $ProbeHoldMs
+    $intact = Test-Path $marker
+    Write-Host ("probe {0} root {1} {2}" -f $PID, $FakeRoot, $(if ($intact) { 'intact' } else { 'CLOBBERED' }))
+    if (-not $Keep) { Remove-Item -Path $FakeRoot -Recurse -Force -ErrorAction SilentlyContinue }
+    if ($intact) { exit 0 }
+    exit 1
+}
+
+# A run that crashed, one kept with -Keep, or one whose scratch was still locked at cleanup leaves
+# its directory behind. Sweep only what is old enough that no live run can own it: a run takes
+# about 15 seconds, so an hour is far past any sibling still in flight.
+if (Test-Path $ScratchBase) {
+    Get-ChildItem -Path $ScratchBase -Directory -Filter 'run-*' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-1) } |
+        ForEach-Object { Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }
+}
 
 $script:Failures = 0
 $script:Checks   = 0
+$script:FailLog  = @()
 
 function Check {
     param([string]$Name, [bool]$Ok, [string[]]$Detail = @())
@@ -85,6 +140,10 @@ function Check {
         $script:Failures++
         Write-Host ("  FAIL  {0}" -f $Name) -ForegroundColor Red
         $Detail | Select-Object -First 12 | ForEach-Object { Write-Host ("          {0}" -f $_) -ForegroundColor Red }
+        # Kept as well as printed: the session hooks run this through execFileSync and report only
+        # "tests FAIL", so a failure seen by a hook has no output anywhere unless it is written down.
+        $script:FailLog += ("FAIL  " + $Name)
+        $script:FailLog += ($Detail | Select-Object -First 12 | ForEach-Object { "        " + $_ })
     }
 }
 
@@ -414,7 +473,55 @@ Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
 Check 'restored session-check reports on a repo' $ran @($out | Select-Object -Last 10)
 
+# ------------------------------------------------------------------ 10. two runs can overlap
+
+# The regression check for the false failure of 2026-08-13. Two children run the scratch-root code
+# path at the same time; each must still own its marker when it wakes. Under the old constant root
+# the second child's wipe took the first child's marker with it and both runs reported failure.
+Write-Host ''
+Write-Host 'Concurrency'
+
+$probeArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $SelfPath,
+               '-Probe', '-ProbeHoldMs', '2000')
+# The fault reinstates the old behaviour by handing both children one fixed root, which is
+# exactly what the constant used to do to every run on the machine.
+if ($Fault -eq 'collision') {
+    $probeArgs += @('-FakeHome', (Join-Path $ScratchBase 'collision\Users\Restored'))
+    Note 'fault: both concurrent runs were pinned to one scratch root'
+}
+
+# Start-Job, not Start-Process -PassThru: on PowerShell 5.1 the process object returned by
+# Start-Process without -Wait comes back with an empty ExitCode, so a crashed child read as a pass.
+# Inside a job, $LASTEXITCODE is the child's own, and both jobs still run as separate processes.
+$jobs = @(1, 2 | ForEach-Object {
+    Start-Job -ArgumentList (, $probeArgs) -ScriptBlock {
+        param($childArgs)
+        $out = & powershell @childArgs 2>&1
+        [pscustomobject]@{ Exit = $LASTEXITCODE; Out = ($out | Out-String) }
+    }
+})
+$results    = @($jobs | Wait-Job | Receive-Job)
+$jobs | Remove-Job -Force
+$probeLines = @($results | ForEach-Object { $_.Out -split "`r?`n" } | Where-Object { $_ -match '^probe ' })
+$clobbered  = @($probeLines | Where-Object { $_ -match 'CLOBBERED' })
+$exits      = @($results | ForEach-Object { if ($null -eq $_.Exit) { 'null' } else { $_.Exit } })
+$bothOk     = (@($exits | Where-Object { $_ -ne 0 }).Count -eq 0) -and ($clobbered.Count -eq 0) -and
+              ($probeLines.Count -eq 2)
+Check 'two overlapping runs both keep their scratch directory' $bothOk `
+    (@(("exit codes: {0}" -f ($exits -join ', '))) + $probeLines)
+
+$roots = @($probeLines | ForEach-Object { ($_ -split ' root ')[1] -replace ' (intact|CLOBBERED)$', '' })
+Check 'each run derives its own scratch root' `
+    (($roots.Count -eq 2) -and ($roots[0] -ne $roots[1])) $roots
+
 # ------------------------------------------------------------------ verdict
+
+# Holds the clone open for the rest of the run, which is what a child process left over from check
+# 9 does by accident. A passing run must still report a pass; the scratch is the tidying up.
+if ($Fault -eq 'locked-scratch') {
+    $lock = [System.IO.File]::Open((Join-Path $Clone 'README.md'), 'Open', 'Read', 'None')
+    Note 'fault: something is holding the scratch directory open'
+}
 
 Write-Host ''
 # node --test's shape, because that is what the dashboard's testSummary() parses. Without these two
@@ -426,13 +533,51 @@ if ($script:Failures -eq 0) {
     Write-Host ("RESTORE PROVEN - {0} checks, 0 failures" -f $script:Checks) -ForegroundColor Green
 } else {
     Write-Host ("RESTORE NOT PROVEN - {0} of {1} checks failed" -f $script:Failures, $script:Checks) -ForegroundColor Red
+
+    # A hook that swallows stdout leaves a failure with no evidence behind it, and an intermittent
+    # one then cannot be diagnosed after the fact - which is exactly the position a run at
+    # 2026-08-13 16:44 UTC left this repo in. The log outlives the run.
+    $logDir = Join-Path $env:TEMP 'restore-test-failures'
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+    $stamp   = (Get-Date).ToString('yyyyMMdd-HHmmss')
+    $logPath = Join-Path $logDir ("{0}-{1}.log" -f $stamp, $PID)
+    $header  = @(
+        ("when      {0}" -f (Get-Date).ToString('o')),
+        ("from      {0}" -f $From),
+        ("fault     {0}" -f $Fault),
+        ("fakeHome  {0}" -f $FakeHome),
+        ("repo      {0}" -f $RepoRoot),
+        ("commit    {0}" -f (& git -C $RepoRoot rev-parse --short HEAD 2>&1)),
+        ("verdict   {0} of {1} checks failed" -f $script:Failures, $script:Checks),
+        ''
+    )
+    Set-Content -Path $logPath -Value ($header + $script:FailLog) -Encoding utf8
+    Write-Host ("Failure detail written to {0}" -f $logPath) -ForegroundColor Red
 }
 
 if ($Keep) {
     Write-Host ("Left in place: {0}" -f $FakeRoot)
 } else {
-    Remove-Item -Path $FakeRoot -Recurse -Force
-    Write-Host 'Scratch removed.'
+    # Check 9 runs the restored session-check inside the clone, and its own children (git, gh, a
+    # nested run) can still hold that directory a moment after it returns. With
+    # $ErrorActionPreference = 'Stop' the failed delete ended the script non-zero, so a run whose
+    # 21 checks all passed reported "tests FAIL" to the session hooks - observed 2026-08-13 16:44
+    # UTC and again in the pre-commit gate. Tidying up is not a check, and must not decide the
+    # verdict: retry briefly, then leave it for the next run's sweep and say so.
+    $removed = $false
+    for ($attempt = 1; $attempt -le 5 -and -not $removed; $attempt++) {
+        try {
+            Remove-Item -Path $FakeRoot -Recurse -Force -ErrorAction Stop
+            $removed = $true
+        } catch {
+            Start-Sleep -Milliseconds 400
+        }
+    }
+    if ($removed) {
+        Write-Host 'Scratch removed.'
+    } else {
+        Write-Host ("Scratch still locked, left at {0} - a later run sweeps it." -f $FakeRoot) -ForegroundColor DarkGray
+    }
 }
 
 if ($script:Failures -gt 0) { exit 1 }

@@ -50,9 +50,22 @@ powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
 ```
 
 It clones the pushed remote and installs it into a fake home under a different username, then runs
-19 checks — including executing the restored hooks from their new location. `-Fault <name>` makes a
+21 checks — including executing the restored hooks from their new location. `-Fault <name>` makes a
 chosen check fail on purpose. Add a check whenever you add something to the whitelist; a whitelist
 entry with no assertion behind it is how 24 skills went missing without a single error message.
+
+It is safe to run twice at once. The scratch root carries a per-run id because the script deletes
+it whole, and a shared one made two overlapping runs fail on a repo that was fine. `-Fault
+collision` pins both to one root and shows that failure again.
+
+Two more traps, both of which made a green run report `tests FAIL` to the session hooks:
+
+- The final `Remove-Item` of the scratch can lose a race with a child process left over from the
+  last check, and `$ErrorActionPreference = 'Stop'` then ends the script non-zero. Tidying up must
+  never decide the verdict — `-Fault locked-scratch` holds the clone open and the run must still
+  exit 0.
+- A failure seen by a hook has no output anywhere: `session-check` runs the suite through
+  `execFileSync` and prints only `tests FAIL`. Detail goes to `%TEMP%\restore-test-failures`.
 
 Three sources, and the difference matters:
 

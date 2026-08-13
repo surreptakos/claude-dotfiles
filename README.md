@@ -93,18 +93,31 @@ powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
 
 Both scripts take `-UserHome`, so a restore can be aimed anywhere. The test clones the **pushed
 remote** — what is in your working tree is not what a new machine gets — and installs it into
-`C:\dotfiles-restore-test\Users\Restored`: a different username, outside the real profile, so any
-occurrence of the real home path in the output is unambiguously a leak rather than the scratch
-directory's own name.
+`C:\dotfiles-restore-test\run-<pid>-<rand>\Users\Restored`: a different username, outside the real
+profile, so any occurrence of the real home path in the output is unambiguously a leak rather than
+the scratch directory's own name. The run id is what keeps two simultaneous runs apart — the whole
+scratch root is deleted at startup, and while it was a constant, the session-start hook and the
+first prompt hook 8 seconds later wiped each other and both reported a failure on a healthy repo.
+`-FakeHome` still pins the path explicitly; two runs given the same one still collide, by design.
 
-Nineteen checks. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
+Twenty-one checks. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
 still parses and every path in it points at a file that exists; every junction resolves to a real
 `SKILL.md`; every file survives the round trip byte-for-byte; nothing credential-shaped came
-along; and the restored hooks and skills **run** from the new home — `session-gate.js` passes its
-own test suite there, `ask_matt_gate.py` lints, `session-check` reports on a repo. That last group
-is the difference between proving bytes moved and proving the machine would work.
+along; two overlapping runs each keep their own scratch directory; and the restored hooks and
+skills **run** from the new home — `session-gate.js` passes its own test suite there,
+`ask_matt_gate.py` lints, `session-check` reports on a repo. That last group is the difference
+between proving bytes moved and proving the machine would work.
 
-`-Fault missing|home-leak|secret|drift|broken-hook|dead-link` breaks one thing on purpose so the
+A failing run also writes its failure detail to `%TEMP%\restore-test-failures\<stamp>-<pid>.log`.
+The session hooks run the suite through `execFileSync` and report only `tests FAIL`, so without
+that file an intermittent failure seen by a hook leaves no evidence to diagnose.
+
+Cleanup never decides the verdict. Deleting the scratch at the end can fail because a child process
+left over from the last check still holds the clone, and under `$ErrorActionPreference = 'Stop'`
+that ended a 21-of-21 run non-zero — which is what the hooks reported as `tests FAIL`. The delete
+now retries, then leaves the directory for a later run's sweep.
+
+`-Fault missing|home-leak|secret|drift|broken-hook|dead-link|collision|locked-scratch` breaks one thing on purpose so the
 matching check can be watched going red. A check that has only ever passed is not yet a check —
 `dead-link` passed on its first attempt because it deleted a directory nothing linked to.
 
