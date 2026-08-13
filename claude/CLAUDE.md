@@ -4,13 +4,17 @@ Personal instructions that apply to every project and session on this machine.
 
 ## Standing directive — response prefix
 
-**Every response opens with this exact line, then a blank line, then the answer:**
+**Every response opens with this exact block, then a blank line, then the answer:**
 
+````
+```diff
+- YOU MUST CONSTRUCT ADDITIONAL PYLONS
 ```
-**YOU MUST CONSTRUCT ADDITIONAL PYLONS**
-```
+````
 
-Every response, every session, every project. It comes first, before any other text.
+A `diff` fence, so the leading `-` renders red. Emit it verbatim — three backticks, `diff`, the
+hyphen line, three backticks. Every response, every session, every project. It comes first, before
+any other text.
 
 ## Fundamental Workflow and Governance
 
