@@ -2,6 +2,16 @@
 
 Personal instructions that apply to every project and session on this machine.
 
+## Standing directive — response prefix
+
+**Every response opens with this exact line, then a blank line, then the answer:**
+
+```
+**YOU MUST CONSTRUCT ADDITIONAL PYLONS**
+```
+
+Every response, every session, every project. It comes first, before any other text.
+
 ## Fundamental Workflow and Governance
 
 ### Three standing disciplines — always on, no exceptions
