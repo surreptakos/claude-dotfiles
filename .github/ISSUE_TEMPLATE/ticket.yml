@@ -1,0 +1,21 @@
+name: Ticket
+description: A scoped piece of work (feature slice, chore, docs)
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What to build
+      description: The observable outcome. Anchor to code symbols and docs where you can.
+    validations:
+      required: true
+  - type: textarea
+    id: blocked
+    attributes:
+      label: Blocked by
+      description: Issue numbers this depends on (also add native GitHub dependencies if enabled).
+  - type: textarea
+    id: done
+    attributes:
+      label: Done when
+      description: Checkable acceptance lines. Include "tests\restore-test.ps1 green".

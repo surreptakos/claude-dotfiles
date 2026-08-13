@@ -50,11 +50,17 @@ powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
 ```
 
 It clones the pushed remote and installs it into a fake home under a different username, then runs
-19 checks — including executing the restored hooks from their new location. Use `-From local` while
-iterating (it clones the working tree's committed state, so **commit first** or the clone will not
-contain your change), and `-Fault <name>` to watch a specific check fail. Add a check whenever you
-add something to the whitelist; a whitelist entry with no assertion behind it is how 24 skills went
-missing without a single error message.
+19 checks — including executing the restored hooks from their new location. `-Fault <name>` makes a
+chosen check fail on purpose. Add a check whenever you add something to the whitelist; a whitelist
+entry with no assertion behind it is how 24 skills went missing without a single error message.
+
+Three sources, and the difference matters:
+
+- `-From origin` (default) clones the remote. The only one that answers "would a new machine work?"
+- `-From local` clones this checkout's committed state, so **commit first** or your change is absent.
+- `-From worktree` copies what `git ls-files` currently sees — staged changes included, no network.
+  This is what the pre-commit hook and CI run; the other two would test the wrong commit or fail to
+  authenticate against a private remote from inside a runner.
 
 Three traps that cost time here, all Windows PowerShell 5.1:
 
@@ -79,6 +85,18 @@ junk characters, run `Assert-NoSecrets`, and delete it. The guard matches creden
 the words — prose in the global `CLAUDE.md` names `refresh_token`, and a guard that fires on
 documentation gets disabled. Writing that example out as a literal JSON pair is enough to trip it,
 which is how this paragraph got its current wording.
+
+## The harness
+
+Installed 2026-08-12, version in `docs/agents/harness-version.md`.
+
+- `DASHBOARD.md` is **generated**. Never hand-edit it; edit `scripts/build-dashboard.js`. CI owns the
+  artifact — run the script locally to check output, then discard it.
+- `.githooks/pre-commit` runs the restore test before every commit. Activate in a fresh clone with
+  `git config core.hooksPath .githooks`.
+- Tracker conventions: `docs/agents/issue-tracker.md`. Run `node tools/tracker-audit.js` before
+  trusting the tracker — exit 2 means it could not audit, which is not a pass.
+- Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
 ## Related
 

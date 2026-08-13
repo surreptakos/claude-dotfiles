@@ -1,0 +1,74 @@
+name: Refresh dashboard
+
+# DASHBOARD.md stays accurate at the end of every commit and every tracker change:
+# every push to the default branch, every issue event, and a daily safety tick regenerate it.
+#
+# INSTALL-TIME SUBSTITUTION: "main" appears TWICE below (push.branches and checkout.ref).
+# Replace both with the repo's actual default branch (git symbolic-ref refs/remotes/origin/HEAD).
+# On a master repo the un-substituted workflow never fires on push and the checkout pins the
+# wrong ref -- and the failure is SILENT: no run, no error. (Hit on aac-task-management,
+# 2026-07-28: default branch master.)
+on:
+  push:
+    branches: [master]
+  issues:
+    types: [opened, closed, reopened, edited, labeled, unlabeled, assigned, unassigned]
+  workflow_dispatch:
+  schedule:
+    - cron: '0 11 * * *' # daily 6am CT safety refresh (catches label edits made outside events we listen to)
+
+concurrency:
+  group: dashboard
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  issues: read
+  actions: read
+
+jobs:
+  refresh:
+    # windows-latest, not ubuntu: CONFIG.testCommand is a PowerShell script that restores a Windows
+    # profile - junctions, C:\ paths, the py launcher. Nothing about it runs on Linux.
+    runs-on: windows-latest
+    # The commit step below is sh. Windows runners default to pwsh, where `if git diff --quiet; then`
+    # is a parse error, so pin bash (Git Bash ships on the runner) for every run step.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      # INSTALL-TIME: if CONFIG.testCommand is not Node, the runner has no test
+      # environment -- add the language setup AND the dependency install here, or
+      # the dashboard's health line reads "FAILING -- 1 error" (a collection/import
+      # error, not a real failure) while the suite is green locally. Install the
+      # FULL dependency set the test suite imports, optional extras included: on
+      # aac-task-management (2026-07-28) `.[dev]` alone failed collection because
+      # one test imports a script whose module top imports an extra's package.
+      # Python example:
+      #   - uses: actions/setup-python@v5
+      #     with: { python-version: '3.12' }
+      #   - run: pip install -e ".[dev,<extras-the-tests-import>]"
+      - name: Build DASHBOARD.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/build-dashboard.js
+      - name: Commit if changed
+        run: |
+          # `git add -N` (intent-to-add) FIRST. `git diff` is blind to an untracked file, so on a
+          # repo where DASHBOARD.md does not exist yet -- i.e. every fresh install -- this step
+          # printed "Dashboard unchanged" and exited 0. The workflow went green while never
+          # creating the artifact it exists to create, and nothing about the run looked wrong.
+          # Found on the commissions install, 2026-07-30 (run 30570115511). Do not remove.
+          git add -N DASHBOARD.md
+          if git diff --quiet -- DASHBOARD.md; then
+            echo "Dashboard unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add DASHBOARD.md
+          git commit -m "chore: refresh dashboard [skip ci]"
+          git push

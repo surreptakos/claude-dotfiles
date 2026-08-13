@@ -37,9 +37,12 @@
 #>
 [CmdletBinding()]
 param(
-    # origin = clone the pushed remote (the honest test). local = clone this working copy,
-    # for iterating on the scripts before pushing them.
-    [ValidateSet('origin', 'local')][string]$From = 'origin',
+    # origin   clone the pushed remote - the honest test, and the one to run before trusting a restore
+    # local    clone this checkout's committed state, for iterating before pushing
+    # worktree copy what git currently sees (index + working tree), no clone and no network. This is
+    #          the automation mode: a pre-commit gate that cloned HEAD would be testing the PREVIOUS
+    #          commit, and CI cannot clone a private remote from inside the runner.
+    [ValidateSet('origin', 'local', 'worktree')][string]$From = 'origin',
     [string]$FakeHome = 'C:\dotfiles-restore-test\Users\Restored',
     [switch]$Keep,
 
@@ -96,15 +99,35 @@ Write-Host ''
 if (Test-Path $FakeRoot) { Remove-Item -Path $FakeRoot -Recurse -Force }
 New-Item -ItemType Directory -Path $FakeRoot -Force | Out-Null
 
-$source = $RepoRoot
-if ($From -eq 'origin') {
-    $source = (git -C $RepoRoot remote get-url origin)
-    if ($LASTEXITCODE -ne 0) { Write-Host 'No origin remote.' -ForegroundColor Red; exit 2 }
+if ($From -eq 'worktree') {
+    # git ls-files rather than a directory copy: it is exactly what git sees, so it picks up
+    # staged changes (what a pre-commit gate must test) while excluding ignored paths and
+    # .claude/worktrees, which holds whole checkouts of this same repo.
+    Write-Host ("Copying the working tree from {0}" -f $RepoRoot)
+    $listed = & git -C $RepoRoot ls-files
+    if ($LASTEXITCODE -ne 0) { Write-Host 'git ls-files failed.' -ForegroundColor Red; exit 2 }
+    foreach ($relative in $listed) {
+        # NOT $from: PowerShell variable names are case-insensitive, so $from IS the -From
+        # parameter, and assigning a path to it fails its ValidateSet.
+        $src = Join-Path $RepoRoot ($relative -replace '/', '\')
+        if (-not (Test-Path $src)) { continue }   # staged deletion
+        $dst    = Join-Path $Clone ($relative -replace '/', '\')
+        $parent = Split-Path $dst -Parent
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        Copy-Item -Path $src -Destination $dst -Force
+    }
+    Write-Host ("  {0} tracked files" -f $listed.Count)
+} else {
+    $source = $RepoRoot
+    if ($From -eq 'origin') {
+        $source = (git -C $RepoRoot remote get-url origin)
+        if ($LASTEXITCODE -ne 0) { Write-Host 'No origin remote.' -ForegroundColor Red; exit 2 }
+    }
+    Write-Host ("Cloning {0}" -f $source)
+    git clone --quiet --depth 1 $source $Clone
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Clone failed.' -ForegroundColor Red; exit 2 }
+    Write-Host ("  at {0}" -f (git -C $Clone log --oneline -1))
 }
-Write-Host ("Cloning {0}" -f $source)
-git clone --quiet --depth 1 $source $Clone
-if ($LASTEXITCODE -ne 0) { Write-Host 'Clone failed.' -ForegroundColor Red; exit 2 }
-Write-Host ("  at {0}" -f (git -C $Clone log --oneline -1))
 Write-Host ''
 
 . (Join-Path $Clone 'lib\manifest.ps1')
@@ -393,6 +416,11 @@ Check 'restored session-check reports on a repo' $ran @($out | Select-Object -La
 
 # ------------------------------------------------------------------ verdict
 
+Write-Host ''
+# node --test's shape, because that is what the dashboard's testSummary() parses. Without these two
+# lines it falls through to the last line printed and the health line reads "Scratch removed."
+Write-Host ("pass {0}" -f ($script:Checks - $script:Failures))
+Write-Host ("fail {0}" -f $script:Failures)
 Write-Host ''
 if ($script:Failures -eq 0) {
     Write-Host ("RESTORE PROVEN - {0} checks, 0 failures" -f $script:Checks) -ForegroundColor Green

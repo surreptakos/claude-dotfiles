@@ -1,0 +1,28 @@
+name: PRD
+description: A feature's product requirements — the parent issue its tickets hang off
+labels: [prd, needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What hurts today, for whom, with evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What is true when this ships. Plain language.
+    validations:
+      required: true
+  - type: textarea
+    id: decisions
+    attributes:
+      label: Decisions locked
+      description: Owner calls already made (link ADRs). Anything not listed here is open.
+  - type: textarea
+    id: tickets
+    attributes:
+      label: Tickets
+      description: Task list of child issues once cut (`- [ ] #NN`).
