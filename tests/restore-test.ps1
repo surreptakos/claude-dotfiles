@@ -85,6 +85,21 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $SelfPath = $MyInvocation.MyCommand.Path
 $RealHome = $env:USERPROFILE.TrimEnd('\', '/')
 
+# Check 9 runs the RESTORED session-check inside the clone, and session-check runs whatever the
+# repo's .claude/session.json names as its test command - this suite. So every run used to restore
+# a copy of the repo and then test that copy, several scratch directories deep, and the nested
+# session-check processes outlived their parents holding the clone open. While the scratch root was
+# a constant the nested run wiped its own parent's directory, which broke the recursion by breaking
+# the run. One env var stops the descent without changing what check 9 proves: the restored
+# session-check still runs and still reports, it just does not restore the world again.
+if ($env:RESTORE_TEST_ACTIVE -and -not $Probe) {
+    Write-Host ("Nested restore-test skipped - already inside run {0}." -f $env:RESTORE_TEST_ACTIVE)
+    Write-Host 'pass 0'
+    Write-Host 'fail 0'
+    exit 0
+}
+$env:RESTORE_TEST_ACTIVE = $PID
+
 $ScratchBase = 'C:\dotfiles-restore-test'
 if (-not $FakeHome) {
     # Per run, not per machine. The whole of $FakeRoot is deleted below, so two runs sharing it
