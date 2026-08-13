@@ -67,6 +67,14 @@ Two more traps, both of which made a green run report `tests FAIL` to the sessio
 - A failure seen by a hook has no output anywhere: `session-check` runs the suite through
   `execFileSync` and prints only `tests FAIL`. Detail goes to `%TEMP%\restore-test-failures`.
 
+The suite also used to restore itself: check 9 runs the restored `session-check` inside the clone,
+and `session-check` runs whatever `.claude/session.json` names as the test command — this suite.
+About four scratch directories per run, with nested processes outliving their parents and holding
+the clone open, which is the lock behind the trap above. The constant scratch root had hidden it,
+because the nested run deleted its own parent's directory. `RESTORE_TEST_ACTIVE` stops the descent:
+a run that finds it set reports `pass 0` / `fail 0` and exits 0, so check 9 still gets a real
+`session-check` run. Leave that variable alone in anything the suite spawns.
+
 Three sources, and the difference matters:
 
 - `-From origin` (default) clones the remote. The only one that answers "would a new machine work?"

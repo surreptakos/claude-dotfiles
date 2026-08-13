@@ -117,6 +117,13 @@ left over from the last check still holds the clone, and under `$ErrorActionPref
 that ended a 21-of-21 run non-zero — which is what the hooks reported as `tests FAIL`. The delete
 now retries, then leaves the directory for a later run's sweep.
 
+A run does not restore itself. The last check runs the restored `session-check` inside the clone,
+and `session-check` runs whatever the repo names as its test command — this suite. Every run used
+to restore a copy and test that copy, several directories deep, leaving nested processes holding
+the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `pass 0` / `fail 0`
+and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
+scratch directory.
+
 `-Fault missing|home-leak|secret|drift|broken-hook|dead-link|collision|locked-scratch` breaks one thing on purpose so the
 matching check can be watched going red. A check that has only ever passed is not yet a check —
 `dead-link` passed on its first attempt because it deleted a directory nothing linked to.
