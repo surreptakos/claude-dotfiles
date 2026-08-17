@@ -1,10 +1,10 @@
 # claude-dotfiles — working dashboard
 
-_Generated 2026-08-16T11:14:16.110Z at commit `2bb1595` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
+_Generated 2026-08-17T11:19:49.696Z at commit `81aa21c` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
 
 ## Needs your attention
 
-- **open bug:** [#1](https://github.com/surreptakos/claude-dotfiles/issues/1) Pin line endings so a clone materializes the bytes that were pushed _(updated 3 days ago)_
+- **open bug:** [#1](https://github.com/surreptakos/claude-dotfiles/issues/1) Pin line endings so a clone materializes the bytes that were pushed _(updated 4 days ago)_
 
 ## Pipeline health
 
@@ -18,9 +18,9 @@ _None._
 
 | Issue | Title | Type | Triage | From PRD | Updated |
 | --- | --- | --- | --- | --- | --- |
-| [#3](https://github.com/surreptakos/claude-dotfiles/issues/3) | Collapse four skills that exist twice with divergent content | chore | ready-for-agent | — | 3 days ago |
-| [#2](https://github.com/surreptakos/claude-dotfiles/issues/2) | Decide whether ~/.codex/config.toml joins the whitelist | chore | ready-for-agent | — | 3 days ago |
-| [#1](https://github.com/surreptakos/claude-dotfiles/issues/1) | Pin line endings so a clone materializes the bytes that were pushed | bug | ready-for-agent | — | 3 days ago |
+| [#3](https://github.com/surreptakos/claude-dotfiles/issues/3) | Collapse four skills that exist twice with divergent content | chore | ready-for-agent | — | 4 days ago |
+| [#2](https://github.com/surreptakos/claude-dotfiles/issues/2) | Decide whether ~/.codex/config.toml joins the whitelist | chore | ready-for-agent | — | 4 days ago |
+| [#1](https://github.com/surreptakos/claude-dotfiles/issues/1) | Pin line endings so a clone materializes the bytes that were pushed | bug | ready-for-agent | — | 4 days ago |
 
 ## Where the rest lives
 
