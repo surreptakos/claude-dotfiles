@@ -6,7 +6,7 @@
 - [Zoho Desk token scope](zoho-desk-token-scope.md) — token is PROD-bound since #61; sandbox 932165744 unreachable (403 OAUTH_ORG_MISMATCH); portal-bound, needs own grant
 - [Desk provisioning API facts](desk-provisioning-api-facts.md) — what Desk REST can/can't provision: fields+writes+comments+webhooks yes; department/picklist-choices/custom-statuses need UI; model gate state as a custom field not native status
 - [Desk-channel intake progress](desk-channel-intake-progress.md) — issues 1/4/5/6/9-digest/10/11/12 done+verified in sandbox (134 tests); AP department + prod (#3/#13/#7/#8) human-gated
-- [clasp login scope trap](clasp-login-scope-trap.md) — plain `clasp login` uses clasp's client → "This app is blocked" on restricted scopes; use --creds project client + --use-project-scopes; /exec web app is the run fallback
+- [clasp login scope trap](clasp-login-scope-trap.md) — plain `clasp login` uses clasp's client → "This app is blocked" on restricted scopes; re-auth ONLY via `node tools/clasp-auth.js` (creds JSON in OneDrive Downloads); /exec web app is the run fallback
 - [Zoho token cache gotcha](zoho-token-cache-gotcha.md) — Zoho access token cached ~55m; re-minted grant looks wrong until cache cleared (fixed 2026-07-23); prod Desk org=874367220, not 875376555
 - [Intake queue live](intake-queue-live.md) — 2026-07-28 go-live: 4 triggers installed, /exec enqueue-only, BILL PRODUCTION; quota is the open risk
 - [Worktree is stale, work in main](worktree-is-stale-work-in-main.md) — session cwd is a stale worktree; real work is the MAIN checkout, now on branch main (ea8b80f, pushed)

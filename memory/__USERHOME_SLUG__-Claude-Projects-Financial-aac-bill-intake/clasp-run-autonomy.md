@@ -13,9 +13,10 @@ Setup that made it work (done 2026-07-06):
 - `.clasp.json` has `"projectId": "gpt-sheets-access-475817"`; `appsscript.json` has
   `"executionApi": {"access":"MYSELF"}` + an `oauthScopes` list (mail.google.com, spreadsheets,
   drive, script.external_request, script.scriptapp, userinfo.email).
-- Logged in with a desktop OAuth client via
-  `clasp login --creds <client_secret.json> --use-project-scopes --include-clasp-scopes`
-  (interactive browser consent as djgatsakos@gmail.com — the script owner).
+- Logged in with the project's desktop OAuth client (interactive browser consent as
+  djgatsakos@gmail.com — the script owner). Today's re-auth method: `node tools/clasp-auth.js`
+  and paste the command it prints — never hand-write a `clasp login` line (see
+  [[clasp-login-scope-trap]]).
 - An API-executable deployment must exist (`clasp create-deployment`).
 
 Run from the `gas/` dir (the Bash cwd resets between calls — always `cd` first):

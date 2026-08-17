@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 24403232-cfbd-49b7-abf4-38a13f819b7d
+  modified: 2026-08-17T16:14:17.124Z
 ---
 
 Branch `fix/paid-stub-ledger-immutable`. Implemented issues 01–05 of
@@ -47,7 +48,7 @@ is rejected wholesale (scripts.run needs the manifest's derived scopes) — even
 capabilityPing fails. `clasp push` still works (needs only script.projects). I pushed
 the new engine, found run-function blocked, and ROLLED PRODUCTION BACK to the prior
 engine (deployed 92ced4b:src/Core.js) before any run migrated the live ledger — clean,
-stable, ledger still 14-col. To finish 06: operator runs `clasp login` (full scopes),
+stable, ledger still 14-col. To finish 06: operator re-authed clasp (today's method: `node tools/clasp-auth.js`, NEVER bare `clasp login` — see [[sheet-rest-api-access]]),
 then follow `.scratch/paid-stub-immutability/06-RECONCILIATION-RUNBOOK.md` — dry-run
 then execute `runReconciliation` with `.scratch/paid-stub-immutability/reconciliation-payload.json`
 (35 targets, deduped) then `runAllSilent` then `reconcileInspect`. Verified freeze

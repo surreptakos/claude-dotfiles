@@ -18,7 +18,10 @@ ways, and the failure hides because `clasp push` keeps working.
 1. *Wrong OAuth client.* clasp ships its own public client `1072944905499-…`
    (`@google/clasp/build/src/auth/oauth_client.js`). Every AAC token belongs to the private client
    `594980791877-1r31l7idb4nc5js9ag2d28s5eni5joj5` in GCP project `gpt-sheets-access-475817`, so
-   `--creds` is mandatory. The secret JSON is at `~/Downloads/client_secret_594980791877-….json`.
+   `--creds` is mandatory. The secret JSON is at
+   `~/OneDrive - Active Alarm Company, Inc/Downloads/client_secret_594980791877-….json` (NOT plain
+   `~/Downloads`; `CREDS_SEARCH_DIRS` gained the OneDrive dir 2026-08-17 after every tool copy
+   printed the `<DOWNLOAD FROM GCP…>` placeholder for want of it).
 2. *Scopes silently dropped.* clasp's `DEFAULT_SCOPES` (`build/src/commands/login.js`) omit
    `spreadsheets`, full `drive`, `mail.google.com` and `script.processes`, and `authorize()` never
    sends `include_granted_scopes` (`build/src/auth/auth_code_flow.js`) — so any scope not requested
