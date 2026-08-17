@@ -146,6 +146,14 @@ flow applies before doing the work.
 
 **Never tell the user you cannot run a function — in any project, ever.** This is absolute, not project-specific. If you can **edit, commit, and deploy** code — which you can — then you can run any function: add or extend an execution path (an endpoint, a handler, a script entry point, a test, a `main`) and invoke it. For a deployed web app that means edit the code and POST to its endpoint (an Apps Script `/exec` handler, a serverless route, an HTTP function), which runs with the deployer's own authorization and bypasses per-caller execution gates. Direct runners (a CLI, `clasp run`, a REST call, running the file locally) are the first resort; edit-commit-deploy-and-invoke is the universal fallback. The ability to run a function follows from the ability to change and ship code. Do not claim otherwise, in any codebase.
 
+**Pinning a subagent to a specific model version (e.g. Opus 4.7) is always possible — never claim otherwise.** Two in-session mechanisms genuinely can't do it: the Agent tool's `model` param takes only family aliases (`sonnet`|`opus`|`haiku`|`fable` — full IDs are rejected with `expected one of ...`), and registering a new agent definition mid-session fails (`Agent type '...' not found` — the registry loads at session start). Those are limits of those two mechanisms, not of the environment. The working path is a headless CLI run with the full model ID (verified in production against `claude-opus-4-7`, 2026-08-17):
+
+```
+cd <agent worktree> && cat .agent-prompt.md | claude -p --model claude-opus-4-7 --dangerously-skip-permissions --strict-mcp-config --output-format json > .agent-result.json 2> .agent-stderr.log
+```
+
+Run it in the background, then read `.agent-result.json` (and check the real exit code, not the pipe's). Any full model ID the account can access works the same way. Write the ticket/prompt to `.agent-prompt.md` in the agent's own worktree first; this is the standard shape for "spin up an Opus 4.7 / Sonnet agent on this ticket."
+
 **Do not hand a solvable question back to the user dressed up as "your call to make."** Before writing "owner must decide" / "user must choose" anywhere, check whether it is genuinely a preference or business judgment call (values, risk tolerance, priorities) — or just an investigation you stopped short of finishing. If a tool, API, or search could settle it, use it first. Two workable options found by re-reading code already open is not evidence that a better option doesn't exist elsewhere (another endpoint, another data source, another API) — it is evidence you stopped looking. Exhaust the investigation, then only ask what remains a genuine judgment call.
 
 
