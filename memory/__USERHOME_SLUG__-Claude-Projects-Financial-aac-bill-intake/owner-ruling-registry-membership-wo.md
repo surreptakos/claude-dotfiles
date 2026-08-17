@@ -15,3 +15,4 @@ Two owner rulings, 2026-08-12 late evening, both tracked on issue 126:
 2. **Tax-gate provenance, verbatim**: "yes, because it is still getting reviewed by a human anyway. I'd rather you err on being overzealous" — a REGISTRY-VALIDATED W/O may waive the sales-tax hold regardless of source (subject included). Supersedes the "subject may never exempt, currently no" line in the repo CLAUDE.md PROVENANCE paragraph (PR 92 hazard now applies only to NON-member text). CLAUDE.md update rides issue 126's branch.
 
 General preference behind both: hold less, err overzealous on reading, humans still review at Work-validate. See [[owner-rulings-2026-08-12-hold-less]].
+

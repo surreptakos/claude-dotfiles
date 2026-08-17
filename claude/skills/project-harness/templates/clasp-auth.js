@@ -101,7 +101,8 @@ const CREDS_SEARCH_DIRS = [
   path.join(os.homedir(), 'Downloads'),
   path.join(os.homedir(), '.config'),
   path.join(os.homedir(), 'Desktop'),
-  path.join(os.homedir(), 'OneDrive - Active Alarm Company, Inc', 'Desktop')
+  path.join(os.homedir(), 'OneDrive - Active Alarm Company, Inc', 'Desktop'),
+  path.join(os.homedir(), 'OneDrive - Active Alarm Company, Inc', 'Downloads')
 ];
 
 /* ─── Helpers ─── */
