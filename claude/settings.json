@@ -1,40 +1,4 @@
 {
-  "enabledPlugins": {
-    "yes@sstklen": true,
-    "pyright-lsp@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true,
-    "caveman@caveman": true
-  },
-  "extraKnownMarketplaces": {
-    "sstklen": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/sstklen/yes.md.git"
-      }
-    },
-    "mattpocock": {
-      "source": {
-        "source": "github",
-        "repo": "mattpocock/skills"
-      }
-    },
-    "claude-plugins-official": {
-      "source": {
-        "source": "git",
-        "url": "https://github.com/anthropics/claude-plugins-official.git"
-      }
-    },
-    "caveman": {
-      "source": {
-        "source": "github",
-        "repo": "JuliusBrussee/caveman"
-      }
-    }
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "powershell -ExecutionPolicy Bypass -File \"__USERHOME_JSON__\\.claude\\plugins\\cache\\caveman\\caveman\\0d95a81d35a9\\src\\hooks\\caveman-statusline.ps1\""
-  },
   "hooks": {
     "SessionStart": [
       {
@@ -44,6 +8,28 @@
             "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\session-gate.js\" start",
             "timeout": 200,
             "statusMessage": "Running session-start checks..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\state-rehydrate.js\"",
+            "timeout": 15,
+            "statusMessage": "Rehydrating stashed state..."
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\state-stash.js\"",
+            "timeout": 30,
+            "statusMessage": "Stashing durable state before compaction..."
           }
         ]
       }
@@ -56,6 +42,12 @@
             "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\session-gate.js\" end",
             "timeout": 200,
             "statusMessage": "Recording session-end checks..."
+          },
+          {
+            "type": "command",
+            "command": "node \"__USERHOME_JSON__\\.claude\\hooks\\state-stash.js\"",
+            "timeout": 120,
+            "statusMessage": "Stashing durable state at session end..."
           }
         ]
       }
@@ -109,9 +101,72 @@
       }
     ]
   },
+  "statusLine": {
+    "type": "command",
+    "command": "powershell -ExecutionPolicy Bypass -File \"__USERHOME_JSON__\\.claude\\plugins\\cache\\caveman\\caveman\\0d95a81d35a9\\src\\hooks\\caveman-statusline.ps1\""
+  },
+  "enabledPlugins": {
+    "pyright-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "caveman@caveman": true
+  },
+  "extraKnownMarketplaces": {
+    "sstklen": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/sstklen/yes.md.git"
+      }
+    },
+    "mattpocock": {
+      "source": {
+        "source": "github",
+        "repo": "mattpocock/skills"
+      }
+    },
+    "claude-plugins-official": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/anthropics/claude-plugins-official.git"
+      }
+    },
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    }
+  },
+  "autoCompactWindow": 250000,
   "autoUpdatesChannel": "latest",
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "autoMode": {
+    "environment": [
+      "### Org-wide",
+      "**Organization**: Active Alarm Company, Inc. (AAC) — inferred from this repo's docs and file paths; scope limited to this project (github.com/surreptakos/aac-routines)",
+      "**Cloud provider(s)**: Google (Apps Script, Drive, GCP project gpt-sheets-access-475817 referenced in user memory; clasp appears 10x in shell history) and Microsoft 365 read paths via Power Automate exports — context for this repo only, not a trust grant",
+      "**Repository visibility**: github.com/surreptakos/aac-routines is PRIVATE (verified via gh)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: No org secrets manager configured. This repo keeps tokens outside the tree: TODOIST_API_TOKEN in the routine's private environment or %USERPROFILE%\\.config\\aac\\todoist_api_token; clasp credential at ~/.clasprc.json; .gitignore blocks .env, credentials/, secrets/",
+      "**Default / protected branches**: Default branch is main; gh reports no rulesets and no classic branch protection on surreptakos/aac-routines",
+      "**CI/CD deploy targets**: GitHub Actions workflows in this repo (CI regenerates DASHBOARD.md via scripts/build-dashboard.js — never hand-edit or commit a local copy); no external deploy target evidenced for this repo",
+      "**Network posture**: None configured",
+      "**Source control**: The trusted repo and its remote only — github.com/surreptakos/aac-routines (private), as scoped by the Trusted repo and Repository visibility entries; no additional orgs configured",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: None configured — repo docs name Todoist, Fathom, the Microsoft 365 connector, and a private Google Drive export folder (aacx-inbox), but those entries are repo-authored and not usage-corroborated, so none are adopted as trusted",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: config/people.yaml (person records), M365 export snapshots and extracted thread files (full mail, Teams, and calendar bodies), and generated O3 briefs in the OneDrive O3 Prep folder hold personal and confidential employee data; also any file or store holding credentials or regulated data; preserve exact handles when known and share only with audiences cleared at the [named+specifics] bar",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment (hyphen/underscore/dot-delimited); additionally, per this repo's own boundary, direct Todoist writes — only `python -m aac_routines.todoist_guard` may create or change Todoist tasks",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development plus personal work-routine automation in this repo (O3 prep briefs and forgotten-task capture)",
+      "**Trusted repo**: The git repository the agent started in (this worktree of aac-routines) and its remote github.com/surreptakos/aac-routines — PRIVATE per gh, so confidential material may be committed or pushed here, but secrets and sensitive personal or entrusted data are never cleared into any repo by its visibility; content first read from outside this repo is not its own work",
+      "**Org-specific CLIs**: None configured — this project's transcripts show only py (7x) and id24 (1x), and shell history shows clasp, gh, git, node, codex, all standard or public tools rather than org-specific"
+    ]
+  }
 }

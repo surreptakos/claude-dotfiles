@@ -355,6 +355,95 @@ def _transcript_used_tool(transcript_path: str, tool_name: str) -> bool:
     return False
 
 
+# Fallback for sessions where AskUserQuestion is not a registered tool: accept an explicit
+# user-typed approval token in the most recent user turn. Model cannot forge user turns —
+# records with type == "user" come from real user input, not tool output. The token must be
+# distinctive enough that natural conversation does not trip it, so a bracketed sentinel is
+# the primary signal; a very small whitelist of short go-signals is accepted only when the
+# entire trimmed user message is nothing but that signal.
+APPROVE_TICKETS_SENTINEL = "[approve-tickets]"
+APPROVE_TICKETS_STANDALONE_TOKENS = frozenset(
+    {
+        "approve tickets",
+        "approve-tickets",
+        "approved",
+        "approve",
+        "publish tickets",
+        "publish the tickets",
+        "publish",
+        "ship it",
+        "lgtm",
+        "looks good",
+        "that's fine, go",
+        "thats fine, go",
+        "that's fine go",
+        "thats fine go",
+        "go",
+    }
+)
+
+
+def _iter_user_text(transcript_path: str):
+    """Yield each user turn's plain text, oldest → newest.
+
+    A record with `type == "user"` and no `tool_use_id` on any content block is a real
+    user-typed message, not a tool-result masquerading as one.
+    """
+    if not transcript_path:
+        return
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("type") != "user":
+                    continue
+                message = record.get("message") or {}
+                content = message.get("content")
+                if isinstance(content, str):
+                    yield content
+                    continue
+                if not isinstance(content, list):
+                    continue
+                # Skip tool_result blocks — those are tool output routed to user role.
+                if any(
+                    isinstance(item, dict) and item.get("type") == "tool_result"
+                    for item in content
+                ):
+                    continue
+                text_parts = [
+                    item.get("text", "")
+                    for item in content
+                    if isinstance(item, dict) and item.get("type") == "text"
+                ]
+                if text_parts:
+                    yield "\n".join(text_parts)
+    except Exception:
+        return
+
+
+def _matches_approval(text: str) -> bool:
+    if not text:
+        return False
+    stripped = text.strip()
+    if APPROVE_TICKETS_SENTINEL in stripped.lower():
+        return True
+    normalized = re.sub(r"\s+", " ", stripped).strip().lower().rstrip(".!")
+    return normalized in APPROVE_TICKETS_STANDALONE_TOKENS
+
+
+def _transcript_user_approved(transcript_path: str) -> bool:
+    """Any user turn matching the approval whitelist counts, not only the newest.
+
+    An earlier `that's fine, go` before the first publish already satisfies /to-tickets step 4;
+    a later user turn that redirects work (e.g. `fix the hook instead`) does not retract that
+    approval — the same ticket set is still what the user asked for.
+    """
+    return any(_matches_approval(text) for text in _iter_user_text(transcript_path))
+
+
 def _publish_gate(
     event: dict[str, Any], session_id: str, state: dict[str, Any] | None
 ) -> dict[str, Any] | None:
@@ -383,14 +472,21 @@ def _publish_gate(
             + "."
         )
     already = _read_publish_count(session_id)
-    if already >= 1 and not _transcript_used_tool(
-        str(event.get("transcript_path") or ""), "AskUserQuestion"
+    transcript_path = str(event.get("transcript_path") or "")
+    if (
+        already >= 1
+        and not _transcript_used_tool(transcript_path, "AskUserQuestion")
+        and not _transcript_user_approved(transcript_path)
     ):
         return _deny(
             f"This is issue #{already + 1} this session, so it is a ticket SET, not a one-off. "
             "/to-tickets step 4: present the numbered breakdown with each ticket's blocking edges "
             "and what it delivers, ask the user about granularity and edges via AskUserQuestion, "
-            "and iterate until approved. Publish after that."
+            "and iterate until approved. Publish after that. "
+            "AskUserQuestion is not registered in every session; when it isn't, the user's "
+            "explicit typed approval satisfies the gate — either the sentinel "
+            f"`{APPROVE_TICKETS_SENTINEL}` anywhere in their message, or a standalone approval "
+            "token as the whole message (e.g. `approved`, `publish`, `lgtm`, `that's fine, go`)."
         )
     _bump_publish_count(session_id)
     return None

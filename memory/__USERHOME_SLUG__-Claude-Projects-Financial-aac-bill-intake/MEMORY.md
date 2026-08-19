@@ -27,3 +27,5 @@
 - [Registry-membership W/O ruling](owner-ruling-registry-membership-wo.md) — invert detection to board membership (issue 126); registry-validated subject W/O may waive tax hold
 - [UrlFetch quota is the ceiling](urlfetch-quota-is-the-ceiling.md) — 64-ticket sweep exhausted the daily quota 2026-08-13; resets 02:00 Central; check the exception before diagnosing code
 - [Overnight shift 2026-08-13](overnight-shift-2026-08-13.md) — 12 issues closed live-verified, 7 releases, Data-verify 60 to 34; Blueprint/perform API facts; subagent runner recipe
+- [Nightly orchestrator live](nightly-orchestrator-live.md) — daily 02:05 task opens PRs on ready-for-agent issues; check gh pr list + FOLLOW-UPS.md each morning
+- [Headless claude CLI auth dead](headless-claude-cli-auth-dead.md) — claude -p can't refresh (empty creds file); pin Opus 4.7 via opus47 agent type instead

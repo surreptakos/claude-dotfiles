@@ -47,3 +47,5 @@
 - [Skills live in session-scoped paths](skills-live-in-session-scoped-paths.md) — a skill missing from `~/.claude` is not missing; three tiers, and how to make one durable.
 - [Design projects on the work account](design-projects-on-the-work-account.md) — which project is live, which design system is stale, and why the two transports disagree about what exists.
 - [Measurement tools must assert their subject](measurement-tools-must-assert-their-subject.md) — a diff tool that can't confirm WHAT it measured reports coverage it doesn't have; it must throw, not fall back.
+- [Closing keywords in commit bodies](closing-keywords-in-commit-bodies.md) — "closes #482's corruption vector" in prose auto-closed the issue on push to main.
+- [Nightly local ticket agent](nightly-local-ticket-agent.md) — Task Scheduler 11:05pm CT headless claude on ready-for-agent+backend tickets; disabled cloud twin trig_01WoV66…; CLI vs desktop auth gotchas.

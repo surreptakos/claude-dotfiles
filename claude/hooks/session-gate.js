@@ -36,11 +36,14 @@ const os = require('node:os');
 const path = require('node:path');
 
 const HOME = os.homedir();
+// Profile-aware: under CLAUDE_CONFIG_DIR (e.g. claude-personal) state and the check
+// script live in that profile, not the default ~/.claude.
+const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude');
 const STATE_DIR = process.env.SESSION_GATE_STATE_DIR
-  || path.join(HOME, '.claude', 'hook-state', 'session-gate');
+  || path.join(CONFIG_DIR, 'hook-state', 'session-gate');
 // Overridable so the tests can stand a stub in front of a script that runs a whole test suite.
 const CHECK = process.env.SESSION_GATE_CHECK
-  || path.join(HOME, '.claude', 'skills', 'session-check', 'check.js');
+  || path.join(CONFIG_DIR, 'skills', 'session-check', 'check.js');
 const TTL_MS = Number(process.env.SESSION_GATE_TTL_MS || 15 * 60 * 1000);
 const END_COOLDOWN_MS = Number(process.env.SESSION_GATE_END_COOLDOWN_MS || 5 * 60 * 1000);
 // Kept under the hook timeout in settings.json on purpose: overrunning here reports "did not

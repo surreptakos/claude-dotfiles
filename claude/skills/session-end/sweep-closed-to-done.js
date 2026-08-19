@@ -25,7 +25,8 @@ const path = require('node:path');
 const APPLY = process.argv.includes('--apply');
 
 function run(cmd, args, opts = {}) {
-  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+  // 50MB: a 350+-item board's item-list JSON overflows the 1MB default (ENOBUFS, 2026-08-18)
+  return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024, ...opts });
 }
 function gh(args) { return run('gh', args); }
 function ghJson(args) { return JSON.parse(gh(args)); }
