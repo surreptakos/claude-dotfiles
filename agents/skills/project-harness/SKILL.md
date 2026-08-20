@@ -76,7 +76,7 @@ cross-repo Projects board instead of per-repo (see step 6).
 8. **Live tracker audit** — copy `templates/tracker-audit.js` to `tools/tracker-audit.js`. No substitutions: it infers the repo from `gh repo view`. It reads live GitHub state (prose `Blocked by #N` with no native dependency edge, closed issues with unticked acceptance boxes, a `#N` that is neither an issue nor a PR, missing/conflicting triage labels, an open issue whose Projects card says Done, an open issue on no board at all, plus two advisory checks) — the drift no file-level test can see. Exit 0 clean / 1 drift / **2 could not audit**; preserve that third code in any edit, because a tracker query returning nothing must never read as a pass.
    - It needs the network and an authenticated `gh`, so it does **NOT** go in the pre-commit hook — a commit gate that needs the network breaks committing offline. It is a command, optionally a CI step (separate workflow or a job in `dashboard.yml`, never the test job).
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 8.**
+9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 9.**
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
@@ -100,6 +100,21 @@ cross-repo Projects board instead of per-repo (see step 6).
     - If the repo has a packaging step that sweeps root files (clasp, docker COPY), exclude it — same list as
       step 10. `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` — which authorizes clasp's own OAuth client with narrower defaults — produces a credential that pushes fine in the repo you are standing in while silently breaking Gmail and Drive work in another. Nothing local to the affected repo can see it.
     - Where the repo has a `package.json`, also wire `prepush` to `node tools/clasp-auth.js --quiet` so a dead credential stops the deploy instead of failing inside clasp with a bare `invalid_grant` (message-board does this). Without one, the gate is the session check plus the release runbook.
+
+15. **Workflow scripts** — copy `templates/ticket-fleet.js` to `.claude/workflows/ticket-fleet.js`.
+    - A named script for Claude Code's in-session Workflow tool (`Workflow({name: 'ticket-fleet'})`):
+      scout enumerates `ready-for-agent` tickets and `Blocked by #N` edges, unblocked tickets run in
+      parallel — implementer (pinned model via `args.implModel`, default `claude-opus-4-7`; isolated
+      worktree; up to 3 attempts) then a BLIND verifier that sees only branch + acceptance criteria
+      and is prompted to refute — and a PR opens only on a verified pass. Discoveries return through
+      structured output and one writer appends them, so no append races.
+    - **Skip the copy if the file already exists** — a repo may carry hand-tuned prompts or caps, and
+      detection cannot reproduce them (same hazard as step 3.3's `CONFIG` and step 12's session.json).
+    - The Workflow tool resolves `name:` from the checkout it runs in, so the file must be COMMITTED
+      to be usable from a fresh clone; it is inert content otherwise (plain JS the tool reads —
+      nothing executes on install).
+    - First run in a repo: pass `deliver: false` (verify-only dry run) before letting it push
+      branches and open PRs.
 
 ## 4 — Verify (never skip)
 
@@ -235,6 +250,8 @@ whole install; steps 1–7 are idempotent but re-running them churns files for n
 | 8 | 2026-08-02 | `.caveman.json` at the repo root, pinning session output intensity to `ultra` (Dan, 2026-08-02). Without a repo file the level comes from a user config that exists on one machine and in no history, so the same repo reads `full` on another checkout and nothing says why | step 14 (add the file only where it is missing; keep an existing value) |
 
 | 7 | 2026-08-01 | Session checks: `.claude/session.json` + `docs/runbooks/session.md`, and `tools/clasp-auth.js` on clasp repos. The credential gate is the load-bearing part — it verifies the grant's SCOPES, not just that it refreshes, and `~/.clasprc.json` is shared machine-wide, so a bare `clasp login` in one repo silently narrows what every other one can do. Two of four clasp repos had no such gate | steps 12–13 (preserve any existing `.claude/session.json`) |
+
+| 9 | 2026-08-19 | `.claude/workflows/ticket-fleet.js` — named script for the in-session Workflow tool: parallel unblocked-ticket runs, pinned implementer model (full IDs verified working in `opts.model`, e.g. `claude-opus-4-7`), blind refuting verifier per attempt, PR only on verified pass, single-writer discovery collection. Also fixes `templates/harness-version.md`, which still said 7 after the v8 bump | step 15 (copy only where the file is missing) |
 
 A row can mean "re-copy a file you already have". The marker answers *what a repo lacks*, and a
 template that changed is something the repo lacks just as much as a file it never had — so bump the
