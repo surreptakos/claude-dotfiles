@@ -69,6 +69,15 @@ occur in practice — `C:\Users\Dan`, the JSON-escaped `C:\\Users\\Dan`, the for
 substitutes the local home back. A machine with the same username sees no difference; one with a
 different username still works.
 
+## Line endings are pinned
+
+`.gitattributes` says `* -text`: git converts nothing, in either direction. The mirrored trees
+hold the exact bytes `sync.ps1` read off the live machine — some files CRLF, some LF, a couple
+mixed, and all of that is the truth being carried. Before the pin, this machine's global
+`core.autocrlf=true` made a fresh clone materialize every LF file as CRLF, so a new machine
+restored byte-different files while every git operation printed line-ending warnings. The
+restore test's clone-fidelity check (below) is what watches for the conversion coming back.
+
 ## Junctioned skills
 
 Twenty of the skills under `~/.claude/skills` are junctions into `~/.agents/skills` —
@@ -100,7 +109,9 @@ scratch root is deleted at startup, and while it was a constant, the session-sta
 first prompt hook 8 seconds later wiped each other and both reported a failure on a healthy repo.
 `-FakeHome` still pins the path explicitly; two runs given the same one still collide, by design.
 
-Twenty-one checks. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
+Twenty-two checks. The clone carries the exact bytes that were pushed — each working-tree file
+hashed raw against the blob git stored, which is what catches a checkout quietly rewriting line
+endings. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
 still parses and every path in it points at a file that exists; every junction resolves to a real
 `SKILL.md`; every file survives the round trip byte-for-byte; nothing credential-shaped came
 along; two overlapping runs each keep their own scratch directory; and the restored hooks and
@@ -124,7 +135,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|home-leak|secret|drift|broken-hook|dead-link|collision|locked-scratch` breaks one thing on purpose so the
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|dead-link|collision|locked-scratch` breaks one thing on purpose so the
 matching check can be watched going red. A check that has only ever passed is not yet a check —
 `dead-link` passed on its first attempt because it deleted a directory nothing linked to.
 

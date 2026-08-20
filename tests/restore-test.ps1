@@ -13,6 +13,7 @@
     path in a restored file is then unambiguously a leak, not the scratch directory's own name.
 
     Checks, in order:
+      0  the clone materialized the exact bytes that were pushed (clone modes only)
       1  install.ps1 exits 0
       2  every whitelisted item landed, with the same file count as the repo
       3  memory slugs were de-tokenized back into real project directory names
@@ -60,6 +61,7 @@ param(
 
     # Deliberate breakage, to watch a check fail:
     #   missing      a whitelisted file never made it into the repo   -> check 2
+    #   crlf         the clone's bytes differ from the pushed bytes   -> check 0
     #   home-leak    a file was copied without going through Copy-OneFile -> check 5
     #   secret       a credential value reached the repo              -> check 8
     #   drift        a restored file does not round-trip              -> check 7
@@ -67,7 +69,7 @@ param(
     #   dead-link    a junctioned skill's target never travelled      -> check 6b
     #   collision    two overlapping runs share one scratch root      -> check 10
     #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
-    [ValidateSet('none', 'missing', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
+    [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
                  'collision', 'locked-scratch')]
     [string]$Fault = 'none',
 
@@ -208,6 +210,16 @@ Write-Host ''
 
 # ------------------------------------------------------------------ 0. inject the fault
 
+if ($Fault -eq 'crlf') {
+    # What an unpinned checkout under core.autocrlf=true did to every LF file: rewrite the
+    # bytes on the way out of git. Flip one cloned file's endings, whichever way they point.
+    $victim = Join-Path $Clone 'claude\CLAUDE.md'
+    $text   = [System.IO.File]::ReadAllText($victim)
+    if ($text.Contains("`r`n")) { $text = $text.Replace("`r`n", "`n") }
+    else                        { $text = $text.Replace("`n", "`r`n") }
+    [System.IO.File]::WriteAllText($victim, $text, (New-Object System.Text.UTF8Encoding($false)))
+    Note 'fault: flipped the line endings of a cloned file'
+}
 if ($Fault -eq 'home-leak') {
     # What a copy that bypassed Copy-OneFile would leave behind: this machine's home, verbatim.
     Set-Content -Path (Join-Path $Clone 'claude\skills\leak-probe.md') `
@@ -229,6 +241,39 @@ if ($Fault -eq 'dead-link') {
     $victim = Join-Path $Clone ('agents\skills\' + (Split-Path $link.Target -Leaf))
     Remove-Item -Path $victim -Recurse -Force
     Note ('fault: removed a junction target from the repo - ' + $link.Name)
+}
+Write-Host ''
+
+# ------------------------------------------------------------------ 0. clone is byte-faithful
+
+# The repo's promise is that a clone materializes the bytes sync.ps1 pushed. It did not always:
+# with core.autocrlf=true (this machine's global git config) and no .gitattributes, checkout
+# rewrote every LF text file to CRLF - so a new machine restored byte-different files, and the
+# clone-vs-restored comparisons below could not see it because both sides were rewritten alike.
+# Compare each working-tree file's raw bytes (--no-filters) against the blob git stored; any
+# conversion on the way out of git is a hash mismatch. Worktree mode copies files without a
+# checkout, so there is nothing to compare there.
+Write-Host 'Clone fidelity'
+if ($From -eq 'worktree') {
+    Note 'worktree mode copies files without a git checkout - no conversion possible'
+} else {
+    $tracked = @(& git -C $Clone ls-files -s | ForEach-Object {
+        $meta, $path = $_ -split "`t", 2
+        [pscustomobject]@{ Sha = ($meta -split ' ')[1]; Path = $path }
+    })
+    # Not piped from PowerShell: 5.1 can prepend a BOM to the first line it feeds a native
+    # process ("could not open '<BOM>.caveman.json'", observed while building this check), so
+    # the path list travels through a BOM-free file and a cmd redirect.
+    $listFile = Join-Path $FakeRoot 'tracked-paths.txt'
+    [System.IO.File]::WriteAllLines($listFile, @($tracked | ForEach-Object { $_.Path }),
+                                    (New-Object System.Text.UTF8Encoding($false)))
+    $actual = @(cmd /c "git -C ""$Clone"" hash-object --no-filters --stdin-paths < ""$listFile""")
+    $rewritten = @()
+    for ($i = 0; $i -lt $tracked.Count; $i++) {
+        if ($i -ge $actual.Count -or $actual[$i] -ne $tracked[$i].Sha) { $rewritten += $tracked[$i].Path }
+    }
+    Check ("all {0} cloned files carry the exact bytes that were pushed" -f $tracked.Count) `
+        (($tracked.Count -gt 0) -and ($rewritten.Count -eq 0)) $rewritten
 }
 Write-Host ''
 
