@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 3b0c0ef5-c1fe-441f-87e6-d0e7df614ebe
-  modified: 2026-08-20T00:39:20.357Z
+  modified: 2026-08-20T00:57:22.610Z
 ---
 
 Repo: https://github.com/surreptakos/aac-contract-builder (private, gh account surreptakos). Stood up 2026-08-19 from Cowork handoff zip; tag `handoff-2026-08-19` is the as-received tree, then flattened to root. Repo is authoritative; Cowork skill is a bridge consuming tagged releases.
@@ -21,6 +21,8 @@ Machine facts: P: jobs drive NOT mounted on this dev machine — anything needin
 Ticket #4 resolved 2026-08-19 (grilling): SCHEDULE-GENERATION-PROCEDURE §1/§6/§11/§11a/§12 ratified with amendments, carried by PR #16 (branch ratify/schedule-generation-1-6-11-12, awaiting Dan's merge = ratification act). Key rulings: domain-scoped precedence + proposal-vs-master hard stop; prevailing wage from labor COST column vs approved costs (Field Tech $55, FT-PW $100, Programmer $50, PM $75, as of 2026-08-19 — first recorded home is §1); merged work-up reconciliation rule; §6 description order (work-up Description if passes muster → references/PART-TRANSLATIONS.md → proposal via PR → rep question); largest unit price sort; kit sentence killed; dismissed-WARN line + deviation approval recorded in handoff email; stop-slop 1.1.0-custom vendored at skill/stop-slop/ (rubric for PROMPT.md 42/60). PartList export (2008 parts, recognition-only) at fixtures/exports/.
 
 Ticket #7 resolved 2026-08-19 (grilling, PR #17 merged, main 9e9153a): MAPPING-APPENDIX §3a rewritten validation-only — drafter/reviewer NEVER derive prices; shipped figure comes from proposal and must reproduce from FSI on file. Dan's package-wide directive: all price-derivation rules gutted into new references/ESTIMATING-APPENDIX.md ("Estimating Build appendix", parked seed doc for later estimating build) — approved labor costs master table now lives THERE (§1 cites it), Repair Service derivation (1% basis unresolved, orphan flag kept per Dan), inspection formula, 50% software-passthrough markup, corrected Norway example ($46 = combined program, RS alone $21; Mark's $25 ruling recorded). Repair Service RMR bills from CUTOVER, not month 13 (MAPPING-APPENDIX §3a). Classification test for future sweeps: price derivation moves to estimating; validation/presentation anchors stay in package. OPEN-DECISIONS items 6–8 resolved. Recurring pattern now thrice-confirmed: price-setting questions are estimating's, never the drafter's — reframe before grilling Dan on them.
+
+Ticket #3 resolved 2026-08-19 (grilling): golden set standard at docs/golden-set-standard.md (main 1422a85). Sanitization = FULL SYNTHETIC: deterministic tokens for all identifiers applied identically to facts and expected outputs; token mapping stays on jobs drive; git-history grep gates push; exception — ACCOUNT-RULES account keys retained on fixtures exercising them. Selection = ratified criteria (count 12: recency 12mo, system spread, RMR spread, CPD, LEAF-if-exists, sweep's clean package, resi+commercial), applied at export because P: unmounted. Export = HITL ticket #18 (wayfinder:task, child of map) into fixtures/golden/. Dan's training-data worry answered: identifiers carry no signal; jobs drive stays truth; lesson-mining lands findings not files (sweep precedent). PORTFOLIO-SWEEP.md stays as is.
 
 Engineering work outside the map (proceeds anytime, no ruling needed): pytest harness, xlsx_surgical byte-fidelity test, facts-schema draft, gap report (KICKOFF-PROMPT tasks 3–5).
 
