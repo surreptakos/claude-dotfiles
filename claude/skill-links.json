@@ -44,6 +44,10 @@
         "Target":  "__USERHOME__\\.agents\\skills\\improve-codebase-architecture"
     },
     {
+        "Name":  "project-harness",
+        "Target":  "__USERHOME__\\.agents\\skills\\project-harness"
+    },
+    {
         "Name":  "prototype",
         "Target":  "__USERHOME__\\.agents\\skills\\prototype"
     },
@@ -54,6 +58,18 @@
     {
         "Name":  "resolving-merge-conflicts",
         "Target":  "__USERHOME__\\.agents\\skills\\resolving-merge-conflicts"
+    },
+    {
+        "Name":  "session-check",
+        "Target":  "__USERHOME__\\.agents\\skills\\session-check"
+    },
+    {
+        "Name":  "session-end",
+        "Target":  "__USERHOME__\\.agents\\skills\\session-end"
+    },
+    {
+        "Name":  "session-start",
+        "Target":  "__USERHOME__\\.agents\\skills\\session-start"
     },
     {
         "Name":  "setup-matt-pocock-skills",

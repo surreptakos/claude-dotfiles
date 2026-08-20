@@ -1,7 +1,7 @@
 {
   "_comment": [
-    "Read by the generic session check: $session-start, $session-end, or",
-    "node $HOME/.agents/skills/session-check/check.js [--end].",
+    "Read by the generic session check: /session-start, /session-end, or",
+    "node ~/.claude/skills/session-check/check.js [--end].",
     "",
     "ONLY what the checker cannot auto-detect belongs here. It already finds git, npm test,",
     "tools/clasp-auth.js, tools/tracker-audit.js, tools/canary.js and the GitHub ticket list on its",

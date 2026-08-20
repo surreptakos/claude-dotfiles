@@ -12,7 +12,7 @@ ambiguous: `Sales Data KPIs/aac-cockpit` on this machine.
 **Step 0 decides which job this is. Read it before anything else** — most invocations after the first
 are upgrades, and the install steps are not the right path for those.
 
-> **Never back this skill up inside `~/.agents/skills/`.** A copied folder there is loaded as a
+> **Never back this skill up inside `~/.claude/skills/`.** A copied folder there is loaded as a
 > second skill with an identical description, so skill selection has two indistinguishable
 > candidates. Copy to a temp directory instead. (Hit while editing this skill on 2026-07-28.)
 
@@ -43,7 +43,7 @@ per repo.
 ## 1 — Explore (before touching anything)
 
 - `git remote -v` — must be a GitHub repo for the tracker/CI pieces; if no remote, offer to `gh repo create` (private by default).
-- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in AGENTS.md/CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so.
+- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so.
 - **ADR dir** — `docs/adr/` or `doc/adr/` or none. None is fine (section skipped).
 - **Deploy/CI workflow** — any existing `.github/workflows/*.yml` whose name suggests deploy/test; the dashboard reports the most deploy-like one, or skips.
 - Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to skip or merge.
@@ -79,10 +79,10 @@ cross-repo Projects board instead of per-repo (see step 6).
 9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 8.**
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
-11. **AGENTS.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12. Preserve and update an existing CLAUDE.md when the repository also uses Claude Code.
+11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
 12. **Session checks** — copy `templates/session.json` to `.claude/session.json`, substituting `TEST_COMMAND` (same value as the hook and `ticket.yml`). Copy `templates/session-runbook.md` to `docs/runbooks/session.md`; if the repo does not deploy, delete that template's Releasing section as its comment says.
     - **PRESERVE an existing `.claude/session.json` verbatim.** Identical hazard to step 3.3's `CONFIG` block, and for the identical reason: this file carries the hand-corrected test command and the repo's release gates, and detection cannot reproduce either. Merge in missing keys; never regenerate the file.
-    - The engine itself is **NOT** installed per repo. It lives once at `~/.agents/skills/session-check/check.js` and is invoked by the `$session-start` and `$session-end` skills. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
+    - The engine itself is **NOT** installed per repo. It lives once at `~/.claude/skills/session-check/check.js`, and `~/.claude/hooks/session-gate.js` runs it from the global `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks — so a harnessed repo gets the checks without anyone invoking a skill. `/session-start` and `/session-end` only re-print the cached result. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
     - Fill `releaseGates` with what the repo actually gates on — `node tools/clasp-auth.js --quiet` and `node tools/canary.js` where those exist, `[]` otherwise. They run at `--end`.
 13. **Clasp credential gate** — for a clasp repo (`.clasp.json` at the root, in `gas/`, or in `src/`), copy `templates/clasp-auth.js` to `tools/clasp-auth.js`.
     - **It is AAC-hardcoded on purpose.** `CLIENT_ID` and `ACCOUNT` name the private OAuth client in `gpt-sheets-access-475817` and the account owning the bound scripts. A non-AAC repo needs both edited; there is no detection that could infer them, and a wrong guess yields a tool that confidently validates the wrong credential. Say so at handoff rather than installing it silently into a non-AAC project.
@@ -127,7 +127,7 @@ cross-repo Projects board instead of per-repo (see step 6).
   neither is authoritative. `node scripts/build-dashboard.js && git add DASHBOARD.md` then continue.
   Simplest habit: after the initial install, stop generating it locally and let CI own it — run the
   script only to check output, and discard the result.
-- **Session checks** — `node "$HOME/.agents/skills/session-check/check.js"` from the repo. It must find the test command (via `.claude/session.json` or `npm test`) and report the tracker audit; a `no test command detected` line means the substitution did not land. On a clasp repo, confirm the Apps Script section reports the credential rather than `no tools/clasp-auth.js`.
+- **Session checks** — `node ~/.claude/skills/session-check/check.js` from the repo. It must find the test command (via `.claude/session.json` or `npm test`) and report the tracker audit; a `no test command detected` line means the substitution did not land. On a clasp repo, confirm the Apps Script section reports the credential rather than `no tools/clasp-auth.js`.
 - File nothing fake to test issue events; the daily tick and next real issue cover it.
 
 ## 5 — Projects board (optional but default-yes)
@@ -208,13 +208,13 @@ A repo harnessed at an older version does not get new capabilities by itself. Th
 
   ```sh
   find "$HOME/Claude/Projects" -path '*/scripts/build-dashboard.js' \
-       -not -path '*/.claude/worktrees/*' -not -path '*/.codex/worktrees/*' -print0 |
+       -not -path '*/.claude/worktrees/*' -print0 |
     while IFS= read -r -d '' f; do
       r=$(dirname "$(dirname "$f")")
       [ -f "$r/docs/agents/issue-tracker.md" ] && echo "$r"
     done
   ```
-- **Agent worktrees.** `.claude/worktrees/*` or `.codex/worktrees/*` can hold full copies of the repo, so an unfiltered sweep
+- **Agent worktrees.** `.claude/worktrees/*` holds full copies of the repo, so an unfiltered sweep
   returns dozens of hits for two repos. Exclude them and upgrade the primary checkout only.
 
 **2. Read the version.** `cat docs/agents/harness-version.md` → `harness-version: N`. **File absent

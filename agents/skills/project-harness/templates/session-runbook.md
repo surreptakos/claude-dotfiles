@@ -2,11 +2,15 @@
 
 Two commands, and the vocabulary to understand what they tell you.
 
-With Codex: `$session-start` and `$session-end`. Directly:
+With Claude, the checks are **hooks, not commands you have to remember**: `~/.claude/hooks/session-gate.js`
+runs the start checks on `SessionStart` and the end checks as soon as a turn reads as wrapping up.
+`/session-start` and `/session-end` re-print the result. Directly:
 
 ```bash
-node "$HOME/.agents/skills/session-check/check.js"          # starting
-node "$HOME/.agents/skills/session-check/check.js" --end    # finishing
+node ~/.claude/hooks/session-gate.js report           # starting (cached; --refresh re-runs)
+node ~/.claude/hooks/session-gate.js report --end     # finishing
+node ~/.claude/skills/session-check/check.js          # the engine, no caching
+node ~/.claude/skills/session-check/check.js --end
 ```
 
 Both are read-only. They fetch and report; they never commit, push, merge or deploy. Exit 0 means all
@@ -58,6 +62,12 @@ deploy or a ruling. Verify every issue the session touched, and reopen with a re
 
 **Closing means verified, not merged.** A box needing a live run stays unticked and the issue stays
 open, however finished the code is.
+
+**File what outlives the session.** A finding you leave in a chat message is lost the moment the
+session closes — the open question nobody owns, the contradiction found in passing, the thing that
+needs a ruling. It goes on the tracker before you finish, with the evidence attached, or it did not
+happen. File it with what you found, not just the question — the next reader has none of your
+context, and a bare question gets closed as stale.
 
 **Tracker drift** — `node tools/tracker-audit.js`. Exit 1 means it found something; exit 2 means it
 could not audit, which is not a pass.

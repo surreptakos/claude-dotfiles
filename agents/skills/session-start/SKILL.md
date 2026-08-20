@@ -1,13 +1,23 @@
 ---
 name: session-start
-description: Start-of-session checks for any git project — fetch from the remote, report anything left over, verify the deploy credential, run the tests, and list open tickets. Use at the beginning of a session, when the user asks "what's the state", "where were we", "start a session", or before picking up a ticket.
+description: Re-print the start-of-session checks for a git project — what the remote did, what is uncommitted, whether the deploy credential is alive, whether tests pass, and which tickets are open. The checks already run automatically at session start; use this to see them again, or with --refresh to re-run them mid-session.
 ---
 
 # Start a session
 
+**The checks are a hook now, not a decision.** `~/.claude/hooks/session-gate.js start` runs on
+`SessionStart` and injects the result before the first reply, so it happens whether or not anyone
+remembers this skill. If the report is already in context, do not re-run it and do not paste it back
+— that is the double-posting the hook was built to avoid.
+
+Use this skill to see it again, or to re-run it after the tree has moved:
+
 ```bash
-node "$HOME/.agents/skills/session-check/check.js"
+node ~/.claude/hooks/session-gate.js report
 ```
+
+Prints the cached report (and says how old it is). Add `--refresh` to force a fresh run — worth it
+after a pull, a long gap, or anything that touched the tree.
 
 Read-only: it fetches (which changes no files) and reports. Works in any git repo — everything is
 either universal, auto-detected from files already present, or read from an optional
@@ -49,5 +59,5 @@ running in production.
 
 ## Related
 
-- `$session-end`
+- `/session-end`
 - A project may have its own `docs/runbooks/session.md` — read it if so

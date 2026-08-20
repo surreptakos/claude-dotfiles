@@ -5,7 +5,7 @@
 // command to paste. The command is GENERATED from the constants below, so it cannot drift from
 // what the credential actually needs.
 //
-// Why this file exists rather than a paragraph in AGENTS.md or CLAUDE.md: a bare `clasp login` looks like it
+// Why this file exists rather than a paragraph in CLAUDE.md: a bare `clasp login` looks like it
 // works and quietly produces a WRONG credential, in two independent ways.
 //
 //   1. WRONG OAUTH CLIENT. clasp ships its own public client (1072944905499-…, see
@@ -101,7 +101,8 @@ const CREDS_SEARCH_DIRS = [
   path.join(os.homedir(), 'Downloads'),
   path.join(os.homedir(), '.config'),
   path.join(os.homedir(), 'Desktop'),
-  path.join(os.homedir(), 'OneDrive - Active Alarm Company, Inc', 'Desktop')
+  path.join(os.homedir(), 'OneDrive - Active Alarm Company, Inc', 'Desktop'),
+  path.join(os.homedir(), 'OneDrive - Active Alarm Company, Inc', 'Downloads')
 ];
 
 /* ─── Helpers ─── */
