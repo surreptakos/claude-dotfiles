@@ -1,0 +1,30 @@
+---
+name: personal-profile-parity
+description: "How ~/.claude-personal was brought to parity with ~/.claude on 2026-08-19, and the profile-aware hook contract that keeps the two accounts separate."
+metadata: 
+  node_type: memory
+  type: project
+  originSessionId: fdad46d0-30d3-4f45-b4db-1391b3a33cfc
+  modified: 2026-08-19T17:31:21.915Z
+---
+
+`~/.claude-personal` (djgatsakos@gmail.com, launched via the `claude-personal` shim) was a stale
+2026-08-02 snapshot: no session-gate/state-stash/state-rehydrate hooks, no hook wiring in
+settings.json beyond governance-reminder, pre-lint CLAUDE.md, drifting skill copies. Root cause of
+the missing state hooks: they were never tracked in claude-dotfiles — fixed in commit 5bec0bd.
+
+Parity procedure (2026-08-19): copy hooks + CLAUDE.md + agents verbatim; recreate the 28 skill
+junctions pointing at the machine-wide `~/.agents/skills`; robocopy /MIR the real skill dirs; merge
+settings.json by replacing only the `hooks` key with the work profile's, rewriting `\.claude\` to
+`\.claude-personal\` in hook-file paths (`.codex` paths untouched) and keeping every personal pref
+(model, fastMode, plugins, statusLine). Backup at `~/.claude-personal-backup-20260819-parity`.
+
+`state-stash.js`, `state-rehydrate.js` and `session-gate.js` are now profile-aware: they derive
+state dirs, the miner's `.credentials.json` and the check-script path from `CLAUDE_CONFIG_DIR` when
+set, falling back to `~/.claude`. Without this, a personal-profile session-end mined its digest with
+WORK credentials. Any new hook that touches profile state must follow the same
+`process.env.CLAUDE_CONFIG_DIR || ~/.claude` pattern.
+
+Deliberately NOT synced: work project memories (`~/.claude/projects/*/memory`) into the personal
+profile — moving AAC content under the personal account is Dan's call, per
+[[two-claude-profiles-work-and-personal]].

@@ -1,2 +1,3 @@
 - [State a standing rule once](state-a-standing-rule-once.md) — one mention in the global CLAUDE.md, no reinforcing copies in skills, hooks or project files
 - [Verify before filing a sweep ticket](verify-before-filing-a-sweep-ticket.md) — re-list issues at publish time; a chip session may have filed and fixed it already
+- [Personal profile parity](personal-profile-parity.md) — how ~/.claude-personal mirrors ~/.claude; hooks must derive paths from CLAUDE_CONFIG_DIR
