@@ -1,8 +1,8 @@
 # Harness version
 
-    harness-version: 8
+    harness-version: 9
 
-Installed/upgraded: 2026-08-12 by the `project-harness` skill.
+Installed/upgraded: 2026-08-19 by the `project-harness` skill.
 
 This file exists so "which generation of the harness does this repo have?" is a question you can
 answer by reading, instead of by remembering. Before this marker, a new harness capability only
