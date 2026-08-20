@@ -277,6 +277,43 @@ if ($From -eq 'worktree') {
 }
 Write-Host ''
 
+# ------------------------------------------------------------------ 0b. seed a personal profile
+
+# Issue #9: pull refreshes ~/.claude-personal when it exists, and must not create one when it
+# does not. A fresh fake home would exercise only the skip path, which proves nothing about the
+# refresh - so seed a minimal personal profile carrying exactly what the refresh must preserve:
+# a personal pref in settings.json, a stale hooks key that must be replaced and rewritten, and a
+# personal-only memory file with its own MEMORY.md pointer line. The checks in section 6c read
+# these back after the install.
+$FakePersonal = Join-Path $FakeHome '.claude-personal'
+New-Item -ItemType Directory -Path (Join-Path $FakePersonal 'hooks') -Force | Out-Null
+$seedSettings = @'
+{
+  "model": "personal-model-pref",
+  "fastMode": true,
+  "hooks": {
+    "SessionStart": [ { "hooks": [ { "type": "command", "command": "node \"__FAKEHOME__\\.claude-personal\\hooks\\stale.js\"" } ] } ]
+  }
+}
+'@.Replace('__FAKEHOME__', $FakeHome.Replace('\', '\\'))
+[System.IO.File]::WriteAllText((Join-Path $FakePersonal 'settings.json'), $seedSettings,
+                               (New-Object System.Text.UTF8Encoding($false)))
+
+# The seed memory lives under a slug the work profile also restores, so the union merge runs on it.
+$seedSourceDir = Get-ChildItem -Path (Join-Path $Clone 'memory') -Directory -ErrorAction SilentlyContinue |
+    Where-Object { Test-Path (Join-Path $_.FullName 'MEMORY.md') } | Select-Object -First 1
+$seedSlug = ''
+$seedMem  = ''
+if ($null -ne $seedSourceDir) {
+    $seedSlug = ConvertFrom-TokenSlug -Slug $seedSourceDir.Name -UserHome $FakeHome
+    $seedMem  = Join-Path $FakePersonal ("projects\" + $seedSlug + "\memory")
+    New-Item -ItemType Directory -Path $seedMem -Force | Out-Null
+    Set-Content -Path (Join-Path $seedMem 'personal-only-note.md') `
+                -Value 'personal-only memory - must survive the refresh untouched' -Encoding utf8
+    Set-Content -Path (Join-Path $seedMem 'MEMORY.md') `
+                -Value '- [Personal-only note](personal-only-note.md) - stays out of the work profile' -Encoding utf8
+}
+
 # ------------------------------------------------------------------ 1. run the installer
 
 $log = Join-Path $FakeRoot 'install.log'
@@ -351,9 +388,12 @@ $missing = @($pairs | Where-Object { -not (Test-Path $_.Local) } | ForEach-Objec
 Check ("all {0} whitelisted files exist under the fake home" -f $pairs.Count) ($missing.Count -eq 0) $missing
 
 # Restoring more than the repo carries would mean the installer invented something; restoring
-# fewer is caught above. Both are worth knowing.
+# fewer is caught above. Both are worth knowing. The personal profile is excluded here - it is
+# a refresh target seeded by this test, not a whitelisted restore - and gets its own checks in
+# section 6c (the exclusion also covers ~/.claude-personal-refresh-backup-<stamp>).
 $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction SilentlyContinue |
-              Where-Object { $_.FullName -notlike '*\.claude-dotfiles-backup-*' })
+              Where-Object { $_.FullName -notlike '*\.claude-dotfiles-backup-*' -and
+                             $_.FullName -notlike '*\.claude-personal*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
 
@@ -377,6 +417,13 @@ Check ("all {0} memory slugs re-slugged onto the new username" -f $memoryDirs.Co
 
 $textFiles = @($restored | Where-Object { Test-TextFile -Path $_.FullName })
 
+# The refreshed personal profile is scanned for residue too - its files come off the freshly
+# restored ~/.claude, so a token or a real-home path in there is just as much a leak. (Recurse
+# does not traverse the junctions, same as everywhere else in this suite.)
+$personalText = @(Get-ChildItem -Path $FakePersonal -Recurse -File -ErrorAction SilentlyContinue |
+                  Where-Object { Test-TextFile -Path $_.FullName })
+$scanFiles = @($textFiles + $personalText)
+
 # Only the four tokens ConvertFrom-Tokens actually substitutes. __USERHOME_SLUG__ is deliberately
 # excluded: it is a DIRECTORY-name token, never a content one, so it survives inside a file by
 # design - a memory file documenting this repo names it in prose. Matching the word rather than
@@ -386,14 +433,14 @@ $pathToken = [regex]'__USERHOME(_JSON|_POSIX|_FWD|_LC)?__'
 $tokenLeft = @()
 $homeLeft  = @()
 $forms     = Get-HomeForms -UserHome $RealHome
-foreach ($file in $textFiles) {
+foreach ($file in $scanFiles) {
     $content = [System.IO.File]::ReadAllText($file.FullName)
     if ($pathToken.IsMatch($content)) { $tokenLeft += $file.FullName }
     foreach ($form in @($forms.Json, $forms.Posix, $forms.Fwd, $forms.Raw, $forms.Lower)) {
         if ($content.Contains($form)) { $homeLeft += ("{0}  ({1})" -f $file.FullName, $form); break }
     }
 }
-Check ("no __USERHOME token survives in {0} restored text files" -f $textFiles.Count) ($tokenLeft.Count -eq 0) $tokenLeft
+Check ("no __USERHOME token survives in {0} restored text files" -f $scanFiles.Count) ($tokenLeft.Count -eq 0) $tokenLeft
 Check 'no real-home path survives in any restored text file' ($homeLeft.Count -eq 0) $homeLeft
 
 # ------------------------------------------------------------------ 6. settings.json is usable
@@ -496,6 +543,111 @@ if (-not (Test-Path $linkFile)) {
     })
     Check 'every flow skill named in the global CLAUDE.md is invocable' ($absentFlows.Count -eq 0) $absentFlows
 }
+
+# ------------------------------------------------------------------ 6c. personal profile refresh
+
+# Issue #9: pull ends by refreshing ~/.claude-personal from the freshly written ~/.claude - a
+# one-way overlay. The profile seeded in 0b proves the refresh path end to end: work content
+# flows in byte-equal, the hooks key is rewritten onto .claude-personal paths, and everything
+# personal - the prefs, the personal-only memory, its pointer line - survives untouched.
+# Reverse memory sync is deliberately absent (declined by default 2026-08-19): push reads only
+# ~/.claude, so nothing here can assert personal content into the repo, and nothing should.
+Write-Host ''
+Write-Host 'Personal profile refresh'
+
+$pHooksBad   = @()
+$workHooksDir = Join-Path $FakeHome '.claude\hooks'
+Get-ChildItem -Path $workHooksDir -Recurse -File | ForEach-Object {
+    $relative = $_.FullName.Substring($workHooksDir.Length).TrimStart('\')
+    if (Test-Excluded -RelativePath $relative) { return }
+    $twin = Join-Path $FakePersonal ('hooks\' + $relative)
+    if (-not (Test-Path $twin)) { $pHooksBad += ("missing: {0}" -f $relative); return }
+    $a = [System.IO.File]::ReadAllBytes($_.FullName)
+    $b = [System.IO.File]::ReadAllBytes($twin)
+    if (-not ([System.Linq.Enumerable]::SequenceEqual($a, $b))) { $pHooksBad += ("differs: {0}" -f $relative) }
+}
+Check 'personal hooks are byte-equal to the work profile''s' ($pHooksBad.Count -eq 0) $pHooksBad
+
+$pSettingsPath = Join-Path $FakePersonal 'settings.json'
+$pSettings = $null
+try { $pSettings = Get-Content $pSettingsPath -Raw | ConvertFrom-Json } catch { }
+$prefsIntact = ($null -ne $pSettings) -and
+               ($pSettings.PSObject.Properties.Name -contains 'model') -and
+               ($pSettings.model -eq 'personal-model-pref') -and
+               ($pSettings.PSObject.Properties.Name -contains 'fastMode') -and
+               ($pSettings.fastMode -eq $true)
+Check 'personal settings.json parses and keeps its personal prefs' $prefsIntact
+
+$pCommands = @()
+if (($null -ne $pSettings) -and ($pSettings.PSObject.Properties.Name -contains 'hooks')) {
+    foreach ($event in $pSettings.hooks.PSObject.Properties) {
+        foreach ($group in $event.Value) { foreach ($hook in $group.hooks) { $pCommands += $hook.command } }
+    }
+}
+$pCmdBad = @()
+foreach ($command in $pCommands) {
+    # \.claude\ with the trailing backslash cannot match \.claude-personal\, so a survivor here
+    # is a hook path the rewrite missed. .codex paths are deliberately untouched.
+    if ($command -like '*\.claude\*') { $pCmdBad += ("still on .claude: {0}" -f $command); continue }
+    foreach ($m in ([regex]'"([A-Za-z]:\\[^"]+)"').Matches($command)) {
+        $p = $m.Groups[1].Value
+        if (($p -like '*\.claude-personal\*') -and -not (Test-Path $p)) {
+            $pCmdBad += ("names a missing file: {0}" -f $p)
+        }
+    }
+}
+Check ("all {0} personal hook commands are rewritten to .claude-personal and resolve" -f $pCommands.Count) `
+    (($pCommands.Count -gt 0) -and ($pCmdBad.Count -eq 0)) $pCmdBad
+
+$pLinksBad = @()
+$workJunctions = @(Get-ChildItem -Path (Join-Path $FakeHome '.claude\skills') -Directory -Force |
+                   Where-Object { Test-IsLink -Item $_ })
+foreach ($junction in $workJunctions) {
+    $twin = Join-Path $FakePersonal ('skills\' + $junction.Name)
+    if (-not (Test-Path $twin)) { $pLinksBad += ("{0}: not created" -f $junction.Name); continue }
+    $item = Get-Item $twin -Force
+    if (-not (Test-IsLink -Item $item)) { $pLinksBad += ("{0}: exists but is not a link" -f $junction.Name); continue }
+    if ((Get-LinkTarget -Item $item) -ne (Get-LinkTarget -Item $junction)) {
+        $pLinksBad += ("{0}: different target" -f $junction.Name); continue
+    }
+    if (-not (Test-Path (Join-Path $twin 'SKILL.md'))) {
+        $pLinksBad += ("{0}: link resolves to nothing readable" -f $junction.Name)
+    }
+}
+Check ("all {0} personal skill junctions mirror the work profile's" -f $workJunctions.Count) `
+    (($workJunctions.Count -gt 0) -and ($pLinksBad.Count -eq 0)) $pLinksBad
+
+$pMemOk = $false; $pMemDetail = @()
+if ($null -ne $seedSourceDir) {
+    $workMem = Join-Path $FakeHome ('.claude\projects\' + $seedSlug + '\memory')
+    $missingInPersonal = @(Get-ChildItem -Path $workMem -File |
+                           Where-Object { -not (Test-Path (Join-Path $seedMem $_.Name)) } |
+                           ForEach-Object { $_.Name })
+    $noteSurvived = Test-Path (Join-Path $seedMem 'personal-only-note.md')
+    $index = ''
+    if (Test-Path (Join-Path $seedMem 'MEMORY.md')) {
+        $index = [System.IO.File]::ReadAllText((Join-Path $seedMem 'MEMORY.md'))
+    }
+    $unionHasPersonal = $index.Contains('(personal-only-note.md)')
+    $workIndexTargets = @()
+    if (Test-Path (Join-Path $workMem 'MEMORY.md')) {
+        $workIndexTargets = @(([regex]'\]\(([^)]+\.md)\)').Matches(
+            [System.IO.File]::ReadAllText((Join-Path $workMem 'MEMORY.md'))) |
+            ForEach-Object { $_.Groups[1].Value })
+    }
+    $unionHasWork = (@($workIndexTargets | Where-Object { -not $index.Contains('(' + $_ + ')') }).Count -eq 0)
+    $pMemOk = ($missingInPersonal.Count -eq 0) -and $noteSurvived -and $unionHasPersonal -and $unionHasWork
+    if (-not $pMemOk) {
+        $pMemDetail = @(
+            ("work files missing in personal: {0}" -f ($missingInPersonal -join ', ')),
+            ("personal-only note survived: {0}" -f $noteSurvived),
+            ("index keeps the personal pointer line: {0}" -f $unionHasPersonal),
+            ("index keeps every work pointer line: {0}" -f $unionHasWork))
+    }
+} else {
+    $pMemDetail = @('no repo memory dir with a MEMORY.md to seed against')
+}
+Check 'personal memory is a union: work files in, personal-only file and pointer line kept' $pMemOk $pMemDetail
 
 # ------------------------------------------------------------------ 7. round trip is lossless
 

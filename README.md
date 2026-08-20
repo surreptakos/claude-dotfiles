@@ -45,7 +45,30 @@ Push after editing a skill, the global `CLAUDE.md`, or a hook. Pull on the other
 `push` clears the mirrored trees (`claude/skills`, `claude/hooks`, `codex/hooks`, `memory`) before
 copying, so a skill deleted locally also leaves the repo. `pull` never deletes: it writes over what
 it carries and leaves anything else alone, after copying the current state to
-`~/.claude-dotfiles-backup-<timestamp>`.
+`~/.claude-dotfiles-backup-<timestamp>`. A pull ends by refreshing `~/.claude-personal` when that
+profile exists — see below.
+
+## The personal profile (`~/.claude-personal`)
+
+Issue #9 decisions, 2026-08-19:
+
+- **(a) Adopted** — a pull ends with `Update-PersonalProfile` (`lib/personal.ps1`), a one-way
+  overlay from the freshly written `~/.claude` onto `~/.claude-personal`. Hooks, `CLAUDE.md` and
+  agents copy verbatim (the hooks are profile-aware via `CLAUDE_CONFIG_DIR`, so identical copies
+  are correct); skill junctions are recreated against the same machine-wide targets and real skill
+  dirs are overlaid; `settings.json` gets the work profile's **hooks key only**, with the
+  mechanical path rewrite `\.claude\` → `\.claude-personal\` (`.codex` paths untouched) — the
+  personal model, plugins, statusLine and prefs are preserved; project memories union-merge (work
+  files copy in, newer mtime wins, `MEMORY.md` unions by pointer-line target).
+- **(b) Declined** — reverse memory sync. Personal-only memories never flow into the work profile
+  or into this repo: push reads only `~/.claude`. Declined by default 2026-08-19; flipping it
+  requires an explicit owner instruction.
+
+The refresh never deletes anything personal and never touches `.credentials.json`, `.claude.json`
+or any account state in either profile. On a machine without `~/.claude-personal` it does nothing
+and never creates one. Any file it would overwrite with different bytes is backed up first to
+`~/.claude-personal-refresh-backup-<timestamp>`; identical bytes are skipped, so a second run
+writes nothing.
 
 ## New machine
 
@@ -112,7 +135,7 @@ scratch root is deleted at startup, and while it was a constant, the session-sta
 first prompt hook 8 seconds later wiped each other and both reported a failure on a healthy repo.
 `-FakeHome` still pins the path explicitly; two runs given the same one still collide, by design.
 
-Twenty-four checks. The clone carries the exact bytes that were pushed — each working-tree file
+Twenty-nine checks. The clone carries the exact bytes that were pushed — each working-tree file
 hashed raw against the blob git stored, which is what catches a checkout quietly rewriting line
 endings. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
 still parses and every path in it points at a file that exists; `codex/config.toml` was restored
@@ -123,6 +146,13 @@ along; two overlapping runs each keep their own scratch directory; and the resto
 skills **run** from the new home — `session-gate.js` passes its own test suite there,
 `ask_matt_gate.py` lints, `session-check` reports on a repo. That last group is the difference
 between proving bytes moved and proving the machine would work.
+
+The personal-profile refresh is proven too: the test seeds a minimal `~/.claude-personal` in the
+fake home — a personal pref, a stale hooks key, a personal-only memory with its own pointer line —
+and asserts after the install that the hooks are byte-equal to the work profile's, the settings
+keep the personal prefs with every hook command rewritten onto `.claude-personal` paths that
+resolve, the junctions mirror the work profile's, and the memory ended up a union with the
+personal-only file and its pointer line intact.
 
 A failing run also writes its failure detail to `%TEMP%\restore-test-failures\<stamp>-<pid>.log`.
 The session hooks run the suite through `execFileSync` and report only `tests FAIL`, so without
@@ -160,4 +190,10 @@ It is a backstop, not the mechanism. The whitelist is the mechanism.
 
 Switching *accounts* on one machine is a different problem, solved separately in
 `../claude-account-handoff` — that one moves `CLAUDE_CONFIG_DIR` between a work and a personal
-profile. This repo carries one profile between machines.
+profile. This repo carries the work profile between machines, and refreshes the personal profile
+*from* it.
+
+Reverse memory sync is also deliberately unsolved: the personal-only memories in
+`~/.claude-personal/projects/*/memory` never flow back into `~/.claude` or into this repo. That is
+a privacy default (declined 2026-08-19), not an oversight — push reads only `~/.claude`, and
+flipping the direction requires an explicit owner instruction.

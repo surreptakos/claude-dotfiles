@@ -26,6 +26,7 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 . (Join-Path $RepoRoot 'lib\manifest.ps1')
+. (Join-Path $RepoRoot 'lib\personal.ps1')
 
 $UserHome = $UserHome.TrimEnd('\', '/')
 Write-Host ("{0}  (home: {1}){2}" -f $Mode.ToUpper(), $UserHome, $(if ($DryRun) { '  [dry run]' } else { '' }))
@@ -195,6 +196,13 @@ if ($Mode -eq 'pull') {
     # would be skipped as a missing target.
     $links = Restore-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  {0} skill junctions recreated" -f $links)
+
+    # Last, because it reads the ~/.claude the lines above just wrote. One-way overlay onto
+    # ~/.claude-personal (issue #9): skipped entirely when the profile does not exist, and
+    # personal-only content never flows back - push above reads only ~/.claude.
+    Write-Host ''
+    Write-Host 'Personal profile (~/.claude-personal)'
+    Update-PersonalProfile -UserHome $UserHome -DryRun:$DryRun
 
     Write-Host ''
     Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)
