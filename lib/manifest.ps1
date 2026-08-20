@@ -33,6 +33,11 @@ function Get-DotfileItems {
         # Without hooks.json the carried ask_matt_gate.py is inert on the Codex side: the script
         # is there and nothing calls it. AGENTS.md is Codex's half of the global rules.
         [pscustomobject]@{ Type = 'File'; Repo = 'codex/hooks.json';                       Local = (Join-Path $codex  'hooks.json') }
+        # Codex's settings file - the counterpart of claude/settings.json. Without it a fresh
+        # machine gets the carried hooks wired over default settings (issue #2). Scanned for
+        # credential values 2026-08-12 and again 2026-08-19: none; the sha256 values in it are
+        # trust pins for hooks.json entries, not secrets.
+        [pscustomobject]@{ Type = 'File'; Repo = 'codex/config.toml';                      Local = (Join-Path $codex  'config.toml') }
         [pscustomobject]@{ Type = 'File'; Repo = 'codex/AGENTS.md';                        Local = (Join-Path $codex  'AGENTS.md') }
     )
 }
@@ -216,13 +221,18 @@ function Get-HomeForms {
         Json  = $trimmed.Replace('\', '\\')                                                # C:\\Users\\Dan
         Fwd   = $trimmed.Replace('\', '/')                                                 # C:/Users/Dan
         Posix = '/' + $trimmed.Substring(0, 1).ToLower() + $trimmed.Substring(2).Replace('\', '/')  # /c/Users/Dan
+        Lower = $trimmed.ToLower()                                                         # c:\users\dan (Codex trust keys)
         Slug  = (ConvertTo-Slug $trimmed)                                                  # C--Users-Dan
     }
 }
 
 # Order matters only in that the JSON form must go first; it contains a doubled
 # backslash the raw form cannot match, but replacing raw first would still leave
-# a half-converted string behind if that ever changed.
+# a half-converted string behind if that ever changed. The lowercase form goes
+# last: String.Replace is case-sensitive, so on a home that is already lowercase
+# the raw pass has consumed every occurrence before the lowercase pass looks.
+# Codex writes its project-trust keys lowercased ([projects.'c:\users\dan\...']
+# in config.toml), which is the one place this spelling occurs in practice.
 function ConvertTo-Tokens {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text,
@@ -234,6 +244,7 @@ function ConvertTo-Tokens {
     $out = $out.Replace($h.Posix, '__USERHOME_POSIX__')
     $out = $out.Replace($h.Fwd,   '__USERHOME_FWD__')
     $out = $out.Replace($h.Raw,   '__USERHOME__')
+    $out = $out.Replace($h.Lower, '__USERHOME_LC__')
     return $out
 }
 
@@ -247,6 +258,7 @@ function ConvertFrom-Tokens {
     $out = $out.Replace('__USERHOME_JSON__',  $h.Json)
     $out = $out.Replace('__USERHOME_POSIX__', $h.Posix)
     $out = $out.Replace('__USERHOME_FWD__',   $h.Fwd)
+    $out = $out.Replace('__USERHOME_LC__',    $h.Lower)
     $out = $out.Replace('__USERHOME__',       $h.Raw)
     return $out
 }

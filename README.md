@@ -20,6 +20,7 @@ end of a run.
 | `claude/skill-links.json` | (recreated junctions) | which skills are junctions and what they point at |
 | `codex/hooks/` | `~/.codex/hooks/` | `ask_matt_gate.py`, which the pre-send lint and the governance gate both call |
 | `codex/hooks.json` | `~/.codex/hooks.json` | the wiring that calls it — without this the script above is inert |
+| `codex/config.toml` | `~/.codex/config.toml` | Codex's settings — model, sandbox, marketplaces, plugin enables, project trust. The counterpart of `claude/settings.json`; carried since issue #2 so the hooks above don't land on default settings. Scanned for credential values (2026-08-12 and 2026-08-19): none — the `sha256:` values in it are trust pins for `hooks.json` entries, not secrets |
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` | Codex's half of the global rules |
 | `memory/<slug>/` | `~/.claude/projects/<slug>/memory/` | per-project memory files |
 
@@ -63,11 +64,13 @@ named after the project's absolute path with every non-alphanumeric character re
 (`C:\Users\Dan\Claude\Projects\...` becomes `C--Users-Dan-Claude-Projects-...`). Both would break on a
 machine with a different username.
 
-Push rewrites the home directory to `__USERHOME__` in every text file, in all four spellings that
+Push rewrites the home directory to `__USERHOME__` in every text file, in all five spellings that
 occur in practice — `C:\Users\Dan`, the JSON-escaped `C:\\Users\\Dan`, the forward-slash
-`C:/Users/Dan`, and the Git-Bash `/c/Users/Dan`. Directory slugs get `__USERHOME_SLUG__`. Pull
-substitutes the local home back. A machine with the same username sees no difference; one with a
-different username still works.
+`C:/Users/Dan`, the Git-Bash `/c/Users/Dan`, and the all-lowercase `c:\users\dan` that Codex
+writes into `config.toml`'s project-trust keys (`__USERHOME_LC__` — the replacement is
+case-sensitive, so the other four spellings cannot catch it). Directory slugs get
+`__USERHOME_SLUG__`. Pull substitutes the local home back. A machine with the same username sees
+no difference; one with a different username still works.
 
 ## Line endings are pinned
 
@@ -109,10 +112,12 @@ scratch root is deleted at startup, and while it was a constant, the session-sta
 first prompt hook 8 seconds later wiped each other and both reported a failure on a healthy repo.
 `-FakeHome` still pins the path explicitly; two runs given the same one still collide, by design.
 
-Twenty-two checks. The clone carries the exact bytes that were pushed — each working-tree file
+Twenty-four checks. The clone carries the exact bytes that were pushed — each working-tree file
 hashed raw against the blob git stored, which is what catches a checkout quietly rewriting line
 endings. Files landed; no `__USERHOME` token or real-home path survived; `settings.json`
-still parses and every path in it points at a file that exists; every junction resolves to a real
+still parses and every path in it points at a file that exists; `codex/config.toml` was restored
+and every user-profile path in it — the lowercased trust keys included — points inside the fake
+home; every junction resolves to a real
 `SKILL.md`; every file survives the round trip byte-for-byte; nothing credential-shaped came
 along; two overlapping runs each keep their own scratch directory; and the restored hooks and
 skills **run** from the new home — `session-gate.js` passes its own test suite there,

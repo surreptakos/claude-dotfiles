@@ -1,0 +1,162 @@
+model = "gpt-5.6-sol"
+model_reasoning_effort = "high"
+service_tier = "default"
+sandbox_mode = "workspace-write"
+
+approvals_reviewer = "user"
+
+
+notify = [ "__USERHOME_JSON__\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\84464046935436b8\\bin\\node_modules\\@oai\\sky\\bin\\windows\\codex-computer-use.exe", "turn-ended" ]
+
+[marketplaces.openai-bundled]
+last_updated = "2026-08-19T20:51:57Z"
+source_type = "local"
+source = '\\?\__USERHOME__\.codex\.tmp\bundled-marketplaces\openai-bundled'
+
+[marketplaces.openai-primary-runtime]
+last_updated = "2026-08-19T20:51:08Z"
+source_type = "local"
+source = '\\?\__USERHOME__\.cache\codex-runtimes\codex-primary-runtime\plugins\openai-primary-runtime'
+
+[marketplaces.claude-plugins-official]
+last_updated = "2026-08-19T20:50:42Z"
+last_revision = "0fc2bb13a805969c14b0fe9398bad41db346d84e"
+source_type = "git"
+source = "https://github.com/anthropics/claude-plugins-official.git"
+
+[marketplaces.sstklen]
+last_updated = "2026-07-24T21:05:13Z"
+last_revision = "47521489a4fc0537b633339372dcd7514032acfb"
+source_type = "git"
+source = "https://github.com/sstklen/yes.md.git"
+
+[marketplaces.caveman]
+last_updated = "2026-08-19T20:50:25Z"
+last_revision = "99a9aa2f5a45097fc3563febea7d0baf64407441"
+source_type = "git"
+source = "https://github.com/JuliusBrussee/caveman.git"
+
+[plugins."visualize@openai-bundled"]
+enabled = true
+
+[plugins."documents@openai-primary-runtime"]
+enabled = true
+
+[plugins."pdf@openai-primary-runtime"]
+enabled = true
+
+[plugins."spreadsheets@openai-primary-runtime"]
+enabled = true
+
+[plugins."presentations@openai-primary-runtime"]
+enabled = true
+
+[plugins."template-creator@openai-primary-runtime"]
+enabled = true
+
+[plugins."sites@openai-bundled"]
+enabled = true
+
+[plugins."pyright-lsp@claude-plugins-official"]
+enabled = true
+
+[plugins."typescript-lsp@claude-plugins-official"]
+enabled = true
+
+[plugins."yes@sstklen"]
+enabled = true
+
+[plugins."chrome@openai-bundled"]
+enabled = true
+
+[plugins."computer-use@openai-bundled"]
+enabled = true
+
+[plugins."browser@openai-bundled"]
+enabled = true
+
+[plugins."caveman@caveman"]
+enabled = true
+
+[features]
+js_repl = false
+memories = true
+
+[mcp_servers.node_repl]
+args = []
+command = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node_repl.exe'
+startup_timeout_sec = 120
+
+[mcp_servers.node_repl.env]
+NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
+NODE_REPL_NODE_MODULE_DIRS = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node_modules'
+NODE_REPL_NODE_PATH = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node.exe'
+NODE_REPL_TRUSTED_CODE_PATHS = '__USERHOME__\.codex;__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node_modules'
+CODEX_HOME = '__USERHOME__\.codex'
+BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab"
+NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = "Control the in-app browser in conjunction with the Browser Plugin."
+NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative."
+BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
+BROWSER_USE_CODEX_APP_VERSION = "26.814.41957"
+NODE_REPL_TRUSTED_SERVICES = '{"browser":"__USERHOME_FWD__/.codex/plugins/cache/openai-bundled/browser/26.814.41957/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
+SKY_CUA_NATIVE_PIPE = "1"
+SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-ec646206-3918-441b-a169-82e9363cf5f6'
+CODEX_CLI_PATH = '__USERHOME__\AppData\Local\OpenAI\Codex\bin\f71e347eb70b3d24\codex.exe'
+
+[shell_environment_policy.set]
+NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S = "e7f98a8ce324234ed7f3be8fa39ba54b26e2e8fc79feed2470dcd0871af4a5b3"
+
+[desktop]
+conversationDetailMode = "STEPS_COMMANDS"
+ambient-suggestions-enabled = true
+show-context-window-usage = true
+appearanceTheme = "dark"
+usePointerCursors = true
+enabled-reasoning-efforts = ["low", "medium", "high", "xhigh", "ultra", "max"]
+selected-avatar-id = "rocky"
+followUpQueueMode = "queue"
+
+[desktop.open-in-target-preferences]
+global = "fileManager"
+
+[desktop.open-in-target-preferences.perPath]
+'__USERHOME__\Claude\Projects\Operations\zoho-source-of-truth' = "fileManager"
+
+[windows]
+sandbox = "elevated"
+
+[projects.'__USERHOME_LC__\claude\projects\meta\task-management']
+trust_level = "trusted"
+
+[projects.'__USERHOME_LC__\claude\projects\sales data kpis\aac-cockpit']
+trust_level = "trusted"
+
+[projects.'__USERHOME_LC__\claude\projects\financial\aac-bill-intake']
+trust_level = "trusted"
+
+[projects.'c:\windows\system32']
+trust_level = "trusted"
+
+[projects.'__USERHOME_LC__']
+trust_level = "trusted"
+
+[projects.'__USERHOME_LC__\claude\projects\operations\zoho-source-of-truth']
+trust_level = "trusted"
+
+[sandbox_workspace_write]
+network_access = true
+
+[memories]
+generate_memories = true
+use_memories = true
+
+[hooks.state]
+
+[hooks.state.'__USERHOME__\.codex\hooks.json:pre_tool_use:0:0']
+trusted_hash = "sha256:dd0aaeee0cb29f5548d1908fee6b6af0bb1089cbb808dfb10d9396bd982b40f5"
+
+[hooks.state.'__USERHOME__\.codex\hooks.json:user_prompt_submit:0:0']
+trusted_hash = "sha256:f4a1cd253002bf0dfca3c6fb421d6631395e420b116f466cc14c2115c45a406b"
+
+[hooks.state.'__USERHOME__\.codex\hooks.json:stop:0:0']
+trusted_hash = "sha256:21aca5aef34e8d4d63b698ab90767284691167a717c6d5e930863d60c8f0e337"

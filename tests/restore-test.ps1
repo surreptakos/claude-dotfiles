@@ -381,7 +381,7 @@ $textFiles = @($restored | Where-Object { Test-TextFile -Path $_.FullName })
 # excluded: it is a DIRECTORY-name token, never a content one, so it survives inside a file by
 # design - a memory file documenting this repo names it in prose. Matching the word rather than
 # the substitution would fail the run on a correct restore, which is how a check gets ignored.
-$pathToken = [regex]'__USERHOME(_JSON|_POSIX|_FWD)?__'
+$pathToken = [regex]'__USERHOME(_JSON|_POSIX|_FWD|_LC)?__'
 
 $tokenLeft = @()
 $homeLeft  = @()
@@ -389,7 +389,7 @@ $forms     = Get-HomeForms -UserHome $RealHome
 foreach ($file in $textFiles) {
     $content = [System.IO.File]::ReadAllText($file.FullName)
     if ($pathToken.IsMatch($content)) { $tokenLeft += $file.FullName }
-    foreach ($form in @($forms.Json, $forms.Posix, $forms.Fwd, $forms.Raw)) {
+    foreach ($form in @($forms.Json, $forms.Posix, $forms.Fwd, $forms.Raw, $forms.Lower)) {
         if ($content.Contains($form)) { $homeLeft += ("{0}  ({1})" -f $file.FullName, $form); break }
     }
 }
@@ -430,6 +430,30 @@ if ($null -ne $settings) {
     foreach ($a in ($absent | Where-Object { $_ -like '*\plugins\cache\*' })) {
         Note ("expected-absent (rebuilds on first launch): {0}" -f $a)
     }
+}
+
+# ------------------------------------------------------------------ 6a. codex config.toml is usable
+
+# Codex's settings file rode along from issue #2 onward; without it the carried Codex hooks run
+# over default settings on a fresh machine. PowerShell 5.1 has no TOML parser, so this checks the
+# property that matters for a restore: every user-profile path in it - including the lowercased
+# project-trust keys Codex writes, the one spelling the other tokens cannot catch - was re-pointed
+# at the new home. Paths outside a profile (the c:\windows\system32 trust entry) are legitimately
+# machine-independent and stay as they are.
+Write-Host ''
+Write-Host 'codex config.toml'
+$codexConfig = Join-Path $FakeHome '.codex\config.toml'
+Check 'codex/config.toml was restored' (Test-Path $codexConfig)
+if (Test-Path $codexConfig) {
+    $toml     = [System.IO.File]::ReadAllText($codexConfig)
+    $badPaths = @()
+    foreach ($m in ([regex]'[A-Za-z]:[\\/][^"''\s\]]*').Matches($toml)) {
+        # JSON-escaped and forward-slash spellings compare like raw ones
+        $p = $m.Value.Replace('\\', '\').Replace('/', '\')
+        if ($p -notmatch '(?i)[\\/]users[\\/]') { continue }
+        if (-not $p.ToLower().StartsWith($FakeHome.ToLower())) { $badPaths += $p }
+    }
+    Check 'every user-profile path in it points inside the fake home' ($badPaths.Count -eq 0) $badPaths
 }
 
 # ------------------------------------------------------------------ 6b. skill junctions
