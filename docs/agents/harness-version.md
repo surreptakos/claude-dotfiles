@@ -1,6 +1,6 @@
 # Harness version
 
-    harness-version: 9
+    harness-version: 10
 
 Installed/upgraded: 2026-08-19 by the `project-harness` skill.
 
