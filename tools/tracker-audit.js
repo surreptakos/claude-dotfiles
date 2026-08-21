@@ -58,7 +58,7 @@ try {
 let issues;
 try {
   issues = JSON.parse(sh(
-    'gh issue list --state all --limit 1000 --json number,title,state,body,labels,url,projectItems'
+    'gh issue list --state all --limit 1000 --json number,title,state,body,labels,url,projectItems,milestone'
   ));
 } catch (e) {
   cannotAudit('`gh issue list` failed.', e.message);
@@ -275,12 +275,56 @@ if (!boardInUse) {
   });
 }
 
+// ---- 7. Milestones: once a repo sequences work, an unsequenced issue is invisible to planning ---
+// Same infer-from-data posture as the board check: milestones are opt-in, and a repo that has never
+// created one is not drifting by not using them. But once ANY issue carries a milestone, the repo has
+// chosen milestones as its sequencing record, and an open issue outside every milestone is work no
+// milestone view will ever show. Observed 2026-08-21: 26 of 29 open issues unmilestoned because the
+// milestones were created mid-push and only the critical path was assigned — no tool noticed.
+const milestonesInUse = issues.some((i) => i.milestone && i.milestone.title);
+if (!milestonesInUse) {
+  console.log('NOTE: no issue carries a milestone, so milestone coverage was not checked.\n');
+} else {
+  open.forEach((i) => {
+    if (!(i.milestone && i.milestone.title)) {
+      report('unmilestoned', i,
+        'is open with no milestone while this repo sequences work with milestones, so no milestone ' +
+        'view will ever surface it. Assign one: gh issue edit ' + i.number + ' --milestone "<title>"');
+    }
+  });
+}
+
+// ---- 8. An open issue the commit log claims was delivered --------------------------------------
+// `Closes #N` closes on merge; a merge subject saying `(issue N)` closes nothing, and the issue
+// sits open looking like undone work. Observed 2026-08-21: four issues delivered by merged agent
+// branches titled "Merge agent/issue-24-attempt1: ... (issue 24)" stayed open for a day — the
+// closed-with-open-boxes check runs the OTHER direction and could not see them. Advisory, because a
+// subject can mention an issue without delivering it; the git log may also be absent (shallow clone),
+// in which case this check silently does not run rather than guessing.
+try {
+  const subjects = sh('git log --format=%s -500').split('\n');
+  open.forEach((i) => {
+    const re = new RegExp('\\bissue\\s+#?' + i.number + '\\b', 'i');
+    const hit = subjects.find((s) => re.test(s));
+    if (hit) {
+      report('possibly-delivered?', i,
+        'is OPEN but a commit on this branch says: "' + hit.slice(0, 100) + '". If that commit ' +
+        'delivered it, verify the acceptance boxes and close; a closing keyword (`Closes #' +
+        i.number + '`) in the PR body would have done this automatically. Advisory only.');
+    }
+  });
+} catch (e) {
+  // A check that silently did not run reads as a clean pass — say so instead. Non-fatal: the audit
+  // may legitimately run outside a git checkout (CI job with tracker access only).
+  console.log('NOTE: git log unavailable, so delivered-but-open could not be checked.\n');
+}
+
 // ---- Output ------------------------------------------------------------------------------------
 // Anything ending in '?' is advisory: reported, never fails the run. A check that cannot tell a
 // real problem from a shape it misreads must not be able to block anyone.
 const ORDER = ['ungated-dependency', 'closed-with-open-boxes', 'dangling-reference', 'untriaged',
-               'conflicting-triage', 'board-says-done', 'not-on-board',
-               'closed-with-open-boxes?', 'stale-premise?'];
+               'conflicting-triage', 'board-says-done', 'not-on-board', 'unmilestoned',
+               'closed-with-open-boxes?', 'stale-premise?', 'possibly-delivered?'];
 findings.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.number - b.number);
 
 console.log('Tracker audit — ' + REPO + ' (' + open.length + ' open, ' + issues.length + ' total)\n');
