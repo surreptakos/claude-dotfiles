@@ -112,7 +112,15 @@ function testSummary(out) {
   const passed = /(\d+)\s+passed/i.exec(text);
   const failed = /(\d+)\s+failed/i.exec(text);
   if (passed || failed) {
-    return (passed ? passed[1] : '0') + ' passing, ' + (failed ? failed[1] : '0') + ' failing';
+    // Skips and xfails ride along when present. A pass count that silently shrank because a
+    // platform-conditional test skipped in CI reads as healthy-but-different from local, which is
+    // exactly the unexplained drift this line exists to prevent (hit on aac-contract-builder,
+    // 2026-08-21: 316 local vs 315 CI, the difference a Windows-only test skipping on Linux).
+    const skippedAlt = /(\d+)\s+skipped/i.exec(text);
+    const xfailed = /(\d+)\s+xfailed/i.exec(text);
+    return (passed ? passed[1] : '0') + ' passing, ' + (failed ? failed[1] : '0') + ' failing'
+      + (skippedAlt ? ', ' + skippedAlt[1] + ' skipped' : '')
+      + (xfailed ? ', ' + xfailed[1] + ' xfailed' : '');
   }
   return (text.trim().split('\n').pop() || '').trim();
 }
