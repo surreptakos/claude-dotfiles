@@ -1,7 +1,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel. args: {label, maxTickets, implModel, maxAttempts, deliver, followupsFile}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel. args: {label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile}',
   phases: [
     { title: 'Scout', detail: 'list tickets, dependency edges, repo map' },
     { title: 'Implement', detail: 'one pinned agent per ticket, isolated worktree, bounded retries' },
@@ -15,7 +15,13 @@ export const meta = {
 const cfg = Object.assign({
   label: 'ready-for-agent',
   maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
-  implModel: 'claude-opus-4-7',
+  // Per-stage model pins. Frontier only where errors compound (implement); the orchestrator is the
+  // main session's own model. Mid-tier for bounded, checkable work; cheap tier for pure mechanics.
+  scoutModel: 'claude-sonnet-5',            // structured extraction from gh issues
+  implModel: 'claude-opus-4-7',             // heaviest-context stage, version-stable across runs
+  verifyModel: 'claude-sonnet-5',           // skepticism comes from blindness + prompt, not tier
+  deliverModel: 'claude-haiku-4-5-20251001',// push + PR mechanics, no judgment
+  reportModel: 'claude-haiku-4-5-20251001', // formats pre-aggregated discoveries
   maxAttempts: 3,           // Ralph-style bounded retry, fresh context each attempt
   deliver: true,            // false = stop after verify, no push/PR
   followupsFile: 'FOLLOW-UPS.md',
@@ -59,7 +65,7 @@ const scout = await agent(
 4. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs — never a glob if docs forbid it).
 5. Produce a repoMap: max 15 lines — key directories, conventions, hard rails an implementer must not break.
 Return structured output only.`,
-  { label: 'scout', phase: 'Scout', schema: SCOUT, effort: 'low' }
+  { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: 'low' }
 )
 if (!scout || !scout.tickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], note: 'scout found no open tickets with label ' + cfg.label } }
 
@@ -99,7 +105,7 @@ In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only — evidence must be commands you ran plus decisive output lines.`,
-      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT }
+      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel }
     )
     if (lastVerdict && lastVerdict.pass) break
   }
@@ -113,7 +119,7 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
 2. gh pr create --title "fix: ${t.title} (#${t.number})" --body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY.
 3. gh issue comment ${t.number} --body with the PR link.
 Do NOT merge, do NOT close the issue, do NOT touch main. Return structured output only.`,
-      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED }
+      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )
   }
   return { ticket: t.number, done, branch: impl && impl.branch, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, discoveries: (impl && impl.discoveries) || [] }
@@ -126,7 +132,7 @@ const allDiscoveries = clean.flatMap(r => r.discoveries)
 if (allDiscoveries.length) {
   await agent(
     `Append to ${cfg.followupsFile} at repo root (create if missing; append-only, never rewrite existing entries). Add a "## Run (ticket-fleet)" heading, then one bullet per finding, each self-contained:\n- ${allDiscoveries.join('\n- ')}\nCommit nothing. Return "appended N entries".`,
-    { label: 'followups-writer', phase: 'Report', effort: 'low' }
+    { label: 'followups-writer', phase: 'Report', model: cfg.reportModel, effort: 'low' }
   )
 }
 return {
