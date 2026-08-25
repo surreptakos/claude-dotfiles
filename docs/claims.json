@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Docs claims-audit tripwire. Verified by the shared engine (whose home-installed copy lives",
+    "at ~/.claude/skills/consistency-audit/claims-audit.js and whose mirror is",
+    "claude/skills/consistency-audit/claims-audit.js) via tests/docs-claims.test.js, chained",
+    "into the session.json test command. tests/claims-audit.test.js is the ENGINE's unit suite;",
+    "this file plus docs-claims.test.js is the repo's own docs tripwire. Adding a claim is a",
+    "JSON edit; see the consistency-audit SKILL.md 'Automate' section for the schema."
+  ],
+  "claims": [
+    {
+      "id": "claude-md-Get-DotfileItems-exists",
+      "type": "symbol-exists",
+      "doc": "CLAUDE.md",
+      "source": "lib/manifest.ps1",
+      "symbol": "Get-DotfileItems"
+    },
+    {
+      "id": "claude-md-Copy-OneFile-exists",
+      "type": "symbol-exists",
+      "doc": "CLAUDE.md",
+      "source": "lib/manifest.ps1",
+      "symbol": "Copy-OneFile"
+    },
+    {
+      "id": "generated-trees-rule",
+      "type": "expected-text",
+      "doc": "CLAUDE.md",
+      "expected": "`claude/`, `codex/` and `memory/` are generated. Never hand-edit them."
+    }
+  ]
+}
