@@ -709,6 +709,29 @@ Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
 Check 'restored session-check reports on a repo' $ran @($out | Select-Object -Last 10)
 
+# The claims-audit engine ships via the claude/skills whitelist entry, so the restore places it at
+# ~/.claude/skills/consistency-audit/claims-audit.js on the fake home. The hand-written test suite
+# in this repo's tests/ exercises all four claim types (pass and fail each), plus every claim
+# type's missing-cite path, plus the cross-claim resilience regression (a broken claim mid-batch
+# must not swallow later ones - that was attempt 2's silent crash-and-exit-2 bug). Wiring it here
+# is what turns "a file that could regress" into a gate that catches the regression. Runs against
+# the RESTORED engine from the fake home - not the mirror in the clone - because a broken restore
+# that dropped the engine must fail this check, not silently fall back to the mirror.
+$claimsAuditTest = Join-Path $Clone 'tests\claims-audit.test.js'
+$restoredEngine  = Join-Path $FakeHome '.claude\skills\consistency-audit\claims-audit.js'
+if ((Test-Path $claimsAuditTest) -and (Test-Path $restoredEngine)) {
+    $env:CLAIMS_AUDIT_ENGINE = $restoredEngine
+    $out = & node --test $claimsAuditTest 2>&1
+    $claimsExit = $LASTEXITCODE
+    Remove-Item Env:\CLAIMS_AUDIT_ENGINE
+    Check 'restored claims-audit.js passes tests/claims-audit.test.js' ($claimsExit -eq 0) @($out | Select-Object -Last 20)
+} else {
+    $detail = @()
+    if (-not (Test-Path $claimsAuditTest)) { $detail += ("tests/claims-audit.test.js missing in clone: {0}" -f $claimsAuditTest) }
+    if (-not (Test-Path $restoredEngine))  { $detail += ("engine not restored under fake home: {0}" -f $restoredEngine) }
+    Check 'restored claims-audit.js passes tests/claims-audit.test.js' $false $detail
+}
+
 # ------------------------------------------------------------------ 10. two runs can overlap
 
 # The regression check for the false failure of 2026-08-13. Two children run the scratch-root code
