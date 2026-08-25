@@ -15,9 +15,10 @@ globals (GmailApp/SpreadsheetApp/UrlFetchApp/Claude) only exist in Google's clou
   intake behaviors) with NO Apps Script globals, ending in `if (typeof module !== 'undefined')
   module.exports = {...}` — a no-op in GAS, a require target in Node. `Code.gs` is the IO layer
   and calls these as GAS globals (all `.gs`/`.js` files share one global scope).
-- **Unit tests:** Node's built-in `node --test` (no deps). Run the exact 7-file command in
-  `.claude/session.json` — a bare `cd gas && node --test` or a `gas/*.test.js` glob misses the
-  `tools/*.test.js` files and under-reports by dozens of tests.
+- **Unit tests:** Node's built-in `node --test` (no deps). Run the exact 8-file command in
+  `.claude/session.json` — a bare `cd gas && node --test` or a `gas/*.test.js` glob misses five
+  files (`gas/eval/decision-eval.test.js` plus the four `tools/*.test.js` files, including the
+  `tools/claims.test.js` docs-claims tripwire from issue 326) and under-reports by ~67 tests.
 - **"Typecheck" = parse check:** `node --check` rejects `.gs`, so copy to a temp `.js` first:
   `cp Code.gs /tmp/Code.js && node --check /tmp/Code.js`. `core.js` checks directly.
 - **`.claspignore`** keeps `core.test.js`, `README.md`, dev files out of `clasp push`.

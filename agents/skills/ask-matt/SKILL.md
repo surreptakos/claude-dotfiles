@@ -25,6 +25,12 @@ The route most work travels. You have an idea and want it built.
 
    Either way, **`/implement`** builds each issue by driving **`/tdd`** internally — one red-green slice at a time — then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before committing. Reach for **`/tdd`** on its own when you just want to build a concrete behaviour test-first without a full spec, and **`/code-review`** on its own whenever you want to review a branch or PR against a fixed point.
 
+   After `/code-review` passes and before the PR merges, run **`/simplify`** on the same diff — a reuse/efficiency/altitude pass that cleans up what review confirmed correct. No bug hunt; that stays with `/code-review`.
+
+### Repo-native beats marketplace
+
+In a repo with `/ask-matt` set up, prefer the top-level **`/code-review`**, **`/simplify`**, and **`/consistency-audit`** over the marketplace variants `/engineering:code-review`, `/engineering:system-design`, `/engineering:architecture`, `/engineering:tech-debt`, and `/engineering:documentation`. Repo-native skills are calibrated to this repo's standards and Ask-matt flow; the `/engineering:*` set is generic and duplicates coverage. Reach for `/engineering:*` only in a bare repo without Ask-matt installed.
+
 ### Context hygiene
 
 Keep steps 1–3 in **one unbroken context window** — don't compact or clear until after `/to-tickets` — so the grilling, spec, and tickets all build on the same thinking. Each `/implement` then starts fresh, working from the ticket.
@@ -44,6 +50,14 @@ A starting situation that generates work, then merges onto the main flow.
 - **A huge, foggy effort — a greenfield project or a huge feature build, too big for one session** → **`/wayfinder`**, the most cognitively demanding flow here. When the way from here to the destination isn't visible yet, it charts a **shared map** of **decision tickets** on the issue tracker and resolves them one at a time — producing **decisions, not deliverables** — until the fog is pushed back and the way is clear. Where **`/grill-with-docs`** sharpens an idea you can hold in one session, wayfinder is for the idea you can't — and it's slower and denser, so save it for exactly that, never a well-scoped feature.
 
   When the map clears, **it hands off, it doesn't build**: merge onto the main flow at **`/to-spec`**, which collapses the map's linked decisions into a buildable plan, then `/to-tickets` and `/implement` as usual. Looping the map straight into `/implement` skips that collapse and throws the linked detail away — go straight to `/implement` only when the effort turned out genuinely small.
+
+## Hygiene, on trigger
+
+Not scheduled — run when the trigger fires.
+
+- **`/consistency-audit`** — when docs contradict code, or a doc claims a state ("X shipped", "Y not built") that reality disagrees with. Sweeps every prose surface (README, CLAUDE.md, ADRs, PRDs, runbooks, memory files, doc generators), verifies each claim against primary sources, fixes stale claims, and hunts the generator that republished the drift. Run after any big rewrite, or when a wrong claim is caught in the wild.
+- **`/anthropic-skills:consolidate-memory`** — when `memory/` grew past a glance, or two memory files describe the same person/project/preference. Merges duplicates, retires dated entries, converts relative→absolute dates, trims `MEMORY.md` under 200 lines / 25KB. Does not check truth; run **`/consistency-audit`** first if reality-drift is likely.
+- **`/maintain-repo`** — the weekly wrapper: runs `/consistency-audit` then `/anthropic-skills:consolidate-memory` in the right order. Reach for this on the cadence; reach for the two above when only one job applies.
 
 ## Codebase health
 
