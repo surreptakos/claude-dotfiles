@@ -1,6 +1,6 @@
 # claude-dotfiles — working dashboard
 
-_Generated 2026-08-25T14:44:59.604Z at commit `729571a` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
+_Generated 2026-08-25T14:58:11.659Z at commit `9a01295` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
 
 ## Needs your attention
 
