@@ -6,15 +6,14 @@ sandbox_mode = "workspace-write"
 approvals_reviewer = "user"
 
 
-notify = [ "__USERHOME_JSON__\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\84464046935436b8\\bin\\node_modules\\@oai\\sky\\bin\\windows\\codex-computer-use.exe", "turn-ended" ]
+
+notify = [ "__USERHOME_JSON__\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\1d17ec7e898678cb\\bin\\node_modules\\@oai\\sky\\bin\\windows\\codex-computer-use.exe", "turn-ended" ]
 
 [marketplaces.openai-bundled]
-last_updated = "2026-08-19T20:51:57Z"
 source_type = "local"
 source = '\\?\__USERHOME__\.codex\.tmp\bundled-marketplaces\openai-bundled'
 
 [marketplaces.openai-primary-runtime]
-last_updated = "2026-08-19T20:51:08Z"
 source_type = "local"
 source = '\\?\__USERHOME__\.cache\codex-runtimes\codex-primary-runtime\plugins\openai-primary-runtime'
 
@@ -78,30 +77,34 @@ enabled = true
 [plugins."caveman@caveman"]
 enabled = true
 
+[plugins."codex-app-tools@openai-bundled"]
+enabled = true
+
 [features]
 js_repl = false
 memories = true
 
 [mcp_servers.node_repl]
 args = []
-command = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node_repl.exe'
+command = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\1d17ec7e898678cb\bin\node_repl.exe'
 startup_timeout_sec = 120
 
 [mcp_servers.node_repl.env]
 NODE_REPL_NATIVE_PIPE_CONNECT_TIMEOUT_MS = "1000"
-NODE_REPL_NODE_MODULE_DIRS = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node_modules'
-NODE_REPL_NODE_PATH = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node.exe'
-NODE_REPL_TRUSTED_CODE_PATHS = '__USERHOME__\.codex;__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\84464046935436b8\bin\node_modules'
+NODE_REPL_NODE_MODULE_DIRS = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\1d17ec7e898678cb\bin\node_modules'
+NODE_REPL_NODE_PATH = '__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\1d17ec7e898678cb\bin\node.exe'
+NODE_REPL_TRUSTED_CODE_PATHS = '__USERHOME__\.codex;__USERHOME__\AppData\Local\OpenAI\Codex\runtimes\cua_node\1d17ec7e898678cb\bin\node_modules'
 CODEX_HOME = '__USERHOME__\.codex'
 BROWSER_USE_AVAILABLE_BACKENDS = "chrome,iab"
+BROWSER_USE_TINYSKY_ENABLED = "0"
 NODE_REPL_INSTRUCTIONS_USE_CASE_BROWSER = "Control the in-app browser in conjunction with the Browser Plugin."
 NODE_REPL_INSTRUCTIONS_USE_CASE_CHROME = "Control the Chrome browser in conjunction with the Chrome Plugin. Prefer this method of controlling Chrome over alternatives (such as Computer Use) unless the user explicitly mentions an alternative."
 BROWSER_USE_CODEX_APP_BUILD_FLAVOR = "prod"
-BROWSER_USE_CODEX_APP_VERSION = "26.814.41957"
-NODE_REPL_TRUSTED_SERVICES = '{"browser":"__USERHOME_FWD__/.codex/plugins/cache/openai-bundled/browser/26.814.41957/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
+BROWSER_USE_CODEX_APP_VERSION = "26.818.61809"
+NODE_REPL_TRUSTED_SERVICES = '{"browser":"__USERHOME_FWD__/.codex/plugins/cache/openai-bundled/browser/26.818.61809/scripts/browser-service.mjs","sky":"@oai/sky/service"}'
 SKY_CUA_NATIVE_PIPE = "1"
-SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-ec646206-3918-441b-a169-82e9363cf5f6'
-CODEX_CLI_PATH = '__USERHOME__\AppData\Local\OpenAI\Codex\bin\f71e347eb70b3d24\codex.exe'
+SKY_CUA_NATIVE_PIPE_DIRECTORY = '\\.\pipe\codex-computer-use-30b3ca12-fa0e-46b6-ab38-dcaf5ef038f7'
+CODEX_CLI_PATH = '__USERHOME__\AppData\Local\OpenAI\Codex\bin\8fffe69425752027\codex.exe'
 
 [shell_environment_policy.set]
 NODE_REPL_TRUSTED_BROWSER_CLIENT_SHA256S = "e7f98a8ce324234ed7f3be8fa39ba54b26e2e8fc79feed2470dcd0871af4a5b3"

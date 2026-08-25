@@ -36,3 +36,5 @@
 - [Owner actions are tickets](owner-actions-are-tickets.md) — human steps become ready-for-human issues at discovery; PR/HANDOFF/reply notes are burial sites
 - [Surface in chat, not docs](surface-in-chat-not-docs.md) — Dan never reads reports/HANDOFF/ADRs, rarely GitHub; owner decisions and must-knows go in plain-English chat too
 - [Next orchestrator run openers](next-orchestrator-run-openers.md) — run 317 enrichment + 275 Gas rename live halves from MAIN checkout before fleeting; keep them ready-for-human so fleet skips
+- [Capture, don't build, on credits](capture-dont-build-on-credits.md) — owner approval = ticket + pickup command, never unbidden implementation; builds need explicit "run it"
+- [Project value rationale](project-value-rationale.md) — full why-does-this-exist case: ADR-0002 context + seat cost + bus factor; pricing audits & sub portal documented nowhere else

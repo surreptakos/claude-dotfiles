@@ -38,7 +38,9 @@ spellings, making docs disagree with each other.
 6. **Live facts are measured, not documented.** Which environment is live, which triggers are
    installed, which flags are set — run the project's diagnostic (`ping`, `listInstalledTriggers`,
    whatever the project CLAUDE.md names). If prose states one of these as fact, the fix is
-   usually to replace the value with a pointer to the diagnostic.
+   usually to replace the value with a pointer to the diagnostic. Same for tracker-derivable
+   facts — counts, status, enumerations GitHub Issues already carries get a pointer, not a
+   sentence. One source of truth per fact.
 7. **Owner decisions become tickets, never inline fixes.** Anything the audit surfaces that needs
    a human ruling (a threshold, a judgment call, a manual UI step) gets a ticket through the
    project's flow (`/triage` or `/to-tickets`), not an ad-hoc fix and not a note buried in the
