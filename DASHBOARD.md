@@ -1,6 +1,6 @@
 # claude-dotfiles — working dashboard
 
-_Generated 2026-08-25T14:31:34.669Z at commit `74cf4e0` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
+_Generated 2026-08-25T14:44:59.604Z at commit `729571a` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
 
 ## Needs your attention
 
@@ -18,6 +18,7 @@ _None._
 
 | Issue | Title | Type | Triage | From PRD | Updated |
 | --- | --- | --- | --- | --- | --- |
+| [#12](https://github.com/surreptakos/claude-dotfiles/issues/12) | Dotfiles freshness loop: sync stamps, auto-pull when safe, hard block on two-way divergence | — | ready-for-agent | — | today |
 | [#11](https://github.com/surreptakos/claude-dotfiles/issues/11) | Global CLAUDE.md memory-governance rules: non-derivable facts only, fix wrong notes at discovery, disk outranks notes | — | ready-for-agent | — | today |
 | [#10](https://github.com/surreptakos/claude-dotfiles/issues/10) | Session-end checklist gains contradiction sweep: fix contradicted notes at the source | — | ready-for-agent | — | today |
 
