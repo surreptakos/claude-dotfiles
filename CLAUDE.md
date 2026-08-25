@@ -119,6 +119,33 @@ Installed 2026-08-12, version in `docs/agents/harness-version.md`.
   trusting the tracker — exit 2 means it could not audit, which is not a pass.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
+## The freshness loop (issue 12)
+
+Sessions in this repo must never run against stale or divergent governance copies. Every
+`sync.ps1 -Mode push` and `-Mode pull` writes a stamp to
+`~/.claude/hook-state/dotfiles-sync/state.json` (git-ignored runtime state, per-user, not carried in
+the mirror). `tools/dotfiles-freshness.ps1` reads that stamp, fetches origin, and classifies:
+
+- **synced** or **unknown (no stamp)** — silent.
+- **state1** (origin ahead, live matches stamp) — auto-installs (`git pull --ff-only` +
+  `sync.ps1 -Mode pull`), reports the commits landed.
+- **state2** (live edited since last sync, origin not ahead) — report only, at start and end. Live
+  edits are routine; a blocker here would fire constantly and get disabled (secret-guard principle).
+- **state3** (both directions diverged) — HARD BLOCK: `UserPromptSubmit` hook exits 2 with the
+  resolution commands on stderr (documented Claude Code mechanism for refusing a prompt).
+  Resolution order: push live first, `git pull --rebase`, `git push`, then `sync.ps1 -Mode pull`.
+
+The three hook entries live in **`.claude/settings.json`** (project-level, hand-written) and invoke
+`tools/dotfiles-freshness-hook.js`. Nothing in this feature lives in the generated `claude/` mirror —
+that is deliberate. An earlier attempt at this issue put the hooks inside the mirror without the live
+`~/.claude` counterparts and the next routine `sync.ps1 -Mode push` would have wiped them.
+
+Auto-pull is guarded twice: the classifier requires `-not $liveDrift` for state1, and
+`install-state1` mode re-classifies before running anything. Tests:
+`tools/dotfiles-freshness-hook.test.js` (Node, 8 cases) and `tests/dotfiles-freshness.tests.ps1`
+(PowerShell, 18 cases including all four states and the stamp round-trip). Both run inside
+`tests/restore-test.ps1` as part of the standard test suite.
+
 ## Related
 
 - `../claude-account-handoff` — moves *accounts* on one machine (`CLAUDE_CONFIG_DIR`). Different

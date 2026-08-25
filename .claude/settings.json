@@ -1,0 +1,52 @@
+{
+  "_comment": [
+    "Project-level Claude Code settings for THIS repo (claude-dotfiles).",
+    "",
+    "NOT the mirror at claude/settings.json - that one is a GENERATED copy of",
+    "~/.claude/settings.json and is wiped on every sync push. This file is",
+    "hand-written, committed to the repo, and loaded by Claude Code when a",
+    "session starts anywhere under this checkout.",
+    "",
+    "Wires the dotfiles-freshness loop (issue 12) - see tools/dotfiles-freshness.ps1",
+    "and tools/dotfiles-freshness-hook.js. Runs only for sessions in this repo,",
+    "which is where the freshness of ~/.claude vs origin actually matters."
+  ],
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"tools/dotfiles-freshness-hook.js\" session-start",
+            "timeout": 120,
+            "statusMessage": "Checking dotfiles freshness..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"tools/dotfiles-freshness-hook.js\" prompt",
+            "timeout": 30,
+            "statusMessage": "Guarding against dotfiles divergence..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"tools/dotfiles-freshness-hook.js\" session-end",
+            "timeout": 30,
+            "statusMessage": "Recording dotfiles freshness at end..."
+          }
+        ]
+      }
+    ]
+  }
+}
