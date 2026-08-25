@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: a26cd633-a291-4992-a7ce-6f91258c2b3e
-  modified: 2026-08-07T13:44:18.618Z
+  modified: 2026-08-24T15:42:12.559Z
 ---
 
 Measured 2026-08-07 on AP-6 (1073870000033209430): a ticket in the Desk Recycle Bin still answers
@@ -19,8 +19,10 @@ condition (ticket binned). Diagnosis cost a session; one field read answers it.
 
 **How to apply:** on any AP intake park, run `deskThreadsDiag(ticketId)` (threads HTTP +
 Attachments tab) and read `isTrashed` off the ticket. Disposal: `queueDismissParked(ticketId)` is a
-HUMAN act by contract ("I have handled this" — its own docstring); restore-from-bin + `enqueueDeskTicket`
-+ `drainIntakeQueue` is the retry path. #79 tracks parking with the real reason. PR #78 made
+HUMAN decision by contract ("I have handled this" — its own docstring); the agent may EXECUTE it once
+the owner has reviewed that specific park (owner clarified 2026-08-24, AP-284 stale row: asked "why
+can't you run it", agent ran it, `removed:1`, alarm cleared). Decision human, keystrokes optional.
+Restore-from-bin + `enqueueDeskTicket` + `drainIntakeQueue` is the retry path. #79 tracks parking with the real reason. PR #78 made
 threads-404 fall back to the Attachments tab (correct for tickets whose PDF lives only there).
 
 See [[pollers-run-workday-only]], [[desk-ticket-ids-exceed-2p53]].

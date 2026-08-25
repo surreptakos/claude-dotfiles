@@ -64,6 +64,8 @@ Each ticket is a **child issue** of the map; the tracker's issue id is its ident
 
 Each ticket carries a `wayfinder:<type>` label — one of `research`, `prototype`, `grilling`, `task` (see [Ticket Types](#ticket-types)).
 
+Where the tracker has a triage-label vocabulary (see `docs/agents/triage-labels.md` in the repo), every wayfinder issue — the map and each ticket — ALSO gets a triage label **at creation**, in the same command that creates it. Wayfinder issues bypass the repo's issue forms, so nothing else guarantees them a triage state: found on aac-contract-builder 2026-08-21, where four wayfinder-born issues carried only `wayfinder:*` labels and sat invisible to triage for two days. Default `needs-triage`; use a sharper label (`ready-for-human` for a map, `ready-for-agent` for an AFK research ticket) only when the right state is already obvious.
+
 A session **claims** a ticket by assigning it to the dev driving the map, **first**, before any work, so concurrent sessions skip it. That assignee _is_ the claim: an open, unassigned ticket is unclaimed.
 
 Blocking uses the tracker's **native** dependency relationship — essential because it renders the frontier _visually_ in the tracker's own UI, so the human sees what's takeable without opening the map. Only a tracker that lacks native blocking falls back to a body convention. A ticket is **unblocked** when every ticket blocking it is closed; the **frontier** is the open, unblocked, unclaimed children — the edge of the known.

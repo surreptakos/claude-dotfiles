@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 3d49ce01-d0f0-448b-afa6-781fff136b93
-  modified: 2026-07-28T14:30:10.088Z
+  modified: 2026-08-24T23:50:41.898Z
 ---
 
 Verified live 2026-07-20 against Desk sandbox `932165744` with a token carrying `Desk.settings.ALL`
@@ -34,6 +34,12 @@ Verified live 2026-07-20 against Desk sandbox `932165744` with a token carrying 
   rejects `allowedValues`; `PATCH /organizationFields/{id}` rejects `allowedValues` as an extra param;
   layout `replaceValues` needs a non-empty `oldValue` anchor so it can't bootstrap a first choice.
   → seed the human-picked dropdowns (rejection-reason etc.) in the UI. Engine writes don't need them.
+- **RENAME/REMOVE a choice — dead on BOTH replaceValues branches (completed 2026-08-24, prod, cf_tier
+  probe `deskChoiceMergeProbe` in DeskSetup.gs).** newValue NOT existing: appends, keeps old (the
+  2026-07-20/08-06 measurements). newValue ALREADY existing (the branch Zoho's doc note left open,
+  the one that could have made rename = add-then-merge): HTTP 200, empty body, NOTHING changes — no
+  removal from allowedValues (re-read ~2 min later, rules out serialised-schedule delay), no
+  ticket-value migration. Rename of an established choice is UI-only on complete measurement.
 - **Create custom ticket STATUSES** — the built-in `status` field `replaceValues` 500s (its values
   carry a `statusType` the plain-string schema can't express). DESIGN CHOICE (ADR-0002 allows gates as
   a "stage/field"): model the AP gate state as a custom Picklist field the engine writes freely, NOT
@@ -77,5 +83,26 @@ Verified live 2026-07-20 against Desk sandbox `932165744` with a token carrying 
   `cf_ap_stage`. 2/5 added; rest drain on spaced re-runs.
 - **Webhook `name`** — prod 422s special chars (the `->` arrow: "does not match the allowed values").
   Keep it alphanumeric + spaces. Sandbox didn't enforce this.
+
+**Layout writes + field DELETE (verified live on PROD 874367220, 2026-08-21, cf_proposed_gl kill):**
+- `DELETE /organizationFields/{id}` EXISTS but 400s `FieldExistsInLayout` ("used in other active
+  department layouts") while the field sits on ANY ticket layout. The 2026-07 probe delete worked
+  because that probe field was never on a layout.
+- `PATCH /layouts/{id}` EXISTS (PUT → 405) but its validator is effectively unsatisfiable for a
+  layout carrying system picklists: it plays the extra-param strip dance (hasLogo, photoURL, status),
+  then demands `isMandatory` per entry (missing-key dance, one per response), then demands
+  `allowedValues` per picklist — and for Priority (id 1073870000000000437, subType ColorCoded) it
+  rejects EVERY shape Desk itself returns: layout-GET strings → 400 FieldDoesNotHavePickListValues;
+  organizationFields `{value}` objects (list AND single-field GET agree on this shape) → 422
+  INVALID_DATA "does not match the allowed values" at `allowedValues/0`; objects minus `-None-` →
+  same 422. Also throws `InvalidAllowedValuesInField` sometimes WITHOUT `additionalInfo.fieldId`.
+  Machinery lives in `deskLayoutRemoveField(layoutId, fieldId, confirm, variant)` +
+  `deskLayoutFieldScan(fieldId)` + `deskLayoutPicklistShapeProbe` (DeskSetup.gs, PRs #288-#299);
+  every failed PATCH left the layout intact (shapeIntact verified per run).
+- CONCLUSION: removing a field from a layout is UI-only (drag to unused in Setup → Layouts and
+  Fields), like picklist choices and departments. After UI removal, `deskDeleteRetiredProposedGlField`
+  (dry-default, confirm-gated, PR #287) can finish the delete via API.
+- The AP layout GET works, but the Service department layout GET 403s — a field shared into an
+  unreadable department layout may block the delete invisibly.
 
 See [[gas-verification-loop]], [[zoho-desk-access]].

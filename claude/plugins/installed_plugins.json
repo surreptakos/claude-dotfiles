@@ -30,6 +30,16 @@
         "lastUpdated": "2026-07-27T16:29:04.726Z",
         "gitCommitSha": "0d95a81d35a9f2d123a5e9430d1cfc43d55f1bb0"
       }
+    ],
+    "i-have-adhd@i-have-adhd": [
+      {
+        "scope": "user",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\i-have-adhd\\i-have-adhd\\0.2.0",
+        "version": "0.2.0",
+        "installedAt": "2026-08-21T14:19:05.285Z",
+        "lastUpdated": "2026-08-21T14:19:05.285Z",
+        "gitCommitSha": "e7555fcaf612dfa1739dc86610ea926a906db614"
+      }
     ]
   }
 }

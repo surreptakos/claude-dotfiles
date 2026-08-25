@@ -154,6 +154,8 @@ cd <agent worktree> && cat .agent-prompt.md | claude -p --model claude-opus-4-7 
 
 Run it in the background, then read `.agent-result.json` (and check the real exit code, not the pipe's). Any full model ID the account can access works the same way. Write the ticket/prompt to `.agent-prompt.md` in the agent's own worktree first; this is the standard shape for "spin up an Opus 4.7 / Sonnet agent on this ticket."
 
+**Headless CLI auth status (re-check before relying on the recipe above):** the shared credential store (`~/.claude/nightly-aac-agent/token.txt` era) went dead on 2026-08-19 — `credentials.json` holds empty `accessToken`/`refreshToken`, `expiresAt: 0` — and was still dead on 2026-08-25 (verified live both dates). Until a human re-authenticates the CLI, headless `claude -p` fails auth; pin models in-session instead: the registered `opus47` agent type, or Workflow `agent()` with a full model ID. This paragraph dates itself — a later successful headless run supersedes it.
+
 **Do not hand a solvable question back to the user dressed up as "your call to make."** Before writing "owner must decide" / "user must choose" anywhere, check whether it is genuinely a preference or business judgment call (values, risk tolerance, priorities) — or just an investigation you stopped short of finishing. If a tool, API, or search could settle it, use it first. Two workable options found by re-reading code already open is not evidence that a better option doesn't exist elsewhere (another endpoint, another data source, another API) — it is evidence you stopped looking. Exhaust the investigation, then only ask what remains a genuine judgment call.
 
 

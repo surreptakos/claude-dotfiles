@@ -1,18 +1,23 @@
 ---
 name: intake-queue-live
-description: "2026-07-28 go-live — AP intake runs unattended in BILL PRODUCTION; four triggers installed, /exec is enqueue-only"
+description: "2026-07-28 go-live — AP intake runs unattended in BILL PRODUCTION; five triggers installed (2026-08-25), /exec is enqueue-only"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 35ef26be-db88-471c-ae34-1852e3b84f8a
-  modified: 2026-07-29T15:39:52.990Z
+  modified: 2026-08-25T14:14:49.227Z
 ---
+
+**UPDATE 2026-08-25:** five triggers now (`previewOrphanSweep` Sunday 03:00 added, issue 310). The
+`runPaymentPoll` 6-minute-death problem below is FIXED — issue 25 is CLOSED and pollers run
+workday-only ([[pollers-run-workday-only]]), so the 248 min/day figure is historical. Trigger list
+is still runtime state: `clasp run-function listInstalledTriggers`.
 
 On 2026-07-28 Dan authorized full go-live of the durable intake queue. The pipeline now runs
 unattended against **BILL production** (`billEnv: 'PRODUCTION'` — confirm with `clasp run
 intakeSweepPreview`, which prints it).
 
-Four triggers are installed (verify with `clasp run listInstalledTriggers`, never assume):
+Four triggers were installed at go-live (verify with `clasp run listInstalledTriggers`, never assume):
 `drainIntakeQueue` 5m, `runRelayPoll` 15m, `runPaymentPoll` 1h, `runWeeklyDigest` weekly.
 `processInbox` is deliberately NOT installed — the Desk webhook is the intake route, and the Gmail
 poller would be a second bill-creating path over the same mail.
@@ -34,7 +39,7 @@ against 90.** Roughly 5x the ~50 min/day install estimate. Method that worked: C
 label — the Apps Script `processes` API returns 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` because the
 clasp token lacks `script.processes`.
 
-**`runPaymentPoll` has never completed a single run since go-live** — every hourly execution dies at
+**`runPaymentPoll` had never completed a single run since go-live** (HISTORICAL — fixed, issue 25 closed) — every hourly execution dies at
 the 6-minute ceiling, so paid detection has never worked, and it burns 144 of those 248 minutes doing
 nothing. Filed as issue #25. Fixing it drops the total to ~104; widening the relay poll to 30 min gets
 under 90. The alternative is a Workspace account (360 min/day ceiling).

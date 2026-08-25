@@ -11,6 +11,7 @@
 - [DOM repros go through jsdom in the scratchpad](dom-repro-via-jsdom-scratchpad.md) — Browser pane can't reach localhost; jsdom needs `runScripts: 'dangerously'` or inline `onblur` never fires.
 - [Tier touch cadence, set 2026-07-29](tier-touch-cadence-never-ratified.md) — A 3+QBR / B 2 / C 1 / D none, plus Dan's rule that undecided figures come from the GM column.
 - [Nothing lives only in chat](nothing-lives-only-in-chat.md) — file every human step and open question as a GitHub issue when raised; Dan assumes he remembers nothing.
+- [Surface everything in chat](surface-everything-in-chat.md) — Dan never reads reports/ADRs/HANDOFF and rarely GitHub; files are Claude's tools, decisions and findings get said in chat in plain English.
 - [Verify before filing, cite the check](verify-before-filing-cite-the-check.md) — stale notes read like facts; check git/sheet/code first and put the check in the issue.
 - [Live workbook id, service-account readable](live-workbook-id-sa-readable.md) — `AAC_Deal_Snapshots_2026` / `1IZZkTMjRRUEPAwQutlkMD5W6oh8Tiy4zQyH5pgqtG7Q`; read live state instead of calling it unknowable.
 - [Run a new capture early, don't wait for the trigger](run-early-dont-wait-for-the-trigger.md) — the first live run is where the real bugs are, and a failed scheduled run loses history forever.
@@ -49,3 +50,4 @@
 - [Measurement tools must assert their subject](measurement-tools-must-assert-their-subject.md) — a diff tool that can't confirm WHAT it measured reports coverage it doesn't have; it must throw, not fall back.
 - [Closing keywords in commit bodies](closing-keywords-in-commit-bodies.md) — "closes #482's corruption vector" in prose auto-closed the issue on push to main.
 - [Nightly local ticket agent](nightly-local-ticket-agent.md) — Task Scheduler 11:05pm CT headless claude on ready-for-agent+backend tickets; disabled cloud twin trig_01WoV66…; CLI vs desktop auth gotchas.
+- [Workflow scripts: LF pin + session-start cache](workflow-scripts-lf-session-cache.md) — named Workflow invocation rejects \r and serves session-start cache; use {scriptPath} mid-session, fresh session for {name}.

@@ -1,15 +1,20 @@
 ---
 name: nightly-orchestrator-live
-description: Nightly autonomous ticket orchestrator runs daily 02:05 — opens PRs on ready-for-agent issues overnight
+description: Nightly ticket orchestrator KILLED 2026-08-25 (scheduled task Disabled) — fleet runs are manual now; contract/paths below still valid for manual runs
 metadata: 
   node_type: memory
   type: project
   originSessionId: 8d9f7456-f33f-446e-b603-7e9e2a4a7b6e
-  modified: 2026-08-18T15:04:36.333Z
+  modified: 2026-08-25T14:15:02.917Z
 ---
 
-Since 2026-08-18 a nightly orchestrator (Windows scheduled task `aac-bill-intake nightly ticket
-agent`, daily 02:05, enabled) runs Fable 5 headless against the main checkout and spawns one Opus
+**UPDATE 2026-08-25: the owner killed the nightly run.** `schtasks /query` shows the task
+`Status: Disabled, Next Run Time: N/A` (verified 2026-08-25). Ticket-fleet runs are MANUAL now —
+see [[next-orchestrator-run-openers]] for what the next manual run executes first. The contract,
+worktree layout and log paths below stay valid for those manual runs.
+
+From 2026-08-18 to 2026-08-25 a nightly orchestrator (Windows scheduled task `aac-bill-intake nightly ticket
+agent`, daily 02:05, enabled) ran Fable 5 headless against the main checkout and spawns one Opus
 4.7 CLI sub-session per `ready-for-agent` issue in a worktree under
 `__USERHOME__\.claude\nightly-agents\aac-bill-intake\worktrees\`. Delivery is a PR per ticket —
 it never pushes main, never `clasp push`/`deploy`, never writes BILL or Desk. Contract:

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: feedback
   originSessionId: c8c14ce3-7dbd-4035-83fd-2079a4fd7529
-  modified: 2026-07-28T21:04:16.453Z
+  modified: 2026-08-25T14:14:14.349Z
 ---
 
 When asking Dan to make a decision, explain the situation at length and in plain language before
@@ -26,4 +26,4 @@ happens today, what goes wrong, and what changes under each option, in the words
 than the codebase's. Put the concrete story first and the mechanism last, or leave the mechanism
 out entirely when it is an implementation detail he does not need to pick. Answer any question he
 asks back (e.g. "what are you trying to use for sandbox?") with verified facts before re-asking.
-See [[worktree-is-stale-work-in-main]].
+See [[surface-in-chat-not-docs]].

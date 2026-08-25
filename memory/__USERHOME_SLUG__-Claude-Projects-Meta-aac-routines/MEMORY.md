@@ -4,4 +4,4 @@
 - [Status questions are not build orders](status-questions-not-build-orders.md) — report findings and wait for go; Dan starts builds
 - [Pre-send lint discipline](pre-send-lint-discipline.md) — lint to exit 0 before sending, fresh declare nonce each turn
 - [O3 prep surface outputs](o3-prep-surface-outputs.md) — attach both .docx to chat via SendUserFile at completion; never make Dan hunt OneDrive
-- [O3 directs include techs](o3-directs-include-techs.md) — Rob's directs = 4 PMs + all field techs; standing questions scope both
+- [Org structure source of truth](o3-directs-include-techs.md) — read config/org-chart.yaml reports_to, not people.yaml manages; Rob=Projects, Nick=Services

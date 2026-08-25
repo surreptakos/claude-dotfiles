@@ -44,6 +44,10 @@
         "Target":  "__USERHOME__\\.agents\\skills\\improve-codebase-architecture"
     },
     {
+        "Name":  "playwright-cli",
+        "Target":  "__USERHOME__\\.agents\\skills\\playwright-cli"
+    },
+    {
         "Name":  "project-harness",
         "Target":  "__USERHOME__\\.agents\\skills\\project-harness"
     },

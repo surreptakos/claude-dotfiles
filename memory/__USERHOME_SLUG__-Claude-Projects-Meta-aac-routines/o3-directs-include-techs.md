@@ -1,15 +1,15 @@
 ---
 name: o3-directs-include-techs
-description: "Rob Olsen's direct-reports include all field technicians, not just the four named PMs"
+description: "Org structure source of truth is config/org-chart.yaml (owner PDF 2026-08-19); Rob owns Projects side, Nick owns Services side — people.yaml manages lists drift"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 5faad2cd-370b-439d-b979-fc8b8447a1b5
-  modified: 2026-08-18T16:02:20.181Z
+  modified: 2026-08-20T01:59:54.871Z
 ---
 
-Rob Olsen's directs are Palm Gatsakos, Chris Gatsakos, Christopher Freeman, Art Sotelo AND all field technicians. `config/people.yaml` `rob.manages` reflects this as of 2026-08-18. Standing weekly questions ("O3s with all directs / Staff Meeting with all directs / feedback delivered to each direct") therefore scope PMs + techs for Rob's O3s.
+Authoritative org structure: `config/org-chart.yaml` on main (rebuilt 2026-08-19 from Dan's own org chart PDF "260819 AAC Org Chart.pdf", OneDrive Desktop\SAVE ME\Org Chart). Rob Olsen's directs: Palm Gatsakos (Project Admin), Christopher Freeman + Hal Henderson (Project Managers), Danny/Jerry/Martin Martinez + TJ Hansen (Project Technicians), Art Sotelo + Chris Gatsakos (System Specialists). Nick Remblake's directs: Becky Runyan, Mireya Torres, Tina Romanchek, Juan Martinez, Scott Taggart, Brian Martin, Matt Jansen, Mike Wade. Departed, never treat as staff: Jane Musel, Mary Gatsakos, Doug Davenport.
 
-**Why:** Dan flagged mid-turn 2026-08-18 during Rob's O3 prep: "Rob's directs include all technicians as well." The prior config listed only the four named leads and the O3 doc named them explicitly — both were incomplete.
+**Why:** Earlier note said Rob's directs = 4 named leads + "all field technicians" (Dan's 2026-08-18 correction). The 2026-08-19 chart splits technicians: project techs under Rob, service/support under Nick — Mike Wade and Mireya Torres are Nick's, not Rob's. `config/people.yaml` `rob.manages` still says "all field technicians"; drift flagged at 2026-08-19 session end, ticket publish gated on Dan's `[approve-tickets]`.
 
-**How to apply:** Reference `config/people.yaml` `manages:` list when generating standing questions or scoping "all your directs" language. Do NOT enumerate the direct list inline in the doc; write "all your directs (PMs + techs)" so scope is unambiguous without depending on stale head-counts. Related: [[o3-prep-surface-outputs]].
+**How to apply:** For O3 scope or any "Rob's directs / Nick's directs" question, read `config/org-chart.yaml` `reports_to` edges, not people.yaml `manages`. Write "all your directs" in docs without enumerating. Related: [[o3-prep-surface-outputs]].

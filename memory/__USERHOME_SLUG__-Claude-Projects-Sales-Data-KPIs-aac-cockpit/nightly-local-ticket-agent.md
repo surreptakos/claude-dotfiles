@@ -5,8 +5,12 @@ metadata:
   node_type: memory
   type: project
   originSessionId: caed4690-20fa-4c8b-871e-797bc5542b44
-  modified: 2026-08-18T15:00:39.434Z
+  modified: 2026-08-25T13:00:42.257Z
 ---
+
+**2026-08-25 rulings (Dan, in chat):** (1) Task stays DISABLED — Dan disabled it himself on 8/24, deliberately; do not re-arm without his word. (2) Merge policy: agent MERGES its own PRs after full verification — #485 restored, the 08-24 never-merge contract reversed; ORCHESTRATOR.md updated (commit 6318bee), prompt.md re-synced hash-identical. Merge = TEST deploy only; prod stays Thursday promote. #537 closed with all three answers.
+
+**2026-08-24 rewrite:** `prompt.md` replaced with the ticket-fleet ORCHESTRATOR (repo-root `ORCHESTRATOR.md` in aac-cockpit, copied verbatim; old prompt at `prompt.md.bak-2026-08-24-pre-fleet-orchestrator`). New contract: /triage + /to-tickets + /ticket-fleet loop, PRs only, **NEVER merge** (supersedes #485's merge allowance for these runs), backend-only via compound label `"ready-for-agent --label backend"`. Trigger changed from daily 02:00 to **one-time 2026-08-25 01:31 CT** — daily recurrence REMOVED; restore with `Set-ScheduledTask -TaskName "AAC nightly ticket agent" -Trigger (New-ScheduledTaskTrigger -Daily -At 02:00)` or re-import `task-backup-2026-08-24.xml`. After the one-time fire the task goes dormant until restored. **2026-08-25: the 01:31 fire never happened — task was found `State: Disabled`**, disabled 8/24 between 02:08 and 21:01 by an unrecorded actor (Task Scheduler history log off, no audit events, no transcript shows it; every `Disable-ScheduledTask` in transcripts targeted other repos' tasks). Gotcha: `Get-ScheduledTaskInfo` reports `NextRunTime` even on a disabled task — verify `(Get-ScheduledTask).State`, not NextRunTime. The fleet-orchestrator prompt has NEVER run yet.
 
 Set up 2026-08-18. Local nightly autonomous ticket agent:
 
