@@ -1,6 +1,6 @@
 # claude-dotfiles — working dashboard
 
-_Generated 2026-08-25T17:35:28.680Z at commit `da75d32` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
+_Generated 2026-08-25T21:05:25.084Z at commit `befa932` by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._
 
 ## Needs your attention
 
@@ -16,9 +16,7 @@ _None._
 
 ## Open issues
 
-| Issue | Title | Type | Triage | From PRD | Updated |
-| --- | --- | --- | --- | --- | --- |
-| [#10](https://github.com/surreptakos/claude-dotfiles/issues/10) | Session-end checklist gains contradiction sweep: fix contradicted notes at the source | — | ready-for-agent | — | today |
+_None._
 
 ## Where the rest lives
 
