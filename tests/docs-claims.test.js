@@ -22,12 +22,17 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
-const ENGINE = path.join(os.homedir(), '.claude', 'skills', 'consistency-audit', 'claims-audit.js');
+// Prefer the home-installed engine (what every consuming repo runs); fall back to this repo's
+// own mirror so a fresh clone — or a CI runner with no ~/.claude — still audits with the same
+// engine the sync would install. Only a machine with NEITHER fails.
+const HOME_ENGINE = path.join(os.homedir(), '.claude', 'skills', 'consistency-audit', 'claims-audit.js');
+const MIRROR_ENGINE = path.join(ROOT, 'claude', 'skills', 'consistency-audit', 'claims-audit.js');
+const ENGINE = fs.existsSync(HOME_ENGINE) ? HOME_ENGINE : MIRROR_ENGINE;
 
 test('docs/claims.json verifies clean', () => {
   assert.ok(
     fs.existsSync(ENGINE),
-    'claims-audit engine missing — run the dotfiles sync (sync.ps1 -Mode pull in claude-dotfiles); expected at ' + ENGINE
+    'claims-audit engine missing — run the dotfiles sync (sync.ps1 -Mode pull in claude-dotfiles); expected at ' + HOME_ENGINE + ' or ' + MIRROR_ENGINE
   );
   try {
     const out = execFileSync(process.execPath, [ENGINE], { cwd: ROOT, encoding: 'utf8' });
