@@ -124,3 +124,103 @@ killed generator prevents more drift than ten fixed sentences.
 - Ticket sweep: every surfaced item gets exactly one stated outcome — already tracked (number),
   not worth tracking (one line why), or needs a ticket (batched through the project's flow).
 - Update the project's handoff/state doc with a dated section recording the sweep.
+
+## Automate — per-repo wiring for the claims-audit tripwire
+
+A sweep is a point-in-time fix; the tripwire keeps facts pinned between sweeps. Same
+generic-tool/per-repo-config shape session-check uses: `claims-audit.js` beside this SKILL.md
+travels to every machine, and each repo declares its own facts in `docs/claims.json`.
+
+**Recipe** — perform once per repo, after a consistency sweep has established the truth:
+
+1. **Seed `docs/claims.json`** from the sweep. Every fact the sweep fixed becomes a claim.
+   Pick the smallest claim type that captures the invariant — an `expected-text` claim on a
+   whole paragraph is a maintenance drag; a `symbol-exists` or `command-single-source` claim
+   on the load-bearing detail is not.
+
+   ```json
+   {
+     "claims": [
+       {
+         "id": "test-command-single-source",
+         "type": "command-single-source",
+         "source": ".claude/session.json",
+         "sourcePath": "test",
+         "bindings": [
+           { "doc": "README.md",       "occurrence": "Run `node --test tests/` before committing." },
+           { "doc": "docs/runbook.md", "occurrence": "CI executes `node --test tests/` and then deploys." }
+         ]
+       },
+       {
+         "id": "public-api-symbols",
+         "type": "symbol-exists",
+         "doc": "docs/api.md",
+         "source": "src/pipeline.js",
+         "symbol": "processInvoice"
+       }
+     ]
+   }
+   ```
+
+2. **Add a wrapper test** to the repo's suite so the tripwire fires on every CI run and every
+   pre-commit gate. The wrapper is thin — the engine already exits 1 with one line per finding.
+
+   ```js
+   // tests/claims-audit.test.js in the consuming repo
+   const { execFileSync } = require('node:child_process');
+   const path = require('node:path');
+   const test = require('node:test');
+
+   const ENGINE = path.join(
+     require('node:os').homedir(),
+     '.claude', 'skills', 'consistency-audit', 'claims-audit.js'
+   );
+
+   test('docs/claims.json verifies clean', () => {
+     execFileSync(process.execPath, [ENGINE], {
+       cwd: path.join(__dirname, '..'),
+       stdio: 'inherit',
+     });
+   });
+   ```
+
+   If the repo's canonical test command is something other than `node --test` (a `pytest`
+   suite, a `powershell` runner), shell out to the engine from that runner instead — the exit
+   code is the whole contract.
+
+3. **Seed the four claim types** to the facts that failed the sweep most:
+
+   - **token-subset** — for endpoint lists, flag inventories, enumerations the docs recite. The
+     doc names every token; the code file emits every token; drift is one side that stopped
+     matching.
+   - **symbol-exists** — for API reference docs, trace files, ADRs citing a function name. Both
+     directions: the doc must still cite it AND the source must still define it, so a rename
+     that landed in code but not docs (and its inverse) both trip.
+   - **expected-text** — for pinned prose the reader must see verbatim: a warning, a rule, a
+     header a script parses. Use sparingly; a whole-paragraph claim breaks on any edit.
+   - **command-single-source** — for commands quoted across README/runbook/CI docs whose source
+     of truth is a config file (`.claude/session.json`, a workflow YAML, a package.json script).
+     Bindings are explicit doc positions — dated history files stay exempt because they are not
+     bound.
+
+4. **Wire the wrapper into pre-commit and CI.** A test that runs only on demand is a report,
+   not a tripwire. The engine's exit codes are:
+
+   - **0** — every claim verified clean.
+   - **1** — one or more findings; one tab-separated line per finding on stdout
+     (`<claimId>\t<docPath>:<lineNo>\t<message>`). Broken claims land here too — an unknown
+     `type`, a missing `doc`, a missing `source`, or a malformed field — so one broken claim
+     never masks the rest of the audit.
+   - **2** — audit-level configuration error: the claims file itself is missing, is not valid
+     JSON, or is not the expected shape. Anything scoped to a single claim never trips exit 2.
+
+   Surface all three to the caller so a runner can tell "the tripwire fired" apart from "you
+   pointed me at nothing".
+
+5. **Extend claims.json as the world changes.** A new claim is a JSON edit, never an engine
+   edit. If a repo needs a claim type this engine does not offer, that is a signal for a
+   ticket back to this skill's engine — the point of the declarative shape is that per-repo
+   config never forks the engine.
+
+The first consumer is `aac-bill-intake` (issue 326): its seed claims are the concrete fixtures
+this engine was designed against.
