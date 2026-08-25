@@ -150,6 +150,12 @@ if ($Mode -eq 'push') {
             Write-Host ('  git -C "{0}" status --short' -f $RepoRoot)
             Write-Host '  (or re-run with -Commit "<message>" so the guard gates the commit)'
         }
+
+        # Stamp AFTER the commit so syncedCommit records what the mirror actually holds. The
+        # freshness check (tools/dotfiles-freshness.ps1) reads this to decide whether live has
+        # drifted since the last sync; without a stamp the whole check stays silent.
+        $stampPath = Write-DotfilesStamp -RepoRoot $RepoRoot -UserHome $UserHome -Kind 'push'
+        Write-Host ("Stamped {0}" -f $stampPath)
     }
     exit 0
 }
@@ -203,6 +209,14 @@ if ($Mode -eq 'pull') {
     Write-Host ''
     Write-Host 'Personal profile (~/.claude-personal)'
     Update-PersonalProfile -UserHome $UserHome -DryRun:$DryRun
+
+    # Stamp AFTER the writes so liveFingerprint matches what pull just landed. Same file the
+    # push branch writes; a fresh install runs `install.ps1 -> sync.ps1 -Mode pull` and gets
+    # its initial stamp for free.
+    if (-not $DryRun) {
+        $stampPath = Write-DotfilesStamp -RepoRoot $RepoRoot -UserHome $UserHome -Kind 'pull'
+        Write-Host ("Stamped {0}" -f $stampPath)
+    }
 
     Write-Host ''
     Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)

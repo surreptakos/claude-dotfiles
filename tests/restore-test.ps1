@@ -393,7 +393,12 @@ Check ("all {0} whitelisted files exist under the fake home" -f $pairs.Count) ($
 # section 6c (the exclusion also covers ~/.claude-personal-refresh-backup-<stamp>).
 $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -notlike '*\.claude-dotfiles-backup-*' -and
-                             $_.FullName -notlike '*\.claude-personal*' })
+                             $_.FullName -notlike '*\.claude-personal*' -and
+                             # Issue 12: sync.ps1 writes ~/.claude/hook-state/dotfiles-sync/state.json
+                             # on every pull. Runtime state, not a whitelisted restore - stays out of
+                             # the file-count assertion the same way the backup and the personal
+                             # profile do.
+                             $_.FullName -notlike '*\.claude\hook-state\*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
 
@@ -708,6 +713,73 @@ $checkExit = $LASTEXITCODE
 Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
 Check 'restored session-check reports on a repo' $ran @($out | Select-Object -Last 10)
+
+# ------------------------------------------------------------------ 9a. dotfiles freshness ships
+
+# Issue 12: sync stamps + freshness classifier + block hook. The tool and the hook driver ship in
+# tools/ (hand-written space) and .claude/settings.json (project-level, hand-written) so they
+# survive a sync push - the previous attempt at this issue committed them into the generated
+# claude/hooks mirror and would have been wiped by the next push. The clone is the check for that:
+# these files must exist in the pushed remote, and the Node hook driver must pass its own tests.
+
+Write-Host ''
+Write-Host 'Dotfiles freshness (issue 12)'
+
+$freshnessTool = Join-Path $Clone 'tools\dotfiles-freshness.ps1'
+$freshnessHook = Join-Path $Clone 'tools\dotfiles-freshness-hook.js'
+$freshnessHookTest = Join-Path $Clone 'tools\dotfiles-freshness-hook.test.js'
+$freshnessSettings = Join-Path $Clone '.claude\settings.json'
+
+Check 'tools/dotfiles-freshness.ps1 shipped' (Test-Path $freshnessTool)
+Check 'tools/dotfiles-freshness-hook.js shipped' (Test-Path $freshnessHook)
+Check 'tools/dotfiles-freshness-hook.test.js shipped' (Test-Path $freshnessHookTest)
+Check '.claude/settings.json wires the hook' (Test-Path $freshnessSettings)
+
+if (Test-Path $freshnessHookTest) {
+    $out = & node --test $freshnessHookTest 2>&1
+    Check 'dotfiles-freshness-hook.js passes its own test suite' `
+        ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
+}
+
+# Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
+# return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
+# The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the
+# depth-1 clone has no remote-tracking branch. The point of this check is that the tool runs to
+# completion after a restore, produces JSON, and answers something the driver can parse.
+if (Test-Path $freshnessTool) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshnessTool `
+                            -Mode classify -RepoRoot $Clone -UserHome $FakeHome -SkipFetch 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    $reportBlock = ''
+    $m = [regex]::Match($out.Trim(), '\{[\s\S]*\}\s*$')
+    if ($m.Success) { $reportBlock = $m.Value }
+    $report = $null
+    if ($reportBlock) { try { $report = $reportBlock | ConvertFrom-Json } catch { $report = $null } }
+    $stateName = ''
+    if ($null -ne $report) { $stateName = [string]$report.state }
+    Check ('freshness classifier runs from a restored checkout (state={0}, exit={1})' -f $stateName, $exit) `
+        (($exit -eq 0) -and ($null -ne $report) -and ($stateName -ne '')) `
+        @(($out -split "`r?`n") | Select-Object -Last 12)
+}
+
+# Stamp round-trip + classify-state tests from the CLONE. Runs the standalone unit test file
+# against the restored tool; if it passes, all four states plus the stamp round-trip work
+# against a freshly restored home rather than only in the working tree.
+$freshnessPsTests = Join-Path $Clone 'tests\dotfiles-freshness.tests.ps1'
+if (Test-Path $freshnessPsTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshnessPsTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'dotfiles-freshness.tests.ps1 passes (stamp round-trip + 4 states)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+}
 
 # ------------------------------------------------------------------ 10. two runs can overlap
 
