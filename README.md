@@ -7,6 +7,11 @@ behaves like this one.
 It does **not** carry credentials. Three files have to move by hand; `install.ps1` names them at the
 end of a run.
 
+Live working dashboard (open issues, PRDs, triage counts, pipeline health) is at
+[`DASHBOARD.md` on the `dashboard` branch](https://github.com/surreptakos/claude-dotfiles/blob/dashboard/DASHBOARD.md).
+CI regenerates it on every push and every issue event and force-pushes there — never onto master
+(issue 20).
+
 ## What is in here
 
 | Path | Restores to | Why it matters |
