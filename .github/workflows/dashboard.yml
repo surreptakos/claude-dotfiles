@@ -71,4 +71,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add DASHBOARD.md
           git commit -m "chore: refresh dashboard [skip ci]"
-          git push
+          # Push the fresh commit to a dedicated `dashboard` branch, NOT to master. issue 20:
+          # master must never advance from a dashboard refresh -- every advance flipped
+          # already-drifted live copies into state3 (both-diverged hard block) even though
+          # DASHBOARD.md is not in the sync manifest and has no bearing on live state. The
+          # dashboard branch is force-pushed each run: it is a snapshot artifact rebased on
+          # master's tip, not a rolling history. Stable read URL:
+          #   https://github.com/<owner>/<repo>/blob/dashboard/DASHBOARD.md
+          git push -f origin HEAD:refs/heads/dashboard

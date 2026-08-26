@@ -46,14 +46,22 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 
 ## Dashboard
 
-`DASHBOARD.md` at the repo root is the live view — open issues, PRDs and their decomposition state,
-triage counts, pipeline health. It is **generated**. Never edit it by hand; edit
-`scripts/build-dashboard.js`.
+`DASHBOARD.md` is the live view — open issues, PRDs and their decomposition state, triage counts,
+pipeline health. It is **generated**. Never edit it by hand; edit `scripts/build-dashboard.js`.
 
-`.github/workflows/dashboard.yml` regenerates and commits it on every push to `master`, every issue
-event, and a daily tick. Run `node scripts/build-dashboard.js` locally to check your changes, then
-discard the result — committing a local copy collides with the bot's and turns the next push into a
-rebase conflict on a file nobody authored.
+`.github/workflows/dashboard.yml` regenerates it on every push to `master`, every issue event, and a
+daily tick, then force-pushes the fresh commit to the dedicated `dashboard` branch — **never to
+master**. The stable read URL is
+<https://github.com/surreptakos/claude-dotfiles/blob/dashboard/DASHBOARD.md>. Master carries a copy
+too, but it is a static snapshot that CI no longer updates, so read the dashboard branch for the
+live view. The split exists because dashboard commits landing on master were the single largest
+source of state3 (both-diverged) hard-blocks in the freshness classifier: DASHBOARD.md is not part
+of the sync manifest, yet every `chore: refresh dashboard` push advanced origin and flipped
+already-drifted live copies into state3 (issue 20, 2026-08-26).
+
+Run `node scripts/build-dashboard.js` locally to check your changes, then discard the result —
+committing a local copy collides with the bot's on the dashboard branch and turns the next push
+into a rebase conflict on a file nobody authored.
 
 The workflow runs on `windows-latest`. The test command is a PowerShell script that restores a
 Windows profile; nothing about it runs on Linux.
