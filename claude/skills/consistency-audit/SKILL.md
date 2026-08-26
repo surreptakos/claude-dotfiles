@@ -16,6 +16,13 @@ spellings, making docs disagree with each other.
 
 ## Ground rules — read before touching anything
 
+0. **Every run is a full holistic sweep — never a delta.** Sweep the complete prose inventory
+   every time. Do not restrict to files changed since last run, files in a recent git-log window,
+   files mentioned in the tracker recently, or a diff against a prior audit report. Drift
+   accumulates hardest in surfaces nobody has touched — the ones a delta sweep skips are the ones
+   most likely to have quietly gone stale. A prior report is a comparison point at the end, never a
+   scope limit at the start. If Phase 1's inventory count is smaller than the repo's actual prose
+   surface count, the audit is broken and must be restarted with a complete inventory.
 1. **Primary source outranks any document.** Authority order: live measurement > code as it reads
    today > git history > tracker state > another document (never). A doc is never evidence for a
    doc.
@@ -48,7 +55,9 @@ spellings, making docs disagree with each other.
 
 ## Phase 1 — inventory every prose surface
 
-Build the list before reading anything, so nothing is skipped silently:
+Build the list before reading anything, so nothing is skipped silently. Enumerate the complete
+current inventory each run — never carry over a prior run's list, never diff against one. A
+surface that existed last sweep and still exists gets re-verified this sweep, even if untouched:
 
 - Root docs: `*.md` at repo root (README, CLAUDE.md, CONTEXT, AGENTS, HANDOFF, trace/report/
   follow-up files).
@@ -67,7 +76,8 @@ State the inventory count in the report. A surface deliberately skipped gets a l
 
 ## Phase 2 — extract the testable claims
 
-Read each surface for claims a tool can verify. The recurring kinds:
+Read each surface — every one from Phase 1, not a subset — for claims a tool can verify. The
+recurring kinds:
 
 - **Implementation status**: "X is implemented / not yet implemented / planned / TODO".
 - **Ticket state**: "issue N is open / closed / blocked on".
@@ -118,6 +128,8 @@ killed generator prevents more drift than ten fixed sentences.
 
 ## Phase 7 — report
 
+- Full-sweep confirmation: state the total inventory count for this run and confirm every surface
+  was verified, not skipped as "unchanged since last sweep". A report that cannot state this fails.
 - Counts: claims checked, claims fixed, files touched, generators killed.
 - The fixes that change behavior or procedure, each in one plain sentence.
 - Root causes observed (which of the three known ones, plus anything new).

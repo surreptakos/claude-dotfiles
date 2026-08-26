@@ -1,7 +1,16 @@
 name: Refresh dashboard
 
 # DASHBOARD.md stays accurate at the end of every commit and every tracker change:
-# every push to the default branch, every issue event, and a daily safety tick regenerate it.
+# every push to the default branch and every issue event regenerates it.
+#
+# NO daily cron. Issue 21 on claude-dotfiles (2026-08-26): the relative "N days ago" labels in
+# the dashboard drifted daily by construction, so the 6am safety tick regenerated the file every
+# night purely to bump those labels, and each run produced a "chore: refresh dashboard" commit
+# that changed nothing else. The fix pairs with `build-dashboard.js` switching to ISO calendar
+# dates (fmtDate) — same input, same output — so a schedule tick has nothing to do and the cron
+# is gone. Push and issue events still fire this workflow; the "Commit if changed" step below
+# already guards against no-op commits (`git diff --quiet` after `git add -N`), so the workflow
+# writes a commit only when something outside the dashboard's control actually moved.
 #
 # INSTALL-TIME SUBSTITUTION: "main" appears TWICE below (push.branches and checkout.ref).
 # Replace both with the repo's actual default branch (git symbolic-ref refs/remotes/origin/HEAD).
@@ -14,8 +23,6 @@ on:
   issues:
     types: [opened, closed, reopened, edited, labeled, unlabeled, assigned, unassigned]
   workflow_dispatch:
-  schedule:
-    - cron: '0 11 * * *' # daily 6am CT safety refresh (catches label edits made outside events we listen to)
 
 concurrency:
   group: dashboard

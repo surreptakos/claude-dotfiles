@@ -5,6 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 775b530f-7299-4b6d-b767-b407e67616c7
+  modified: 2026-08-26T13:55:17.389Z
 ---
 
 `clasp run` works for the `gas/` project, so Claude can execute functions headlessly (no editor).
@@ -26,5 +27,5 @@ JSON summary {counts, rows, ...} — I added that return for headless inspection
 `clasp run diagAttachment --params '["<query>"]'`.
 
 Gmail connector (MCP) is also authorized (read threads/labels) but CANNOT fetch attachment
-bytes — so the pipeline must run in GAS. Still on SANDBOX (`BILL_BASE_URL` stage). See
-[[gas-testing-architecture]]. Prod cutover still needs prod Script Properties set in the editor.
+bytes — so the pipeline must run in GAS. Production went live 2026-07-28; ask `clasp run-function
+ping` for the current `env` rather than restating it here. See [[gas-testing-architecture]].

@@ -1,40 +1,38 @@
-- [GAS testing architecture](gas-testing-architecture.md) — core.js (pure, dual-env) + node --test via .claude/session.json 7-file command; node --check on temp .js; split-coded threshold 0.10
+- [GAS testing architecture](gas-testing-architecture.md) — core.js (pure, dual-env) + node --test via .claude/session.json 8-file command; eval ground truth from PDFs, never live output
 - [clasp run autonomy](clasp-run-autonomy.md) — headless GAS execution: GCP link + project scopes + deployment; run functions + Gmail connector caveats
-- [GAS verification loop](gas-verification-loop.md) — deploy+verify against BILL sandbox: clasp push -f / ping / reprocessReview / tailLog; Log sheet is source of truth
-- [Eval fixture ground-truth gap](eval-fixture-ground-truth-gap.md) — RESOLVED 2026-07-17: fixtures corrected from real PDFs; decision-eval 8/8, evalExtraction 100%
-- [Zoho Desk access](zoho-desk-access.md) — admin MCP/API access; prod org 874367220, ZohoOne, 3 active departments incl AP; sandboxes abandoned; MCP is ops-only, provisioning needs Desk REST + settings scope
-- [Zoho Desk token scope](zoho-desk-token-scope.md) — token is PROD-bound since #61; sandbox 932165744 unreachable (403 OAUTH_ORG_MISMATCH); portal-bound, needs own grant
-- [Desk provisioning API facts](desk-provisioning-api-facts.md) — what Desk REST can/can't provision: fields+writes+comments+webhooks yes; department/picklist-choices/custom-statuses need UI; model gate state as a custom field not native status
-- [Desk-channel intake progress](desk-channel-intake-progress.md) — feature DONE, prod live 2026-07-28; surviving Desk write-path gotchas: status='Closed or Done', silent cf no-op, /content suffix, GmailApp not MailApp
-- [clasp login scope trap](clasp-login-scope-trap.md) — plain `clasp login` uses clasp's client → "This app is blocked" on restricted scopes; re-auth ONLY via `node tools/clasp-auth.js` (creds JSON in OneDrive Downloads); /exec web app is the run fallback
-- [Zoho token cache gotcha](zoho-token-cache-gotcha.md) — Zoho access token cached ~55m; re-minted grant looks wrong until cache cleared (fixed 2026-07-23); prod Desk org=874367220, not 875376555
-- [Intake queue live](intake-queue-live.md) — 2026-07-28 go-live: /exec enqueue-only, BILL PRODUCTION; 5 triggers as of 2026-08-25; issue 25 quota problem fixed
+- [GAS verification loop](gas-verification-loop.md) — deploy+verify headlessly: clasp push -f / ping (for env) / reprocessReview / tailLog; 10 MiB attach cap; Log sheet is source of truth
+- [Zoho Desk access](zoho-desk-access.md) — prod org 874367220 (ZohoOne), 3 active depts incl AP; wide PROD-bound token since #61; sandbox unreachable; MCP ops-only; portal-bound
+- [Desk provisioning API facts](desk-provisioning-api-facts.md) — fields/writes/comments/webhooks via REST; depts, picklist choices, custom statuses need UI; gate state = cf, not native status
+- [Desk-channel intake progress](desk-channel-intake-progress.md) — DONE, prod live 2026-07-28; Desk write gotchas: status='Closed or Done', silent cf no-op, /content suffix, GmailApp not MailApp
+- [clasp login scope trap](clasp-login-scope-trap.md) — plain `clasp login` uses clasp's client and drops scopes; re-auth ONLY via `node tools/clasp-auth.js`; /exec web app is the run fallback
+- [Zoho token cache gotcha](zoho-token-cache-gotcha.md) — access token cached ~55m; re-minted grant looks wrong until cache cleared; prod Desk org=874367220, not 875376555
+- [Intake queue live](intake-queue-live.md) — 2026-07-28 go-live: /exec enqueue-only, BILL PROD; ask `clasp run-function listInstalledTriggers` for trigger count; issue 25 quota fixed
 - [Ask questions in plain language](ask-questions-in-plain-language.md) — decision questions are exempt from caveman; concrete story first, mechanism last
 - [BILL note API facts](bill-notes-api-facts.md) — notes are v2-only: SendMessage.json writes, List/Note.json reads, nothing deletes
 - [Approved BILL note voice](bill-note-voice-approved.md) — Dan-approved note wording; stop-slop AND write-like-dan, both
 - [BILL approver routing](bill-approver-routing.md) — PR #34 comments are the source of record (65.4% holdout, 96.8% GL→approver); 5 live policies; BILL cannot see the job board
 - [Desk ticket ids exceed 2^53](desk-ticket-ids-exceed-2p53.md) — never coerce a Desk id to a JS Number; it silently rounds to a different valid-looking id
 - [Pollers run workday only](pollers-run-workday-only.md) — drain/payment/relay skip outside Mon-Fri 06:00-18:00 Central; a quiet weekend queue is the gate, not an outage
-- [Desk Blueprint API facts](desk-blueprint-api-facts.md) — criteria is UI-only (500s every spelling); mimic a dumped accepted artifact, not the spec; POST creates ACTIVE; blueprints don't block API status writes
+- [Desk Blueprint API facts](desk-blueprint-api-facts.md) — criteria is UI-only; POST creates ACTIVE; captured ticket refuses status two ways (422 + bare 403); perform bare, land cf via PATCH
 - [Tax-exempt property spelling](tax-exempt-property-spelling.md) — TAX_EXEMPT_CUSTOMERS property carries "Chicago Park District"; core default doesn't; property is authoritative
 - [Handed-off work is yours](handed-off-work-is-yours.md) — a handed-over PR/branch/ticket transfers wholesale; clear mechanical blockers, don't ask for rulings on its prior state
 - [ask-matt gate nonce](ask-matt-gate-nonce.md) — nonce is per-prompt and declare must be the turn's first tool call; stale nonce blocks every tool with a misleading "missing" message
 - [Stubbed dup gate diagnostic trap](stubbed-dup-gate-diagnostic-trap.md) — testGlOverridePrecedenceLive always says CREATE (stubbed dupSource); ask dupCheckPairs instead
 - [Trashed ticket API signature](trashed-ticket-api-signature.md) — binned ticket: GET+comments 200 but threads 404, empty Attachments; read isTrashed first; queueDismissParked is human-only
-- [Triage, don't solve, mid-turn reports](triage-not-solve-midturn-reports.md) — owner reports/rulings become GitHub issues via /triage; never fix inline; 2nd issue in a session needs the ticket-set breakdown approved
-- [Owner rulings 2026-08-12: hold less](owner-rulings-2026-08-12-hold-less.md) — "almost NEVER Data Verify"; issues 120-125 (WO subjects, service/order defaults, inspection⇒Services, zero-total≠credit, dup auto-reject, per-cause tags)
+- [Triage, don't solve, mid-turn](triage-not-solve-midturn-reports.md) — owner reports become GitHub issues via /triage; never fix inline; 2nd issue in session needs breakdown approved
+- [Owner rulings 2026-08-12: hold less](owner-rulings-2026-08-12-hold-less.md) — "almost NEVER Data Verify"; issues 120-125 cover WO subjects, defaults, inspection, zero, dup auto-reject, tags
 - [Registry-membership W/O ruling](owner-ruling-registry-membership-wo.md) — invert detection to board membership (issue 126); registry-validated subject W/O may waive tax hold
 - [UrlFetch quota is the ceiling](urlfetch-quota-is-the-ceiling.md) — 64-ticket sweep exhausted the daily quota 2026-08-13; resets 02:00 Central; check the exception before diagnosing code
-- [Overnight shift 2026-08-13](overnight-shift-2026-08-13.md) — 12 issues closed live-verified, 7 releases, Data-verify 60 to 34; Blueprint/perform API facts; subagent runner recipe
 - [Nightly orchestrator live](nightly-orchestrator-live.md) — KILLED 2026-08-25, task Disabled; fleet runs manual now; contract/log paths still valid
 - [Headless claude CLI auth dead](headless-claude-cli-auth-dead.md) — claude -p can't refresh (empty creds file); pin Opus 4.7 via opus47 agent type instead
-- [GL-uncovered bill: run pipeline yourself](gl-uncovered-bill-run-pipeline-yourself.md) — owner rebuke 2026-08-21: download bill's invoice from BILL, run extractor+GL match, propose GL; never park as "owner disposition"
+- [GL-uncovered bill: run pipeline yourself](gl-uncovered-bill-run-pipeline-yourself.md) — download the bill's invoice, run extractor+GL match, propose GL; never park as "owner disposition"
 - [Stacked PR base delete closes PR](stacked-pr-base-delete-closes-pr.md) — retarget stacked PRs to main BEFORE deleting base; closed PR can't reopen/retarget
 - [Workflow CRLF script trap](workflow-crlf-script-trap.md) — CRLF control-char rejection; run LF copy from scratchpad
-- [COA parent archive cascades](coa-parent-archive-cascades.md) — v3 parent archive cascades to children, restore does not; history-less victims invisible to preview; check postableAccounts ledger
-- [fetchAll burst limit + 502 partial runs](gas-fetchall-burst-and-502-cap.md) — fetchAll >100 trips urlfetch burst limit (chunk 20); scripts.run 502 can be 6-min cap with PARTIAL completion — re-measure, don't re-diagnose
+- [COA parent archive cascades](coa-parent-archive-cascades.md) — v3 parent archive cascades to children, restore does not; check postableAccounts for history-less victims
+- [fetchAll burst + 502 partials](gas-fetchall-burst-and-502-cap.md) — fetchAll >100 trips urlfetch burst (chunk 20); scripts.run 502 = 6-min cap with PARTIAL completion; re-measure first
 - [Owner actions are tickets](owner-actions-are-tickets.md) — human steps become ready-for-human issues at discovery; PR/HANDOFF/reply notes are burial sites
 - [Surface in chat, not docs](surface-in-chat-not-docs.md) — Dan never reads reports/HANDOFF/ADRs, rarely GitHub; owner decisions and must-knows go in plain-English chat too
 - [Next orchestrator run openers](next-orchestrator-run-openers.md) — run 317 enrichment + 275 Gas rename live halves from MAIN checkout before fleeting; keep them ready-for-human so fleet skips
 - [Capture, don't build, on credits](capture-dont-build-on-credits.md) — owner approval = ticket + pickup command, never unbidden implementation; builds need explicit "run it"
 - [Project value rationale](project-value-rationale.md) — full why-does-this-exist case: ADR-0002 context + seat cost + bus factor; pricing audits & sub portal documented nowhere else
+- [Distributed docs self-contained](distributed-docs-self-contained.md) — owner directive 2026-08-25: staff-facing PDF/docx carry zero repo/ADR/path refs; verify extracted-text grep

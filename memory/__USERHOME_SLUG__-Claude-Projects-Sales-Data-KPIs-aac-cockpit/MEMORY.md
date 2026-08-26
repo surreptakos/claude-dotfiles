@@ -1,53 +1,48 @@
 # Memory index
 
-- [/project-harness skill](project-harness-skill.md) — reusable skill installing the full organization harness (labels, forms, dashboard, hooks, board) into any repo.
-
-- [Report-contract convergence](report-contract-convergence.md) — the approved 2026-07-28 contract, ADR-0023/0024, and the eleven-ticket frontier under .scratch/report-minimum/.
-
-- [Subagent model = Sonnet](subagent-model-sonnet.md) — spawn orchestration subagents with Sonnet, not Opus.
-- [Verify deploy via /exec fetch](verify-deploy-via-exec-fetch.md) — confirm a client-side change is live in prod without the login flow (doGet ships full client pre-auth).
-- [Deal-rot retired, deal-centric model now](deal-rot-retired-deal-centric-model.md) — the rot LEVEL engine (Healthy/Watch/Rotting/Rotten) is gone; Deal Health is a deal-centric problem-tag list (`dealProblems_`).
-- [The VP report is Mark's only authoring home](vp-report-is-marks-only-authoring-home.md) — Dan's rule, and the Sales Team authoring view that was retired for it.
-- [DOM repros go through jsdom in the scratchpad](dom-repro-via-jsdom-scratchpad.md) — Browser pane can't reach localhost; jsdom needs `runScripts: 'dangerously'` or inline `onblur` never fires.
-- [Tier touch cadence, set 2026-07-29](tier-touch-cadence-never-ratified.md) — A 3+QBR / B 2 / C 1 / D none, plus Dan's rule that undecided figures come from the GM column.
-- [Nothing lives only in chat](nothing-lives-only-in-chat.md) — file every human step and open question as a GitHub issue when raised; Dan assumes he remembers nothing.
-- [Surface everything in chat](surface-everything-in-chat.md) — Dan never reads reports/ADRs/HANDOFF and rarely GitHub; files are Claude's tools, decisions and findings get said in chat in plain English.
-- [Verify before filing, cite the check](verify-before-filing-cite-the-check.md) — stale notes read like facts; check git/sheet/code first and put the check in the issue.
-- [Live workbook id, service-account readable](live-workbook-id-sa-readable.md) — `AAC_Deal_Snapshots_2026` / `1IZZkTMjRRUEPAwQutlkMD5W6oh8Tiy4zQyH5pgqtG7Q`; read live state instead of calling it unknowable.
-- [Run a new capture early, don't wait for the trigger](run-early-dont-wait-for-the-trigger.md) — the first live run is where the real bugs are, and a failed scheduled run loses history forever.
-- [There is nothing to reconcile against — the snapshots ARE Zoho](usable-means-reconciled-against-an-independent-source.md) — verified means every figure is explained, not re-fetched; a demand I wrote and Dan struck.
-- [Git Bash /tmp is invisible to Windows python](git-bash-tmp-invisible-to-windows-python.md) — the silent no-op that rewrote two issue bodies unchanged; use the scratchpad path instead.
-- [Apps Script run attribution is not recoverable after the fact](apps-script-run-attribution-is-not-recoverable.md) — Cloud Logging says "unknown" and `processes.list` lacks the scope; record trigger-vs-hand at write time.
-- [A broken join looks exactly like zero coverage](broken-join-looks-like-zero-coverage.md) — prove the join resolved before allowing a verdict; refuse on provable conditions, never a guessed threshold.
-- [Zoho create_record mappings are API-editable](zoho-workflow-create-record-is-api-editable.md) — the by-id rule endpoint exposes and accepts what the list endpoint hides; criteria lives in `criteria_details`.
-- [Suppress triggers on AAC_Projects bulk writes](zoho-bulk-writes-need-trigger-suppression.md) — 16 repeat:false create_or_edit rules would fire for the first time on old records, deposit invoices included.
-- [clasp push never deletes remote files](clasp-push-never-deletes-remote-files.md) — a scratch file pushed to run something once stays in production; removal needs the API.
-- [Design work goes to Claude Design](design-work-goes-to-claude-design.md) — Design owns the frontend, I own the backend; includes the MCP + project id for pulling the board myself.
-- [Read the connector, not the local copy](read-the-connector-not-the-local-copy.md) — the on-disk design reference is a snapshot; check DesignSync before calling a board hook missing.
-- [Back up before a mutation test](mutation-test-backup-not-git-checkout.md) — `git checkout --` on a dirty file silently ate six uncommitted edits.
-- [The served board is executed by nothing](served-board-executed-by-nothing.md) — the gate renders the retired Dashboard_v2; run `tools/render-board.js` before believing the report is fine.
-- [Don't park a vague defect report](dont-park-a-vague-defect-report.md) — "doesn't look right" means go render the page, not ask Dan for a screenshot.
-- [Test-gate tickets #120/#121](test-gate-tickets-120-121.md) — the agreed fix for the blind gate, and why no acceptance criterion may name a commit hash.
-- [Backend only — the seam is the payload](backend-only-the-seam-is-the-payload.md) — data and logic are mine, markup/CSS/visual mechanisms are Dan's; stop at the payload and hand over.
-- [One owner per file](one-owner-per-file.md) — read each other's files, write only your own; the split landed 2026-08-02 (ADR-0026) and the first pull after it needed no hand-merge.
-- [Board values must be payload keys](board-values-must-be-payload-keys.md) — a getter renders as nothing and says nothing; only what `renderVals()` returns reaches a binding.
-- [Milestone map, re-cut 2026-08-02](milestone-map-2026-08-02.md) — M1 is Dan's parity signoff and nothing else; M6/M7/M8 hold what was blocking it without being parity.
-- [The perf bypass is gone](perf-bypass-is-live-and-expires.md) — removed 2026-08-02; the page always gates now, and here is what replaced it for measuring.
-- [Weekly payloads carry no roster key](weekly-payload-has-no-roster-key.md) — `attainment.roster` is month/quarter only; a rule that reads it passes every test and is false in production.
-- [Dan needs an editable week](dan-needs-an-editable-week.md) — he tests by typing; the owner is exempt from the publication lock, and a new gate must keep that true.
-- [A board pull is three files](a-board-pull-is-three-files.md) — the board, Matrix.dc.html and support.js move together; taking one is not taking the board.
-- [The served page runs in the Browser pane](the-served-page-runs-in-the-browser-pane.md) — `tools/preview-served-page.js` gives the real runtime locally; stop claiming render questions need the Apps Script sandbox.
-- [Measuring the deployed report](ops-endpoint-measurement-recipe.md) — where the ops secret lives, the POST-302 trap, and what each leg costs.
-- [Where the report's time goes](where-the-reports-time-goes.md) — re-measured after the fixes: the server legs are ~1.9s, and the client half is now the biggest unknown.
-- [Reproduce as the viewer who reported it](reproduce-as-the-viewer-who-reported-it.md) — "could not reproduce" needs the viewer, rep and week named; Dan tests as Sandbox Rep.
-- [board-logic.js escapes + CRLF](board-logic-source-uses-unicode-escapes.md) — why an Edit old_string silently fails to match there, and the splice that works instead.
-- [Two Claude profiles, work and personal](two-claude-profiles-work-and-personal.md) — the handoff tooling, and why `CLAUDE_CONFIG_DIR=~/.claude` quietly breaks the work profile.
-- [Pause on mid-turn messages](pause-on-midturn-messages.md) — a casual message during a long build is a steering attempt; ask before the next phase.
-- [Question stops work, answer in final text](question-stops-work-answer-in-final-text.md) — Dan's rule; mid-turn text can silently not render, so answers and deliverables go last, and "you didn't send it" is always believed.
-- [Prod freeze, Thursday promote](prod-freeze-thursday-promote.md) - board is live; pushes hit TEST deployment, prod changes Thursdays only (Dan 2026-08-10).
-- [Skills live in session-scoped paths](skills-live-in-session-scoped-paths.md) — a skill missing from `~/.claude` is not missing; three tiers, and how to make one durable.
-- [Design projects on the work account](design-projects-on-the-work-account.md) — which project is live, which design system is stale, and why the two transports disagree about what exists.
-- [Measurement tools must assert their subject](measurement-tools-must-assert-their-subject.md) — a diff tool that can't confirm WHAT it measured reports coverage it doesn't have; it must throw, not fall back.
-- [Closing keywords in commit bodies](closing-keywords-in-commit-bodies.md) — "closes #482's corruption vector" in prose auto-closed the issue on push to main.
-- [Nightly local ticket agent](nightly-local-ticket-agent.md) — Task Scheduler 11:05pm CT headless claude on ready-for-agent+backend tickets; disabled cloud twin trig_01WoV66…; CLI vs desktop auth gotchas.
-- [Workflow scripts: LF pin + session-start cache](workflow-scripts-lf-session-cache.md) — named Workflow invocation rejects \r and serves session-start cache; use {scriptPath} mid-session, fresh session for {name}.
+- [/project-harness skill](project-harness-skill.md) — reusable skill; installs org harness (labels, forms, dashboard, hooks, board) into any repo.
+- [Report-contract convergence](report-contract-convergence.md) — approved 2026-07-28; ADR-0023/0024; eleven-ticket frontier.
+- [Verify deploy via /exec fetch](verify-deploy-via-exec-fetch.md) — confirm client-side change is live without login flow.
+- [Deal-rot retired, deal-centric now](deal-rot-retired-deal-centric-model.md) — Deal Health is `dealProblems_` tags; rot LEVEL gone.
+- [VP report = Mark's only authoring home](vp-report-is-marks-only-authoring-home.md) — his independent analysis, not rep notes.
+- [DOM repros via jsdom](dom-repro-via-jsdom-scratchpad.md) — jsdom needs `runScripts: 'dangerously'` or inline `onblur` never fires.
+- [Tier touch cadence, 2026-07-29](tier-touch-cadence-never-ratified.md) — A 3+QBR / B 2 / C 1 / D none; undecided figures from GM column.
+- [Nothing lives only in chat](nothing-lives-only-in-chat.md) — file human steps as GitHub issues; Dan assumes he remembers nothing.
+- [Surface everything in chat](surface-everything-in-chat.md) — Dan rarely reads files/tracker; say decisions in chat.
+- [Verify before filing, cite check](verify-before-filing-cite-the-check.md) — check git/sheet/code first; put the check in the issue.
+- [Live workbook id, SA-readable](live-workbook-id-sa-readable.md) — `AAC_Deal_Snapshots_2026` / `1IZZkTMjRRUEPAwQutlkMD5W6oh8Tiy4zQyH5pgqtG7Q`.
+- [Run capture early, don't wait for trigger](run-early-dont-wait-for-the-trigger.md) — first live run surfaces bugs; failed trigger loses history.
+- [Snapshots ARE Zoho — nothing to reconcile](usable-means-reconciled-against-an-independent-source.md) — verified = every figure explained.
+- [Git Bash /tmp invisible to Windows python](git-bash-tmp-invisible-to-windows-python.md) — use scratchpad path; silent no-op trap.
+- [Apps Script run attribution not recoverable](apps-script-run-attribution-is-not-recoverable.md) — record trigger-vs-hand at write time.
+- [Broken join looks like zero coverage](broken-join-looks-like-zero-coverage.md) — prove join resolved; refuse on provable conditions.
+- [Zoho create_record mappings API-editable](zoho-workflow-create-record-is-api-editable.md) — by-id endpoint exposes what list hides.
+- [Suppress triggers on AAC_Projects bulk writes](zoho-bulk-writes-need-trigger-suppression.md) — 16 repeat:false rules fire once on old records.
+- [clasp push never deletes remote files](clasp-push-never-deletes-remote-files.md) — a scratch file stays in prod; removal needs API.
+- [Design goes to Claude Design](design-work-goes-to-claude-design.md) — Design owns frontend, I own backend; live id in [[design-projects-…]].
+- [Read connector, not local copy](read-the-connector-not-the-local-copy.md) — on-disk reference is a snapshot; check DesignSync first.
+- [Back up before mutation test](mutation-test-backup-not-git-checkout.md) — `git checkout --` on dirty file ate six uncommitted edits.
+- [Don't park a vague defect report](dont-park-a-vague-defect-report.md) — "doesn't look right" means go render the page.
+- [Backend only — seam is the payload](backend-only-the-seam-is-the-payload.md) — data/logic mine; markup/CSS/visual mechanisms Dan's.
+- [One owner per file](one-owner-per-file.md) — read each other's files, write only your own; split landed 2026-08-02 (ADR-0026).
+- [Board values must be payload keys](board-values-must-be-payload-keys.md) — a getter renders as nothing; only `renderVals()` reaches a binding.
+- [Milestone map, re-cut 2026-08-02](milestone-map-2026-08-02.md) — M1 = Dan's parity signoff; M6/M7/M8 hold the rest.
+- [Perf bypass is gone](perf-bypass-is-live-and-expires.md) — removed 2026-08-02; page always gates now; here's what replaced it.
+- [Weekly payloads have no roster key](weekly-payload-has-no-roster-key.md) — `attainment.roster` is month/quarter only; rule reading it fails live.
+- [Dan needs an editable week](dan-needs-an-editable-week.md) — he tests by typing; owner exempt from publication lock.
+- [A board pull is three files](a-board-pull-is-three-files.md) — the board, Matrix.dc.html and support.js move together.
+- [Served page runs in Browser pane](the-served-page-runs-in-the-browser-pane.md) — `tools/preview-served-page.js` gives real runtime locally.
+- [Measuring the deployed report](ops-endpoint-measurement-recipe.md) — ops-secret home, POST-302 trap, each leg's cost.
+- [Where the report's time goes](where-the-reports-time-goes.md) — server legs ~1.9s after 2026-08-02 fixes; client half unknown.
+- [Reproduce as the viewer who reported it](reproduce-as-the-viewer-who-reported-it.md) — Dan tests as Sandbox Rep.
+- [board-logic.js escapes + CRLF](board-logic-source-uses-unicode-escapes.md) — Edit old_string silently fails; splice by line index.
+- [Two Claude profiles, work + personal](two-claude-profiles-work-and-personal.md) — `CLAUDE_CONFIG_DIR=~/.claude` breaks work profile.
+- [Pause on mid-turn messages](pause-on-midturn-messages.md) — a casual mid-build message is a steering attempt; ask before next phase.
+- [Question stops work, answer in final text](question-stops-work-answer-in-final-text.md) — mid-turn text can silently not render.
+- [Prod freeze, Thursday promote](prod-freeze-thursday-promote.md) — pushes hit TEST; prod changes Thursdays only (Dan 2026-08-10).
+- [Skills in session-scoped paths](skills-live-in-session-scoped-paths.md) — missing from `~/.claude` != missing; three tiers.
+- [Design projects on work account](design-projects-on-the-work-account.md) — which project is live, which system is stale, why transports disagree.
+- [Measurement tools assert subject](measurement-tools-must-assert-their-subject.md) — diff tool must throw on subject mismatch, not fall back.
+- [Closing keywords in commit bodies](closing-keywords-in-commit-bodies.md) — "closes #482's corruption vector" auto-closed the issue on push.
+- [Nightly local ticket agent](nightly-local-ticket-agent.md) — Task Scheduler 11:05pm CT headless claude; currently disabled (2026-08-25).
+- [Workflow scripts: LF + session cache](workflow-scripts-lf-session-cache.md) — named form serves session-start cache; use `{scriptPath}`.

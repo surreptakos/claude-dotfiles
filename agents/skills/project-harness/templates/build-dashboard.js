@@ -25,10 +25,13 @@ const OUT = path.join(ROOT, 'DASHBOARD.md');
 function sh(cmd) { return execSync(cmd, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, cwd: ROOT }); }
 function ghJson(cmd) { try { return JSON.parse(sh(cmd)); } catch (e) { return null; } }
 function esc(s) { return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' '); }
-function ago(iso) {
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
-  return days <= 0 ? 'today' : days === 1 ? '1 day ago' : days + ' days ago';
-}
+// The "Updated" column and its attention-list mentions used to read as "N days ago" via a
+// relative-age helper. That value drifts every day the timestamp does not, so a nightly cron had
+// to regenerate the dashboard just to bump the labels — and every regeneration produced a
+// "chore: refresh dashboard" commit whether anything else moved or not. Issue 21 (claude-dotfiles,
+// 2026-08-26) killed both halves: emit the ISO calendar date instead so identical inputs produce
+// identical output, and drop the daily cron in `dashboard.yml` at the same time.
+function fmtDate(iso) { return String(iso || '').slice(0, 10); }
 
 const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
 const issues = ghJson('gh issue list --state open --limit 500 --json number,title,labels,assignees,updatedAt,url,body,subIssuesSummary,parent') || [];
@@ -151,7 +154,7 @@ const issueCols = [
   // nothing, and without it the relationship is only visible from the PRD side — someone scanning the issue
   // list cannot tell which tickets belong to an initiative and which are standalone.
   { h: 'From PRD', f: i => i.parent ? '#' + i.parent.number : '—' },
-  { h: 'Updated', f: i => ago(i.updatedAt) }
+  { h: 'Updated', f: i => fmtDate(i.updatedAt) }
 ];
 // The PRD table swaps "From PRD" (always blank on a parent) for the decomposition state.
 const prdCols = issueCols.slice(0, 4)
@@ -166,10 +169,10 @@ if (CONFIG.deployWorkflow) {
 if (tests && /FAILING/.test(tests)) attention.push('- **Test suite failing at this commit:** ' + tests);
 ['needs-triage', 'needs-info', 'ready-for-human'].forEach(k => {
   issues.filter(i => i.triage === k).forEach(i =>
-    attention.push('- **' + k + ':** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ago(i.updatedAt) + ')_'));
+    attention.push('- **' + k + ':** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + fmtDate(i.updatedAt) + ')_'));
 });
 issues.filter(i => i.type === 'bug').forEach(i =>
-  attention.push('- **open bug:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ago(i.updatedAt) + ')_'));
+  attention.push('- **open bug:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + fmtDate(i.updatedAt) + ')_'));
 
 issues.filter(i => i.type === 'prd' && !i.decomp.done).forEach(i =>
   attention.push('- **PRD not broken into tickets:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' — run `/to-tickets`'));
@@ -178,7 +181,7 @@ const prds = issues.filter(i => i.type === 'prd');
 const rest = issues.filter(i => i.type !== 'prd');
 
 const health = [];
-if (CONFIG.deployWorkflow) health.push('- **Deploy (`' + CONFIG.deployWorkflow + '`):** ' + (deploy ? (deploy.conclusion || deploy.status) + ' at `' + deploy.headSha.slice(0, 7) + '` (' + ago(deploy.updatedAt) + ') — [run](' + deploy.url + ')' : 'no runs found'));
+if (CONFIG.deployWorkflow) health.push('- **Deploy (`' + CONFIG.deployWorkflow + '`):** ' + (deploy ? (deploy.conclusion || deploy.status) + ' at `' + deploy.headSha.slice(0, 7) + '` (' + fmtDate(deploy.updatedAt) + ') — [run](' + deploy.url + ')' : 'no runs found'));
 if (tests) health.push('- **Test suite at this commit:** ' + tests);
 
 const md = [

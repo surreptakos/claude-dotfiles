@@ -1,26 +1,28 @@
 ---
 name: zoho-desk-access
-description: "Zoho Desk admin API/MCP access confirmed — prod + sandbox org IDs, edition, departments, and MCP surface limits"
-metadata: 
+description: "Zoho Desk access — prod org 874367220 (ZohoOne), 3 active departments incl AP; token PROD-bound with wide CRM+Desk superset; sandbox unreachable; MCP is ops-only"
+metadata:
   node_type: memory
   type: reference
   originSessionId: 778e1340-d671-4348-b1ce-71de6962e369
-  modified: 2026-08-25T14:15:12.951Z
+  modified: 2026-08-26T14:08:09.634Z
 ---
 
-**UPDATE 2026-08-25 — two bullets below are superseded:** sandbox `882152284` was abandoned
-2026-07-20 (replaced by `932165744`, itself unreachable since the #61 token swap — no working
-sandbox Desk credential exists; see [[zoho-desk-token-scope]]). Prod now has THREE active
-departments: **AP** (`1073870000032818112`, the configured intake one), Active Alarm Company, and
-OSH Service — confirmed live by `deskDepartmentConfigDiag`, which exists because a stale comment
-claimed AP was never created. Check that diagnostic, not this list.
+## Live account facts
 
-Confirmed 2026-07-17 via the connected Zoho Desk MCP: the session has **admin** API access (`isAdminInOrg: true`) to Active Alarm's Desk.
+- **Prod portal** "Active Alarm Company" — orgId `874367220`, edition **ZohoOne** (Enterprise-tier Desk features, incl. Deluge and multi-department). primaryContact dgatsakos.
+- **Prod departments (three active):** **AP** (`1073870000032818112`, the configured intake one), **Active Alarm Company**, and **OSH Service**. Confirm live with `deskDepartmentConfigDiag` — that diagnostic exists because a stale comment claimed AP was never created. Check the diagnostic, not this list.
+- **Sandbox is unreachable.** Previous sandboxes (`882152284`, then `932165744`) are abandoned; the current PROD-bound token 403s `OAUTH_ORG_MISMATCH` on every org-scoped sandbox call. No working sandbox Desk credential exists. Sandbox work would need a fresh sandbox-portal grant (portal-bound rule below).
+- **MCP session** has admin API access (`isAdminInOrg: true`) — confirmed 2026-07-17.
 
-- **Prod portal** "Active Alarm Company" — orgId `874367220`, edition **ZohoOne** (so Enterprise-tier Desk features are available, incl. Deluge and multi-department). primaryContact dgatsakos.
-- **Sandbox portal (ABANDONED, see update above)** — orgId `882152284`, edition Enterprise, `isSandboxPortal: true`, primaryContact nremblake.
-- **Prod departments (STALE, see update above):** "Active Alarm Company" (default, id `1073870000000006907`) and "OSH Service" / Oak Street Health Service (id `1073870000000808039`). AP invoices are ~all Oak Street Health work, so the OSH structure is relevant.
+## Token binding
 
-**MCP surface is operations-only:** tickets, comments, threads, replies, contacts, accounts, calls/events/tasks, plus read-only orgs/departments/reply-mail-addresses. It does NOT expose provisioning (create department / custom field / status / webhook / email channel). Those require the **Desk REST API with an admin (Desk.settings) OAuth token** — the plan is to drive them as GAS setup functions reading creds from Script Properties, sandbox-first then prod, per [[gas-verification-loop]]. The M365 auto-forward rule and email-channel verification have no API path from here (M365 connector is read/search only).
+- **The current `ZOHO_REFRESH_TOKEN` is PROD-bound and wide** — carries `ZohoCRM.modules.ALL ZohoCRM.settings.ALL ZohoCRM.users.ALL ZohoCRM.org.ALL ZohoCRM.bulk.ALL ZohoCRM.notifications.ALL ZohoCRM.coql.READ Desk.tickets.ALL Desk.contacts.ALL Desk.tasks.ALL Desk.basic.ALL Desk.settings.ALL Desk.events.ALL Desk.articles.ALL Desk.search.READ` (installed 2026-08-05, #61). Superset of everything the pipeline uses. Prior Desk-only token in `ZOHO_REFRESH_TOKEN_BAK`; `zohoTokenRestore()` rolls back.
+- **A Desk OAuth token is portal-bound** — one token does not serve both portals. A prod-context grant answers 200 for prod and 403 `OAUTH_ORG_MISMATCH` for sandbox on every org-scoped call, while org-agnostic `GET /organizations` still lists both. At any future prod+sandbox split, store both refresh tokens (e.g. `ZOHO_REFRESH_TOKEN_SANDBOX` / `_PROD`) and select by portal — not just swap `DESK_ORG_ID`.
+- **Lesson: Dan holds wide tokens from this self-client — ask him for one before prescribing the api-console grant ceremony.** OAuth refresh does not escalate scope; a new grant is minted only in `api-console.zoho.com` behind an admin login. Probe candidates with `zohoToken2Probe` (statuses only, never prints values); promote with `zohoTokenPromote2`. Live-portal check: `zohoWhichPortal` (read-only, probes both org ids).
 
-Part of the Desk-channel AP intake work (`.scratch/desk-channel-intake/`, ADR-0002).
+## MCP surface — ops only
+
+The connected Desk MCP exposes tickets, comments, threads, replies, contacts, accounts, calls/events/tasks, plus read-only orgs/departments/reply-mail-addresses. It does NOT expose provisioning (create department / custom field / status / webhook / email channel). Those go through the Desk REST API with the wide token above.
+
+Part of the Desk-channel AP intake work (`.scratch/desk-channel-intake/`, ADR-0002). See [[gas-verification-loop]], [[desk-provisioning-api-facts]].

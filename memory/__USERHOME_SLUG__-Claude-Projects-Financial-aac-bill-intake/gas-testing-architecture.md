@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 775b530f-7299-4b6d-b767-b407e67616c7
-  modified: 2026-08-25T14:15:15.221Z
+  modified: 2026-08-26T14:07:45.829Z
 ---
 
 The `gas/` Apps Script project has no native typechecker or test runner, and its platform
@@ -22,6 +22,7 @@ globals (GmailApp/SpreadsheetApp/UrlFetchApp/Claude) only exist in Google's clou
 - **"Typecheck" = parse check:** `node --check` rejects `.gs`, so copy to a temp `.js` first:
   `cp Code.gs /tmp/Code.js && node --check /tmp/Code.js`. `core.js` checks directly.
 - **`.claspignore`** keeps `core.test.js`, `README.md`, dev files out of `clasp push`.
+- **Extraction-eval fixtures require human ground truth from the source PDF — never `expected` = live extractor output.** `gas/eval/fixtures.js` (git-ignored) once carried placeholder `total`/`invoiceDate` values that masqueraded as ground truth; the 31% match rate was stale fixture data, not an extraction defect (resolved 2026-07-17 by reading four AP PDFs by eye). The file lives only in the main checkout and is pushed to GAS, so run clasp only from main to avoid deleting git-ignored fixtures/GlData/AliasData.
 
 The GAS-IO paths (Gmail/Sheets/Claude calls) can't be unit-tested locally — they're covered by
 the structural+behavioral audit and a BILL **sandbox** run. Split-coded stop-gate threshold is

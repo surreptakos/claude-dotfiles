@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: caed4690-20fa-4c8b-871e-797bc5542b44
-  modified: 2026-08-25T13:00:42.257Z
+  modified: 2026-08-26T13:56:44.082Z
 ---
 
 **2026-08-25 rulings (Dan, in chat):** (1) Task stays DISABLED — Dan disabled it himself on 8/24, deliberately; do not re-arm without his word. (2) Merge policy: agent MERGES its own PRs after full verification — #485 restored, the 08-24 never-merge contract reversed; ORCHESTRATOR.md updated (commit 6318bee), prompt.md re-synced hash-identical. Merge = TEST deploy only; prod stays Thursday promote. #537 closed with all three answers.
@@ -23,4 +23,4 @@ Set up 2026-08-18. Local nightly autonomous ticket agent:
 - **Cloud twin:** routine `trig_01WoV66mpZFy3Wf3Z4MvGpuz` ("Nightly ticket agent — aac-cockpit", cron `0 4 * * *` UTC) created same day, now `enabled: false`. Fallback if PC won't be on — re-enable at https://claude.ai/code/routines/trig_01WoV66mpZFy3Wf3Z4MvGpuz, but disable one of the two: both fire ~11pm CT and would duplicate PRs.
 - **Gotchas learned:** stored CLI OAuth credential (`~/.claude/.credentials.json`) died with `expiresAt: 0` and could not refresh while desktop app kept working — desktop and CLI auth are separate. `claude setup-token` prints its token only in a real interactive terminal, after browser approval, and saves it nowhere. First `token.txt` paste was corrupted (wrong from char 14); a 401 from a hand-pasted token means diff the file against the source before re-running the flow. Dan's token from this setup is exposed in the 2026-08-18 session transcript — rotation is his call.
 
-Related: [[subagent-model-sonnet]] (agent runs claude-sonnet-5), [[prod-freeze-thursday-promote]] (merged PRs still only ship TEST until Thursday promote).
+Related: [[prod-freeze-thursday-promote]] (merged PRs still only ship TEST until Thursday promote).

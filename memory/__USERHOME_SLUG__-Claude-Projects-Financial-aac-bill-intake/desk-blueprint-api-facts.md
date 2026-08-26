@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 53abe6ea-c9c1-4c7f-81be-a658ee95927a
-  modified: 2026-08-05T22:05:23.104Z
+  modified: 2026-08-26T14:04:37.618Z
 ---
 
 Measured live 2026-08-05 (`deskBlueprintBisect`, 4 rounds, on prod org 874367220) while installing #8:
@@ -24,10 +24,13 @@ Measured live 2026-08-05 (`deskBlueprintBisect`, 4 rounds, on prod org 874367220
 - **Enforcement is OFF for an API-created Blueprint and switches ON at editor Publish.** Pre-publish,
   direct API status writes on captured tickets went through (proved on AP-38 both directions);
   post-publish the same write answers **HTTP 403** and only the Blueprint's transitions move the
-  ticket. Perform one via `POST /tickets/{id}/transitions/{transitionId}/perform` →
-  `200 {"updatedState":"..."}` (the `/blueprint/transitions/.../perform` spelling is a 404).
-  Mandatory during-fields are enforced on the perform. `deskSetGateStage_` carries the 403→transition
-  fallback since 9f100a6.
+  ticket. A captured ticket refuses status writes in TWO shapes: 422 naming the blueprint, and a
+  BARE 403 `FORBIDDEN` carrying no blueprint word — detect both (`blueprintRefusalOfStatus`;
+  measured 2026-08-13). Perform via `POST /tickets/{id}/transitions/{transitionId}/perform` →
+  `200 {"updatedState":"..."}` (the `/blueprint/transitions/.../perform` spelling is a 404);
+  perform refuses ANY field envelope (`"An extra parameter 'cf' is found"`), so land cf via
+  PATCH first and perform bare. Mandatory during-fields are still enforced on the perform.
+  `deskSetGateStage_` carries the 403→transition fallback since 9f100a6.
 - Ticket tags: `POST /tickets/{id}/associateTag {"tags":["name"]}` (creates the tag if new);
   `/tickets/{id}/tags` is GET-only; `dissociateTag` removes. PATCHing `tags` on the ticket is
   refused.
