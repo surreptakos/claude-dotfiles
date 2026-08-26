@@ -129,8 +129,15 @@ the mirror). `tools/dotfiles-freshness.ps1` reads that stamp, fetches origin, an
 - **synced** or **unknown (no stamp)** — silent.
 - **state1** (origin ahead, live matches stamp) — auto-installs (`git pull --ff-only` +
   `sync.ps1 -Mode pull`), reports the commits landed.
-- **state2** (live edited since last sync, origin not ahead) — report only, at start and end. Live
-  edits are routine; a blocker here would fire constantly and get disabled (secret-guard principle).
+- **state2** (live edited since last sync, origin not ahead) — session-start auto-captures
+  and pushes (`sync.ps1 -Mode push -Commit "chore: session-start capture"` then `git push`;
+  fixed commit prefix so history is grep-able). Pairs with the state1 auto-resolver: together
+  they make state3 impossible outside a real merge conflict. Failure is non-blocking: the
+  hook falls back to the old advisory with the failure reason appended, and the session
+  continues. Session-end still reports state2 for edits made *during* the session. Set
+  `DOTFILES_AUTO_PUSH=0` to disable the auto-push (advisory-only, previous behavior).
+  The origin-ahead-ineligible variant (behind>0, live clean — a feature branch or worktree)
+  stays a manual-pull advisory; pushing would not help.
 - **state3** (both directions diverged) — HARD BLOCK: `UserPromptSubmit` hook exits 2 with the
   resolution commands on stderr (documented Claude Code mechanism for refusing a prompt).
   Resolution order: push live first, `git pull --rebase`, `git push`, then `sync.ps1 -Mode pull`.
@@ -141,10 +148,18 @@ that is deliberate. An earlier attempt at this issue put the hooks inside the mi
 `~/.claude` counterparts and the next routine `sync.ps1 -Mode push` would have wiped them.
 
 Auto-pull is guarded twice: the classifier requires `-not $liveDrift` for state1, and
-`install-state1` mode re-classifies before running anything. Tests:
-`tools/dotfiles-freshness-hook.test.js` (Node, 8 cases) and `tests/dotfiles-freshness.tests.ps1`
-(PowerShell, 18 cases including all four states and the stamp round-trip). Both run inside
-`tests/restore-test.ps1` as part of the standard test suite.
+`install-state1` mode re-classifies before running anything. Auto-push is guarded the same
+way, and by the same shape: `push-state2` mode re-classifies and refuses unless state=state2,
+liveDrift=true, behind=0, ahead=0, AND isWorktree=false. The ahead/isWorktree half of that
+list matches install-state1's `-not $repo.isWorktree` clause and is not decorative - this
+repo runs many concurrent agent worktrees, each on its own feature branch, and a SessionStart
+hook fired inside one of those must NEVER auto-commit dotfiles-sync work onto the wrong
+branch (it would pollute the ticket's diff). Tests: `tools/dotfiles-freshness-hook.test.js`
+(Node, 12 cases including state2 auto-push success, auto-push failure fallback, the
+origin-ahead-ineligible variant, and the worktree / ahead>0 guards that refuse the auto-push
+outright) and `tests/dotfiles-freshness.tests.ps1` (PowerShell, 25 assertions including all
+four states, the stamp round-trip, push-state2's state3 refusal, and push-state2's worktree
+refusal). Both run inside `tests/restore-test.ps1` as part of the standard test suite.
 
 ## Related
 
