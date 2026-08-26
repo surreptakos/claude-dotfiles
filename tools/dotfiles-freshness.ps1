@@ -29,6 +29,12 @@
     classify       Print JSON state + counts + resolution commands. Read-only.
     install-state1 Auto-heal state1: git pull --ff-only, then sync.ps1 -Mode pull.
                    Refuses if a fresh classify does not return state1.
+    push-state2    Auto-capture state2 (live drift): sync.ps1 -Mode push -Commit "chore:
+                   session-start capture", then git push. Refuses unless a fresh classify
+                   returns state2 with liveDrift=true and behind=0 (no incoming commits).
+                   This is issue 19 - pairs with the state1 auto-resolver to prevent state3
+                   accumulation. Failure returns ok:false with a reason; the driver falls
+                   back to the state2 advisory rather than blocking the session.
     stamp          Write an initial stamp (install.ps1 uses this after the first pull).
 
 .PARAMETER RepoRoot
@@ -46,7 +52,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('classify', 'install-state1', 'stamp')][string]$Mode = 'classify',
+    [ValidateSet('classify', 'install-state1', 'push-state2', 'stamp')][string]$Mode = 'classify',
     [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)),
     [string]$UserHome = $env:USERPROFILE,
     [switch]$SkipFetch
@@ -319,6 +325,96 @@ switch ($Mode) {
             installed       = $report.incomingCommits
             newHead         = $newHead
             steps           = $steps
+        }
+        Write-Output (ConvertTo-Json $result -Depth 6)
+        exit 0
+    }
+    'push-state2' {
+        # Guard: classify FIRST, refuse unless we still see state2 with live drift, no
+        # incoming commits, AND we are not sitting on a worktree/feature branch. This
+        # mirrors install-state1's guard-first pattern, INCLUDING install-state1's
+        # `-not $repo.isWorktree` clause - `Get-RepoState` sets isWorktree=true whenever
+        # `.git/worktrees/` appears in the git-dir path, and this repo is used by many
+        # concurrent agent worktrees. Without this clause, a SessionStart hook fired inside
+        # a ticket's worktree would auto-commit and push the "chore: session-start capture"
+        # commit onto that feature branch, polluting the ticket's diff. Refuses on state1
+        # (auto-pull's job), state3 (needs manual merge), origin-ahead-ineligible state2
+        # (behind>0, liveDrift=false), and the worktree/feature-branch shape (isWorktree=true
+        # OR ahead>0 - pushing there would move the wrong branch).
+        $report = Get-Classification
+        $behind = 0
+        $ahead = 0
+        $isWorktree = $false
+        if ($null -ne $report.repo -and ($report.repo -is [hashtable])) {
+            if ($report.repo.ContainsKey('behind'))     { $behind     = [int]$report.repo['behind'] }
+            if ($report.repo.ContainsKey('ahead'))      { $ahead      = [int]$report.repo['ahead'] }
+            if ($report.repo.ContainsKey('isWorktree')) { $isWorktree = [bool]$report.repo['isWorktree'] }
+        } elseif ($null -ne $report.repo) {
+            if ($report.repo.PSObject.Properties.Name -contains 'behind')     { $behind     = [int]$report.repo.behind }
+            if ($report.repo.PSObject.Properties.Name -contains 'ahead')      { $ahead      = [int]$report.repo.ahead }
+            if ($report.repo.PSObject.Properties.Name -contains 'isWorktree') { $isWorktree = [bool]$report.repo.isWorktree }
+        }
+        if ($report.state -ne 'state2' -or (-not $report.liveDrift) -or $behind -gt 0 -or $ahead -gt 0 -or $isWorktree) {
+            $err = [ordered]@{
+                ok         = $false
+                reason     = ('refused: state is {0} (liveDrift={1}, behind={2}, ahead={3}, worktree={4})' -f $report.state, $report.liveDrift, $behind, $ahead, $isWorktree)
+                state      = $report.state
+                liveDrift  = $report.liveDrift
+                behind     = $behind
+                ahead      = $ahead
+                isWorktree = $isWorktree
+            }
+            Write-Output (ConvertTo-Json $err -Depth 4)
+            exit 1
+        }
+
+        $steps = @()
+        # 1. sync.ps1 -Mode push -Commit "chore: session-start capture" - fixed commit prefix
+        # for grep-ability across the history. sync.ps1 clears mirror roots, tokenizes home
+        # paths, runs the secret guard, and commits in one step - a follow-up `git commit`
+        # would run even if the secret guard exited 1, so the -Commit path is the safe one.
+        $syncPath = Join-Path $RepoRoot 'sync.ps1'
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $syncOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $syncPath -Mode push -Commit 'chore: session-start capture' -UserHome $UserHome 2>&1 | Out-String
+        $syncExit = $LASTEXITCODE
+        $ErrorActionPreference = $prev
+        $steps += [ordered]@{ step = 'sync.ps1 -Mode push -Commit'; exit = $syncExit; output = $syncOut.Trim() }
+        if ($syncExit -ne 0) {
+            # Trim the sync output to the last decisive line - full push output is too noisy
+            # to inject as hook context, and the driver prints the reason unedited.
+            $lastLine = ''
+            if ($syncOut) {
+                $trimmed = $syncOut.Trim()
+                $parts = $trimmed -split "`n"
+                $lastLine = ($parts[$parts.Count - 1]).Trim()
+            }
+            $reason = 'sync.ps1 -Mode push failed'
+            if ($lastLine) { $reason = 'sync.ps1 -Mode push failed: ' + $lastLine }
+            Write-Output (ConvertTo-Json ([ordered]@{ ok = $false; reason = $reason; steps = $steps }) -Depth 6)
+            exit 1
+        }
+
+        # 2. git push - Invoke-Git already clears GIT_* env vars and separates stderr, which
+        # matters because git writes benign warnings there and $ErrorActionPreference=Stop
+        # would treat them as terminating. See sync.ps1 comments for the same gotcha.
+        $pushGit = Invoke-Git @('push')
+        $steps += [ordered]@{ step = 'git push'; exit = $pushGit.ExitCode; output = $pushGit.Output; stderr = $pushGit.Stderr }
+        if ($pushGit.ExitCode -ne 0) {
+            $reason = 'git push failed'
+            if ($pushGit.Stderr) {
+                $firstLine = ($pushGit.Stderr -split "`n")[0].Trim()
+                if ($firstLine) { $reason = 'git push failed: ' + $firstLine }
+            }
+            Write-Output (ConvertTo-Json ([ordered]@{ ok = $false; reason = $reason; steps = $steps }) -Depth 6)
+            exit 1
+        }
+
+        $newHead = (Invoke-Git @('rev-parse', 'HEAD')).Output
+        $result = [ordered]@{
+            ok      = $true
+            pushed  = $newHead
+            steps   = $steps
         }
         Write-Output (ConvertTo-Json $result -Depth 6)
         exit 0

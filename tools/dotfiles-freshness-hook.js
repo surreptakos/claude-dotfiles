@@ -11,15 +11,22 @@
  *
  * MODES
  *   session-start   run classifier; if state1, run install-state1 and inject the
- *                   commit list the auto-install landed. Otherwise inject nothing
- *                   for `synced`/`unknown`, a warn block for `state2`, a warn
- *                   block for `state3` (the block itself lives at UserPromptSubmit).
+ *                   commit list the auto-install landed; if state2 with live drift
+ *                   AND no incoming commits, run push-state2 (issue 19: sync push +
+ *                   git push, fixed commit "chore: session-start capture") and inject
+ *                   the outcome, or fall back to the state2 advisory with the failure
+ *                   reason appended when the push failed. Otherwise inject nothing for
+ *                   `synced`/`unknown`, a warn block for the origin-ahead-ineligible
+ *                   variant of `state2`, a warn block for `state3` (the block itself
+ *                   lives at UserPromptSubmit).
  *   prompt          run classifier; on state3, EXIT 2 with the resolution commands
  *                   on stderr - Claude Code treats a UserPromptSubmit hook exit 2
  *                   as a block on the prompt, and stderr is passed back to the
  *                   model. Every other state stays silent.
  *   session-end     run classifier; on state2 or state3, inject a warn so the
- *                   end audit records the drift alongside anything unpushed.
+ *                   end audit records the drift alongside anything unpushed. The
+ *                   session-start auto-push clears most state2s before this fires,
+ *                   but a live edit made DURING the session lands here.
  *
  * WHY UserPromptSubmit for the block, not SessionStart
  *   SessionStart hooks in Claude Code can only INJECT context; they cannot refuse
@@ -47,9 +54,11 @@ const path = require('node:path');
 const REPO = process.env.DOTFILES_REPO_ROOT || repoRoot(process.cwd());
 const TOOL = process.env.DOTFILES_FRESHNESS_TOOL || path.join(REPO, 'tools', 'dotfiles-freshness.ps1');
 const AUTO_INSTALL = process.env.DOTFILES_AUTO_INSTALL !== '0';
+const AUTO_PUSH    = process.env.DOTFILES_AUTO_PUSH    !== '0';
 const SKIP_FETCH   = process.env.DOTFILES_SKIP_FETCH === '1';
 const CLASSIFY_TIMEOUT_MS = Number(process.env.DOTFILES_CLASSIFY_TIMEOUT_MS || 20000);
-const INSTALL_TIMEOUT_MS  = Number(process.env.DOTFILES_INSTALL_TIMEOUT_MS || 90000);
+const INSTALL_TIMEOUT_MS  = Number(process.env.DOTFILES_INSTALL_TIMEOUT_MS  || 90000);
+const PUSH_TIMEOUT_MS     = Number(process.env.DOTFILES_PUSH_TIMEOUT_MS     || 120000);
 const USER_HOME = process.env.DOTFILES_USER_HOME || os.homedir();
 
 function repoRoot(from) {
@@ -71,7 +80,9 @@ function runTool(mode) {
     : [TOOL, '--mode', mode, '--repo', REPO, '--home', USER_HOME];
   if (SKIP_FETCH && mode === 'classify') { args.push(isPs ? '-SkipFetch' : '--skip-fetch'); }
   const cmd = isPs ? 'powershell' : process.execPath;
-  const timeout = mode === 'install-state1' ? INSTALL_TIMEOUT_MS : CLASSIFY_TIMEOUT_MS;
+  let timeout = CLASSIFY_TIMEOUT_MS;
+  if (mode === 'install-state1') timeout = INSTALL_TIMEOUT_MS;
+  else if (mode === 'push-state2') timeout = PUSH_TIMEOUT_MS;
   let stdout = '', code = 0;
   try {
     stdout = execFileSync(cmd, args, {
@@ -147,6 +158,38 @@ function formatState1Refused(report, install) {
   ].join('\n');
 }
 
+function formatState2Pushed(report, push) {
+  // Issue 19: state2 with live drift auto-captured and pushed at session start. Pairs with
+  // the state1 auto-resolver to make state3 impossible outside a real merge conflict - a
+  // subsequent classify (after the stamp sync.ps1 writes) reports 'synced'.
+  const parts = [
+    'DOTFILES FRESHNESS: live-side drift auto-captured and pushed at session start.',
+    '',
+    'Ran: sync.ps1 -Mode push -Commit "chore: session-start capture"',
+    'Then: git push',
+  ];
+  if (push && push.pushed) {
+    parts.push('', 'New HEAD on origin: ' + push.pushed);
+  }
+  parts.push(
+    '',
+    'A fresh classify would now report `synced`. No action needed.',
+  );
+  return parts.join('\n');
+}
+
+function formatState2AutoPushFailed(report, push) {
+  // On failure the base state2 advisory is preserved so the resolution commands are visible;
+  // the failure reason is appended so the operator can see what went wrong without hunting
+  // logs. Never blocks - state2 is a report-only classification by design.
+  const base = formatState2(report, false);
+  const reason = (push && push.reason) || 'auto-push failed (no reason returned)';
+  return base + '\n\n' + [
+    'AUTO-PUSH FAILED: ' + reason,
+    'Session continues; run the commands above manually when convenient.',
+  ].join('\n');
+}
+
 function formatState2(report, atEnd) {
   const prefix = atEnd
     ? 'DOTFILES FRESHNESS (END): live-side drift is unpushed alongside any commits above.'
@@ -203,7 +246,36 @@ function modeSessionStart() {
   }
 
   if (report.state === 'synced' || report.state === 'unknown') { emitSilent(); return; }
-  if (report.state === 'state2') { emitContext(formatState2(report, false)); return; }
+  if (report.state === 'state2') {
+    // Issue 19: auto-capture live drift when it is the only thing wrong AND we are safely
+    // on the tracking branch. The classifier returns state2 in two shapes: (a) liveDrift=true
+    // and behind=0, safe to auto-push; (b) origin ahead but ineligible for state1 (worktree,
+    // or local commits ahead), where pushing would not help. Only shape (a) triggers the
+    // auto-push - shape (b) stays a manual-pull advisory. AUTO_PUSH=0 disables the mechanism
+    // entirely for debugging.
+    //
+    // Worktree/ahead-guard rationale (matches install-state1's `-not $repo.isWorktree`
+    // clause): this repo runs many concurrent agent worktrees, each on its own feature
+    // branch. A SessionStart hook fired inside one of those worktrees must NEVER auto-commit
+    // dotfiles-sync work onto that feature branch - it would pollute the ticket's diff.
+    // Reject both the worktree marker AND `ahead>0` (a plain checkout with unpushed local
+    // commits, e.g. mid-implementation on master) - either shape means pushing here would
+    // move the wrong branch. The classifier's push-state2 mode re-checks this same shape;
+    // the Node-side guard just spares the PowerShell round-trip in the common case.
+    const liveDrift  = report.liveDrift === true;
+    const repo       = report.repo || {};
+    const behind     = Number(repo.behind || 0) > 0;
+    const ahead      = Number(repo.ahead  || 0) > 0;
+    const isWorktree = repo.isWorktree === true;
+    if (!AUTO_PUSH || !liveDrift || behind || ahead || isWorktree) {
+      emitContext(formatState2(report, false));
+      return;
+    }
+    const push = runTool('push-state2');
+    if (push && push.ok) { emitContext(formatState2Pushed(report, push)); return; }
+    emitContext(formatState2AutoPushFailed(report, push || {}));
+    return;
+  }
   if (report.state === 'state3') { emitContext(formatState3(report, false)); return; }
 
   if (report.state === 'state1') {

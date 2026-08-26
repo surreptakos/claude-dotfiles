@@ -244,6 +244,49 @@ try {
     Assert 'install-state1 refusal names the state' (($null -ne $installReport) -and ($installReport.state -eq 'state3')) $r.Out
     Assert 'install-state1 refusal exits nonzero' ($r.Exit -ne 0) ("exit={0}" -f $r.Exit)
 
+    # push-state2 MUST refuse in state3 (auto-push guard - same principle as install-state1).
+    # Live drift is present, but so is an incoming commit; pushing here would leave origin
+    # ahead of local and the operator still owes a manual pull.
+    $r = Invoke-Tool -RepoRoot $local -UserHome $home2 -Mode 'push-state2'
+    $pushReport = Parse-Report $r.Out
+    Assert 'push-state2 refuses in state3' (($null -ne $pushReport) -and ($pushReport.ok -eq $false)) $r.Out
+    Assert 'push-state2 refusal names the state' (($null -ne $pushReport) -and ($pushReport.state -eq 'state3')) $r.Out
+    Assert 'push-state2 refusal exits nonzero' ($r.Exit -ne 0) ("exit={0}" -f $r.Exit)
+
+    # push-state2 MUST refuse when invoked inside a worktree - this repo runs many concurrent
+    # agent worktrees, each on its own feature branch, and auto-pushing "chore: session-start
+    # capture" onto a feature branch would pollute the ticket's diff. Matches install-state1's
+    # `-not $repo.isWorktree` clause. Set up: revert the live drift so classify returns
+    # state1-eligible on master; `git worktree add` off `feature/push-state2-guard` (branched
+    # from master) and push its upstream so the classifier can measure ahead/behind at all;
+    # then re-drift live and run push-state2 pointed at the worktree. Refusal is the pass
+    # condition; the reason string names the worktree flag so the operator can see WHY.
+    Set-Content -Path (Join-Path $home2 '.claude\CLAUDE.md') -Value "# fake CLAUDE.md" -Encoding utf8
+    $worktreePath = Join-Path $sandbox2 'worktree'
+    & git -C $local worktree add --quiet -b feature/push-state2-guard $worktreePath 2>&1 | Out-Null
+    # A brand-new branch has no upstream; without one the classifier returns state=unknown
+    # and the guard cannot see the worktree flag. Push once so `rev-parse @{u}` succeeds.
+    & git -C $worktreePath push --quiet -u origin feature/push-state2-guard 2>&1 | Out-Null
+    # Worktree shares tools/ and lib/ with the checkout by nature; still confirm.
+    Assert 'worktree carries the tool' (Test-Path (Join-Path $worktreePath 'tools\dotfiles-freshness.ps1')) $worktreePath
+    # Stamp against the worktree so live and stamp agree, then drift live to produce the
+    # state2 shape (drift + no incoming) with isWorktree=true.
+    Write-DotfilesStamp -RepoRoot $worktreePath -UserHome $home2 -Kind 'pull' | Out-Null
+    Add-Content -Path (Join-Path $home2 '.claude\CLAUDE.md') -Value "`nlocal edit for worktree test"
+    # push-state2 pointed at the worktree must refuse. The classifier reports state2 with
+    # isWorktree=true; the guard sees isWorktree and rejects even though the drift-shape would
+    # otherwise be eligible. Assertion is on ok:false + isWorktree:true, not on the state
+    # (though state=state2 is what actually flows through here).
+    $r = Invoke-Tool -RepoRoot $worktreePath -UserHome $home2 -Mode 'push-state2'
+    $pushReport = Parse-Report $r.Out
+    Assert 'push-state2 refuses in a worktree' (($null -ne $pushReport) -and ($pushReport.ok -eq $false)) $r.Out
+    Assert 'push-state2 refusal names the worktree flag' (($null -ne $pushReport) -and ($pushReport.isWorktree -eq $true)) $r.Out
+    Assert 'push-state2 worktree refusal exits nonzero' ($r.Exit -ne 0) ("exit={0}" -f $r.Exit)
+    # Tear the worktree down BEFORE the outer finally deletes the sandbox - git tracks it and
+    # would leave orphaned pointers under .git/worktrees/ otherwise. The state1 block below
+    # resets live itself, so no live-side restore is needed here.
+    & git -C $local worktree remove --force $worktreePath 2>&1 | Out-Null
+
     # STATE1 (origin ahead, live clean): revert live edit, re-stamp, then re-run classify.
     Set-Content -Path (Join-Path $home2 '.claude\CLAUDE.md') -Value "# fake CLAUDE.md" -Encoding utf8
     Write-DotfilesStamp -RepoRoot $local -UserHome $home2 -Kind 'pull' | Out-Null
