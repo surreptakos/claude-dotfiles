@@ -1,7 +1,16 @@
 name: Refresh dashboard
 
 # DASHBOARD.md stays accurate at the end of every commit and every tracker change:
-# every push to the default branch, every issue event, and a daily safety tick regenerate it.
+# every push to the default branch and every issue event regenerate it.
+#
+# NO SCHEDULE BLOCK (issue 21): DASHBOARD.md is drift-free -- its content depends only on the repo
+# state and tracker state, not on wall-clock time (see `ymd()` in scripts/build-dashboard.js, which
+# renders timestamps as YYYY-MM-DD from the source ISO rather than "N days ago" relative to now).
+# The daily 6am safety cron was there to catch label edits made outside events we listen to, but
+# the `issues.types: [labeled, unlabeled]` triggers below already cover that, and every extra
+# cron-driven refresh either committed an identical artifact (waste) or advanced master past state
+# stamps held by live copies (state3 lockups). Adding a cron back is a regression -- fix the
+# missing event trigger instead.
 #
 # INSTALL-TIME SUBSTITUTION: "main" appears TWICE below (push.branches and checkout.ref).
 # Replace both with the repo's actual default branch (git symbolic-ref refs/remotes/origin/HEAD).
@@ -14,8 +23,6 @@ on:
   issues:
     types: [opened, closed, reopened, edited, labeled, unlabeled, assigned, unassigned]
   workflow_dispatch:
-  schedule:
-    - cron: '0 11 * * *' # daily 6am CT safety refresh (catches label edits made outside events we listen to)
 
 concurrency:
   group: dashboard
