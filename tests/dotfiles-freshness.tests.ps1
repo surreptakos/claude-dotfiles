@@ -282,6 +282,60 @@ try {
     Assert 'push-state2 refuses in a worktree' (($null -ne $pushReport) -and ($pushReport.ok -eq $false)) $r.Out
     Assert 'push-state2 refusal names the worktree flag' (($null -ne $pushReport) -and ($pushReport.isWorktree -eq $true)) $r.Out
     Assert 'push-state2 worktree refusal exits nonzero' ($r.Exit -ne 0) ("exit={0}" -f $r.Exit)
+
+    # resolve-state3 (issue 18) MUST refuse when invoked inside a worktree. Same rationale as
+    # push-state2: this repo runs many concurrent agent worktrees, and an auto-resolve there
+    # would sync-push + git-push a "chore: capture live edits before pulling" commit onto the
+    # ticket's feature branch - exactly the pollution the previous attempt of this issue was
+    # caught doing on verification. Set-up: push an incoming commit onto the worktree branch's
+    # remote so the classifier sees state3 (behind>0 AND liveDrift), then invoke resolve-state3
+    # pointed at the worktree. Refusal is the pass condition, and the reason string must name
+    # BOTH the state and the worktree flag.
+    $branchHelper = Join-Path $sandbox2 ('branchhelper-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 4)))
+    & git clone --quiet -b feature/push-state2-guard $remote $branchHelper 2>&1 | Out-Null
+    & git -C $branchHelper config user.email "helper@example.com" | Out-Null
+    & git -C $branchHelper config user.name  "Helper" | Out-Null
+    Add-Content -Path (Join-Path $branchHelper 'README.md') -Value "`nincoming for worktree"
+    & git -C $branchHelper commit --quiet -am 'incoming for worktree state3 test' | Out-Null
+    & git -C $branchHelper push --quiet 2>&1 | Out-Null
+    Remove-Item -Path $branchHelper -Recurse -Force
+    # Confirm classify sees state3 (drift + incoming) inside the worktree.
+    $r = Invoke-Tool -RepoRoot $worktreePath -UserHome $home2 -Mode 'classify'
+    $classifyWt = Parse-Report $r.Out
+    Assert 'classify inside worktree with drift+incoming reports state3' `
+        (($null -ne $classifyWt) -and ($classifyWt.state -eq 'state3') -and $classifyWt.liveDrift) $r.Out
+    # And confirm the classifier also flagged isWorktree=true - the guard reads this field.
+    $classifyWtIsWorktree = $false
+    if ($null -ne $classifyWt -and ($classifyWt.PSObject.Properties.Name -contains 'repo') -and ($null -ne $classifyWt.repo)) {
+        if ($classifyWt.repo.PSObject.Properties.Name -contains 'isWorktree') {
+            $classifyWtIsWorktree = [bool]$classifyWt.repo.isWorktree
+        }
+    }
+    Assert 'classify reports isWorktree=true inside worktree' $classifyWtIsWorktree $r.Out
+    # Capture the worktree branch's remote HEAD BEFORE calling resolve-state3. If the guard is
+    # broken and the auto-resolve runs to completion, the remote HEAD will move; comparing the
+    # after-value against this before-value is the only proof that nothing shipped that survives
+    # a partial-run bug (a broken guard that ran only steps 1-3 before failing step 4 would
+    # STILL have polluted origin).
+    $preResolveRemoteHead = (& git ls-remote $remote refs/heads/feature/push-state2-guard 2>&1 | Out-String).Trim().Split("`t")[0]
+
+    # The guard-refusal we care about. If this REPORTS ok:true, the guard is broken and the
+    # test rig has just polluted feature/push-state2-guard on origin - the exact pre-verification
+    # failure. Refusal with isWorktree=true is the correctness proof.
+    $r = Invoke-Tool -RepoRoot $worktreePath -UserHome $home2 -Mode 'resolve-state3'
+    $resolveReport = Parse-Report $r.Out
+    Assert 'resolve-state3 refuses in a worktree' (($null -ne $resolveReport) -and ($resolveReport.ok -eq $false)) $r.Out
+    Assert 'resolve-state3 refusal names the worktree flag' (($null -ne $resolveReport) -and ($resolveReport.isWorktree -eq $true)) $r.Out
+    Assert 'resolve-state3 worktree refusal exits nonzero' ($r.Exit -ne 0) ("exit={0}" -f $r.Exit)
+
+    # Prove nothing shipped: the worktree branch's remote HEAD MUST equal what it was before we
+    # invoked resolve-state3. A moved HEAD means the guard let the auto-resolve run and the
+    # ticket branch got polluted - which is what the previous verification caught.
+    $postResolveRemoteHead = (& git ls-remote $remote refs/heads/feature/push-state2-guard 2>&1 | Out-String).Trim().Split("`t")[0]
+    Assert 'resolve-state3 in a worktree did not move the branchs remote HEAD (no pollution shipped)' `
+        ($postResolveRemoteHead -eq $preResolveRemoteHead) `
+        ("before={0}`nafter ={1}" -f $preResolveRemoteHead, $postResolveRemoteHead)
+
     # Tear the worktree down BEFORE the outer finally deletes the sandbox - git tracks it and
     # would leave orphaned pointers under .git/worktrees/ otherwise. The state1 block below
     # resets live itself, so no live-side restore is needed here.
