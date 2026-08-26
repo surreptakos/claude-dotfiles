@@ -1,7 +1,7 @@
 - [O3 prep date discipline](o3-prep-date-discipline.md) — absolute dates only, verify O3 date from calendar, applies to all directs
 - [Headless child isolation](headless-child-isolation.md) — CLAUDE_CONFIG_DIR recipe; bare claude -p children strangled by governance
-- [autocompact window mechanics](autocompact-window-mechanics.md) — setting loads at session start; /autocompact command changes live AND persists; 250k set 2026-08-18
+- [autocompact window mechanics](autocompact-window-mechanics.md) — setting loads at session start; /autocompact changes live and persists
 - [Status questions are not build orders](status-questions-not-build-orders.md) — report findings and wait for go; Dan starts builds
 - [Pre-send lint discipline](pre-send-lint-discipline.md) — lint to exit 0 before sending, fresh declare nonce each turn
-- [O3 prep surface outputs](o3-prep-surface-outputs.md) — attach both .docx to chat via SendUserFile at completion; never make Dan hunt OneDrive
-- [Org structure source of truth](o3-directs-include-techs.md) — read config/org-chart.yaml reports_to, not people.yaml manages; Rob=Projects, Nick=Services
+- [O3 prep surface outputs](o3-prep-surface-outputs.md) — SendUserFile every produced .docx at completion; agenda docx only when block authored
+- [Org structure source of truth](o3-directs-include-techs.md) — read org-chart.yaml reports_to, not people.yaml manages; Rob=Projects Nick=Services
