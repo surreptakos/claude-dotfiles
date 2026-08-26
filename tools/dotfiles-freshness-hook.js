@@ -19,10 +19,18 @@
  *                   `synced`/`unknown`, a warn block for the origin-ahead-ineligible
  *                   variant of `state2`, a warn block for `state3` (the block itself
  *                   lives at UserPromptSubmit).
- *   prompt          run classifier; on state3, EXIT 2 with the resolution commands
- *                   on stderr - Claude Code treats a UserPromptSubmit hook exit 2
- *                   as a block on the prompt, and stderr is passed back to the
- *                   model. Every other state stays silent.
+ *   prompt          run classifier; on state3, first try `resolve-state3` when the
+ *                   local checkout is eligible (liveDrift=true, behind>0, ahead=0,
+ *                   NOT a worktree) - the .ps1 runs sync push + git pull --rebase
+ *                   + git push + sync pull. Clean rebase: inject a note the state
+ *                   is now synced and let the prompt through. Rebase conflict or
+ *                   any other failure, and any ineligible shape (worktree, ahead>0):
+ *                   EXIT 2 with the resolution commands on stderr, augmented with
+ *                   the conflicted-path list when the rebase produced one - Claude
+ *                   Code treats a UserPromptSubmit hook exit 2 as a block on the
+ *                   prompt, and stderr is passed back to the model. Every other
+ *                   state stays silent. Set DOTFILES_AUTO_RESOLVE_STATE3=0 to fall
+ *                   back to the pre-issue-18 behaviour (always block on state3).
  *   session-end     run classifier; on state2 or state3, inject a warn so the
  *                   end audit records the drift alongside anything unpushed. The
  *                   session-start auto-push clears most state2s before this fires,
@@ -55,10 +63,12 @@ const REPO = process.env.DOTFILES_REPO_ROOT || repoRoot(process.cwd());
 const TOOL = process.env.DOTFILES_FRESHNESS_TOOL || path.join(REPO, 'tools', 'dotfiles-freshness.ps1');
 const AUTO_INSTALL = process.env.DOTFILES_AUTO_INSTALL !== '0';
 const AUTO_PUSH    = process.env.DOTFILES_AUTO_PUSH    !== '0';
+const AUTO_RESOLVE = process.env.DOTFILES_AUTO_RESOLVE_STATE3 !== '0';
 const SKIP_FETCH   = process.env.DOTFILES_SKIP_FETCH === '1';
 const CLASSIFY_TIMEOUT_MS = Number(process.env.DOTFILES_CLASSIFY_TIMEOUT_MS || 20000);
 const INSTALL_TIMEOUT_MS  = Number(process.env.DOTFILES_INSTALL_TIMEOUT_MS  || 90000);
 const PUSH_TIMEOUT_MS     = Number(process.env.DOTFILES_PUSH_TIMEOUT_MS     || 120000);
+const RESOLVE_TIMEOUT_MS  = Number(process.env.DOTFILES_RESOLVE_TIMEOUT_MS  || 180000);
 const USER_HOME = process.env.DOTFILES_USER_HOME || os.homedir();
 
 function repoRoot(from) {
@@ -83,6 +93,7 @@ function runTool(mode) {
   let timeout = CLASSIFY_TIMEOUT_MS;
   if (mode === 'install-state1') timeout = INSTALL_TIMEOUT_MS;
   else if (mode === 'push-state2') timeout = PUSH_TIMEOUT_MS;
+  else if (mode === 'resolve-state3') timeout = RESOLVE_TIMEOUT_MS;
   let stdout = '', code = 0;
   try {
     stdout = execFileSync(cmd, args, {
@@ -228,6 +239,62 @@ function formatState3(report, atEnd) {
   return parts.join('\n');
 }
 
+function formatState3Resolved(report, resolve) {
+  // Issue 18: prompt-time auto-resolve landed. Injected as UserPromptSubmit additionalContext
+  // so the model knows what happened between "session opened in state3" (session-start's warn)
+  // and "state is now synced" (this note); the prompt itself proceeds unchanged.
+  const commits = report.incomingCommits || [];
+  const parts = [
+    'DOTFILES FRESHNESS: state3 auto-resolved at prompt (rebase was clean).',
+    '',
+    'Ran: sync.ps1 -Mode push -Commit "chore: capture live edits before pulling"',
+    'Then: git pull --rebase, git push, sync.ps1 -Mode pull',
+  ];
+  if (resolve && resolve.resolved) {
+    parts.push('', 'New HEAD on origin: ' + resolve.resolved);
+  }
+  if (commits.length) {
+    parts.push('', 'Commits merged in:', ...commits.map((c) => '  ' + c));
+  }
+  parts.push('', 'A fresh classify would now report `synced`. Proceeding with your prompt.');
+  return parts.join('\n');
+}
+
+function formatState3Conflict(report, resolve) {
+  // Rebase produced merge conflicts. The .ps1 aborted the rebase and returned the conflicted
+  // paths; surface them at the top of the block message so the operator can see immediately
+  // which files need attention before re-running the manual sequence.
+  const conflicted = (resolve && Array.isArray(resolve.conflictedPaths)) ? resolve.conflictedPaths : [];
+  const parts = [
+    'DOTFILES FRESHNESS STOP - state3 auto-resolve HIT MERGE CONFLICTS. Rebase aborted.',
+    '',
+  ];
+  if (conflicted.length) {
+    parts.push('Conflicted files (' + conflicted.length + '):');
+    parts.push(...conflicted.map((p) => '  ' + p));
+    parts.push('');
+  } else {
+    parts.push('(No conflicted-path list returned; check `git status`.)', '');
+  }
+  parts.push(
+    'The auto-capture commit ("chore: capture live edits before pulling") IS on your branch',
+    'and will be your merge base. Resolve by hand:',
+    '',
+    ...(report.resolution || []).map((c) => '  ' + c),
+    '',
+    'After resolving the conflicts and pushing, re-run `.\\sync.ps1 -Mode pull`.',
+  );
+  return parts.join('\n');
+}
+
+function formatState3ResolveFailed(report, resolve) {
+  // Non-conflict failure (network, auth, sync-push failed, sync-pull failed). Keep the standard
+  // state3 block message so the operator sees the manual path, and append the specific reason.
+  const reason = (resolve && resolve.reason) || 'unknown';
+  const base = formatState3(report, false);
+  return base + '\n\nAUTO-RESOLVE FAILED: ' + reason;
+}
+
 /* --------------------------------------------------------------------- modes */
 
 function modeSessionStart() {
@@ -299,7 +366,44 @@ function modePrompt() {
 
   if (report.state !== 'state3') { emitSilent(); return; }
 
-  // The block. Exit 2 tells Claude Code to refuse the prompt; stderr is fed back to the model.
+  // Issue 18: try to auto-resolve on state3 before blocking. Eligibility mirrors the .ps1's
+  // guard (which is the correctness contract - see resolve-state3 in dotfiles-freshness.ps1).
+  // The Node-side check is a fast pre-filter that spares the PowerShell round-trip and, more
+  // importantly, keeps a driver bug from routing an ineligible state3 (worktree/ahead>0) into
+  // an auto-resolve at all: the worktree guard IS the specific safeguard that failed the
+  // previous verification of this issue.
+  //
+  // Why the worktree/ahead guard belongs here even though the .ps1 also has it: this hook
+  // fires with cwd = agent's own worktree in this repo's normal parallel-agent workflow.
+  // Every ticket runs in its own worktree on its own feature branch. An auto-resolve there
+  // would `sync.ps1 -Mode push -Commit` (a commit on the ticket branch), then `git push` it
+  // to the branch's origin - polluting the ticket's diff and its PR. Match install-state1's
+  // `-not $repo.isWorktree` and push-state2's `-or $ahead -gt 0` clauses exactly.
+  const repo       = report.repo || {};
+  const liveDrift  = report.liveDrift === true;
+  const behind     = Number(repo.behind || 0) > 0;
+  const ahead      = Number(repo.ahead  || 0) > 0;
+  const isWorktree = repo.isWorktree === true;
+  const eligible   = AUTO_RESOLVE && liveDrift && behind && !ahead && !isWorktree;
+
+  if (eligible) {
+    const resolve = runTool('resolve-state3');
+    if (resolve && resolve.ok) {
+      // Success: inject a note and let the prompt through. Exit 0, no stderr.
+      emitContext(formatState3Resolved(report, resolve));
+      return;
+    }
+    // Failure: block, and use the conflict-aware wording when the .ps1 returned a path list.
+    const conflicted = resolve && Array.isArray(resolve.conflictedPaths) && resolve.conflictedPaths.length > 0;
+    const message = conflicted
+      ? formatState3Conflict(report, resolve)
+      : formatState3ResolveFailed(report, resolve || {});
+    process.stderr.write(message + '\n');
+    process.exit(2);
+    return;
+  }
+
+  // Ineligible (worktree, ahead>0, auto-resolve disabled): block with the standard message.
   process.stderr.write(formatState3(report, false) + '\n');
   process.exit(2);
 }

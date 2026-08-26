@@ -49,6 +49,11 @@ function ensureStub() {
     "  process.stdout.write(JSON.stringify(push));",
     "  process.exit(push.ok === false ? 1 : 0);",
     "}",
+    "if (mode === 'resolve-state3') {",
+    "  const resolve = fixture.resolveState3 || { ok: true, resolved: 'stub-rebased-head', steps: [{ step: 'sync push', exit: 0 }, { step: 'git pull --rebase', exit: 0 }, { step: 'git push', exit: 0 }, { step: 'sync pull', exit: 0 }] };",
+    "  process.stdout.write(JSON.stringify(resolve));",
+    "  process.exit(resolve.ok === false ? 1 : 0);",
+    "}",
     "if (mode === 'stamp') { process.stdout.write(JSON.stringify({ ok: true, stampPath: '/stub' })); process.exit(0); }",
     "process.stdout.write(JSON.stringify({ ok: false, error: 'unknown mode ' + mode })); process.exit(1);",
   ].join('\n');
@@ -72,6 +77,9 @@ function sandbox() {
     },
     setClassifyAndPush(report, pushState2) {
       fs.writeFileSync(fixture, JSON.stringify({ classify: report, pushState2 }), 'utf8');
+    },
+    setClassifyAndResolve(report, resolveState3) {
+      fs.writeFileSync(fixture, JSON.stringify({ classify: report, resolveState3 }), 'utf8');
     },
     runs() {
       if (!fs.existsSync(counter)) return [];
@@ -293,39 +301,154 @@ test('state2 with local commits ahead (liveDrift=true, ahead>0): warn only, no a
   assert.deepStrictEqual(box.runs(), ['classify']);
 });
 
-test('state3 (both diverged): prompt EXITS 2 with resolution on stderr; session-start warns', () => {
+test('state3 with clean rebase (issue 18): prompt auto-resolves + proceeds; session-start still warns', () => {
+  // Eligible state3 (liveDrift=true, behind>0, ahead=0, isWorktree=false). The .ps1's
+  // resolve-state3 mode ran sync push + git pull --rebase + git push + sync pull cleanly.
+  // The prompt hook injects a note and exits 0 - Claude Code allows the prompt through.
   const box = sandbox();
-  box.setClassify({
-    state: 'state3', summary: 'both diverged', liveDrift: true,
-    resolution: [
-      'cd C:/repo',
-      '.\\sync.ps1 -Mode push -Commit "chore: capture live edits"',
-      'git pull --rebase',
-      'git push',
-      '.\\sync.ps1 -Mode pull',
-    ],
-    incomingCommits: ['abc first', 'def second'],
-  });
+  box.setClassifyAndResolve(
+    { state: 'state3', summary: 'both diverged (rebasable)', liveDrift: true,
+      repo: { behind: 2, ahead: 0, isWorktree: false },
+      resolution: [
+        'cd C:/repo',
+        '.\\sync.ps1 -Mode push -Commit "chore: capture live edits before pulling"',
+        'git pull --rebase',
+        'git push',
+        '.\\sync.ps1 -Mode pull',
+      ],
+      incomingCommits: ['abc first', 'def second'] },
+    { ok: true, resolved: 'newhead-fed789',
+      steps: [
+        { step: 'sync.ps1 -Mode push -Commit (capture)', exit: 0, output: 'Committed ...' },
+        { step: 'git pull --rebase', exit: 0, output: 'Successfully rebased and updated refs/heads/master.' },
+        { step: 'git push', exit: 0, output: '' },
+        { step: 'sync.ps1 -Mode pull', exit: 0, output: 'PULL done' },
+      ] },
+  );
   const prompt = callHook(box, 'prompt', JSON.stringify({ prompt: 'proceed' }));
-  assert.strictEqual(prompt.status, 2, 'state3 MUST block via exit 2');
-  assert.match(prompt.stderr, /BOTH DIVERGED/);
-  assert.match(prompt.stderr, /cd C:\/repo/);
-  assert.match(prompt.stderr, /sync\.ps1 -Mode push -Commit/);
-  assert.match(prompt.stderr, /git pull --rebase/);
-  assert.match(prompt.stderr, /git push/);
-  assert.match(prompt.stderr, /sync\.ps1 -Mode pull/);
-  // Order matters: capture live BEFORE pulling.
-  const idxPush = prompt.stderr.indexOf('sync.ps1 -Mode push');
-  const idxPull = prompt.stderr.indexOf('sync.ps1 -Mode pull');
-  assert.ok(idxPush > -1 && idxPull > -1 && idxPush < idxPull, 'push (capture live) must precede pull');
+  assert.strictEqual(prompt.status, 0, 'clean-rebase state3 MUST proceed (not exit 2)');
+  const promptOut = JSON.parse(prompt.stdout);
+  const ctx = promptOut.hookSpecificOutput.additionalContext;
+  assert.match(ctx, /state3 auto-resolved/);
+  assert.match(ctx, /newhead-fed789/);
+  assert.match(ctx, /synced/, 'must claim the state is now synced');
+  assert.match(ctx, /Proceeding with your prompt/);
+  assert.strictEqual(promptOut.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+  // Fired: classify then resolve-state3. Nothing else.
+  assert.deepStrictEqual(box.runs(), ['classify', 'resolve-state3']);
 
+  // Session-start (fires before the prompt) still warns - the prompt is where the resolve
+  // happens, not session-start (previous verification failed on running resolve at both).
   const start = callHook(box, 'session-start');
   assert.strictEqual(start.status, 0, 'session-start injects a warn, does not block');
   const startOut = JSON.parse(start.stdout);
   assert.match(startOut.hookSpecificOutput.additionalContext, /BOTH DIVERGED/);
+  // Critical: session-start MUST NOT invoke resolve-state3. Only the classify from this
+  // call should have fired (the prompt call above already ran classify+resolve).
+  const startRuns = box.runs().slice(2); // trim the prompt call's runs
+  assert.deepStrictEqual(startRuns, ['classify'],
+    'session-start must NOT auto-resolve state3 (that runs at UserPromptSubmit only)');
 
   // Install-state1 never fires for state3 (auto-pull must not run with live drift).
   assert.strictEqual(box.runs().filter((r) => r === 'install-state1').length, 0);
+});
+
+test('state3 with rebase conflict (issue 18): prompt blocks, message names conflicted files', () => {
+  // Same eligible shape as the success case, but the .ps1 hit a merge conflict during
+  // git pull --rebase, aborted the rebase, and returned the conflicted paths. The prompt
+  // hook MUST block (exit 2) and surface those paths so the operator can see them.
+  const box = sandbox();
+  box.setClassifyAndResolve(
+    { state: 'state3', summary: 'both diverged', liveDrift: true,
+      repo: { behind: 1, ahead: 0, isWorktree: false },
+      resolution: [
+        'cd C:/repo',
+        '.\\sync.ps1 -Mode push -Commit "chore: capture live edits before pulling"',
+        'git pull --rebase',
+        'git push',
+        '.\\sync.ps1 -Mode pull',
+      ],
+      incomingCommits: ['abc conflicting'] },
+    { ok: false,
+      reason: 'rebase produced merge conflicts in 2 file(s)',
+      conflictedPaths: ['claude/CLAUDE.md', 'memory/MEMORY.md'],
+      aborted: true },
+  );
+  const prompt = callHook(box, 'prompt', JSON.stringify({ prompt: 'proceed' }));
+  assert.strictEqual(prompt.status, 2, 'conflict MUST block via exit 2');
+  assert.match(prompt.stderr, /HIT MERGE CONFLICTS/);
+  assert.match(prompt.stderr, /Rebase aborted/);
+  assert.match(prompt.stderr, /Conflicted files \(2\)/);
+  assert.match(prompt.stderr, /claude\/CLAUDE\.md/);
+  assert.match(prompt.stderr, /memory\/MEMORY\.md/);
+  // Manual sequence is still surfaced so the operator has a runnable path.
+  assert.match(prompt.stderr, /sync\.ps1 -Mode push -Commit/);
+  assert.match(prompt.stderr, /git pull --rebase/);
+  assert.deepStrictEqual(box.runs(), ['classify', 'resolve-state3']);
+});
+
+test('state3 inside a worktree (issue 18): prompt blocks WITHOUT running resolve-state3', () => {
+  // The multi-agent guard that failed the previous verification. Every ticket runs in its own
+  // worktree on its own feature branch; a hook that auto-resolved here would commit and push
+  // "chore: capture live edits before pulling" onto that feature branch's origin, polluting
+  // the ticket's diff. The .ps1 also refuses this shape, but the Node-side pre-filter is what
+  // spares the PowerShell round-trip AND makes the guard visible in the hook's own tests.
+  const box = sandbox();
+  box.setClassifyAndResolve(
+    { state: 'state3', summary: 'both diverged - worktree', liveDrift: true,
+      repo: { behind: 1, ahead: 0, isWorktree: true },
+      resolution: [
+        'cd C:/worktree',
+        '.\\sync.ps1 -Mode push -Commit "chore: capture live edits before pulling"',
+        'git pull --rebase',
+        'git push',
+        '.\\sync.ps1 -Mode pull',
+      ],
+      incomingCommits: ['abc incoming'] },
+    { ok: true, resolved: 'stub-would-have-resolved' },
+  );
+  const prompt = callHook(box, 'prompt', JSON.stringify({ prompt: 'proceed' }));
+  assert.strictEqual(prompt.status, 2, 'state3 in a worktree MUST still block');
+  assert.match(prompt.stderr, /BOTH DIVERGED/);
+  // Guard fires in the driver: resolve-state3 must NOT be invoked - the stub would have
+  // reported success and let the prompt through. If it fired, the driver bypassed the
+  // worktree guard and we would have polluted the ticket branch in a real run.
+  assert.deepStrictEqual(box.runs(), ['classify']);
+});
+
+test('state3 with local commits ahead (issue 18): prompt blocks WITHOUT running resolve-state3', () => {
+  // Sibling of the worktree case. ahead>0 on a plain checkout means the caller has unpushed
+  // local commits (typically mid-implementation on master). Pushing a "capture live" commit
+  // and rebasing here would rewrite that in-progress history. Refuse.
+  const box = sandbox();
+  box.setClassifyAndResolve(
+    { state: 'state3', summary: 'both diverged - ahead=1', liveDrift: true,
+      repo: { behind: 1, ahead: 1, isWorktree: false },
+      resolution: ['cd C:/repo', '.\\sync.ps1 -Mode push -Commit "chore: capture"', 'git pull --rebase', 'git push', '.\\sync.ps1 -Mode pull'],
+      incomingCommits: ['abc incoming'] },
+    { ok: true, resolved: 'stub-would-have-resolved' },
+  );
+  const prompt = callHook(box, 'prompt', JSON.stringify({ prompt: 'proceed' }));
+  assert.strictEqual(prompt.status, 2, 'state3 with ahead>0 MUST still block');
+  assert.match(prompt.stderr, /BOTH DIVERGED/);
+  assert.deepStrictEqual(box.runs(), ['classify']);
+});
+
+test('state3 auto-resolve disabled (DOTFILES_AUTO_RESOLVE_STATE3=0): prompt blocks with pre-issue-18 message', () => {
+  const box = sandbox();
+  box.env.DOTFILES_AUTO_RESOLVE_STATE3 = '0';
+  box.setClassifyAndResolve(
+    { state: 'state3', summary: 'both diverged - resolve disabled', liveDrift: true,
+      repo: { behind: 2, ahead: 0, isWorktree: false },
+      resolution: ['cd C:/repo', '.\\sync.ps1 -Mode push -Commit "chore: capture"', 'git pull --rebase', 'git push', '.\\sync.ps1 -Mode pull'],
+      incomingCommits: ['abc incoming'] },
+    { ok: true, resolved: 'stub-would-have-resolved' },
+  );
+  const prompt = callHook(box, 'prompt', JSON.stringify({ prompt: 'proceed' }));
+  assert.strictEqual(prompt.status, 2);
+  assert.match(prompt.stderr, /BOTH DIVERGED/);
+  // The escape hatch matters: nothing auto-runs when the operator disabled it.
+  assert.deepStrictEqual(box.runs(), ['classify']);
 });
 
 test('compact resume neither runs nor injects', () => {

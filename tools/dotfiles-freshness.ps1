@@ -35,6 +35,16 @@
                    This is issue 19 - pairs with the state1 auto-resolver to prevent state3
                    accumulation. Failure returns ok:false with a reason; the driver falls
                    back to the state2 advisory rather than blocking the session.
+    resolve-state3 Attempt the 5-step state3 recovery in place: sync push (capture live),
+                   git pull --rebase, git push, sync pull. Refuses unless a fresh classify
+                   returns state3 with liveDrift=true, behind>0, ahead=0, AND isWorktree=false
+                   - matches push-state2's guard shape (issue 18). If the rebase encounters
+                   a merge conflict, aborts the rebase, returns ok:false with conflictedPaths,
+                   and leaves the working tree untouched from the caller's point of view (the
+                   pre-rebase capture commit stays - it is the operator's manual-merge base).
+                   Called only from UserPromptSubmit - never SessionStart - because a
+                   background auto-resolve at session-start would run before the user asked
+                   for anything and could still leave a bad merge behind.
     stamp          Write an initial stamp (install.ps1 uses this after the first pull).
 
 .PARAMETER RepoRoot
@@ -52,7 +62,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('classify', 'install-state1', 'push-state2', 'stamp')][string]$Mode = 'classify',
+    [ValidateSet('classify', 'install-state1', 'push-state2', 'resolve-state3', 'stamp')][string]$Mode = 'classify',
     [string]$RepoRoot = (Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)),
     [string]$UserHome = $env:USERPROFILE,
     [switch]$SkipFetch
@@ -414,6 +424,152 @@ switch ($Mode) {
         $result = [ordered]@{
             ok      = $true
             pushed  = $newHead
+            steps   = $steps
+        }
+        Write-Output (ConvertTo-Json $result -Depth 6)
+        exit 0
+    }
+    'resolve-state3' {
+        # Issue 18. Guard: classify FIRST and refuse unless we still see state3 with live drift,
+        # incoming commits waiting, no local ahead commits, and NOT sitting on a worktree. This
+        # mirrors push-state2's guard shape - and the isWorktree/ahead guard is not decorative,
+        # it is the specific bug that failed verification on the previous attempt: state3 inside
+        # an agent's ticket worktree would auto-commit "chore: capture live edits before pulling"
+        # onto that feature branch and push it to the branch's origin, polluting the ticket diff
+        # exactly the way push-state2 was built to prevent.
+        #
+        # The driver at tools/dotfiles-freshness-hook.js SHOULD short-circuit these shapes before
+        # invoking us so we do not spend a PowerShell round-trip on a case we will refuse - but
+        # this guard is the correctness contract and must not depend on the driver honouring it.
+        $report = Get-Classification
+        $behind = 0
+        $ahead = 0
+        $isWorktree = $false
+        if ($null -ne $report.repo -and ($report.repo -is [hashtable])) {
+            if ($report.repo.ContainsKey('behind'))     { $behind     = [int]$report.repo['behind'] }
+            if ($report.repo.ContainsKey('ahead'))      { $ahead      = [int]$report.repo['ahead'] }
+            if ($report.repo.ContainsKey('isWorktree')) { $isWorktree = [bool]$report.repo['isWorktree'] }
+        } elseif ($null -ne $report.repo) {
+            if ($report.repo.PSObject.Properties.Name -contains 'behind')     { $behind     = [int]$report.repo.behind }
+            if ($report.repo.PSObject.Properties.Name -contains 'ahead')      { $ahead      = [int]$report.repo.ahead }
+            if ($report.repo.PSObject.Properties.Name -contains 'isWorktree') { $isWorktree = [bool]$report.repo.isWorktree }
+        }
+        if ($report.state -ne 'state3' -or (-not $report.liveDrift) -or $behind -le 0 -or $ahead -gt 0 -or $isWorktree) {
+            $err = [ordered]@{
+                ok         = $false
+                reason     = ('refused: state is {0} (liveDrift={1}, behind={2}, ahead={3}, worktree={4})' -f $report.state, $report.liveDrift, $behind, $ahead, $isWorktree)
+                state      = $report.state
+                liveDrift  = $report.liveDrift
+                behind     = $behind
+                ahead      = $ahead
+                isWorktree = $isWorktree
+            }
+            Write-Output (ConvertTo-Json $err -Depth 4)
+            exit 1
+        }
+
+        $steps = @()
+        # 1. Capture live edits into a commit BEFORE the rebase. Same shape as push-state2's
+        # step 1; the commit message is distinct so history reads chronologically (capture,
+        # then rebase, then post-rebase state).
+        $syncPath = Join-Path $RepoRoot 'sync.ps1'
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $syncOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $syncPath -Mode push -Commit 'chore: capture live edits before pulling' -UserHome $UserHome 2>&1 | Out-String
+        $syncExit = $LASTEXITCODE
+        $ErrorActionPreference = $prev
+        $steps += [ordered]@{ step = 'sync.ps1 -Mode push -Commit (capture)'; exit = $syncExit; output = $syncOut.Trim() }
+        if ($syncExit -ne 0) {
+            $lastLine = ''
+            if ($syncOut) {
+                $trimmed = $syncOut.Trim()
+                $parts = $trimmed -split "`n"
+                $lastLine = ($parts[$parts.Count - 1]).Trim()
+            }
+            $reason = 'sync.ps1 -Mode push failed'
+            if ($lastLine) { $reason = 'sync.ps1 -Mode push failed: ' + $lastLine }
+            Write-Output (ConvertTo-Json ([ordered]@{ ok = $false; reason = $reason; steps = $steps }) -Depth 6)
+            exit 1
+        }
+
+        # 2. Rebase onto incoming. This is where a real merge conflict shows up. On failure
+        # collect the conflicted paths from `git diff --name-only --diff-filter=U` while the
+        # rebase is still in progress, then `git rebase --abort` to leave a clean tree. Callers
+        # get ok:false + conflictedPaths so the hook can surface them in the block message.
+        $rebase = Invoke-Git @('pull', '--rebase')
+        $steps += [ordered]@{ step = 'git pull --rebase'; exit = $rebase.ExitCode; output = $rebase.Output; stderr = $rebase.Stderr }
+        if ($rebase.ExitCode -ne 0) {
+            $conflicted = @()
+            $rebaseInProgress = $false
+            $gitDir = (Invoke-Git @('rev-parse', '--git-dir')).Output
+            if ($gitDir) {
+                # `git rev-parse --git-dir` returns a path relative to cwd when invoked from
+                # inside a worktree, absolute otherwise. Resolve either shape against RepoRoot.
+                if (-not [System.IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $RepoRoot $gitDir }
+                if ((Test-Path (Join-Path $gitDir 'rebase-merge')) -or (Test-Path (Join-Path $gitDir 'rebase-apply'))) {
+                    $rebaseInProgress = $true
+                }
+            }
+            if ($rebaseInProgress) {
+                $diff = Invoke-Git @('diff', '--name-only', '--diff-filter=U')
+                if ($diff.ExitCode -eq 0 -and $diff.Output) {
+                    $conflicted = @($diff.Output -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+                }
+                $abort = Invoke-Git @('rebase', '--abort')
+                $steps += [ordered]@{ step = 'git rebase --abort'; exit = $abort.ExitCode; output = $abort.Output; stderr = $abort.Stderr }
+            }
+            # Distinguish conflict-that-needs-a-human from any other pull failure (network,
+            # auth, non-fast-forward without rebase-in-progress). The hook uses conflictedPaths
+            # to build the surfaced message; if absent it falls back to a generic reason.
+            $reason = 'git pull --rebase failed'
+            if ($conflicted.Count -gt 0) {
+                $reason = ('rebase produced merge conflicts in {0} file(s)' -f $conflicted.Count)
+            } elseif ($rebase.Stderr) {
+                $firstLine = ($rebase.Stderr -split "`n")[0].Trim()
+                if ($firstLine) { $reason = 'git pull --rebase failed: ' + $firstLine }
+            }
+            Write-Output (ConvertTo-Json ([ordered]@{
+                ok              = $false
+                reason          = $reason
+                conflictedPaths = $conflicted
+                aborted         = $rebaseInProgress
+                steps           = $steps
+            }) -Depth 6)
+            exit 1
+        }
+
+        # 3. Push the rebased history. Failure here (auth, non-fast-forward from another push
+        # that raced in between fetch and push) is a legitimate blocker - the operator has to
+        # resolve it manually.
+        $pushGit = Invoke-Git @('push')
+        $steps += [ordered]@{ step = 'git push'; exit = $pushGit.ExitCode; output = $pushGit.Output; stderr = $pushGit.Stderr }
+        if ($pushGit.ExitCode -ne 0) {
+            $reason = 'git push failed'
+            if ($pushGit.Stderr) {
+                $firstLine = ($pushGit.Stderr -split "`n")[0].Trim()
+                if ($firstLine) { $reason = 'git push failed: ' + $firstLine }
+            }
+            Write-Output (ConvertTo-Json ([ordered]@{ ok = $false; reason = $reason; steps = $steps }) -Depth 6)
+            exit 1
+        }
+
+        # 4. sync.ps1 -Mode pull writes the fresh stamp itself, so no separate stamp step needed.
+        # Also updates any mirrored files the incoming commits touched.
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $pullOut = & powershell -NoProfile -ExecutionPolicy Bypass -File $syncPath -Mode pull -UserHome $UserHome 2>&1 | Out-String
+        $pullExit = $LASTEXITCODE
+        $ErrorActionPreference = $prev
+        $steps += [ordered]@{ step = 'sync.ps1 -Mode pull'; exit = $pullExit; output = $pullOut.Trim() }
+        if ($pullExit -ne 0) {
+            Write-Output (ConvertTo-Json ([ordered]@{ ok = $false; reason = 'sync.ps1 -Mode pull failed'; steps = $steps }) -Depth 6)
+            exit 1
+        }
+
+        $newHead = (Invoke-Git @('rev-parse', 'HEAD')).Output
+        $result = [ordered]@{
+            ok      = $true
+            resolved = $newHead
             steps   = $steps
         }
         Write-Output (ConvertTo-Json $result -Depth 6)
