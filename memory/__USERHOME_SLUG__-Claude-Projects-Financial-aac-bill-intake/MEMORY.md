@@ -1,3 +1,4 @@
+- [Owner review 2026-08-26 not-in-bill](owner-review-2026-08-26-not-in-bill.md) — 29 tagged tickets; 9 obvious WO misses, missing WO field, credit memos absent, teaching mechanism undocumented, AP-303 fabricated site, AP-326 vendor mis-attribution; owner trust concern; fleet block anchored on teaching mechanism (§D of HANDOFF 16e1f6e)
 - [GAS testing architecture](gas-testing-architecture.md) — core.js (pure, dual-env) + node --test via .claude/session.json 8-file command; eval ground truth from PDFs, never live output
 - [clasp run autonomy](clasp-run-autonomy.md) — headless GAS execution: GCP link + project scopes + deployment; run functions + Gmail connector caveats
 - [GAS verification loop](gas-verification-loop.md) — deploy+verify headlessly: clasp push -f / ping (for env) / reprocessReview / tailLog; 10 MiB attach cap; Log sheet is source of truth
