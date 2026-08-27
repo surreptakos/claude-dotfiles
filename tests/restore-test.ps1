@@ -741,6 +741,22 @@ if (Test-Path $freshnessHookTest) {
         ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
 }
 
+# ticket-fleet branch-naming (issue 29): the workflow's concurrent-attempt guard
+# lives in a pure helper (tools/ticket-fleet-branch.js) so its test can run
+# without spinning up the Workflow tool. Wiring it here means a regression in
+# the runId/workerIndex shape (or a drift between .claude/workflows/ticket-fleet.js
+# and agents/skills/project-harness/templates/ticket-fleet.js) fails the restore
+# suite the same way the freshness-hook regressions do.
+$fleetBranchModule = Join-Path $Clone 'tools\ticket-fleet-branch.js'
+$fleetBranchTest   = Join-Path $Clone 'tools\ticket-fleet-branch.test.js'
+Check 'tools/ticket-fleet-branch.js shipped' (Test-Path $fleetBranchModule)
+Check 'tools/ticket-fleet-branch.test.js shipped' (Test-Path $fleetBranchTest)
+if (Test-Path $fleetBranchTest) {
+    $out = & node --test $fleetBranchTest 2>&1
+    Check 'ticket-fleet-branch passes its own test suite (issue 29 concurrent-attempt guard)' `
+        ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 20)
+}
+
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
 # The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the

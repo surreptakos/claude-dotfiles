@@ -27,6 +27,23 @@ const cfg = Object.assign({
   followupsFile: 'FOLLOW-UPS.md',
 }, args || {})
 
+// ---- concurrent-run safety ----
+// Two ticket-fleet invocations can pick up the same open ticket at the same
+// time (nothing on the tracker side prevents it). Without a per-run identifier
+// both runners would spawn implementers that try to create
+// `agent/issue-<N>-attempt1`, and the second git-branch or push collides. This
+// runner mints a `runId` per invocation and hands each spawned implementer a
+// per-worker suffix `wf_<runId>-w<workerN>` (workerN = the ticket's index in
+// the wave), embedded in the branch name. Two concurrent scouts against the
+// same ticket therefore produce distinct branches. Alternative not used here:
+// query-and-increment against
+//   gh api repos/<owner>/<repo>/branches --paginate --jq \
+//     '.[].name | select(startswith("agent/issue-N-attempt"))'
+// then increment - has a race between the query and branch creation. See
+// tools/ticket-fleet-branch.js for the pure-function counterpart the tests
+// exercise (tools/ticket-fleet-branch.test.js).
+const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'], properties: {
   tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy'], properties: {
@@ -78,16 +95,24 @@ if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.ma
 log(`Wave: ${wave.map(t => '#' + t.number).join(', ')}`)
 
 // ---- Implement + blind Verify per ticket, no barrier between tickets ----
-const results = await pipeline(wave, async (t) => {
+// Pre-annotate each ticket with a workerIndex (0-based position in the wave) so
+// the pipeline callback can build a collision-proof branch name without
+// relying on pipeline's callback signature to pass an index.
+const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
+const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
+  const t = ticket
   let lastVerdict = null, impl = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Per-worker suffix - the concrete slot the branch name lives in. Keep this
+    // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
+    const branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
     const priorFindings = lastVerdict ? `\nPrevious attempt FAILED verification. Independent reviewer findings (fix these with a genuinely different approach, not a parameter tweak):\n- ${lastVerdict.failures.join('\n- ')}` : ''
     impl = await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first — binding.
 Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${priorFindings}
-Rules: one branch named agent/issue-${t.number}-attempt${attempt}; commit your work; NEVER push, NEVER open a PR, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # — closing-keyword risk).
+Rules: one branch named ${branch}; commit your work; NEVER push, NEVER open a PR, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # — closing-keyword risk).
 Done-condition (machine-checkable, all required): branch exists with your commits; \`${scout.testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met.
 Log any out-of-scope findings as self-contained discovery strings — do not fix them, do not widen the diff.
 Return structured output only.`,
