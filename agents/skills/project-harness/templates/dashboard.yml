@@ -71,4 +71,14 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add DASHBOARD.md
           git commit -m "chore: refresh dashboard [skip ci]"
-          git push
+          # Push the fresh commit to a dedicated `dashboard` branch, NOT the default branch.
+          # claude-dotfiles issue 20 (2026-08-26): committing DASHBOARD.md refreshes back to
+          # master advanced origin on a file that was not part of the sync manifest, which
+          # flipped already-drifted live copies into state3 (both-diverged hard block) on
+          # every issue event and every push. The fix is a branch-split: master is never
+          # advanced by CI; DASHBOARD.md lands on a snapshot branch that is force-pushed
+          # each run (a snapshot rebased on the default branch's tip, not a rolling history).
+          # Stable read URL:
+          #   https://github.com/<owner>/<repo>/blob/dashboard/DASHBOARD.md
+          # Ported to the harness template by claude-dotfiles issue 27.
+          git push -f origin HEAD:refs/heads/dashboard
