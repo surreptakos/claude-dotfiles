@@ -269,13 +269,18 @@ try {
     $leakBare = New-LeakBareRepo -Root $sandbox3
     $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
 
-    # tracker-audit.js bails at exit code 2 the moment `gh repo view` fails, which is what we
-    # WANT here: we cannot spin up a real GitHub repo in a test, and the point of this check
-    # is that under a leaked GIT_DIR the tool still reaches its own gh call and its own git
-    # subprocesses look at $env:cwd rather than $env:GIT_DIR. The proof is that the leaked
-    # bare repo's config is byte-identical after the run - if the guard were absent, the
-    # tool's own `git rev-parse` / `git log` / `git fetch` calls would have been redirected
-    # into the leaked repo. gh's own failure mode is irrelevant.
+    # The earlier version of this block asserted only that the leaked bare stayed byte-identical
+    # after tracker-audit ran. That was insufficient: tracker-audit exits at code 2 the moment
+    # `gh repo view` fails, and a fake target with no GitHub remote makes it fail. So the tool
+    # never reaches the git subprocesses the guard exists to protect, and deleting CHILD_ENV
+    # from tracker-audit.js still passes the block. Reviewer proved that (issue 28 attempt3).
+    #
+    # This version stubs `gh` on PATH so tracker-audit runs to completion, gives the target repo
+    # a commit whose body says `Fixes #999`, and stubs `gh issue list` to return #999 as OPEN.
+    # tracker-audit's landed-but-open check then emits a finding for #999 IFF `git log` ran
+    # against the target repo. Under a leaked GIT_DIR without the guard, git log would run
+    # against the empty leaked bare and NEITHER the finding nor the target's fake nameWithOwner
+    # would appear in output. That is the positive assertion.
     $target = Join-Path $sandbox3 'target-repo'
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     & git -C $target init --quiet --initial-branch=master | Out-Null
@@ -283,15 +288,55 @@ try {
     & git -C $target config user.name  'Audit' | Out-Null
     Set-Content -Path (Join-Path $target 'README.md') -Value 'seed' -Encoding utf8
     & git -C $target add -A | Out-Null
-    & git -C $target commit --quiet -m 'seed' | Out-Null
+    # Body carries the closing keyword; tracker-audit's CLOSING regex reads the whole message.
+    & git -C $target commit --quiet -m 'seed' -m 'Fixes #999' | Out-Null
+
+    # A gh shim on PATH. tracker-audit calls `gh repo view`, `gh issue list`, `gh pr list`,
+    # and `gh api ... /dependencies/blocked_by`; all four are dispatched here.
+    $shimDir = Join-Path $sandbox3 'gh-shim'
+    New-Item -ItemType Directory -Path $shimDir -Force | Out-Null
+    $shimRepoName = 'tracker-audit-probe/target-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    $shimJs = @'
+'use strict';
+const args = process.argv.slice(2).join(' ');
+function out(s) { process.stdout.write(s); process.exit(0); }
+if (args.startsWith('repo view')) {
+  out(JSON.stringify({
+    nameWithOwner: process.env.SHIM_REPO_NAME,
+    defaultBranchRef: { name: 'master' }
+  }));
+}
+if (args.startsWith('issue list')) {
+  out(JSON.stringify([{
+    number: 999,
+    title: 'landed-but-open probe',
+    state: 'OPEN',
+    body: 'probe body',
+    labels: [{ name: 'ready-for-agent', description: '', color: '' }],
+    url: 'https://example.test/issues/999',
+    projectItems: [],
+    closedByPullRequestsReferences: [],
+    milestone: { title: 'probe-milestone' }
+  }]));
+}
+if (args.startsWith('pr list')) out('[]');
+if (args.startsWith('api')) out('');
+out('{}');
+'@
+    Set-Content -Path (Join-Path $shimDir 'gh-shim.js') -Value $shimJs -Encoding utf8
+    # cmd shim so `gh` on PATH resolves before the real gh.exe. execSync spawns through cmd.exe
+    # on Windows, which picks up `.cmd` ahead of `.exe` when PATHEXT is default.
+    $ghCmd = '@echo off' + "`r`n" + 'node "%~dp0gh-shim.js" %*'
+    Set-Content -Path (Join-Path $shimDir 'gh.cmd') -Value $ghCmd -Encoding ascii
 
     $auditTool = Join-Path $RepoRoot 'tools\tracker-audit.js'
     Assert 'tools/tracker-audit.js exists' (Test-Path $auditTool)
 
     $env:GIT_DIR = Join-Path $leakBare ''
+    $savedPath = $env:PATH
+    $env:PATH = $shimDir + [IO.Path]::PathSeparator + $env:PATH
+    $env:SHIM_REPO_NAME = $shimRepoName
 
-    # Run from $target. tracker-audit.js will most likely exit 2 (no gh auth against a
-    # local-only repo). That's fine; the config-comparison below is the correctness proof.
     Push-Location $target
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -299,7 +344,23 @@ try {
     $auditExit = $LASTEXITCODE
     $ErrorActionPreference = $prev
     Pop-Location
+
     Remove-Item Env:\GIT_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\SHIM_REPO_NAME -ErrorAction SilentlyContinue
+    $env:PATH = $savedPath
+
+    # Positive: the header line names the shim's repo. If the guard failed, `gh repo view` still
+    # returns the shim's name (env is fine), so this check on its own does not prove target-git.
+    # It proves tracker-audit actually ran instead of exiting 2 early.
+    Assert 'tracker-audit.js reached its own gh chain (header names shim repo)' `
+        ($out -match [regex]::Escape($shimRepoName)) `
+        ("exit={0}`nout={1}" -f $auditExit, $out)
+    # Positive: landed-but-open ONLY fires when `git log` on the target returned the seeded
+    # commit whose body says `Fixes #999`. A leaked GIT_DIR points at the empty bare — git log
+    # there returns nothing, no CLOSING regex hit, no finding. This is the guard-proving check.
+    Assert 'tracker-audit.js emitted landed-but-open #999 (git log read the TARGET repo)' `
+        ($out -match 'landed-but-open' -and $out -match '#999') `
+        ("exit={0}`nout={1}" -f $auditExit, $out)
 
     $leakConfigAfter = Read-BareConfig -BareRoot $leakBare
     Assert 'tracker-audit.js did NOT write into the leaked bare repo config' `
