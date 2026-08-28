@@ -125,6 +125,32 @@ where a junction should go is left alone; that is someone's local edit.
 Not following reparse points is now the deliberate half of the arrangement: it is what stops a
 junctioned skill being stored twice, once under each path.
 
+## Cloud sessions load the skills as an uploaded plugin
+
+Claude Code cloud containers (claude.ai/code, Cowork) never see this machine's `~/.claude` — no
+dotfiles support, and user-scope plugin installs don't transfer. The only account-wide mechanism is
+plugin sync: a plugin enabled on the claude.ai account downloads into every cloud session as
+`<name>@synced`, whatever repo it runs against.
+
+`tools/build-cloud-plugin.py` packages the live `~/.claude/skills` tree into that shape:
+
+```powershell
+py -3 tools/build-cloud-plugin.py   # emits dist/dan-skills.zip (dist/ is gitignored)
+```
+
+It resolves dead junctions through `~/.agents/skills`, then rewrites each `SKILL.md` to survive the
+claude.ai upload validator, which enforces three rules the local loader does not: frontmatter may
+carry only `name`, `description`, `allowed-tools`, `license`, `metadata`, `compatibility` (anything
+else — `disable-model-invocation`, `argument-hint`, `hidden` — moves under `metadata:` as strings);
+descriptions may not contain XML tags (angle brackets are stripped, tag names kept); and the zip may
+not ship a top-level `bin/` directory — that last one bites marketplace plugins repacked by hand,
+not this script's output.
+
+Upload at claude.ai → Customize → Plugins → Add → Upload plugin, and enable it. claude.ai stores a
+copy, so **an edited or new skill reaches cloud sessions only after a rebuild and re-upload** — the
+zip is a snapshot, not a live mirror. `sync.ps1 -Mode push` keeps carrying the skills between
+machines exactly as before; this section is only about the cloud copy.
+
 ## Proving the restore, without a second machine
 
 ```powershell

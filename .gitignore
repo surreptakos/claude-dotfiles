@@ -32,3 +32,6 @@ __pycache__/
 # stub that stands in for the PowerShell classifier. Deterministic content;
 # checking it in would only invite hand edits nobody meant to commit.
 tools/__dotfiles-freshness-stub.js
+
+# build output of tools/build-cloud-plugin.py — regenerate, never commit
+dist/
