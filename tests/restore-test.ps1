@@ -77,7 +77,15 @@ param(
     # holds a marker file for -ProbeHoldMs and reports whether it survived. That is the exact code
     # path that used to clobber a concurrent run, without paying for a second full install.
     [switch]$Probe,
-    [int]$ProbeHoldMs = 2000
+    [int]$ProbeHoldMs = 2000,
+
+    # Internal, used by tests/git-env-leak.tests.ps1. Runs ONLY the file-scope GIT_* clear and the
+    # bootstrap file-copy path (git ls-files for -From worktree, git clone for the others), reports
+    # the tracked-file count, then exits before any of the 21 checks run. That is the exact code
+    # path that -- pre-2026-08-25 -- silently returned zero files under a leaked GIT_DIR and made
+    # the whole restore-test crash on 'The property Count cannot be found on this object'. A green
+    # BootstrapOnly run under leak proves the file-scope clear works; a red one prints the leak.
+    [switch]$BootstrapOnly
 )
 
 Set-StrictMode -Version Latest
@@ -86,6 +94,22 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $SelfPath = $MyInvocation.MyCommand.Path
 $RealHome = $env:USERPROFILE.TrimEnd('\', '/')
+
+# Issue 28: the pre-commit hook runs this suite as a child of `git commit`, which exports
+# GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY. Those env
+# vars OVERRIDE `git -C <path>` - git honours them first, and -C only relocates its path
+# resolution when they are unset. Without clearing them here, the bootstrap `git -C $RepoRoot
+# ls-files` a few lines below silently reads the parent commit's index (0 files instead of
+# ~586), the -From origin/local clones fail, and every helper the suite spawns later inherits
+# the same leak. Clear the five vars at file scope, BEFORE any git call and BEFORE the source
+# of lib/manifest.ps1 (which defines Clear-GitEnv - but manifest.ps1 lives in $Clone, not
+# $RepoRoot, so we can't use it before the clone exists). Done unconditionally: the suite
+# never uses those vars for itself, so there is nothing to restore before exit.
+foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
+    if ($null -ne [Environment]::GetEnvironmentVariable($name)) {
+        [Environment]::SetEnvironmentVariable($name, $null)
+    }
+}
 
 # Check 9 runs the RESTORED session-check inside the clone, and session-check runs whatever the
 # repo's .claude/session.json names as its test command - this suite. So every run used to restore
@@ -205,6 +229,18 @@ if ($From -eq 'worktree') {
     Write-Host ("  at {0}" -f (git -C $Clone log --oneline -1))
 }
 Write-Host ''
+
+if ($BootstrapOnly) {
+    # Issue 28. The whole point of this switch is to prove the file-scope GIT_* clear at the top of
+    # this file protects the bootstrap `git -C $RepoRoot ls-files` / `git clone` calls from a leaked
+    # GIT_DIR. If we got here, the ls-files/clone succeeded; report the file count and exit. A count
+    # of zero means the leak went through: git honoured GIT_DIR over -C, and the "target" ls-files
+    # was actually reading the leaked repo's empty index.
+    $cloneFiles = @(Get-ChildItem -Path $Clone -Recurse -File -ErrorAction SilentlyContinue)
+    Write-Host ("BOOTSTRAP OK   {0} files in clone" -f $cloneFiles.Count)
+    if ($cloneFiles.Count -lt 1) { exit 3 }   # leak got through - the count reveals it
+    exit 0
+}
 
 . (Join-Path $Clone 'lib\manifest.ps1')
 
@@ -795,6 +831,27 @@ if (Test-Path $freshnessPsTests) {
     } finally { $ErrorActionPreference = $prev }
     Check 'dotfiles-freshness.tests.ps1 passes (stamp round-trip + 4 states)' `
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+}
+
+# ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)
+
+# Prove that sync.ps1, tools/dotfiles-freshness.ps1, and tools/tracker-audit.js do not honour a
+# leaked GIT_DIR - `git -C <path>` does not override GIT_DIR by itself, and a hook-invoked child
+# process silently reads/writes the parent's repo unless every helper clears the five GIT_* env
+# vars first. Runs the standalone suite against the CLONED tests/ folder; the clone's copy is what
+# ships, so this proves the guard survives the mirror rather than only working in the working tree.
+$leakTests = Join-Path $Clone 'tests\git-env-leak.tests.ps1'
+if (Test-Path $leakTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $leakTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'git-env-leak.tests.ps1 passes (sync + freshness + tracker + audit)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'git-env-leak.tests.ps1 shipped' $false @('tests/git-env-leak.tests.ps1 missing from clone')
 }
 
 # ------------------------------------------------------------------ 9b. claims-audit engine ships

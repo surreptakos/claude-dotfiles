@@ -3,6 +3,16 @@
 #   git config core.hooksPath .githooks
 # Bypass for a genuine emergency: git commit --no-verify (CI still gates).
 # TEST_COMMAND is substituted by the harness skill at install time.
+#
+# Issue 28: git invokes this hook with GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE /
+# GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY exported into the child environment. Those env
+# vars OVERRIDE `git -C <path>` in every downstream tool - the restore-test bootstrap,
+# the tracker-audit, the freshness classifier - and silently redirect their git calls
+# to this commit's index instead of the target they were told to inspect. Every helper
+# also clears them internally as a defence in depth, but strip them here so the whole
+# test suite runs under a clean environment from the start.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+
 echo "pre-commit: restore test (~13s)"
 powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree || {
   echo ""
