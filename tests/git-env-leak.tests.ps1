@@ -353,6 +353,81 @@ try {
     Remove-Item -Path $sandbox4 -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# --------------------------------------------------------------------------------------- 5
+# restore-test.ps1 -BootstrapOnly under a leaked GIT_DIR. This is the exact regression the
+# reviewer flagged: restore-test.ps1 runs `git -C $RepoRoot ls-files` (and, in the non-worktree
+# modes, `git clone` / `git remote get-url origin` / `git log`) at file scope BEFORE it sources
+# lib/manifest.ps1, so a fix that lives only inside manifest.ps1 does nothing for those calls.
+# The pre-commit hook exports GIT_DIR into this child; under that leak, `git -C <worktree>
+# ls-files` returns 0 files instead of the real ~586 and the outer suite crashes on 'The
+# property Count cannot be found on this object' before it ever reaches check 9c.
+#
+# restore-test.ps1 now clears GIT_* at file scope before any git call (issue 28); this check
+# proves it. -BootstrapOnly runs just the bootstrap file-copy path and reports the file count,
+# so this check finishes in a second or two instead of the ~13s of the full suite. Also
+# proves the leaked bare repo's config is byte-identical afterwards, so no bootstrap call
+# accidentally wrote into it.
+
+Write-Host ''
+Write-Host 'restore-test.ps1 -BootstrapOnly clones the target under GIT_DIR leak'
+
+# When this file is invoked as check 9c of the outer restore-test (which runs it from inside the
+# CLONED tests folder), $RepoRoot resolves to $Clone -- a copy of files WITHOUT a .git directory.
+# `restore-test.ps1 -From worktree` in that context would fail on the bootstrap `git -C $Clone
+# ls-files` because $Clone has no repo, and that failure would look like a leak-guard regression
+# even though it's just the missing .git. Detect the case (RESTORE_TEST_ACTIVE set by the outer)
+# and skip - the outer restore-test's own file-scope Clear-GitEnv is what would fail under
+# regression, and check 9c already proves this whole suite runs green under it.
+$repoHasGit = Test-Path (Join-Path $RepoRoot '.git')
+if (-not $repoHasGit -or $env:RESTORE_TEST_ACTIVE) {
+    Write-Host '  skip  restore-test.ps1 -BootstrapOnly (no .git at $RepoRoot; runs when the leak suite is invoked standalone)' -ForegroundColor DarkGray
+    $sandbox5 = $null
+} else { $sandbox5 = New-Sandbox }
+if ($null -ne $sandbox5) {
+try {
+    $leakBare = New-LeakBareRepo -Root $sandbox5
+    $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
+
+    # Fresh fake home outside real profile - restore-test.ps1 refuses -FakeHome under $HOME.
+    $fakeHome = Join-Path $sandbox5 'home\Restored'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $fakeHome) -Force | Out-Null
+
+    # THE LEAK.
+    $env:GIT_DIR = Join-Path $leakBare ''
+
+    $script = Join-Path $RepoRoot 'tests\restore-test.ps1'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    # RESTORE_TEST_ACTIVE stops the nested-suite recursion in the outer test's flow, but this
+    # check is a first-level invocation, so it must NOT inherit that guard - clear it in the
+    # child. -From worktree is the mode the pre-commit hook uses and the one that broke.
+    $childCmd = ('$env:RESTORE_TEST_ACTIVE = $null; ' +
+                 '& "' + $script + '" -From worktree -BootstrapOnly')
+    $out = & powershell -NoProfile -ExecutionPolicy Bypass -Command $childCmd 2>&1 | Out-String
+    $bootstrapExit = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+
+    Remove-Item Env:\GIT_DIR -ErrorAction SilentlyContinue
+
+    $leakConfigAfter = Read-BareConfig -BareRoot $leakBare
+    Assert 'restore-test.ps1 -BootstrapOnly exits 0 under GIT_DIR leak' `
+        ($bootstrapExit -eq 0) `
+        (($out -split "`n") | Select-Object -Last 12 | Out-String)
+    # The specific regression: a zero file count is what silent-leak looks like. Match the
+    # count-line the -BootstrapOnly branch prints.
+    $countLine = ($out -split "`n") | Where-Object { $_ -match '^BOOTSTRAP OK\s+(\d+)\s+files' } | Select-Object -First 1
+    $countOk = $false
+    if ($countLine -match '^BOOTSTRAP OK\s+(\d+)\s+files') { $countOk = ([int]$Matches[1]) -gt 100 }
+    Assert 'restore-test.ps1 -BootstrapOnly reported a non-zero clone file count under leak' $countOk `
+        ("out={0}" -f $out)
+    Assert 'restore-test.ps1 -BootstrapOnly left the leaked bare repo config UNTOUCHED' `
+        ($leakConfigAfter -eq $leakConfigBefore) `
+        ("before={0}`nafter ={1}" -f $leakConfigBefore, $leakConfigAfter)
+} finally {
+    Remove-Item -Path $sandbox5 -Recurse -Force -ErrorAction SilentlyContinue
+}
+}
+
 # --------------------------------------------------------------------------------------- verdict
 
 # Restore any outer GIT_* env vars the caller had set.
