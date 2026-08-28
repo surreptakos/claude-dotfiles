@@ -13,4 +13,5 @@
 - [CO attribution build](co-attribution-build.md) — PRD #19, tickets #21-#27, ADRs 0004/0005; GP = Sales − Total Cost (quoted); Deal Owner = attribution; Dan adding Total Cost field
 - [Zoho field traps](zoho-field-traps.md) — AAC_Projects.Owner = PM, Project_Manager = sales rep (labels crossed); Project_GPM is formula-derived
 - [Publish gate hook](publish-gate-hook.md) — gh issue create gated by flow + AskUserQuestion evidence; Dan wants general policy gates; Fable: trim to one governance injection
+- [Cloud skill sync](cloud-skill-sync.md) — dan-skills/caveman/i-have-adhd uploaded to claude.ai 2026-08-28, sync into all cloud containers; rebuild via claude-dotfiles `tools/build-cloud-plugin.py` + re-upload after skill edits; validator: 6 frontmatter keys, no XML in descriptions, no top-level bin/
 
