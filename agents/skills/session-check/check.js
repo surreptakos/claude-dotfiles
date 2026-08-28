@@ -311,6 +311,34 @@ async function workChecks() {
   }
 }
 
+/* --------------------------------------------------------- cloud skills ---------------------- */
+
+/** Skills live on this machine; cloud containers run a SNAPSHOT uploaded to claude.ai. Editing a
+ *  skill here changes nothing in the cloud until the plugin is rebuilt and re-uploaded, and the
+ *  product says nothing when the copy goes stale. End of session is when that gap is cheap to close.
+ *  Machine-wide, so it reports the same in every repo — and stays silent on machines with no plugin. */
+function cloudSkillChecks() {
+  const sweep = path.join(__dirname, 'cloud-plugin-sweep.js');
+  if (!fs.existsSync(sweep)) return;
+  const r = runReadingOutput(process.execPath, [sweep, '--json'], { timeout: 30000 });
+  let result;
+  try { result = JSON.parse(r.out); } catch (e) { result = null; }
+  if (!result || result.state === 'not-configured') return;
+
+  head('Cloud skills');
+  const lines = result.lines || [];
+  if (result.state === 'in-sync') { ok(`cloud plugin is current — ${result.count} skills`); return; }
+  if (result.state === 'unknown') {
+    note(`could not check the cloud plugin: ${result.reason || 'unknown reason'}`);
+    return;
+  }
+  warn(result.state === 'never-uploaded'
+    ? 'no upload recorded — cloud sessions may be running without your skills'
+    : 'cloud plugin is STALE — cloud sessions load the skills as they were at the last upload');
+  lines.forEach((l) => note(l));
+  note('`/update-cloud-plugin` rebuilds and re-uploads it, then stamps the sweep');
+}
+
 /* -------------------------------------------------------------- tickets ---------------------- */
 
 function ticketChecks() {
@@ -339,6 +367,7 @@ async function main() {
   claspChecks();
   await workChecks();
   ticketChecks();
+  if (END) cloudSkillChecks();
   if (CFG.note) { head('Note'); note(CFG.note); }
   console.log(out.join('\n'));
   console.log('');

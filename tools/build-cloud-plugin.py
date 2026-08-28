@@ -30,6 +30,16 @@ import yaml
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
 PLUGIN_NAME = "dan-skills"
 
+# Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
+# the same rule, so a .bak file dropped next to a SKILL.md does not read as a stale cloud plugin.
+IGNORED_DIRS = {".git", "node_modules", "__pycache__", ".pytest_cache"}
+BACKUP_RE = re.compile(r"\.bak(-|\.|$)", re.IGNORECASE)
+
+
+def ignore_noise(_dir, names):
+    return [n for n in names if n in IGNORED_DIRS or BACKUP_RE.search(n)
+            or n in {".DS_Store", "Thumbs.db"}]
+
 
 def split_frontmatter(text):
     """Return (frontmatter_str, body) or (None, text) when no frontmatter."""
@@ -127,7 +137,7 @@ def main():
         except Exception as exc:  # noqa: BLE001 - report and keep packaging the rest
             failures.append(f"{entry.name}: {exc}")
             continue
-        shutil.copytree(entry, dest)
+        shutil.copytree(entry, dest, ignore=ignore_noise)
         (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
         packaged.append((entry.name, moved))
 
