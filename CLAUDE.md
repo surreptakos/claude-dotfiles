@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
 ```
 
 It clones the pushed remote and installs it into a fake home under a different username, then runs
-21 checks — including executing the restored hooks from their new location. `-Fault <name>` makes a
+its checks — including executing the restored hooks from their new location. `-Fault <name>` makes a
 chosen check fail on purpose. Add a check whenever you add something to the whitelist; a whitelist
 entry with no assertion behind it is how 24 skills went missing without a single error message.
 
