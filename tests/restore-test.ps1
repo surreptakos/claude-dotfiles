@@ -781,6 +781,27 @@ if (Test-Path $freshnessPsTests) {
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
 }
 
+# ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)
+
+# Prove that sync.ps1, tools/dotfiles-freshness.ps1, and tools/tracker-audit.js do not honour a
+# leaked GIT_DIR - `git -C <path>` does not override GIT_DIR by itself, and a hook-invoked child
+# process silently reads/writes the parent's repo unless every helper clears the five GIT_* env
+# vars first. Runs the standalone suite against the CLONED tests/ folder; the clone's copy is what
+# ships, so this proves the guard survives the mirror rather than only working in the working tree.
+$leakTests = Join-Path $Clone 'tests\git-env-leak.tests.ps1'
+if (Test-Path $leakTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $leakTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'git-env-leak.tests.ps1 passes (sync + freshness + tracker + audit)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'git-env-leak.tests.ps1 shipped' $false @('tests/git-env-leak.tests.ps1 missing from clone')
+}
+
 # ------------------------------------------------------------------ 9b. claims-audit engine ships
 
 # The claims-audit engine ships via the claude/skills whitelist entry, so the restore places it at

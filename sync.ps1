@@ -122,8 +122,16 @@ if ($Mode -eq 'push') {
             # terminating NativeCommandError. That killed this block between the add and the
             # commit - leaving everything staged and nothing committed - on a checkout whose
             # only sin was mixed line endings. Exit codes are the signal here, not stderr.
+            #
+            # GIT_* env vars are cleared for the duration of this block (issue 28). When
+            # sync.ps1 is invoked from a pre-commit hook (or from the state2 auto-push path
+            # in dotfiles-freshness-hook.js, which is called from a hook itself), the parent
+            # git process leaks GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE into the child;
+            # `git -C $RepoRoot add/commit` would then silently operate on the PARENT repo
+            # instead of the target. `-C` does not override GIT_DIR - only unsetting does.
             $previous = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
+            $savedGitEnv = Clear-GitEnv
             try {
                 git -C $RepoRoot add -A 2>&1 |
                     Where-Object { $_ -notmatch 'will be replaced by CRLF' } |
@@ -143,6 +151,7 @@ if ($Mode -eq 'push') {
                 Write-Host ''
                 Write-Host ('Committed: ' + (git -C $RepoRoot log --oneline -1))
             } finally {
+                Restore-GitEnv -Saved $savedGitEnv
                 $ErrorActionPreference = $previous
             }
         } else {

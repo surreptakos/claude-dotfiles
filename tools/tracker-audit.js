@@ -28,6 +28,28 @@
 
 const { execSync, execFileSync } = require('child_process');
 
+/** Child env with the five GIT_* overrides stripped. Issue 28.
+ *
+ *  `git -C <path>` does NOT override GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_COMMON_DIR /
+ *  GIT_OBJECT_DIRECTORY: git honours those env vars first, so a leaked GIT_DIR silently redirects
+ *  every git call in this process to whatever repo the parent named — including the `gh` shells and
+ *  the `git log/fetch/rev-parse` probes below. This tool is meant to audit the repo it is invoked
+ *  from, and a leaked GIT_DIR would make it audit somebody else's; worse, the `git fetch` inside
+ *  check 9 would fetch into the parent's repo instead. Precomputed once and reused, rather than
+ *  cleared-and-restored per call, because this script never uses those env vars for itself.
+ *
+ *  The same guard already lives in tools/dotfiles-freshness.ps1's Invoke-Git and now in sync.ps1's
+ *  -Commit path (via lib/manifest.ps1's Clear-GitEnv). Keep the three in step.
+ */
+const CHILD_ENV = (() => {
+  const env = Object.assign({}, process.env);
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+                   'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY']) {
+    delete env[k];
+  }
+  return env;
+})();
+
 /** Acceptance boxes a closed issue is allowed to leave unticked, by exact text fragment. Deliberately
  *  empty: an exemption here is a claim that a box did not need to be true, which deserves a comment
  *  on the issue rather than a line in this file. */
@@ -103,7 +125,7 @@ if (require.main !== module) {
  *  call look like it failed. So stderr is suppressed via stdio, never in the command string. */
 function sh(cmd) {
   return execSync(cmd, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-                         stdio: ['ignore', 'pipe', 'ignore'] });
+                         stdio: ['ignore', 'pipe', 'ignore'], env: CHILD_ENV });
 }
 
 /** git, with NO shell between us and it. The log format below is built out of `%` placeholders, and
@@ -111,7 +133,7 @@ function sh(cmd) {
  *  `sh`, which would otherwise mangle the separators on Windows and leave the parse silently empty. */
 function git(args) {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-                                     stdio: ['ignore', 'pipe', 'ignore'] });
+                                     stdio: ['ignore', 'pipe', 'ignore'], env: CHILD_ENV });
 }
 
 /** Bail with exit 2 rather than reporting a clean run we cannot stand behind. */
@@ -587,7 +609,7 @@ if (!LOG_REF) {
   // — the scan still runs against whatever is on disk — but it must never hang the audit.
   try {
     execSync('git fetch --quiet origin ' + DEFAULT_BRANCH,
-             { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000 });
+             { stdio: ['ignore', 'ignore', 'ignore'], timeout: 30000, env: CHILD_ENV });
   } catch (e) { /* offline, or no such remote. Scan what is here. */ }
   try {
     landedFindings(issues, landedCommits(git(['log', '--no-color', '--format=' + LOG_FORMAT, LOG_REF])),

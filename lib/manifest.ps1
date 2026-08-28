@@ -470,6 +470,48 @@ function Get-DotfilesFingerprint {
 # ("no stamp"), the freshness check stays silent - the criterion "auto-pull must
 # never run while live drift exists" then holds trivially because a missing
 # stamp cannot possibly report "unedited since last sync".
+# Names of the five GIT_* environment variables that override `git -C <path>` and would silently
+# redirect any child git call to the parent process's repo. See Clear-GitEnv below for the full
+# rationale; issue 28.
+$script:GitEnvNames = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY')
+
+function Clear-GitEnv {
+    <#
+    .SYNOPSIS
+        Strip the five GIT_* env vars from the current process, returning a saved-state
+        hashtable for Restore-GitEnv. Issue 28.
+    .DESCRIPTION
+        `git -C <path>` does NOT override GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE /
+        GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY: git honours those env vars first, and the -C
+        flag only relocates its resolution of a path when they are unset. A pre-commit hook
+        that runs restore-test.ps1 (which runs the freshness suite, which runs git) leaks
+        those vars into every child process; every downstream `git -C <target>` then silently
+        operates on the PARENT repo instead of the intended target. Corrupted state1
+        detection 2026-08-25 and polluted a parent bare repo's .git/config with test
+        user.email entries on the same run.
+
+        Callers must pair Clear-GitEnv with Restore-GitEnv in a try/finally so the parent's
+        environment is not permanently mutated when the caller returns.
+    #>
+    $saved = @{}
+    foreach ($name in $script:GitEnvNames) {
+        $val = [Environment]::GetEnvironmentVariable($name)
+        if ($null -ne $val) {
+            $saved[$name] = $val
+            [Environment]::SetEnvironmentVariable($name, $null)
+        }
+    }
+    return $saved
+}
+
+function Restore-GitEnv {
+    param([hashtable]$Saved)
+    if ($null -eq $Saved) { return }
+    foreach ($name in $Saved.Keys) {
+        [Environment]::SetEnvironmentVariable($name, $Saved[$name])
+    }
+}
+
 function Get-DotfilesStampPath {
     param([Parameter(Mandatory = $true)][string]$UserHome)
     return (Join-Path $UserHome '.claude\hook-state\dotfiles-sync\state.json')
@@ -486,9 +528,11 @@ function Write-DotfilesStamp {
     if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
 
     $commit = ''
+    $savedGitEnv = Clear-GitEnv
     try {
         $commit = (& git -C $RepoRoot rev-parse HEAD 2>$null).Trim()
     } catch { $commit = '' }
+    finally { Restore-GitEnv -Saved $savedGitEnv }
 
     $stamp = [ordered]@{
         version         = 1

@@ -93,11 +93,7 @@ function Invoke-Git {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $errFile = [System.IO.Path]::GetTempFileName()
-    $savedGitEnv = @{}
-    foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
-        $val = [Environment]::GetEnvironmentVariable($name)
-        if ($null -ne $val) { $savedGitEnv[$name] = $val; [Environment]::SetEnvironmentVariable($name, $null) }
-    }
+    $savedGitEnv = Clear-GitEnv
     try {
         $stdout = & git -C $RepoRoot @Arguments 2>$errFile | Out-String
         $exit = $LASTEXITCODE
@@ -105,7 +101,7 @@ function Invoke-Git {
         if (Test-Path $errFile) { $stderr = [System.IO.File]::ReadAllText($errFile) }
         return [pscustomobject]@{ ExitCode = $exit; Output = $stdout.Trim(); Stderr = $stderr.Trim() }
     } finally {
-        foreach ($name in $savedGitEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $savedGitEnv[$name]) }
+        Restore-GitEnv -Saved $savedGitEnv
         $ErrorActionPreference = $prev
         if (Test-Path $errFile) { Remove-Item -Path $errFile -Force -ErrorAction SilentlyContinue }
     }
