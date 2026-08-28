@@ -41,6 +41,38 @@ def ignore_noise(_dir, names):
             or n in {".DS_Store", "Thumbs.db"}]
 
 
+# A packaged skill runs in a cloud container, where none of this machine's hooks and none of
+# ~/.claude/skills exist. Any command naming those paths fails there, so bodies are retargeted at
+# the plugin's own copy through ${CLAUDE_PLUGIN_ROOT}, which is substituted only in plugin skills.
+CHECK_JS = "${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js"
+PATH_REWRITES = [
+    (re.compile(r"~/\.claude/hooks/session-gate\.js report --end"), CHECK_JS + " --end"),
+    (re.compile(r"~/\.claude/hooks/session-gate\.js report"), CHECK_JS),
+    (re.compile(r"(?:~|\$HOME|\$\{HOME\})/\.claude/skills/"), "${CLAUDE_PLUGIN_ROOT}/skills/"),
+]
+CLOUD_NOTE = (
+    "> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below\n"
+    "> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:\n"
+    "> every run is fresh.\n"
+)
+
+
+def retarget_paths(body):
+    """Point commands at the plugin's copy of the scripts. Returns (new_body, changed)."""
+    new = body
+    for pattern, replacement in PATH_REWRITES:
+        new = pattern.sub(replacement, new)
+    if new == body:
+        return body, False
+    # The note belongs under the first heading, next to the commands, not in a footer nobody reads.
+    lines = new.splitlines(keepends=True)
+    for i, line in enumerate(lines):
+        if line.startswith("# "):
+            lines.insert(i + 1, "\n" + CLOUD_NOTE)
+            return "".join(lines), True
+    return CLOUD_NOTE + "\n" + new, True
+
+
 def split_frontmatter(text):
     """Return (frontmatter_str, body) or (None, text) when no frontmatter."""
     if not text.startswith("---"):
@@ -84,8 +116,10 @@ def transform_skill_md(path):
     # "<ViewTransition>". Drop the angle brackets, keep the tag name.
     fm["description"] = re.sub(r"</?([A-Za-z][\w.:-]*)\s*/?>", r"\1", str(fm["description"]))
 
+    body, retargeted = retarget_paths(body)
+
     new_fm = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True, width=100000).strip()
-    return f"---\n{new_fm}\n---\n{body}", sorted(moved)
+    return f"---\n{new_fm}\n---\n{body}", sorted(moved), retargeted
 
 
 def main():
@@ -133,13 +167,13 @@ def main():
                 continue
         dest = plugin_root / "skills" / entry.name
         try:
-            new_text, moved = transform_skill_md(skill_md)
+            new_text, moved, retargeted = transform_skill_md(skill_md)
         except Exception as exc:  # noqa: BLE001 - report and keep packaging the rest
             failures.append(f"{entry.name}: {exc}")
             continue
         shutil.copytree(entry, dest, ignore=ignore_noise)
         (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
-        packaged.append((entry.name, moved))
+        packaged.append((entry.name, moved, retargeted))
 
     zip_path = out / f"{PLUGIN_NAME}.zip"
     if zip_path.exists():
@@ -149,13 +183,16 @@ def main():
             if f.is_file():
                 zf.write(f, f.relative_to(plugin_root))
 
-    moved_count = sum(1 for _, m in packaged if m)
+    moved_count = sum(1 for _n, m, _r in packaged if m)
+    retargeted = [n for n, _m, r in packaged if r]
     print(f"packaged {len(packaged)} skills -> {zip_path} "
           f"({zip_path.stat().st_size // 1024} KB), version {version}")
     print(f"frontmatter keys moved under metadata in {moved_count} skills")
-    for name, moved in packaged:
+    for name, moved, _r in packaged:
         if moved:
             print(f"  {name}: {', '.join(moved)}")
+    print(f"local paths retargeted at the plugin in {len(retargeted)} skills"
+          + (f": {', '.join(retargeted)}" if retargeted else ""))
     if failures:
         print("FAILURES:")
         for f in failures:
