@@ -18,7 +18,9 @@ node ~/.claude/hooks/session-gate.js report --end
 ```
 
 Add `--refresh` to force a fresh run — do that after any commit or push, since the point of the
-check is the state of the tree *now*.
+check is the state of the tree *now*. If that hook file does not exist (a cloud container with the
+skills but not the hooks), run the engine directly — same report, always fresh:
+`node ~/.claude/skills/session-check/check.js --end`.
 
 ## When the user types `/session-end`: auto-drive to archive-ready
 
@@ -31,7 +33,8 @@ with the exact line `Ready to archive` (no punctuation, no bold, no extra words)
 can hit archive immediately. Passive wrap-up wording ("wrap up", "handing off") is NOT a
 standing OK — confirm before landing shared-state actions in that mode.
 
-Sequence, none skippable when the user typed `/session-end`:
+Sequence, none skippable when the user typed `/session-end` (in a cloud container, take each
+step's `gh` spelling through the substitution table in the cloud section below):
 
 1. **Commit any uncommitted work** in a single commit that describes what changed and why.
    Never `--no-verify`. If pre-commit fails, fix the underlying issue and create a NEW commit.
@@ -52,7 +55,9 @@ Sequence, none skippable when the user typed `/session-end`:
    ```
    Zero configuration: auto-discovers every open ProjectsV2 board linked to the repo's `origin`
    remote and sweeps each. No-op if no linked board has a `Status` field with a `Done` option.
-   Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`.
+   Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. Local
+   machines only — it needs gh with project scope, and no cloud substitute exists (see the cloud
+   section below): in a container, skip it with a stated reason and name it for a local session.
 7. **Batch surfaced items through `/to-tickets`** (see ticket sweep below). This is required, not
    optional. `/to-tickets` handles its own breakdown/approval/publish flow — invoke it once with
    all NEEDS-A-TICKET items collected during the sweep. Never `gh issue create` ad hoc.
@@ -149,6 +154,38 @@ Sequence, none skippable when the user typed `/session-end`:
 If any step in 1–11 fails or is blocked for a reason the assistant cannot resolve, name the
 blocker, list what IS done, and stop. Do NOT emit `Ready to archive` — the whole point of the
 line is that seeing it means the user can archive without checking.
+
+## In a cloud container: same duties, different instruments
+
+A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the
+environment is the tell. Every step above still applies; only the tool changes. Do not report a
+step as impossible because its `gh` spelling failed — use the equivalent:
+
+| The sequence says | In a container use |
+| --- | --- |
+| `gh pr create` | GitHub MCP `create_pull_request` |
+| `gh pr merge --squash --delete-branch` | MCP `merge_pull_request` (method squash), then `git push origin --delete <branch>` |
+| `gh issue list --json … --jq …` | MCP `list_issues` / `search_issues` — milestone and body come back as fields; do the filtering yourself |
+| `gh issue edit <n> --milestone` | MCP `issue_write` (update) |
+| `gh pr list --state open` | MCP `list_pull_requests` |
+| `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
+
+Quick read-only checks can also go straight to REST — `curl
+https://api.github.com/repos/<owner>/<repo>/...` — the session's egress proxy authenticates
+api.github.com, private repos included. Git itself (push, fetch, branch delete) works normally
+through the same proxy.
+
+Three genuine differences, all to be said out loud rather than skipped silently:
+
+- **Step 6 (board sweep)** has no cloud substitute — the MCP has no ProjectsV2 tools. Skip it with
+  a stated reason and name it for a local session.
+- **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container. Still
+  not a pass: run the same audit through the MCP tools, or name it as needing a local run.
+- **The cloud-plugin staleness check** does not run in containers — the container IS the
+  downstream copy. Nothing to do there.
+
+MCP write calls (merge, close, edit) may raise a permission prompt; when the user typed
+`/session-end`, that prompt is the confirmation, not a reason to skip the step.
 
 ## Then close the loop (report interpretation)
 

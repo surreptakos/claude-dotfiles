@@ -16,7 +16,9 @@
  *   .clasp.json            Apps Script project — warns that `clasp push` is a release
  *   tools/tracker-audit.js  tracker drift (exit 1 = found drift, 2 = could not audit)
  *   tools/canary.js         pre-release gate, run at --end
- *   gh + a GitHub remote    open tickets by label
+ *   a GitHub remote         open tickets by label — via gh, or the GitHub REST API when gh is
+ *                           missing (cloud containers have no gh, but their egress proxy
+ *                           authenticates api.github.com, private repos included)
  *
  * OPTIONAL `.claude/session.json`, all keys optional:
  *   {
@@ -42,6 +44,12 @@ const path = require('node:path');
 
 const END = process.argv.includes('--end');
 const REPO = findRepoRoot(process.cwd());
+
+/** A Claude Code cloud container (claude.ai/code, Cowork). Several checks mean something
+ *  different there: no gh, no clasp credential, and the machine is a downstream copy of the
+ *  skills rather than where they are authored. */
+const IS_CLOUD = Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID
+  || process.env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE);
 
 const C = process.stdout.isTTY
   ? { r: '\x1b[31m', y: '\x1b[33m', g: '\x1b[32m', b: '\x1b[1m', x: '\x1b[0m', d: '\x1b[2m' }
@@ -218,8 +226,12 @@ function claspChecks() {
     // dropping scopes another repo depends on.
     const auth = runReadingOutput('node', ['tools/clasp-auth.js', '--quiet'], { timeout: 25000 });
     if (auth.code === 0) ok('clasp credential is alive and correctly scoped');
-    else if (auth.code === 2 || auth.code === null) warn('could not check the clasp credential — not a pass');
-    else {
+    else if (auth.code === 2 || auth.code === null) {
+      // A cloud container never carries ~/.clasprc.json — the credential is not provisioned
+      // there, deploys stay CI or local, and warning about it every session is noise.
+      if (IS_CLOUD) note('cloud container — no clasp credential is provisioned here; deploys stay CI or local');
+      else warn('could not check the clasp credential — not a pass');
+    } else {
       const why = (auth.out.match(/^Reason: (.*)$/m) || [])[1] || 'dead or missing scopes';
       warn(`clasp credential needs re-authorizing — ${why}`);
       note('`node tools/clasp-auth.js` prints the exact command; do NOT shorten it to `clasp login`');
@@ -278,6 +290,17 @@ async function workChecks() {
       else if (r.timedOut) {
         stop(`release gate TIMEOUT after 300000 ms — \`${g}\``);
         noteDiagnostics(r.out);
+      } else if (r.code === 2) {
+        // The house convention: exit 1 = found a failure, exit 2 = could not check. Neither is
+        // a pass, but "could not check" is not "FAILS" — in a cloud container a gate that needs
+        // a local credential can never run, and calling that a failed release check every
+        // session teaches people to ignore the line that matters.
+        warn(`release gate could not check — that is not a pass — \`${g}\``);
+        if (IS_CLOUD) {
+          const reason = (r.out.match(/^CANNOT CHECK: .*$/m) || [])[0];
+          if (reason) note(reason);
+          note('cloud container — a gate needing local credentials cannot run here; release stays CI or local');
+        } else noteDiagnostics(r.out);
       } else {
         stop(`release gate FAILS — \`${g}\``);
         noteDiagnostics(r.out);
@@ -288,8 +311,12 @@ async function workChecks() {
 
   if (has('tools/tracker-audit.js')) {
     const a = runReadingOutput('node', ['tools/tracker-audit.js'], { timeout: 60000 });
-    if (a.code === null || a.code === 2) warn('the tracker audit could not run — that is not a pass');
-    else {
+    if (a.code === null || a.code === 2) {
+      warn('the tracker audit could not run — that is not a pass');
+      if (IS_CLOUD && tryRun('gh', ['--version'], { timeout: 10000 }) === null) {
+        note('this container has no gh — audit the tracker with the GitHub MCP tools, or run it locally');
+      }
+    } else {
       const n = Number((a.out.match(/(\d+) drift finding/) || [])[1] || 0);
       if (n > 0) { warn(`tracker audit: ${n} drift finding(s)`); note('`node tools/tracker-audit.js` — check none are yours'); }
       else ok('tracker audit clean');
@@ -318,6 +345,10 @@ async function workChecks() {
  *  product says nothing when the copy goes stale. End of session is when that gap is cheap to close.
  *  Machine-wide, so it reports the same in every repo — and stays silent on machines with no plugin. */
 function cloudSkillChecks() {
+  // The sweep compares the AUTHORING machine's tree against the last upload. Inside a cloud
+  // container the tree IS the downstream copy, there is no stamp, and the report would read
+  // "never uploaded" every session — meaningless there, so stay quiet.
+  if (IS_CLOUD) return;
   const sweep = path.join(__dirname, 'cloud-plugin-sweep.js');
   if (!fs.existsSync(sweep)) return;
   const r = runReadingOutput(process.execPath, [sweep, '--json'], { timeout: 30000 });
@@ -341,18 +372,51 @@ function cloudSkillChecks() {
 
 /* -------------------------------------------------------------- tickets ---------------------- */
 
+function parseGithubSlug(remote) {
+  const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(remote || '');
+  return m ? { owner: m[1], repo: m[2] } : null;
+}
+
+/** The REST path for machines without gh, via curl — NOT node's fetch, which ignores
+ *  HTTPS_PROXY and so bypasses exactly the proxy that makes this work. Cloud containers are
+ *  the case that matters: their egress proxy authenticates api.github.com, so private repos
+ *  answer too. Elsewhere it still works for public repos and degrades to the same
+ *  "did not answer" note for private ones. curl ships on Windows 10+, macOS and the
+ *  containers, so this adds no dependency. */
+function curlTicketRows(slug, label) {
+  const url = `https://api.github.com/repos/${slug.owner}/${slug.repo}/issues`
+    + `?labels=${encodeURIComponent(label)}&state=open&per_page=100`;
+  const r = runReadingOutput('curl', ['-sS', '--fail', '--max-time', '25',
+    '-H', 'Accept: application/vnd.github+json', '-H', 'User-Agent: session-check', url],
+  { timeout: 30000 });
+  if (r.code !== 0) return { error: `curl exit ${r.code === null ? 'unknown' : r.code}` };
+  try {
+    const issues = JSON.parse(r.out);
+    // The issues endpoint returns PRs too; gh issue list does not. Match gh.
+    return { list: issues.filter((i) => !i.pull_request).map((i) => `#${i.number}  ${i.title}`) };
+  } catch (e) { return { error: 'unparseable response' }; }
+}
+
 function ticketChecks() {
   const remote = tryRun('git', ['remote', 'get-url', 'origin']);
-  if (!remote || !/github\.com/i.test(remote)) return;
-  if (tryRun('gh', ['--version'], { timeout: 10000 }) === null) return;
+  const slug = parseGithubSlug(remote);
+  if (!slug) return;
 
   const label = CFG.ticketLabel || 'ready-for-agent';
-  const rows = tryRun('gh', ['issue', 'list', '--label', label, '--state', 'open',
-                             '--json', 'number,title', '-q', '.[] | "#\\(.number)  \\(.title)"'],
-                      { timeout: 25000 });
-  if (rows === null) { note('(could not reach GitHub for the ticket list)'); return; }
-  if (!rows) { ok(`no open tickets labelled ${label}`); return; }
-  const list = rows.split('\n');
+  let list;
+  if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
+    const rows = tryRun('gh', ['issue', 'list', '--label', label, '--state', 'open',
+                               '--json', 'number,title', '-q', '.[] | "#\\(.number)  \\(.title)"'],
+                        { timeout: 25000 });
+    if (rows === null) { note('(could not reach GitHub for the ticket list)'); return; }
+    list = rows ? rows.split('\n') : [];
+  } else {
+    const r = curlTicketRows(slug, label);
+    if (r.error) { note(`(no gh, and the GitHub API did not answer — ${r.error})`); return; }
+    list = r.list;
+  }
+
+  if (!list.length) { ok(`no open tickets labelled ${label}`); return; }
   ok(`${list.length} ticket(s) labelled ${label}`);
   list.slice(0, 8).forEach((r) => note(r));
   if (list.length > 8) note(`...and ${list.length - 8} more`);
