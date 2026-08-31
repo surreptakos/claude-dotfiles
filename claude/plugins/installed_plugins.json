@@ -40,6 +40,15 @@
         "lastUpdated": "2026-08-21T14:19:05.285Z",
         "gitCommitSha": "e7555fcaf612dfa1739dc86610ea926a906db614"
       }
+    ],
+    "dan-skills@local-desktop-app-uploads": [
+      {
+        "scope": "user",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads\\dan-skills",
+        "version": "2026.08.31",
+        "installedAt": "2026-08-31T18:25:28.799Z",
+        "lastUpdated": "2026-08-31T18:25:28.799Z"
+      }
     ]
   }
 }

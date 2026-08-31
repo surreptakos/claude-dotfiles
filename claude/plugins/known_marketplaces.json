@@ -38,5 +38,13 @@
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\i-have-adhd",
     "lastUpdated": "2026-08-21T14:18:53.654Z"
+  },
+  "local-desktop-app-uploads": {
+    "source": {
+      "source": "directory",
+      "path": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads"
+    },
+    "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads",
+    "lastUpdated": "2026-08-31T18:25:27.489Z"
   }
 }

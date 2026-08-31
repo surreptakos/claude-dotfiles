@@ -53,6 +53,28 @@ prefixed one is whatever the last upload froze. A stale upload is therefore not 
 cloud sessions; it plants a second, older copy of every skill in this machine's own picker. Both
 accounts need the new zip, or the one that does not get it keeps serving the old snapshot.
 
+**There are three skill channels on this machine, and this skill only covers one of them.**
+
+1. **Local** — `~/.claude/skills` plus `~/.agents/skills` junctions. What `sync.ps1` mirrors into
+   claude-dotfiles, what the sweep fingerprints, what a fresh machine restores.
+2. **Account Plugins** — the `dan-skills` zip this skill builds. Namespaced `dan-skills:`.
+3. **Account Skills** — individual skills uploaded at claude.ai, cached on disk at
+   `%APPDATA%\Claude\local-agent-mode-sessions\skills-plugin\<orgUuid>\<accountUuid>\skills\`
+   beside a `manifest.json`. Namespaced by the org's display name, which is why `anthropic-skills:`
+   fronts skills that are Dan's own, not Anthropic's.
+
+Channel 3 is invisible to everything in this repo. Counted 2026-08-31: the work org carried 33
+skills there and the personal org 27, and **28 of the work org's were absent from
+`~/.claude/skills` entirely** — `writing`, `aac-sop`, `aac-contract-package`, `o3-prep`, `todo`,
+`email-review`, `review-contract`, `software-decision`, `audit-code-changes` among them. They are
+not in the mirror, not in the zip, and not on a restored machine. Worse, names living in more than
+one channel drift silently: `writing-dan` was byte-equal between local and the personal org and
+**different** in the work org, and the two orgs' `writing` differed from each other. Nothing
+detects that.
+
+Do not conclude a skill is missing from the packager because it is absent from `~/.claude/skills`.
+Check channel 3 first.
+
 Default path: send `dist/dan-skills.zip` with `SendUserFile` and let the owner upload it. One drag,
 no account switching, no credentials, and it works regardless of which login the browser holds.
 
