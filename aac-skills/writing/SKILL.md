@@ -31,7 +31,7 @@ Run both passes in order, then the Final Scoring Gate. Keep intermediate drafts 
 
 ### Pass 1 — Strip AI tells (slop)
 
-Apply the nine core slop rules and the ten AI-generated tells to every paragraph. See [references/slop.md](references/slop.md), [references/phrases.md](references/phrases.md), [references/structures.md](references/structures.md).
+Apply the nine core slop rules and the ten AI-generated tells to every paragraph. See [references/slop.md](references/slop.md), [references/phrases.md](references/phrases.md), [references/structures.md](references/structures.md). Before/after transformations: [references/examples.md](references/examples.md).
 
 Score the result on the six dimensions in slop.md (1–10 each). Below 42/60, revise and re-score before moving on.
 
