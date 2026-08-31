@@ -193,6 +193,44 @@ def main():
             if f.is_file():
                 zf.write(f, f.relative_to(plugin_root))
 
+    # ------------------------------------------------------------------ AAC team bundle
+    repo = Path(__file__).resolve().parent.parent
+    aac_src = repo / "aac-skills"
+    aac_root = out / "aac-skills"
+    aac_packaged = []
+    if aac_src.is_dir():
+        if aac_root.exists():
+            shutil.rmtree(aac_root)
+        (aac_root / ".claude-plugin").mkdir(parents=True)
+        (aac_root / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps(
+                {
+                    "name": "aac-skills",
+                    "version": version,
+                    "author": {"name": "Dan Gatsakos"},
+                    "description": "Active Alarm Company team skills - SOPs, contract packages, "
+                    "writing standards and software decisions. Canonical source: aac-skills/ in "
+                    "the claude-dotfiles repo.",
+                },
+                indent=2,
+            )
+            + NL,
+            encoding="utf-8",
+        )
+        for entry in sorted(aac_src.iterdir()):
+            if not entry.is_dir() or not (entry / "SKILL.md").is_file():
+                continue
+            dest = aac_root / "skills" / entry.name
+            try:
+                new_text, _m, _r = transform_skill_md(entry / "SKILL.md")
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"aac/{entry.name}: {exc}")
+                continue
+            shutil.copytree(entry, dest, ignore=ignore_noise)
+            (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
+            aac_packaged.append(entry.name)
+        print(f"aac-skills bundle: {len(aac_packaged)} skills ({', '.join(aac_packaged)})")
+
     # ------------------------------------------------------------------ repo marketplace
     # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.
     if not args.no_marketplace:
@@ -201,6 +239,11 @@ def main():
         if mkt_payload.exists():
             shutil.rmtree(mkt_payload)
         shutil.copytree(plugin_root, mkt_payload)
+        if aac_packaged:
+            aac_mkt = repo / "marketplace" / "aac-skills"
+            if aac_mkt.exists():
+                shutil.rmtree(aac_mkt)
+            shutil.copytree(aac_root, aac_mkt)
         mkt_dir = repo / ".claude-plugin"
         mkt_dir.mkdir(exist_ok=True)
         (mkt_dir / "marketplace.json").write_text(
@@ -218,7 +261,15 @@ def main():
                             "for Claude Code, Desktop, Cowork and cloud sessions.",
                             "version": version,
                         }
-                    ],
+                    ] + ([
+                        {
+                            "name": "aac-skills",
+                            "source": "./marketplace/aac-skills",
+                            "description": "AAC Skills - Active Alarm Company team skills: "
+                            "SOPs, contract packages, writing standards, software decisions.",
+                            "version": version,
+                        }
+                    ] if aac_packaged else []),
                 },
                 indent=2,
             )

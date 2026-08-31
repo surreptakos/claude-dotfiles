@@ -1,0 +1,897 @@
+{
+  "mode": "work_instruction",
+  "title": "Running a System Surveyor site walk",
+  "department": "Sales",
+  "version": "1.0",
+  "owner": "VP of Sales & Marketing",
+  "last_updated": "2026-06-25",
+  "intro": "Purpose: create a consistent site-walk record that gives estimating enough information to produce an accurate workup without relying on AE memory or avoidable follow-up. Covers AEs using System Surveyor from the site walk through handoff to the Sales Estimator (Phase 4). Applies to all AEs with a System Surveyor seat.",
+  "tools": [
+    {
+      "label": "Bring",
+      "items": [
+        "A charged mobile device or tablet with the latest System Surveyor app; log in with your assigned company credentials (do not share logins between AEs).",
+        "Any available floor plans (PDF, PNG, or JPG).",
+        "A site-walk agenda, business cards, and any pre-sales materials."
+      ]
+    },
+    {
+      "label": "Confirm",
+      "items": [
+        "The device library is current for Security & Access Control (cameras, access control hardware, intercoms, intrusion sensors).",
+        "The preliminary scope is documented in Project Notes."
+      ]
+    },
+    {
+      "label": "Know",
+      "items": [
+        "The customer name, site address, and deal/job number, plus the contact name, title, and phone.",
+        "The site's access rules before arriving: PPE, escort/badging, restricted or secure areas, working-hours limits, and any customer permission required to photograph."
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "kind": "phase",
+      "text": "Phase 1 - Pre-site-walk preparation (complete before arriving)"
+    },
+    {
+      "kind": "step",
+      "text": "Create the project: tap + New Project, enter customer name, site address, and deal/job number; set the vertical to Security & Access Control (System Surveyor's vertical setting; fire and all other in-scope devices are still captured in this project)."
+    },
+    {
+      "kind": "step",
+      "text": "In Project Notes, record the meeting purpose, the customer contact name and title, and any known scope discussed before the walk."
+    },
+    {
+      "kind": "step",
+      "text": "Upload available floor plans before the walk and give each a clear label (e.g., “Building A, 1st Floor”)."
+    },
+    {
+      "kind": "step",
+      "text": "Confirm the device library is current and includes the categories expected on site: cameras, access control hardware, intercoms, intrusion sensors."
+    },
+    {
+      "kind": "phase",
+      "text": "Phase 2 - Conducting the site walk"
+    },
+    {
+      "kind": "step",
+      "text": "Arrival & orientation: view the drawing before placing any devices. Identify main entry/exit points, parking, loading docks, server/IDF room locations, and any customer-flagged problem areas."
+    },
+    {
+      "kind": "step",
+      "text": "Open the project and navigate to the correct floor plan."
+    },
+    {
+      "kind": "ifthen",
+      "if": "no floor plan is available",
+      "then": "check for an evacuation drawing, photograph it, and use it as the device-placement base; if none exists, use the Sketch tool to create a simple site diagram before placing devices."
+    },
+    {
+      "kind": "step",
+      "text": "Place each device: select the correct type from the library and place it on the floor plan. Use the actual product model where known; use a placeholder category if the final product is TBD."
+    },
+    {
+      "kind": "step",
+      "text": "Annotate each device with the required fields for its type (see Required Device Data, below): label/ID, location description, coverage/field of view, mounting height/location, and special install notes (conduit required, outdoor-rated, etc.)."
+    },
+    {
+      "kind": "step",
+      "text": "Photograph each device per the Required Device Data table: a photo set for some device types, and at least one photo where no larger set is specified. Capture the space, mounting surface, and obstructions."
+    },
+    {
+      "kind": "step",
+      "text": "Document infrastructure: mark IDF/MDF room locations, existing conduit runs, power availability, and networking infrastructure. Note any locations needing new conduit, trenching, or special mounting. Also note ceiling type, wall construction, lift/ladder needs, exposed vs concealed cable path, firestopping, after-hours or access limits, and customer/IT dependencies."
+    },
+    {
+      "kind": "step",
+      "text": "Record key customer requirements and preferences in Project Notes as the conversation happens. Do not rely on memory after the walk."
+    },
+    {
+      "kind": "step",
+      "text": "Before leaving, review the placed devices with the customer contact where appropriate; confirm coverage areas match expectations and note any agreed changes."
+    },
+    {
+      "kind": "step",
+      "text": "Set each element's Status in System Surveyor: Proposed (new), In place (existing, staying as-is), To be replaced (direct swap), To be upgraded (reused, reconnected, or reprogrammed), or To be removed. Also set its Color by system so the drawing reads at a glance. See Installation status and Color coding by system below."
+    },
+    {
+      "kind": "table",
+      "title": "Required device data - populate in each element",
+      "headers": [
+        "Device type",
+        "Required fields",
+        "Photos required"
+      ],
+      "widths": [
+        1900,
+        4760,
+        2700
+      ],
+      "rows": [
+        [
+          "IP / Analog Camera",
+          "Model or spec, mounting height, coverage direction, indoor/outdoor, day/night requirement, existing or new cabling",
+          "Location photo + intended field of view"
+        ],
+        [
+          "Access Control Reader",
+          "Door ID/name, reader type (card/mobile/biometric), door hardware type, electric strike or mag lock, REX device required, push pad, etc.",
+          "Door face, frame, lockset/hardware, strike or mag-lock area, hinge side; head-end/IDF room and cable pathway as applicable or once per shared pathway/head-end condition."
+        ],
+        [
+          "Door Contact / REX",
+          "Door ID linked to reader, contact type, surface or mortise, REX type",
+          "Door edge, frame detail, and REX / exit-device location"
+        ],
+        [
+          "Intercom / Video Door Station",
+          "Location name, indoor/outdoor, vandal resistant, network or analog, directory integration required",
+          "Mounting surface and door approach"
+        ],
+        [
+          "Intrusion Sensor",
+          "Zone number/name, sensor type (motion, glass break, door/window contact), panel location",
+          "Mounting location and coverage area"
+        ],
+        [
+          "Panel / Head-End",
+          "Panel model or category, rack/wall mount, location (IDF/MDF room), power source, network drop available",
+          "Room overview and available rack/wall space"
+        ],
+        [
+          "Network Switch / NVR",
+          "Location, managed/unmanaged, PoE ports required, storage capacity (NVR), rack space needed",
+          "Existing infrastructure in room"
+        ],
+        [
+          "Fire Alarm Device",
+          "Device type (panel, smoke/heat, duct detector, pull station, notification appliance), addressable vs conventional, circuit/zone, mounting, and interfaces (elevator/HVAC/door holders). Fire intake guidance in Appendix B; fire design/code items go to the fire team before quoting.",
+          "Device location and nearby interfaces"
+        ]
+      ]
+    },
+    {
+      "kind": "note",
+      "text": "Enter these in each element's System Surveyor fields. System Surveyor has named fields for them (status, mount, field of view, resolution, connectivity, and more) and carries them into the BOM and Element Detail exports, so there is no separate form to fill."
+    },
+    {
+      "kind": "phase",
+      "text": "Phase 3 - Post-walk review (within 24 hours)"
+    },
+    {
+      "kind": "step",
+      "text": "Review every placed device: confirm all required fields are complete, all photos are attached and labeled, and all annotations are accurate."
+    },
+    {
+      "kind": "step",
+      "text": "Verify device counts against your walk notes. Resolve discrepancies before handoff - contact the customer if clarification is needed."
+    },
+    {
+      "kind": "step",
+      "text": "Complete Project Notes: customer pain points and priorities, product preferences or exclusions, budget range if disclosed, decision timeline, and any competitive factors."
+    },
+    {
+      "kind": "step",
+      "text": "Write a 3-5 sentence plain-language scope summary in the project's Summary/Description field for quick estimator reference."
+    },
+    {
+      "kind": "step",
+      "text": "Confirm infrastructure notes are complete (cable runs, conduit, power, network topology); these affect labor estimates."
+    },
+    {
+      "kind": "step",
+      "text": "Update placeholder devices to the correct product model where known; otherwise confirm an accurate description of what is needed."
+    },
+    {
+      "kind": "phase",
+      "text": "Phase 4 - Handoff to the Sales Estimator"
+    },
+    {
+      "kind": "note",
+      "text": "The handoff is a formal step: share the project and send the summary email. Both are required."
+    },
+    {
+      "kind": "step",
+      "text": "Share the project in System Surveyor: open Share / Collaborate, enter the Sales Estimator's company email, and grant Edit access (unless the VP of Sales & Marketing directs View + Comment). In the invitation note, enter: “Handoff for estimating - see summary email for full context. Proposal due: [DATE].”"
+    },
+    {
+      "kind": "step",
+      "text": "Confirm the share invitation was sent. If the estimator does not confirm receipt within 4 business hours, follow up with the estimator."
+    },
+    {
+      "kind": "step",
+      "text": "Within 2 hours of sharing the project, export the BOM and Element Detail from System Surveyor and send the handoff summary email (template below) with both attached."
+    },
+    {
+      "kind": "block",
+      "title": "Handoff summary email - template",
+      "lines": [
+        "TO:       [Sales Estimator name and email]",
+        "CC:       [VP of Sales & Marketing]",
+        "SUBJECT:  System Surveyor Handoff - [Customer Name] - [Site Address]",
+        "",
+        "Hi [Estimator name],",
+        "",
+        "Please find the site walk project for [Customer Name] shared to your",
+        "System Surveyor account.",
+        "",
+        "CUSTOMER:      [Customer Name]",
+        "SITE:          [Full Site Address]",
+        "CONTACT:       [Customer Contact Name, Title, Phone]",
+        "DATE OF WALK:  [Date]",
+        "PROPOSAL DUE:  [Target Date]",
+        "",
+        "SCOPE SUMMARY:",
+        "[3-5 sentence plain-language summary of what was surveyed and what the",
+        "customer needs.]",
+        "",
+        "KEY CUSTOMER PRIORITIES:",
+        "  1. [Priority 1]",
+        "  2. [Priority 2]",
+        "  3. [Priority 3]",
+        "",
+        "ATTACHED:      System Surveyor BOM and Element Detail exports",
+        "               (the device list, counts, models, and specs are in these)",
+        "",
+        "INFRASTRUCTURE NOTES:",
+        "[Cabling requirements, conduit, power constraints, access limitations.]",
+        "",
+        "BUDGET RANGE:          [If disclosed - otherwise 'Not disclosed']",
+        "COMPETITIVE SITUATION: [Known competitors or customer preferences]",
+        "",
+        "BASE vs ALTERNATES:    [base bid; options/alternates to price separately]",
+        "EXCLUSIONS:            [what is explicitly NOT included]",
+        "CUSTOMER-PROVIDED:     [equipment/work the customer supplies - network, conduit, etc.]",
+        "RECURRING (RMR):       [monitoring / service / managed deal, if any]",
+        "REASON FOR DEADLINE:   [board date, budget cycle, incident, lease, etc.]",
+        "",
+        "OPEN ITEMS / ASSUMPTIONS:",
+        "[TBDs, assumptions, customer dependencies; note any VP of Sales & Marketing exception approved.]",
+        "",
+        "Please confirm receipt and let me know if you have any questions before",
+        "you begin the workup.",
+        "",
+        "Thank you,",
+        "[AE Name] | [Phone] | [Email]"
+      ]
+    },
+    {
+      "kind": "table",
+      "title": "Handoff timing standards",
+      "headers": [
+        "Milestone",
+        "Standard"
+      ],
+      "widths": [
+        4860,
+        4500
+      ],
+      "rows": [
+        [
+          "Post-walk project review complete",
+          "Within 24 hours of the site walk"
+        ],
+        [
+          "Project shared in System Surveyor",
+          "Within 24 hours of the site walk"
+        ],
+        [
+          "Handoff email sent to estimator",
+          "Within 2 hours of sharing the project"
+        ],
+        [
+          "Estimator acknowledges receipt",
+          "Within 4 business hours of the handoff email"
+        ],
+        [
+          "AE available for estimator questions",
+          "Throughout the estimating period"
+        ],
+        [
+          "AE reviews draft workup with estimator",
+          "Before the proposal is finalized - mandatory"
+        ]
+      ]
+    },
+    {
+      "kind": "note",
+      "text": "The Sales Estimator may perform an initial review, but does not begin the formal workup until the Pre-Handoff Quality Gate (Appendix A) is met, or the VP of Sales & Marketing approves a documented exception."
+    }
+  ],
+  "done_when": "Every device is placed with its required fields, its required photo set, and Status and system color set on every element; device counts are verified against your notes; all open items are logged in Appendix C and any “Blocks estimate = Yes” items are resolved or have a VP of Sales & Marketing exception; Project Notes and a 3-5 sentence scope summary are complete; the project is shared with the estimator and the handoff email is sent.",
+  "records": [
+    "System Surveyor project (device placements, photos, notes) - shared with the estimator and retained in the System Surveyor account",
+    "Handoff summary email with BOM and Element Detail exports - sent to the estimator",
+    "Completed Pre-Handoff Quality Gate (Appendix A) and Open Items log (Appendix C) - Zoho deal record"
+  ],
+  "watch_out": [
+    "Do not rely on memory after the walk. Record customer requirements as the conversation happens.",
+    "No orphaned or unplaced devices, and no placeholder device types left unidentified, at handoff.",
+    "Set the Status (Proposed / In place / To be replaced / To be upgraded / To be removed) and the system color on every element.",
+    "Project naming convention (Appendix E) must be followed so projects are findable.",
+    "Get customer permission before photographing; do not photograph restricted, classified, or security-sensitive areas. Follow site PPE, escort, and access rules.",
+    "Confirm conceptual coverage and priorities with the customer only. Do not represent the layout, product selection, labor, or price as final until estimating and technical review are complete."
+  ],
+  "sections": [
+    {
+      "heading": "Installation status",
+      "items": [
+        {
+          "kind": "text",
+          "text": "System Surveyor tracks each element's lifecycle in its native Status field. Set it on every element. Status tracks lifecycle; color marks the system (see Color coding by system below)."
+        },
+        {
+          "kind": "table",
+          "headers": [
+            "Situation",
+            "Status to set"
+          ],
+          "widths": [
+            5600,
+            3760
+          ],
+          "rows": [
+            [
+              "New device",
+              "Proposed"
+            ],
+            [
+              "Existing device staying as-is",
+              "In place"
+            ],
+            [
+              "Direct replacement (swap)",
+              "To be replaced"
+            ],
+            [
+              "Existing reused, reconnected, reprogrammed, or upgraded",
+              "To be upgraded"
+            ],
+            [
+              "Removed or demolished",
+              "To be removed"
+            ]
+          ]
+        },
+        {
+          "kind": "note",
+          "text": "For a relocation, set the existing-location element to To be removed and add a Proposed element at the new location. State any required action (reconnect, reprogram, reuse) in the element Notes."
+        }
+      ]
+    },
+    {
+      "heading": "Color coding by system",
+      "items": [
+        {
+          "kind": "text",
+          "text": "Set each element's Color by system so the drawing reads at a glance. Color is a visual aid only; the Status field tracks lifecycle."
+        },
+        {
+          "kind": "swatch_table",
+          "headers": [
+            "Swatch",
+            "System",
+            "Applies to"
+          ],
+          "widths": [
+            1700,
+            2700,
+            4960
+          ],
+          "rows": [
+            {
+              "label": "DARK BLUE",
+              "hex": "1F4E79",
+              "cells": [
+                "Video surveillance & video intercoms",
+                "IP and analog cameras, NVR/DVR, video door stations, video intercom panels"
+              ]
+            },
+            {
+              "label": "RED",
+              "hex": "C00000",
+              "cells": [
+                "Fire",
+                "Fire alarm panels, smoke and heat detectors, pull stations, strobes, notification appliances"
+              ]
+            },
+            {
+              "label": "ORANGE",
+              "hex": "C55A11",
+              "cells": [
+                "Access control",
+                "Readers, controllers, door hardware, electric strikes, mag locks, REX devices, non-video intercoms"
+              ]
+            },
+            {
+              "label": "DARK GREEN",
+              "hex": "375623",
+              "cells": [
+                "Intrusion",
+                "Motion detectors, door and window contacts, glass-break sensors, keypads, intrusion panels, sirens"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "heading": "If a project is returned",
+      "items": [
+        {
+          "kind": "text",
+          "text": "If the estimator identifies missing information that prevents workup:"
+        },
+        {
+          "kind": "bullet",
+          "text": "The estimator notifies the AE and VP of Sales & Marketing by email, listing the specific deficiencies."
+        },
+        {
+          "kind": "bullet",
+          "text": "The AE has 24 hours to complete the missing information in System Surveyor and re-notify the estimator."
+        },
+        {
+          "kind": "bullet",
+          "text": "If additional site access is required, the AE coordinates a follow-up visit or customer call within 48 hours."
+        },
+        {
+          "kind": "bullet",
+          "text": "The VP of Sales & Marketing is cc'd on all return communications and tracks repeat deficiency patterns."
+        }
+      ]
+    }
+  ],
+  "checklist_title": "Pre-Handoff Quality Gate (the Estimator verifies)",
+  "checklist": [
+    "Project naming convention followed",
+    "Floor plan labels accurate and readable",
+    "All devices placed on the floor plan - no orphaned/unplaced devices",
+    "Required fields complete for 100% of placed devices",
+    "Required photo set attached for each device type (minimum one where no larger set is specified)",
+    "Status (Proposed / In place / To be replaced / To be upgraded / To be removed) and system color set on every element",
+    "Project Notes include customer contact, scope context, priorities, and budget range",
+    "Scope summary (3-5 sentences) written in the project description",
+    "Infrastructure / cabling notes complete",
+    "No placeholder device types remaining (or all identified and explained in notes)",
+    "Handoff email sent with all required fields completed",
+    "System Surveyor BOM and Element Detail exported and attached to the handoff email",
+    "All TBDs, assumptions, and customer dependencies logged in Appendix C",
+    "Items marked “Blocks estimate = Yes” resolved, or VP of Sales & Marketing exception approved"
+  ],
+  "quick_reference": [
+    {
+      "n": "1",
+      "step": "Pre-walk prep",
+      "actions": [
+        "Create project",
+        "Upload & label floor plans",
+        "Record contact & known scope",
+        "Verify device library"
+      ]
+    },
+    {
+      "n": "2",
+      "step": "Site walk",
+      "actions": [
+        "Walk the full site",
+        "Place all devices",
+        "Annotate (required fields)",
+        "Photograph each",
+        "Document infrastructure",
+        "Record priorities",
+        "Set Status and system color"
+      ]
+    },
+    {
+      "n": "3",
+      "step": "Post-walk review",
+      "actions": [
+        "Within 24h: review all devices",
+        "Verify counts",
+        "Complete notes",
+        "Write scope summary",
+        "Update placeholders"
+      ]
+    },
+    {
+      "n": "4",
+      "step": "Estimator handoff",
+      "actions": [
+        "Share project (Edit access, unless the VP directs View + Comment)",
+        "Export BOM and Element Detail",
+        "Send handoff email with exports attached",
+        "Confirm receipt within 4 business hours"
+      ]
+    },
+    {
+      "n": "5",
+      "step": "Support estimating",
+      "actions": [
+        "Remain available for questions",
+        "Review the draft workup before the proposal is finalized"
+      ]
+    }
+  ],
+  "revision_log": [
+    {
+      "date": "2026-06-25",
+      "ver": "1.0",
+      "by": "Mark Kurland",
+      "change": "Created"
+    }
+  ],
+  "responsibilities": [
+    {
+      "role": "Account Executive (AE)",
+      "responsibility": "Owns the site walk, customer discussion, the System Surveyor project, device placement, notes/photos, and the handoff package to estimating."
+    },
+    {
+      "role": "Sales Estimator",
+      "responsibility": "Reviews the shared project, the BOM and Element Detail exports, and the handoff email; prepares the estimate and workup from that structured starting point, identifies missing information, and raises clarifying questions before the proposal is finalized."
+    },
+    {
+      "role": "VP of Sales & Marketing",
+      "responsibility": "Owns process compliance, seat assignments, approved exceptions, and repeated quality issues."
+    }
+  ],
+  "appendices": [
+    {
+      "label": "Appendix B - Per-system technical capture standards",
+      "intro": "Populate these in each element's System Surveyor fields when applicable, in addition to the core required device data. This is a checklist of what matters per system. If a field is unknown, record “Unknown” in the element and, if it affects estimating, log it in Appendix C (Open items).",
+      "items": [
+        {
+          "kind": "subhead",
+          "text": "Video surveillance"
+        },
+        {
+          "kind": "bullet",
+          "text": "Desired retention period"
+        },
+        {
+          "kind": "bullet",
+          "text": "Resolution / PPF expectations"
+        },
+        {
+          "kind": "bullet",
+          "text": "Analytics required (LPR, people counting, line-cross)"
+        },
+        {
+          "kind": "bullet",
+          "text": "Low-light / IR needs"
+        },
+        {
+          "kind": "bullet",
+          "text": "Exterior / weather exposure"
+        },
+        {
+          "kind": "bullet",
+          "text": "Mounting surface and height"
+        },
+        {
+          "kind": "bullet",
+          "text": "Field-of-view objective"
+        },
+        {
+          "kind": "bullet",
+          "text": "Nearest network / power"
+        },
+        {
+          "kind": "bullet",
+          "text": "Viewing / use case (live, forensic, remote)"
+        },
+        {
+          "kind": "subhead",
+          "text": "Access control"
+        },
+        {
+          "kind": "bullet",
+          "text": "Door type / material"
+        },
+        {
+          "kind": "bullet",
+          "text": "Frame type"
+        },
+        {
+          "kind": "bullet",
+          "text": "Existing lockset / hardware"
+        },
+        {
+          "kind": "bullet",
+          "text": "Strike / mag / exit-device condition"
+        },
+        {
+          "kind": "bullet",
+          "text": "Fire-rated door?"
+        },
+        {
+          "kind": "bullet",
+          "text": "ADA / egress constraints"
+        },
+        {
+          "kind": "bullet",
+          "text": "Door handing"
+        },
+        {
+          "kind": "bullet",
+          "text": "Existing access system and credential type"
+        },
+        {
+          "kind": "bullet",
+          "text": "Controller / head-end location"
+        },
+        {
+          "kind": "bullet",
+          "text": "Cable pathway and power source"
+        },
+        {
+          "kind": "bullet",
+          "text": "Fail-safe vs fail-secure"
+        },
+        {
+          "kind": "subhead",
+          "text": "Intrusion"
+        },
+        {
+          "kind": "bullet",
+          "text": "Existing panel type"
+        },
+        {
+          "kind": "bullet",
+          "text": "Monitoring status"
+        },
+        {
+          "kind": "bullet",
+          "text": "Keypad locations"
+        },
+        {
+          "kind": "bullet",
+          "text": "Partitions / areas"
+        },
+        {
+          "kind": "bullet",
+          "text": "Arm / disarm workflow"
+        },
+        {
+          "kind": "bullet",
+          "text": "User count"
+        },
+        {
+          "kind": "bullet",
+          "text": "Zone (opening) list"
+        },
+        {
+          "kind": "bullet",
+          "text": "Expansion needs"
+        },
+        {
+          "kind": "bullet",
+          "text": "Communication path (IP / cell)"
+        },
+        {
+          "kind": "subhead",
+          "text": "Fire alarm (capture only if known)"
+        },
+        {
+          "kind": "bullet",
+          "text": "Existing panel make"
+        },
+        {
+          "kind": "bullet",
+          "text": "Addressable vs conventional"
+        },
+        {
+          "kind": "bullet",
+          "text": "Device types and counts (smoke / heat / duct / pull / notification)"
+        },
+        {
+          "kind": "bullet",
+          "text": "Monitoring / communicator"
+        },
+        {
+          "kind": "bullet",
+          "text": "Interfaces (elevator recall, HVAC shutdown, door holders, sprinkler)"
+        },
+        {
+          "kind": "flag",
+          "text": "Fire is intake-level only. Do NOT determine occupancy/use group, AHJ, code edition, permit/plan-review, or inspection requirements during the AE walk. Fire design, code analysis, and AHJ coordination are the fire team's responsibility - engage them before quoting fire scope; log unknowns for fire-team review."
+        }
+      ]
+    },
+    {
+      "label": "Appendix C - Open items & assumptions",
+      "items": [
+        {
+          "kind": "text",
+          "text": "Log every TBD, assumption, or customer dependency here so it does not disappear. Anything marked “Blocks estimate? = Yes” must be resolved, or an exception approved by the VP of Sales & Marketing, before handoff."
+        },
+        {
+          "kind": "table",
+          "headers": [
+            "Open item",
+            "Why it matters",
+            "Owner",
+            "Needed by",
+            "Blocks estimate?"
+          ],
+          "widths": [
+            2600,
+            2700,
+            1600,
+            1300,
+            1160
+          ],
+          "rows": [
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ],
+            [
+              "",
+              "",
+              "",
+              "",
+              ""
+            ]
+          ]
+        },
+        {
+          "kind": "text",
+          "text": "Retain the completed Quality Gate (Appendix A) and this log in the Zoho deal record. Complete both using the System Surveyor Handoff checklist template in Zoho; until that template is built, paste them into a Zoho note titled “System Surveyor Handoff Record.” Note in System Surveyor that the completed handoff record is stored in Zoho."
+        }
+      ]
+    },
+    {
+      "label": "Appendix D - Proposal-strategy inputs (reference)",
+      "intro": "Appendices D-F are standing references. Capture them for proposal strategy and positioning. The handoff email pulls the estimating-critical ones. Where these overlap the Zoho deal record, the CRM is the system of record. Reference it; don't duplicate.",
+      "items": [
+        {
+          "kind": "bullet",
+          "text": "Decision maker / economic buyer and the buying/approval process."
+        },
+        {
+          "kind": "bullet",
+          "text": "Reason for the deadline (board date, budget cycle, incident, lease)."
+        },
+        {
+          "kind": "bullet",
+          "text": "Required proposal format; base scope vs alternates/options; explicit exclusions."
+        },
+        {
+          "kind": "bullet",
+          "text": "Customer-provided equipment or work; recurring (monitoring/service/RMR) deal; warranty/service expectations."
+        },
+        {
+          "kind": "bullet",
+          "text": "Preferred manufacturers; unacceptable manufacturers; incumbent provider; known competitors."
+        },
+        {
+          "kind": "bullet",
+          "text": "Budget confidence level; pain points ranked by importance."
+        }
+      ]
+    },
+    {
+      "label": "Appendix E - System Surveyor administration (reference)",
+      "intro": "Account housekeeping. Not needed during the walk.",
+      "items": [
+        {
+          "kind": "text",
+          "text": "The company holds 5 licensed seats on System Surveyor."
+        },
+        {
+          "kind": "bullet",
+          "label": "Seat assignment: ",
+          "text": "each seat is assigned to one named AE by the VP of Sales & Marketing or designated administrator. Seats are non-transferable without VP of Sales & Marketing approval; do not share logins. Notify the VP of Sales & Marketing if a seat needs to be reallocated (departure or role change)."
+        },
+        {
+          "kind": "bullet",
+          "label": "Project naming: ",
+          "text": "[Customer Name] - [Site Address] - [YYYY-MM-DD].  Example: Acme Corporation - 1250 Industrial Blvd Chicago IL - 2025-03-14."
+        },
+        {
+          "kind": "bullet",
+          "label": "Archiving: ",
+          "text": "Active projects stay in the AE's list. Won: archive after acceptance + job number, add “WON - [Job #]” to the title. Lost: archive with “LOST - [reason]” within 5 business days. No-decision: archive with “NO DECISION - [follow-up date]” and calendar a follow-up task."
+        },
+        {
+          "kind": "bullet",
+          "label": "Post-award: ",
+          "text": "for won projects, do not archive or restrict access until the estimator/PM has exported or shared the System Surveyor record into the project handoff package."
+        }
+      ]
+    },
+    {
+      "label": "Appendix F - Compliance metrics (reference)",
+      "intro": "The VP of Sales & Marketing reviews project quality monthly across all 5 seats.",
+      "items": [
+        {
+          "kind": "table",
+          "headers": [
+            "Metric",
+            "Definition",
+            "Target",
+            "How measured / who",
+            "Escalation on repeat miss"
+          ],
+          "widths": [
+            1700,
+            2500,
+            1000,
+            2300,
+            1860
+          ],
+          "rows": [
+            [
+              "Handoff timing",
+              "% of handoffs meeting the Phase 4 timing standards",
+              "≥ 90%",
+              "Timing standards vs actual; VP of Sales & Marketing",
+              "Coaching, then documented plan"
+            ],
+            [
+              "Return rate",
+              "% of projects returned by estimating for missing info",
+              "≤ 10%",
+              "Estimator return log; VP of Sales & Marketing",
+              "Root-cause review with the AE"
+            ],
+            [
+              "Photo coverage",
+              "% of devices with the required photos",
+              "100%",
+              "Quality-gate audit; Estimator",
+              "Re-train; re-audit next project"
+            ],
+            [
+              "Estimator feedback",
+              "Average handoff quality score",
+              "≥ 4 / 5",
+              "Estimator scores each handoff",
+              "Review the trend with the AE"
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

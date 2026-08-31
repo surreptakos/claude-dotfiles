@@ -10,6 +10,12 @@
       "source": "./marketplace/dan-skills",
       "description": "Dan's personal Claude skills - one canonical set for Claude Code, Desktop, Cowork and cloud sessions.",
       "version": "2026.8.31"
+    },
+    {
+      "name": "aac-skills",
+      "source": "./marketplace/aac-skills",
+      "description": "AAC Skills - Active Alarm Company team skills: SOPs, contract packages, writing standards, software decisions.",
+      "version": "2026.8.31"
     }
   ]
 }

@@ -1,0 +1,8 @@
+{
+  "name": "aac-skills",
+  "version": "2026.8.31",
+  "author": {
+    "name": "Dan Gatsakos"
+  },
+  "description": "Active Alarm Company team skills - SOPs, contract packages, writing standards and software decisions. Canonical source: aac-skills/ in the claude-dotfiles repo."
+}
