@@ -1,134 +1,134 @@
 [
-    {
-        "Name":  "ask-matt",
-        "Target":  "__USERHOME__\\.agents\\skills\\ask-matt"
-    },
-    {
-        "Name":  "code-review",
-        "Target":  "__USERHOME__\\.agents\\skills\\code-review"
-    },
-    {
-        "Name":  "codebase-design",
-        "Target":  "__USERHOME__\\.agents\\skills\\codebase-design"
-    },
-    {
-        "Name":  "diagnosing-bugs",
-        "Target":  "__USERHOME__\\.agents\\skills\\diagnosing-bugs"
-    },
-    {
-        "Name":  "domain-modeling",
-        "Target":  "__USERHOME__\\.agents\\skills\\domain-modeling"
-    },
-    {
-        "Name":  "grill-me",
-        "Target":  "__USERHOME__\\.agents\\skills\\grill-me"
-    },
-    {
-        "Name":  "grill-with-docs",
-        "Target":  "__USERHOME__\\.agents\\skills\\grill-with-docs"
-    },
-    {
-        "Name":  "grilling",
-        "Target":  "__USERHOME__\\.agents\\skills\\grilling"
-    },
-    {
-        "Name":  "handoff",
-        "Target":  "__USERHOME__\\.agents\\skills\\handoff"
-    },
-    {
-        "Name":  "implement",
-        "Target":  "__USERHOME__\\.agents\\skills\\implement"
-    },
-    {
-        "Name":  "improve-codebase-architecture",
-        "Target":  "__USERHOME__\\.agents\\skills\\improve-codebase-architecture"
-    },
-    {
-        "Name":  "playwright-cli",
-        "Target":  "__USERHOME__\\.agents\\skills\\playwright-cli"
-    },
-    {
-        "Name":  "project-harness",
-        "Target":  "__USERHOME__\\.agents\\skills\\project-harness"
-    },
-    {
-        "Name":  "prototype",
-        "Target":  "__USERHOME__\\.agents\\skills\\prototype"
-    },
-    {
-        "Name":  "research",
-        "Target":  "__USERHOME__\\.agents\\skills\\research"
-    },
-    {
-        "Name":  "resolving-merge-conflicts",
-        "Target":  "__USERHOME__\\.agents\\skills\\resolving-merge-conflicts"
-    },
-    {
-        "Name":  "session-check",
-        "Target":  "__USERHOME__\\.agents\\skills\\session-check"
-    },
-    {
-        "Name":  "session-end",
-        "Target":  "__USERHOME__\\.agents\\skills\\session-end"
-    },
-    {
-        "Name":  "session-start",
-        "Target":  "__USERHOME__\\.agents\\skills\\session-start"
-    },
-    {
-        "Name":  "setup-matt-pocock-skills",
-        "Target":  "__USERHOME__\\.agents\\skills\\setup-matt-pocock-skills"
-    },
-    {
-        "Name":  "tdd",
-        "Target":  "__USERHOME__\\.agents\\skills\\tdd"
-    },
-    {
-        "Name":  "teach",
-        "Target":  "__USERHOME__\\.agents\\skills\\teach"
-    },
-    {
-        "Name":  "to-spec",
-        "Target":  "__USERHOME__\\.agents\\skills\\to-spec"
-    },
-    {
-        "Name":  "to-tickets",
-        "Target":  "__USERHOME__\\.agents\\skills\\to-tickets"
-    },
-    {
-        "Name":  "triage",
-        "Target":  "__USERHOME__\\.agents\\skills\\triage"
-    },
-    {
-        "Name":  "vercel-composition-patterns",
-        "Target":  "__USERHOME__\\.agents\\skills\\vercel-composition-patterns"
-    },
-    {
-        "Name":  "vercel-react-best-practices",
-        "Target":  "__USERHOME__\\.agents\\skills\\vercel-react-best-practices"
-    },
-    {
-        "Name":  "vercel-react-native-skills",
-        "Target":  "__USERHOME__\\.agents\\skills\\vercel-react-native-skills"
-    },
-    {
-        "Name":  "vercel-react-view-transitions",
-        "Target":  "__USERHOME__\\.agents\\skills\\vercel-react-view-transitions"
-    },
-    {
-        "Name":  "wayfinder",
-        "Target":  "__USERHOME__\\.agents\\skills\\wayfinder"
-    },
-    {
-        "Name":  "web-design-guidelines",
-        "Target":  "__USERHOME__\\.agents\\skills\\web-design-guidelines"
-    },
-    {
-        "Name":  "writing-great-skills",
-        "Target":  "__USERHOME__\\.agents\\skills\\writing-great-skills"
-    },
-    {
-        "Name":  "writing-guidelines",
-        "Target":  "__USERHOME__\\.agents\\skills\\writing-guidelines"
-    }
+  {
+    "Name": "ask-matt",
+    "Target": "__USERHOME__\\.agents\\skills\\ask-matt"
+  },
+  {
+    "Name": "code-review",
+    "Target": "__USERHOME__\\.agents\\skills\\code-review"
+  },
+  {
+    "Name": "codebase-design",
+    "Target": "__USERHOME__\\.agents\\skills\\codebase-design"
+  },
+  {
+    "Name": "diagnosing-bugs",
+    "Target": "__USERHOME__\\.agents\\skills\\diagnosing-bugs"
+  },
+  {
+    "Name": "domain-modeling",
+    "Target": "__USERHOME__\\.agents\\skills\\domain-modeling"
+  },
+  {
+    "Name": "grill-me",
+    "Target": "__USERHOME__\\.agents\\skills\\grill-me"
+  },
+  {
+    "Name": "grill-with-docs",
+    "Target": "__USERHOME__\\.agents\\skills\\grill-with-docs"
+  },
+  {
+    "Name": "grilling",
+    "Target": "__USERHOME__\\.agents\\skills\\grilling"
+  },
+  {
+    "Name": "handoff",
+    "Target": "__USERHOME__\\.agents\\skills\\handoff"
+  },
+  {
+    "Name": "implement",
+    "Target": "__USERHOME__\\.agents\\skills\\implement"
+  },
+  {
+    "Name": "improve-codebase-architecture",
+    "Target": "__USERHOME__\\.agents\\skills\\improve-codebase-architecture"
+  },
+  {
+    "Name": "playwright-cli",
+    "Target": "__USERHOME__\\.agents\\skills\\playwright-cli"
+  },
+  {
+    "Name": "project-harness",
+    "Target": "__USERHOME__\\.agents\\skills\\project-harness"
+  },
+  {
+    "Name": "prototype",
+    "Target": "__USERHOME__\\.agents\\skills\\prototype"
+  },
+  {
+    "Name": "research",
+    "Target": "__USERHOME__\\.agents\\skills\\research"
+  },
+  {
+    "Name": "resolving-merge-conflicts",
+    "Target": "__USERHOME__\\.agents\\skills\\resolving-merge-conflicts"
+  },
+  {
+    "Name": "session-check",
+    "Target": "__USERHOME__\\.agents\\skills\\session-check"
+  },
+  {
+    "Name": "session-end",
+    "Target": "__USERHOME__\\.agents\\skills\\session-end"
+  },
+  {
+    "Name": "session-start",
+    "Target": "__USERHOME__\\.agents\\skills\\session-start"
+  },
+  {
+    "Name": "setup-matt-pocock-skills",
+    "Target": "__USERHOME__\\.agents\\skills\\setup-matt-pocock-skills"
+  },
+  {
+    "Name": "tdd",
+    "Target": "__USERHOME__\\.agents\\skills\\tdd"
+  },
+  {
+    "Name": "teach",
+    "Target": "__USERHOME__\\.agents\\skills\\teach"
+  },
+  {
+    "Name": "to-spec",
+    "Target": "__USERHOME__\\.agents\\skills\\to-spec"
+  },
+  {
+    "Name": "to-tickets",
+    "Target": "__USERHOME__\\.agents\\skills\\to-tickets"
+  },
+  {
+    "Name": "triage",
+    "Target": "__USERHOME__\\.agents\\skills\\triage"
+  },
+  {
+    "Name": "vercel-composition-patterns",
+    "Target": "__USERHOME__\\.agents\\skills\\vercel-composition-patterns"
+  },
+  {
+    "Name": "vercel-react-best-practices",
+    "Target": "__USERHOME__\\.agents\\skills\\vercel-react-best-practices"
+  },
+  {
+    "Name": "vercel-react-native-skills",
+    "Target": "__USERHOME__\\.agents\\skills\\vercel-react-native-skills"
+  },
+  {
+    "Name": "vercel-react-view-transitions",
+    "Target": "__USERHOME__\\.agents\\skills\\vercel-react-view-transitions"
+  },
+  {
+    "Name": "wayfinder",
+    "Target": "__USERHOME__\\.agents\\skills\\wayfinder"
+  },
+  {
+    "Name": "web-design-guidelines",
+    "Target": "__USERHOME__\\.agents\\skills\\web-design-guidelines"
+  },
+  {
+    "Name": "writing-great-skills",
+    "Target": "__USERHOME__\\.agents\\skills\\writing-great-skills"
+  },
+  {
+    "Name": "writing-guidelines",
+    "Target": "__USERHOME__\\.agents\\skills\\writing-guidelines"
+  }
 ]

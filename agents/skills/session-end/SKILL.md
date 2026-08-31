@@ -63,6 +63,16 @@ Sequence, none skippable when the user typed `/session-end`:
    open while all its acceptance boxes are ticked.** Two failure modes the tracker audit does
    not catch on its own; both surface with two `gh` queries the assistant runs here.
 
+   **These checks resolve EVERY open issue that fails them, not just the ones this session
+   touched.** `/session-end` is the housekeeping pass for the whole tracker — a pre-existing
+   un-milestoned or delivered-but-open issue is a blocker the assistant fixes here, not a
+   note handed back to the owner. Ruling 2026-08-31 after a `/session-end` reply routed five
+   pre-existing hits back as questions ("which milestone for each?", "close, add box, or
+   hold?"). Wrong. Read the body, pick the best-fit milestone from the open list, or convert
+   prose bullets to `- [ ]` boxes. Only escalate when the body cannot be read from the tracker
+   or the choice is genuinely between two open milestones with equal fit — and even then,
+   act (pick one, note the alternative in a comment), do not hand back.
+
    a. **Un-milestoned open issues.** Every open issue must be assigned to a milestone — the
       milestone is what maps a ticket to a scope decision, and an un-milestoned ticket is
       invisible to the milestone view the owner works from. Run:
@@ -70,11 +80,14 @@ Sequence, none skippable when the user typed `/session-end`:
       gh issue list --state open --limit 1000 --json number,title,milestone \
         --jq '[.[] | select(.milestone == null) | {n: .number, t: .title}]'
       ```
-      For each result, assign the correct milestone with
-      `gh issue edit <n> --milestone "<Milestone N — Title>"`. If the assistant cannot tell
-      which milestone applies, name the issue and ask; do not leave any open issue unassigned.
-      Skip this check for repos that deliberately do not use milestones (state so out loud
-      the first time it comes up in a session).
+      For each result: list open milestones with
+      `gh api repos/OWNER/REPO/milestones --jq '.[] | select(.state == "open") | {n: .number, t: .title}'`,
+      read the issue body, and assign the best-fit milestone with
+      `gh issue edit <n> --milestone "<Milestone N — Title>"`. Ambiguity between two open
+      milestones is resolved by picking the one whose title's scope decision most directly
+      names the issue's subject; leave a one-line comment on the ticket if the second choice
+      is close. Skip this check for repos that deliberately do not use milestones (state so
+      out loud the first time it comes up in a session).
 
    b. **Delivered-but-open issues.** An open issue whose `## Done when` / `## Acceptance` /
       `## Acceptance criteria` section has zero unticked boxes is either finished-and-forgotten
@@ -87,14 +100,23 @@ Sequence, none skippable when the user typed `/session-end`:
       | select((.body | [scan("(?m)^[- \t*]*\\[ \\][ \t]")] | length) == 0)
       | {n: .number, t: .title}
       ```
-      For each hit, do one of exactly three things — no fourth:
+      For each hit, do one of exactly three things — no fourth. **The frequent case is a
+      prose-bullet acceptance (`- foo` instead of `- [ ] foo`), which reads as "zero unticked
+      boxes" to the scanner even though the work has not started.** That is not a real
+      delivered-but-open — convert the prose bullets to unchecked boxes in the SAME `/session-end`
+      pass. `gh issue view N --json body --jq .body > body.md`, rewrite the Acceptance section's
+      `- ` bullets to `- [ ] ` (leave `## Non-goals` / `## Evidence` / `## References` sections
+      alone — those are prose lists, not acceptance), then `gh issue edit N --body-file body.md`.
+      Re-run the scan to confirm zero hits before `Ready to archive`.
       - **Close** with a comment naming what proved each box, if the work genuinely landed
         this session or earlier.
       - **Add the missing box** to the body if a live-run, deploy, or owner sign-off is still
-        required (a ticked ledger without that box is dishonest — it is the pattern that
-        closed real issues prematurely before the tracker audit was written).
+        required, OR if the Acceptance section is prose bullets that need converting to `- [ ]`
+        boxes (see paragraph above; the two cases share a fix). A ticked ledger without a
+        real acceptance box is dishonest — that pattern closed real issues prematurely before
+        the tracker audit was written.
       - **Leave open and say why** in one line to the user, if the hold-open reason is
-        genuine but not captured on the issue.
+        genuine but not captured on the issue AND the box conversion above does not apply.
 
 10. **Clean up the worktree** — if the session ran in a git worktree and the branch has landed:
    `git worktree remove` refuses to remove the current worktree, so use the `ExitWorktree` tool
@@ -149,6 +171,14 @@ Sequence, none skippable when the user typed `/session-end`:
 If any step in 1–11 fails or is blocked for a reason the assistant cannot resolve, name the
 blocker, list what IS done, and stop. Do NOT emit `Ready to archive` — the whole point of the
 line is that seeing it means the user can archive without checking.
+
+**"Blocked for a reason the assistant cannot resolve" is a narrow phrase, not a hedge.** A
+pre-existing tracker hit (un-milestoned issue, prose-bullet acceptance, delivered-but-open
+detected by the scanner) IS resolvable: read the body, pick the milestone, convert the
+bullets to boxes. Handing those back as questions defeats the whole `/session-end` skill.
+The blocker exception covers CI failures, protected-branch refusals, credentials the assistant
+cannot mint, and choices requiring an owner ruling (values / risk tolerance / priorities) —
+not tracker housekeeping that reading the body settles.
 
 ## Then close the loop (report interpretation)
 
