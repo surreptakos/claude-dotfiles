@@ -32,8 +32,11 @@ local and the personal org and different in the work org, and each org's `writin
 the other's. The two orgs also disagree: `aac-contract-package`, `email-review`, `o3-prep`,
 `review-contract` and `todo` exist only in the work org.
 
-Nothing carries `creatorType: organization` — nothing is published org-wide to Active Alarm, and
-that admin surface is unused as of this date.
+The manifest does NOT distinguish org-scoped from personal — every uploaded skill is
+`creatorType: user`, and the org-vs-personal scope is a claude.ai concept only. Confirmed
+2026-08-31: the work-org Skills UI shows `aac-contract-package`, `writing`, `aac-sop`,
+`software-decision` as Organization skills (visible to every Active Alarm member), yet
+`manifest.json` marks them the same as personal `writing-dan`. Do not infer scope from disk.
 
 **How to apply:** never conclude a skill is missing, or that a `plugin:name` skill is a vendor's,
 from `~/.claude/skills` alone — list channel 3 for both orgs first. The org UUIDs come from each

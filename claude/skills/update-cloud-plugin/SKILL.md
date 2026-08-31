@@ -79,10 +79,12 @@ each org's `writing` differed from the other's.
 The two orgs are not in step either. Five of his work-org skills are absent from the personal org:
 `aac-contract-package`, `email-review`, `o3-prep`, `review-contract`, `todo`.
 
-**No skill anywhere carries `creatorType: organization`.** Nothing is published org-wide; every
-`user` entry is Dan's own upload inside that org. Publishing to the Active Alarm org is a separate
-admin surface he has never used, and it would reach teammates without giving them GitHub access to
-a private marketplace.
+**The manifest does NOT distinguish org-scoped from personal.** Every uploaded skill is
+`creatorType: user`, and the org-vs-personal scope lives only in claude.ai. Confirmed 2026-08-31
+against the work-org Skills UI: `aac-contract-package`, `writing`, `aac-sop`, `software-decision`
+are published org-wide (visible to every Active Alarm member), yet in `manifest.json` they are
+indistinguishable from Dan's personal `writing-dan` or `o3-prep`. So a downstream tool cannot know
+which uploads reach teammates without asking the web UI.
 
 Do not conclude a skill is missing from the packager because it is absent from `~/.claude/skills`.
 Check channel 3 first, and read `creatorType` before calling anything Anthropic's.
