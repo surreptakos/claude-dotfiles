@@ -39,6 +39,10 @@ const STATE_FILE = process.env.CLOUD_PLUGIN_STATE
   || path.join(HOME, '.claude', 'hook-state', 'cloud-plugin', 'state.json');
 const BUILDER = process.env.CLOUD_PLUGIN_BUILDER
   || path.join(HOME, 'Claude', 'Projects', 'Meta', 'claude-dotfiles', 'tools', 'build-cloud-plugin.py');
+// The AAC team skills ride the same plugin but live in the repo, not ~/.claude/skills. An edit
+// there is drift the same as any other; absent dir (another machine) simply contributes nothing.
+const AAC_DIR = process.env.CLOUD_PLUGIN_AAC_DIR
+  || path.join(HOME, 'Claude', 'Projects', 'Meta', 'claude-dotfiles', 'aac-skills');
 
 // One machine, two signed-in accounts (work and personal), and dan-skills is enabled on both -
 // established 2026-08-31 when a work-account session listed dan-skills:* while nothing named
@@ -110,6 +114,14 @@ function collectSkills() {
       dir = alt;
     }
     skills.push({ name: entry.name, hash: hashDir(dir) });
+  }
+  if (fs.existsSync(AAC_DIR)) {
+    for (const entry of fs.readdirSync(AAC_DIR, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(AAC_DIR, entry.name);
+      if (!fs.existsSync(path.join(dir, 'SKILL.md'))) continue;
+      skills.push({ name: `aac/${entry.name}`, hash: hashDir(dir) });
+    }
   }
   return skills;
 }

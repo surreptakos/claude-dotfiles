@@ -9,18 +9,22 @@ description: Rebuild the dan-skills plugin from the live ~/.claude/skills tree a
 > call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
 > every run is fresh.
 
+**Since 2026-08-31 evening there is ONE plugin: `aac-skills` (54 skills)** — Dan's personal set
+from `~/.claude/skills` plus the four AAC team skills from the repo's hand-edited `aac-skills/`
+tree, merged by the packager. `dan-skills` no longer exists as a plugin name anywhere.
+
 **One button now exists.** `sync.ps1 -Mode push` refreshes `marketplace/dan-skills/` and
 `.claude-plugin/marketplace.json` from the live tree on every push, and the session hooks already
 run that push automatically. The repo IS a private marketplace:
 
 ```bash
 claude plugin marketplace add surreptakos/claude-dotfiles
-claude plugin install dan-skills@claude-dotfiles
+claude plugin install aac-skills@claude-dotfiles
 ```
 
 Installed at user scope on this machine for both profiles 2026-08-31 (the old
 `dan-skills@local-desktop-app-uploads` copy was uninstalled). Any machine refreshes with
-`claude plugin marketplace update claude-dotfiles && claude plugin update dan-skills`.
+`claude plugin marketplace update claude-dotfiles && claude plugin update aac-skills`.
 claude.ai itself takes the same marketplace: Settings > Plugins > Add > "Add from a
 repository" syncs a plugin marketplace straight from a GitHub repo or git URL — confirmed in Dan's
 own UI 2026-08-31 after the docs suggested zip-only. So the zip is a fallback, not a channel: every

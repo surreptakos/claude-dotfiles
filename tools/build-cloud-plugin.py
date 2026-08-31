@@ -33,7 +33,7 @@ from pathlib import Path
 import yaml
 
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
-PLUGIN_NAME = "dan-skills"
+PLUGIN_NAME = "aac-skills"
 NL = chr(10)
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
@@ -151,9 +151,10 @@ def main():
                 "name": PLUGIN_NAME,
                 "version": version,
                 "author": {"name": "Dan Gatsakos"},
-                "description": "Dan's personal Claude Code skills, packaged for claude.ai "
-                "account sync so every Cowork and cloud session loads them. Built by "
-                "tools/build-cloud-plugin.py from ~/.claude/skills.",
+                "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
+                "Company team skills (aac-sop, aac-contract-package, writing, "
+                "software-decision). Built by tools/build-cloud-plugin.py from "
+                "~/.claude/skills and the repo's aac-skills/ tree.",
             },
             indent=2,
         )
@@ -193,43 +194,27 @@ def main():
             if f.is_file():
                 zf.write(f, f.relative_to(plugin_root))
 
-    # ------------------------------------------------------------------ AAC team bundle
+    # ---------------------------------------------------------------- AAC team skills
+    # The four org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
+    # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
     repo = Path(__file__).resolve().parent.parent
     aac_src = repo / "aac-skills"
-    aac_root = out / "aac-skills"
-    aac_packaged = []
     if aac_src.is_dir():
-        if aac_root.exists():
-            shutil.rmtree(aac_root)
-        (aac_root / ".claude-plugin").mkdir(parents=True)
-        (aac_root / ".claude-plugin" / "plugin.json").write_text(
-            json.dumps(
-                {
-                    "name": "aac-skills",
-                    "version": version,
-                    "author": {"name": "Dan Gatsakos"},
-                    "description": "Active Alarm Company team skills - SOPs, contract packages, "
-                    "writing standards and software decisions. Canonical source: aac-skills/ in "
-                    "the claude-dotfiles repo.",
-                },
-                indent=2,
-            )
-            + NL,
-            encoding="utf-8",
-        )
         for entry in sorted(aac_src.iterdir()):
             if not entry.is_dir() or not (entry / "SKILL.md").is_file():
                 continue
-            dest = aac_root / "skills" / entry.name
+            dest = plugin_root / "skills" / entry.name
+            if dest.exists():
+                failures.append(f"aac/{entry.name}: name collides with a personal skill")
+                continue
             try:
-                new_text, _m, _r = transform_skill_md(entry / "SKILL.md")
+                new_text, moved, retargeted = transform_skill_md(entry / "SKILL.md")
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"aac/{entry.name}: {exc}")
                 continue
             shutil.copytree(entry, dest, ignore=ignore_noise)
             (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
-            aac_packaged.append(entry.name)
-        print(f"aac-skills bundle: {len(aac_packaged)} skills ({', '.join(aac_packaged)})")
+            packaged.append((entry.name, moved, retargeted))
 
     # ------------------------------------------------------------------ repo marketplace
     # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.
@@ -239,11 +224,9 @@ def main():
         if mkt_payload.exists():
             shutil.rmtree(mkt_payload)
         shutil.copytree(plugin_root, mkt_payload)
-        if aac_packaged:
-            aac_mkt = repo / "marketplace" / "aac-skills"
-            if aac_mkt.exists():
-                shutil.rmtree(aac_mkt)
-            shutil.copytree(aac_root, aac_mkt)
+        stale = repo / "marketplace" / "dan-skills"
+        if stale.exists():
+            shutil.rmtree(stale)
         mkt_dir = repo / ".claude-plugin"
         mkt_dir.mkdir(exist_ok=True)
         (mkt_dir / "marketplace.json").write_text(
@@ -257,19 +240,11 @@ def main():
                         {
                             "name": PLUGIN_NAME,
                             "source": "./marketplace/" + PLUGIN_NAME,
-                            "description": "Dan's personal Claude skills - one canonical set "
-                            "for Claude Code, Desktop, Cowork and cloud sessions.",
+                            "description": "AAC Skills - Dan's full skill set plus the Active "
+                            "Alarm Company team skills, one package for every surface.",
                             "version": version,
                         }
-                    ] + ([
-                        {
-                            "name": "aac-skills",
-                            "source": "./marketplace/aac-skills",
-                            "description": "AAC Skills - Active Alarm Company team skills: "
-                            "SOPs, contract packages, writing standards, software decisions.",
-                            "version": version,
-                        }
-                    ] if aac_packaged else []),
+                    ],
                 },
                 indent=2,
             )

@@ -36,6 +36,7 @@ function scratch() {
       // Hermetic by default: point account discovery at nothing, so a test that does not care
       // about accounts is not reading this machine's real logins.
       CLOUD_PLUGIN_ACCOUNT_DIRS: path.join(root, 'no-accounts-here'),
+      CLOUD_PLUGIN_AAC_DIR: path.join(root, 'no-aac-here'),
     },
   };
 }
