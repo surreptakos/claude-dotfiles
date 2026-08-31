@@ -42,6 +42,17 @@ Active Alarm team workspace and a personal one; a plugin uploaded there reaches 
 not his cloud Claude Code. Read the signed-in email out of the profile menu before believing an
 upload will land anywhere useful.
 
+**`dan-skills` is enabled on BOTH accounts, and the desktop app serves it too.** Established
+2026-08-31 from a work-account session (`~/.claude.json` → `dgatsakos@activealarm.com`): its skill
+list carried `dan-skills:session-end`, `dan-skills:writing-dan` and 48 more, while
+`installed_plugins.json` held only `pyright-lsp`, `typescript-lsp`, `caveman`, `i-have-adhd` and no
+`dan-skills` directory existed under `~/.claude`. So the account copy reaches a local desktop
+session, not only cloud ones, and it arrives **beside** `~/.claude/skills` rather than instead of
+it — every packaged skill shows up twice, once bare and once `dan-skills:`-prefixed, and the
+prefixed one is whatever the last upload froze. A stale upload is therefore not merely invisible to
+cloud sessions; it plants a second, older copy of every skill in this machine's own picker. Both
+accounts need the new zip, or the one that does not get it keeps serving the old snapshot.
+
 Default path: send `dist/dan-skills.zip` with `SendUserFile` and let the owner upload it. One drag,
 no account switching, no credentials, and it works regardless of which login the browser holds.
 
