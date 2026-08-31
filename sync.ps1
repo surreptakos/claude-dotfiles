@@ -105,6 +105,23 @@ if ($Mode -eq 'push') {
     $links = Save-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  claude/skill-links.json  ({0} junctions recorded)" -f $links)
 
+    # Refresh the marketplace payload (marketplace/dan-skills + .claude-plugin/marketplace.json)
+    # from the same live tree the mirror was just read from, so one push updates every surface
+    # that installs from this repo. Best-effort: a missing python must not block a dotfiles sync.
+    if (-not $DryRun) {
+        $packager = Join-Path $RepoRoot 'tools\build-cloud-plugin.py'
+        $py = Get-Command py -ErrorAction SilentlyContinue
+        if ($py -and (Test-Path $packager)) {
+            $pkgOut = & $py.Source -3 $packager 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host '  marketplace/dan-skills refreshed from live skills'
+            } else {
+                Write-Host '  marketplace refresh FAILED (sync continues):' -ForegroundColor Yellow
+                $pkgOut | Select-Object -Last 3 | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
+            }
+        }
+    }
+
     Write-Host ''
     Write-Host ("{0} files staged in the repo." -f $total)
 

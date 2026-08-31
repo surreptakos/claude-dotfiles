@@ -1,0 +1,14 @@
+{
+  "name": "claude-dotfiles",
+  "owner": {
+    "name": "Dan Gatsakos"
+  },
+  "plugins": [
+    {
+      "name": "dan-skills",
+      "source": "./marketplace/dan-skills",
+      "description": "Dan's personal Claude skills - one canonical set for Claude Code, Desktop, Cowork and cloud sessions.",
+      "version": "2026.08.31"
+    }
+  ]
+}

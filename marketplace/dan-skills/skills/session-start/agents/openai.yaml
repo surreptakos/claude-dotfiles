@@ -1,0 +1,4 @@
+interface:
+  display_name: "Session Start"
+  short_description: "Check repository state before starting work"
+  default_prompt: "Use $session-start to inspect this repository before beginning work."

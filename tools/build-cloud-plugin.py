@@ -12,7 +12,12 @@ dropped: they move under metadata as strings, the same shape writing-dan used to
 pass the validator on 2026-08-27. Claude Code ignores unknown metadata, so the
 plugin still loads locally via --plugin-dir for testing.
 
-Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR]
+Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and writes
+<repo>/.claude-plugin/marketplace.json, which makes the repo itself an installable Claude
+plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
+remains for the claude.ai org-Skills surface, which only takes uploads.
+
+Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR] [--no-marketplace]
 Exit 0 on success, 1 on any skill that could not be packaged.
 """
 
@@ -29,6 +34,7 @@ import yaml
 
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
 PLUGIN_NAME = "dan-skills"
+NL = chr(10)
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
 # the same rule, so a .bak file dropped next to a SKILL.md does not read as a stale cloud plugin.
@@ -126,6 +132,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=str(Path.home() / ".claude" / "skills"))
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "dist"))
+    ap.add_argument("--no-marketplace", action="store_true",
+                    help="skip refreshing <repo>/marketplace and marketplace.json")
     args = ap.parse_args()
 
     src = Path(args.source)
@@ -182,6 +190,38 @@ def main():
         for f in sorted(plugin_root.rglob("*")):
             if f.is_file():
                 zf.write(f, f.relative_to(plugin_root))
+
+    # ------------------------------------------------------------------ repo marketplace
+    # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.
+    if not args.no_marketplace:
+        repo = Path(__file__).resolve().parent.parent
+        mkt_payload = repo / "marketplace" / PLUGIN_NAME
+        if mkt_payload.exists():
+            shutil.rmtree(mkt_payload)
+        shutil.copytree(plugin_root, mkt_payload)
+        mkt_dir = repo / ".claude-plugin"
+        mkt_dir.mkdir(exist_ok=True)
+        (mkt_dir / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "claude-dotfiles",
+                    "owner": {"name": "Dan Gatsakos"},
+                    "plugins": [
+                        {
+                            "name": PLUGIN_NAME,
+                            "source": "./marketplace/" + PLUGIN_NAME,
+                            "description": "Dan's personal Claude skills - one canonical set "
+                            "for Claude Code, Desktop, Cowork and cloud sessions.",
+                            "version": version,
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + NL,
+            encoding="utf-8",
+        )
+        print(f"marketplace payload refreshed -> {mkt_payload} + .claude-plugin/marketplace.json")
 
     moved_count = sum(1 for _n, m, _r in packaged if m)
     retargeted = [n for n, _m, r in packaged if r]
