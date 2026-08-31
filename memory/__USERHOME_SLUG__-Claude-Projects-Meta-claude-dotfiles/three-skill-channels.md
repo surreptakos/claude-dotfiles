@@ -26,10 +26,9 @@ which only 12 were his, personal org 27 of which 7 were his.
 
 Nine of his work-org skills have no copy under `~/.claude/skills`: `aac-contract-package`,
 `aac-sop`, `audit-code-changes`, `email-review`, `o3-prep`, `review-contract`, `software-decision`,
-`todo`, `writing`. A restored machine does not get them. Three more — `caveman`, `find-skills`,
-`writing-dan` — exist in both channels and drift unwatched: `writing-dan` was byte-equal between
-local and the personal org and different in the work org, and each org's `writing` differed from
-the other's. The two orgs also disagree: `aac-contract-package`, `email-review`, `o3-prep`,
+`todo`, `writing`. A restored machine does not get them. Two more — `caveman`, `find-skills` — exist in both channels and drift unwatched. `writing-dan`
+did too until 2026-08-31, when Dan retired it (deleted locally; account copies pending his
+deletion): it had already drifted, byte-equal local-vs-personal-org but different in the work org. The two orgs also disagree: `aac-contract-package`, `email-review`, `o3-prep`,
 `review-contract` and `todo` exist only in the work org.
 
 The manifest does NOT distinguish org-scoped from personal — every uploaded skill is

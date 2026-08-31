@@ -1,6 +1,6 @@
 ---
 name: update-cloud-plugin
-description: Rebuild the dan-skills plugin from the live ~/.claude/skills tree and re-upload it to claude.ai so cloud containers stop running stale skills. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
+description: Rebuild and republish the aac-skills plugin (the single 53-skill package built from ~/.claude/skills plus the repo aac-skills/ tree) when the session-end sweep reports drift. Marketplace push is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
 ---
 
 # Update the cloud plugin
