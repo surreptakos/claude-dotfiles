@@ -20,14 +20,20 @@ A skill offered in a session came from one of three places, and they are not int
    `anthropic-skills:` fronts skills Dan wrote himself.
 
 **Why it matters:** channel 3 is invisible to the repo, the mirror, the packager and the sweep.
-Measured 2026-08-31 — work org 33 skills, personal org 27, and 28 of the work org's had no
-counterpart in `~/.claude/skills`: `writing`, `aac-sop`, `aac-contract-package`, `o3-prep`, `todo`,
-`email-review`, `review-contract`, `software-decision`, `audit-code-changes` among them. A restored
-machine does not get them; they arrive only by signing back into the account.
+Its `manifest.json` marks each skill `creatorType: anthropic` (the stock set) or `user` (Dan's own
+upload) — read that before calling anything a vendor's. Measured 2026-08-31: work org 33 skills of
+which only 12 were his, personal org 27 of which 7 were his.
 
-Names that appear in more than one channel drift with nothing watching: `writing-dan` was
-byte-equal between local and the personal org and different in the work org, and each org's
-`writing` differed from the other's.
+Nine of his work-org skills have no copy under `~/.claude/skills`: `aac-contract-package`,
+`aac-sop`, `audit-code-changes`, `email-review`, `o3-prep`, `review-contract`, `software-decision`,
+`todo`, `writing`. A restored machine does not get them. Three more — `caveman`, `find-skills`,
+`writing-dan` — exist in both channels and drift unwatched: `writing-dan` was byte-equal between
+local and the personal org and different in the work org, and each org's `writing` differed from
+the other's. The two orgs also disagree: `aac-contract-package`, `email-review`, `o3-prep`,
+`review-contract` and `todo` exist only in the work org.
+
+Nothing carries `creatorType: organization` — nothing is published org-wide to Active Alarm, and
+that admin surface is unused as of this date.
 
 **How to apply:** never conclude a skill is missing, or that a `plugin:name` skill is a vendor's,
 from `~/.claude/skills` alone — list channel 3 for both orgs first. The org UUIDs come from each

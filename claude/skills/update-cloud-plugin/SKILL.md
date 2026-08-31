@@ -63,17 +63,29 @@ accounts need the new zip, or the one that does not get it keeps serving the old
    beside a `manifest.json`. Namespaced by the org's display name, which is why `anthropic-skills:`
    fronts skills that are Dan's own, not Anthropic's.
 
-Channel 3 is invisible to everything in this repo. Counted 2026-08-31: the work org carried 33
-skills there and the personal org 27, and **28 of the work org's were absent from
-`~/.claude/skills` entirely** — `writing`, `aac-sop`, `aac-contract-package`, `o3-prep`, `todo`,
-`email-review`, `review-contract`, `software-decision`, `audit-code-changes` among them. They are
-not in the mirror, not in the zip, and not on a restored machine. Worse, names living in more than
-one channel drift silently: `writing-dan` was byte-equal between local and the personal org and
-**different** in the work org, and the two orgs' `writing` differed from each other. Nothing
-detects that.
+Channel 3 is invisible to everything in this repo, and its `manifest.json` carries a
+`creatorType` per skill — `anthropic` for the stock set, `user` for an upload of Dan's. Counted
+2026-08-31, and the split matters: the work org held 33 skills, but 21 were Anthropic's; only 12
+were his. The personal org held 27, of which 7 were his.
+
+Of his 12 in the work org, **nine have no copy under `~/.claude/skills` at all** —
+`aac-contract-package`, `aac-sop`, `audit-code-changes`, `email-review`, `o3-prep`,
+`review-contract`, `software-decision`, `todo`, `writing`. Those are not in the mirror, not in the
+zip, and not on a restored machine; they come back only by signing into the account. The other
+three — `caveman`, `find-skills`, `writing-dan` — exist in both places and can drift, and do:
+`writing-dan` was byte-equal between local and the personal org and different in the work org, and
+each org's `writing` differed from the other's.
+
+The two orgs are not in step either. Five of his work-org skills are absent from the personal org:
+`aac-contract-package`, `email-review`, `o3-prep`, `review-contract`, `todo`.
+
+**No skill anywhere carries `creatorType: organization`.** Nothing is published org-wide; every
+`user` entry is Dan's own upload inside that org. Publishing to the Active Alarm org is a separate
+admin surface he has never used, and it would reach teammates without giving them GitHub access to
+a private marketplace.
 
 Do not conclude a skill is missing from the packager because it is absent from `~/.claude/skills`.
-Check channel 3 first.
+Check channel 3 first, and read `creatorType` before calling anything Anthropic's.
 
 Default path: send `dist/dan-skills.zip` with `SendUserFile` and let the owner upload it. One drag,
 no account switching, no credentials, and it works regardless of which login the browser holds.
