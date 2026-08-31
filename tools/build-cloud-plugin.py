@@ -143,12 +143,14 @@ def main():
         shutil.rmtree(plugin_root)
     (plugin_root / ".claude-plugin").mkdir(parents=True)
 
-    version = date.today().strftime("%Y.%m.%d")
+    today = date.today()
+    version = f"{today.year}.{today.month}.{today.day}"
     (plugin_root / ".claude-plugin" / "plugin.json").write_text(
         json.dumps(
             {
                 "name": PLUGIN_NAME,
                 "version": version,
+                "author": {"name": "Dan Gatsakos"},
                 "description": "Dan's personal Claude Code skills, packaged for claude.ai "
                 "account sync so every Cowork and cloud session loads them. Built by "
                 "tools/build-cloud-plugin.py from ~/.claude/skills.",
@@ -205,6 +207,8 @@ def main():
             json.dumps(
                 {
                     "name": "claude-dotfiles",
+                    "description": "Dan Gatsakos's personal skill marketplace, generated from "
+                    "the live ~/.claude/skills tree by tools/build-cloud-plugin.py.",
                     "owner": {"name": "Dan Gatsakos"},
                     "plugins": [
                         {

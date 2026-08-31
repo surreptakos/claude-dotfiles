@@ -1,5 +1,6 @@
 {
   "name": "claude-dotfiles",
+  "description": "Dan Gatsakos's personal skill marketplace, generated from the live ~/.claude/skills tree by tools/build-cloud-plugin.py.",
   "owner": {
     "name": "Dan Gatsakos"
   },
@@ -8,7 +9,7 @@
       "name": "dan-skills",
       "source": "./marketplace/dan-skills",
       "description": "Dan's personal Claude skills - one canonical set for Claude Code, Desktop, Cowork and cloud sessions.",
-      "version": "2026.08.31"
+      "version": "2026.8.31"
     }
   ]
 }

@@ -1,5 +1,8 @@
 {
   "name": "dan-skills",
-  "version": "2026.08.31",
+  "version": "2026.8.31",
+  "author": {
+    "name": "Dan Gatsakos"
+  },
   "description": "Dan's personal Claude Code skills, packaged for claude.ai account sync so every Cowork and cloud session loads them. Built by tools/build-cloud-plugin.py from ~/.claude/skills."
 }
