@@ -114,7 +114,7 @@ if ($Mode -eq 'push') {
         if ($py -and (Test-Path $packager)) {
             $pkgOut = & $py.Source -3 $packager 2>&1
             if ($LASTEXITCODE -eq 0) {
-                Write-Host '  marketplace/dan-skills refreshed from live skills'
+                Write-Host '  marketplace/aac-skills refreshed from live skills'
             } else {
                 Write-Host '  marketplace refresh FAILED (sync continues):' -ForegroundColor Yellow
                 $pkgOut | Select-Object -Last 3 | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
