@@ -28,6 +28,14 @@ Done 2026-08-28 — three plugins uploaded + enabled on the Active Alarm team wo
 2. Descriptions may not contain XML tags — script strips angle brackets, keeps tag name.
 3. Zip may not ship top-level `bin/` ("claude.ai-hosted plugins may not ship bin/ executables").
 
+**Invoking them in a cloud session** (docs, plugins-reference#synced-plugins): the command is
+namespaced, `/dan-skills:session-start`; bare `/session-start` works only when nothing else owns the
+name. Account plugin changes reach only sessions started AFTER the change — an already-running cloud
+session answers `Unknown command`. Packaged bodies are path-retargeted by the builder: any
+`~/.claude/skills/...` or `~/.claude/hooks/session-gate.js report` becomes
+`${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js`, since a container has neither this machine's
+hooks nor its skills tree (commit `4e30620`).
+
 **Drift detector:** `~/.claude/skills/session-check/cloud-plugin-sweep.js` hashes every file the
 packager would ship plus the packager itself against `~/.claude/hook-state/cloud-plugin/state.json`;
 `/session-end` prints it (exit 0 in sync / 1 drift or never uploaded / 2 could not check). The
