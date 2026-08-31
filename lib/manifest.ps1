@@ -17,6 +17,7 @@ function Get-DotfileItems {
     $claude = Join-Path $UserHome '.claude'
     $codex  = Join-Path $UserHome '.codex'
     $agents = Join-Path $UserHome '.agents'
+    $docs   = Get-DocumentsPath -UserHome $UserHome
 
     @(
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/CLAUDE.md';                       Local = (Join-Path $claude 'CLAUDE.md') }
@@ -39,7 +40,30 @@ function Get-DotfileItems {
         # trust pins for hooks.json entries, not secrets.
         [pscustomobject]@{ Type = 'File'; Repo = 'codex/config.toml';                      Local = (Join-Path $codex  'config.toml') }
         [pscustomobject]@{ Type = 'File'; Repo = 'codex/AGENTS.md';                        Local = (Join-Path $codex  'AGENTS.md') }
+        # The two PowerShell profiles. They are the only place a shell-level Claude Code setting
+        # (CLAUDE_CODE_USE_POWERSHELL_TOOL) reaches a session launched from a terminal, and the
+        # registry User variable does not substitute: an already-running Explorer hands its stale
+        # environment block to everything it starts, so a Git Bash or cmd launch misses the value
+        # until the next logon. Both engines get one because 5.1 and 7 read different files.
+        [pscustomobject]@{ Type = 'File'; Repo = 'powershell/pwsh7-profile.ps1';            Local = (Join-Path $docs 'PowerShell\Microsoft.PowerShell_profile.ps1') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'powershell/windows-powershell-profile.ps1'; Local = (Join-Path $docs 'WindowsPowerShell\Microsoft.PowerShell_profile.ps1') }
     )
+}
+
+# Documents is a redirectable shell folder - on this machine it points into OneDrive, not
+# $UserHome\Documents, and $UserHome\Documents still exists as the legacy stub holding
+# My Music / My Pictures. Ask the shell for the real one, but only when $UserHome IS this
+# machine's profile: the restore test installs into a fake home under a different username
+# and must not be handed the real Documents folder to write into.
+function Get-DocumentsPath {
+    param([Parameter(Mandatory = $true)][string]$UserHome)
+
+    $real = $env:USERPROFILE
+    if ($real -and ($UserHome.TrimEnd('\', '/') -ieq $real.TrimEnd('\', '/'))) {
+        $shell = [Environment]::GetFolderPath('MyDocuments')
+        if ($shell) { return $shell }
+    }
+    return (Join-Path $UserHome 'Documents')
 }
 
 # ------------------------------------------------------------------- skill links
@@ -83,6 +107,54 @@ function Get-SkillLinks {
         Where-Object { $_.Target -ne '' }
 }
 
+# ConvertTo-Json is not an engine-independent formatter: Windows PowerShell 5.1 indents four
+# spaces and pads the colon ("Name":  "x"), PowerShell 7 indents two and does not. The same
+# push run from the two engines therefore rewrites every line of skill-links.json with
+# identical content - `git diff -w` comes back empty - and the file flip-flops in history
+# depending on which shell the owner happened to be in. Emit the bytes here instead.
+function Write-JsonStringLiteral {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.Append('"')
+    foreach ($ch in $Value.ToCharArray()) {
+        switch ($ch) {
+            '"'     { [void]$sb.Append('\"');   continue }
+            '\'     { [void]$sb.Append('\\');   continue }
+            "`b"    { [void]$sb.Append('\b');   continue }
+            "`f"    { [void]$sb.Append('\f');   continue }
+            "`n"    { [void]$sb.Append('\n');   continue }
+            "`r"    { [void]$sb.Append('\r');   continue }
+            "`t"    { [void]$sb.Append('\t');   continue }
+            default {
+                if ([int]$ch -lt 32) { [void]$sb.Append(('\u{0:x4}' -f [int]$ch)) }
+                else                 { [void]$sb.Append($ch) }
+            }
+        }
+    }
+    [void]$sb.Append('"')
+    return $sb.ToString()
+}
+
+# Two-space indent, CRLF, no trailing newline - the shape ConvertTo-Json produced under
+# PowerShell 7, so pinning it left the committed file unchanged.
+function ConvertTo-SkillLinkJson {
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Links)
+
+    $nl    = "`r`n"
+    $lines = New-Object System.Collections.ArrayList
+    [void]$lines.Add('[')
+    for ($i = 0; $i -lt $Links.Count; $i++) {
+        $comma = if ($i -lt $Links.Count - 1) { ',' } else { '' }
+        [void]$lines.Add('  {')
+        [void]$lines.Add('    "Name": '   + (Write-JsonStringLiteral -Value $Links[$i].Name) + ',')
+        [void]$lines.Add('    "Target": ' + (Write-JsonStringLiteral -Value $Links[$i].Target))
+        [void]$lines.Add('  }' + $comma)
+    }
+    [void]$lines.Add(']')
+    return ($lines -join $nl)
+}
+
 function Save-SkillLinks {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -98,7 +170,7 @@ function Save-SkillLinks {
         Write-Host ("  would write {0}  ({1} links)" -f $path, $links.Count)
         return $links.Count
     }
-    $json = ConvertTo-Json -InputObject $links -Depth 3
+    $json = ConvertTo-SkillLinkJson -Links $links
     [System.IO.File]::WriteAllText($path, $json, $script:Utf8NoBom)
     return $links.Count
 }

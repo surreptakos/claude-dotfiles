@@ -1,3 +1,5 @@
 - [State a standing rule once](state-a-standing-rule-once.md) — one mention in the global CLAUDE.md, no reinforcing copies in skills, hooks or project files
 - [Verify before filing a sweep ticket](verify-before-filing-a-sweep-ticket.md) — re-list issues at publish time; a chip session may have filed and fixed it already
 - [Personal profile parity](personal-profile-parity.md) — parity automated: sync pull refreshes ~/.claude-personal one-way (issue #9); reverse memory sync declined by default; hooks must derive paths from CLAUDE_CONFIG_DIR
+- [PowerShell 7 is the tool engine](powershell-7-is-the-tool-engine.md) — installed 2026-08-31; tool re-resolves per call, and ConvertTo-Json now indents 2 spaces
+- [Concurrent sessions share one sync push](concurrent-sessions-share-one-sync-push.md) — another session's push sweeps your live ~/.claude edits into its commit

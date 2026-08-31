@@ -585,6 +585,60 @@ if (-not (Test-Path $linkFile)) {
     Check 'every flow skill named in the global CLAUDE.md is invocable' ($absentFlows.Count -eq 0) $absentFlows
 }
 
+# ------------------------------------------------------------------ 6b2. PowerShell profiles
+
+# A whitelist entry with no assertion behind it is how 24 skills went missing without a single
+# error message, so the two profiles get one. The interesting half is WHERE they land: Documents
+# is a redirectable shell folder, and Get-DocumentsPath must resolve inside the fake home rather
+# than reaching for this machine's real (OneDrive-redirected) Documents.
+Write-Host ''
+Write-Host 'PowerShell profiles'
+
+$profileTargets = @(
+    @{ Name = 'pwsh 7';             Path = (Join-Path $FakeHome 'Documents\PowerShell\Microsoft.PowerShell_profile.ps1') }
+    @{ Name = 'Windows PowerShell'; Path = (Join-Path $FakeHome 'Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1') }
+)
+$missingProfiles = @($profileTargets | Where-Object { -not (Test-Path $_.Path) } | ForEach-Object {
+    "{0}: not restored at {1}" -f $_.Name, $_.Path
+})
+Check 'both PowerShell profiles restored under the fake home' ($missingProfiles.Count -eq 0) $missingProfiles
+
+# The reason they travel at all: a terminal-launched session reads the tool flag from here, not
+# from the registry, whose value an already-running Explorer does not hand out.
+if ($missingProfiles.Count -eq 0) {
+    $flagless = @($profileTargets | Where-Object {
+        (Get-Content $_.Path -Raw) -notmatch 'CLAUDE_CODE_USE_POWERSHELL_TOOL'
+    } | ForEach-Object { "{0}: no CLAUDE_CODE_USE_POWERSHELL_TOOL line" -f $_.Name })
+    Check 'restored profiles still set the PowerShell tool flag' ($flagless.Count -eq 0) $flagless
+}
+
+# Get-DocumentsPath is the part that could quietly write into the real profile.
+$docsReal = Get-DocumentsPath -UserHome $env:USERPROFILE
+$docsFake = Get-DocumentsPath -UserHome $FakeHome
+Check 'Get-DocumentsPath keeps a foreign home inside that home' `
+    ($docsFake.ToLower().StartsWith($FakeHome.ToLower())) @("resolved to $docsFake")
+Check 'Get-DocumentsPath asks the shell for the real profile' `
+    ($docsReal -eq [Environment]::GetFolderPath('MyDocuments')) @("resolved to $docsReal")
+
+# ------------------------------------------------------------------ 6b3. skill-links formatting
+
+# ConvertTo-Json indents four spaces on 5.1 and two on 7, so the generated file used to churn
+# whole-file depending on which shell ran the push. The writer is pinned; assert the bytes.
+Write-Host ''
+Write-Host 'skill-links.json formatting'
+
+$sampleLinks = @(
+    [pscustomobject]@{ Name = 'a';    Target = '__USERHOME__\.agents\skills\a' }
+    [pscustomobject]@{ Name = 'b"q';  Target = "x`ty" }
+)
+$pinned = ConvertTo-SkillLinkJson -Links $sampleLinks
+# The CRLF sits between the line text and the \n that (?m)$ anchors to, so \r? is not optional here.
+Check 'pinned writer emits two-space indent'  ($pinned -match '(?m)^  \{\r?$')
+Check 'pinned writer emits CRLF'              ($pinned.Contains("`r`n") -and $pinned -notmatch "(?<!`r)`n")
+Check 'pinned writer escapes quote and tab'   ($pinned.Contains('"b\"q"') -and $pinned.Contains('"x\ty"'))
+$parsed = @($pinned | ConvertFrom-Json | ForEach-Object { $_ })
+Check 'pinned writer round-trips as JSON'     ($parsed.Count -eq 2 -and $parsed[1].Name -eq 'b"q')
+
 # ------------------------------------------------------------------ 6c. personal profile refresh
 
 # Issue #9: pull ends by refreshing ~/.claude-personal from the freshly written ~/.claude - a
