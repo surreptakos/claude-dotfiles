@@ -41,13 +41,14 @@
         "gitCommitSha": "e7555fcaf612dfa1739dc86610ea926a906db614"
       }
     ],
-    "dan-skills@local-desktop-app-uploads": [
+    "dan-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads\\dan-skills",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\dan-skills\\2026.08.31",
         "version": "2026.08.31",
-        "installedAt": "2026-08-31T18:25:28.799Z",
-        "lastUpdated": "2026-08-31T18:25:28.799Z"
+        "installedAt": "2026-08-31T20:38:55.948Z",
+        "lastUpdated": "2026-08-31T20:38:55.948Z",
+        "gitCommitSha": "eb731945de104ae954e310a370039c030c5c8bb4"
       }
     ]
   }

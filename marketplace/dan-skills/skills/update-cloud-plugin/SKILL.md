@@ -9,6 +9,23 @@ description: Rebuild the dan-skills plugin from the live ~/.claude/skills tree a
 > call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
 > every run is fresh.
 
+**One button now exists.** `sync.ps1 -Mode push` refreshes `marketplace/dan-skills/` and
+`.claude-plugin/marketplace.json` from the live tree on every push, and the session hooks already
+run that push automatically. The repo IS a private marketplace:
+
+```bash
+claude plugin marketplace add surreptakos/claude-dotfiles
+claude plugin install dan-skills@claude-dotfiles
+```
+
+Installed at user scope on this machine for both profiles 2026-08-31 (the old
+`dan-skills@local-desktop-app-uploads` copy was uninstalled). Any machine refreshes with
+`claude plugin marketplace update claude-dotfiles && claude plugin update dan-skills`.
+Surfaces still fed by hand: claude.ai org Skills (zip upload below), personal account Skills, and
+the one-time admin steps — org marketplace at claude.ai admin settings (GitHub-synced), personal
+Cowork Customize > add marketplace. Same-name uploads OVERWRITE; deleting first is unnecessary.
+
+
 Cloud containers never read this machine's `~/.claude/skills`. They load what the claude.ai account
 has enabled, and an uploaded plugin is a **snapshot** — claude.ai keeps its own copy. A skill edited
 here reaches a cloud session only after a rebuild and a re-upload. `cloud-plugin-sweep.js` detects

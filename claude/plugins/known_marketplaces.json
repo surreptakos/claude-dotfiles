@@ -46,5 +46,13 @@
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads",
     "lastUpdated": "2026-08-31T18:25:27.489Z"
+  },
+  "claude-dotfiles": {
+    "source": {
+      "source": "github",
+      "repo": "surreptakos/claude-dotfiles"
+    },
+    "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles",
+    "lastUpdated": "2026-08-31T20:38:54.476Z"
   }
 }
