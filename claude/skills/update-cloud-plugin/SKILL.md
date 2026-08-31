@@ -91,9 +91,14 @@ Read the plugin row back: it must show the new version and the skill count from 
 owner uploaded, wait for them to say it landed — their word is the read-back. Only then:
 
 ```bash
-node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js" --stamp --version <version>
+node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js" --stamp --version <version> --accounts <every account uploaded to>
 node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js"
 ```
+
+`--accounts` takes a comma-separated list of emails and defaults to every account signed in on this
+machine, which is only right when the upload really did reach all of them. Name the subset when it
+did not: the sweep then reports `partial-upload` and exits 1 until the rest are done, instead of
+calling the machine current while one account still serves the old snapshot.
 
 The second run must print `cloud plugin is current`. Stamping before a verified upload is worse than
 not stamping at all — it tells every future session the cloud copy is fresh when it is not.

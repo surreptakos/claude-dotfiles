@@ -5,6 +5,7 @@
  *   node cloud-plugin-sweep.js            # human report; exit 0 in sync, 1 drift, 2 cannot check
  *   node cloud-plugin-sweep.js --json     # same finding as JSON, for session-check
  *   node cloud-plugin-sweep.js --stamp    # record the current tree as the uploaded one
+ *   node cloud-plugin-sweep.js --stamp --accounts a@x.com,b@y.com   # ...to these accounts only
  *
  * WHY IT EXISTS
  * Claude Code cloud containers never read ~/.claude/skills. They load what the claude.ai account
@@ -21,7 +22,8 @@
  * Exit 2 is "could not check" — a missing skills tree, an unreadable stamp. It is never a pass.
  *
  * Environment overrides (tests use them; leave them unset in real runs):
- *   CLOUD_PLUGIN_SKILLS_DIR, CLOUD_PLUGIN_FALLBACK_DIR, CLOUD_PLUGIN_STATE, CLOUD_PLUGIN_BUILDER
+ *   CLOUD_PLUGIN_SKILLS_DIR, CLOUD_PLUGIN_FALLBACK_DIR, CLOUD_PLUGIN_STATE, CLOUD_PLUGIN_BUILDER,
+ *   CLOUD_PLUGIN_ACCOUNT_DIRS (path-separator list of config dirs to read accounts from)
  */
 'use strict';
 
@@ -37,6 +39,38 @@ const STATE_FILE = process.env.CLOUD_PLUGIN_STATE
   || path.join(HOME, '.claude', 'hook-state', 'cloud-plugin', 'state.json');
 const BUILDER = process.env.CLOUD_PLUGIN_BUILDER
   || path.join(HOME, 'Claude', 'Projects', 'Meta', 'claude-dotfiles', 'tools', 'build-cloud-plugin.py');
+
+// One machine, two signed-in accounts (work and personal), and dan-skills is enabled on both -
+// established 2026-08-31 when a work-account session listed dan-skills:* while nothing named
+// dan-skills existed on disk. A single stamp therefore cannot answer "is the cloud copy current",
+// because an upload to one account leaves the other serving the old snapshot, in that account's
+// cloud sessions AND in its desktop skill list. The stamp records which accounts were uploaded to;
+// a fingerprint match with an account missing is not a pass.
+const ACCOUNT_DIRS = (process.env.CLOUD_PLUGIN_ACCOUNT_DIRS || '')
+  ? process.env.CLOUD_PLUGIN_ACCOUNT_DIRS.split(path.delimiter).filter(Boolean)
+  : [path.join(HOME, '.claude'), path.join(HOME, '.claude-personal')];
+
+// The default profile is the asymmetric one: CLAUDE_CONFIG_DIR absent resolves ~/.claude.json, a
+// SIBLING of ~/.claude, while a named profile keeps its .claude.json inside. Check inside first.
+function accountFileFor(dir) {
+  const inside = path.join(dir, '.claude.json');
+  if (fs.existsSync(inside)) return inside;
+  return path.join(path.dirname(dir), '.claude.json');
+}
+
+/** Emails of the accounts signed in on this machine. Unreadable or absent files are skipped. */
+function discoverAccounts() {
+  const found = [];
+  for (const dir of ACCOUNT_DIRS) {
+    try {
+      const file = accountFileFor(dir);
+      if (!fs.existsSync(file)) continue;
+      const email = (JSON.parse(fs.readFileSync(file, 'utf8')).oauthAccount || {}).emailAddress;
+      if (email && !found.includes(email)) found.push(email);
+    } catch (e) { /* a profile we cannot read is a profile we cannot claim was uploaded to */ }
+  }
+  return found;
+}
 
 /** Files the packager does not ship. Keep in step with build-cloud-plugin.py's IGNORE. */
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '__pycache__', '.pytest_cache']);
@@ -110,7 +144,22 @@ function sweep() {
     return { state: 'never-uploaded', fingerprint: now, skills, count: skills.length };
   }
   if (stamp.fingerprint === now) {
-    return { state: 'in-sync', fingerprint: now, skills, count: skills.length, uploadedAt: stamp.uploadedAt };
+    // A stamp written before accounts were tracked names none. Treat that as "the account it was
+    // written from", not as "every account is stale" - the alternative renames a long-standing
+    // in-sync machine to partial on upgrade and teaches the owner to ignore the check.
+    const accounts = discoverAccounts();
+    const uploaded = Array.isArray(stamp.accounts) ? stamp.accounts : accounts;
+    const missing = accounts.filter((a) => !uploaded.includes(a));
+    if (missing.length) {
+      return {
+        state: 'partial-upload', fingerprint: now, skills, count: skills.length,
+        uploadedAt: stamp.uploadedAt, accounts, uploaded, missing,
+      };
+    }
+    return {
+      state: 'in-sync', fingerprint: now, skills, count: skills.length,
+      uploadedAt: stamp.uploadedAt, accounts, uploaded,
+    };
   }
 
   const before = new Map((stamp.skills || []).map((s) => [s.name, s.hash]));
@@ -126,7 +175,7 @@ function sweep() {
   };
 }
 
-function writeStamp(version) {
+function writeStamp(version, accounts) {
   const skills = collectSkills();
   if (!skills) { throw new Error(`no skills directory at ${SKILLS_DIR}`); }
   let builderHash = null;
@@ -136,6 +185,9 @@ function writeStamp(version) {
     builderHash,
     version: version || null,
     uploadedAt: new Date().toISOString(),
+    // Defaulting to every discovered account is the honest default only because --stamp is run
+    // after a verified upload; naming a subset is how a one-account upload gets recorded truthfully.
+    accounts: (accounts && accounts.length) ? accounts : discoverAccounts(),
     count: skills.length,
     skills,
   };
@@ -156,6 +208,10 @@ function describe(result) {
     lines.push('no cloud plugin set up on this machine');
   } else if (result.state === 'in-sync') {
     lines.push(`${result.count} skills match the plugin uploaded ${result.uploadedAt || 'earlier'}`);
+    if (result.uploaded && result.uploaded.length > 1) cap('accounts covered', result.uploaded);
+  } else if (result.state === 'partial-upload') {
+    lines.push(`${result.count} skills match the last upload, but not every account got it`);
+    cap('still on the old snapshot', result.missing);
   } else if (result.state === 'never-uploaded') {
     lines.push(`${result.count} skills on this machine, no upload recorded yet`);
   } else if (result.state === 'drift') {
@@ -169,14 +225,22 @@ function describe(result) {
   return lines;
 }
 
-const EXIT = { 'in-sync': 0, 'not-configured': 0, drift: 1, 'never-uploaded': 1, unknown: 2 };
+const EXIT = {
+  'in-sync': 0, 'not-configured': 0,
+  drift: 1, 'never-uploaded': 1, 'partial-upload': 1,
+  unknown: 2,
+};
 
 function main(argv) {
   if (argv.includes('--stamp')) {
     const i = argv.indexOf('--version');
-    const stamp = writeStamp(i >= 0 ? argv[i + 1] : null);
+    const a = argv.indexOf('--accounts');
+    const accounts = a >= 0 && argv[a + 1] ? argv[a + 1].split(',').map((s) => s.trim()).filter(Boolean) : null;
+    const stamp = writeStamp(i >= 0 ? argv[i + 1] : null, accounts);
     if (!argv.includes('--quiet')) {
+      const who = stamp.accounts && stamp.accounts.length ? stamp.accounts.join(', ') : 'no account recorded';
       console.log(`stamped ${stamp.count} skills as uploaded (${stamp.fingerprint.slice(0, 12)}) at ${stamp.uploadedAt}`);
+      console.log(`  accounts: ${who}`);
     }
     return 0;
   }
@@ -189,12 +253,17 @@ function main(argv) {
   const headline = {
     'in-sync': 'cloud plugin is current',
     drift: 'cloud plugin is STALE — cloud sessions load the old skills',
+    'partial-upload': 'cloud plugin uploaded to some accounts, not all',
     'never-uploaded': 'no upload recorded — cloud sessions may have no skills',
     unknown: 'could not check the cloud plugin',
     'not-configured': 'cloud plugin not set up here',
   }[result.state];
   console.log(headline);
   for (const line of describe(result)) console.log(`  ${line}`);
+  if (result.state === 'partial-upload') {
+    console.log('  fix: upload the same dist/dan-skills.zip to the account(s) above, then');
+    console.log('       `node cloud-plugin-sweep.js --stamp --accounts <every account uploaded to>`');
+  }
   if (result.state === 'drift' || result.state === 'never-uploaded') {
     console.log('  fix: rebuild with build-cloud-plugin.py, re-upload at claude.ai > Customize > Plugins,');
     console.log('       then `node cloud-plugin-sweep.js --stamp`');
