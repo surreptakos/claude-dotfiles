@@ -21,9 +21,12 @@ claude plugin install dan-skills@claude-dotfiles
 Installed at user scope on this machine for both profiles 2026-08-31 (the old
 `dan-skills@local-desktop-app-uploads` copy was uninstalled). Any machine refreshes with
 `claude plugin marketplace update claude-dotfiles && claude plugin update dan-skills`.
-Surfaces still fed by hand: claude.ai org Skills (zip upload below), personal account Skills, and
-the one-time admin steps — org marketplace at claude.ai admin settings (GitHub-synced), personal
-Cowork Customize > add marketplace. Same-name uploads OVERWRITE; deleting first is unnecessary.
+claude.ai itself takes the same marketplace: Settings > Plugins > Add > "Add from a
+repository" syncs a plugin marketplace straight from a GitHub repo or git URL — confirmed in Dan's
+own UI 2026-08-31 after the docs suggested zip-only. So the zip is a fallback, not a channel: every
+plugin surface (Code, Desktop, claude.ai chat, Cowork, org admin) can sync from
+surreptakos/claude-dotfiles. Only the claude.ai SKILLS pages (Customize > Skills, admin-settings >
+Skills) remain upload-only. Same-name uploads OVERWRITE; deleting first is unnecessary.
 
 
 Cloud containers never read this machine's `~/.claude/skills`. They load what the claude.ai account
