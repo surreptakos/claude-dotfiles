@@ -68,7 +68,7 @@ upload will land anywhere useful.
 
 **`dan-skills` is enabled on BOTH accounts, and the desktop app serves it too.** Established
 2026-08-31 from a work-account session (`~/.claude.json` → `dgatsakos@activealarm.com`): its skill
-list carried `dan-skills:session-end`, `dan-skills:writing-dan` and 48 more, while
+list carried `dan-skills:session-end` and 49 more, while
 `installed_plugins.json` held only `pyright-lsp`, `typescript-lsp`, `caveman`, `i-have-adhd` and no
 `dan-skills` directory existed under `~/.claude`. So the account copy reaches a local desktop
 session, not only cloud ones, and it arrives **beside** `~/.claude/skills` rather than instead of
@@ -97,8 +97,7 @@ Of his 12 in the work org, **nine have no copy under `~/.claude/skills` at all**
 `review-contract`, `software-decision`, `todo`, `writing`. Those are not in the mirror, not in the
 zip, and not on a restored machine; they come back only by signing into the account. The other
 three — `caveman`, `find-skills`, `writing-dan` — exist in both places and can drift, and do:
-`writing-dan` was byte-equal between local and the personal org and different in the work org, and
-each org's `writing` differed from the other's.
+writing-dan (deleted 2026-08-31) drifted the same way.
 
 The two orgs are not in step either. Five of his work-org skills are absent from the personal org:
 `aac-contract-package`, `email-review`, `o3-prep`, `review-contract`, `todo`.
@@ -107,7 +106,7 @@ The two orgs are not in step either. Five of his work-org skills are absent from
 `creatorType: user`, and the org-vs-personal scope lives only in claude.ai. Confirmed 2026-08-31
 against the work-org Skills UI: `aac-contract-package`, `writing`, `aac-sop`, `software-decision`
 are published org-wide (visible to every Active Alarm member), yet in `manifest.json` they are
-indistinguishable from Dan's personal `writing-dan` or `o3-prep`. So a downstream tool cannot know
+indistinguishable from Dan's personal `o3-prep`. So a downstream tool cannot know
 which uploads reach teammates without asking the web UI.
 
 Do not conclude a skill is missing from the packager because it is absent from `~/.claude/skills`.

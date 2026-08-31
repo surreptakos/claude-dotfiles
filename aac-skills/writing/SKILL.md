@@ -1,6 +1,6 @@
 ---
 name: "writing"
-description: "Revise prose with AI writing tells stripped, or audit prose against the same rules without editing. Use whenever the user asks to \"fix\", \"clean up\", \"rewrite\", \"edit\", \"revise\", \"polish\", \"tighten\", or \"audit\" writing — email, memo, doc, PRD, ADR, README, runbook, release note, feedback, policy — or hands over text that reads as AI-generated (hedged, metronomic, padded). Add --docs to layer Vercel's structural conventions (sentence-case headings, Steps components, curly quotes, unit spacing, no em-dashes) on top for API docs, PRDs, ADRs, READMEs, runbooks, marketing pages. Add --audit to return file:line findings without touching the text — use for specs, contracts, or quoted wording where a human keeps final say. Trigger even when the user does not name the skill — \"make this better\", \"does this sound AI\", \"slop check\" all apply. Voice-neutral: strips AI tells, does not impose a house voice. Ends with a required six-dimension scoring gate (42/60) before any text is returned."
+description: "Revise prose with AI writing tells stripped, or audit prose against the same rules without editing. Use whenever the user asks to \"fix\", \"clean up\", \"rewrite\", \"edit\", \"revise\", \"polish\", \"tighten\", or \"audit\" writing — email, memo, doc, PRD, ADR, README, runbook, release note, feedback, policy — or hands over text that reads as AI-generated (hedged, metronomic, padded). Add --docs to layer Vercel's structural conventions (sentence-case headings, Steps components, curly quotes, unit spacing) on top for API docs, PRDs, ADRs, READMEs, runbooks, marketing pages. Add --audit to return file:line findings without touching the text — use for specs, contracts, or quoted wording where a human keeps final say. Trigger even when the user does not name the skill — \"make this better\", \"does this sound AI\", \"slop check\" all apply. Voice-neutral: strips AI tells, does not impose a house voice. Ends with a required six-dimension scoring gate (42/60) before any text is returned."
 ---
 
 # Writing
@@ -12,9 +12,14 @@ description: "Revise prose with AI writing tells stripped, or audit prose agains
 
 ## Flag
 
-- **`--docs`** — layer Vercel's structural conventions on top of the mode above: sentence-case H1–H6, TL;DR opener, `- **Term**: description` bullet format, Steps components for multi-step flows, `64 KB` / `200 ms` / bare `30s` units, curly quotes, `…` ellipsis, snake_case placeholders, no em-dashes, no `---` rules, code language tags. Use for API docs, PRDs, ADRs, READMEs, runbooks, marketing landing pages. See [references/docs.md](references/docs.md).
+- **`--docs`** — layer Vercel's structural conventions on top of the mode above: sentence-case H1–H6, TL;DR opener, `- **Term**: description` bullet format, Steps components for multi-step flows, `64 KB` / `200 ms` / bare `30s` units, curly quotes, `…` ellipsis, snake_case placeholders, no `---` rules, code language tags. Use for API docs, PRDs, ADRs, READMEs, runbooks, marketing landing pages. See [references/docs.md](references/docs.md).
 
 Modes and flag compose: `--audit --docs` audits against slop + docs; `--docs` alone rewrites with them applied.
+
+**Em dashes are banned in every mode.** Slop rule 6 and the Quick Checks ("Em-dash anywhere?
+Remove it.") apply to the base revise and audit passes, not only under `--docs` — the docs flag
+merely adds Vercel's broader dash conventions on top. A delivered draft containing an em dash
+fails Pass 1 regardless of flags.
 
 ## Skip
 
@@ -77,7 +82,7 @@ Do not edit. Read the file(s), check against slop + (if `--docs`) docs conventio
 <filename>:12 - throat-clearing opener ("Here's the thing")
 <filename>:24 - passive voice ("the decision was reached")
 <filename>:47 - banned word "easy" (docs mode)
-<filename>:58 - em dash in prose (docs mode)
+<filename>:58 - em dash in prose (slop rule 6 - every mode)
 <filename>:71 - vague quantifier "significantly" (docs mode)
 ```
 
