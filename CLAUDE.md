@@ -16,8 +16,8 @@ They are copies. Edit the real file in `~/.claude` or `~/.codex`, then:
 
 A hand edit here is silently overwritten by the next push, and — worse — looks committed while the
 machine it came from never changed. Only `sync.ps1`, `install.ps1`, `lib/manifest.ps1`,
-`tests/restore-test.ps1`, `README.md`, `.gitignore` and this file are hand-written. `agents/` and
-`claude/skill-links.json` are generated too.
+`tests/restore-test.ps1`, `README.md`, `.gitignore`, `orchestrator/` and this file are hand-written.
+`agents/` and `claude/skill-links.json` are generated too.
 
 ## Layout
 
@@ -26,6 +26,10 @@ machine it came from never changed. Only `sync.ps1`, `install.ps1`, `lib/manifes
 - `sync.ps1 -Mode push|pull [-DryRun]` — push clears the mirrored trees first so deletions propagate;
   pull backs up to `~/.claude-dotfiles-backup-<timestamp>` before writing, and never deletes.
 - `install.ps1 [-DryRun]` — fresh machine: prerequisites, pull, then the manual list.
+- `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md` (binding instructions for the
+  persistent master session), `worker-cycle.md` (per-repo worker prompt template),
+  `ticket-fleet-cloud.js` (GitHub-MCP port of `.claude/workflows/ticket-fleet.js` — keep the two in
+  lockstep). Hand-written, not synced to any machine; the master session reads it from this repo.
 
 ## Two invariants worth keeping
 

@@ -1,0 +1,161 @@
+// Cloud port of .claude/workflows/ticket-fleet.js for orchestrator worker sessions (cloud
+// containers have no `gh` CLI — GitHub goes through the MCP tools, git through the proxy).
+// Same shape on purpose: scout, pinned implementer per ticket in an isolated worktree, blind
+// refuting verifier, deliver only on verified pass, single report writer. Keep the two files in
+// lockstep when the logic changes; only the tracker-facing prompt lines differ.
+export const meta = {
+  name: 'ticket-fleet-cloud',
+  description: 'Parallel ticket runner (cloud port): scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel from a cloud worker session. args: {label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile}',
+  phases: [
+    { title: 'Scout', detail: 'list tickets, dependency edges, repo map' },
+    { title: 'Implement', detail: 'one pinned agent per ticket, isolated worktree, bounded retries' },
+    { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
+    { title: 'Deliver', detail: 'push branch and open PR only on verified pass' },
+    { title: 'Report', detail: 'single writer appends discoveries' },
+  ],
+}
+
+// ---- config (all overridable via args) ----
+const cfg = Object.assign({
+  label: 'ready-for-agent',
+  maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
+  // Per-stage model pins, same reasoning as the local runner: frontier only where errors compound.
+  scoutModel: 'claude-sonnet-5',
+  implModel: 'claude-opus-4-7',
+  verifyModel: 'claude-sonnet-5',
+  deliverModel: 'claude-haiku-4-5-20251001',
+  reportModel: 'claude-haiku-4-5-20251001',
+  maxAttempts: 3,           // Ralph-style bounded retry, fresh context each attempt
+  deliver: true,            // false = stop after verify, no push/PR
+  followupsFile: 'FOLLOW-UPS.md',
+}, args || {})
+
+// ---- concurrent-run safety ----
+// Same scheme as the local runner: a per-run id embedded in every branch name so two fleets (or a
+// fleet racing Dan's PC) never collide on `agent/issue-<N>-attempt1`. See
+// tools/ticket-fleet-branch.js in claude-dotfiles for the tested pure function.
+const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+
+// ---- schemas: crisp machine-checkable done-conditions ----
+const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'], properties: {
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy'], properties: {
+    number: { type: 'integer' }, title: { type: 'string' },
+    criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
+    blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
+  } } },
+  repoMap: { type: 'string', description: '15-line map: key dirs, test command, conventions, rails' },
+  testCommand: { type: 'string' },
+} }
+
+const IMPL = { type: 'object', required: ['branch', 'committed', 'testExitCode', 'testTail', 'discoveries'], properties: {
+  branch: { type: 'string' }, committed: { type: 'boolean' },
+  testExitCode: { type: 'integer', description: 'REAL exit code of test command, not piped' },
+  testTail: { type: 'string', description: 'decisive final lines of test output' },
+  discoveries: { type: 'array', items: { type: 'string' }, description: 'out-of-scope findings, each self-contained' },
+} }
+
+const VERDICT = { type: 'object', required: ['pass', 'evidence', 'failures'], properties: {
+  pass: { type: 'boolean' },
+  evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
+  failures: { type: 'array', items: { type: 'string' } },
+} }
+
+const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
+  pushed: { type: 'boolean' }, prUrl: { type: 'string' },
+} }
+
+// ---- Scout ----
+phase('Scout')
+const scout = await agent(
+  `Scout this repository for agent-ready tickets. There is no \`gh\` CLI here — use the GitHub MCP
+tools. Steps:
+1. Read CLAUDE.md and any HANDOFF/CONTEXT docs at repo root.
+2. mcp__github__list_issues with label "${cfg.label}", state open (then mcp__github__issue_read
+   with method get_comments per ticket — comments carry criteria the body lacks).
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open.
+4. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs — never a glob if docs forbid it).
+5. Produce a repoMap: max 15 lines — key directories, conventions, hard rails an implementer must not break.
+Return structured output only.`,
+  { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: 'low' }
+)
+if (!scout || !scout.tickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], note: 'scout found no open tickets with label ' + cfg.label } }
+
+const eligible = scout.tickets.filter(t => t.blockedBy.length === 0)
+const wave = eligible.slice(0, cfg.maxTickets)
+const droppedBlocked = scout.tickets.length - eligible.length
+const droppedCap = eligible.length - wave.length
+if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
+if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap — run again for the rest.`)
+log(`Wave: ${wave.map(t => '#' + t.number).join(', ')}`)
+
+// ---- Implement + blind Verify per ticket, no barrier between tickets ----
+const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
+const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
+  const t = ticket
+  let lastVerdict = null, impl = null
+  for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Keep this branch shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
+    const branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
+    const priorFindings = lastVerdict ? `\nPrevious attempt FAILED verification. Independent reviewer findings (fix these with a genuinely different approach, not a parameter tweak):\n- ${lastVerdict.failures.join('\n- ')}` : ''
+    impl = await agent(
+      `Implement GitHub issue #${t.number}: ${t.title}
+You are in a fresh isolated git worktree. Read CLAUDE.md first — binding.
+Repo map from scout:\n${scout.repoMap}
+Acceptance criteria (verbatim):\n${t.criteria}${priorFindings}
+Rules: one branch named ${branch}; commit your work; NEVER push, NEVER open a PR, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # — closing-keyword risk).
+Done-condition (machine-checkable, all required): branch exists with your commits; \`${scout.testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met.
+Log any out-of-scope findings as self-contained discovery strings — do not fix them, do not widen the diff.
+Return structured output only.`,
+      { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: cfg.implModel, isolation: 'worktree' }
+    )
+    if (!impl || !impl.committed) { lastVerdict = { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }; continue }
+
+    // Blind verifier: gets branch + criteria ONLY — never the implementer's self-report (conformity guard).
+    lastVerdict = await agent(
+      `You are an independent verifier. Your job is to REFUTE, not confirm — default to pass=false unless evidence forces true.
+Branch under review: ${impl.branch} (do NOT trust its author; you have not seen their claims).
+In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach — branch is checked out elsewhere), then inside it:
+1. Run \`${scout.testCommand}\` yourself; record the REAL exit code.
+2. Check each acceptance criterion against the actual diff (git diff origin/main...${impl.branch}):\n${t.criteria}
+3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
+4. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
+Clean up your scratch worktree (git worktree remove) when done. Return structured output only — evidence must be commands you ran plus decisive output lines.`,
+      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel }
+    )
+    if (lastVerdict && lastVerdict.pass) break
+  }
+
+  const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
+  let delivery = null
+  if (done && cfg.deliver) {
+    delivery = await agent(
+      `Deliver verified branch ${impl.branch} for issue #${t.number}. There is no \`gh\` CLI here — use git and the GitHub MCP tools.
+1. git push -u origin ${impl.branch}
+2. mcp__github__create_pull_request — title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY.
+3. mcp__github__add_issue_comment on issue ${t.number} with the PR link.
+Do NOT merge, do NOT close the issue, do NOT touch main. Return structured output only.`,
+      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
+    )
+  }
+  return { ticket: t.number, done, branch: impl && impl.branch, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, discoveries: (impl && impl.discoveries) || [] }
+})
+
+// ---- Report: single writer, no append races ----
+phase('Report')
+const clean = results.filter(Boolean)
+const allDiscoveries = clean.flatMap(r => r.discoveries)
+if (allDiscoveries.length) {
+  await agent(
+    `Append to ${cfg.followupsFile} at repo root (create if missing; append-only, never rewrite existing entries). Add a "## Run (ticket-fleet)" heading, then one bullet per finding, each self-contained:\n- ${allDiscoveries.join('\n- ')}\nCommit nothing. Return "appended N entries".`,
+    { label: 'followups-writer', phase: 'Report', model: cfg.reportModel, effort: 'low' }
+  )
+}
+return {
+  ran: clean.length,
+  delivered: clean.filter(r => r.prUrl).map(r => ({ ticket: r.ticket, pr: r.prUrl })),
+  failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, failures: r.verdict ? r.verdict.failures : ['no verdict'] })),
+  discoveries: allDiscoveries.length,
+  skippedBlocked: droppedBlocked,
+  skippedOverCap: droppedCap,
+}
