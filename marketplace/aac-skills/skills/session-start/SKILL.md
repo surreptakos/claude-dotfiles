@@ -21,7 +21,9 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js
 ```
 
 Prints the cached report (and says how old it is). Add `--refresh` to force a fresh run — worth it
-after a pull, a long gap, or anything that touched the tree.
+after a pull, a long gap, or anything that touched the tree. If that hook file does not exist (a
+cloud container with the skills but not the hooks), run the engine directly — same report, always
+fresh: `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js`.
 
 Read-only: it fetches (which changes no files) and reports. Works in any git repo — everything is
 either universal, auto-detected from files already present, or read from an optional
@@ -49,12 +51,20 @@ this one keeps working.
 **`!! no tools/clasp-auth.js`** — the credential refreshes but its scopes are unchecked. Worth
 fixing before any release.
 
+**`cloud container — no clasp credential is provisioned here`** — expected, not a finding. Cloud
+containers never carry `~/.clasprc.json`; deploys stay CI or local. Do not try to re-authorize from
+the container, and do not report it as a blocker.
+
 **`STOP tests FAIL`** — find out whether it was already broken before this session. `git stash` and
 re-run, or check the last commit that touched the failing area.
 
 **Tickets** — offer the ones that look actionable rather than reading the list out. When the user
 picks one, read it **with its comments** (`gh issue view <n> --comments`): measurements and owner
-decisions live in comments, and skipping them costs rework.
+decisions live in comments, and skipping them costs rework. No `gh` (cloud containers): read it
+with the GitHub MCP tools (`issue_read` for the body, its comments method for the thread), or
+`curl https://api.github.com/repos/<owner>/<repo>/issues/<n>/comments` — the session's egress proxy
+authenticates api.github.com, private repos included. The engine lists tickets the same way when gh
+is missing, so an empty Tickets section means none are open, not that the list could not be read.
 
 ## What it cannot tell you
 
