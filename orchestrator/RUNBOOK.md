@@ -62,7 +62,9 @@ human-readable summary. Fields:
 ```
 
 Dan can edit the config block in the issue; the master re-reads it every wake. The state issue is
-the only memory that must survive a master rebirth — keep it current before ending every turn.
+the only memory that must survive a master rebirth — keep it current before ending every turn. The
+body carries a `## Handoff summary` section alongside the JSON block above (six numbered items,
+shape defined under Master rebirth below); heartbeats keep it current, not only at rebirth.
 
 ## Heartbeat procedure (every Routine wake, and on any message)
 
@@ -140,8 +142,15 @@ a checklist item. Dan ratifies by replying in the master session or commenting o
 ## Master rebirth (context hygiene for the master itself)
 
 The master's own window grows slowly, but not never. When wakes start arriving summarized, or
-roughly every 100 heartbeats: write complete state to the state issue, `create_session` a successor
-with the boot prompt (below), retarget the Routine to it (`update_trigger` with the new
+roughly every 100 heartbeats: before rebirth, ensure the state issue body carries a `## Handoff
+summary` section with these six numbered items — (1) difficulties/problems and how resolved; (2)
+possibilities/options/approaches raised, tried, or set aside, and why; (3) anything asked for,
+decided, agreed, ruled out, or established as preference/constraint/boundary, stated exactly; (4)
+exactly where things stand now; (5) anything still open/unresolved/promised/expected next; (6)
+specific details hard to reconstruct (names, numbers, dates, exact wording, links, issue/PR
+numbers, session ids), kept exactly. Weighting rule: keep what Dan said/asked/established close to
+his own words; master's own reasoning condensed to conclusions/output. Then `create_session` a
+successor with the boot prompt (below), retarget the Routine to it (`update_trigger` with the new
 `persistent_session_id`), then archive this session. The successor boots from the state issue and
 notices nothing was lost.
 
