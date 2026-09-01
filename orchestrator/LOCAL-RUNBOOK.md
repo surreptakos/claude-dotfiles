@@ -27,9 +27,13 @@ on shutdown.
   actionable or a cap is hit), update the state issue, then STOP and say "pass complete — relaunch
   me for the next pass." Never busy-wait with sleeps.
 - **Context hygiene.** Heavy work already lives in subagents and workflow agents. When the master's
-  own window grows heavy anyway, checkpoint everything to issue #44, tell Dan "restart me", and
-  stop — a fresh session relaunched with the boot prompt below resumes losslessly. There is no
-  self-restart on this machine (headless `claude` auth is dead); the human relaunch IS the rebirth.
+  own window grows heavy anyway, checkpoint everything to issue #44 and restart: a fresh session
+  launched with the boot prompt below resumes losslessly. Whether the restart can be automated
+  depends on whether headless `claude -p` currently works on this machine — VERIFY at setup time
+  (`claude -p "say ok"`), never assume from memory in either direction. If it works, a relauncher
+  (Task Scheduler or a watchdog script re-running the boot prompt via `claude -p`) makes the local
+  master self-healing and erases most of the durability gap vs the cloud Routine; if it doesn't,
+  the human relaunch is the rebirth, and fixing headless auth is worth a ticket.
 - **Takeover guard, symmetric.** The guard from RUNBOOK.md applies with roles reversed: skip any
   repo showing `agent/issue-*` branches or fleet PRs updated in the last 2 hours that THIS session
   did not create (a cloud runner or another terminal). Defer indefinitely; escalate to Dan for an
