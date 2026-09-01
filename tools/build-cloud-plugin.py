@@ -12,7 +12,12 @@ dropped: they move under metadata as strings, the same shape writing-dan used to
 pass the validator on 2026-08-27. Claude Code ignores unknown metadata, so the
 plugin still loads locally via --plugin-dir for testing.
 
-Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR]
+Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and writes
+<repo>/.claude-plugin/marketplace.json, which makes the repo itself an installable Claude
+plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
+remains for the claude.ai org-Skills surface, which only takes uploads.
+
+Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR] [--no-marketplace]
 Exit 0 on success, 1 on any skill that could not be packaged.
 """
 
@@ -28,7 +33,8 @@ from pathlib import Path
 import yaml
 
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
-PLUGIN_NAME = "dan-skills"
+PLUGIN_NAME = "aac-skills"
+NL = chr(10)
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
 # the same rule, so a .bak file dropped next to a SKILL.md does not read as a stale cloud plugin.
@@ -126,6 +132,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=str(Path.home() / ".claude" / "skills"))
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "dist"))
+    ap.add_argument("--no-marketplace", action="store_true",
+                    help="skip refreshing <repo>/marketplace and marketplace.json")
     args = ap.parse_args()
 
     src = Path(args.source)
@@ -135,15 +143,18 @@ def main():
         shutil.rmtree(plugin_root)
     (plugin_root / ".claude-plugin").mkdir(parents=True)
 
-    version = date.today().strftime("%Y.%m.%d")
+    today = date.today()
+    version = f"{today.year}.{today.month}.{today.day}"
     (plugin_root / ".claude-plugin" / "plugin.json").write_text(
         json.dumps(
             {
                 "name": PLUGIN_NAME,
                 "version": version,
-                "description": "Dan's personal Claude Code skills, packaged for claude.ai "
-                "account sync so every Cowork and cloud session loads them. Built by "
-                "tools/build-cloud-plugin.py from ~/.claude/skills.",
+                "author": {"name": "Dan Gatsakos"},
+                "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
+                "Company team skills (aac-sop, aac-contract-package, writing, "
+                "software-decision). Built by tools/build-cloud-plugin.py from "
+                "~/.claude/skills and the repo's aac-skills/ tree.",
             },
             indent=2,
         )
@@ -182,6 +193,65 @@ def main():
         for f in sorted(plugin_root.rglob("*")):
             if f.is_file():
                 zf.write(f, f.relative_to(plugin_root))
+
+    # ---------------------------------------------------------------- AAC team skills
+    # The four org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
+    # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
+    repo = Path(__file__).resolve().parent.parent
+    aac_src = repo / "aac-skills"
+    if aac_src.is_dir():
+        for entry in sorted(aac_src.iterdir()):
+            if not entry.is_dir() or not (entry / "SKILL.md").is_file():
+                continue
+            dest = plugin_root / "skills" / entry.name
+            if dest.exists():
+                failures.append(f"aac/{entry.name}: name collides with a personal skill")
+                continue
+            try:
+                new_text, moved, retargeted = transform_skill_md(entry / "SKILL.md")
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"aac/{entry.name}: {exc}")
+                continue
+            shutil.copytree(entry, dest, ignore=ignore_noise)
+            (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
+            packaged.append((entry.name, moved, retargeted))
+
+    # ------------------------------------------------------------------ repo marketplace
+    # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.
+    if not args.no_marketplace:
+        repo = Path(__file__).resolve().parent.parent
+        mkt_payload = repo / "marketplace" / PLUGIN_NAME
+        if mkt_payload.exists():
+            shutil.rmtree(mkt_payload)
+        shutil.copytree(plugin_root, mkt_payload)
+        stale = repo / "marketplace" / "dan-skills"
+        if stale.exists():
+            shutil.rmtree(stale)
+        mkt_dir = repo / ".claude-plugin"
+        mkt_dir.mkdir(exist_ok=True)
+        (mkt_dir / "marketplace.json").write_text(
+            json.dumps(
+                {
+                    "name": "claude-dotfiles",
+                    "description": "Dan Gatsakos's personal skill marketplace, generated from "
+                    "the live ~/.claude/skills tree by tools/build-cloud-plugin.py.",
+                    "owner": {"name": "Dan Gatsakos"},
+                    "plugins": [
+                        {
+                            "name": PLUGIN_NAME,
+                            "source": "./marketplace/" + PLUGIN_NAME,
+                            "description": "AAC Skills - Dan's full skill set plus the Active "
+                            "Alarm Company team skills, one package for every surface.",
+                            "version": version,
+                        }
+                    ],
+                },
+                indent=2,
+            )
+            + NL,
+            encoding="utf-8",
+        )
+        print(f"marketplace payload refreshed -> {mkt_payload} + .claude-plugin/marketplace.json")
 
     moved_count = sum(1 for _n, m, _r in packaged if m)
     retargeted = [n for n, _m, r in packaged if r]

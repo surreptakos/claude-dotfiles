@@ -3,3 +3,6 @@
 - [Personal profile parity](personal-profile-parity.md) — parity automated: sync pull refreshes ~/.claude-personal one-way (issue #9); reverse memory sync declined by default; hooks must derive paths from CLAUDE_CONFIG_DIR
 - [PowerShell 7 is the tool engine](powershell-7-is-the-tool-engine.md) — installed 2026-08-31; tool re-resolves per call, and ConvertTo-Json now indents 2 spaces
 - [Concurrent sessions share one sync push](concurrent-sessions-share-one-sync-push.md) — another session's push sweeps your live ~/.claude edits into its commit
+- [Three skill channels](three-skill-channels.md) — local, account Plugins, account Skills; only the first is in the repo, and the third is invisible to every tool here
+- [Marketplace is the distribution spine](marketplace-is-the-distribution-spine.md) — every surface syncs aac-skills from the repo; semver-clean versions only; zip is fallback for Skills pages
+- [Git Bash sed strips CRLF](sed-strips-crlf-in-this-repo.md) - edit .ps1 with PowerShell or Edit tool, never sed -i

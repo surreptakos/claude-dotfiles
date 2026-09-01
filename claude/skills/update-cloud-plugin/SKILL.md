@@ -1,9 +1,33 @@
 ---
 name: update-cloud-plugin
-description: Rebuild the dan-skills plugin from the live ~/.claude/skills tree and re-upload it to claude.ai so cloud containers stop running stale skills. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
+description: Rebuild and republish the aac-skills plugin (the single 53-skill package built from ~/.claude/skills plus the repo aac-skills/ tree) when the session-end sweep reports drift. Marketplace push is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
 ---
 
 # Update the cloud plugin
+
+**Since 2026-08-31 evening there is ONE plugin: `aac-skills` (54 skills)** — Dan's personal set
+from `~/.claude/skills` plus the four AAC team skills from the repo's hand-edited `aac-skills/`
+tree, merged by the packager. `dan-skills` no longer exists as a plugin name anywhere.
+
+**One button now exists.** `sync.ps1 -Mode push` refreshes `marketplace/dan-skills/` and
+`.claude-plugin/marketplace.json` from the live tree on every push, and the session hooks already
+run that push automatically. The repo IS a private marketplace:
+
+```bash
+claude plugin marketplace add surreptakos/claude-dotfiles
+claude plugin install aac-skills@claude-dotfiles
+```
+
+Installed at user scope on this machine for both profiles 2026-08-31 (the old
+`dan-skills@local-desktop-app-uploads` copy was uninstalled). Any machine refreshes with
+`claude plugin marketplace update claude-dotfiles && claude plugin update aac-skills`.
+claude.ai itself takes the same marketplace: Settings > Plugins > Add > "Add from a
+repository" syncs a plugin marketplace straight from a GitHub repo or git URL — confirmed in Dan's
+own UI 2026-08-31 after the docs suggested zip-only. So the zip is a fallback, not a channel: every
+plugin surface (Code, Desktop, claude.ai chat, Cowork, org admin) can sync from
+surreptakos/claude-dotfiles. Only the claude.ai SKILLS pages (Customize > Skills, admin-settings >
+Skills) remain upload-only. Same-name uploads OVERWRITE; deleting first is unnecessary.
+
 
 Cloud containers never read this machine's `~/.claude/skills`. They load what the claude.ai account
 has enabled, and an uploaded plugin is a **snapshot** — claude.ai keeps its own copy. A skill edited
@@ -44,7 +68,7 @@ upload will land anywhere useful.
 
 **`dan-skills` is enabled on BOTH accounts, and the desktop app serves it too.** Established
 2026-08-31 from a work-account session (`~/.claude.json` → `dgatsakos@activealarm.com`): its skill
-list carried `dan-skills:session-end`, `dan-skills:writing-dan` and 48 more, while
+list carried `dan-skills:session-end` and 49 more, while
 `installed_plugins.json` held only `pyright-lsp`, `typescript-lsp`, `caveman`, `i-have-adhd` and no
 `dan-skills` directory existed under `~/.claude`. So the account copy reaches a local desktop
 session, not only cloud ones, and it arrives **beside** `~/.claude/skills` rather than instead of
@@ -52,6 +76,41 @@ it — every packaged skill shows up twice, once bare and once `dan-skills:`-pre
 prefixed one is whatever the last upload froze. A stale upload is therefore not merely invisible to
 cloud sessions; it plants a second, older copy of every skill in this machine's own picker. Both
 accounts need the new zip, or the one that does not get it keeps serving the old snapshot.
+
+**There are three skill channels on this machine, and this skill only covers one of them.**
+
+1. **Local** — `~/.claude/skills` plus `~/.agents/skills` junctions. What `sync.ps1` mirrors into
+   claude-dotfiles, what the sweep fingerprints, what a fresh machine restores.
+2. **Account Plugins** — the `dan-skills` zip this skill builds. Namespaced `dan-skills:`.
+3. **Account Skills** — individual skills uploaded at claude.ai, cached on disk at
+   `%APPDATA%\Claude\local-agent-mode-sessions\skills-plugin\<orgUuid>\<accountUuid>\skills\`
+   beside a `manifest.json`. Namespaced by the org's display name, which is why `anthropic-skills:`
+   fronts skills that are Dan's own, not Anthropic's.
+
+Channel 3 is invisible to everything in this repo, and its `manifest.json` carries a
+`creatorType` per skill — `anthropic` for the stock set, `user` for an upload of Dan's. Counted
+2026-08-31, and the split matters: the work org held 33 skills, but 21 were Anthropic's; only 12
+were his. The personal org held 27, of which 7 were his.
+
+Of his 12 in the work org, **nine have no copy under `~/.claude/skills` at all** —
+`aac-contract-package`, `aac-sop`, `audit-code-changes`, `email-review`, `o3-prep`,
+`review-contract`, `software-decision`, `todo`, `writing`. Those are not in the mirror, not in the
+zip, and not on a restored machine; they come back only by signing into the account. The other
+three — `caveman`, `find-skills`, `writing-dan` — exist in both places and can drift, and do:
+writing-dan (deleted 2026-08-31) drifted the same way.
+
+The two orgs are not in step either. Five of his work-org skills are absent from the personal org:
+`aac-contract-package`, `email-review`, `o3-prep`, `review-contract`, `todo`.
+
+**The manifest does NOT distinguish org-scoped from personal.** Every uploaded skill is
+`creatorType: user`, and the org-vs-personal scope lives only in claude.ai. Confirmed 2026-08-31
+against the work-org Skills UI: `aac-contract-package`, `writing`, `aac-sop`, `software-decision`
+are published org-wide (visible to every Active Alarm member), yet in `manifest.json` they are
+indistinguishable from Dan's personal `o3-prep`. So a downstream tool cannot know
+which uploads reach teammates without asking the web UI.
+
+Do not conclude a skill is missing from the packager because it is absent from `~/.claude/skills`.
+Check channel 3 first, and read `creatorType` before calling anything Anthropic's.
 
 Default path: send `dist/dan-skills.zip` with `SendUserFile` and let the owner upload it. One drag,
 no account switching, no credentials, and it works regardless of which login the browser holds.

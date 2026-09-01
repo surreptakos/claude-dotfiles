@@ -1,0 +1,249 @@
+{
+  "_about": "Bullet library for build_package.py. Text is authoritative here and nowhere else; the builder never carries its own copy. Sourced verbatim from BASELINES.md. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order.",
+  "_version": "1.2",
+  "_updated": "2026-08-19",
+  "clarifications": {
+    "universal": [
+      {
+        "id": "validity",
+        "text": "Pricing is valid for 30 days; pricing is based on all work being performed Monday through Friday, 8:00 AM to 5:00 PM.",
+        "order": 10
+      },
+      {
+        "id": "labor_materials",
+        "text": "Active Alarm Company will provide all labor and listed materials required to complete the installation.",
+        "order": 20
+      },
+      {
+        "id": "training",
+        "text": "End-user training is included as one (1) training session at completion of the installation. Additional or repeated training sessions may be scheduled at Active Alarm Company’s then-current service rates.",
+        "order": 25
+      },
+      {
+        "id": "warranty",
+        "text": "One (1) year parts and labor warranty applies only to newly supplied equipment and Active Alarm Company’s installation workmanship. Active Alarm provides no warranty coverage for equipment supplied by others.",
+        "order": 30
+      },
+      {
+        "id": "access",
+        "text": "Subscriber must provide free, safe, and unobstructed access to all work areas for the duration of the installation. Delays caused by denied or restricted access may result in rescheduling and/or additional charges.",
+        "order": 65
+      },
+      {
+        "id": "pathways",
+        "text": "All cabling pathways are assumed to be accessible and free from obstruction.",
+        "order": 70
+      },
+      {
+        "id": "permits",
+        "text": "Active Alarm Company will file for and procure the permits required by local law for the work described above. Permit fees are the responsibility of Subscriber.",
+        "order": 55
+      },
+      {
+        "id": "credit_card",
+        "text": "Payments made by credit card with an amount in excess of $1,000.00 will be charged a 3.5% fee.",
+        "order": 75
+      },
+      {
+        "id": "site_conditions",
+        "text": "Pricing is based on the drawings, specifications, and site conditions represented by Subscriber and on any pre-installation site walk. Concealed or materially different conditions discovered during installation are subject to change order.",
+        "order": 90
+      },
+      {
+        "id": "assumptions_closer",
+        "text": "If any assumption stated above is or becomes untrue, the affected work will be addressed by change order.",
+        "order": 99
+      }
+    ],
+    "conditional": {
+      "deposit": {
+        "when": "total price exceeds $5,000 and the customer is paying us",
+        "text": "A 50% deposit is required to initiate scheduling and procurement of material; the remaining balance will be due upon completion.",
+        "order": 15
+      },
+      "prevailing_wage_not_subject": {
+        "when": "commercial and labor is not priced at prevailing wage rates",
+        "text": "Pricing assumes the project and related work are not subject to prevailing wage requirements under any local, state, or federal law. If prevailing wage obligations are found to apply, Subscriber must notify Active Alarm Company in writing within 48 hours so that revised pricing may be issued reflecting any additional wage-related costs.",
+        "order": 80
+      },
+      "tax_exempt": {
+        "when": "nonprofit, school or park district, or municipality",
+        "text": "Pricing assumes Subscriber is tax-exempt and will provide a tax exemption certificate prior to purchase of equipment.",
+        "order": 82
+      },
+      "customer_furnished": {
+        "when": "the customer is furnishing equipment",
+        "text": "Pricing assumes any customer-furnished equipment is complete, compatible, and functional upon delivery to the site.",
+        "order": 84
+      },
+      "third_party_finance": {
+        "when": "a lender finances the equipment",
+        "text": "The purchase price stated above is payable by {lender} under its separate lease agreement with Subscriber. No deposit or progress payment is due to Active Alarm Company from Subscriber.",
+        "order": 15
+      }
+    },
+    "by_system": {
+      "Fire Alarm": [
+        {
+          "id": "ahj_review",
+          "text": "All work is subject to AHJ review and approval. AHJ-required changes beyond the approved scope will be addressed by change order.",
+          "order": 50
+        },
+        {
+          "id": "other_trades_fire",
+          "text": "Subscriber’s designated contractors are responsible for sprinkler system work, HVAC duct work, elevator recall wiring, kitchen hood suppression interfaces, agent-release wiring, and voice evacuation or mass notification work, unless expressly listed in the Scope of Work.",
+          "order": 60
+        }
+      ],
+      "Access Control": [
+        {
+          "id": "network_ac",
+          "text": "Network connectivity, IP addresses, and switch ports for headend equipment must be provided by Subscriber’s IT department. Wireless access points, switches, routers, patch panels, and network configuration are Subscriber’s responsibility.",
+          "order": 50
+        },
+        {
+          "id": "openings_condition",
+          "text": "Pricing assumes existing doors, frames, hinges, and surfaces are in suitable condition to accept new access control hardware. Repairs or modifications needed to make the openings compatible may require a change order.",
+          "order": 52
+        },
+        {
+          "id": "door_hardware",
+          "text": "Subscriber’s designated door hardware contractor will provide and install all mechanical and electrified locking hardware not expressly listed in the Equipment and Labor section, including locksets, exit devices, closers, electric strikes, magnetic locks, and electrified locksets, and will complete any door or frame modification required.",
+          "order": 54
+        }
+      ],
+      "Video Surveillance": [
+        {
+          "id": "network_video",
+          "text": "Subscriber’s IT department will provide network connectivity, IP addresses, sufficient bandwidth, available switch ports, and the required PoE capacity. Network switches, routers, internet service, and network configuration are Subscriber’s responsibility.",
+          "order": 50
+        },
+        {
+          "id": "recording_start",
+          "text": "Recording begins at system cutover. Migration of historical video is not included.",
+          "order": 52
+        },
+        {
+          "id": "camera_placement",
+          "text": "Camera placement is based on the site survey and drawings on file. Final mounting positions, heights, and aiming will be determined in the field; material deviations will be addressed by change order.",
+          "order": 54
+        }
+      ],
+      "Intrusion Alarm": [
+        {
+          "id": "comm_path",
+          "text": "Phone line, IP, or cellular communication path required for monitoring must be provided and maintained by Subscriber unless expressly listed in the equipment section.",
+          "order": 50
+        },
+        {
+          "id": "programming",
+          "text": "Panel programming will be completed to Subscriber’s stated operational requirements at the time of installation. Changes to zone assignments, user codes, schedules, or system behavior requested after turnover may be subject to a service call charge.",
+          "order": 52
+        }
+      ]
+    },
+    "reused_takeover": [
+      {
+        "id": "existing_unverified",
+        "text": "Active Alarm Company has not verified the condition, compatibility, or functionality of existing equipment prior to signing. Acceptance of existing equipment is not a representation of its condition, and Active Alarm provides no warranty coverage for it.",
+        "order": 92
+      },
+      {
+        "id": "existing_nonfunctional",
+        "text": "Existing equipment found to be non-functional, non-compliant, or incompatible during takeover or integration will be brought to Subscriber’s attention prior to proceeding, and resolution will be addressed by change order.",
+        "order": 92
+      }
+    ]
+  },
+  "exclusions": {
+    "universal": [
+      {
+        "id": "cosmetic",
+        "text": "Any painting, patching, drywall repair, or cosmetic restoration resulting from the installation is excluded."
+      },
+      {
+        "id": "electrical",
+        "text": "Any new electrical work required to provide power is excluded. Adequate power is assumed to be available near installation areas."
+      },
+      {
+        "id": "core_drilling",
+        "text": "Core drilling, saw cutting, structural penetrations, and slab penetrations requiring engineering review or structural trade work are excluded. Ordinary low-voltage device mounting and cable penetrations required for Active Alarm Company’s included installation scope are not excluded by this item."
+      },
+      {
+        "id": "backing",
+        "text": "Structural steel, backing, blocking, or framing beyond standard device mounting is excluded. Subscriber or Subscriber’s designated contractor is responsible for providing adequate backing at all mounting locations."
+      },
+      {
+        "id": "other_trade_debris",
+        "text": "Removal of debris, materials, or conditions left by other trades is excluded. Active Alarm Company will remove debris generated by its own installation work."
+      },
+      {
+        "id": "existing_removal",
+        "text": "Removal, disposal, or decommissioning of existing equipment not identified in this contract’s scope is excluded."
+      },
+      {
+        "id": "periodic_maintenance",
+        "text": "Annual or periodic inspection, testing, and preventive maintenance beyond the initial commissioning and acceptance testing included in this contract are excluded. Recurring service programs are available under a separate agreement."
+      },
+      {
+        "id": "ahj_fees",
+        "text": "Permit fees, engineering fees, plan-review fees, inspection fees, and re-inspection or re-test fees assessed by the authority having jurisdiction are excluded."
+      },
+      {
+        "id": "catchall",
+        "text": "Any item, task, service, material, or deliverable not specifically identified in the Scope of Work is excluded. The absence of an explicit exclusion for any item does not imply inclusion.",
+        "always_last": true
+      }
+    ],
+    "conditional": {
+      "licensing": {
+        "when": "the job sells software, licenses, or a cloud subscription",
+        "text": "Licensing, subscription, or license-renewal fees beyond the recurring services listed in the Services section are excluded."
+      },
+      "cybersecurity": {
+        "when": "the system touches the customer's network",
+        "text": "Cybersecurity risk assessments, penetration testing, network vulnerability scanning, or security hardening of Subscriber’s network infrastructure are excluded beyond standard device-level configuration performed by Active Alarm Company during commissioning."
+      },
+      "detector_cleaning": {
+        "when": "fire alarm and routine cleaning was discussed but not sold",
+        "text": "Routine cleaning of detectors and other periodic preventive maintenance are excluded unless expressly listed as a recurring service.",
+        "merge_into": "periodic_maintenance",
+        "merged_text": "Annual or periodic inspection, testing, and preventive maintenance beyond the initial commissioning and acceptance testing included in this contract are excluded, including routine cleaning of detectors. Recurring service programs are available under a separate agreement."
+      },
+      "submittals": {
+        "when": "confirmed with Sales that submittals are not ours",
+        "text": "Drawings and submittals required by the authority having jurisdiction or by Subscriber are excluded."
+      }
+    },
+    "by_system": {
+      "Video Surveillance": [
+        {
+          "id": "rack_ups",
+          "text": "NVR/DVR rack space and UPS power protection for recording equipment must be provided by Subscriber unless expressly listed in the equipment section."
+        }
+      ]
+    }
+  },
+  "sow_templates": {
+    "Fire Alarm": "Active Alarm Company will furnish, install, program, and test a {designation} fire alarm system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Intrusion Alarm": "Active Alarm Company will furnish, install, program, and test a {designation} intrusion alarm system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Video Surveillance": "Active Alarm Company will furnish, install, program, and test a {designation} video surveillance system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Access Control": "Active Alarm Company will furnish, install, program, and test a {designation} access control system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Elevator Monitoring": "Active Alarm Company will furnish, install, program, and test a {designation} elevator monitoring connection at the site listed above, as itemized in the Equipment and Labor section.",
+    "Nurse Call": "Active Alarm Company will furnish, install, program, and test a {designation} nurse call system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Area of Refuge": "Active Alarm Company will furnish, install, program, and test a {designation} area of refuge two-way communication system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Network": "Active Alarm Company will furnish, install, and test {designation} network cabling at the site listed above, as itemized in the Equipment and Labor section.",
+    "Standalone Intercom": "Active Alarm Company will furnish, install, program, and test a {designation} intercom system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Visitor Management": "Active Alarm Company will furnish, install, program, and test a {designation} visitor management system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Standalone Environmental Monitoring": "Active Alarm Company will furnish, install, program, and test a {designation} environmental monitoring system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Audio/Visual": "Active Alarm Company will furnish, install, program, and test a {designation} audio/visual system at the site listed above, as itemized in the Equipment and Labor section."
+  },
+  "sow_closer": "Upon completion, Active Alarm Company will test the system and provide end-user training.",
+  "sow_closer_fire": "Upon completion, Active Alarm Company will test the system with the AHJ as required and provide end-user training.",
+  "sow_closer_by_system": {
+    "Area of Refuge": "Upon completion, Active Alarm Company will test the system with the AHJ as required and provide end-user training.",
+    "Network": "Upon completion, Active Alarm Company will test all cabling and provide test results.",
+    "Elevator Monitoring": ""
+  },
+  "_job_clarification_default_order": 40
+}
