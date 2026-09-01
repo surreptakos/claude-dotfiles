@@ -148,7 +148,7 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
     delivery = await agent(
       `Deliver verified branch ${impl.branch} for issue #${t.number}.
 1. git push -u origin ${impl.branch}
-2. gh pr create --title "fix: ${t.title} (#${t.number})" --body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY.
+2. gh pr create --title "fix: ${t.title} (#${t.number})" --body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
 3. gh issue comment ${t.number} --body with the PR link.
 Do NOT merge, do NOT close the issue, do NOT touch main. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
