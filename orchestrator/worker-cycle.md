@@ -47,7 +47,9 @@ Then, in order:
 
 6. **Fleet.** If eligible `ready-for-agent` tickets exist (open, no open blockers), run the
    Workflow tool with `scriptPath` = the dotfiles clone's `orchestrator/ticket-fleet-cloud.js` and
-   `args` = {{FLEET_ARGS}}. This is your explicit multi-agent authorization from Dan via the
+   `args` = {{FLEET_ARGS}} plus a `runId` you mint yourself (`printf %x $(date +%s)`; the
+   workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the fleet refuses
+   to start without one). This is your explicit multi-agent authorization from Dan via the
    master. When the fleet returns, run the **merge pass** (step 3) once more over the PRs it just
    opened.
 

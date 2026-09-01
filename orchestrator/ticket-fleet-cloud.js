@@ -6,7 +6,7 @@
 export const meta = {
   name: 'ticket-fleet-cloud',
   description: 'Parallel ticket runner (cloud port): scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel from a cloud worker session. args: {label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel from a cloud worker session. args: {runId (required, caller-minted unique token), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile}',
   phases: [
     { title: 'Scout', detail: 'list tickets, dependency edges, repo map' },
     { title: 'Implement', detail: 'one pinned agent per ticket, isolated worktree, bounded retries' },
@@ -18,6 +18,7 @@ export const meta = {
 
 // ---- config (all overridable via args) ----
 const cfg = Object.assign({
+  runId: null,              // REQUIRED from the caller; see concurrent-run safety below
   label: 'ready-for-agent',
   maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
   // Per-stage model pins, same reasoning as the local runner: frontier only where errors compound.
@@ -35,7 +36,11 @@ const cfg = Object.assign({
 // Same scheme as the local runner: a per-run id embedded in every branch name so two fleets (or a
 // fleet racing Dan's PC) never collide on `agent/issue-<N>-attempt1`. See
 // tools/ticket-fleet-branch.js in claude-dotfiles for the tested pure function.
-const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+// The workflow runtime throws on Date.now(), new Date() and Math.random() inside scripts (they would
+// break resume), so the id cannot be minted here: the caller passes it as args.runId (any short
+// unique token, e.g. the shell's `date +%s` in hex). Failing loudly beats a shared branch name.
+if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot call Date.now()/Math.random(); pass a unique token such as `printf %x $(date +%s)`')
+const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'], properties: {
