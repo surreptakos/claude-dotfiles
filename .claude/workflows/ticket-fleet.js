@@ -1,7 +1,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel. args: {label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel. args: {runId (required, caller-minted unique token), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile}',
   phases: [
     { title: 'Scout', detail: 'list tickets, dependency edges, repo map' },
     { title: 'Implement', detail: 'one pinned agent per ticket, isolated worktree, bounded retries' },
@@ -13,6 +13,7 @@ export const meta = {
 
 // ---- config (all overridable via args) ----
 const cfg = Object.assign({
+  runId: null,              // REQUIRED from the caller; see concurrent-run safety below
   label: 'ready-for-agent',
   maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
   // Per-stage model pins. Frontier only where errors compound (implement); the orchestrator is the
@@ -32,7 +33,7 @@ const cfg = Object.assign({
 // time (nothing on the tracker side prevents it). Without a per-run identifier
 // both runners would spawn implementers that try to create
 // `agent/issue-<N>-attempt1`, and the second git-branch or push collides. This
-// runner mints a `runId` per invocation and hands each spawned implementer a
+// runner takes a caller-minted `runId` per invocation and hands each spawned implementer a
 // per-worker suffix `wf_<runId>-w<workerN>` (workerN = the ticket's index in
 // the wave), embedded in the branch name. Two concurrent scouts against the
 // same ticket therefore produce distinct branches. Alternative not used here:
@@ -42,7 +43,11 @@ const cfg = Object.assign({
 // then increment - has a race between the query and branch creation. See
 // tools/ticket-fleet-branch.js for the pure-function counterpart the tests
 // exercise (tools/ticket-fleet-branch.test.js).
-const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+// The workflow runtime throws on Date.now(), new Date() and Math.random() inside scripts (they would
+// break resume), so the id cannot be minted here: the caller passes it as args.runId (any short
+// unique token, e.g. the shell's `date +%s` in hex). Failing loudly beats a shared branch name.
+if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot call Date.now()/Math.random(); pass a unique token such as `printf %x $(date +%s)`')
+const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'], properties: {
