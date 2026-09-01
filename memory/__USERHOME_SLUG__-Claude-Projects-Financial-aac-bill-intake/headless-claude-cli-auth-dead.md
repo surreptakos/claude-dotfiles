@@ -5,11 +5,11 @@ metadata:
   node_type: memory
   type: project
   originSessionId: df9de2e4-1ad1-460e-933e-45310a15d441
-  modified: 2026-08-19T01:38:14.252Z
+  modified: 2026-09-01T16:56:59.850Z
 ---
 
-Measured 2026-08-19: `claude -p --model claude-opus-4-7 …` returns `is_error: true`, `Failed to
-authenticate: OAuth session expired and could not be refreshed`. `CLAUDE_CODE_OAUTH_TOKEN` unset in
+Measured 2026-08-19, re-verified live 2026-08-25 and 2026-09-01 (probe run each time): `claude -p`
+returns `is_error: true`, `Failed to authenticate: OAuth session expired and could not be refreshed`. `CLAUDE_CODE_OAUTH_TOKEN` unset in
 process/User/Machine scopes; `~/.claude/.credentials.json` holds empty `accessToken`/`refreshToken`
 with `expiresAt: 0`. So the global CLAUDE.md "headless CLI run with the full model ID" recipe for
 pinning a subagent model is dead until Dan mints a token (`claude setup-token`) or re-logs the CLI.
