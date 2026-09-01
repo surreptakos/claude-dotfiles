@@ -25,7 +25,6 @@
 - [Registry-membership W/O ruling](owner-ruling-registry-membership-wo.md) — invert detection to board membership (issue 126); registry-validated subject W/O may waive tax hold
 - [UrlFetch quota is the ceiling](urlfetch-quota-is-the-ceiling.md) — 64-ticket sweep exhausted the daily quota 2026-08-13; resets 02:00 Central; check the exception before diagnosing code
 - [Nightly orchestrator live](nightly-orchestrator-live.md) — KILLED 2026-08-25, task Disabled; fleet runs manual now; contract/log paths still valid
-- [Headless claude CLI auth dead](headless-claude-cli-auth-dead.md) — claude -p can't refresh (empty creds file); pin Opus 4.7 via opus47 agent type instead
 - [GL-uncovered bill: run pipeline yourself](gl-uncovered-bill-run-pipeline-yourself.md) — download the bill's invoice, run extractor+GL match, propose GL; never park as "owner disposition"
 - [Stacked PR base delete closes PR](stacked-pr-base-delete-closes-pr.md) — retarget stacked PRs to main BEFORE deleting base; closed PR can't reopen/retarget
 - [Workflow CRLF script trap](workflow-crlf-script-trap.md) — CRLF control-char rejection; run LF copy from scratchpad
