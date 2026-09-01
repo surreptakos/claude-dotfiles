@@ -7,6 +7,10 @@ answers what the evidence lets it answer, and puts the rest to Dan as one decisi
 ratifies, it goes back to the dev loop. Commissioned 2026-09-01 in the apps-script-head-sync
 session; this file is the master's binding instructions — the boot prompt just points here.
 
+**Venue:** this file describes the CLOUD master. `LOCAL-RUNBOOK.md` is the PC variant of the same
+orchestrator. Exactly one master may be active anywhere at a time; the state issue records which
+venue holds it (`"venue"` field), and a master must verify no other venue is active before booting.
+
 ## Roles
 
 - **Master** — a Claude Code cloud session, woken hourly by a Routine bound to it. Never implements
