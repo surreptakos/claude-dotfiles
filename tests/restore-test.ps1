@@ -368,8 +368,13 @@ if ($Fault -eq 'missing') {
     Note ('fault: deleted a restored file - ' + $victim.Name)
 }
 if ($Fault -eq 'drift') {
-    Add-Content -Path (Join-Path $FakeHome '.claude\CLAUDE.md') -Value 'appended after restore'
-    Note 'fault: a restored file no longer matches the repo'
+    # Issue 40: CLAUDE.md now lives in the active profile when one exists (see manifest.ps1);
+    # append to whichever path the manifest chose so the fault reaches the real restore target.
+    $driftTarget = ((Get-DotfileItems -RepoRoot $Clone -UserHome $FakeHome) |
+                    Where-Object { $_.Repo -eq 'claude/CLAUDE.md' } |
+                    Select-Object -First 1).Local
+    Add-Content -Path $driftTarget -Value 'appended after restore'
+    Note ('fault: a restored file no longer matches the repo (' + $driftTarget + ')')
 }
 if ($Fault -eq 'broken-hook') {
     Set-Content -Path (Join-Path $FakeHome '.claude\hooks\session-gate.js') `
@@ -427,9 +432,16 @@ Check ("all {0} whitelisted files exist under the fake home" -f $pairs.Count) ($
 # fewer is caught above. Both are worth knowing. The personal profile is excluded here - it is
 # a refresh target seeded by this test, not a whitelisted restore - and gets its own checks in
 # section 6c (the exclusion also covers ~/.claude-personal-refresh-backup-<stamp>).
+# Issue 40 exception: when a personal profile exists the manifest routes CLAUDE.md straight
+# there (so Claude Code's ancestor scan cannot rediscover ~/.claude/CLAUDE.md as a second
+# copy). That one file IS a whitelisted restore even though it sits under .claude-personal;
+# the pair for claude/CLAUDE.md points at it, so it must be counted here to keep pair<->file
+# arithmetic honest.
+$personalClaudeMd = (Join-Path $FakePersonal 'CLAUDE.md').ToLower()
 $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction SilentlyContinue |
               Where-Object { $_.FullName -notlike '*\.claude-dotfiles-backup-*' -and
-                             $_.FullName -notlike '*\.claude-personal*' -and
+                             ($_.FullName -notlike '*\.claude-personal*' -or
+                              $_.FullName.ToLower() -eq $personalClaudeMd) -and
                              # Issue 12: sync.ps1 writes ~/.claude/hook-state/dotfiles-sync/state.json
                              # on every pull. Runtime state, not a whitelisted restore - stays out of
                              # the file-count assertion the same way the backup and the personal
@@ -639,6 +651,24 @@ Check 'pinned writer escapes quote and tab'   ($pinned.Contains('"b\"q"') -and $
 $parsed = @($pinned | ConvertFrom-Json | ForEach-Object { $_ })
 Check 'pinned writer round-trips as JSON'     ($parsed.Count -eq 2 -and $parsed[1].Name -eq 'b"q')
 
+# ------------------------------------------------------------------ 6b4. global CLAUDE.md single-load (issue 40)
+
+# The regression check for the /doctor finding of 2026-08-28: with a personal profile active,
+# a byte-identical ~/.claude/CLAUDE.md would sit under a scanned .claude/ ancestor and double-
+# load global memory (~5.7k tokens per session, every project). The fix routes staging into the
+# active profile so the file lives ONLY there. This asserts both halves: the file is present at
+# the personal-profile path, and no orphan ~/.claude/CLAUDE.md survives to be rediscovered by
+# the ancestor walk. The freshness fingerprint uses relative repo paths for hashing, so the
+# round trip stays valid regardless of which of the two locations the manifest chose.
+Write-Host ''
+Write-Host 'Global CLAUDE.md single-load (issue 40)'
+Check 'global CLAUDE.md landed in the active (personal) profile' `
+    (Test-Path (Join-Path $FakePersonal 'CLAUDE.md')) `
+    @('expected ' + (Join-Path $FakePersonal 'CLAUDE.md') + ' to exist after pull')
+Check 'no orphan ~/.claude/CLAUDE.md remains to trigger the ancestor double-load' `
+    (-not (Test-Path (Join-Path $FakeHome '.claude\CLAUDE.md'))) `
+    @('~/.claude/CLAUDE.md still present - a session under $HOME would load global memory twice')
+
 # ------------------------------------------------------------------ 6c. personal profile refresh
 
 # Issue #9: pull ends by refreshing ~/.claude-personal from the freshly written ~/.claude - a
@@ -647,6 +677,8 @@ Check 'pinned writer round-trips as JSON'     ($parsed.Count -eq 2 -and $parsed[
 # personal - the prefs, the personal-only memory, its pointer line - survives untouched.
 # Reverse memory sync is deliberately absent (declined by default 2026-08-19): push reads only
 # ~/.claude, so nothing here can assert personal content into the repo, and nothing should.
+# Issue 40: CLAUDE.md itself no longer copies through the refresh - the manifest routes it
+# straight to the personal profile - so this section covers hooks/settings/skills/memory only.
 Write-Host ''
 Write-Host 'Personal profile refresh'
 

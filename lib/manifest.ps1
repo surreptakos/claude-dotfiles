@@ -14,13 +14,24 @@ function Get-DotfileItems {
         [Parameter(Mandatory = $true)][string]$UserHome
     )
 
-    $claude = Join-Path $UserHome '.claude'
-    $codex  = Join-Path $UserHome '.codex'
-    $agents = Join-Path $UserHome '.agents'
-    $docs   = Get-DocumentsPath -UserHome $UserHome
+    $claude   = Join-Path $UserHome '.claude'
+    $codex    = Join-Path $UserHome '.codex'
+    $agents   = Join-Path $UserHome '.agents'
+    $personal = Join-Path $UserHome '.claude-personal'
+    $docs     = Get-DocumentsPath -UserHome $UserHome
+
+    # Issue 40: global CLAUDE.md loads twice when it lives at ~/.claude/CLAUDE.md and the
+    # active profile is ~/.claude-personal. Claude Code reads $CLAUDE_CONFIG_DIR/CLAUDE.md
+    # as user memory AND walks ancestors looking for .claude/CLAUDE.md - two different
+    # absolute paths, byte-identical content, ~5.7k tokens duplicated every session. When
+    # a personal profile exists, route staging there so the file lives only at the active
+    # profile's own path (not a scanned ancestor). A machine without a personal profile
+    # falls through to ~/.claude/CLAUDE.md where user memory and the ancestor scan resolve
+    # to the same path - Claude Code deduplicates that on its own.
+    $claudeMdLocal = if (Test-Path $personal) { Join-Path $personal 'CLAUDE.md' } else { Join-Path $claude 'CLAUDE.md' }
 
     @(
-        [pscustomobject]@{ Type = 'File'; Repo = 'claude/CLAUDE.md';                       Local = (Join-Path $claude 'CLAUDE.md') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'claude/CLAUDE.md';                       Local = $claudeMdLocal }
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/settings.json';                   Local = (Join-Path $claude 'settings.json') }
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json') }
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }

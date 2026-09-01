@@ -9,8 +9,15 @@
 #       requires an explicit owner instruction.
 #
 # The refresh is a one-way overlay, and the work profile is the source of truth:
-#   - hooks, CLAUDE.md, agents: copied verbatim (byte-equal; both profiles' hooks are
-#     profile-aware via CLAUDE_CONFIG_DIR since commit 5bec0bd, so identical copies are correct)
+#   - hooks, agents: copied verbatim (byte-equal; both profiles' hooks are profile-aware via
+#     CLAUDE_CONFIG_DIR since commit 5bec0bd, so identical copies are correct)
+#   - CLAUDE.md: NO LONGER copied here. Issue 40 - the manifest routes CLAUDE.md staging
+#     straight into the active profile (~/.claude-personal on this machine) so Claude Code's
+#     ancestor scan cannot rediscover a second ~/.claude/CLAUDE.md copy. The copy block below
+#     is dead on machines where the fix has run - Test-Path on the (deliberately absent) work
+#     CLAUDE.md returns false and the block skips. It stays defined for the edge case where
+#     a machine still carries an orphan work CLAUDE.md from before the fix and the sync.ps1
+#     cleanup step is skipped (e.g. running Update-PersonalProfile in isolation).
 #   - skills: junctions recreated against the same machine-wide targets; real skill dirs
 #     overlaid file-by-file; personal-only skills left alone
 #   - settings.json: HOOKS KEY ONLY, with the mechanical path rewrite \.claude\ ->
@@ -58,8 +65,9 @@ function Update-PersonalProfile {
     }
     if ($DryRun) {
         Write-Host ("  would refresh {0} from {1}:" -f $personal, $work)
-        Write-Host '    hooks, CLAUDE.md, agents verbatim; skill junctions + real skill dirs;'
+        Write-Host '    hooks, agents verbatim; skill junctions + real skill dirs;'
         Write-Host '    settings.json hooks key (paths rewritten to .claude-personal); memory union.'
+        Write-Host '    (CLAUDE.md now routes through the manifest per issue 40 - not copied here.)'
         Write-Host '    Personal-only files are never deleted; overwrites are backed up first.'
         return
     }

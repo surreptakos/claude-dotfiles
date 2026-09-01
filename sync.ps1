@@ -224,6 +224,28 @@ if ($Mode -eq 'pull') {
         }
     }
 
+    # Issue 40: when the manifest routes CLAUDE.md to ~/.claude-personal (personal profile
+    # active), remove any leftover ~/.claude/CLAUDE.md so Claude Code's ancestor scan cannot
+    # rediscover the old copy for a second load. Silent no-op on machines the fix has never
+    # written to (no orphan present); back up the byte to the same backup dir the pull built,
+    # since Backup-LocalTargets only backed up the current manifest destinations.
+    $personalProfile = Join-Path $UserHome '.claude-personal'
+    $orphanClaudeMd  = Join-Path $UserHome '.claude\CLAUDE.md'
+    $activeClaudeMd  = ($items | Where-Object { $_.Repo -eq 'claude/CLAUDE.md' } | Select-Object -First 1).Local
+    if ((Test-Path $personalProfile) -and (Test-Path $orphanClaudeMd) -and
+        ($activeClaudeMd -ne $orphanClaudeMd)) {
+        if ($DryRun) {
+            Write-Host ("  would remove orphan {0} (issue 40: staged now at {1})" -f $orphanClaudeMd, $activeClaudeMd)
+        } else {
+            $orphanBackup = Join-Path $backup 'claude\CLAUDE.md.orphan'
+            $orphanParent = Split-Path $orphanBackup -Parent
+            if (-not (Test-Path $orphanParent)) { New-Item -ItemType Directory -Path $orphanParent -Force | Out-Null }
+            Copy-Item -Path $orphanClaudeMd -Destination $orphanBackup -Force
+            Remove-Item -Path $orphanClaudeMd -Force
+            Write-Host ("  removed orphan {0} (staged now at {1})" -f $orphanClaudeMd, $activeClaudeMd)
+        }
+    }
+
     # After the trees, never before: a junction to a directory that has not been restored yet
     # would be skipped as a missing target.
     $links = Restore-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
