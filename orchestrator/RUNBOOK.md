@@ -134,7 +134,9 @@ batch rulings — with one inversion: the master grills **itself** first. Per ti
 
 Post the brief as one GitHub issue in claude-dotfiles (label `orchestrator`, title "Decision brief
 <date>"): self-answered rulings listed first as an FYI with links, then the open decisions each as
-a checklist item. Dan ratifies by replying in the master session or commenting on the issue —
+a checklist item. Write the brief in plain, direct prose for Dan to read: remove all mannered
+prose, no metaphor or flourish where a literal phrase exists; one short paragraph per open
+decision. Dan ratifies by replying in the master session or commenting on the issue —
 "approved as recommended" on the issue counts for every unchecked item he doesn't override.
 
 ## Master rebirth (context hygiene for the master itself)
