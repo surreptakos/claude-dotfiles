@@ -887,6 +887,23 @@ if (Test-Path $freshnessPsTests) {
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
 }
 
+# sync.ps1 -Mode push refusal from a git worktree (issue 32). Runs against the CLONE so the
+# ship pass proves the test file made it into the mirror, and the sync.ps1 in the clone is
+# what the guard is being tested on - not the working tree's copy.
+$syncWtTests = Join-Path $Clone 'tests\sync-worktree-guard.tests.ps1'
+if (Test-Path $syncWtTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $syncWtTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'sync-worktree-guard.tests.ps1 passes (push refuses from worktree; -FromWorktree bypasses)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'sync-worktree-guard.tests.ps1 shipped' $false @('tests/sync-worktree-guard.tests.ps1 missing from clone')
+}
+
 # ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)
 
 # Prove that sync.ps1, tools/dotfiles-freshness.ps1, and tools/tracker-audit.js do not honour a

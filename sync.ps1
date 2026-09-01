@@ -18,7 +18,13 @@ param(
     [Parameter(Mandatory = $true)][ValidateSet('push', 'pull')][string]$Mode,
     [switch]$DryRun,
     [string]$Commit,
-    [string]$UserHome = $env:USERPROFILE
+    [string]$UserHome = $env:USERPROFILE,
+    # Escape hatch for the push-from-worktree refusal (issue 32). Default off. Do not pass
+    # this from any hook - the point of the guard is that a hook fired inside an agent
+    # worktree must not clear/rewrite the mirror against branch state the caller did not
+    # intend, nor commit dotfiles-sync work onto the ticket's feature branch. Only use for
+    # deliberate manual invocations (e.g. testing).
+    [switch]$FromWorktree
 )
 
 Set-StrictMode -Version Latest
@@ -64,6 +70,36 @@ function Backup-LocalTargets {
 # ------------------------------------------------------------------------ push
 
 if ($Mode -eq 'push') {
+    # issue 32: refuse a push from a git worktree unless -FromWorktree is passed.
+    # This repo runs many concurrent agent worktrees, each on its own feature branch. A push
+    # from one either (a) clears then rewrites claude/, codex/, memory/ against the branch's
+    # tree - which is almost never what the caller wants when they meant to sync live to
+    # master - or (b) with -Commit, drops the sync commit onto the ticket's feature branch,
+    # polluting the diff. Mirrors the push-state2 hook guard's `-not $repo.isWorktree`
+    # clause (tools/dotfiles-freshness.ps1) and its rationale. Detection matches Get-RepoState
+    # in tools/dotfiles-freshness.ps1: `git rev-parse --git-dir` returns a path under
+    # `.git/worktrees/<name>/` for a worktree checkout and plain `.git` (or the bare .git
+    # dir) otherwise. LASTEXITCODE gates the check so a non-git RepoRoot (should not happen,
+    # but does under some test fixtures) does not throw here.
+    if (-not $FromWorktree) {
+        $gitDirRaw = & git -C $RepoRoot rev-parse --git-dir 2>$null
+        if ($LASTEXITCODE -eq 0 -and $gitDirRaw -match '[\\/]worktrees[\\/]') {
+            $msg = @(
+                "sync.ps1 -Mode push refuses to run from a git worktree.",
+                ("  RepoRoot: {0}" -f $RepoRoot),
+                ("  git-dir : {0}" -f $gitDirRaw.Trim()),
+                "  A sync push from a worktree would clear then rewrite the mirrored trees",
+                "  (claude/, codex/, memory/) against this worktree's branch state - almost",
+                "  never what a caller who meant to sync live -> master intends. With -Commit",
+                "  it would also drop the sync commit onto the ticket branch, polluting the",
+                "  diff. Run this from the main checkout, or pass -FromWorktree if you know",
+                "  this is deliberate (e.g. testing)."
+            ) -join "`n"
+            [Console]::Error.WriteLine($msg)
+            exit 2
+        }
+    }
+
     # Clear the mirrored trees first so a skill deleted locally also leaves the repo.
     foreach ($relative in $mirrorRoots) {
         $path = Join-Path $RepoRoot $relative
