@@ -14,10 +14,15 @@ on shutdown.
 ## What changes from the cloud runbook
 
 - **No worker sessions.** The master dispatches everything in-session: `/triage` and `/to-tickets`
-  run via subagents (Agent tool) to keep the master's own window lean, and the fleet runs via the
-  Workflow tool on the ORIGINAL `.claude/workflows/ticket-fleet.js` — `gh` exists here, no cloud
-  port needed. The merge pass uses `gh pr merge` under the same policy (verifier evidence + green
-  CI + no conflict + no human changes-requested).
+  run via subagents (Agent tool) spawned with `run_in_background: true` — the master does not wait
+  on them. While those subagents run, the master keeps working: it runs the merge pass over open
+  fleet PRs (same policy as `RUNBOOK.md` — verifier evidence + green CI + no conflict + no human
+  changes-requested, via `gh pr merge`) and performs the takeover-guard check for the next repo in
+  priority order. The fleet (Workflow tool on the ORIGINAL `.claude/workflows/ticket-fleet.js` —
+  `gh` exists here, no cloud port needed) is only started for a repo AFTER that repo's `/triage`
+  and `/to-tickets` subagent results have arrived, because the fleet's scout reads the labels those
+  steps produce. The master collects subagent results when their completion notifications arrive
+  rather than polling.
 - **Skills are native.** `/triage`, `/to-tickets`, `/project-harness`, `/session-start`,
   `/session-end`, `/grill-ready-for-human` all load from `~/.claude` — invoke them directly instead
   of reading SKILL.md files out of a clone.
