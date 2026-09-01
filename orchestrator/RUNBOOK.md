@@ -89,10 +89,14 @@ placeholders filled (repo, default branch, fleet args from config). Record the s
 `activeWorker`. One worker at a time (`maxConcurrentWorkers: 1`) — serialized cycles keep cost
 legible and failures attributable.
 
-**Takeover guard** (first cycle per repo only): if the repo shows `agent/issue-*` branches or fleet
-PRs updated within the last 2 hours that this orchestrator did not create, Dan's PC may still be
-mid-fleet there. Defer that repo one wake and note it in the state issue. Second consecutive
-deferral → proceed anyway (his run has had its window) but say so in the state issue.
+**Takeover guard** (every cycle, not just the first): if the repo shows `agent/issue-*` branches or
+fleet PRs updated within the last 2 hours that this orchestrator did not create, Dan's PC (or
+another runner) is mid-fleet there. Defer that repo — indefinitely, never "proceed anyway" — note
+it in the state issue, and if it is still deferred after 3 wakes, ask Dan for an explicit handoff
+(a message in this session or a comment on the state issue). Two runners on one repo burn double
+usage for the same backlog even when branch names don't collide; that happened on 2026-09-01
+(cloud worker + PC fleet on bill-intake, weekly limit exhausted) and must not happen again. The
+kill switch for everything is disabling the heartbeat Routine — the master only acts on wakes.
 
 ## Merge policy (Dan, 2026-09-01: auto-merge ON)
 
