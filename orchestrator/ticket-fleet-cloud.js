@@ -44,8 +44,9 @@ const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
-  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy'], properties: {
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
+    keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -79,7 +80,7 @@ tools. Steps:
 1. Read CLAUDE.md and any HANDOFF/CONTEXT docs at repo root.
 2. mcp__github__list_issues with label "${cfg.label}", state open (then mcp__github__issue_read
    with method get_comments per ticket — comments carry criteria the body lacks).
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open.
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
 4. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs — never a glob if docs forbid it).
 5. Produce a repoMap: max 15 lines — key directories, conventions, hard rails an implementer must not break.
 6. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") — not every repo uses main.
@@ -138,11 +139,18 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
   let delivery = null
   if (done && cfg.deliver) {
+    // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A ratification
+    // ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the commit messages say.
+    const keepOpen = t.keepOpen === true || /\b(?:leave|keep|stay|remain)s?\s+(?:this\s+|the\s+|it\s+)?(?:ticket\s+|issue\s+)?open\b/i.test(t.criteria || '')
+    const issueRef = keepOpen
+      ? `"Refs #${t.number}" (this ticket stays OPEN by its own instruction; never write Closes, Fixes or Resolves)`
+      : `"Closes #${t.number}"`
+    const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."' : ''
     delivery = await agent(
       `Deliver verified branch ${impl.branch} for issue #${t.number}. There is no \`gh\` CLI here — use git and the GitHub MCP tools.
 1. git push -u origin ${impl.branch}
-2. mcp__github__create_pull_request — title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
-3. mcp__github__add_issue_comment on issue ${t.number} with the PR link.
+2. mcp__github__create_pull_request — title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
+3. mcp__github__add_issue_comment on issue ${t.number} with the PR link${keepOpenNote}.
 Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )

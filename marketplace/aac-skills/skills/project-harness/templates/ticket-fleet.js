@@ -44,8 +44,9 @@ const runId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'], properties: {
-  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy'], properties: {
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
+    keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -76,7 +77,7 @@ const scout = await agent(
   `Scout this repository for agent-ready tickets. Steps:
 1. Read CLAUDE.md and any HANDOFF/CONTEXT docs at repo root.
 2. gh issue list --label ${cfg.label} --state open --json number,title (then gh issue view N --comments per ticket — comments carry criteria the body lacks).
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open.
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
 4. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs — never a glob if docs forbid it).
 5. Produce a repoMap: max 15 lines — key directories, conventions, hard rails an implementer must not break.
 Return structured output only.`,
@@ -135,11 +136,18 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
   let delivery = null
   if (done && cfg.deliver) {
+    // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A ratification
+    // ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the commit messages say.
+    const keepOpen = t.keepOpen === true || /\b(?:leave|keep|stay|remain)s?\s+(?:this\s+|the\s+|it\s+)?(?:ticket\s+|issue\s+)?open\b/i.test(t.criteria || '')
+    const issueRef = keepOpen
+      ? `"Refs #${t.number}" (this ticket stays OPEN by its own instruction; never write Closes, Fixes or Resolves)`
+      : `"Closes #${t.number}"`
+    const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."' : ''
     delivery = await agent(
       `Deliver verified branch ${impl.branch} for issue #${t.number}.
 1. git push -u origin ${impl.branch}
-2. gh pr create --title "fix: ${t.title} (#${t.number})" --body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY.
-3. gh issue comment ${t.number} --body with the PR link.
+2. gh pr create --title "fix: ${t.title} (#${t.number})" --body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY.
+3. gh issue comment ${t.number} --body with the PR link${keepOpenNote}.
 Do NOT merge, do NOT close the issue, do NOT touch main. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )

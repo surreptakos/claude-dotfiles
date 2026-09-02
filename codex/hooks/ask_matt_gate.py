@@ -611,6 +611,7 @@ def _strip_code(text: str) -> str:
 
 
 FENCE_PATTERN = re.compile(r"```")
+RUNNABLE_FENCE_PATTERN = re.compile(r"```bash\n.*?```", re.DOTALL)
 INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
 # Dan, 2026-09-02: "I don't need to see filepaths or code or anything formatted
 # in monospaced text. PRs, tickets, specs, PRDs -- those are for you." Monospace
@@ -623,7 +624,11 @@ def _caveman_lint(text: str) -> list[str]:
     prose = _strip_code(text)
     words = prose.split()
     violations: list[str] = []
-    fences = len(FENCE_PATTERN.findall(text)) // 2
+    # A ```bash block is a command the user can click Run on, so it is the
+    # deliverable when they ask how to do something — not working material
+    # leaking into a status report. Every other fence still counts.
+    runnable = len(RUNNABLE_FENCE_PATTERN.findall(text))
+    fences = max(0, len(FENCE_PATTERN.findall(text)) // 2 - runnable)
     spans = len(INLINE_CODE_PATTERN.findall(text))
     if fences or spans:
         violations.append(
