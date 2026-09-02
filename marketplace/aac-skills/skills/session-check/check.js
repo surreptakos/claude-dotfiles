@@ -40,6 +40,7 @@
 
 const { execFile, execFileSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const END = process.argv.includes('--end');
@@ -370,6 +371,67 @@ function cloudSkillChecks() {
   note('`/update-cloud-plugin` rebuilds and re-uploads it, then stamps the sweep');
 }
 
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
+  catch (e) { return null; }
+}
+
+/* --------------------------------------------------------- installed plugins ----------------
+ *  A marketplace install reads the LOCAL clone of the marketplace, never the source. So a
+ *  plugin can sit at an old version indefinitely while the repo it came from is current, and
+ *  nothing says so: `claude plugin install` happily reinstalls whatever the cached clone holds.
+ *  Measured 2026-09-02 — a clone frozen at 2026-08-31 kept serving that build for two days
+ *  while GitHub carried the new one, and the only symptom was a skill that would not update.
+ *  Machine-wide, silent when no marketplace is configured. */
+function installedPluginChecks() {
+  if (IS_CLOUD) return;
+  const root = path.join(os.homedir(), '.claude', 'plugins');
+  const known = readJson(path.join(root, 'known_marketplaces.json'));
+  const installed = readJson(path.join(root, 'installed_plugins.json'));
+  if (!known || !installed || !installed.plugins) return;
+
+  const rows = [];
+  for (const [id, entries] of Object.entries(installed.plugins)) {
+    const at = id.lastIndexOf('@');
+    if (at < 1) continue;
+    const name = id.slice(0, at);
+    const market = id.slice(at + 1);
+    const entry = (entries || [])[0];
+    if (!entry || !entry.version) continue;
+    const loc = known[market] && known[market].installLocation;
+    if (!loc) continue;
+    const manifest = readJson(path.join(loc, '.claude-plugin', 'marketplace.json'));
+    if (!manifest || !Array.isArray(manifest.plugins)) continue;
+    const offered = manifest.plugins.find((p) => p && p.name === name);
+    if (!offered || !offered.version) continue;
+    if (String(offered.version) !== String(entry.version)) {
+      rows.push({ name, market, have: entry.version, offered: offered.version });
+    }
+  }
+
+  // Age of each clone, because a current-looking install proves nothing when the clone
+  // behind it has not been fetched in weeks.
+  const stale = [];
+  const now = Date.now();
+  for (const [market, meta] of Object.entries(known)) {
+    const when = Date.parse(meta && meta.lastUpdated);
+    if (!Number.isFinite(when)) continue;
+    const days = Math.floor((now - when) / 86400000);
+    if (days >= 7) stale.push({ market, days });
+  }
+
+  if (!rows.length && !stale.length) return;
+  head('Plugins');
+  rows.forEach((r) => {
+    warn(`${r.name} is behind its marketplace — installed ${r.have}, available ${r.offered}`);
+    note(`\`claude plugin update ${r.name}\`, then restart`);
+  });
+  stale.forEach((s) => {
+    note(`marketplace ${s.market} last fetched ${s.days}d ago — `
+      + '`claude plugin marketplace update` refreshes every one');
+  });
+}
+
 /* -------------------------------------------------------------- tickets ---------------------- */
 
 function parseGithubSlug(remote) {
@@ -431,6 +493,7 @@ async function main() {
   claspChecks();
   await workChecks();
   ticketChecks();
+  installedPluginChecks();
   if (END) cloudSkillChecks();
   if (CFG.note) { head('Note'); note(CFG.note); }
   console.log(out.join('\n'));

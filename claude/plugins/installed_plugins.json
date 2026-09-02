@@ -40,6 +40,16 @@
         "lastUpdated": "2026-08-21T14:19:05.285Z",
         "gitCommitSha": "e7555fcaf612dfa1739dc86610ea926a906db614"
       }
+    ],
+    "aac-skills@claude-dotfiles": [
+      {
+        "scope": "user",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.2",
+        "version": "2026.9.2",
+        "installedAt": "2026-09-02T20:47:25.994Z",
+        "lastUpdated": "2026-09-02T20:49:48.062Z",
+        "gitCommitSha": "c47e7af87a617839418bef67697938e4544f3729"
+      }
     ]
   }
 }
