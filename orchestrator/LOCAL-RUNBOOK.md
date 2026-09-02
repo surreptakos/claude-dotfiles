@@ -19,7 +19,10 @@ on shutdown.
   fleet PRs (same policy as `RUNBOOK.md` — verifier evidence + green CI + no conflict + no human
   changes-requested, via `gh pr merge`) and performs the takeover-guard check for the next repo in
   priority order. The fleet (Workflow tool on the ORIGINAL `.claude/workflows/ticket-fleet.js` —
-  `gh` exists here, no cloud port needed) is only started for a repo AFTER that repo's `/triage`
+  `gh` exists here, no cloud port needed; pass `runId` in `args`, minted with
+  `printf %x $(date +%s)`, because the workflow runtime forbids `Date.now()` in scripts; and
+  launch by `scriptPath`, since a workflow registered by name is a session-start snapshot that
+  ignores later edits) is only started for a repo AFTER that repo's `/triage`
   and `/to-tickets` subagent results have arrived, because the fleet's scout reads the labels those
   steps produce. The master collects subagent results when their completion notifications arrive
   rather than polling.
