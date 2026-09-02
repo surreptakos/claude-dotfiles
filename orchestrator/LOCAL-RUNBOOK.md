@@ -50,10 +50,26 @@ master lives there.
 - **Pacing: one pass, then stop. No `/loop`.** Serve the repo until nothing is actionable or a cap
   is hit, heartbeating the state issue as you go. Then clear the venue, write
   `**Pass complete — YYYY-MM-DD HH:MM UTC**` (current UTC) at the top of the heartbeat section of
-  the state issue, say "pass complete", and end the turn. The watchdog reads that line on its next
-  slot, closes this window, and launches the next repo's master; this repo gets its next pass when
-  its turn comes round again. A master that keeps looping after its pass holds the only slot and
-  starves the other three repos. Never busy-wait with sleeps.
+  the state issue, say "pass complete", and end the turn. The watchdog closes this window once the
+  marker is newer than the process start, no Heartbeat line is newer than the marker, and the
+  session transcript has been untouched for five minutes; then it launches the next repo's master.
+  This repo gets its next pass when its turn comes round again. A master that keeps looping after
+  its pass holds the only slot and starves the other three repos. Never busy-wait with sleeps.
+- **A message after Pass complete reopens the pass.** Before doing anything else, write a fresh
+  `**Heartbeat N — <UTC>**` line above the marker; that is what tells the watchdog the pass is
+  live again. On 2026-09-02 22:30 UTC the first serial watchdog closed `master-bill-intake` mid
+  fleet launch: its marker was from 22:20, Dan had typed into the window at 22:27, and the kill
+  rule only compared the marker with the process start (ticket #82). Finish the reopened work,
+  then write Pass complete again.
+- **Nobody is at the keyboard (Dan, 2026-09-02, verbatim: "I should not ever be asked to
+  approve-tickets. I am not at the computer. This is meant to be a completely autonomous run").**
+  Never call `AskUserQuestion`; never wait for a typed approval. Anything that needs Dan becomes a
+  `ready-for-human` ticket with the evidence in its body, the heartbeat names it, and the pass
+  continues. The watchdog launch sets `AAC_ORCHESTRATOR_AUTONOMOUS=1`, and the ask-matt publish
+  gate skips its ticket-set approval step under that variable only (ticket #81); the route
+  requirement (`to-tickets` / `triage` / `to-spec` declared) still applies. Review happens after
+  the fact: every filed ticket carries its measured evidence and a triage label, and the
+  heartbeat lists what was filed.
 - **Context hygiene.** Heavy work already lives in subagents and workflow agents. When the master's
   own window grows heavy mid-pass anyway, checkpoint everything to its state issue and end the pass
   early with the `Pass complete` line: the repo comes round again after the others, and the fresh
@@ -153,18 +169,26 @@ slot does this:
    `master`, rooted in claude-dotfiles) blocks everything: the watchdog prints its PID and the
    `Stop-Process` line and exits. Stop it; the next slot proceeds.
 2. **Alive masters.** Every `claude.exe` or `node.exe` process with `--remote-control
-   master-<slug>` on its command line. For each, the watchdog reads that repo's state issue. A
-   `**Pass complete — YYYY-MM-DD HH:MM UTC**` line newer than the process start means the master
-   is finished: the watchdog stops the `claude` process and its `cmd.exe /k` wrapper window and
-   records that. Any other alive master is still working, and the slot ends with no launch. A
-   master whose latest marker (heartbeat or pass complete) is older than 120 minutes is reported
-   as possibly stalled but is not killed — an interactive session mid-work is Dan's to stop.
+   master-<slug>` on its command line. For each, the watchdog reads that repo's state issue. The
+   master is finished only when all three hold: a `**Pass complete — YYYY-MM-DD HH:MM UTC**`
+   line newer than the process start; no `Heartbeat` line newer than that marker (a later
+   heartbeat means the pass was reopened); and the newest transcript under
+   `~/.claude/projects/<clone slug>/` untouched for five minutes (`-IdleMinutes`). Then the
+   watchdog stops the `claude` process and its `cmd.exe /k` wrapper window and records that. Any
+   other alive master is still working, and the slot ends with no launch. A master whose latest
+   marker is older than 120 minutes is reported as possibly stalled but is not killed — an
+   interactive session mid-work is Dan's to stop.
 3. **Launch the next repo.** With nothing alive, pick the repo never served yet (priority order:
    bill-intake, contract-builder, sales-cockpit, zoho), else the one whose latest marker is oldest,
    and run `Start-Process cmd.exe /k cd /d "<clone>" && claude --dangerously-skip-permissions
-   --remote-control master-<slug> "<boot prompt>"` in a fresh visible window rooted in that clone
-   — the window stays on the desktop and the same session shows up at claude.ai/code and in the
-   Claude mobile app. Exactly one launch per slot, and only when nothing is alive.
+   --remote-control master-<slug> "<boot prompt>"` in a fresh visible window rooted in that clone,
+   with `AAC_ORCHESTRATOR_AUTONOMOUS=1` set in that window's environment — the window stays on
+   the desktop and the same session shows up at claude.ai/code and in the Claude mobile app.
+   Exactly one launch per slot, and only when nothing is alive.
+
+Every decision is appended to `~/.claude/hook-state/master-watchdog/watchdog.log` with a UTC
+stamp. A scheduled task's stdout goes nowhere, and the 22:30 kill above had to be reconstructed
+from process tables and issue timestamps; read the log first next time.
 
 `-Only <slug>` restricts the candidates; `-WhatIf` prints every decision and neither stops nor
 launches anything; `-Force` skips the guards and launches the next repo regardless. The launched
@@ -314,6 +338,27 @@ issue #77 for the test and removed right after (body confirmed identical to the 
   21:37:40Z) - closing pid=25416`, `-WhatIf: not stopped`, no launch. The real run with `-Only
   bogus` (so nothing could launch) -> `[zoho] stopped claude pid=25416`, then `ERROR: -Only
   matched no repo; nothing launched`, exit 1; the fake process was gone afterwards.
+
+### Verified on 2026-09-02 (attempt 6, reopen and idle guards — ticket #82)
+
+Fake master `node fake-master.js --remote-control master-zoho`, test markers written into issue
+#77 and removed afterwards (body confirmed restored), a fake transcript file in the zoho project
+folder whose mtime was set by hand.
+
+- Marker one minute ahead of now, transcript just written -> `[zoho] MASTER ALIVE ...: Pass
+  complete ... but transcript written 0m ago (< 5m) - still in use, not closed`, then `one master
+  at a time: 1 alive - exit 0, no launch`.
+- Same marker plus a `Heartbeat 9` two minutes ahead -> `... Pass complete ... superseded by
+  Heartbeat ... - pass reopened, working`, no launch.
+- Same marker, no newer heartbeat, transcript mtime moved ten minutes back -> `[zoho] PASS
+  COMPLETE at ... transcript idle 10m) - closing pid=...`, `-WhatIf: not stopped`; the real run
+  with `-Only bogus` then printed `stopped claude pid=...` and the fake process was gone. The
+  transcript is matched by creation time after the process start, not last-write time: the
+  first cut filtered on last-write and a ten-minute-old transcript vanished from the search,
+  which read as "no transcript" and (safely) as in use.
+- Nothing alive under Windows PowerShell 5.1 -> one launch line for contract-builder (bill-intake
+  now has a marker, so it is no longer first), carrying `set AAC_ORCHESTRATOR_AUTONOMOUS=1 &&`.
+- The log file received one stamped line per decision.
 
 ## The three relaunch options (Dan's ruling, 2026-09-02)
 

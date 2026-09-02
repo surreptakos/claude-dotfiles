@@ -1,13 +1,13 @@
 ﻿<#
 .SYNOPSIS
     Relaunch watchdog for the local master orchestrators (issue 64; one master per repo since
-    issue 70; ONE MASTER AT A TIME since issue 79).
+    issue 70; ONE MASTER AT A TIME since issue 79; idle guard and log since issue 82).
 
 .DESCRIPTION
     Runs from Windows Task Scheduler every -IntervalMinutes while Dan is logged on. Exactly one
     master runs at a time (Dan, 2026-09-02): the watchdog launches one repo's master, rooted in
     that repo's clone; that master runs ONE pass, writes a `**Pass complete - <UTC>**` line into
-    its state issue and stops; the next watchdog slot sees the marker, closes that window, and
+    its state issue and stops; a later watchdog slot sees the marker, closes that window, and
     launches the next repo. Repos are served in RUNBOOK.md priority order the first time round,
     then least-recently-served first, so every repo gets a turn.
 
@@ -20,18 +20,34 @@
       1. Legacy guard. A process with the pre-issue-70 shape `--remote-control master "<prompt>"`
          (bare token, rooted in claude-dotfiles) blocks everything until stopped.
       2. Alive masters: every claude/node process with `--remote-control master-<slug>`.
-         For each, read that repo's state issue. A `Pass complete` line newer than the
-         process start means the master is done: stop it (and its cmd.exe wrapper window) and
-         record that. Otherwise it is still working: exit, launch nothing. A master whose
-         latest heartbeat is older than -MaxHeartbeatAgeMinutes is reported as possibly
-         stalled but NOT killed - an interactive session mid-work is Dan's to stop.
+         For each, read that repo's state issue. The master is DONE only when all three hold:
+           a. a `Pass complete` line newer than the process start;
+           b. that line is not older than the latest `Heartbeat` line (a heartbeat written after
+              the marker means the pass was reopened - Dan typed into the window and the master
+              went back to work);
+           c. the session transcript has not been written for -IdleMinutes (default 5) - the
+              real "nobody is talking to it" signal. On 2026-09-02 22:30 UTC the first version
+              of this rule killed master-bill-intake mid-fleet: it had written Pass complete at
+              22:20, Dan resumed it at 22:27, it launched a fleet at 22:30:01, and the 22:30 slot
+              stopped it on the stale marker (issue 82).
+         Done: stop the claude process and its cmd.exe wrapper window and record that.
+         Otherwise the master is still working: exit, launch nothing. A master whose latest
+         marker is older than -MaxHeartbeatAgeMinutes is reported as possibly stalled but NOT
+         killed - an interactive session mid-work is Dan's to stop.
       3. Nothing alive: pick the next repo - never-served repos first in priority order, then
          the one whose latest marker (heartbeat or pass complete) is oldest - and launch it:
-           claude --dangerously-skip-permissions --remote-control master-<slug> "<boot prompt>"
+           set AAC_ORCHESTRATOR_AUTONOMOUS=1 && claude --dangerously-skip-permissions
+             --remote-control master-<slug> "<boot prompt>"
          in a visible cmd.exe window with the working directory set to the repo clone.
          `--dangerously-skip-permissions` is there because the auto-mode permission classifier
-         denied `gh pr merge` on 2026-09-02 while auto-merge is ON by ruling (issue 71);
-         LOCAL-RUNBOOK.md states what that costs.
+         denied `gh pr merge` on 2026-09-02 while auto-merge is ON by ruling (issue 71).
+         AAC_ORCHESTRATOR_AUTONOMOUS=1 is what the ask-matt publish gate keys its ticket-set
+         exemption on (issue 81): nobody is at the keyboard to approve a ticket set, by design.
+         LOCAL-RUNBOOK.md states what both cost.
+
+    Every decision is also appended to -LogFile (default
+    ~/.claude/hook-state/master-watchdog/watchdog.log), because a scheduled task's stdout goes
+    nowhere and the 22:30 kill above had to be reconstructed from process tables.
 
     -WhatIf does every check, prints every decision, stops and launches nothing. It is a plain
     switch, not SupportsShouldProcess: under ShouldProcess the WhatIf preference leaks into the
@@ -49,6 +65,12 @@
 .PARAMETER MaxHeartbeatAgeMinutes
     Age past which an alive master's heartbeat is reported as stale. 120 per issue 64.
 
+.PARAMETER IdleMinutes
+    A finished master is closed only when its transcript has been untouched this long. 5.
+
+.PARAMETER LogFile
+    Append-only decision log. Empty string disables it.
+
 .PARAMETER Force
     Ignore the legacy guard and the alive check; launch the next repo regardless.
 
@@ -64,6 +86,8 @@ param(
     [string]$DotfilesRoot = (Join-Path $env:USERPROFILE 'Claude\Projects\Meta\claude-dotfiles'),
     [string[]]$Only = @(),
     [int]$MaxHeartbeatAgeMinutes = 120,
+    [int]$IdleMinutes = 5,
+    [string]$LogFile = (Join-Path $env:USERPROFILE '.claude\hook-state\master-watchdog\watchdog.log'),
     [string]$ClaudeExe = 'claude',
     [switch]$Force,
     [switch]$NoBypass,
@@ -83,7 +107,20 @@ $Repos = @(
     @{ Slug = 'zoho';             Repo = 'surreptakos/zoho-source-of-truth'; StateIssue = 77; Root = (Join-Path $env:USERPROFILE 'Claude\Projects\Operations\zoho-source-of-truth') }
 )
 
-function Write-Info { param($msg) Write-Host "[watchdog] $msg" }
+$script:RunStamp = [datetime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')
+if ($LogFile) {
+    $logDir = Split-Path -Parent $LogFile
+    if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+}
+
+function Write-Info {
+    param($msg)
+    $line = "[watchdog] $msg"
+    Write-Host $line
+    if ($LogFile) {
+        try { Add-Content -Path $LogFile -Value "$script:RunStamp $line" -Encoding UTF8 } catch { }
+    }
+}
 
 function Get-RemoteControlProcesses {
     # Every claude/node process whose command line carries --remote-control. Win32_Process
@@ -148,19 +185,38 @@ function Get-LatestMarkerUtc {
     return $latest
 }
 
+function Get-TranscriptLastWriteUtc {
+    param([hashtable]$R, [datetime]$StartedUtc)
+    # Claude Code keeps one transcript per session under ~/.claude/projects/<cwd slug>/<id>.jsonl,
+    # where the slug is the clone path with every non-alphanumeric run turned into '-'. The
+    # master's transcript is the newest one in that folder CREATED after the process started
+    # (creation time, not last write: the whole point is to read how long ago it was last written).
+    $slug = ($R.Root -replace '[^A-Za-z0-9]', '-')
+    $dir = Join-Path $env:USERPROFILE (Join-Path '.claude\projects' $slug)
+    if (-not (Test-Path $dir)) { return $null }
+    $files = @(Get-ChildItem -Path $dir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.CreationTimeUtc -gt $StartedUtc } |
+        Sort-Object LastWriteTimeUtc -Descending)
+    if ($files.Count -eq 0) { return $null }
+    return $files[0].LastWriteTimeUtc
+}
+
 function Get-BootPrompt {
     param([hashtable]$R)
     # No double quotes inside: the prompt travels as one double-quoted cmd.exe argument.
     $runbooks = Join-Path $DotfilesRoot 'orchestrator'
     return ("You are the master orchestrator, local variant, serving $($R.Repo). This session is rooted in that repo's clone; " +
-            "never change directory out of it. Read $runbooks\LOCAL-RUNBOOK.md and then $runbooks\RUNBOOK.md - binding, in that " +
+            "never change directory out of it. Nobody is at the keyboard: never call AskUserQuestion and never wait for a typed " +
+            "approval; anything that needs Dan becomes a ready-for-human ticket with the evidence in its body. " +
+            "Read $runbooks\LOCAL-RUNBOOK.md and then $runbooks\RUNBOOK.md - binding, in that " +
             "order of precedence. Your state issue is surreptakos/claude-dotfiles#$($R.StateIssue); issue #44 there is the shared " +
             "registry and config - read it, never write to it or to another repo's state issue. Check your state issue for the " +
             "current state and that no other master serves $($R.Repo); claim venue local-pc there. Then run ONE pass, no /loop: " +
             "serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When the pass is done, clear " +
             "the venue, write a line **Pass complete - YYYY-MM-DD HH:MM UTC** (current UTC) at the top of your state issue's " +
-            "heartbeat section, say pass complete, and stop; the watchdog closes this window and starts the next repo. " +
-            "My messages in this terminal override everything.")
+            "heartbeat section, say pass complete, and stop; the watchdog closes this window once it has been idle five minutes " +
+            "and starts the next repo. If a message arrives after that, the pass is reopened: write a fresh Heartbeat line " +
+            "before doing anything else, so the watchdog does not close you mid-work. My messages in this terminal override everything.")
 }
 
 function Stop-MasterWindow {
@@ -176,7 +232,7 @@ function Stop-MasterWindow {
     }
 }
 
-Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
+Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  idle=${IdleMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
 
 # -Only arrives as one comma-joined string when the script is run with -File; split it.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -194,7 +250,7 @@ if ($legacy.Count -gt 0 -and -not $Force) {
     exit 0
 }
 
-# --- Alive masters: finished ones get closed, working ones block the launch ------------
+# --- Alive masters: finished AND idle ones get closed, everything else blocks the launch ---
 $markersBySlug = @{}
 $stillWorking = 0
 foreach ($p in $rcProcs) {
@@ -210,22 +266,39 @@ foreach ($p in $rcProcs) {
     $markers = Get-StateMarkers -Issue $row.StateIssue
     $markersBySlug[$slug] = $markers
     $started = $p.CreationDate.ToUniversalTime()
-    if ($markers -and $markers.PassComplete -and $markers.PassComplete -gt $started -and -not $Force) {
-        Write-Info "$tag PASS COMPLETE at $($markers.PassComplete.ToString('u')) (master started $($started.ToString('u'))) - closing pid=$($p.ProcessId)"
+    $pc = $null
+    if ($markers) { $pc = $markers.PassComplete }
+    $hb = $null
+    if ($markers) { $hb = $markers.Heartbeat }
+    $lastWrite = Get-TranscriptLastWriteUtc -R $row -StartedUtc $started
+    $idleMin = -1
+    if ($lastWrite) { $idleMin = [int](([datetime]::UtcNow - $lastWrite).TotalMinutes) }
+
+    $markerFresh = ($pc -and $pc -gt $started)
+    $notReopened = ($pc -and (-not $hb -or $pc -ge $hb))
+    $idle = ($idleMin -ge $IdleMinutes)   # -1 (no transcript found) never counts as idle
+    if ($markerFresh -and $notReopened -and $idle -and -not $Force) {
+        Write-Info "$tag PASS COMPLETE at $($pc.ToString('u')) (master started $($started.ToString('u')), transcript idle ${idleMin}m) - closing pid=$($p.ProcessId)"
         if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
         else { Stop-MasterWindow -Proc $p -Tag $tag }
         continue
     }
-    $hb = Get-LatestMarkerUtc -Markers $markers
-    if ($hb) {
-        $ageMin = [int](([datetime]::UtcNow - $hb).TotalMinutes)
-        if ($ageMin -ge $MaxHeartbeatAgeMinutes) {
-            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old - possibly stalled; not killed, Dan decides"
-        } else {
-            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), working (latest marker ${ageMin}m ago)"
-        }
+    if ($markerFresh -and -not $notReopened) {
+        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId): Pass complete $($pc.ToString('u')) superseded by Heartbeat $($hb.ToString('u')) - pass reopened, working"
+    } elseif ($markerFresh -and -not $idle) {
+        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId): Pass complete $($pc.ToString('u')) but transcript written ${idleMin}m ago (< ${IdleMinutes}m) - still in use, not closed"
     } else {
-        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), no marker yet (booting)"
+        $latest = Get-LatestMarkerUtc -Markers $markers
+        if ($latest) {
+            $ageMin = [int](([datetime]::UtcNow - $latest).TotalMinutes)
+            if ($ageMin -ge $MaxHeartbeatAgeMinutes) {
+                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old - possibly stalled; not killed, Dan decides"
+            } else {
+                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), working (latest marker ${ageMin}m ago, transcript idle ${idleMin}m)"
+            }
+        } else {
+            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), no marker yet (booting)"
+        }
     }
     $stillWorking++
 }
@@ -259,6 +332,7 @@ if (-not $NoBypass) { $bypass = @('--dangerously-skip-permissions') }
 $launchCmd = (@(
     '/k',
     'cd', '/d', "`"$($next.Root)`"", '&&',
+    'set', 'AAC_ORCHESTRATOR_AUTONOMOUS=1', '&&',
     $ClaudeExe) + $bypass + @('--remote-control', "master-$($next.Slug)", "`"$(Get-BootPrompt -R $next)`"")
 ) -join ' '
 
