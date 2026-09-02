@@ -335,6 +335,16 @@ $seedSettings = @'
 [System.IO.File]::WriteAllText((Join-Path $FakePersonal 'settings.json'), $seedSettings,
                                (New-Object System.Text.UTF8Encoding($false)))
 
+# Issue 40: seed a stale CLAUDE.md at the personal path with distinct bytes so the refresh's
+# removal step is exercised. Section 6b4 asserts that (a) this file is gone after pull, so a
+# CLAUDE_CONFIG_DIR=~/.claude-personal session does NOT double-load global memory, and (b) the
+# work-profile CLAUDE.md at ~/.claude/CLAUDE.md survives (the reopen constraint: never delete
+# the active-profile source of truth as an "orphan"). The stale marker ends up in the personal
+# refresh backup dir, whose presence check lives in section 6c.
+Set-Content -Path (Join-Path $FakePersonal 'CLAUDE.md') `
+            -Value "STALE personal CLAUDE.md - issue 40 refresh must remove this file, not keep it in sync" `
+            -Encoding utf8
+
 # The seed memory lives under a slug the work profile also restores, so the union merge runs on it.
 $seedSourceDir = Get-ChildItem -Path (Join-Path $Clone 'memory') -Directory -ErrorAction SilentlyContinue |
     Where-Object { Test-Path (Join-Path $_.FullName 'MEMORY.md') } | Select-Object -First 1
@@ -638,6 +648,43 @@ Check 'pinned writer emits CRLF'              ($pinned.Contains("`r`n") -and $pi
 Check 'pinned writer escapes quote and tab'   ($pinned.Contains('"b\"q"') -and $pinned.Contains('"x\ty"'))
 $parsed = @($pinned | ConvertFrom-Json | ForEach-Object { $_ })
 Check 'pinned writer round-trips as JSON'     ($parsed.Count -eq 2 -and $parsed[1].Name -eq 'b"q')
+
+# ------------------------------------------------------------------ 6b4. global CLAUDE.md single-load (issue 40)
+
+# Regression check for /doctor's finding of 2026-08-28: with CLAUDE_CONFIG_DIR=~/.claude-personal
+# a byte-identical ~/.claude-personal/CLAUDE.md would sit next to ~/.claude/CLAUDE.md and cause
+# Claude Code to load global memory twice - user memory from the personal path plus an ancestor
+# .claude/CLAUDE.md walked up from cwd - two distinct absolute paths, so the dedup that saves the
+# work-active scenario does not fire. The fix: Update-PersonalProfile removes any CLAUDE.md at
+# the personal path (backed up first), so the ancestor scan is the single source in a personal-
+# active session with cwd under $HOME. The reopen constraint: the work-profile CLAUDE.md at
+# ~/.claude/CLAUDE.md must NOT be deleted as an "orphan" by pull, because push reads only there
+# and it is the machine's live source of truth.
+Write-Host ''
+Write-Host 'Global CLAUDE.md single-load (issue 40)'
+Check 'personal CLAUDE.md removed after refresh (no CLAUDE_CONFIG_DIR=personal double-load)' `
+    (-not (Test-Path (Join-Path $FakePersonal 'CLAUDE.md'))) `
+    @('~/.claude-personal/CLAUDE.md still present - a personal-active session would load global memory twice')
+Check 'work-profile CLAUDE.md at ~/.claude/CLAUDE.md survives (push source of truth, not an orphan)' `
+    (Test-Path (Join-Path $FakeHome '.claude\CLAUDE.md')) `
+    @('~/.claude/CLAUDE.md missing - pull treated the active-profile source of truth as an orphan and removed it')
+
+# The stale CLAUDE.md seed (see the seeding block above section 1) has to reach the refresh
+# backup directory before being removed - anything else means the refresh dropped the personal
+# copy without preserving it. The backup dir name is timestamped, so match by prefix and by
+# containing a CLAUDE.md whose bytes match the stale marker.
+$refreshBackupDirs = @(Get-ChildItem -Path $FakeHome -Directory -ErrorAction SilentlyContinue |
+                       Where-Object { $_.Name -like '.claude-personal-refresh-backup-*' })
+$staleFound = $false
+foreach ($dir in $refreshBackupDirs) {
+    $candidate = Join-Path $dir.FullName 'CLAUDE.md'
+    if ((Test-Path $candidate) -and
+        ([System.IO.File]::ReadAllText($candidate) -like '*STALE personal CLAUDE.md*')) {
+        $staleFound = $true; break
+    }
+}
+Check 'stale personal CLAUDE.md was backed up before removal' $staleFound `
+    @('no ~/.claude-personal-refresh-backup-*/CLAUDE.md contains the stale marker seeded in the personal profile')
 
 # ------------------------------------------------------------------ 6c. personal profile refresh
 
