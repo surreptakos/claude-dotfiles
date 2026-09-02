@@ -543,8 +543,16 @@ FILLER_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ARTICLE_PATTERN = re.compile(r"\b(the|a|an)\b", re.IGNORECASE)
-WORD_CAP = 500
+# Lowered 500 -> 150 on 2026-09-02: Dan approved a 98-word reply and rejected a
+# 179-word one as not concise. Article density did NOT separate the two (1.0 vs
+# 0.6 per 100), so length is the lever that actually tracks his judgement. A
+# report that genuinely needs more room gets split across messages.
+WORD_CAP = 150
 ARTICLES_PER_100_CAP = 7.0
+# Plain English is mostly short sentences. Replies Dan accepted topped out at 22
+# words; the long-form report he did not want ran 60 words in one sentence.
+SENTENCE_WORD_CAP = 28
+SENTENCE_SPLIT = re.compile(r"[.!?]+(?:\s|$)")
 
 
 def _lint_log_path() -> Path:
@@ -614,6 +622,14 @@ def _caveman_lint(text: str) -> list[str]:
             violations.append(
                 f"article density {density:.1f}/100 words (cap {ARTICLES_PER_100_CAP:g}) — drop a/an/the"
             )
+    sentences = [s.strip() for s in SENTENCE_SPLIT.split(prose) if s.strip()]
+    long_sentences = [s for s in sentences if len(s.split()) > SENTENCE_WORD_CAP]
+    if long_sentences:
+        worst = max(long_sentences, key=lambda s: len(s.split()))
+        violations.append(
+            f"{len(long_sentences)} sentence(s) over {SENTENCE_WORD_CAP} words"
+            f" (longest {len(worst.split())}) — split them"
+        )
     return violations
 
 
