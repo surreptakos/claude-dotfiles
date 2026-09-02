@@ -630,7 +630,10 @@ def _caveman_lint(text: str) -> list[str]:
             f"monospaced text in a reply: {fences} code block(s), {spans} inline span(s)"
             " — say it in plain words"
         )
-    paths = sorted({m.group(0) for m in PATH_PATTERN.finditer(prose)})
+    # Web links are citations, not working material — Dan objected to file paths,
+    # not to sources. Strip URLs before scanning so a cited link is never flagged.
+    pathless = re.sub(r"https?://\S+", " ", prose)
+    paths = sorted({m.group(0) for m in PATH_PATTERN.finditer(pathless)})
     if paths:
         violations.append(
             "file paths or filenames in a reply: " + ", ".join(paths[:4]) + " — name the thing, not its path"
