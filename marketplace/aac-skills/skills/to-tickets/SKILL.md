@@ -106,3 +106,22 @@ The end-to-end behaviour this ticket makes work, from the user's perspective —
 </issue-template>
 
 In either form, avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
+
+## In a cloud container: same duties, different instruments
+
+A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Every process step above still applies; only publishing changes. Do not report a step as impossible because its `gh` spelling failed — use the GitHub MCP equivalent, same shape as `orchestrator/ticket-fleet-cloud.js`:
+
+| The step says | In a container use |
+| --- | --- |
+| `gh repo view --json nameWithOwner` | derive `<owner>/<repo>` from `git remote get-url origin` |
+| `gh issue create --title ... --body ... --label ready-for-agent` | MCP `create_issue` (title, body, labels: `["ready-for-agent"]`) |
+| `gh issue edit N --add-label ready-for-agent` | MCP `update_issue` (labels: existing + `["ready-for-agent"]`) |
+| `gh issue view N --json number,title,labels` | MCP `issue_read` (verify the new ticket landed with the right label) |
+| a sub-issue / blocking edge on GitHub | MCP `add_sub_issue` (or `update_issue` with a "Blocked by" body line if the tracker has no native edge) |
+| `gh issue comment N --body-file <path>` | MCP `add_issue_comment` (read the file into `body`) |
+
+Publish the tickets in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers — the same rule the local-vs-remote step above uses. When the tracker has native blocking / sub-issue relationships, prefer the MCP tool that carries them (`add_sub_issue`); otherwise fall back to a plain "Blocked by" line in the body pointing at the blocker's number.
+
+Local-files mode (`.scratch/<feature-slug>/issues/`) is unchanged in a container — it is just file writes, no `gh` and no MCP needed. Read-only reference lookups can also go straight to REST — `curl https://api.github.com/repos/<owner>/<repo>/issues/<n>` — the session's egress proxy authenticates api.github.com, private repos included.
+
+MCP write calls (create, update, comment) may raise a permission prompt; when the user typed `/to-tickets`, that prompt is the confirmation, not a reason to skip the step. Publish sequentially, not in one big batch — a failed create in the middle of a batch leaves the tracker in a state the user cannot easily read back.

@@ -7,3 +7,4 @@
 - [Marketplace is the distribution spine](marketplace-is-the-distribution-spine.md) — every surface syncs aac-skills from the repo; semver-clean versions only; zip is fallback for Skills pages
 - [Git Bash sed strips CRLF](sed-strips-crlf-in-this-repo.md) - edit .ps1 with PowerShell or Edit tool, never sed -i
 - [Fable usage is rationed](fable-usage-is-rationed.md) — weekly cap; fleet/subagent pins stay Opus 4.7 / Sonnet 5 / Haiku, prompt edits only
+- [Workflow runtime quirks](workflow-runtime-quirks.md) — named workflows snapshot at session start (use scriptPath); scripts cannot call Date.now()/Math.random(), fleet needs args.runId
