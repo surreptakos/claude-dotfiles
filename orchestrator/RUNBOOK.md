@@ -8,8 +8,11 @@ ratifies, it goes back to the dev loop. Commissioned 2026-09-01 in the apps-scri
 session; this file is the master's binding instructions — the boot prompt just points here.
 
 **Venue:** this file describes the CLOUD master. `LOCAL-RUNBOOK.md` is the PC variant of the same
-orchestrator. Exactly one master may be active anywhere at a time; the state issue records which
-venue holds it (`"venue"` field), and a master must verify no other venue is active before booting.
+orchestrator. One master per repo (Dan, 2026-09-02 — replaces "exactly one master anywhere"): each
+target repo has its own state issue whose `"venue"` field records which venue serves that repo, and
+a master must verify no other venue is active for its repo before booting. Two masters on one repo
+is the double-run that exhausted the weekly limit on 2026-09-01; several masters on several repos is
+the intended shape.
 
 ## Roles
 
@@ -39,9 +42,15 @@ from the 2026-08-26 owner review; its concerns live on as ordinary tickets).
 
 ## State
 
-Lives in a GitHub issue in `surreptakos/claude-dotfiles` titled **"Master orchestrator state"**
-(create on first boot if missing, label `orchestrator`). Body = a fenced JSON block plus a short
-human-readable summary. Fields:
+Lives in GitHub issues in `surreptakos/claude-dotfiles`. Issue #44 ("Master orchestrator state") is
+the registry: the shared config defaults, the table of per-repo state issues, and the run history
+from before the split. Each repo has its own issue titled **"Master orchestrator state — <owner/repo>"**
+(label `orchestrator` + `ready-for-human`; create on first boot if missing and add it to the
+registry). A master rewrites only its own repo's issue — never #44 and never a peer's — so
+heartbeats from several masters cannot overwrite each other. The per-repo body = a fenced JSON block
+plus the handoff summary; the shared-registry shape below is the single-master original, kept for
+the cloud variant. Per-repo fields are the inner `repos.<owner/repo>` object plus `repo`, `venue`,
+`phase`, `decisionBriefIssue` and `config`:
 
 ```json
 {
@@ -116,11 +125,30 @@ kill switch for everything is disabling the heartbeat Routine — the master onl
 
 ## Merge policy (Dan, 2026-09-01: auto-merge ON)
 
-The worker's merge pass (not the fleet) merges a fleet PR when ALL hold: the PR body carries the
-blind verifier's pass evidence; CI on the head is green (or the repo has no CI); no merge conflict;
-no human has requested changes. Method: the repo's documented convention, else squash. After merge:
-confirm the ticket closed (the PR body's `Closes #N` should do it; close manually citing the PR if
-not), delete the branch. A PR that fails the bar stays open and is the next cycle's first work item.
+The merge pass (the worker's in the cloud, the master's own on the PC — not the fleet) merges a fleet
+PR when ALL hold: the PR body carries the blind verifier's pass evidence; CI on the head is green,
+or the repo has no CI workflow at all; no merge conflict; no human has requested changes. Method:
+the repo's documented convention, else squash. After merge, delete the branch, then act on the
+ticket by what the PR body says:
+
+- `Closes #N` — confirm the ticket closed; close it manually citing the PR if GitHub did not.
+- `Refs #N` with a keep-open note — the deliver stage writes this when the ticket itself says it
+  must stay open (a ratification ticket). Do NOT close the ticket. Relabel it `ready-for-human`
+  (remove `ready-for-agent`) so the next scout does not re-implement it and the grill phase
+  surfaces it to Dan.
+
+A PR that fails the bar stays open and is the next cycle's first work item.
+
+**CI exists but never ran on this head.** A repo that has a CI workflow, and a PR head with zero
+check runs — typical when the branch was pushed before the workflow reached the default branch, as
+with `surreptakos/aac-contract-builder#158` on 2026-09-02 — satisfies neither "green" nor "no CI".
+Such a PR is NOT mergeable until CI has run on that head. Re-fire path, in order of preference:
+close and reopen the PR (`gh pr close N` then `gh pr reopen N`; a `pull_request` workflow fires on
+`reopened`), or a fresh push to the branch. Never assume a `workflow_dispatch` trigger exists. The
+merge pass is allowed to close-and-reopen on its own — it changes no code and no ticket — and
+records it in the state issue with the PR number and time. A push to an agent branch is the
+implementer's or a human's, never the merge pass's. Then wait: the PR is re-assessed on the next
+heartbeat, not polled.
 
 ## Harness policy (Dan, 2026-09-01: auto-install ON)
 

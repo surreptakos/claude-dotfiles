@@ -1,12 +1,14 @@
 <#
 .SYNOPSIS
-    Register (or preview) the "Claude master watchdog" Windows scheduled task.
+    Register (or preview) the "Claude master watchdog" Windows scheduled task. One task;
+    the watchdog itself loops over the four target repos and launches one master per
+    repo, rooted in that repo's clone (issue 70).
 
 .DESCRIPTION
     Two-step install by design (issue 64, attempt 3, fixing a hazard the previous
     delivery had): the DEFAULT invocation is a preview that prints the exact
     schtasks command it would run and stops without touching the scheduler, so
-    nothing schedules and no unattended `claude --remote-control master` process
+    nothing schedules and no unattended `claude --remote-control master-<slug>` process
     can spawn just from someone running the script to "see what it does". The
     caller has to add `-Install` to actually register.
 
@@ -46,7 +48,13 @@ if (-not (Test-Path $WatchdogPs1)) {
     throw "watchdog not found at $WatchdogPs1"
 }
 
-$tr = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$WatchdogPs1`""
+# Prefer PowerShell 7 (pwsh) when installed; fall back to Windows PowerShell 5.1. The watchdog
+# runs under either (it carries a UTF-8 BOM for 5.1's sake), but 7 is what the rest of this
+# machine's tooling uses (installed 2026-08-31).
+$shell = 'powershell.exe'
+$pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+if ($pwsh) { $shell = $pwsh.Source }
+$tr = "`"$shell`" -NoProfile -ExecutionPolicy Bypass -File `"$WatchdogPs1`""
 if ($RunNow) { $FirstRunMinutes = 1 }
 $startTime = (Get-Date).AddMinutes([Math]::Max(1, $FirstRunMinutes)).ToString('HH:mm')
 
@@ -64,6 +72,7 @@ $schArgs = @(
 
 Write-Host "[install] task name       : $TaskName"
 Write-Host "[install] watchdog script : $WatchdogPs1"
+Write-Host "[install] shell           : $shell"
 Write-Host "[install] interval        : every $IntervalMinutes minute(s)"
 Write-Host "[install] first-run slot  : $startTime  (in ~$([Math]::Max(1,$FirstRunMinutes)) minute(s) from now)"
 Write-Host "[install] logon mode      : interactive only  (/IT)"
