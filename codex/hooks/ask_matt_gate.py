@@ -444,6 +444,11 @@ def _transcript_user_approved(transcript_path: str) -> bool:
     return any(_matches_approval(text) for text in _iter_user_text(transcript_path))
 
 
+def _autonomous_master() -> bool:
+    """True only under the watchdog-launched orchestrator master (claude-dotfiles issue 81)."""
+    return os.environ.get("AAC_ORCHESTRATOR_AUTONOMOUS", "") == "1"
+
+
 def _publish_gate(
     event: dict[str, Any], session_id: str, state: dict[str, Any] | None
 ) -> dict[str, Any] | None:
@@ -473,6 +478,16 @@ def _publish_gate(
         )
     already = _read_publish_count(session_id)
     transcript_path = str(event.get("transcript_path") or "")
+    # An autonomous orchestrator master has nobody at the keyboard by design (Dan, 2026-09-02:
+    # "I should not ever be asked to approve-tickets. I am not at the computer. This is meant to
+    # be a completely autonomous run"). orchestrator/master-watchdog.ps1 in claude-dotfiles sets
+    # AAC_ORCHESTRATOR_AUTONOMOUS=1 on exactly the launch it controls; a session cannot grant
+    # itself the exemption by renaming. The route requirement above still applies; only the
+    # ticket-SET approval half is skipped. Review happens after the fact: every filed ticket
+    # carries its evidence and a triage label, and the master's heartbeat lists what it filed.
+    if _autonomous_master():
+        _bump_publish_count(session_id)
+        return None
     if (
         already >= 1
         and not _transcript_used_tool(transcript_path, "AskUserQuestion")
