@@ -548,7 +548,10 @@ ARTICLE_PATTERN = re.compile(r"\b(the|a|an)\b", re.IGNORECASE)
 # 0.6 per 100), so length is the lever that tracks his judgement. 150 was tried
 # first and Dan set 250, keeping room for a real report in one message.
 WORD_CAP = 250
-ARTICLES_PER_100_CAP = 7.0
+# Raised 7 -> 12 on 2026-09-02. Dan asked for plain English, and a ceiling of 7
+# is what was forcing replies into telegram-speak: ordinary explanatory prose
+# runs about 9 per 100. The ceiling still catches genuine padding.
+ARTICLES_PER_100_CAP = 12.0
 # Plain English is mostly short sentences. Replies Dan accepted topped out at 22
 # words; the long-form report he did not want ran 60 words in one sentence.
 SENTENCE_WORD_CAP = 28
@@ -607,10 +610,31 @@ def _strip_code(text: str) -> str:
     return re.sub(r"`[^`\n]*`", " ", text)
 
 
+FENCE_PATTERN = re.compile(r"```")
+INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
+# Dan, 2026-09-02: "I don't need to see filepaths or code or anything formatted
+# in monospaced text. PRs, tickets, specs, PRDs -- those are for you." Monospace
+# in a reply is a tell that the reply is carrying working material rather than a
+# status. Say it in words, or put it in the artifact where it belongs.
+PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|json|md|ya?ml|js|ts)\b")
+
+
 def _caveman_lint(text: str) -> list[str]:
     prose = _strip_code(text)
     words = prose.split()
     violations: list[str] = []
+    fences = len(FENCE_PATTERN.findall(text)) // 2
+    spans = len(INLINE_CODE_PATTERN.findall(text))
+    if fences or spans:
+        violations.append(
+            f"monospaced text in a reply: {fences} code block(s), {spans} inline span(s)"
+            " — say it in plain words"
+        )
+    paths = sorted({m.group(0) for m in PATH_PATTERN.finditer(prose)})
+    if paths:
+        violations.append(
+            "file paths or filenames in a reply: " + ", ".join(paths[:4]) + " — name the thing, not its path"
+        )
     fillers = sorted({m.group(0).lower() for m in FILLER_PATTERN.finditer(prose)})
     if fillers:
         violations.append("banned filler/hedge words: " + ", ".join(fillers))
