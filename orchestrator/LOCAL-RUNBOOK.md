@@ -42,10 +42,22 @@ on shutdown.
   (Task Scheduler or a watchdog script re-running the boot prompt via `claude -p`) makes the local
   master self-healing and erases most of the durability gap vs the cloud Routine; if it doesn't,
   the human relaunch is the rebirth, and fixing headless auth is worth a ticket.
-- **Takeover guard, symmetric.** The guard from RUNBOOK.md applies with roles reversed: skip any
-  repo showing `agent/issue-*` branches or fleet PRs updated in the last 2 hours that THIS session
-  did not create (a cloud runner or another terminal). Defer indefinitely; escalate to Dan for an
-  explicit handoff; never proceed on your own.
+- **Takeover guard, process-based (Dan, 2026-09-02).** On this PC the 2-hour timestamp window is
+  replaced by a live check: another runner is present when either holds, and the answer never
+  depends on how old a branch or PR is.
+  1. `Get-Process claude` shows a PID this master did not record. At boot, record the PIDs it
+     returns (that set is this master's own terminal plus any pre-existing sessions) in the
+     `## Handoff summary` of issue #44 under item 6. Before every fleet launch, run it again: any
+     PID not in the boot set is a foreign runner (another terminal, a headless `claude -p`, a
+     desktop scheduled task) and every repo is deferred until it exits. Fleet and Agent-tool
+     agents run inside this process, so the master's own work never adds a PID.
+  2. `git worktree list` in the target repo shows an `agent/issue-*` worktree this master did not
+     create. A fleet removes its worktrees when it finishes, so an unexpected one is a fleet
+     mid-run from another terminal, or a crashed one that needs `git worktree prune` first.
+  Cloud runners leave no process here, so the 2-hour signal from RUNBOOK.md (fleet PRs or
+  `agent/issue-*` branches on origin updated within 2 hours that this master did not create) stays
+  as the third check. Same response as RUNBOOK.md on any hit: defer indefinitely, escalate to Dan
+  for an explicit handoff, never proceed on your own.
 - **Kill switch.** Esc / Ctrl+C in the terminal. Nothing revives the loop afterward — closing the
   terminal is a real stop, and the state issue means nothing is lost.
 - **Grill phase & ratification.** Same procedure; the decision brief is still a claude-dotfiles
