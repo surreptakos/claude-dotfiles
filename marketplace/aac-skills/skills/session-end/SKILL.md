@@ -73,7 +73,10 @@ step's `gh` spelling through the substitution table in the cloud section below):
    not catch on its own; both surface with two `gh` queries the assistant runs here.
 
    **These checks resolve EVERY open issue that fails them, not just the ones this session
-   touched.** `/session-end` is the housekeeping pass for the whole tracker — a pre-existing
+   touched.** "These checks" means the two in THIS step and no others: un-milestoned open
+   issues, and open issues whose acceptance ledger has zero unticked boxes. The tracker
+   audit's own findings are scoped differently — see the tracker-audit entry under *Then
+   close the loop*, and read both before deciding what a given line obliges. `/session-end` is the housekeeping pass for the whole tracker — a pre-existing
    un-milestoned or delivered-but-open issue is a blocker the assistant fixes here, not a
    note handed back to the owner. Ruling 2026-08-31 after a `/session-end` reply routed five
    pre-existing hits back as questions ("which milestone for each?", "close, add box, or
@@ -236,6 +239,21 @@ quoted in an issue comment points at something nobody else can reach. Push per s
 
 **`!! tracker audit: N drift finding(s)`** — run it and check whether any are from this session.
 Pre-existing findings are somebody else's; new ones are not. Fix your own before finishing.
+
+**Scope, because this rule and step 9 read as if they disagree.** They govern different things and
+both are live:
+
+- *Step 9* sweeps the WHOLE tracker, but only for its own two checks — no milestone, and a fully
+  ticked acceptance ledger. Origin is irrelevant there; a pre-existing hit is still yours to fix.
+- *This rule* governs the tracker audit's findings. Drift you caused this session is yours. Drift
+  that predates the session is not, and clearing it is optional.
+
+One exception inside this rule, because it is cheap and the audit already tells you how: a
+`landed-but-open?` advisory is resolved regardless of origin. Read the named commit, then either
+close the issue or comment on it saying what is left. That advisory is close kin to step 9's
+delivered-but-open check, and leaving it costs the next session the same investigation. Ruling
+2026-09-02, after a session cleared only its own advisory and reported the other two as somebody
+else's — technically correct under this rule, and still the wrong call.
 
 **`!! cloud plugin is STALE`** (or `no upload recorded`) — the skills on this machine changed since
 the plugin was uploaded to claude.ai, so every cloud container is still loading the old ones. The
