@@ -66,6 +66,16 @@ the only memory that must survive a master rebirth — keep it current before en
 body carries a `## Handoff summary` section alongside the JSON block above (six numbered items,
 shape defined under Master rebirth below); heartbeats keep it current, not only at rebirth.
 
+**Cross-repo references and labels (tracker-audit gates).** Every reference to an issue or PR that
+lives in another repository is written fully qualified as `owner/repo#N` (e.g.
+`surreptakos/aac-bill-intake#562`), never bare `#N` — the state issue lives in
+`surreptakos/claude-dotfiles`, so `#562` there resolves against claude-dotfiles and reads to
+`tools/tracker-audit.js` as a `dangling-reference`. The state issue AND every decision brief carry
+BOTH the `orchestrator` label AND the `ready-for-human` label (they are documents for Dan, not
+agent work); a single-label `orchestrator` issue trips the audit's `untriaged` check because
+`orchestrator` is not in the triage vocabulary. When rewriting the state body on a heartbeat, keep
+both rules holding; when opening a decision brief, apply both labels at creation.
+
 ## Heartbeat procedure (every Routine wake, and on any message)
 
 1. Read the state issue. Read any new Dan messages in this session — they override everything here.
