@@ -50,7 +50,7 @@ if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
-const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'], properties: {
+const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
   tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
@@ -58,6 +58,7 @@ const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand'],
   } } },
   repoMap: { type: 'string', description: '15-line map: key dirs, test command, conventions, rails' },
   testCommand: { type: 'string' },
+  defaultBranch: { type: 'string', description: 'default branch of the repo (e.g. main or master, from git symbolic-ref refs/remotes/origin/HEAD)' },
 } }
 
 const IMPL = { type: 'object', required: ['branch', 'committed', 'testExitCode', 'testTail', 'discoveries'], properties: {
@@ -86,6 +87,7 @@ const scout = await agent(
 3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open.
 4. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs — never a glob if docs forbid it).
 5. Produce a repoMap: max 15 lines — key directories, conventions, hard rails an implementer must not break.
+6. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") — not every repo uses main.
 Return structured output only.`,
   { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: 'low' }
 )
@@ -133,7 +135,7 @@ Return structured output only.`,
 Branch under review: ${impl.branch} (do NOT trust its author; you have not seen their claims).
 In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach — branch is checked out elsewhere), then inside it:
 1. Run \`${scout.testCommand}\` yourself; record the REAL exit code.
-2. Check each acceptance criterion against the actual diff (git diff origin/main...${impl.branch}):\n${t.criteria}
+2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${impl.branch}):\n${t.criteria}
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only — evidence must be commands you ran plus decisive output lines.`,
@@ -150,7 +152,7 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
 1. git push -u origin ${impl.branch}
 2. gh pr create --title "fix: ${t.title} (#${t.number})" --body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and "Closes #${t.number}" in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
 3. gh issue comment ${t.number} --body with the PR link.
-Do NOT merge, do NOT close the issue, do NOT touch main. Return structured output only.`,
+Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )
   }
