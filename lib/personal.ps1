@@ -9,8 +9,22 @@
 #       requires an explicit owner instruction.
 #
 # The refresh is a one-way overlay, and the work profile is the source of truth:
-#   - hooks, CLAUDE.md, agents: copied verbatim (byte-equal; both profiles' hooks are
-#     profile-aware via CLAUDE_CONFIG_DIR since commit 5bec0bd, so identical copies are correct)
+#   - hooks, agents: copied verbatim (byte-equal; both profiles' hooks are profile-aware via
+#     CLAUDE_CONFIG_DIR since commit 5bec0bd, so identical copies are correct)
+#   - CLAUDE.md: DELETED from the personal profile (issue 40). Two copies of the byte-identical
+#     global memory at ~/.claude/CLAUDE.md and ~/.claude-personal/CLAUDE.md caused Claude Code
+#     to double-load global memory in a CLAUDE_CONFIG_DIR=~/.claude-personal session (~5.7k
+#     tokens per session, every project) - user memory reads the personal path, and Claude
+#     Code's ancestor .claude/ scan finds the work path as a distinct absolute path. The
+#     work-active scenario is unaffected: both loads resolve to the same absolute path and
+#     Claude Code deduplicates. In personal-active, removing the personal copy leaves the
+#     ancestor scan as the single source of global memory for any session with cwd under $HOME
+#     (which is where user projects live). The personal copy, when present, is backed up before
+#     removal - re-running the refresh with the file already absent is a no-op. This is a
+#     deliberate departure from the "byte-equal copies of everything else" pattern above:
+#     CLAUDE.md is the ONE file whose being at the personal path actively breaks something.
+#     Personal edits to CLAUDE.md were never persisted anyway (the file was overwritten on
+#     each refresh with the work copy), so no user-visible content changes hands.
 #   - skills: junctions recreated against the same machine-wide targets; real skill dirs
 #     overlaid file-by-file; personal-only skills left alone
 #   - settings.json: HOOKS KEY ONLY, with the mechanical path rewrite \.claude\ ->
@@ -58,8 +72,10 @@ function Update-PersonalProfile {
     }
     if ($DryRun) {
         Write-Host ("  would refresh {0} from {1}:" -f $personal, $work)
-        Write-Host '    hooks, CLAUDE.md, agents verbatim; skill junctions + real skill dirs;'
+        Write-Host '    hooks, agents verbatim; skill junctions + real skill dirs;'
         Write-Host '    settings.json hooks key (paths rewritten to .claude-personal); memory union.'
+        Write-Host '    CLAUDE.md removed from the personal profile (issue 40: kills the'
+        Write-Host '      global-memory double-load in a CLAUDE_CONFIG_DIR=~/.claude-personal session).'
         Write-Host '    Personal-only files are never deleted; overwrites are backed up first.'
         return
     }
@@ -105,12 +121,28 @@ function Update-PersonalProfile {
             if ($state -eq 'copied') { $copied++ }
         }
     }
-    $claudeMd = Join-Path $work 'CLAUDE.md'
-    if (Test-Path $claudeMd) {
-        $state = Copy-WithBackup -Source $claudeMd -Destination (Join-Path $personal 'CLAUDE.md')
-        if ($state -eq 'copied') { $copied++ }
+    Write-Host ("  hooks/agents: {0} file(s) updated" -f $copied)
+
+    # Issue 40: remove any CLAUDE.md sitting at the personal path. Keeping a byte-identical
+    # copy there caused Claude Code to load global memory twice in a CLAUDE_CONFIG_DIR=
+    # ~/.claude-personal session: once as user memory from the personal path, once as an
+    # ancestor .claude/CLAUDE.md walked up from cwd - two distinct absolute paths, so the
+    # deduplication that saves the work-active scenario cannot apply. Removing the personal
+    # copy leaves the ancestor scan as the single source. Back up before removing (once) so
+    # a prior copy is recoverable; a run against a machine that has already been fixed finds
+    # nothing at the destination and is a no-op.
+    $personalClaudeMd = Join-Path $personal 'CLAUDE.md'
+    if (Test-Path $personalClaudeMd) {
+        $slot   = Join-Path $backupRoot 'CLAUDE.md'
+        $parent = Split-Path $slot -Parent
+        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+        Copy-Item -Path $personalClaudeMd -Destination $slot -Force
+        $script:PersonalBackupCount++
+        Remove-Item -Path $personalClaudeMd -Force
+        Write-Host '  CLAUDE.md: removed from the personal profile (issue 40 double-load fix; ancestor scan now the sole source)'
+    } else {
+        Write-Host '  CLAUDE.md: not present at the personal path (issue 40 - correct, single-load state)'
     }
-    Write-Host ("  hooks/CLAUDE.md/agents: {0} file(s) updated" -f $copied)
 
     # -------------------------------------------------------------------------- skills
 
