@@ -6,15 +6,17 @@ Dan's always-on PC instead of a cloud session + Routine. Everything not stated h
 auto-harness policies, the grill procedure, the rails, and the state issues as the only durable
 memory.
 
-**One master per repo, each rooted in the clone of the repo it serves (Dan's ruling via tickets
-#70–#73, 2026-09-02; replaces "exactly one master may exist anywhere, ever").** Four masters run
-side by side on this PC, one per target repo, and they are peers, not intruders. Each has its own
-state issue in `claude-dotfiles` (registry in issue #44: bill-intake #74, contract-builder #75,
-sales-cockpit #76, zoho-source-of-truth #77). Before starting, a master checks ITS OWN state issue:
-if it records an active cloud master for that repo, do not start a local one, and vice versa.
-Record the venue on boot (`"venue": "local-pc"` in that issue's JSON) and clear it on shutdown.
-Two masters on one repo is the double-run that exhausted the weekly limit on 2026-09-01; several
-masters on several repos is the intended shape.
+**One master per repo, one master at a time (Dan, 2026-09-02; tickets #70 and #79).** Each master
+is rooted in the clone of the repo it serves and has its own state issue in `claude-dotfiles`
+(registry in issue #44: bill-intake #74, contract-builder #75, sales-cockpit #76,
+zoho-source-of-truth #77). They run in series, never side by side: the watchdog launches one, that
+master runs ONE pass over its repo and writes a `**Pass complete — YYYY-MM-DD HH:MM UTC**` line
+into its state issue, the watchdog closes that window and launches the next repo (never-served
+repos first in priority order, then least recently served). Before starting, a master checks ITS
+OWN state issue: if it records an active cloud master for that repo, do not start a local one, and
+vice versa. Record the venue on boot (`"venue": "local-pc"` in that issue's JSON) and clear it when
+the pass completes. Two masters on one repo is the double-run that exhausted the weekly limit on
+2026-09-01; two masters on two repos at once was ruled out on 2026-09-02 for the same usage reason.
 
 **The claude-dotfiles checkout is not a valid root for a master.** Every target repo's
 `.claude/workflows/ticket-fleet.js` is cwd-relative throughout: its scout runs `gh issue list`
@@ -45,16 +47,18 @@ master lives there.
 - **Skills are native.** `/triage`, `/to-tickets`, `/project-harness`, `/session-start`,
   `/session-end`, `/grill-ready-for-human` all load from `~/.claude` — invoke them directly instead
   of reading SKILL.md files out of a clone.
-- **Pacing.** If the `/loop` skill is available, run under it in dynamic (self-paced) mode: between
-  cycles schedule the next wakeup 20–30 min out; while the repo has actionable work, continue
-  immediately. If `/loop` is not available, run ONE full pass (serve the repo until nothing is
-  actionable or a cap is hit), update the state issue, then STOP and say "pass complete — relaunch
-  me for the next pass." Never busy-wait with sleeps.
+- **Pacing: one pass, then stop. No `/loop`.** Serve the repo until nothing is actionable or a cap
+  is hit, heartbeating the state issue as you go. Then clear the venue, write
+  `**Pass complete — YYYY-MM-DD HH:MM UTC**` (current UTC) at the top of the heartbeat section of
+  the state issue, say "pass complete", and end the turn. The watchdog reads that line on its next
+  slot, closes this window, and launches the next repo's master; this repo gets its next pass when
+  its turn comes round again. A master that keeps looping after its pass holds the only slot and
+  starves the other three repos. Never busy-wait with sleeps.
 - **Context hygiene.** Heavy work already lives in subagents and workflow agents. When the master's
-  own window grows heavy anyway, checkpoint everything to its state issue and stop: the watchdog
-  relaunches a fresh session with the boot prompt within 30 minutes, and it resumes losslessly
-  from that issue. Headless `claude -p` is not part of this path — the watchdog launches a normal
-  interactive `claude`.
+  own window grows heavy mid-pass anyway, checkpoint everything to its state issue and end the pass
+  early with the `Pass complete` line: the repo comes round again after the others, and the fresh
+  session resumes losslessly from that issue. Headless `claude -p` is not part of this path — the
+  watchdog launches a normal interactive `claude`.
 - **Takeover guard, process-based and per repo (Dan, 2026-09-02).** On this PC the 2-hour
   timestamp window is replaced by a live check: another runner is present when either holds, and
   the answer never depends on how old a branch or PR is.
@@ -63,7 +67,8 @@ master lives there.
      pre-existing sessions) in the `## Handoff summary` of the state issue under item 6. Before
      every fleet launch, run it again. A new PID whose command line (from
      `Get-CimInstance Win32_Process`) carries `--remote-control master-<other-slug>` is a peer
-     master serving another repo — expected, never a reason to defer. Any other new PID (another
+     master the watchdog has not closed yet (it closes finished masters on its next slot) — not a
+     reason to defer, but do not start a fleet until it is gone. Any other new PID (another
      terminal, a headless `claude -p`, a desktop scheduled task) is a foreign runner and this
      repo is deferred until it exits. Fleet and Agent-tool agents run inside this process, so the
      master's own work never adds a PID.
@@ -74,10 +79,11 @@ master lives there.
   `agent/issue-*` branches on origin updated within 2 hours that this master did not create) stays
   as the third check. Same response as RUNBOOK.md on any hit: defer indefinitely, escalate to Dan
   for an explicit handoff, never proceed on your own.
-- **Kill switch.** Esc / Ctrl+C in a master's terminal stops that repo's master only. The
-  watchdog relaunches it on its next 30-minute slot unless the task is disabled
-  (`schtasks /Change /Disable /TN "Claude master watchdog"`), which stops every relaunch at once.
-  The state issues mean nothing is lost either way.
+- **Kill switch.** Esc / Ctrl+C in a master's terminal stops the current pass. With no `Pass
+  complete` line the watchdog treats that process as still working while it is alive, and once
+  the window is closed it launches the next repo on its next slot. Disabling the task
+  (`schtasks /Change /Disable /TN "Claude master watchdog"`) stops every launch at once. The state
+  issues mean nothing is lost either way.
 - **Grill phase & ratification.** Same procedure; the decision brief is still a claude-dotfiles
   issue, but rulings can also land straight from Dan typing in a master's terminal — land each one
   on its ticket before moving on.
@@ -115,42 +121,45 @@ but cannot merge.
 > `...\orchestrator\RUNBOOK.md` — binding, in that order of precedence. Your state issue is
 > `surreptakos/claude-dotfiles#<N>`; issue #44 there is the shared registry and config — read it,
 > never write to it or to another repo's state issue. Check your state issue for the current state
-> and that no other master serves `<owner/repo>`; claim venue local-pc there. Then begin the
-> heartbeat procedure under `/loop` dynamic pacing if available, else as single passes. My messages
-> in this terminal override everything.
+> and that no other master serves `<owner/repo>`; claim venue local-pc there. Then run ONE pass, no
+> `/loop`: serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When
+> the pass is done, clear the venue, write a line `**Pass complete - YYYY-MM-DD HH:MM UTC**`
+> (current UTC) at the top of your state issue's heartbeat section, say pass complete, and stop;
+> the watchdog closes this window and starts the next repo. My messages in this terminal override
+> everything.
 
 The remote-control session name is `master-<slug>` (`master-bill-intake`, `master-contract-builder`,
 `master-sales-cockpit`, `master-zoho`), which is also what the watchdog's alive check and the
 takeover guard's peer rule match on.
 
-## Relaunch watchdog (issue 64, per repo since issue 70)
+## Relaunch watchdog (issue 64; per repo since issue 70; serial since issue 79)
 
 A closed terminal, a reboot, or a crash used to stop the babysitter until Dan noticed.
-`orchestrator/master-watchdog.ps1` closes that gap: every 30 minutes (Task Scheduler, "only run
-when user is logged on") the script walks the four repos in priority order, decides for each
-whether its master is alive, and if not, launches one in a visible console with Remote Control
-enabled, rooted in that repo's clone — the window stays on the desktop and the same session shows
-up at claude.ai/code and in the Claude mobile app.
+`orchestrator/master-watchdog.ps1` closes that gap and is also the scheduler that hands the single
+slot from repo to repo. Every 10 minutes (Task Scheduler, "only run when user is logged on") one
+slot does this:
 
-**Alive** for repo `<slug>` means EITHER of these holds (checked in this order):
+1. **Legacy guard.** A process with the old shape `--remote-control master "<prompt>"` (bare
+   `master`, rooted in claude-dotfiles) blocks everything: the watchdog prints its PID and the
+   `Stop-Process` line and exits. Stop it; the next slot proceeds.
+2. **Alive masters.** Every `claude.exe` or `node.exe` process with `--remote-control
+   master-<slug>` on its command line. For each, the watchdog reads that repo's state issue. A
+   `**Pass complete — YYYY-MM-DD HH:MM UTC**` line newer than the process start means the master
+   is finished: the watchdog stops the `claude` process and its `cmd.exe /k` wrapper window and
+   records that. Any other alive master is still working, and the slot ends with no launch. A
+   master whose latest marker (heartbeat or pass complete) is older than 120 minutes is reported
+   as possibly stalled but is not killed — an interactive session mid-work is Dan's to stop.
+3. **Launch the next repo.** With nothing alive, pick the repo never served yet (priority order:
+   bill-intake, contract-builder, sales-cockpit, zoho), else the one whose latest marker is oldest,
+   and run `Start-Process cmd.exe /k cd /d "<clone>" && claude --dangerously-skip-permissions
+   --remote-control master-<slug> "<boot prompt>"` in a fresh visible window rooted in that clone
+   — the window stays on the desktop and the same session shows up at claude.ai/code and in the
+   Claude mobile app. Exactly one launch per slot, and only when nothing is alive.
 
-1. A `claude.exe` or `node.exe` process is running with `--remote-control master-<slug>` on its
-   command line. The match is per repo on purpose: a bare `master` match would let the first
-   master found suppress the launch of every other one.
-2. That repo's state issue carries a `**Heartbeat N — YYYY-MM-DD HH:MM UTC**` line newer than 120
-   minutes. The heartbeat procedure updates this on every wake, so a fresh line means a master is
-   doing work even if its window has migrated to a different PID.
-
-Either check hits → that repo is skipped. Neither hits → `Start-Process cmd.exe /k cd /d "<clone>"
-&& claude --dangerously-skip-permissions --remote-control master-<slug> "<boot prompt>"` in a fresh
-visible window, then on to the next repo. The launched processes are fully independent of the
-watchdog run. `-Only <slug>` restricts the walk; `-WhatIf` prints every decision and launches
-nothing; `-Force` skips the checks.
-
-**Legacy guard.** A process whose command line carries the old shape `--remote-control master
-"<prompt>"` (bare `master`, rooted in claude-dotfiles) blocks every launch: it would double-run
-triage against the per-repo masters. The watchdog prints its PID and the `Stop-Process` line and
-exits 0; stop it, and the next slot launches the per-repo masters.
+`-Only <slug>` restricts the candidates; `-WhatIf` prints every decision and neither stops nor
+launches anything; `-Force` skips the guards and launches the next repo regardless. The launched
+process is fully independent of the watchdog run. A pass that ends between slots leaves the window
+open for at most 10 minutes before the watchdog closes it.
 
 The repo table (slug, `owner/repo`, state issue, clone path) lives at the top of the script.
 Adding a repo means adding a row there, creating its state issue, and adding it to the registry in
@@ -180,13 +189,15 @@ cannot happen:
    powershell -ExecutionPolicy Bypass -File orchestrator\install-watchdog-task.ps1 -Install
    ```
 
-   Default `-FirstRunMinutes 30` puts the first slot 30 minutes out (one full interval away)
+   Default `-FirstRunMinutes 10` puts the first slot 10 minutes out (one full interval away)
    rather than the +1 minute the earlier script used. If you want the first slot to fire in one
    minute for a live smoke test, pass `-Install -RunNow` — you have to ask for it.
 
 The task registers under the current user via `schtasks.exe /IT /RL LIMITED`. `Register-ScheduledTask`
 with the INTERACTIVE principal needed elevation on this machine (2026-09-02); `schtasks /IT` did not.
-One task serves all four repos; the per-repo loop is inside the script.
+One task serves all four repos; the serial hand-off is inside the script. The interval dropped
+from 30 to 10 minutes with issue 79 so a finished pass does not hold the slot for half an hour;
+a watchdog run is four `gh issue view` calls and a process listing.
 
 Run once by hand (only after `-Install`):
 
@@ -201,8 +212,8 @@ schtasks /Delete /TN "Claude master watchdog" /F
 ```
 
 Disable temporarily (task stays, next slot skipped) with `schtasks /Change /Disable`; re-enable
-with `/Enable`. Ctrl+C in a launched master window still stops that master; the watchdog will
-relaunch one for that repo on the next 30-minute slot.
+with `/Enable`. Ctrl+C in a launched master window stops that pass; close the window and the
+watchdog moves to the next repo on its next slot.
 
 **Editing the watchdog on a branch.** The task runs the script at its checkout path, so while the
 checkout sits on a feature branch the task runs THAT branch's script every 30 minutes. Disable the
@@ -275,6 +286,25 @@ node.exe` filter the real check uses.
   parameter also printed twelve `What if: Performing the operation "Set Alias"` lines from the
   CimCmdlets import; it is a plain switch now.
 
+### Verified on 2026-09-02 (attempt 5, one master at a time — ticket #79)
+
+Fake masters were `node fake-master.js --remote-control master-zoho`, which satisfies the
+`claude.exe OR node.exe` filter the real check uses. The pass-complete marker was written into
+issue #77 for the test and removed right after (body confirmed identical to the original).
+
+- Windows PowerShell 5.1, nothing alive, `-WhatIf` -> four `last served: never` lines, then ONE
+  launch line, `[bill-intake] NEXT - would launch: ... --remote-control master-bill-intake ...`,
+  exit 0. Priority order decides among never-served repos.
+- PowerShell 7.6.5, fake `master-zoho` alive, no marker, `-WhatIf` -> `[zoho] MASTER ALIVE
+  pid=28896, no marker yet (booting)` then `one master at a time: 1 alive - exit 0, no launch`.
+- `-Only contract-builder,zoho -WhatIf` -> `[contract-builder] NEXT`; the comma-joined `-Only`
+  string that `-File` passes is split inside the script.
+- Fake `master-zoho` alive, then `**Pass complete — <UTC one minute ahead>**` written into #77:
+  `-WhatIf` -> `[zoho] PASS COMPLETE at 2026-09-02 21:38:00Z (master started 2026-09-02
+  21:37:40Z) - closing pid=25416`, `-WhatIf: not stopped`, no launch. The real run with `-Only
+  bogus` (so nothing could launch) -> `[zoho] stopped claude pid=25416`, then `ERROR: -Only
+  matched no repo; nothing launched`, exit 1; the fake process was gone afterwards.
+
 ## The three relaunch options (Dan's ruling, 2026-09-02)
 
 | Option | Where the timer lives | Auth model at launch | Durability | Steerable how |
@@ -299,7 +329,7 @@ account only exists in the desktop app.
 
 Same config block, now in each repo's state issue (defaults in issue #44). Costs measured
 2026-09-01: a contract-builder cycle ≈ $49, a bill-intake cycle ≈ $22, master overhead ≈ $25/day
-at hourly pacing — per master, so four masters idling cost four times the overhead. Set
+at hourly pacing. Serial passes mean one master's overhead at a time, not four. Set
 `maxWavesPerRepoPerDay` accordingly BEFORE the first pass; local execution spends from the same
 account-level usage pool as cloud — running here prevents double-running, it does not make tokens
 cheaper.

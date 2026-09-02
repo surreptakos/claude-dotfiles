@@ -1,64 +1,63 @@
 ﻿<#
 .SYNOPSIS
     Relaunch watchdog for the local master orchestrators (issue 64; one master per repo since
-    issue 70).
+    issue 70; ONE MASTER AT A TIME since issue 79).
 
 .DESCRIPTION
-    Runs from Windows Task Scheduler every 30 minutes while Dan is logged on. For EACH target
-    repo in $Repos (RUNBOOK.md priority order) it decides whether that repo's master is alive;
-    if not, it launches one in a visible console with Remote Control, ROOTED IN THAT REPO'S
-    CLONE. A master must run inside the repo it serves: every repo's
-    .claude/workflows/ticket-fleet.js is cwd-relative (scout `gh issue list` with no -R,
-    implement `isolation: 'worktree'`, verify `git worktree add` "in this repo"), so a master
-    rooted in the claude-dotfiles checkout points all three at claude-dotfiles and cannot
-    fleet. That is what stalled the 2026-09-02 run (claude-dotfiles issue 44, heartbeats 7-8).
+    Runs from Windows Task Scheduler every -IntervalMinutes while Dan is logged on. Exactly one
+    master runs at a time (Dan, 2026-09-02): the watchdog launches one repo's master, rooted in
+    that repo's clone; that master runs ONE pass, writes a `**Pass complete - <UTC>**` line into
+    its state issue and stops; the next watchdog slot sees the marker, closes that window, and
+    launches the next repo. Repos are served in RUNBOOK.md priority order the first time round,
+    then least-recently-served first, so every repo gets a turn.
 
-    "Alive" for repo <slug> means EITHER of these holds:
-      1. A `claude` (or `node`) process is running with `--remote-control` and `master-<slug>`
-         on its command line. That is the launch shape below, so it is the process signature
-         to trust. The match is per repo on purpose: with several masters alive, a bare
-         `master` match would let the first one found suppress the launch of every other.
-      2. That repo's state issue (claude-dotfiles #<StateIssue>) carries a
-         `**Heartbeat N - <UTC>**` line newer than -MaxHeartbeatAgeMinutes (default 120).
+    A master must run inside the repo it serves: every repo's .claude/workflows/ticket-fleet.js
+    is cwd-relative (scout `gh issue list` with no -R, implement `isolation: 'worktree'`, verify
+    `git worktree add` "in this repo"), so a master rooted in the claude-dotfiles checkout
+    cannot fleet. That is what stalled the 2026-09-02 run (claude-dotfiles issue 44).
 
-    Either check passes: print the reason, launch nothing for that repo.
-    Otherwise: `Start-Process` a NEW cmd.exe window (visible, own console) running
-      claude --dangerously-skip-permissions --remote-control master-<slug> "<boot prompt>"
-    with the working directory set to the repo clone. `--dangerously-skip-permissions` is
-    there because the auto-mode permission classifier denied `gh pr merge` on 2026-09-02 while
-    auto-merge is ON by ruling (issue 71); LOCAL-RUNBOOK.md states what that costs.
+    Each slot:
+      1. Legacy guard. A process with the pre-issue-70 shape `--remote-control master "<prompt>"`
+         (bare token, rooted in claude-dotfiles) blocks everything until stopped.
+      2. Alive masters: every claude/node process with `--remote-control master-<slug>`.
+         For each, read that repo's state issue. A `Pass complete` line newer than the
+         process start means the master is done: stop it (and its cmd.exe wrapper window) and
+         record that. Otherwise it is still working: exit, launch nothing. A master whose
+         latest heartbeat is older than -MaxHeartbeatAgeMinutes is reported as possibly
+         stalled but NOT killed - an interactive session mid-work is Dan's to stop.
+      3. Nothing alive: pick the next repo - never-served repos first in priority order, then
+         the one whose latest marker (heartbeat or pass complete) is oldest - and launch it:
+           claude --dangerously-skip-permissions --remote-control master-<slug> "<boot prompt>"
+         in a visible cmd.exe window with the working directory set to the repo clone.
+         `--dangerously-skip-permissions` is there because the auto-mode permission classifier
+         denied `gh pr merge` on 2026-09-02 while auto-merge is ON by ruling (issue 71);
+         LOCAL-RUNBOOK.md states what that costs.
 
-    Legacy guard: a process whose command line carries `--remote-control master` followed by
-    a space or quote (the pre-issue-70 single master rooted in claude-dotfiles) blocks every
-    launch until it is stopped, because it would double-run triage on all four repos. The
-    script prints the PID and the stop command and exits 0.
-
-    -WhatIf does every check, prints every decision, and launches nothing. It is a plain
-    switch here, not SupportsShouldProcess: under ShouldProcess the WhatIf preference leaks
-    into the CimCmdlets module import and prints a dozen "Set Alias" lines.
+    -WhatIf does every check, prints every decision, stops and launches nothing. It is a plain
+    switch, not SupportsShouldProcess: under ShouldProcess the WhatIf preference leaks into the
+    CimCmdlets module import and prints a dozen "Set Alias" lines.
 
     This file is saved with a UTF-8 BOM on purpose. Windows PowerShell 5.1 reads a BOM-less
     file as ANSI, and any multibyte character inside a string then breaks the parse.
 
 .PARAMETER DotfilesRoot
-    The claude-dotfiles checkout the boot prompt points masters at for the runbooks. Defaults
-    to C:\Users\<current>\Claude\Projects\Meta\claude-dotfiles.
+    The claude-dotfiles checkout the boot prompt points masters at for the runbooks.
 
 .PARAMETER Only
     Slugs to consider (bill-intake, contract-builder, sales-cockpit, zoho). Empty = all.
 
 .PARAMETER MaxHeartbeatAgeMinutes
-    Fresh-heartbeat cutoff. 120 (2h) per issue 64's wording.
+    Age past which an alive master's heartbeat is reported as stale. 120 per issue 64.
 
 .PARAMETER Force
-    Ignore the alive checks and the legacy guard; launch for every selected repo.
+    Ignore the legacy guard and the alive check; launch the next repo regardless.
 
 .PARAMETER NoBypass
-    Omit --dangerously-skip-permissions from the launch. Debugging only; a master launched
-    this way cannot run the merge pass (issue 71).
+    Omit --dangerously-skip-permissions from the launch. Debugging only; such a master cannot
+    run the merge pass (issue 71).
 
 .PARAMETER WhatIf
-    Do the checks, print the decisions, launch nothing.
+    Do the checks, print the decisions, stop nothing, launch nothing.
 #>
 [CmdletBinding()]
 param(
@@ -94,11 +93,11 @@ function Get-RemoteControlProcesses {
     return , $procs
 }
 
-function Test-MasterProcess {
-    param([array]$Procs, [string]$Slug)
-    # A repo's master is a --remote-control process whose name token is master-<slug>.
-    $rx = '--remote-control\s+master-' + [regex]::Escape($Slug) + '(?=\s|"|$)'
-    return , @($Procs | Where-Object { $_.CommandLine -match $rx })
+function Get-MasterSlug {
+    param($Proc)
+    # The slug from a `--remote-control master-<slug>` command line, or $null.
+    if ($Proc.CommandLine -match '--remote-control\s+master-([A-Za-z0-9-]+)(?=\s|"|$)') { return $Matches[1] }
+    return $null
 }
 
 function Test-LegacyMasterProcess {
@@ -107,12 +106,12 @@ function Test-LegacyMasterProcess {
     return , @($Procs | Where-Object { $_.CommandLine -match '--remote-control\s+master(?=\s|"|$)' })
 }
 
-function Get-LatestHeartbeatUtc {
+function Get-StateMarkers {
     param([int]$Issue)
-    # gh must be on PATH and authenticated. If it is not, treat as "unknown" (no fresh
-    # heartbeat) - the process check may still let the repo count as alive.
+    # Reads the state issue body and returns @{ Heartbeat = <utc or null>; PassComplete = <utc or null> },
+    # each the latest of its kind, or $null when gh could not read the issue.
     # PS 5.1 reads console output as ANSI by default. Force UTF-8 so em dashes in the
-    # heartbeat separator do not get mangled into three garbage chars that never match.
+    # marker lines do not get mangled into three garbage chars that never match.
     $prevEnc = [Console]::OutputEncoding
     try {
         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -122,22 +121,30 @@ function Get-LatestHeartbeatUtc {
     }
     if ($body -is [Array]) { $body = $body -join [Environment]::NewLine }
     if (-not $body -or $LASTEXITCODE -ne 0) {
-        Write-Info "gh could not read issue #$Issue; heartbeat check inconclusive"
+        Write-Info "gh could not read issue #$Issue; marker check inconclusive"
         return $null
     }
-    # Match `**Heartbeat N <em dash or hyphen> YYYY-MM-DD HH:MM UTC**`.
-    $rx = '(?m)\*\*Heartbeat\s+\d+\s*[\u2014\-]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+UTC\*\*'
-    $matches = [regex]::Matches($body, $rx)
-    if ($matches.Count -eq 0) { return $null }
-    $latest = $null
-    foreach ($m in $matches) {
+    # `**Heartbeat N <em dash or hyphen> YYYY-MM-DD HH:MM UTC**` and `**Pass complete <dash> YYYY-MM-DD HH:MM UTC**`.
+    $rx = '(?m)\*\*(Heartbeat\s+\d+|Pass complete)\s*[—\-]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+UTC\*\*'
+    $out = @{ Heartbeat = $null; PassComplete = $null }
+    foreach ($m in [regex]::Matches($body, $rx)) {
         $ts = [datetime]::ParseExact(
-            ($m.Groups[1].Value + ' ' + $m.Groups[2].Value),
+            ($m.Groups[2].Value + ' ' + $m.Groups[3].Value),
             'yyyy-MM-dd HH:mm',
             [Globalization.CultureInfo]::InvariantCulture,
             [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
-        if ($null -eq $latest -or $ts -gt $latest) { $latest = $ts }
+        $key = 'Heartbeat'
+        if ($m.Groups[1].Value -like 'Pass complete*') { $key = 'PassComplete' }
+        if ($null -eq $out[$key] -or $ts -gt $out[$key]) { $out[$key] = $ts }
     }
+    return $out
+}
+
+function Get-LatestMarkerUtc {
+    param($Markers)
+    if ($null -eq $Markers) { return $null }
+    $latest = $Markers.Heartbeat
+    if ($Markers.PassComplete -and ($null -eq $latest -or $Markers.PassComplete -gt $latest)) { $latest = $Markers.PassComplete }
     return $latest
 }
 
@@ -149,14 +156,31 @@ function Get-BootPrompt {
             "never change directory out of it. Read $runbooks\LOCAL-RUNBOOK.md and then $runbooks\RUNBOOK.md - binding, in that " +
             "order of precedence. Your state issue is surreptakos/claude-dotfiles#$($R.StateIssue); issue #44 there is the shared " +
             "registry and config - read it, never write to it or to another repo's state issue. Check your state issue for the " +
-            "current state and that no other master serves $($R.Repo); claim venue local-pc there. Then begin the heartbeat " +
-            "procedure under /loop dynamic pacing if available, else as single passes. My messages in this terminal override everything.")
+            "current state and that no other master serves $($R.Repo); claim venue local-pc there. Then run ONE pass, no /loop: " +
+            "serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When the pass is done, clear " +
+            "the venue, write a line **Pass complete - YYYY-MM-DD HH:MM UTC** (current UTC) at the top of your state issue's " +
+            "heartbeat section, say pass complete, and stop; the watchdog closes this window and starts the next repo. " +
+            "My messages in this terminal override everything.")
 }
 
-Write-Info "dotfiles=$DotfilesRoot  cutoff=${MaxHeartbeatAgeMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
+function Stop-MasterWindow {
+    param($Proc, [string]$Tag)
+    # Stop the claude process and, when its parent is the cmd.exe /k wrapper the watchdog
+    # launched (its command line carries the same master-<slug> token), that window too.
+    $parent = Get-CimInstance Win32_Process -Filter "ProcessId=$($Proc.ParentProcessId)" -ErrorAction SilentlyContinue
+    Stop-Process -Id $Proc.ProcessId -Force -ErrorAction SilentlyContinue
+    Write-Info "$Tag stopped claude pid=$($Proc.ProcessId)"
+    if ($parent -and $parent.Name -eq 'cmd.exe' -and $parent.CommandLine -match 'master-') {
+        Stop-Process -Id $parent.ProcessId -Force -ErrorAction SilentlyContinue
+        Write-Info "$Tag stopped cmd.exe wrapper pid=$($parent.ProcessId)"
+    }
+}
 
+Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
+
+# -Only arrives as one comma-joined string when the script is run with -File; split it.
+$Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $selected = @($Repos | Where-Object { $Only.Count -eq 0 -or $Only -contains $_.Slug })
-if ($selected.Count -eq 0) { Write-Info "ERROR: -Only matched no repo"; exit 1 }
 
 $rcProcs = Get-RemoteControlProcesses
 
@@ -170,54 +194,79 @@ if ($legacy.Count -gt 0 -and -not $Force) {
     exit 0
 }
 
-$exitCode = 0
-foreach ($r in $selected) {
-    $tag = "[$($r.Slug)]"
-
-    # --- Check 1: live master process for this repo ---------------------------------
-    $procs = Test-MasterProcess -Procs $rcProcs -Slug $r.Slug
-    if ($procs.Count -gt 0 -and -not $Force) {
-        $pids = ($procs | ForEach-Object { $_.ProcessId }) -join ','
-        Write-Info "$tag MASTER ALIVE (process check): pid(s)=$pids - no launch"
+# --- Alive masters: finished ones get closed, working ones block the launch ------------
+$markersBySlug = @{}
+$stillWorking = 0
+foreach ($p in $rcProcs) {
+    $slug = Get-MasterSlug -Proc $p
+    if (-not $slug) { continue }
+    $tag = "[$slug]"
+    $row = $Repos | Where-Object { $_.Slug -eq $slug } | Select-Object -First 1
+    if (-not $row) {
+        Write-Info "$tag master alive (pid=$($p.ProcessId)) for a repo not in this table - left alone, blocks the launch"
+        $stillWorking++
         continue
     }
-
-    # --- Check 2: fresh heartbeat in this repo's state issue -------------------------
-    $hb = Get-LatestHeartbeatUtc -Issue $r.StateIssue
+    $markers = Get-StateMarkers -Issue $row.StateIssue
+    $markersBySlug[$slug] = $markers
+    $started = $p.CreationDate.ToUniversalTime()
+    if ($markers -and $markers.PassComplete -and $markers.PassComplete -gt $started -and -not $Force) {
+        Write-Info "$tag PASS COMPLETE at $($markers.PassComplete.ToString('u')) (master started $($started.ToString('u'))) - closing pid=$($p.ProcessId)"
+        if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
+        else { Stop-MasterWindow -Proc $p -Tag $tag }
+        continue
+    }
+    $hb = Get-LatestMarkerUtc -Markers $markers
     if ($hb) {
         $ageMin = [int](([datetime]::UtcNow - $hb).TotalMinutes)
-        if ($ageMin -lt $MaxHeartbeatAgeMinutes -and -not $Force) {
-            Write-Info "$tag MASTER ALIVE (heartbeat check): issue #$($r.StateIssue) latest=$($hb.ToString('u'))  age=${ageMin}m < ${MaxHeartbeatAgeMinutes}m - no launch"
-            continue
+        if ($ageMin -ge $MaxHeartbeatAgeMinutes) {
+            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old - possibly stalled; not killed, Dan decides"
         } else {
-            Write-Info "$tag heartbeat stale: issue #$($r.StateIssue) latest=$($hb.ToString('u'))  age=${ageMin}m"
+            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), working (latest marker ${ageMin}m ago)"
         }
     } else {
-        Write-Info "$tag no heartbeat line found in issue #$($r.StateIssue)"
+        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), no marker yet (booting)"
     }
-
-    # --- Launch branch ----------------------------------------------------------------
-    if (-not (Test-Path $r.Root)) {
-        Write-Info "$tag ERROR: repo clone not found: $($r.Root) - skipped"
-        $exitCode = 1
-        continue
-    }
-
-    $bypass = @()
-    if (-not $NoBypass) { $bypass = @('--dangerously-skip-permissions') }
-    $launchCmd = (@(
-        '/k',
-        'cd', '/d', "`"$($r.Root)`"", '&&',
-        $ClaudeExe) + $bypass + @('--remote-control', "master-$($r.Slug)", "`"$(Get-BootPrompt -R $r)`"")
-    ) -join ' '
-
-    Write-Info "$tag NO MASTER ALIVE - would launch: cmd.exe $launchCmd"
-
-    if ($WhatIf) {
-        Write-Info "$tag -WhatIf: no process started"
-    } else {
-        Start-Process -FilePath 'cmd.exe' -ArgumentList $launchCmd -WorkingDirectory $r.Root -WindowStyle Normal
-        Write-Info "$tag launched"
-    }
+    $stillWorking++
 }
-exit $exitCode
+if ($stillWorking -gt 0 -and -not $Force) {
+    Write-Info "one master at a time: $stillWorking alive - exit 0, no launch"
+    exit 0
+}
+
+# --- Pick the next repo: never served first (priority order), then least recently served ---
+# The -Only check sits here, after the close-finished-masters stage, so `-Only <bogus>` is a way
+# to run that stage for real without launching anything.
+if ($selected.Count -eq 0) { Write-Info "ERROR: -Only matched no repo; nothing launched"; exit 1 }
+$candidates = @()
+foreach ($r in $selected) {
+    if (-not (Test-Path $r.Root)) { Write-Info "[$($r.Slug)] clone not found: $($r.Root) - skipped"; continue }
+    $markers = $markersBySlug[$r.Slug]
+    if (-not $markersBySlug.ContainsKey($r.Slug)) { $markers = Get-StateMarkers -Issue $r.StateIssue }
+    $last = Get-LatestMarkerUtc -Markers $markers
+    $lastText = 'never'
+    if ($last) { $lastText = $last.ToString('u') }
+    Write-Info "[$($r.Slug)] last served: $lastText"
+    $candidates += [pscustomobject]@{ Row = $r; Last = $last; Order = [array]::IndexOf(@($Repos | ForEach-Object { $_.Slug }), $r.Slug) }
+}
+if ($candidates.Count -eq 0) { Write-Info "ERROR: no launchable repo"; exit 1 }
+$next = ($candidates | Sort-Object @{ Expression = { if ($_.Last) { 1 } else { 0 } } }, @{ Expression = { if ($_.Last) { $_.Last } else { [datetime]::MinValue } } }, Order | Select-Object -First 1).Row
+
+# --- Launch exactly one ----------------------------------------------------------------
+$tag = "[$($next.Slug)]"
+$bypass = @()
+if (-not $NoBypass) { $bypass = @('--dangerously-skip-permissions') }
+$launchCmd = (@(
+    '/k',
+    'cd', '/d', "`"$($next.Root)`"", '&&',
+    $ClaudeExe) + $bypass + @('--remote-control', "master-$($next.Slug)", "`"$(Get-BootPrompt -R $next)`"")
+) -join ' '
+
+Write-Info "$tag NEXT - would launch: cmd.exe $launchCmd"
+if ($WhatIf) {
+    Write-Info "$tag -WhatIf: no process started"
+} else {
+    Start-Process -FilePath 'cmd.exe' -ArgumentList $launchCmd -WorkingDirectory $next.Root -WindowStyle Normal
+    Write-Info "$tag launched"
+}
+exit 0

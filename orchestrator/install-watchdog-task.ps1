@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
     Register (or preview) the "Claude master watchdog" Windows scheduled task. One task;
-    the watchdog itself loops over the four target repos and launches one master per
-    repo, rooted in that repo's clone (issue 70).
+    the watchdog itself hands one slot from repo to repo: one master at a time, each
+    rooted in its repo's clone, next repo after the current pass completes (issues 70, 79).
+    Interval 10 minutes since issue 79 so a finished pass is closed promptly.
 
 .DESCRIPTION
     Two-step install by design (issue 64, attempt 3, fixing a hazard the previous
@@ -13,7 +14,7 @@
     caller has to add `-Install` to actually register.
 
     When `-Install` is passed, the task is registered and its first-run slot is
-    set to `-FirstRunMinutes` minutes out (default 30, matching the interval)
+    set to `-FirstRunMinutes` minutes out (default 10, matching the interval)
     rather than the +1 minute the earlier script used. That kept the launch
     branch from firing during registration; the previous +1 minute made a real
     launch during an install-and-immediately-uninstall dry read of the runbook.
@@ -33,8 +34,8 @@
 param(
     [string]$TaskName    = 'Claude master watchdog',
     [string]$WatchdogPs1 = '',
-    [int]$IntervalMinutes = 30,
-    [int]$FirstRunMinutes = 30,
+    [int]$IntervalMinutes = 10,
+    [int]$FirstRunMinutes = 10,
     [switch]$Install,
     [switch]$RunNow
 )
