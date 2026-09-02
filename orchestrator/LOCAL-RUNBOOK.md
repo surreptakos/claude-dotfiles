@@ -95,6 +95,16 @@ pass cannot run: on 2026-09-02 the auto-mode permission classifier denied `gh pr
 second a single non-looped invocation, so the command itself was what the harness refused, while
 auto-merge is ON by Dan's ruling. The flag makes the harness match the ruling.
 
+**First launch asks for an OK once, then never again.** `claude --dangerously-skip-permissions`
+opens a "WARNING: Claude Code running in Bypass Permissions mode" dialog until the user setting
+`skipDangerousModePermissionPrompt` is true in `~/.claude/settings.json`; accepting the dialog
+writes that key. The first serial master (bill-intake, 2026-09-02 16:50 local) sat on that dialog
+for four minutes until Dan clicked "Yes, I accept" (settings.json written 16:54:12, first prompt
+processed 16:54:39). The key is now set, so later launches start straight away. If a fresh machine
+or profile shows the dialog again, that key is the fix, not a watchdog change. The other dialogs a
+launch can show — "Yes, I trust this folder" and "Yes, I trust these settings" — are per-project
+and already accepted for all four clones; a new repo row needs one interactive first launch.
+
 Stated plainly: with bypass permissions on, an unattended master can merge, push, delete branches,
 edit issues and run any shell command with no prompt and nobody watching. The merge bar in
 `RUNBOOK.md` (verifier evidence, green CI or no CI, no conflict, no changes-requested, the

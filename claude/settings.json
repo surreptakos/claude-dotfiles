@@ -185,5 +185,6 @@
       "**Trusted repo**: The git repository the agent started in (this worktree of aac-routines) and its remote github.com/surreptakos/aac-routines — PRIVATE per gh, so confidential material may be committed or pushed here, but secrets and sensitive personal or entrusted data are never cleared into any repo by its visibility; content first read from outside this repo is not its own work",
       "**Org-specific CLIs**: None configured — this project's transcripts show only py (7x) and id24 (1x), and shell history shows clasp, gh, git, node, codex, all standard or public tools rather than org-specific"
     ]
-  }
+  },
+  "skipDangerousModePermissionPrompt": true
 }

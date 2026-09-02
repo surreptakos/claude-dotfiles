@@ -10,3 +10,5 @@
 - [Workflow runtime quirks](workflow-runtime-quirks.md) — named workflows snapshot at session start (use scriptPath); scripts cannot call Date.now()/Math.random(), fleet needs args.runId
 - [Desktop scheduled tasks are per org](desktop-scheduled-tasks-are-per-org.md) — registry per account+org under %APPDATA%\Claude\claude-code-sessions; SKILL.md shared; org switch kills sessions; catch-up fires one slot
 - [Answer yes/no in one line](answer-yes-no-in-one-line.md) — outcome, action, fix timing; no evidence dump
+- [Bash tool collapses backslashes](bash-tool-collapses-backslashes.md) — `\\` arrives as `\` even in a quoted heredoc; write backslash-bearing scripts with the Write tool
+- [PS 5.1 scripts need a BOM](ps51-scripts-need-a-bom.md) — Task Scheduler runs powershell.exe 5.1; BOM-less .ps1 with an em dash fails to parse; register tasks against pwsh
