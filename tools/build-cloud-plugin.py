@@ -224,7 +224,11 @@ def main():
                                         "python3=$(command -v python3 || echo none) "
                                         "node=$(command -v node || echo none) "
                                         "pwsh=$(command -v pwsh || echo none) "
-                                        "home=$HOME\"'"
+                                        "home=$HOME "
+                                        # Runtime-only values: a model that merely READ this file
+                                        # cannot produce them, so a quoted line proves execution.
+                                        "host=$(hostname 2>/dev/null || echo unknown) "
+                                        "at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)\"'"
                                     ),
                                     "timeout": 5,
                                 },

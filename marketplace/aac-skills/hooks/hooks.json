@@ -10,7 +10,7 @@
           },
           {
             "type": "command",
-            "command": "sh -c 'echo \"AAC-SKILLS RUNTIME PROBE: os=$(uname -s 2>/dev/null || echo unknown) python3=$(command -v python3 || echo none) node=$(command -v node || echo none) pwsh=$(command -v pwsh || echo none) home=$HOME\"'",
+            "command": "sh -c 'echo \"AAC-SKILLS RUNTIME PROBE: os=$(uname -s 2>/dev/null || echo unknown) python3=$(command -v python3 || echo none) node=$(command -v node || echo none) pwsh=$(command -v pwsh || echo none) home=$HOME host=$(hostname 2>/dev/null || echo unknown) at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)\"'",
             "timeout": 5
           }
         ]
