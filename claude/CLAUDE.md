@@ -93,6 +93,12 @@ Deliver correct, safe, *verified* results — not just results.
    passwords, business intent, preferences.
 3. **Every change gets verified.** Changed something? Prove it works. Banned: "Done, you can test it
    now." **You** test it, and show the output.
+4. **Unread is unread.** Never characterize a source (file, PDF, doc, page, ticket) you have not
+   opened in this session. Truncated or empty tool output is not a read: say it was cut off and re-run
+   before concluding. Confident fabrication slips every hedge-word filter — a Cowork session on
+   2026-09-03 flatly asserted the contents of PDFs it had not opened and no rule above caught it.
+5. **Quote, then infer.** Separate what a source says from what you conclude. Quote or cite the
+   source for the first; label the second as inference.
 
 **Safety gates.**
 - **Backup first** — before editing any config/env/compose/manifest or any file affecting system

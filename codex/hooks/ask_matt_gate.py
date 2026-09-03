@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import subprocess
 import sys
 import tempfile
 from typing import Any
@@ -156,7 +157,7 @@ CAVEMAN_CONTEXT = {
     ),
     "off": (
         "CAVEMAN: OFF for now (flag cleared by /caveman off or \"stop caveman\"). Normal prose; the "
-        "pre-send lint is skipped. Re-enable with /caveman ultra|full|lite."
+        "pre-send lint still runs, for the YES rules only. Re-enable with /caveman ultra|full|lite."
     ),
 }
 
@@ -335,17 +336,18 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         + " Level follows the caveman flag: /caveman ultra|full|lite|off switches it for the "
         "session; nothing else can. "
     )
-    if mode != "off":
-        # The pre-send lint, standing whenever a caveman level is on (owner instruction, 2026-08-12).
-        # Injected on EVERY turn because it is the only enforcement point that can stop the offending
-        # message rather than report it: no hook event sees assistant text before the user does.
-        context += (
-            "PRE-SEND LINT REQUIRED, EVERY REPLY: write your final reply to a file, run "
-            f"`py -3 \"{SCRIPT}\" lint <file> \"{session_id}\"`, and rewrite until it exits 0. Send "
-            "only the linted text. Skipping this is recorded at Stop and reported back to you next "
-            "turn."
-        )
-    if pending_lint and mode != "off":
+    # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
+    # rules at every caveman level, off included, plus the style rules for the level in force. It is
+    # the only enforcement point that can stop the offending message rather than report it: no hook
+    # event sees assistant text before the user does.
+    context += (
+        "PRE-SEND LINT REQUIRED, EVERY REPLY: write your final reply to a file, run "
+        f"`py -3 \"{SCRIPT}\" lint <file> \"{session_id}\"`, and rewrite until it exits 0. Send "
+        "only the linted text. It checks YES (no deflection, no unverified claims, no conclusions "
+        "without data, no characterising unread sources) plus the caveman level. Skipping this is "
+        "recorded at Stop and reported back to you next turn."
+    )
+    if pending_lint:
         context += (
             " CAVEMAN VIOLATION IN YOUR LAST MESSAGE — fix in this one, do not repeat it: "
             + "; ".join(pending_lint)
@@ -633,6 +635,9 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     blocked = _publish_gate(event, session_id, state)
     if blocked is not None:
         return blocked
+    blocked = _backup_gate(event)
+    if blocked is not None:
+        return blocked
     if (
         state
         and state.get("flow")
@@ -824,6 +829,232 @@ def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------- YES gates
+# Dan, 2026-09-03: "how can we force /yes adherence into the hook?" Most of YES is judgment; these
+# are the parts a script can check. They run at every caveman level, off included — YES is not a
+# style. Three text rules audited on the reply (pre-send lint and Stop), one PreToolUse gate on
+# config-shaped edits, one PostToolUse failure counter for the escalation ladder.
+READ_CLASS_TOOLS = {
+    "Read", "Bash", "PowerShell", "Grep", "Glob", "WebFetch", "WebSearch", "NotebookRead",
+    "LS", "Agent", "Task",
+}
+HEDGE_PATTERN = re.compile(
+    r"\b(probably|likely|i think|i believe|i assume|i guess)\b|\bmight be\b|\bseems? like\b"
+    r"|\bshould (be|work)\b",
+    re.IGNORECASE,
+)
+DEFLECTION_PATTERN = re.compile(
+    r"\b(please (check|verify|test|confirm)|you can (test|try|verify|check) (it|this|that|them)( now)?"
+    r"|you may need to|you might need to|you should manually|you('ll| will) need to (run|check|verify)"
+    r"|should (now )?work|let me know if (it|this|that|anything)|try it and see)\b",
+    re.IGNORECASE,
+)
+VERIFIED_CLAIM_PATTERN = re.compile(
+    r"\b(verified|confirmed|tests? pass(es|ed)?|all green|works now|now works|is working|done and tested"
+    r"|passes|exit(s|ed)? 0)\b",
+    re.IGNORECASE,
+)
+CERTAINTY_PATTERN = re.compile(
+    r"\b(definitely|the culprit( is| was)?|must be the|root cause is|has to be the|without a doubt)\b"
+    r"|\bcert" + r"ainly\b",
+    re.IGNORECASE,
+)
+SOURCE_CHARACTERISATION_PATTERN = re.compile(
+    r"\b(the |that |this )?(\S+\.(?:pdf|docx?|md|txt|json|ya?ml|csv|xlsx?|pptx?|html?|js|ts|py|ps1)"
+    r"|document|pdf|spreadsheet|deck|file|page|ticket|issue|thread|transcript|spec|readme|runbook)"
+    r"\b[^.!?\n]{0,80}\b(contains|includes|says|states|mentions|lists|shows|has no|does not (mention|contain|include|say)"
+    r"|doesn'?t (mention|contain|include|say)|no mention of|is silent on|never mentions)\b",
+    re.IGNORECASE,
+)
+
+
+def _turn_tool_names(transcript_path: str) -> set[str] | None:
+    """Tools the assistant called since the last real user prompt. None when unreadable."""
+    if not transcript_path:
+        return None
+    names: set[str] = set()
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                kind = record.get("type")
+                message = record.get("message") or {}
+                content = message.get("content")
+                if kind == "user":
+                    blocks = content if isinstance(content, list) else []
+                    if not any(isinstance(b, dict) and b.get("tool_use_id") for b in blocks):
+                        names = set()  # a real user prompt starts a new turn
+                    continue
+                if kind != "assistant":
+                    continue
+                for item in content if isinstance(content, list) else []:
+                    if isinstance(item, dict) and item.get("type") == "tool_use":
+                        names.add(str(item.get("name") or ""))
+    except Exception:
+        return None
+    return names
+
+
+def _find_transcript(session_id: str) -> str:
+    """The session's transcript under ~/.claude/projects, or '' when not found."""
+    if not session_id or not _safe_id(session_id):
+        return ""
+    root = CLAUDE_HOME / "projects"
+    try:
+        matches = list(root.glob(f"*/{session_id}.jsonl"))
+    except OSError:
+        return ""
+    return str(matches[0]) if matches else ""
+
+
+def _yes_lint(text: str, turn_tools: set[str] | None) -> list[str]:
+    """YES violations a script can see in a reply. `turn_tools` None = transcript unknown."""
+    prose = _strip_code(PYLONS_PREFIX_PATTERN.sub("", text, count=1))
+    violations: list[str] = []
+    hedges = sorted({m.group(0).lower() for m in HEDGE_PATTERN.finditer(prose)})
+    if hedges:
+        violations.append(
+            "YES hedge without evidence: " + ", ".join(hedges[:4]) + " — check, then state it"
+        )
+    deflections = sorted({m.group(0).lower() for m in DEFLECTION_PATTERN.finditer(prose)})
+    if deflections:
+        violations.append(
+            "YES deflection: " + ", ".join(deflections[:3])
+            + " — do the check yourself and show the output"
+        )
+    if turn_tools is not None and not turn_tools:
+        claims = sorted({m.group(0).lower() for m in VERIFIED_CLAIM_PATTERN.finditer(prose)})
+        if claims:
+            violations.append(
+                "YES unverified claim: " + ", ".join(claims[:3])
+                + " — no tool ran this turn, so nothing was verified"
+            )
+        certain = sorted({m.group(0).lower() for m in CERTAINTY_PATTERN.finditer(prose)})
+        if certain:
+            violations.append(
+                "YES conclusion without data: " + ", ".join(certain[:3])
+                + " — no tool ran this turn; state the data source or drop the certainty"
+            )
+    if turn_tools is not None and not (turn_tools & READ_CLASS_TOOLS):
+        sourced = SOURCE_CHARACTERISATION_PATTERN.search(prose)
+        if sourced:
+            snippet = sourced.group(0).strip()
+            violations.append(
+                "YES unread source: \"" + snippet[:70]
+                + "\" — nothing was opened this turn; read it or say it is unread"
+            )
+    return violations
+
+
+CONFIG_FILE_PATTERN = re.compile(
+    r"(^|[\\/])(settings(\.local)?\.json|managed-settings[^\\/]*\.json|\.env[^\\/]*|[^\\/]*\.env"
+    r"|docker-compose[^\\/]*\.ya?ml|compose\.ya?ml|appsscript\.json|hooks\.json|\.clasp\.json"
+    r"|[^\\/]*\.toml|CLAUDE\.md|AGENTS\.md|\.mcp\.json)$",
+    re.IGNORECASE,
+)
+EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+
+
+def _has_backup(path: Path) -> bool:
+    try:
+        for sibling in path.parent.glob(path.name + ".bak*"):
+            if sibling.is_file() and sibling.stat().st_mtime >= path.stat().st_mtime - 1:
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _git_clean(path: Path) -> bool:
+    try:
+        done = subprocess.run(
+            ["git", "-C", str(path.parent), "status", "--porcelain", "--", path.name],
+            capture_output=True, text=True, timeout=4, check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if done.returncode != 0:
+        return False
+    tracked = subprocess.run(
+        ["git", "-C", str(path.parent), "ls-files", "--error-unmatch", "--", path.name],
+        capture_output=True, text=True, timeout=4, check=False,
+    )
+    return tracked.returncode == 0 and not done.stdout.strip()
+
+
+def _backup_gate(event: dict[str, Any]) -> dict[str, Any] | None:
+    """YES safety gate: no edit to a config-shaped file without a backup or a clean git copy."""
+    if str(event.get("tool_name") or "") not in EDIT_TOOLS:
+        return None
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    raw = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    if not isinstance(raw, str) or not CONFIG_FILE_PATTERN.search(raw):
+        return None
+    path = Path(raw)
+    if not path.is_file():
+        return None  # creating a new file needs no backup
+    if _has_backup(path) or _git_clean(path):
+        return None
+    return _deny(
+        f"YES backup gate: {path.name} shapes behaviour and has no backup. Copy it first "
+        f"(cp \"{raw}\" \"{raw}.bak-<why>\") or commit it clean, then retry the edit."
+    )
+
+
+FAILURE_HINT_PATTERN = re.compile(
+    r"\bexit(=| code |code=)?[1-9]\d*\b|Traceback \(most recent call last\)|command not found"
+    r"|\bfatal:|\berror:|\bERROR\b|\bException\b|\bFAILED\b|\bfailed with\b",
+)
+SUCCESS_HINT_PATTERN = re.compile(r"\bexit(=| code )0\b")
+
+
+def _tool_failed(tool_response: Any) -> bool:
+    """Best-effort read of a Bash/PowerShell result. Hook input carries no exit code on this
+    build (transcripts show stdout/stderr/interrupted only), so this is a heuristic: an explicit
+    error flag, or failure text with no explicit exit 0."""
+    if isinstance(tool_response, dict):
+        if tool_response.get("is_error") is True or tool_response.get("interrupted") is True:
+            return True
+        text = str(tool_response.get("stdout") or "") + "\n" + str(tool_response.get("stderr") or "")
+    else:
+        text = str(tool_response or "")
+    if SUCCESS_HINT_PATTERN.search(text):
+        return False
+    return bool(FAILURE_HINT_PATTERN.search(text))
+
+
+ESCALATION = {
+    2: "YES escalation, 2 failures in a row: switch approach — not a parameter tweak.",
+    3: "YES escalation, 3 failures: five-step audit. Read the error word by word; search the exact "
+       "error; read 50 lines of context; verify every assumption; invert the hypothesis.",
+    4: "YES escalation, 4 failures: build a minimal reproduction before touching anything else.",
+    5: "YES escalation, 5+ failures: stop. Write a structured handoff — verified facts, eliminated "
+       "causes, narrowed scope, next steps. Persistence in the wrong direction is worse than stopping.",
+}
+
+
+def _claude_post_tool(event: dict[str, Any]) -> dict[str, Any]:
+    session_id = str(event.get("session_id") or "")
+    if str(event.get("tool_name") or "") not in {"Bash", "PowerShell"} or not session_id:
+        return {}
+    state = _read_state("claude", session_id) or {}
+    failures = int(state.get("consecutive_failures") or 0)
+    failures = failures + 1 if _tool_failed(event.get("tool_response")) else 0
+    state["consecutive_failures"] = failures
+    _write_state("claude", session_id, state)
+    if failures < 2:
+        return {}
+    message = ESCALATION[min(failures, 5)]
+    _log_governance(session_id, f"escalation level {failures}")
+    return {
+        "hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": message},
+        "suppressOutput": True,
+    }
+
+
 def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
     state = _read_state("claude", session_id)
@@ -877,6 +1108,7 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         transcript_path = str(event.get("transcript_path") or "")
         final_text = _last_assistant_text(transcript_path) if transcript_path else ""
         if final_text.strip():
+            violations = violations + _yes_lint(final_text, _turn_tool_names(transcript_path))
             violations = violations + _caveman_lint(final_text, mode)
     except Exception:
         pass  # lint must never wedge a session; the audit above still stands
@@ -911,8 +1143,6 @@ def _presend_audit(session_id: str, state: dict[str, Any] | None) -> list[str]:
     nonce = state.get("nonce")
     if not nonce:
         return []
-    if state.get("caveman") == "off":
-        return []  # no lint is required while caveman is off, so nothing to audit
     if state.get("lint_clean_nonce") == nonce:
         return []
     return [
@@ -998,7 +1228,11 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     mode = state.get("caveman")
     if mode not in CAVEMAN_PROSE_MODES + ("off",):
         mode = _read_caveman_mode()
-    violations = _caveman_lint(text, mode)
+    # YES rules run at every level, off included: they are about truth, not style. The transcript
+    # tells the lint which tools ran this turn; without a session there is no transcript and the
+    # tool-dependent rules stay quiet.
+    turn_tools = _turn_tool_names(_find_transcript(session_id)) if session_id else None
+    violations = _yes_lint(text, turn_tools) + _caveman_lint(text, mode)
     if not violations:
         words = len(_strip_code(text).split())
         if session_id:
@@ -1006,12 +1240,12 @@ def _lint_draft(path: str, session_id: str = "") -> int:
             state["lint_clean_words"] = words
             _write_state("claude", session_id, state)
         if mode == "off":
-            print(f"caveman lint skipped: caveman is off ({words} words of prose)")
+            print(f"lint clean: YES rules pass, caveman off ({words} words of prose)")
         else:
-            print(f"caveman lint clean ({words} words of prose, level {mode})")
+            print(f"lint clean: YES rules pass, caveman {mode} ({words} words of prose)")
         return 0
     for v in violations:
-        print(f"caveman lint: {v}")
+        print(f"lint: {v}")
     print("REWRITE BEFORE SENDING — this draft has not been shown to anyone yet.", file=sys.stderr)
     return 1
 
@@ -1048,6 +1282,9 @@ def main() -> int:
         return 0
     if mode == "claude-stop":
         print(json.dumps(_claude_stop(event)))
+        return 0
+    if mode == "claude-post-tool":
+        print(json.dumps(_claude_post_tool(event)))
         return 0
     if mode == "pre-tool":
         print(json.dumps(_pre_tool(event)))

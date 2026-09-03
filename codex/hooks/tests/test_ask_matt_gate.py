@@ -415,7 +415,8 @@ class AskMattGateTests(unittest.TestCase):
                 self.run_gate("claude-prompt", {"session_id": "s-mode"}, state_dir, caveman=None).stdout
             )["hookSpecificOutput"]["additionalContext"]
             self.assertIn("CAVEMAN: OFF", off)
-            self.assertNotIn("PRE-SEND LINT REQUIRED", off)
+            # Off drops the style rules only; the YES rules and the lint stay on every turn.
+            self.assertIn("PRE-SEND LINT REQUIRED", off)
             self.assertFalse(flag.exists())
             self.assertEqual(self._state(state_dir, "s-mode")["caveman"], "off")
             # Off is still a governed state: tools flow once a route is declared.
@@ -436,7 +437,7 @@ class AskMattGateTests(unittest.TestCase):
             # 60 words, article-heavy, one 30-word sentence: fails ultra, passes lite.
             wordy = (
                 "The relay refused the bill because the policy that owns the approver is the one "
-                "that the owner set to the waiting stage, and the comment on the ticket says so. "
+                "that the owner set to the waiting stage, and the owner agreed to that in chat. "
                 "The fix is in the router. The test covers it. The deploy is queued for the morning "
                 "window and the owner has the link."
             )
@@ -448,21 +449,24 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir, caveman="lite")
             lite = self.run_presend_lint("s-scale", wordy, state_dir, caveman="keep")
             self.assertEqual(lite.returncode, 0, lite.stdout)
-            self.assertIn("level lite", lite.stdout)
+            self.assertIn("caveman lite", lite.stdout)
             # Filler stays banned at every level.
             filler = self.run_presend_lint("s-scale", "Queue empty. Tests basically pass.", state_dir, caveman="keep")
             self.assertEqual(filler.returncode, 1)
             self.assertIn("banned filler", filler.stdout)
-            # Off: anything goes, exit 0, and Stop does not complain about a missing lint.
+            # Off: style rules go, YES rules stay. Articles and length pass; a hedge still fails.
             self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir, caveman=None)
             nonce = self._state(state_dir, "s-scale")["nonce"]
             self.run_claude_declare("s-scale", nonce, "implement", state_dir)
-            off = self.run_presend_lint(
-                "s-scale", "I think this is really just basically the answer.", state_dir, caveman="keep"
-            )
+            off = self.run_presend_lint("s-scale", wordy, state_dir, caveman="keep")
             self.assertEqual(off.returncode, 0, off.stdout)
-            self.assertIn("skipped", off.stdout)
-            transcript = self._transcript(state_dir, "I think this is really just basically the answer.")
+            self.assertIn("caveman off", off.stdout)
+            hedged = self.run_presend_lint(
+                "s-scale", "The relay is probably the thing that fails.", state_dir, caveman="keep"
+            )
+            self.assertEqual(hedged.returncode, 1)
+            self.assertIn("YES hedge", hedged.stdout)
+            transcript = self._transcript(state_dir, wordy)
             stopped = json.loads(
                 self.run_gate(
                     "claude-stop",
@@ -595,13 +599,15 @@ class AskMattGateTests(unittest.TestCase):
         hooks = settings["hooks"]
         self.assertEqual(
             set(hooks),
-            {"SessionStart", "SessionEnd", "PreCompact", "UserPromptSubmit", "PreToolUse", "Stop"},
+            {"SessionStart", "SessionEnd", "PreCompact", "UserPromptSubmit", "PreToolUse",
+             "PostToolUse", "Stop"},
         )
         prompt_config = json.dumps(hooks["UserPromptSubmit"])
         self.assertIn("governance-reminder.js", prompt_config)
         self.assertIn("claude-prompt", prompt_config)
         self.assertIn("claude-pre-tool", json.dumps(hooks["PreToolUse"]))
         self.assertIn("claude-stop", json.dumps(hooks["Stop"]))
+        self.assertIn("claude-post-tool", json.dumps(hooks["PostToolUse"]))
         # The session checks are hooks, not skills the model may forget to invoke.
         self.assertIn("session-gate.js\\\" start", json.dumps(hooks["SessionStart"]))
         self.assertIn("session-gate.js\\\" end", json.dumps(hooks["SessionEnd"]))
@@ -740,7 +746,8 @@ class AskMattGateTests(unittest.TestCase):
             nonce = self._state(state_dir, "s-clean")["nonce"]
             self.run_claude_declare("s-clean", nonce, "implement", state_dir)
             self.run_presend_lint("s-clean", "Hook wired. Tests pass.", state_dir)
-            transcript = self._transcript(state_dir, "Hook wired. Tests pass.")
+            # "Tests pass" is a verification claim; it is clean only because a Bash run backs it.
+            transcript = self._transcript_with_tools(state_dir, ["Bash"], "Hook wired. Tests pass.")
             stopped = json.loads(
                 self.run_gate(
                     "claude-stop",
@@ -837,7 +844,7 @@ class AskMattGateTests(unittest.TestCase):
             input=clean, text=True, capture_output=True, check=False,
         )
         self.assertEqual(done.returncode, 0)
-        self.assertIn("caveman lint clean", done.stdout)
+        self.assertIn("lint clean", done.stdout)
 
     def test_lint_exempts_the_mandated_pylons_prefix_but_no_other_fence(self) -> None:
         # ~/.claude/CLAUDE.md orders every reply to open with this diff fence. It is a directive,
@@ -906,9 +913,119 @@ class AskMattGateTests(unittest.TestCase):
             nonce = self._state(state_dir, "s-switch")["nonce"]
             declared = self.run_claude_declare("s-switch", nonce, "implement", state_dir)
             self.assertIn("caveman-off", declared.stdout)
-            lint = self.run_presend_lint("s-switch", "I think it is really just fine.", state_dir)
+            lint = self.run_presend_lint(
+                "s-switch", "The queue is empty and the deploy is scheduled for the morning.", state_dir
+            )
             self.assertEqual(lint.returncode, 0, lint.stdout)
-            self.assertIn("skipped", lint.stdout)
+            self.assertIn("caveman off", lint.stdout)
+
+    def _transcript_with_tools(self, folder: Path, tools: list[str], text: str) -> str:
+        """A transcript: one user prompt, then tool calls, then the assistant's final text."""
+        path = folder / "transcript.jsonl"
+        records = [{"type": "user", "message": {"role": "user", "content": "do it"}}]
+        for name in tools:
+            records.append({
+                "type": "assistant",
+                "message": {"content": [{"type": "tool_use", "name": name, "input": {}}]},
+            })
+            records.append({
+                "type": "user",
+                "message": {"content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]},
+            })
+        records.append({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
+        path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+        return str(path)
+
+    def test_yes_lint_catches_deflection_unverified_claims_and_unread_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.run_gate("claude-prompt", {"session_id": "s-yes"}, state_dir)
+            nonce = self._state(state_dir, "s-yes")["nonce"]
+            self.run_claude_declare("s-yes", nonce, "implement", state_dir)
+
+            def stop_with(tools: list[str], text: str) -> dict:
+                transcript = self._transcript_with_tools(state_dir, tools, text)
+                self.run_presend_lint("s-yes", "Queue empty.", state_dir)  # clean stamp
+                return json.loads(
+                    self.run_gate(
+                        "claude-stop", {"session_id": "s-yes", "transcript_path": transcript},
+                        state_dir, caveman="keep",
+                    ).stdout
+                )
+
+            # Deflection is flagged whatever tools ran.
+            out = stop_with(["Bash"], "Fixed. Please check it works on your side.")
+            self.assertIn("YES deflection", out["systemMessage"])
+            # A verification claim with no tool this turn is an unverified claim.
+            out = stop_with([], "Tests pass. Deploy confirmed.")
+            self.assertIn("YES unverified claim", out["systemMessage"])
+            # The same claim after a Bash run is not flagged.
+            out = stop_with(["Bash"], "Tests pass. Deploy confirmed.")
+            self.assertNotIn("YES unverified claim", out.get("systemMessage", ""))
+            # Certainty without data.
+            out = stop_with([], "The culprit is the relay. Definitely the timeout.")
+            self.assertIn("YES conclusion without data", out["systemMessage"])
+            # Characterising a document nothing opened this turn (Cowork, 2026-09-03).
+            out = stop_with([], "The Manager Tools PDF contains no sample prose for the body sections.")
+            self.assertIn("YES unread source", out["systemMessage"])
+            out = stop_with(["Read"], "The Manager Tools PDF contains no sample prose for the body sections.")
+            self.assertNotIn("YES unread source", out.get("systemMessage", ""))
+            # Hedges fail regardless of tools.
+            out = stop_with(["Bash"], "It is probably the cache.")
+            self.assertIn("YES hedge", out["systemMessage"])
+
+    def test_backup_gate_blocks_config_edits_without_a_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.run_gate("claude-prompt", {"session_id": "s-bak"}, state_dir)
+            nonce = self._state(state_dir, "s-bak")["nonce"]
+            self.run_claude_declare("s-bak", nonce, "implement", state_dir)
+            target = state_dir / "settings.json"
+            target.write_text("{}", encoding="utf-8")
+
+            def edit(path: Path) -> dict:
+                return json.loads(self.run_gate(
+                    "claude-pre-tool",
+                    {"session_id": "s-bak", "tool_name": "Edit",
+                     "tool_input": {"file_path": str(path), "old_string": "{", "new_string": "{"}},
+                    state_dir, caveman="keep",
+                ).stdout)
+
+            denied = edit(target)
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("YES backup gate", denied["hookSpecificOutput"]["permissionDecisionReason"])
+            # A sibling backup lifts the gate.
+            (state_dir / "settings.json.bak-test").write_text("{}", encoding="utf-8")
+            self.assertEqual(edit(target), {})
+            # Files that do not shape behaviour are never gated; new files are never gated.
+            plain = state_dir / "notes.md"
+            plain.write_text("x", encoding="utf-8")
+            self.assertEqual(edit(plain), {})
+            self.assertEqual(edit(state_dir / "brand-new.env"), {})
+
+    def test_post_tool_failure_counter_drives_the_escalation_ladder(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.run_gate("claude-prompt", {"session_id": "s-esc"}, state_dir)
+
+            def after(stdout: str, stderr: str = "") -> dict:
+                return json.loads(self.run_gate(
+                    "claude-post-tool",
+                    {"session_id": "s-esc", "tool_name": "Bash",
+                     "tool_input": {"command": "x"},
+                     "tool_response": {"stdout": stdout, "stderr": stderr, "interrupted": False}},
+                    state_dir, caveman="keep",
+                ).stdout)
+
+            self.assertEqual(after("ok"), {})
+            self.assertEqual(after("", "Traceback (most recent call last):\n  boom"), {})
+            second = after("exit=1")
+            self.assertIn("2 failures", second["hookSpecificOutput"]["additionalContext"])
+            third = after("", "fatal: not a git repository")
+            self.assertIn("five-step audit", third["hookSpecificOutput"]["additionalContext"])
+            # A success resets the ladder; an explicit exit 0 beats error-looking text.
+            self.assertEqual(after("error: none\nexit=0"), {})
+            self.assertEqual(self._state(state_dir, "s-esc")["consecutive_failures"], 0)
 
     def test_lint_subcommand_reads_a_file_as_well_as_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
