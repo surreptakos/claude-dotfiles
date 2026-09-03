@@ -124,6 +124,9 @@ Installed 2026-08-12, version in `docs/agents/harness-version.md`.
   `git config core.hooksPath .githooks`.
 - Tracker conventions: `docs/agents/issue-tracker.md`. Run `node tools/tracker-audit.js` before
   trusting the tracker — exit 2 means it could not audit, which is not a pass.
+- `node tools/claude-md-lint.js <CLAUDE.md>` checks a CLAUDE.md against the concision paradigm
+  (would removing this line cause a mistake?). Findings are prompts to ask that question, not
+  verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
 ## The freshness loop (issue 12)
