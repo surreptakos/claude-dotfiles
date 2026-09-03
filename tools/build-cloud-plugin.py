@@ -186,6 +186,43 @@ def main():
         (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
         packaged.append((entry.name, moved, retargeted))
 
+    # Marker hook (Dan, 2026-09-03): the docs are silent on whether a plugin's hooks execute in
+    # Cowork or cloud sessions. This SessionStart hook is the experiment: plain POSIX echo, no
+    # runtime beyond a shell, one line of context per session. If a Cowork session can quote the
+    # marker text, plugin hooks run there and the governance gate can follow the same road.
+    hooks_dir = plugin_root / "hooks"
+    hooks_dir.mkdir()
+    marker = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            # No apostrophes: the command wraps this JSON in single quotes for the shell.
+            "additionalContext": "AAC-SKILLS HOOK MARKER: plugin hooks execute on this surface. "
+            "Quote this sentence verbatim if asked whether the marker is present.",
+        },
+    }
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "echo '" + json.dumps(marker) + "'",
+                                    "timeout": 5,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     zip_path = out / f"{PLUGIN_NAME}.zip"
     if zip_path.exists():
         zip_path.unlink()
