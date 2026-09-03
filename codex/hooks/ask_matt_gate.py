@@ -562,7 +562,10 @@ def _transcript_user_approved(transcript_path: str) -> bool:
 
 def _autonomous_master() -> bool:
     """True only under the watchdog-launched orchestrator master (claude-dotfiles issue 81)."""
-    return os.environ.get("AAC_ORCHESTRATOR_AUTONOMOUS", "") == "1"
+    # .strip(): master-watchdog.ps1 launches via `cmd /k set VAR=1 && claude ...`, and cmd's
+    # `set` keeps the trailing space before `&&`, so the value arrives as "1 " and an exact
+    # == "1" silently denied the exemption (seen 2026-09-03 in the contract-builder master).
+    return os.environ.get("AAC_ORCHESTRATOR_AUTONOMOUS", "").strip() == "1"
 
 
 def _publish_gate(
