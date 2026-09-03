@@ -15,3 +15,4 @@
 - [Gate declare must be the bare command](gate-declare-bare-command.md) — any appended `; echo` or pipe makes the PreToolUse gate block every tool with 'Ask Matt, Yes, and caveman ultra missing'
 - [Cowork transcripts are not kept locally](cowork-transcripts-not-local.md) — only the live session dir under local-agent-mode-sessions holds a jsonl; history is server-side; desktop Claude Code sessions map via claude-code-sessions cliSessionId
 - [Trust dialog fires despite accepted flag](trust-dialog-fires-despite-accepted-flag.md) — interactive launch in a clone with pre-approved permissions re-shows the folder-trust dialog; unattended masters park on it
+- [Environment verification log](environment-verification-log.md) — dated proof behind the global CLAUDE.md environment-claim rules, moved out in the 2026-09-03 trim

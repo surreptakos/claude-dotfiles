@@ -958,10 +958,17 @@ CONFIG_FILE_PATTERN = re.compile(
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
+BACKUP_MAX_AGE_SECONDS = 24 * 3600
+
+
 def _has_backup(path: Path) -> bool:
+    """A .bak* sibling from the last day. The first edit of a session needs the copy; later edits
+    the same day keep that copy as their rollback, so they are not asked for another."""
     try:
+        import time
+        cutoff = time.time() - BACKUP_MAX_AGE_SECONDS
         for sibling in path.parent.glob(path.name + ".bak*"):
-            if sibling.is_file() and sibling.stat().st_mtime >= path.stat().st_mtime - 1:
+            if sibling.is_file() and sibling.stat().st_mtime >= cutoff:
                 return True
     except OSError:
         return False
