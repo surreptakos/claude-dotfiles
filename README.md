@@ -137,12 +137,16 @@ memory docs state that "in Cowork sessions on your desktop" Claude Code loads `~
 skipping only imports and symlinked rules that resolve outside the session's working directory. So
 the global instructions DO reach Cowork; hooks are another matter — Cowork runs its agent in a VM
 (`%APPDATA%\Claude\logs\cowork_vm_node.log`), the docs say nothing about hook execution there, and a
-hook command pointing at a Windows path cannot run inside it. A plugin's own `hooks.json` DOES
-execute there: verified 2026-09-03 when a Cowork session quoted the `AAC-SKILLS HOOK MARKER`
-sentence that the aac-skills SessionStart hook echoes (see `tools/build-cloud-plugin.py`). So the
-road for governance into Cowork is a hook carried by the plugin, with a script that needs nothing
-this machine has — the same hook also prints a runtime probe (OS, python3, node, pwsh) so the port
-can be planned against what the VM actually offers.
+hook command pointing at a Windows path cannot run inside it. A plugin's own `hooks.json` does NOT
+reach the model there either, on the evidence so far (2026-09-03): the aac-skills SessionStart hook
+echoes an `AAC-SKILLS HOOK MARKER` sentence carrying the hostname and a UTC timestamp, and a fresh
+Cowork session with the plugin's skills listed reported no such sentence anywhere in its context.
+An earlier Cowork session had "quoted" the marker — that quote matched the hook file verbatim and
+carried none of the runtime values, so it was a file read or a fabrication, and this paragraph
+briefly claimed the opposite on its strength. Cowork's own explanation: project chats are not
+Claude Code sessions, so hooks do not run. What does reach Cowork is text: the global `CLAUDE.md`,
+the plugin's skill descriptions and bodies, and Cowork's own memory. The marker hook stays in the
+plugin as a standing probe (harmless one-liner) so a future surface change is noticed.
 
 `tools/build-cloud-plugin.py` packages the live `~/.claude/skills` tree into that shape:
 
