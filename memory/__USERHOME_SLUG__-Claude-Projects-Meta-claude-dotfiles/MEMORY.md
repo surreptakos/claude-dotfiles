@@ -12,3 +12,6 @@
 - [Answer yes/no in one line](answer-yes-no-in-one-line.md) — outcome, action, fix timing; no evidence dump
 - [Bash tool collapses backslashes](bash-tool-collapses-backslashes.md) — `\\` arrives as `\` even in a quoted heredoc; write backslash-bearing scripts with the Write tool
 - [PS 5.1 scripts need a BOM](ps51-scripts-need-a-bom.md) — Task Scheduler runs powershell.exe 5.1; BOM-less .ps1 with an em dash fails to parse; register tasks against pwsh
+- [Gate declare must be the bare command](gate-declare-bare-command.md) — any appended `; echo` or pipe makes the PreToolUse gate block every tool with 'Ask Matt, Yes, and caveman ultra missing'
+- [Cowork transcripts are not kept locally](cowork-transcripts-not-local.md) — only the live session dir under local-agent-mode-sessions holds a jsonl; history is server-side; desktop Claude Code sessions map via claude-code-sessions cliSessionId
+- [Trust dialog fires despite accepted flag](trust-dialog-fires-despite-accepted-flag.md) — interactive launch in a clone with pre-approved permissions re-shows the folder-trust dialog; unattended masters park on it

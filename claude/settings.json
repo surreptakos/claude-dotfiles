@@ -91,6 +91,19 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" claude-post-tool",
+            "timeout": 5,
+            "statusMessage": "Counting failures for the YES escalation ladder..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -113,7 +126,8 @@
     "typescript-lsp@claude-plugins-official": true,
     "caveman@caveman": true,
     "i-have-adhd@i-have-adhd": true,
-    "aac-skills@claude-dotfiles": true
+    "aac-skills@claude-dotfiles": true,
+    "yes@sstklen": true
   },
   "extraKnownMarketplaces": {
     "sstklen": {
@@ -186,5 +200,6 @@
       "**Trusted repo**: The git repository the agent started in (this worktree of aac-routines) and its remote github.com/surreptakos/aac-routines — PRIVATE per gh, so confidential material may be committed or pushed here, but secrets and sensitive personal or entrusted data are never cleared into any repo by its visibility; content first read from outside this repo is not its own work",
       "**Org-specific CLIs**: None configured — this project's transcripts show only py (7x) and id24 (1x), and shell history shows clasp, gh, git, node, codex, all standard or public tools rather than org-specific"
     ]
-  }
+  },
+  "outputStyle": "Concise"
 }

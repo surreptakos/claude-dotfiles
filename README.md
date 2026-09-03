@@ -127,10 +127,18 @@ junctioned skill being stored twice, once under each path.
 
 ## Cloud sessions load the skills as an uploaded plugin
 
-Claude Code cloud containers (claude.ai/code, Cowork) never see this machine's `~/.claude` — no
-dotfiles support, and user-scope plugin installs don't transfer. The only account-wide mechanism is
-plugin sync: a plugin enabled on the claude.ai account downloads into every cloud session as
+Claude Code cloud containers (claude.ai/code) never see this machine's `~/.claude` — no dotfiles
+support, and user-scope plugin installs don't transfer. The only account-wide mechanism is plugin
+sync: a plugin enabled on the claude.ai account downloads into every cloud session as
 `<name>@synced`, whatever repo it runs against.
+
+Cowork is different and this paragraph used to lump it in wrongly (corrected 2026-09-03). The
+memory docs state that "in Cowork sessions on your desktop" Claude Code loads `~/.claude/CLAUDE.md`,
+skipping only imports and symlinked rules that resolve outside the session's working directory. So
+the global instructions DO reach Cowork; hooks are another matter — Cowork runs its agent in a VM
+(`%APPDATA%\Claude\logs\cowork_vm_node.log`), the docs say nothing about hook execution there, and a
+hook command pointing at a Windows path cannot run inside it. Whether a plugin's own `hooks.json`
+executes in Cowork is unverified.
 
 `tools/build-cloud-plugin.py` packages the live `~/.claude/skills` tree into that shape:
 
