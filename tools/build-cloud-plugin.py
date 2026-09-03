@@ -144,7 +144,11 @@ def main():
     (plugin_root / ".claude-plugin").mkdir(parents=True)
 
     today = date.today()
-    version = f"{today.year}.{today.month}.{today.day}"
+    # Patch segment = day followed by HHMM, so several builds on one day carry distinct, increasing
+    # versions. Five builds on 2026-09-03 all said 2026.9.3 and a Cowork plugin update saw nothing
+    # new. Never zero-padded at the front (day >= 1), so it stays valid semver.
+    from datetime import datetime
+    version = f"{today.year}.{today.month}.{today.day}{datetime.now():%H%M}"
     (plugin_root / ".claude-plugin" / "plugin.json").write_text(
         json.dumps(
             {
@@ -192,14 +196,25 @@ def main():
     # marker text, plugin hooks run there and the governance gate can follow the same road.
     hooks_dir = plugin_root / "hooks"
     hooks_dir.mkdir()
-    marker = {
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            # No apostrophes: the command wraps this JSON in single quotes for the shell.
-            "additionalContext": "AAC-SKILLS HOOK MARKER: plugin hooks execute on this surface. "
-            "Quote this sentence verbatim if asked whether the marker is present.",
-        },
-    }
+    # One hook, one JSON additionalContext (the shape a Cowork session quoted on 2026-09-03). The
+    # runtime probe rides inside the same sentence: values computed at session start (host, UTC
+    # time, interpreter paths) that no file contains, so a quoted line proves the hook RAN rather
+    # than that the model read this file. No apostrophes anywhere: the shell wraps it in quotes.
+    marker_text = (
+        "AAC-SKILLS HOOK MARKER: plugin hooks execute on this surface. Quote this sentence "
+        "verbatim if asked whether the marker is present. RUNTIME PROBE:"
+        " os=$(uname -s 2>/dev/null || echo unknown)"
+        " python3=$(command -v python3 || echo none)"
+        " node=$(command -v node || echo none)"
+        " pwsh=$(command -v pwsh || echo none)"
+        " home=$HOME"
+        " host=$(hostname 2>/dev/null || echo unknown)"
+        " at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+    )
+    marker_json = (
+        '{\\"hookSpecificOutput\\":{\\"hookEventName\\":\\"SessionStart\\",'
+        '\\"additionalContext\\":\\"' + marker_text + '\\"}}'
+    )
     (hooks_dir / "hooks.json").write_text(
         json.dumps(
             {
@@ -209,27 +224,7 @@ def main():
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "echo '" + json.dumps(marker) + "'",
-                                    "timeout": 5,
-                                },
-                                # Verified 2026-09-03: a Cowork session quoted the marker, so
-                                # plugin hooks run there. This second hook reports what the VM
-                                # offers (plain stdout on SessionStart is added to context) so the
-                                # governance gate can be ported against a known runtime.
-                                {
-                                    "type": "command",
-                                    "command": (
-                                        "sh -c 'echo \"AAC-SKILLS RUNTIME PROBE: "
-                                        "os=$(uname -s 2>/dev/null || echo unknown) "
-                                        "python3=$(command -v python3 || echo none) "
-                                        "node=$(command -v node || echo none) "
-                                        "pwsh=$(command -v pwsh || echo none) "
-                                        "home=$HOME "
-                                        # Runtime-only values: a model that merely READ this file
-                                        # cannot produce them, so a quoted line proves execution.
-                                        "host=$(hostname 2>/dev/null || echo unknown) "
-                                        "at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)\"'"
-                                    ),
+                                    "command": "sh -c 'echo \"" + marker_json + "\"'",
                                     "timeout": 5,
                                 },
                             ]
