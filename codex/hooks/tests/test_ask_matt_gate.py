@@ -1026,6 +1026,17 @@ class AskMattGateTests(unittest.TestCase):
             # A success resets the ladder; an explicit exit 0 beats error-looking text.
             self.assertEqual(after("error: none\nexit=0"), {})
             self.assertEqual(self._state(state_dir, "s-esc")["consecutive_failures"], 0)
+            # The pre-send lint failing is a draft rewrite, not a debugging failure.
+            for _ in range(3):
+                out = json.loads(self.run_gate(
+                    "claude-post-tool",
+                    {"session_id": "s-esc", "tool_name": "Bash",
+                     "tool_input": {"command": 'py -3 "C:/x/ask_matt_gate.py" lint draft.md "s-esc"'},
+                     "tool_response": {"stdout": "lint: too long\nexit=1", "stderr": ""}},
+                    state_dir, caveman="keep",
+                ).stdout)
+                self.assertEqual(out, {})
+            self.assertEqual(self._state(state_dir, "s-esc")["consecutive_failures"], 0)
 
     def test_lint_subcommand_reads_a_file_as_well_as_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

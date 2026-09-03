@@ -20,7 +20,9 @@ every project, before any other text.
 ### Three standing disciplines — always on, no exceptions
 
 These are the operating rules, inlined because a pointer to a skill is not a rule: `ask-matt` is
-`disable-model-invocation: true` and the `yes` skill has returned an empty body when invoked.
+`disable-model-invocation: true` and the `yes` skill (an 11 KB plugin skill, never actually empty —
+that claim was checked and dropped 2026-09-03) loads only when its description matches the task,
+which is exactly when discipline is not needed.
 Re-read this section when a session runs long — **drift is the failure mode**, and a per-turn style
 hook firing ~25 times did not prevent it.
 

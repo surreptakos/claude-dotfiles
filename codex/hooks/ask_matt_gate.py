@@ -1047,6 +1047,10 @@ def _claude_post_tool(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
     if str(event.get("tool_name") or "") not in {"Bash", "PowerShell"} or not session_id:
         return {}
+    # The pre-send lint exits 1 by design until the draft is clean; rewriting a draft is not a
+    # debugging failure and must not climb the ladder (it did, twice, on 2026-09-03).
+    if "ask_matt_gate.py" in _command_of(event) and " lint " in _command_of(event):
+        return {}
     state = _read_state("claude", session_id) or {}
     failures = int(state.get("consecutive_failures") or 0)
     failures = failures + 1 if _tool_failed(event.get("tool_response")) else 0
