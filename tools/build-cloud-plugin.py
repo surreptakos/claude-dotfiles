@@ -153,7 +153,7 @@ def main():
                 "author": {"name": "Dan Gatsakos"},
                 "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
                 "Company team skills (aac-sop, aac-contract-package, writing, "
-                "software-decision). Built by tools/build-cloud-plugin.py from "
+                "software-decision, yes). Built by tools/build-cloud-plugin.py from "
                 "~/.claude/skills and the repo's aac-skills/ tree.",
             },
             indent=2,
@@ -195,8 +195,10 @@ def main():
                 zf.write(f, f.relative_to(plugin_root))
 
     # ---------------------------------------------------------------- AAC team skills
-    # The four org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
+    # The org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
     # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
+    # aac-skills/yes is a vendored copy of sstklen/yes.md's English skill (MIT, LICENSE alongside);
+    # the plugin's three hooks are not carried - this package ships skills only.
     repo = Path(__file__).resolve().parent.parent
     aac_src = repo / "aac-skills"
     if aac_src.is_dir():
