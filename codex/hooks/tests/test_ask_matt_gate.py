@@ -443,11 +443,14 @@ class AskMattGateTests(unittest.TestCase):
             ultra = self.run_presend_lint("s-scale", wordy, state_dir, caveman="ultra")
             self.assertEqual(ultra.returncode, 1)
             self.assertIn("article density", ultra.stdout)
-            lite = self.run_presend_lint("s-scale", wordy, state_dir, caveman="lite")
+            # The level is settled per prompt (flag or prompt switch) and kept in state; the lint
+            # follows the state, so a new prompt at lite is what changes it.
+            self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir, caveman="lite")
+            lite = self.run_presend_lint("s-scale", wordy, state_dir, caveman="keep")
             self.assertEqual(lite.returncode, 0, lite.stdout)
             self.assertIn("level lite", lite.stdout)
             # Filler stays banned at every level.
-            filler = self.run_presend_lint("s-scale", "Queue empty. Tests basically pass.", state_dir, caveman="lite")
+            filler = self.run_presend_lint("s-scale", "Queue empty. Tests basically pass.", state_dir, caveman="keep")
             self.assertEqual(filler.returncode, 1)
             self.assertIn("banned filler", filler.stdout)
             # Off: anything goes, exit 0, and Stop does not complain about a missing lint.
@@ -861,6 +864,51 @@ class AskMattGateTests(unittest.TestCase):
             input=moved, text=True, capture_output=True, check=False,
         )
         self.assertEqual(done.returncode, 1)
+
+    def test_prompt_switch_takes_effect_this_turn_regardless_of_hook_order(self) -> None:
+        # Hooks on one event run in parallel with no ordering (docs/hook-ordering-2026-09-03.md),
+        # so the gate reads the switch out of the prompt itself; the flag still says ultra here.
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+
+            def context(prompt: str, **extra_env: str) -> str:
+                env_backup = dict(os.environ)
+                os.environ.update(extra_env)
+                try:
+                    out = self.run_gate(
+                        "claude-prompt", {"session_id": "s-switch", "prompt": prompt}, state_dir
+                    )
+                finally:
+                    os.environ.clear()
+                    os.environ.update(env_backup)
+                return json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"]
+
+            self.assertIn("CAVEMAN LITE: ENFORCED", context("/caveman lite"))
+            self.assertEqual(self._state(state_dir, "s-switch")["caveman"], "lite")
+            self.assertIn("CAVEMAN FULL: ENFORCED", context("/caveman:caveman full"))
+            self.assertIn("CAVEMAN: OFF", context("/caveman off"))
+            self.assertIn("CAVEMAN: OFF", context("stop caveman"))
+            self.assertIn("CAVEMAN: OFF", context("turn the caveman mode off"))
+            self.assertIn("CAVEMAN: OFF", context("Normal mode please."))
+            # Bare /caveman means the plugin default; pinned here through the env override.
+            self.assertIn("CAVEMAN FULL: ENFORCED", context("/caveman", CAVEMAN_DEFAULT_MODE="full"))
+            # Questions and unrelated prompts fall back to the flag (ultra).
+            self.assertIn("CAVEMAN ULTRA: ENFORCED", context("what is caveman mode?"))
+            self.assertIn("CAVEMAN ULTRA: ENFORCED", context("how do I exit vim normal mode"))
+            self.assertIn("CAVEMAN ULTRA: ENFORCED", context("/caveman bogus"))
+            self.assertIn("CAVEMAN ULTRA: ENFORCED", context("fix the router"))
+            # The flag was never touched: the tracker owns it.
+            self.assertEqual(
+                (state_dir / "claude-home" / ".caveman-active").read_text(encoding="utf-8"), "ultra"
+            )
+            # Declare and lint keep the level the prompt settled, even though the flag says ultra.
+            context("/caveman off")
+            nonce = self._state(state_dir, "s-switch")["nonce"]
+            declared = self.run_claude_declare("s-switch", nonce, "implement", state_dir)
+            self.assertIn("caveman-off", declared.stdout)
+            lint = self.run_presend_lint("s-switch", "I think it is really just fine.", state_dir)
+            self.assertEqual(lint.returncode, 0, lint.stdout)
+            self.assertIn("skipped", lint.stdout)
 
     def test_lint_subcommand_reads_a_file_as_well_as_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

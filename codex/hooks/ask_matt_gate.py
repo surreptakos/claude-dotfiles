@@ -72,6 +72,63 @@ def _read_caveman_mode() -> str:
     return "off"
 
 
+# Hooks on one event run in parallel with no ordering (docs/hook-ordering-2026-09-03.md), so on the
+# prompt that carries `/caveman lite` this gate may read the flag before the tracker has written it.
+# The gate therefore recognises the tracker's explicit switch forms itself and uses the result for
+# THIS turn; the flag remains the source on every other prompt. Natural-language activations
+# ("be terse") are left to the tracker and take effect next turn.
+_CAVEMAN_OFF_PATTERNS = (
+    re.compile(r"\b(stop|disable|deactivate|quit|exit|kill)\s+(the\s+)?caveman\b"),
+    re.compile(r"\bcaveman(\s+mode)?\s+(off|stop|disabled?)\b"),
+    re.compile(r"\bturn\s+off\s+(the\s+)?caveman\b"),
+    re.compile(r"^(please\s+)?(go\s+|back\s+to\s+|switch\s+(back\s+)?to\s+|return\s+to\s+)?normal\s+mode\b"),
+)
+_CAVEMAN_QUESTION = re.compile(
+    r"^(what|whats|what's|how|why|when|where|who|does|do|did|is|are|can|could|would|should|tell me|explain)\b"
+)
+_CAVEMAN_SLASH = re.compile(r"^/caveman(?::caveman)?(?:\s+(\S+))?\s*[.!]*$")
+
+
+def _caveman_default_mode() -> str:
+    """The plugin's own resolution, minus repo-local config: env, then user config, then full."""
+    env_mode = (os.environ.get("CAVEMAN_DEFAULT_MODE") or "").lower()
+    if env_mode in CAVEMAN_PROSE_MODES + ("off",):
+        return env_mode
+    base = os.environ.get("XDG_CONFIG_HOME") or os.environ.get("APPDATA") or ""
+    try:
+        cfg = json.loads((Path(base) / "caveman" / "config.json").read_text(encoding="utf-8"))
+        mode = str(cfg.get("defaultMode") or "").lower()
+    except (OSError, ValueError, AttributeError):
+        mode = ""
+    if mode.startswith("wenyan"):
+        mode = mode[len("wenyan"):].lstrip("-") or "full"
+    return mode if mode in CAVEMAN_PROSE_MODES + ("off",) else "full"
+
+
+def _mode_from_prompt(prompt: str) -> str | None:
+    """Level an explicit switch in this prompt selects, or None when the prompt is not a switch."""
+    text = re.sub(r"\s+", " ", (prompt or "").strip().lower())
+    if not text:
+        return None
+    if any(p.search(text) for p in _CAVEMAN_OFF_PATTERNS):
+        return "off"
+    if re.search(r"\bnormal mode\b", text) and re.search(r"\bcaveman\b", text):
+        return "off"
+    if _CAVEMAN_QUESTION.match(text):
+        return None
+    slash = _CAVEMAN_SLASH.match(text)
+    if not slash:
+        return None
+    arg = slash.group(1) or ""
+    if not arg:
+        return _caveman_default_mode()
+    if arg in ("off", "stop", "disable"):
+        return "off"
+    if arg.startswith("wenyan"):
+        arg = arg[len("wenyan"):].lstrip("-") or "full"
+    return arg if arg in CAVEMAN_PROSE_MODES else None
+
+
 # Lint thresholds per level. Ultra keeps the numbers Dan tuned on 2026-09-02 (see the comments on
 # WORD_CAP and friends). Full and lite are looser; monospace, paths and filler stay on at every
 # level because those rules were about what a reply is for, not how terse it is.
@@ -253,7 +310,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     # fed them the deny string in place of real tool output. The Stop hook still refuses to end the
     # turn until a fresh declaration for THIS nonce lands, which is where the per-turn rigor lives.
     previous = _read_state("claude", session_id)
-    mode = _read_caveman_mode()
+    mode = _mode_from_prompt(str(event.get("prompt") or "")) or _read_caveman_mode()
     state = {
         "nonce": nonce,
         "flow": None,
@@ -602,7 +659,10 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
     if not state or state.get("nonce") != nonce:
         print("Governance route rejected: no matching Claude turn", file=sys.stderr)
         return 2
-    mode = _read_caveman_mode()
+    # The prompt hook already settled this turn's level (prompt switch or flag); keep it.
+    mode = state.get("caveman")
+    if mode not in CAVEMAN_PROSE_MODES + ("off",):
+        mode = _read_caveman_mode()
     _write_state(
         "claude",
         session_id,
@@ -931,12 +991,14 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     except OSError as error:
         print(f"caveman lint could not read draft: {error}", file=sys.stderr)
         return 2
-    mode = _read_caveman_mode()
+    state = (_read_state("claude", session_id) or {}) if session_id else {}
+    mode = state.get("caveman")
+    if mode not in CAVEMAN_PROSE_MODES + ("off",):
+        mode = _read_caveman_mode()
     violations = _caveman_lint(text, mode)
     if not violations:
         words = len(_strip_code(text).split())
         if session_id:
-            state = _read_state("claude", session_id) or {}
             state["lint_clean_nonce"] = state.get("nonce")
             state["lint_clean_words"] = words
             _write_state("claude", session_id, state)
