@@ -211,7 +211,23 @@ def main():
                                     "type": "command",
                                     "command": "echo '" + json.dumps(marker) + "'",
                                     "timeout": 5,
-                                }
+                                },
+                                # Verified 2026-09-03: a Cowork session quoted the marker, so
+                                # plugin hooks run there. This second hook reports what the VM
+                                # offers (plain stdout on SessionStart is added to context) so the
+                                # governance gate can be ported against a known runtime.
+                                {
+                                    "type": "command",
+                                    "command": (
+                                        "sh -c 'echo \"AAC-SKILLS RUNTIME PROBE: "
+                                        "os=$(uname -s 2>/dev/null || echo unknown) "
+                                        "python3=$(command -v python3 || echo none) "
+                                        "node=$(command -v node || echo none) "
+                                        "pwsh=$(command -v pwsh || echo none) "
+                                        "home=$HOME\"'"
+                                    ),
+                                    "timeout": 5,
+                                },
                             ]
                         }
                     ]
