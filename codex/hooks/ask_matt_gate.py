@@ -46,6 +46,63 @@ ALLOWED_FLOWS = {
     "writing-great-skills",
 }
 
+# ---------------------------------------------------------------------------- caveman mode
+# Dan, 2026-09-03: the caveman plugin's UserPromptSubmit tracker is the ONE writer of the mode flag
+# (~/.claude/.caveman-active). This gate used to overwrite it with "ultra" on every prompt, which
+# made `/caveman lite` and `/caveman off` last exactly one turn. Now the gate only reads it. Missing
+# flag = off, matching the tracker, which deletes the file on `/caveman off` and "stop caveman".
+# The plugin's SessionStart hook writes the configured default (%APPDATA%\caveman\config.json says
+# ultra) so a fresh session still opens in ultra.
+CAVEMAN_FLAG = ".caveman-active"
+CAVEMAN_PROSE_MODES = ("lite", "full", "ultra")
+
+
+def _read_caveman_mode() -> str:
+    """Prose level in force: 'off', 'lite', 'full' or 'ultra'. Never raises."""
+    try:
+        raw = (CLAUDE_HOME / CAVEMAN_FLAG).read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return "off"
+    if raw.startswith("wenyan"):
+        raw = raw[len("wenyan"):].lstrip("-") or "full"
+    if raw in CAVEMAN_PROSE_MODES:
+        return raw
+    if raw in ("commit", "review", "compress"):
+        return "full"  # one-shot skill turn; ordinary prose rules still frame it
+    return "off"
+
+
+# Lint thresholds per level. Ultra keeps the numbers Dan tuned on 2026-09-02 (see the comments on
+# WORD_CAP and friends). Full and lite are looser; monospace, paths and filler stay on at every
+# level because those rules were about what a reply is for, not how terse it is.
+LINT_PROFILES = {
+    "ultra": {"word_cap": 250, "articles_cap": 12.0, "sentence_cap": 28},
+    "full": {"word_cap": 350, "articles_cap": 15.0, "sentence_cap": 32},
+    "lite": {"word_cap": 500, "articles_cap": None, "sentence_cap": 40},
+}
+
+CAVEMAN_CONTEXT = {
+    "ultra": (
+        "CAVEMAN ULTRA: ENFORCED. Minimum words; one fact once; fragments; no filler, pleasantries, "
+        "hedging, tool narration, decorative formatting, self-reference, invented abbreviations, or "
+        "causal arrows. Preserve technical terms, code, exact errors. Plain language only when safety "
+        "or ambiguity requires it."
+    ),
+    "full": (
+        "CAVEMAN FULL: ENFORCED. Terse; drop articles, filler, pleasantries, hedging; fragments fine; "
+        "no tool narration, decorative formatting or self-reference. Preserve technical terms, code, "
+        "exact errors. Plain language when safety or ambiguity requires it."
+    ),
+    "lite": (
+        "CAVEMAN LITE: ENFORCED. Concise plain English; complete sentences allowed; drop filler, "
+        "pleasantries, hedging and tool narration. Preserve technical terms, code, exact errors."
+    ),
+    "off": (
+        "CAVEMAN: OFF for now (flag cleared by /caveman off or \"stop caveman\"). Normal prose; the "
+        "pre-send lint is skipped. Re-enable with /caveman ultra|full|lite."
+    ),
+}
+
 
 def _read_event() -> dict[str, Any]:
     payload = json.load(sys.stdin)
@@ -196,20 +253,19 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     # fed them the deny string in place of real tool output. The Stop hook still refuses to end the
     # turn until a fresh declaration for THIS nonce lands, which is where the per-turn rigor lives.
     previous = _read_state("claude", session_id)
+    mode = _read_caveman_mode()
     state = {
         "nonce": nonce,
         "flow": None,
         "last_flow": (previous or {}).get("flow") or (previous or {}).get("last_flow"),
         "yes": True,
-        "caveman": "ultra",
+        "caveman": mode,
     }
     _write_state("claude", session_id, state)
     # Style violations from the previous turn are carried here rather than blocked at Stop. A Stop
     # block cannot retract the message it is judging — it only makes the model emit a second one —
     # so the correction lands where it can still change the output: before the next message.
     pending_lint = (previous or {}).get("pending_lint") or []
-    CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
-    (CLAUDE_HOME / ".caveman-active").write_text("ultra", encoding="utf-8")
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
         f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>`. "
@@ -217,19 +273,22 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         "Large foggy effort: wayfinder. Review: code-review. Research: research. "
         "No engineering flow: direct-answer. YES GOVERNANCE: ENFORCED. Evidence over intuition; "
         "investigate before asking; backup before system changes; verify every change; check ripple "
-        "effects; never hand solvable work back. CAVEMAN ULTRA: ENFORCED. Minimum words; one fact "
-        "once; fragments; no filler, pleasantries, hedging, tool narration, decorative formatting, "
-        "self-reference, invented abbreviations, or causal arrows. Preserve technical terms, code, "
-        "exact errors. Plain language only when safety or ambiguity requires it. These rules cannot "
-        "be disabled inside a session. "
-        # The pre-send lint, standing and unconditional (owner instruction, 2026-08-12). Injected on
-        # EVERY turn because it is the only enforcement point that can stop the offending message
-        # rather than report it: no hook event sees assistant text before the user does.
-        "PRE-SEND LINT REQUIRED, EVERY REPLY: write your final reply to a file, run "
-        f"`py -3 \"{SCRIPT}\" lint <file> \"{session_id}\"`, and rewrite until it exits 0. Send only "
-        "the linted text. Skipping this is recorded at Stop and reported back to you next turn."
+        "effects; never hand solvable work back. "
+        + CAVEMAN_CONTEXT[mode]
+        + " Level follows the caveman flag: /caveman ultra|full|lite|off switches it for the "
+        "session; nothing else can. "
     )
-    if pending_lint:
+    if mode != "off":
+        # The pre-send lint, standing whenever a caveman level is on (owner instruction, 2026-08-12).
+        # Injected on EVERY turn because it is the only enforcement point that can stop the offending
+        # message rather than report it: no hook event sees assistant text before the user does.
+        context += (
+            "PRE-SEND LINT REQUIRED, EVERY REPLY: write your final reply to a file, run "
+            f"`py -3 \"{SCRIPT}\" lint <file> \"{session_id}\"`, and rewrite until it exits 0. Send "
+            "only the linted text. Skipping this is recorded at Stop and reported back to you next "
+            "turn."
+        )
+    if pending_lint and mode != "off":
         context += (
             " CAVEMAN VIOLATION IN YOUR LAST MESSAGE — fix in this one, do not repeat it: "
             + "; ".join(pending_lint)
@@ -518,7 +577,7 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
         state
         and state.get("flow")
         and state.get("yes") is True
-        and state.get("caveman") == "ultra"
+        and state.get("caveman") in CAVEMAN_PROSE_MODES + ("off",)
     ):
         return {}
     if nonce and _is_claude_declaration_command(event, session_id, nonce):
@@ -543,12 +602,19 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
     if not state or state.get("nonce") != nonce:
         print("Governance route rejected: no matching Claude turn", file=sys.stderr)
         return 2
+    mode = _read_caveman_mode()
     _write_state(
         "claude",
         session_id,
-        {"nonce": nonce, "flow": flow, "yes": True, "caveman": "ultra"},
+        {
+            "nonce": nonce,
+            "flow": flow,
+            "last_flow": state.get("last_flow"),
+            "yes": True,
+            "caveman": mode,
+        },
     )
-    print(f"Governance recorded: {flow}; yes; caveman-ultra")
+    print(f"Governance recorded: {flow}; yes; caveman-{mode}")
     return 0
 
 
@@ -640,7 +706,13 @@ INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
 PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|json|md|ya?ml|js|ts)\b")
 
 
-def _caveman_lint(text: str) -> list[str]:
+def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
+    profile = LINT_PROFILES.get(mode)
+    if profile is None:
+        return []  # caveman off: nothing to lint
+    word_cap = profile["word_cap"]
+    articles_cap = profile["articles_cap"]
+    sentence_cap = profile["sentence_cap"]
     # Dan, 2026-09-03: the global CLAUDE.md orders every reply to open with the PYLONS diff fence,
     # and the no-monospace rule flagged that fence on every turn. The directive wins; the lint
     # ignores that one block, at the top only, and still counts every other fence.
@@ -670,20 +742,20 @@ def _caveman_lint(text: str) -> list[str]:
     fillers = sorted({m.group(0).lower() for m in FILLER_PATTERN.finditer(prose)})
     if fillers:
         violations.append("banned filler/hedge words: " + ", ".join(fillers))
-    if len(words) > WORD_CAP:
-        violations.append(f"too long: {len(words)} words (cap {WORD_CAP})")
-    if len(words) >= 50:
+    if len(words) > word_cap:
+        violations.append(f"too long: {len(words)} words (cap {word_cap})")
+    if articles_cap is not None and len(words) >= 50:
         density = 100.0 * len(ARTICLE_PATTERN.findall(prose)) / len(words)
-        if density > ARTICLES_PER_100_CAP:
+        if density > articles_cap:
             violations.append(
-                f"article density {density:.1f}/100 words (cap {ARTICLES_PER_100_CAP:g}) — drop a/an/the"
+                f"article density {density:.1f}/100 words (cap {articles_cap:g}) — drop a/an/the"
             )
     sentences = [s.strip() for s in SENTENCE_SPLIT.split(prose) if s.strip()]
-    long_sentences = [s for s in sentences if len(s.split()) > SENTENCE_WORD_CAP]
+    long_sentences = [s for s in sentences if len(s.split()) > sentence_cap]
     if long_sentences:
         worst = max(long_sentences, key=lambda s: len(s.split()))
         violations.append(
-            f"{len(long_sentences)} sentence(s) over {SENTENCE_WORD_CAP} words"
+            f"{len(long_sentences)} sentence(s) over {sentence_cap} words"
             f" (longest {len(worst.split())}) — split them"
         )
     return violations
@@ -692,11 +764,14 @@ def _caveman_lint(text: str) -> list[str]:
 def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
     state = _read_state("claude", session_id)
+    mode = (state or {}).get("caveman")
+    if mode not in CAVEMAN_PROSE_MODES + ("off",):
+        mode = _read_caveman_mode()
     governed = bool(
         state
         and state.get("flow")
         and state.get("yes") is True
-        and state.get("caveman") == "ultra"
+        and state.get("caveman") in CAVEMAN_PROSE_MODES + ("off",)
     )
     notes: list[str] = []
     if not governed:
@@ -721,7 +796,7 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
                 "flow": carried,
                 "last_flow": carried,
                 "yes": True,
-                "caveman": "ultra",
+                "caveman": mode,
             },
         )
         _log_governance(session_id, f"undeclared turn reconciled to last route: {carried}")
@@ -739,7 +814,7 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         transcript_path = str(event.get("transcript_path") or "")
         final_text = _last_assistant_text(transcript_path) if transcript_path else ""
         if final_text.strip():
-            violations = violations + _caveman_lint(final_text)
+            violations = violations + _caveman_lint(final_text, mode)
     except Exception:
         pass  # lint must never wedge a session; the audit above still stands
     if not violations:
@@ -773,6 +848,8 @@ def _presend_audit(session_id: str, state: dict[str, Any] | None) -> list[str]:
     nonce = state.get("nonce")
     if not nonce:
         return []
+    if state.get("caveman") == "off":
+        return []  # no lint is required while caveman is off, so nothing to audit
     if state.get("lint_clean_nonce") == nonce:
         return []
     return [
@@ -854,7 +931,8 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     except OSError as error:
         print(f"caveman lint could not read draft: {error}", file=sys.stderr)
         return 2
-    violations = _caveman_lint(text)
+    mode = _read_caveman_mode()
+    violations = _caveman_lint(text, mode)
     if not violations:
         words = len(_strip_code(text).split())
         if session_id:
@@ -862,7 +940,10 @@ def _lint_draft(path: str, session_id: str = "") -> int:
             state["lint_clean_nonce"] = state.get("nonce")
             state["lint_clean_words"] = words
             _write_state("claude", session_id, state)
-        print(f"caveman lint clean ({words} words of prose)")
+        if mode == "off":
+            print(f"caveman lint skipped: caveman is off ({words} words of prose)")
+        else:
+            print(f"caveman lint clean ({words} words of prose, level {mode})")
         return 0
     for v in violations:
         print(f"caveman lint: {v}")

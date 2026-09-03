@@ -18,7 +18,24 @@ CLAUDE_REMINDER = Path.home() / ".claude" / "hooks" / "governance-reminder.js"
 
 
 class AskMattGateTests(unittest.TestCase):
-    def run_gate(self, mode: str, event: dict, state_dir: Path) -> subprocess.CompletedProcess[str]:
+    # The caveman plugin's tracker owns ~/.claude/.caveman-active; the gate only reads it. Tests
+    # model that by writing the flag into the fake claude-home themselves: ultra unless a test says
+    # otherwise, None to model a cleared flag (/caveman off).
+    def set_caveman(self, state_dir: Path, mode: str | None) -> None:
+        home = state_dir / "claude-home"
+        home.mkdir(parents=True, exist_ok=True)
+        flag = home / ".caveman-active"
+        if mode is None:
+            if flag.exists():
+                flag.unlink()
+        else:
+            flag.write_text(mode, encoding="utf-8")
+
+    def run_gate(
+        self, mode: str, event: dict, state_dir: Path, caveman: str | None = "ultra"
+    ) -> subprocess.CompletedProcess[str]:
+        if caveman != "keep":
+            self.set_caveman(state_dir, caveman)
         env = dict(os.environ)
         env["ASK_MATT_GATE_STATE_DIR"] = str(state_dir)
         env["GOVERNANCE_CLAUDE_HOME"] = str(state_dir / "claude-home")
@@ -33,8 +50,10 @@ class AskMattGateTests(unittest.TestCase):
         )
 
     def run_presend_lint(
-        self, session_id: str, draft: str, state_dir: Path
+        self, session_id: str, draft: str, state_dir: Path, caveman: str | None = "keep"
     ) -> subprocess.CompletedProcess[str]:
+        if caveman != "keep":
+            self.set_caveman(state_dir, caveman)
         env = dict(os.environ)
         env["ASK_MATT_GATE_STATE_DIR"] = str(state_dir)
         env["GOVERNANCE_CLAUDE_HOME"] = str(state_dir / "claude-home")
@@ -342,7 +361,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("Ask Matt gate rejected hook input", result.stderr)
             self.assertNotIn("Traceback", result.stderr)
 
-    def test_claude_prompt_enforces_all_disciplines_and_ultra_flag(self) -> None:
+    def test_claude_prompt_enforces_all_disciplines_and_reads_the_caveman_flag(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
             result = self.run_gate(
@@ -361,6 +380,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("ASK-MATT GATE", context)
             self.assertIn("YES GOVERNANCE: ENFORCED", context)
             self.assertIn("CAVEMAN ULTRA: ENFORCED", context)
+            self.assertIn("PRE-SEND LINT REQUIRED", context)
             self.assertIn('declare-claude "claude-session-1"', context)
             state = json.loads(
                 (state_dir / "claude--claude-session-1.json").read_text(
@@ -370,12 +390,85 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIsNone(state["flow"])
             self.assertTrue(state["yes"])
             self.assertEqual(state["caveman"], "ultra")
-            self.assertEqual(
-                (state_dir / "claude-home" / ".caveman-active").read_text(
-                    encoding="utf-8"
-                ),
-                "ultra",
+
+    def test_claude_gate_follows_the_caveman_flag_and_never_writes_it(self) -> None:
+        # Dan, 2026-09-03: the tracker is the single writer. /caveman lite must survive the next
+        # prompt, and /caveman off (flag deleted) must switch the lint requirement off entirely.
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            flag = state_dir / "claude-home" / ".caveman-active"
+
+            lite = json.loads(
+                self.run_gate("claude-prompt", {"session_id": "s-mode"}, state_dir, caveman="lite").stdout
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("CAVEMAN LITE: ENFORCED", lite)
+            self.assertNotIn("CAVEMAN ULTRA", lite)
+            self.assertIn("PRE-SEND LINT REQUIRED", lite)
+            self.assertEqual(flag.read_text(encoding="utf-8"), "lite")
+            self.assertEqual(self._state(state_dir, "s-mode")["caveman"], "lite")
+            nonce = self._state(state_dir, "s-mode")["nonce"]
+            declared = self.run_claude_declare("s-mode", nonce, "implement", state_dir)
+            self.assertIn("caveman-lite", declared.stdout)
+            self.assertEqual(flag.read_text(encoding="utf-8"), "lite")
+
+            off = json.loads(
+                self.run_gate("claude-prompt", {"session_id": "s-mode"}, state_dir, caveman=None).stdout
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("CAVEMAN: OFF", off)
+            self.assertNotIn("PRE-SEND LINT REQUIRED", off)
+            self.assertFalse(flag.exists())
+            self.assertEqual(self._state(state_dir, "s-mode")["caveman"], "off")
+            # Off is still a governed state: tools flow once a route is declared.
+            nonce = self._state(state_dir, "s-mode")["nonce"]
+            self.run_claude_declare("s-mode", nonce, "implement", state_dir)
+            tool = self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-mode", "tool_name": "Read", "tool_input": {"file_path": "x"}},
+                state_dir,
+                caveman="keep",
             )
+            self.assertEqual(json.loads(tool.stdout), {})
+
+    def test_lint_scales_with_the_caveman_level_and_skips_when_off(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir)
+            # 60 words, article-heavy, one 30-word sentence: fails ultra, passes lite.
+            wordy = (
+                "The relay refused the bill because the policy that owns the approver is the one "
+                "that the owner set to the waiting stage, and the comment on the ticket says so. "
+                "The fix is in the router. The test covers it. The deploy is queued for the morning "
+                "window and the owner has the link."
+            )
+            ultra = self.run_presend_lint("s-scale", wordy, state_dir, caveman="ultra")
+            self.assertEqual(ultra.returncode, 1)
+            self.assertIn("article density", ultra.stdout)
+            lite = self.run_presend_lint("s-scale", wordy, state_dir, caveman="lite")
+            self.assertEqual(lite.returncode, 0, lite.stdout)
+            self.assertIn("level lite", lite.stdout)
+            # Filler stays banned at every level.
+            filler = self.run_presend_lint("s-scale", "Queue empty. Tests basically pass.", state_dir, caveman="lite")
+            self.assertEqual(filler.returncode, 1)
+            self.assertIn("banned filler", filler.stdout)
+            # Off: anything goes, exit 0, and Stop does not complain about a missing lint.
+            self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir, caveman=None)
+            nonce = self._state(state_dir, "s-scale")["nonce"]
+            self.run_claude_declare("s-scale", nonce, "implement", state_dir)
+            off = self.run_presend_lint(
+                "s-scale", "I think this is really just basically the answer.", state_dir, caveman="keep"
+            )
+            self.assertEqual(off.returncode, 0, off.stdout)
+            self.assertIn("skipped", off.stdout)
+            transcript = self._transcript(state_dir, "I think this is really just basically the answer.")
+            stopped = json.loads(
+                self.run_gate(
+                    "claude-stop",
+                    {"session_id": "s-scale", "transcript_path": transcript},
+                    state_dir,
+                    caveman="keep",
+                ).stdout
+            )
+            self.assertEqual(stopped, {})
 
     def test_claude_gate_blocks_tools_and_stop_until_exact_declaration(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -511,21 +604,48 @@ class AskMattGateTests(unittest.TestCase):
         self.assertIn("session-gate.js\\\" end", json.dumps(hooks["SessionEnd"]))
         self.assertIn("session-gate.js\\\" prompt", prompt_config)
 
-    def test_global_instruction_files_pin_yes_and_caveman_ultra(self) -> None:
+    def test_global_instruction_files_pin_yes_and_caveman_default_ultra(self) -> None:
         codex_text = CODEX_INSTRUCTIONS.read_text(encoding="utf-8")
         claude_text = CLAUDE_INSTRUCTIONS.read_text(encoding="utf-8")
         reminder_text = CLAUDE_REMINDER.read_text(encoding="utf-8")
         self.assertIn("CAVEMAN ULTRA", codex_text)
         self.assertIn("YES GOVERNANCE", codex_text)
         self.assertIn("CAVEMAN ULTRA", claude_text)
-        self.assertIn("cannot be disabled inside a session", claude_text)
+        # Since 2026-09-03 the level is switchable in-session through the caveman tracker's flag;
+        # the instructions must say so rather than claim it cannot be disabled.
+        self.assertIn("/caveman lite|full|ultra|off", claude_text)
+        self.assertNotIn("cannot be disabled inside a session", claude_text)
         self.assertIn("CAVEMAN ULTRA", reminder_text)
+        self.assertIn(".caveman-active", reminder_text)
+        # Default level for a fresh session comes from the plugin's user config, not from any hook.
+        plugin_config = Path(os.environ.get("APPDATA", "")) / "caveman" / "config.json"
         self.assertEqual(
-            (Path.home() / ".claude" / ".caveman-active").read_text(
-                encoding="utf-8"
-            ).strip(),
-            "ultra",
+            json.loads(plugin_config.read_text(encoding="utf-8")).get("defaultMode"), "ultra"
         )
+
+    def test_reminder_hook_follows_the_caveman_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            home = Path(folder)
+            def run(mode: str | None) -> str:
+                flag = home / ".caveman-active"
+                if mode is None:
+                    if flag.exists():
+                        flag.unlink()
+                else:
+                    flag.write_text(mode, encoding="utf-8")
+                env = dict(os.environ, CLAUDE_CONFIG_DIR=str(home))
+                done = subprocess.run(
+                    ["node", str(CLAUDE_REMINDER)], input="{}", text=True,
+                    capture_output=True, env=env, check=False,
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                return json.loads(done.stdout)["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("CAVEMAN ULTRA", run("ultra"))
+            self.assertIn("CAVEMAN LITE", run("lite"))
+            self.assertNotIn("ULTRA", run("lite"))
+            off = run(None)
+            self.assertIn("CAVEMAN: off", off)
+            self.assertIn("2. YES", off)
 
 
     def _state(self, state_dir: Path, session_id: str) -> dict:
