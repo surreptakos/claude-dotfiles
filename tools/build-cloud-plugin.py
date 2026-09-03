@@ -153,7 +153,7 @@ def main():
                 "author": {"name": "Dan Gatsakos"},
                 "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
                 "Company team skills (aac-sop, aac-contract-package, writing, "
-                "software-decision). Built by tools/build-cloud-plugin.py from "
+                "software-decision, yes). Built by tools/build-cloud-plugin.py from "
                 "~/.claude/skills and the repo's aac-skills/ tree.",
             },
             indent=2,
@@ -186,6 +186,43 @@ def main():
         (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
         packaged.append((entry.name, moved, retargeted))
 
+    # Marker hook (Dan, 2026-09-03): the docs are silent on whether a plugin's hooks execute in
+    # Cowork or cloud sessions. This SessionStart hook is the experiment: plain POSIX echo, no
+    # runtime beyond a shell, one line of context per session. If a Cowork session can quote the
+    # marker text, plugin hooks run there and the governance gate can follow the same road.
+    hooks_dir = plugin_root / "hooks"
+    hooks_dir.mkdir()
+    marker = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            # No apostrophes: the command wraps this JSON in single quotes for the shell.
+            "additionalContext": "AAC-SKILLS HOOK MARKER: plugin hooks execute on this surface. "
+            "Quote this sentence verbatim if asked whether the marker is present.",
+        },
+    }
+    (hooks_dir / "hooks.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "SessionStart": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": "echo '" + json.dumps(marker) + "'",
+                                    "timeout": 5,
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     zip_path = out / f"{PLUGIN_NAME}.zip"
     if zip_path.exists():
         zip_path.unlink()
@@ -195,8 +232,10 @@ def main():
                 zf.write(f, f.relative_to(plugin_root))
 
     # ---------------------------------------------------------------- AAC team skills
-    # The four org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
+    # The org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
     # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
+    # aac-skills/yes is a vendored copy of sstklen/yes.md's English skill (MIT, LICENSE alongside);
+    # the plugin's three hooks are not carried - this package ships skills only.
     repo = Path(__file__).resolve().parent.parent
     aac_src = repo / "aac-skills"
     if aac_src.is_dir():

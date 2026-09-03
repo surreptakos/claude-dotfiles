@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"AAC-SKILLS HOOK MARKER: plugin hooks execute on this surface. Quote this sentence verbatim if asked whether the marker is present.\"}}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
