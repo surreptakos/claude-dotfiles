@@ -50,6 +50,16 @@
         "lastUpdated": "2026-09-02T20:49:48.062Z",
         "gitCommitSha": "c47e7af87a617839418bef67697938e4544f3729"
       }
+    ],
+    "yes@sstklen": [
+      {
+        "scope": "user",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\sstklen\\yes\\1.1.0",
+        "version": "1.1.0",
+        "installedAt": "2026-09-03T21:22:01.060Z",
+        "lastUpdated": "2026-09-03T21:22:01.060Z",
+        "gitCommitSha": "47521489a4fc0537b633339372dcd7514032acfb"
+      }
     ]
   }
 }

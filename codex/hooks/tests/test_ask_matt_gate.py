@@ -499,7 +499,7 @@ class AskMattGateTests(unittest.TestCase):
         hooks = settings["hooks"]
         self.assertEqual(
             set(hooks),
-            {"SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "Stop"},
+            {"SessionStart", "SessionEnd", "PreCompact", "UserPromptSubmit", "PreToolUse", "Stop"},
         )
         prompt_config = json.dumps(hooks["UserPromptSubmit"])
         self.assertIn("governance-reminder.js", prompt_config)
@@ -699,12 +699,13 @@ class AskMattGateTests(unittest.TestCase):
         self.assertIn("REWRITE BEFORE SENDING", done.stderr)
 
     def test_lint_subcommand_passes_a_clean_draft_and_counts_prose_only(self) -> None:
-        # A fenced block full of articles must not count: _strip_code removes it before measuring.
+        # A runnable bash fence full of articles must not count: _strip_code removes it before
+        # measuring, and a bash fence is the one block the no-monospace rule permits.
         clean = os.linesep.join([
             "Relay refused. BILL owns routing through policy Order Invoices. Approve in BILL.",
             "",
-            "```",
-            "the the the the the the the the the the the the the the the the the the",
+            "```bash",
+            "echo the the the the the the the the the the the the the the the the the the",
             "```",
             "",
         ])
@@ -714,6 +715,32 @@ class AskMattGateTests(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0)
         self.assertIn("caveman lint clean", done.stdout)
+
+    def test_lint_exempts_the_mandated_pylons_prefix_but_no_other_fence(self) -> None:
+        # ~/.claude/CLAUDE.md orders every reply to open with this diff fence. It is a directive,
+        # not working material, so the lint ignores it - at the top only, and only that block.
+        prefix = "```diff\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\n```\n\n"
+        clean = prefix + "Queue empty. Tests pass. Deployed bytes match."
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=clean, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(done.returncode, 0, done.stdout)
+        # A second fence after the prefix is still monospace in a reply.
+        dirty = clean + "\n\n```\nls -la\n```\n"
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=dirty, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("1 code block(s)", done.stdout)
+        # The same block anywhere but the top is not the prefix.
+        moved = "Queue empty.\n\n" + prefix
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=moved, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(done.returncode, 1)
 
     def test_lint_subcommand_reads_a_file_as_well_as_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

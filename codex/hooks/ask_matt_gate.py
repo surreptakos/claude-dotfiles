@@ -627,6 +627,11 @@ def _strip_code(text: str) -> str:
 
 FENCE_PATTERN = re.compile(r"```")
 RUNNABLE_FENCE_PATTERN = re.compile(r"```bash\n.*?```", re.DOTALL)
+# The mandated reply prefix from ~/.claude/CLAUDE.md ("Standing directive — response prefix").
+# Leading whitespace only; anything else before it means it is not the prefix.
+PYLONS_PREFIX_PATTERN = re.compile(
+    r"\A\s*```diff\r?\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\r?\n```[ \t]*\r?\n?"
+)
 INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
 # Dan, 2026-09-02: "I don't need to see filepaths or code or anything formatted
 # in monospaced text. PRs, tickets, specs, PRDs -- those are for you." Monospace
@@ -636,6 +641,10 @@ PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|j
 
 
 def _caveman_lint(text: str) -> list[str]:
+    # Dan, 2026-09-03: the global CLAUDE.md orders every reply to open with the PYLONS diff fence,
+    # and the no-monospace rule flagged that fence on every turn. The directive wins; the lint
+    # ignores that one block, at the top only, and still counts every other fence.
+    text = PYLONS_PREFIX_PATTERN.sub("", text, count=1)
     prose = _strip_code(text)
     words = prose.split()
     violations: list[str] = []

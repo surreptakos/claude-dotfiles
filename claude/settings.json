@@ -113,7 +113,8 @@
     "typescript-lsp@claude-plugins-official": true,
     "caveman@caveman": true,
     "i-have-adhd@i-have-adhd": true,
-    "aac-skills@claude-dotfiles": true
+    "aac-skills@claude-dotfiles": true,
+    "yes@sstklen": true
   },
   "extraKnownMarketplaces": {
     "sstklen": {
