@@ -1,0 +1,81 @@
+name: gas deploy (reusable)
+
+# REUSABLE, called from a repo's own workflow after its test gate:
+#
+#   deploy:
+#     needs: test
+#     uses: surreptakos/claude-dotfiles/.github/workflows/gas-deploy.yml@master
+#     permissions: { contents: write, statuses: read }
+#     with: { wait_minutes: 15 }
+#
+# It moves the repo's `deploy/test` ref to the commit and waits for the `gas/deploy` commit status the
+# script writes once it has pulled, written HEAD and verified the build on its next tick (gas/README.md).
+# The caller's GITHUB_TOKEN is all it needs: nothing Google-side is called from here, ever.
+#
+# Requires, once, on claude-dotfiles: Settings -> Actions -> General -> Access -> "Accessible from
+# repositories owned by the user surreptakos", or the `uses:` line is refused for a private repo.
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        description: Commit to deploy (default the calling workflow's sha)
+        type: string
+        default: ''
+      ref_name:
+        description: The ref the script polls for TEST deploys
+        type: string
+        default: deploy/test
+      status_context:
+        description: The commit status the script writes for a TEST deploy
+        type: string
+        default: gas/deploy
+      wait_minutes:
+        description: How long to wait for the verdict (the tick runs every 5 minutes; verification is one tick after the write)
+        type: number
+        default: 15
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+          fetch-depth: 1
+      - name: Move ${{ inputs.ref_name }} to the commit
+        env:
+          SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+          REF_NAME: ${{ inputs.ref_name }}
+        run: |
+          set -e
+          git push --force origin "$SHA:refs/heads/$REF_NAME"
+          echo "$REF_NAME -> ${SHA:0:7}"
+      - name: Wait for the script's ${{ inputs.status_context }} status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+          CONTEXT: ${{ inputs.status_context }}
+          WAIT_MINUTES: ${{ inputs.wait_minutes }}
+        run: |
+          set -e
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          while :; do
+            line=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/statuses?per_page=100" \
+              --jq "[.[] | select(.context == \"${CONTEXT}\")][0] | if . == null then \"none|\" else \"\(.state)|\(.description)\" end")
+            state="${line%%|*}"; desc="${line#*|}"
+            case "$state" in
+              success) echo "PASS  ${CONTEXT} success — ${desc}"; exit 0 ;;
+              failure|error) echo "::error::${CONTEXT} ${state} — ${desc}"; exit 1 ;;
+              pending) echo "pending — ${desc}" ;;
+              *) echo "no ${CONTEXT} status on ${SHA:0:7} yet" ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::no verdict from ${CONTEXT} within ${WAIT_MINUTES} minutes. Is the gasDeployTick trigger installed on the script? Is the seed ingested? (gas/README.md)"
+              exit 2
+            fi
+            sleep 20
+          done

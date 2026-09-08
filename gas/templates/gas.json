@@ -1,0 +1,12 @@
+{
+  "scriptId": "REPLACE_WITH_SCRIPT_ID",
+  "gcpProject": "gpt-sheets-access-475817",
+  "rootDir": "",
+  "include": ["**/*.js", "**/*.gs", "**/*.html", "appsscript.json"],
+  "exclude": ["**/*.test.js", "tests/**", "test/**", "node_modules/**"],
+  "buildMarker": null,
+  "prod": null,
+  "hooks": { "postDeploy": "", "notify": "" },
+  "runnable": [],
+  "pollMinutes": 5
+}

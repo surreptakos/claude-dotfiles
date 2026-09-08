@@ -17,7 +17,7 @@ They are copies. Edit the real file in `~/.claude` or `~/.codex`, then:
 A hand edit here is silently overwritten by the next push, and — worse — looks committed while the
 machine it came from never changed. Only `sync.ps1`, `install.ps1`, `lib/manifest.ps1`,
 `tests/restore-test.ps1`, `README.md`, `.gitignore`, `aac-skills/`, `orchestrator/` and this file
-are hand-written. `agents/`, `claude/skill-links.json`, `marketplace/` and
+are hand-written — and so are `gas/` (the Apps Script self-deploy package: library, CLI, tests, templates; `gas/README.md`) and the `gas-*.yml` workflows under `.github/workflows/`, which repos call as reusable workflows. `agents/`, `claude/skill-links.json`, `marketplace/` and
 `.claude-plugin/marketplace.json` are generated too — the packager (`tools/build-cloud-plugin.py`,
 run by every push) rebuilds them from `~/.claude/skills` (dan-skills) and `aac-skills/` (the AAC
 team bundle). Edit `aac-skills/` directly; never edit `marketplace/`.

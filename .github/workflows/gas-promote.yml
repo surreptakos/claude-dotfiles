@@ -1,0 +1,105 @@
+name: gas promote (reusable)
+
+# REUSABLE, for a repo's by-hand or scheduled promote:
+#
+#   promote:
+#     uses: surreptakos/claude-dotfiles/.github/workflows/gas-promote.yml@master
+#     permissions: { contents: write, statuses: read }
+#     with:
+#       freeze_days: '1,2,3'          # ISO weekday numbers refused (Mon=1 .. Sun=7); '' for none
+#       timezone: America/Chicago
+#       emergency_override: ${{ inputs.emergency_override }}
+#
+# Moves `deploy/prod` to the commit and waits for `gas/promote`. The script promotes only a commit that
+# `deploy/test` has already verified — a prod ref pointing at an unverified commit stays pending until
+# test catches up, and fails if test failed. The freeze guard is the caller's policy, evaluated here so
+# every repo states it the same way.
+
+on:
+  workflow_call:
+    inputs:
+      sha:
+        type: string
+        default: ''
+      ref_name:
+        type: string
+        default: deploy/prod
+      status_context:
+        type: string
+        default: gas/promote
+      wait_minutes:
+        type: number
+        default: 20
+      freeze_days:
+        description: Comma-separated ISO weekdays (1=Mon .. 7=Sun) on which a promote is refused
+        type: string
+        default: ''
+      timezone:
+        type: string
+        default: America/Chicago
+      emergency_override:
+        description: Promote even on a freeze day (logged loudly)
+        type: boolean
+        default: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      statuses: read
+    steps:
+      - name: Freeze guard
+        env:
+          FREEZE_DAYS: ${{ inputs.freeze_days }}
+          TZ_NAME: ${{ inputs.timezone }}
+          OVERRIDE: ${{ inputs.emergency_override }}
+        run: |
+          day=$(TZ="$TZ_NAME" date +%u)
+          if [ -n "$FREEZE_DAYS" ] && echo ",$FREEZE_DAYS," | grep -q ",$day,"; then
+            if [ "$OVERRIDE" = "true" ]; then
+              echo "::warning::freeze day $day in $TZ_NAME — proceeding on emergency_override"
+            else
+              echo "::error::freeze day $day in $TZ_NAME — promote refused (freeze_days=$FREEZE_DAYS). Re-run with emergency_override."
+              exit 1
+            fi
+          else
+            echo "day $day in $TZ_NAME is not frozen"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+          fetch-depth: 1
+      - name: Move ${{ inputs.ref_name }} to the commit
+        env:
+          SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+          REF_NAME: ${{ inputs.ref_name }}
+        run: |
+          set -e
+          git push --force origin "$SHA:refs/heads/$REF_NAME"
+          echo "$REF_NAME -> ${SHA:0:7}"
+      - name: Wait for the script's ${{ inputs.status_context }} status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ inputs.sha != '' && inputs.sha || github.sha }}
+          CONTEXT: ${{ inputs.status_context }}
+          WAIT_MINUTES: ${{ inputs.wait_minutes }}
+        run: |
+          set -e
+          deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+          while :; do
+            line=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/statuses?per_page=100" \
+              --jq "[.[] | select(.context == \"${CONTEXT}\")][0] | if . == null then \"none|\" else \"\(.state)|\(.description)\" end")
+            state="${line%%|*}"; desc="${line#*|}"
+            case "$state" in
+              success) echo "PASS  ${CONTEXT} success — ${desc}"; exit 0 ;;
+              failure|error) echo "::error::${CONTEXT} ${state} — ${desc}"; exit 1 ;;
+              pending) echo "pending — ${desc}" ;;
+              *) echo "no ${CONTEXT} status on ${SHA:0:7} yet" ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::no verdict from ${CONTEXT} within ${WAIT_MINUTES} minutes (gas/README.md)"
+              exit 2
+            fi
+            sleep 20
+          done

@@ -1,0 +1,32 @@
+name: Deploy Apps Script (TEST)
+
+# Copy to .github/workflows/deploy.yml in the repo. Substitute the default branch and the test command.
+# The test gate is the repo's; the deploy is claude-dotfiles' reusable workflow: it moves `deploy/test`
+# to this commit and waits for the script's own `gas/deploy` verdict. No clasp, no Google credential.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: gas-deploy
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: TEST_COMMAND
+  deploy:
+    needs: test
+    uses: surreptakos/claude-dotfiles/.github/workflows/gas-deploy.yml@master
+    permissions:
+      contents: write
+      statuses: read
+    with:
+      wait_minutes: 15
