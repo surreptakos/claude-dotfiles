@@ -52,7 +52,7 @@ per repo.
 - **Deploy/CI workflow** — any existing `.github/workflows/*.yml` whose name suggests deploy/test; the dashboard reports the most deploy-like one, or skips.
 - Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to skip or merge.
 - Repo private? (`gh repo view --json isPrivate`) — private is expected; never suggest GitHub Pages for a private repo's dashboard.
-- **Clasp repo?** `.clasp.json` at the root, in `gas/`, or in `src/`. Decides step 13 and the Releasing section of the session runbook.
+- **Apps Script repo?** `.clasp.json` at the root, in `gas/`, or in `src/` — or `gas.json`, which means it already deploys itself. Decides step 13 and the Releasing section of the session runbook.
 
 ## 2 — Confirm only genuine branches
 
@@ -80,15 +80,15 @@ cross-repo Projects board instead of per-repo (see step 6).
 8. **Live tracker audit** — copy `templates/tracker-audit.js` to `tools/tracker-audit.js`. No substitutions: it infers the repo from `gh repo view`. It reads live GitHub state (prose `Blocked by #N` with no native dependency edge, closed issues with unticked acceptance boxes, a `#N` that is neither an issue nor a PR, missing/conflicting triage labels, an open issue whose Projects card says Done, an open issue on no board at all, plus two advisory checks) — the drift no file-level test can see. Exit 0 clean / 1 drift / **2 could not audit**; preserve that third code in any edit, because a tracker query returning nothing must never read as a pass.
    - It needs the network and an authenticated `gh`, so it does **NOT** go in the pre-commit hook — a commit gate that needs the network breaks committing offline. It is a command, optionally a CI step (separate workflow or a job in `dashboard.yml`, never the test job).
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 15.**
+9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 17.**
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
 12. **Session checks** — copy `templates/session.json` to `.claude/session.json`, substituting `TEST_COMMAND` (same value as the hook and `ticket.yml`). Copy `templates/session-runbook.md` to `docs/runbooks/session.md`; if the repo does not deploy, delete that template's Releasing section as its comment says.
     - **PRESERVE an existing `.claude/session.json` verbatim.** Identical hazard to step 3.3's `CONFIG` block, and for the identical reason: this file carries the hand-corrected test command and the repo's release gates, and detection cannot reproduce either. Merge in missing keys; never regenerate the file.
     - The engine itself is **NOT** installed per repo. It lives once at `${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js`, and `~/.claude/hooks/session-gate.js` runs it from the global `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks — so a harnessed repo gets the checks without anyone invoking a skill. `/session-start` and `/session-end` only re-print the cached result. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
-    - Fill `releaseGates` with what the repo actually gates on — `node tools/clasp-auth.js --quiet` and `node tools/canary.js` where those exist, `[]` otherwise. They run at `--end`.
-13. **Clasp credential gate** — for a clasp repo (`.clasp.json` at the root, in `gas/`, or in `src/`), copy `templates/clasp-auth.js` to `tools/clasp-auth.js`.
+    - Fill `releaseGates` with what the repo actually gates on — `node tools/canary.js` where it exists, `[]` otherwise; never `clasp-auth` for a self-deploying repo. They run at `--end`.
+13. **Self-deploy (gas)** — an Apps Script repo adopts the gas package instead of a clasp credential: follow the `gas-deploy` team skill (claude-dotfiles `gas/README.md`): `gas init` (prefills `preserve` from the live script), `gas vendor`, the `deploy.yml` template with the repo's test command, one `gasEnsureTrigger_();` line in an existing trigger, then the one-time `gas push` + `gas seed`. The script then pulls every merge from GitHub and no credential exists in CI or on a machine. `templates/clasp-auth.js` is legacy — copy it to `tools/clasp-auth.js` only for a repo the owner explicitly keeps on clasp, and then:
     - **It is AAC-hardcoded on purpose.** `CLIENT_ID` and `ACCOUNT` name the private OAuth client in `gpt-sheets-access-475817` and the account owning the bound scripts. A non-AAC repo needs both edited; there is no detection that could infer them, and a wrong guess yields a tool that confidently validates the wrong credential. Say so at handoff rather than installing it silently into a non-AAC project.
     - Why it is worth a step: it checks the grant's **scopes**, not merely that it refreshes.
 
@@ -101,9 +101,9 @@ cross-repo Projects board instead of per-repo (see step 6).
       the session just reads more verbosely. Pinning it in the repo makes the intent reviewable.
     - Default here is `ultra` (Dan, 2026-08-02). Keep an existing file's value if the repo already carries one;
       only add the file where it is missing.
-    - If the repo has a packaging step that sweeps root files (clasp, docker COPY), exclude it — same list as
-      step 10. `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` — which authorizes clasp's own OAuth client with narrower defaults — produces a credential that pushes fine in the repo you are standing in while silently breaking Gmail and Drive work in another. Nothing local to the affected repo can see it.
-    - Where the repo has a `package.json`, also wire `prepush` to `node tools/clasp-auth.js --quiet` so a dead credential stops the deploy instead of failing inside clasp with a bare `invalid_grant` (message-board does this). Without one, the gate is the session check plus the release runbook.
+    - If the repo has a packaging step that sweeps root files (the gas deployable set, docker COPY), exclude it — same list as
+      step 10 (`gas.json` `exclude` mirrors what `.claspignore` used to say).
+    - A repo still on clasp keeps the old rule: `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` produces a credential that pushes fine here while silently breaking Gmail and Drive work in another repo; wire `prepush` to `node tools/clasp-auth.js --quiet` where there is a `package.json`. A self-deploying repo has nothing credential-shaped to wire.
 
 15. **Workflow scripts** — copy `templates/ticket-fleet.js` to `.claude/workflows/ticket-fleet.js`.
     - A named script for Claude Code's in-session Workflow tool (`Workflow({name: 'ticket-fleet'})`):
@@ -119,6 +119,26 @@ cross-repo Projects board instead of per-repo (see step 6).
       nothing executes on install).
     - First run in a repo: pass `deliver: false` (verify-only dry run) before letting it push
       branches and open PRs.
+
+16. **Cloud plugin** — make `.claude/settings.json` declare the marketplace and the plugin, so a cloud
+    session (claude.ai/code) installs `aac-skills` at startup and the harnessed repo has these skills
+    there too. Run `node ${CLAUDE_PLUGIN_ROOT}/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`: it
+    creates the file when absent (equivalent to copying `templates/claude-settings.json`) and otherwise
+    merges the two keys, leaving `permissions`, `hooks` and everything else verbatim. Then confirm it
+    still parses: `node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`.
+    - **PRESERVE an existing `.claude/settings.json`.** Same hazard as step 12's session.json: repo
+      copies carry hand-built `permissions` allowlists (aac-bill-intake, aac-contract-builder) and
+      `hooks` (aac-sales-cockpit, claude-dotfiles). Never regenerate the file; the script only adds keys.
+    - Why here and not at the account or the environment: cloud sessions read only the repo. The
+      claude.ai account-level plugin sync returns zero plugins for the account even with the plugin
+      enabled there (`plugins_sync_no_changes count:0` in the session diag log), and the cloud
+      environment setup script runs before the session's git credentials exist, so
+      `claude plugin marketplace add` fails there on the private clone. Declared in project settings,
+      Claude Code clones the marketplace itself after credentials are wired up. Verified 2026-09-09 in
+      a cloud container (claude-dotfiles#100): a fresh startup with only these two keys loaded all 56
+      skills and ran the plugin's SessionStart hook.
+    - A local session that already has `aac-skills@claude-dotfiles` installed at user scope is
+      unaffected; the key names the same plugin id.
 
 ## 4 — Verify (never skip)
 
@@ -148,6 +168,9 @@ cross-repo Projects board instead of per-repo (see step 6).
   script only to check output, and discard the result.
 - **Session checks** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js` from the repo. It must find the test command (via `.claude/session.json` or `npm test`) and report the tracker audit; a `no test command detected` line means the substitution did not land. On a clasp repo, confirm the Apps Script section reports the credential rather than `no tools/clasp-auth.js`.
 - File nothing fake to test issue events; the daily tick and next real issue cover it.
+- **Cloud plugin** — `.claude/settings.json` parses and carries `enabledPlugins["aac-skills@claude-dotfiles"]`
+  plus the `claude-dotfiles` marketplace. The real test is a fresh cloud session on the repo: its
+  skill list shows `aac-skills:` entries and the plugin's SessionStart hook prints its marker line.
 
 ## 5 — Projects board (optional but default-yes)
 
@@ -266,6 +289,7 @@ whole install; steps 1–7 are idempotent but re-running them churns files for n
 | 14 | 2026-08-26 | Kill the nightly dashboard cron by making DASHBOARD.md drift-free (claude-dotfiles issue 21). `build-dashboard.js` swaps the relative-age `ago()` helper for `fmtDate()`, which returns `iso.slice(0,10)` — an ISO calendar date instead of "today" / "N days ago" — in the Updated column and every attention-list mention. Same input, same output; a rerun with no other content movement produces byte-identical bytes. `dashboard.yml` drops the `schedule: - cron: '0 11 * * *'` block: the only thing the daily tick did was bump those relative labels, so with the labels stable the tick has nothing to do, and the "chore: refresh dashboard [skip ci]" no-op commits it produced go away with it. Push and issue events still trigger, and the `git add -N` + `git diff --quiet` guard still ensures a commit lands only when content actually changed (v6 protection). **Both files change, patch surgically** — repo-local `CONFIG` blocks and per-repo test-environment setup make a wholesale re-copy destructive (same hazard as v3.3's CONFIG splice and v6's dashboard.yml patch note) | step 3 (patch `scripts/build-dashboard.js`: replace the `ago` function definition with `fmtDate` and swap the four call sites) + step 4 (patch `.github/workflows/dashboard.yml`: delete the `schedule:` block and its `- cron:` line) |
 | 15 | 2026-08-27 | Branch-split the dashboard artifact (claude-dotfiles issue 27, ported from issue 20). `dashboard.yml`'s final `git push` becomes `git push -f origin HEAD:refs/heads/dashboard`: the commit-if-changed step still commits `DASHBOARD.md` with `[skip ci]`, but the push force-lands on a dedicated `dashboard` branch instead of advancing the default branch. Without this, every push/issue event that mutated the dashboard advanced origin on a file that has no bearing on source state, and on claude-dotfiles that flipped drifted live copies into state3 (both-diverged hard block) — the single largest source of session-start hard blocks between 2026-08-25 and 2026-08-26. Stable read URL: `https://github.com/<owner>/<repo>/blob/dashboard/DASHBOARD.md`. Affected repos on this machine (5): aac-sales-commissions, aac-sales-cockpit, aac-task-management, aac-bill-intake, message-board. **`dashboard.yml` change is small enough to patch surgically** — repo-local test-environment setup and default-branch substitutions make a wholesale re-copy destructive (same hazard as v6's dashboard.yml patch note and v14's above); swap only the final `git push` line for the branch-split block and leave the rest of the file alone | step 4 (patch `.github/workflows/dashboard.yml`: replace the final `git push` with `git push -f origin HEAD:refs/heads/dashboard`; verify no `refresh dashboard` commit lands on the default branch after the first CI run) |
 | 16 | 2026-08-27 | Finish the drift-free artifact by dropping the generation-time header (claude-dotfiles issue 26). v14 stabilized the body but the header line still read `_Generated <iso> at commit <sha> ...`, so two back-to-back runs of `build-dashboard.js` on unchanged repo + tracker state produced two different files: the timestamp always moved, and the sha moved whenever HEAD did for unrelated reasons. `build-dashboard.js` now emits `_Generated by scripts/build-dashboard.js (CI: dashboard.yml). Do not edit by hand._` — no timestamp, no sha — and the now-unused `sha` constant is deleted. Same input, same output, byte-identical, so the `git diff --quiet` guard fires only on real content movement. **Same step, patch surgically** — the fix is one call-site and one deleted `const`; keep the repo-local `CONFIG` block intact | step 3 (patch `scripts/build-dashboard.js`: delete the `const sha = ...` line and swap the header line to the timestamp-free form) |
+| 17 | 2026-09-09 | `.claude/settings.json` gains `extraKnownMarketplaces` + `enabledPlugins`, so a cloud session (claude.ai/code) installs the `aac-skills` plugin at startup. Without it a cloud session has none of these skills: the claude.ai account-level plugin sync returns zero plugins for the account (`plugins_sync_no_changes count:0` in the session diag log), and the cloud environment setup script runs before the session's git credentials exist, so `claude plugin marketplace add` fails there on the private clone. Verified in a cloud container (claude-dotfiles#100): a fresh startup with only these two keys cloned the marketplace and loaded all 56 skills plus the plugin's SessionStart hook. **Merge, never overwrite** — repo copies carry `permissions` (aac-bill-intake, aac-contract-builder) and `hooks` (aac-sales-cockpit, claude-dotfiles); `templates/add-cloud-plugin.js` adds the two keys and leaves the rest. **Sweep already performed 2026-09-09** on all eight active repos (claude-dotfiles#100, aac-bill-intake#583, aac-sales-commissions#45, aac-routines#154, zoho-source-of-truth#81, aac-contract-builder#189, aac-message-board#15, aac-sales-cockpit#593); only the marker bumps remain | step 16 (`node templates/add-cloud-plugin.js <repo>` where the keys are missing — a no-op on the eight above; bump the marker) |
 
 A row can mean "re-copy a file you already have". The marker answers *what a repo lacks*, and a
 template that changed is something the repo lacks just as much as a file it never had — so bump the
