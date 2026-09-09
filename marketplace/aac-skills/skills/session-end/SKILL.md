@@ -320,8 +320,9 @@ run stays unticked and the issue stays open, however finished the code is.
 
 Order matters, and no step is skippable:
 
-1. **Credential** — `node tools/clasp-auth.js` (or the project's equivalent). Alive *and* correctly
-   scoped, not merely alive.
+1. **Credential** — none for a self-deploying repo (`gas.json`: the script holds its own and a merge
+   is the release). A repo still on clasp: `node tools/clasp-auth.js` (or the project's equivalent),
+   alive *and* correctly scoped, not merely alive.
 2. **Gates** — whatever `releaseGates` names, or the project's canary.
 3. **Release** — from the main checkout only, never a worktree.
 4. **Confirm** — read back what the deployed thing reports about itself, rather than assuming the

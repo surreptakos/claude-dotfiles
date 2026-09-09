@@ -851,6 +851,24 @@ Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
 Check 'restored session-check reports on a repo' $ran @($out | Select-Object -Last 10)
 
+# Issue 103: the account registry travels, parses, and names every repo the watchdog serves - the
+# repo list is read from the watchdog script itself so the two cannot drift apart unnoticed.
+$accounts = Join-Path $FakeHome '.claude\accounts.json'
+$registry = $null
+try { $registry = Get-Content $accounts -Raw | ConvertFrom-Json } catch { }
+$watchdogRepos = @([regex]::Matches((Get-Content (Join-Path $Clone 'orchestrator\master-watchdog.ps1') -Raw), "Repo\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
+$unregistered = @($watchdogRepos | Where-Object { -not ($registry -and $registry.repos -and ($registry.repos.PSObject.Properties.Name -contains $_)) })
+Check ("restored accounts.json parses and names all {0} watchdog repos" -f $watchdogRepos.Count) `
+    ($null -ne $registry -and $watchdogRepos.Count -gt 0 -and $unregistered.Count -eq 0) $unregistered
+
+$identityTest = Join-Path $FakeHome '.claude\skills\session-check\identity.test.js'
+if (Test-Path $identityTest) {
+    $out = & node --test $identityTest 2>&1
+    Check 'restored identity.js passes its own test suite' ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
+} else {
+    Check 'restored identity.js passes its own test suite' $false @('identity.test.js was not restored')
+}
+
 # ------------------------------------------------------------------ 9a. dotfiles freshness ships
 
 # Issue 12: sync stamps + freshness classifier + block hook. The tool and the hook driver ship in

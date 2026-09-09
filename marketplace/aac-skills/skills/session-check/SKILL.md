@@ -27,7 +27,12 @@ Everything is universal (git), auto-detected, or read from an optional `.claude/
 (`test`, `testTimeoutMs`, `ticketLabel`, `releaseGates`, `checks`, `note`). Exit 1 means STOP-level
 findings, not a crash.
 
-Regression tests live next to it: `node --test check.test.js` from this directory.
+The **Account** section (`identity.js`) reads `~/.claude/accounts.json` — which Claude account
+owns which repo and desktop routine — and compares it with the account the session runs under
+(desktop: the host-session file's path; CLI: `oauthAccount` in the profile's `.claude.json`;
+cloud: unknown, so unchecked). Findings there are warnings by ruling, never STOP.
+
+Regression tests live next to it: `node --test check.test.js identity.test.js` from this directory.
 
 ## Related
 

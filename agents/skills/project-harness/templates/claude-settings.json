@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "Project-level Claude Code settings, installed by the project-harness skill (step 16).",
+    "",
+    "extraKnownMarketplaces + enabledPlugins make a cloud session (claude.ai/code) install the",
+    "aac-skills plugin from surreptakos/claude-dotfiles at startup. Nothing else delivers it there:",
+    "the claude.ai account-level plugin sync returns zero plugins for the account even with the",
+    "plugin enabled (plugins_sync_no_changes count:0 in the session diag log), and the cloud",
+    "environment setup script runs before the session's git credentials exist, so a private",
+    "marketplace clone fails there. Declared here, Claude Code clones the marketplace itself after",
+    "credentials are wired up. Verified 2026-09-09 (claude-dotfiles#100).",
+    "",
+    "PRESERVE THIS FILE ON UPGRADE. Repos add permissions and hooks here; merge keys with",
+    "templates/add-cloud-plugin.js, never regenerate."
+  ],
+  "extraKnownMarketplaces": {
+    "claude-dotfiles": {
+      "source": {
+        "source": "github",
+        "repo": "surreptakos/claude-dotfiles"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "aac-skills@claude-dotfiles": true
+  }
+}

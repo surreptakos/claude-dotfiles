@@ -24,6 +24,9 @@ function Get-DotfileItems {
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/settings.json';                   Local = (Join-Path $claude 'settings.json') }
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json') }
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }
+        # Which Claude account owns which repo and routine (issue 103). Read by the session check
+        # in every repo and by the master watchdog; hand-written, uuids and one email, no secrets.
+        [pscustomobject]@{ Type = 'File'; Repo = 'claude/accounts.json';                    Local = (Join-Path $claude 'accounts.json') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/skills';                          Local = (Join-Path $claude 'skills') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/hooks';                           Local = (Join-Path $claude 'hooks') }
         # Most of the flow skills the global CLAUDE.md names (implement, tdd, triage, handoff,
