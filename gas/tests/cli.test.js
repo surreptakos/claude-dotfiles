@@ -69,6 +69,19 @@ test('normalizeConfig defaults match the library\'s', () => {
   assert.deepEqual(a.include, JSON.parse(JSON.stringify(b.include))); assert.deepEqual(a.exclude, JSON.parse(JSON.stringify(b.exclude)));
   assert.equal(a.rootDir, 'gas'); assert.equal(b.rootDir, 'gas');
   assert.equal(a.pollMinutes, b.pollMinutes);
+  assert.deepEqual(a.preserve, []); assert.deepEqual(JSON.parse(JSON.stringify(b.preserve)), []);
+  assert.equal(a.dropUnknown, false); assert.equal(b.dropUnknown, false);
+  const c = cli.normalizeConfig({ scriptId: 'x', preserve: ['*Data', 'RuleData'], dropUnknown: 'yes' });
+  assert.deepEqual(c.preserve, ['*Data', 'RuleData']); assert.equal(c.dropUnknown, true);
+});
+
+test('carryOver splits HEAD-only files the way the library does: preserved carried verbatim, the rest named', () => {
+  const head = [{ name: 'appsscript', type: 'JSON', source: '{}' }, { name: 'GlData', type: 'SERVER_JS', source: 'var GL = 1;' }, { name: 'Old', type: 'SERVER_JS', source: '' }];
+  const files = [{ name: 'appsscript', type: 'JSON', source: '{"a":1}' }, { name: 'Code', type: 'SERVER_JS', source: '' }];
+  const c = cli.carryOver(head, files, { preserve: ['*Data'] });
+  assert.deepEqual(c.kept, [{ name: 'GlData', type: 'SERVER_JS', source: 'var GL = 1;' }]);
+  assert.deepEqual(c.unknown, ['Old']);
+  assert.deepEqual(cli.carryOver(head, files, {}).kept, []);
 });
 
 test('localDeployables walks rootDir with include/exclude and skips node_modules', () => {

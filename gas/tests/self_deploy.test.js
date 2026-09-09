@@ -185,6 +185,46 @@ test('deploy/test moved: the deployable set is pulled, stamped and written to HE
   assert.equal(sb.st.puts.length, 1, 'nothing rewritten');
 });
 
+test('HEAD-only files: a deploy that would delete them is refused in words; preserved ones ride along verbatim; dropUnknown opts into the wipe', () => {
+  const headFiles = [
+    { name: 'appsscript', type: 'JSON', source: '{}' }, { name: 'Code', type: 'SERVER_JS', source: 'old' }, { name: 'SelfDeploy', type: 'SERVER_JS', source: 'old' },
+    { name: 'GlData', type: 'SERVER_JS', source: 'var GL = { "6100": "Fire" };' }, { name: 'AliasData', type: 'SERVER_JS', source: 'var ALIAS = 1;' }
+  ];
+  // 1. Nothing preserved: refused before anything is written, the names in the status and the mail, and no retry loop.
+  let commits = {}; commits[SHA_B] = repoFiles(baseConfig());
+  let sb = load({ props: SEEDED, refs: { test: SHA_B }, commits, headFiles: headFiles.map((f) => Object.assign({}, f)) });
+  let out = sb.gasDeployTick();
+  assert.equal(out.test.refused, SHA_B); assert.deepEqual(JSON.parse(JSON.stringify(out.test.unknown)), ['GlData', 'AliasData']);
+  assert.equal(sb.st.puts.length, 0, 'nothing written');
+  let st = sb.statusesFor('gas/deploy');
+  assert.equal(st[st.length - 1].state, 'failure'); assert.match(st[st.length - 1].description, /GlData, AliasData/); assert.match(st[st.length - 1].description, /would delete them/);
+  assert.match(sb.state().test.error, /"preserve"/, 'the full way out is in the record and the mail; the status is capped at 140 chars');
+  assert.equal(sb.st.mails.length, 1); assert.match(sb.st.mails[0].subject, /refused/);
+  assert.equal(sb.state().test.error.indexOf('refused'), 0);
+  const again = sb.gasDeployTick();
+  assert.deepEqual(JSON.parse(JSON.stringify(again.test)), { unchanged: SHA_B.slice(0, 7) }, 'a refused commit is judged, not retried every five minutes');
+  assert.equal(sb.st.mails.length, 1);
+  // 2. Preserved by glob: carried over byte for byte, the rest of the set deployed as usual.
+  commits = {}; commits[SHA_B] = repoFiles(baseConfig({ preserve: ['*Data'] }));
+  sb = load({ props: SEEDED, refs: { test: SHA_B }, commits, headFiles: headFiles.map((f) => Object.assign({}, f)) });
+  out = sb.gasDeployTick();
+  assert.equal(out.test.deployed, SHA_B);
+  const names = sb.st.puts[0].map((f) => f.name).sort();
+  assert.deepEqual(names, ['AliasData', 'Code', 'GlData', 'Page', 'SelfDeploy', 'appsscript', 'lib/util']);
+  const gl = sb.st.puts[0].find((f) => f.name === 'GlData');
+  assert.deepEqual(gl, { name: 'GlData', type: 'SERVER_JS', source: 'var GL = { "6100": "Fire" };' });
+  assert.ok(sb.st.puts[0].find((f) => f.name === 'SelfDeploy').source.indexOf("var GAS_DEPLOYED_SHA = '" + SHA_B + "'") !== -1, 'the repo copy replaced the old library');
+  assert.ok(sb.st.logs.some((l) => /carrying over 2 file\(s\).*GlData, AliasData/.test(l)));
+  assert.equal(sb.st.mails.length, 0);
+  // 3. dropUnknown: the repo is the whole truth; what it lacks is dropped and named.
+  commits = {}; commits[SHA_B] = repoFiles(baseConfig({ dropUnknown: true }));
+  sb = load({ props: SEEDED, refs: { test: SHA_B }, commits, headFiles: headFiles.map((f) => Object.assign({}, f)) });
+  out = sb.gasDeployTick();
+  assert.equal(out.test.deployed, SHA_B);
+  assert.deepEqual(sb.st.puts[0].map((f) => f.name).sort(), ['Code', 'Page', 'SelfDeploy', 'appsscript', 'lib/util']);
+  assert.ok(sb.st.logs.some((l) => /dropping 2 file\(s\).*GlData, AliasData/.test(l)));
+});
+
 test('the next tick, running the deployed build, runs the host hook and records success', () => {
   const commits = {}; commits[SHA_B] = repoFiles(baseConfig());
   const pending = { test: { sha: SHA_B, pending: true, attempts: 1, at: 'x', files: 5, bytes: 100 } };

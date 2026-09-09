@@ -45,5 +45,5 @@ test('the consumer templates call the reusable workflows by their real paths', (
   assert.match(p, /uses: surreptakos\/claude-dotfiles\/\.github\/workflows\/gas-promote\.yml@master/);
   assert.match(p, /freeze_days: '1,2,3'/);
   const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'templates', 'gas.json'), 'utf8'));
-  for (const k of ['scriptId', 'gcpProject', 'rootDir', 'include', 'exclude', 'hooks', 'runnable', 'pollMinutes']) assert.ok(k in cfg, k);
+  for (const k of ['scriptId', 'gcpProject', 'rootDir', 'include', 'exclude', 'hooks', 'runnable', 'pollMinutes', 'preserve', 'dropUnknown']) assert.ok(k in cfg, k);
 });

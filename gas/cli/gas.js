@@ -19,7 +19,8 @@
 //   seed <scriptId> --repo o/r [--github-token T | --github-token-env NAME]
 //                                       Write gas-seed-<scriptId>.json to Drive for the script to ingest.
 //   pull <scriptId> [--out dir] [--version N]
-//   push <scriptId> --dir <rootDir> [--sha S]   Write HEAD from disk (bootstrap or emergency; stamps S).
+//   push <scriptId> --dir <rootDir> [--sha S] [--drop-unknown]   Write HEAD from disk (bootstrap or emergency; stamps S).
+//                                       HEAD-only files: carried if gas.json preserves them, else refused.
 //   versions <scriptId> | deployments <scriptId>
 //   promote <scriptId> --deployment ID [--desc text]   Cut a version of HEAD and move a deployment to it.
 //   logs [--project P] [--minutes 60] [--filter F] [--limit 200] [--all]   Cloud Logging, [gas] lines by default.
@@ -288,12 +289,21 @@ async function push(scriptId, flags) {
   const rel = localDeployables(flags.dir, cfg);
   if (rel.indexOf('appsscript.json') === -1) throw new Error('no appsscript.json under ' + flags.dir);
   const sha = flags.sha || ('local-' + new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14));
-  const files = rel.map((r) => {
+  let files = rel.map((r) => {
     let src = fs.readFileSync(path.join(flags.dir, r), 'utf8');
     if (src.indexOf('var GAS_DEPLOYED_SHA = ') !== -1) src = src.split('__GAS_' + 'SHA__').join(sha);
     if (cfg.buildMarker && cfg.buildMarker.file === r) src = src.split(cfg.buildMarker.placeholder || '__BUILD_SHA__').join(sha);
     return { name: scriptName(r), type: scriptType(r), source: src };
   });
+  const head = await getContent(scriptId);
+  const carry = carryOver(head.files, files, cfg);
+  if (carry.unknown.length && !(cfg.dropUnknown || flags['drop-unknown'])) {
+    throw new Error('refused: HEAD carries ' + carry.unknown.length + ' file(s) not under ' + flags.dir + ' (' + carry.unknown.join(', ')
+      + ') and a push would delete them — name them in gas.json "preserve" to carry them over, delete them from the script, or pass --drop-unknown');
+  }
+  if (carry.kept.length) console.log('carrying over ' + carry.kept.length + ' HEAD-only file(s): ' + carry.kept.map((f) => f.name).join(', '));
+  if (carry.unknown.length) console.log('dropping ' + carry.unknown.length + ' HEAD-only file(s): ' + carry.unknown.join(', '));
+  files = files.concat(carry.kept);
   await gapi('PUT', SCRIPT_API + scriptId + '/content', { files });
   const back = await getContent(scriptId);
   console.log('pushed ' + files.length + ' files to HEAD of ' + scriptId + '; HEAD reads build ' + (deployedShaOf(back.files) || 'unstamped'));
@@ -509,8 +519,21 @@ function normalizeConfig(cfg) {
     prod: cfg.prod && cfg.prod.deploymentId ? { deploymentId: String(cfg.prod.deploymentId) } : null,
     hooks: { postDeploy: (cfg.hooks && cfg.hooks.postDeploy) || '', notify: (cfg.hooks && cfg.hooks.notify) || '' },
     runnable: Array.isArray(cfg.runnable) ? cfg.runnable.map(String) : [],
-    pollMinutes: Number(cfg.pollMinutes || 0) || 5
+    pollMinutes: Number(cfg.pollMinutes || 0) || 5,
+    preserve: Array.isArray(cfg.preserve) ? cfg.preserve.map(String) : [],
+    dropUnknown: !!cfg.dropUnknown
   };
+}
+// HEAD-only files split the way the library splits them: preserved (carried verbatim) and unknown.
+function carryOver(headFiles, files, cfg) {
+  cfg = normalizeConfig(cfg || {});
+  const have = new Set(files.map((f) => f.name));
+  const kept = [], unknown = [];
+  for (const h of headFiles || []) {
+    if (have.has(h.name)) continue;
+    if (matchesAny(h.name, cfg.preserve)) kept.push({ name: h.name, type: h.type, source: h.source }); else unknown.push(h.name);
+  }
+  return { kept, unknown };
 }
 // Same glob as the library's gasGlobToRegExp_ — gas/tests/cli.test.js holds the two to one table.
 function globToRegExp(glob) {
@@ -542,7 +565,7 @@ function vendor(repoRoot) {
   console.log('vendored SelfDeploy.js ' + (before ? before + ' → ' : '') + libraryVersionOf(src) + ' at ' + path.relative(root, dest));
   return dest;
 }
-function init(repoRoot, flags) {
+async function init(repoRoot, flags) {
   const root = path.resolve(repoRoot || '.');
   const p = path.join(root, 'gas.json');
   if (fs.existsSync(p) && !flags.force) throw new Error(p + ' exists — edit it, or pass --force');
@@ -552,9 +575,20 @@ function init(repoRoot, flags) {
     rootDir: flags['root-dir'] === undefined ? '' : flags['root-dir'],
     include: ['**/*.js', '**/*.gs', '**/*.html', 'appsscript.json'],
     exclude: ['**/*.test.js', 'tests/**', 'test/**', 'node_modules/**'],
-    hooks: { postDeploy: '', notify: '' }, runnable: [], pollMinutes: 5
+    hooks: { postDeploy: '', notify: '' }, runnable: [], pollMinutes: 5, preserve: [], dropUnknown: false
   };
   if (flags['prod-deployment']) cfg.prod = { deploymentId: flags['prod-deployment'] };
+  // The adoption trap: HEAD files the repo never had (hand-pushed data) would be deleted by the first deploy.
+  // With a credential at hand, prefill preserve with every HEAD-only name so the first deploy carries them.
+  const dir = path.join(root, cfg.rootDir);
+  try {
+    const local = fs.existsSync(dir) ? new Set(localDeployables(dir, cfg).map(scriptName)) : new Set();
+    const head = await getContent(cfg.scriptId);
+    cfg.preserve = (head.files || []).map((f) => f.name).filter((n) => !local.has(n)).sort();
+    if (cfg.preserve.length) console.log('preserve prefilled with ' + cfg.preserve.length + ' HEAD-only file(s): ' + cfg.preserve.join(', ') + ' — trim it to what the repo should not own');
+  } catch (e) {
+    console.log('note: could not read HEAD to prefill preserve (' + (e && e.message) + '); check `gas pull` against ' + (cfg.rootDir || '.') + ' before the first deploy');
+  }
   fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + '\n');
   console.log('wrote ' + p);
   return cfg;
@@ -604,7 +638,7 @@ async function main() {
       process.exitCode = cmd ? 2 : 0;
   }
 }
-module.exports = { parseArgs, normalizeCredentials, codeFromRedirect, scriptName, scriptType, extFor, deployedShaOf, seedPayload, globToRegExp, matchesAny, normalizeConfig, runRequest, libraryVersionOf, localDeployables, PUBLISHED_CLIENT, LOGIN_SCOPES, STATUS, REF_PREFIX, SEED_PREFIX, RUN_FILE };
+module.exports = { parseArgs, normalizeCredentials, codeFromRedirect, scriptName, scriptType, extFor, deployedShaOf, seedPayload, globToRegExp, matchesAny, normalizeConfig, carryOver, runRequest, libraryVersionOf, localDeployables, PUBLISHED_CLIENT, LOGIN_SCOPES, STATUS, REF_PREFIX, SEED_PREFIX, RUN_FILE };
 if (require.main === module) {
   main().catch((e) => { console.error('ERR  ' + (e && e.message ? e.message : e)); process.exit(process.exitCode || 2); });
 }

@@ -68,6 +68,18 @@ three; a promote costs three Apps Script API calls.
 Then a push to the default branch: tests, ref moved, and within about seven minutes a green or red
 `gas/deploy` status on the commit, with the reason in the status description and in the owner's mail.
 
+## Files the repo does not carry
+
+`updateContent` replaces HEAD's whole file set, so a file that lives only on the script — a data file pushed
+by hand and gitignored for what it holds, like aac-bill-intake's `GlData`, `AliasData`, `JobData` — would be
+deleted by the first deploy. So a deploy that finds HEAD-only files **refuses**, names them in the commit
+status and the mail, and records the commit as judged (no five-minute retry loop). Three ways out, in
+`gas.json`: `"preserve": ["*Data"]` (names or globs against the Apps Script file name) carries matching
+files over byte for byte on every deploy; deleting them from the script; or `"dropUnknown": true` for a
+repo that is the whole truth. `gas init` prefills `preserve` with every HEAD-only name it can see, and
+`gas push` applies the same rule (`--drop-unknown` is its escape). Nothing preserved is ever stamped or
+rewritten; nothing unknown is ever deleted silently.
+
 ## Hooks
 
 - `hooks.postDeploy`: a function in the project that the verifying tick calls. Throw to fail the deploy

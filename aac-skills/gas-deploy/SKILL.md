@@ -23,9 +23,13 @@ command below is `node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` 
 1. `gas whoami`. No credential → `gas login` (in a cloud container: `gas login --paste`, hand the URL to
    the owner, paste back the localhost URL). Never `clasp login`: that is the machine-wide credential the
    `aac-google-access` skill guards, and it is the wrong client for anything CI-shaped.
-2. `gas init <repo> --script-id <id> --root-dir <dir>`; edit `gas.json`: `include`/`exclude`,
-   `prod.deploymentId` if there is a PROD, `hooks.postDeploy` if the project has something to check
-   (write that function in the project: throw on a bad deploy, return a one-line summary on a good one).
+2. `gas init <repo> --script-id <id> --root-dir <dir>`; edit `gas.json`: `include`/`exclude` (mirror the
+   repo's `.claspignore`), `prod.deploymentId` if there is a PROD, `hooks.postDeploy` if the project has
+   something to check (write that function in the project: throw on a bad deploy, return a one-line
+   summary on a good one), and **`preserve`**: init prefills it with every file HEAD holds that the repo
+   does not (hand-pushed, gitignored data files). Keep the ones the script needs; a deploy that would
+   delete an unlisted one refuses, by design. `gas pull <id>` and a CR-stripped diff against `rootDir`
+   shows what else differs — a repo ahead of its script means the first push is a real release.
 3. `gas vendor <repo>`; commit `gas.json` and `<rootDir>/SelfDeploy.js`.
 4. Manifest scopes: `script.external_request`, `script.scriptapp`, `drive`, `userinfo.email`, a mail
    scope. The AAC canonical block has them all.
