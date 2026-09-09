@@ -21,7 +21,7 @@
       "url": "https://github.com/anthropics/claude-plugins-official.git"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-plugins-official",
-    "lastUpdated": "2026-09-03T23:02:20.596Z"
+    "lastUpdated": "2026-09-09T15:27:00.540Z"
   },
   "caveman": {
     "source": {
@@ -53,6 +53,6 @@
       "repo": "surreptakos/claude-dotfiles"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles",
-    "lastUpdated": "2026-09-02T21:17:21.414Z"
+    "lastUpdated": "2026-09-09T15:10:13.945Z"
   }
 }
