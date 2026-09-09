@@ -12,7 +12,9 @@
  * WHAT IT DETECTS
  *   git                     always
  *   npm test                package.json with a `scripts.test`
- *   tools/clasp-auth.js     Apps Script credential: alive AND correctly scoped
+ *   gas.json               Apps Script project that deploys ITSELF from GitHub (claude-dotfiles gas/):
+ *                          a merge to the default branch is the release; no credential to check
+ *   tools/clasp-auth.js     Apps Script credential: alive AND correctly scoped (repos still on clasp)
  *   .clasp.json            Apps Script project — warns that `clasp push` is a release
  *   tools/tracker-audit.js  tracker drift (exit 1 = found drift, 2 = could not audit)
  *   tools/canary.js         pre-release gate, run at --end
@@ -216,9 +218,20 @@ function gitChecks() {
 /* ------------------------------------------------------------- apps script ------------------- */
 
 function claspChecks() {
+  // A self-deploying script (claude-dotfiles gas/: gas.json + vendored SelfDeploy.js; or the cockpit's
+  // own ADR-0033 endpoint) holds its credentials itself and pulls each merge from GitHub. There is no
+  // clasp token to check, and warning about one would send someone to re-mint a credential nothing uses.
+  const selfDeploys = has('gas.json') || has('tools/self-deploy-call.js');
   const isClasp = has('.clasp.json') || has('gas/.clasp.json') || has('src/.clasp.json');
-  if (!isClasp && !has('tools/clasp-auth.js')) return;
+  if (!isClasp && !has('tools/clasp-auth.js') && !selfDeploys) return;
   head('Apps Script');
+
+  if (selfDeploys) {
+    ok('self-deploying Apps Script project — a merge to the default branch is the release; no clasp credential to check');
+    if (has('gas.json')) note('`gas status owner/repo` shows the last deploy verdict; `gas run owner/repo <fn> \'[args]\'` replaces `clasp run-function` (claude-dotfiles gas/cli/gas.js)');
+    if (END) note('releasing = merge to the default branch; the script picks it up within ~10 minutes and marks the commit green or red.');
+    return;
+  }
 
   if (has('tools/clasp-auth.js')) {
     // Checks the SCOPES on the grant, not merely whether it refreshes. That distinction is the

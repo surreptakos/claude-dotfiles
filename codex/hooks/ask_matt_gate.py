@@ -951,7 +951,7 @@ def _yes_lint(text: str, turn_tools: set[str] | None) -> list[str]:
 
 CONFIG_FILE_PATTERN = re.compile(
     r"(^|[\\/])(settings(\.local)?\.json|managed-settings[^\\/]*\.json|\.env[^\\/]*|[^\\/]*\.env"
-    r"|docker-compose[^\\/]*\.ya?ml|compose\.ya?ml|appsscript\.json|hooks\.json|\.clasp\.json"
+    r"|docker-compose[^\\/]*\.ya?ml|compose\.ya?ml|appsscript\.json|hooks\.json|\.clasp\.json|gas\.json"
     r"|[^\\/]*\.toml|CLAUDE\.md|AGENTS\.md|\.mcp\.json)$",
     re.IGNORECASE,
 )

@@ -17,7 +17,8 @@ Both are read-only. They fetch and report; they never commit, push, merge or dep
 clear, exit 1 means something needs a decision.
 
 The checker is shared across projects and auto-detects what a repo has — git, `npm test`,
-`tools/clasp-auth.js`, `tools/tracker-audit.js`, `tools/canary.js`, the GitHub ticket list. Anything
+`gas.json` (a self-deploying script: no credential to check), `tools/clasp-auth.js`,
+`tools/tracker-audit.js`, `tools/canary.js`, the GitHub ticket list. Anything
 it cannot detect here lives in `.claude/session.json`.
 
 **Without that tooling the checks below are just git commands**, which is why they are written out

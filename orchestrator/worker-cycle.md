@@ -68,7 +68,7 @@ Then, in order:
 8. **Final message.** One paragraph: tickets fleeted and their outcomes, PRs merged, tickets parked
    `ready-for-human` and why, caps or blockers hit. No file dumps.
 
-Hard rails: never run clasp or any deploy; never touch production data paths; never widen a diff
+Hard rails: never run clasp, move a `deploy/*` ref, or deploy in any other way; never touch production data paths; never widen a diff
 beyond its ticket; never skip/disable a test to get green; read repository files only through the
 local clone (`cat`, `git show`), never through `mcp__github__get_file_contents` or any tool that
 returns base64 into your context; anything preference-shaped or rail-conflicting becomes

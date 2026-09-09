@@ -36,3 +36,4 @@
 - [Capture, don't build, on credits](capture-dont-build-on-credits.md) — owner approval = ticket + pickup command, never unbidden implementation; builds need explicit "run it"
 - [Project value rationale](project-value-rationale.md) — full why-does-this-exist case: ADR-0002 context + seat cost + bus factor; pricing audits & sub portal documented nowhere else
 - [Distributed docs self-contained](distributed-docs-self-contained.md) — owner directive 2026-08-25: staff-facing PDF/docx carry zero repo/ADR/path refs; verify extracted-text grep
+- [Deploys itself — no clasp](deploys-itself-no-clasp.md) — since 2026-09-09: merge to `main` = release (gas.json + SelfDeploy.js, claude-dotfiles gas/); `gas run` replaces clasp run-function; older clasp notes are retired

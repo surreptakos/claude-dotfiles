@@ -83,9 +83,9 @@ writes nothing.
 git clone <this repo> ; cd claude-dotfiles ; .\install.ps1
 ```
 
-It checks for git, node, `py`, `claude`, `clasp` and `gh`, restores the configuration, and prints
-what remains: the two secret files, `/login`, `gh auth login`, and `node tools/clasp-auth.js` from a
-project repo.
+It checks for git, node, `py`, `claude` and `gh`, restores the configuration, and prints what
+remains: the two secret files, `/login`, `gh auth login`, and `gas login` (once per Google account;
+`clasp` is no longer a prerequisite — every AAC Apps Script repo deploys itself, see `gas/README.md`).
 
 ## Absolute paths are stored as tokens
 

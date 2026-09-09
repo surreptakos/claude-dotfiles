@@ -48,7 +48,7 @@ per repo.
 - **Deploy/CI workflow** — any existing `.github/workflows/*.yml` whose name suggests deploy/test; the dashboard reports the most deploy-like one, or skips.
 - Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to skip or merge.
 - Repo private? (`gh repo view --json isPrivate`) — private is expected; never suggest GitHub Pages for a private repo's dashboard.
-- **Clasp repo?** `.clasp.json` at the root, in `gas/`, or in `src/`. Decides step 13 and the Releasing section of the session runbook.
+- **Apps Script repo?** `.clasp.json` at the root, in `gas/`, or in `src/` — or `gas.json`, which means it already deploys itself. Decides step 13 and the Releasing section of the session runbook.
 
 ## 2 — Confirm only genuine branches
 
@@ -83,8 +83,8 @@ cross-repo Projects board instead of per-repo (see step 6).
 12. **Session checks** — copy `templates/session.json` to `.claude/session.json`, substituting `TEST_COMMAND` (same value as the hook and `ticket.yml`). Copy `templates/session-runbook.md` to `docs/runbooks/session.md`; if the repo does not deploy, delete that template's Releasing section as its comment says.
     - **PRESERVE an existing `.claude/session.json` verbatim.** Identical hazard to step 3.3's `CONFIG` block, and for the identical reason: this file carries the hand-corrected test command and the repo's release gates, and detection cannot reproduce either. Merge in missing keys; never regenerate the file.
     - The engine itself is **NOT** installed per repo. It lives once at `~/.claude/skills/session-check/check.js`, and `~/.claude/hooks/session-gate.js` runs it from the global `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks — so a harnessed repo gets the checks without anyone invoking a skill. `/session-start` and `/session-end` only re-print the cached result. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
-    - Fill `releaseGates` with what the repo actually gates on — `node tools/clasp-auth.js --quiet` and `node tools/canary.js` where those exist, `[]` otherwise. They run at `--end`.
-13. **Clasp credential gate** — for a clasp repo (`.clasp.json` at the root, in `gas/`, or in `src/`), copy `templates/clasp-auth.js` to `tools/clasp-auth.js`.
+    - Fill `releaseGates` with what the repo actually gates on — `node tools/canary.js` where it exists, `[]` otherwise; never `clasp-auth` for a self-deploying repo. They run at `--end`.
+13. **Self-deploy (gas)** — an Apps Script repo adopts the gas package instead of a clasp credential: follow the `gas-deploy` team skill (claude-dotfiles `gas/README.md`): `gas init` (prefills `preserve` from the live script), `gas vendor`, the `deploy.yml` template with the repo's test command, one `gasEnsureTrigger_();` line in an existing trigger, then the one-time `gas push` + `gas seed`. The script then pulls every merge from GitHub and no credential exists in CI or on a machine. `templates/clasp-auth.js` is legacy — copy it to `tools/clasp-auth.js` only for a repo the owner explicitly keeps on clasp, and then:
     - **It is AAC-hardcoded on purpose.** `CLIENT_ID` and `ACCOUNT` name the private OAuth client in `gpt-sheets-access-475817` and the account owning the bound scripts. A non-AAC repo needs both edited; there is no detection that could infer them, and a wrong guess yields a tool that confidently validates the wrong credential. Say so at handoff rather than installing it silently into a non-AAC project.
     - Why it is worth a step: it checks the grant's **scopes**, not merely that it refreshes.
 
@@ -97,9 +97,9 @@ cross-repo Projects board instead of per-repo (see step 6).
       the session just reads more verbosely. Pinning it in the repo makes the intent reviewable.
     - Default here is `ultra` (Dan, 2026-08-02). Keep an existing file's value if the repo already carries one;
       only add the file where it is missing.
-    - If the repo has a packaging step that sweeps root files (clasp, docker COPY), exclude it — same list as
-      step 10. `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` — which authorizes clasp's own OAuth client with narrower defaults — produces a credential that pushes fine in the repo you are standing in while silently breaking Gmail and Drive work in another. Nothing local to the affected repo can see it.
-    - Where the repo has a `package.json`, also wire `prepush` to `node tools/clasp-auth.js --quiet` so a dead credential stops the deploy instead of failing inside clasp with a bare `invalid_grant` (message-board does this). Without one, the gate is the session check plus the release runbook.
+    - If the repo has a packaging step that sweeps root files (the gas deployable set, docker COPY), exclude it — same list as
+      step 10 (`gas.json` `exclude` mirrors what `.claspignore` used to say).
+    - A repo still on clasp keeps the old rule: `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` produces a credential that pushes fine here while silently breaking Gmail and Drive work in another repo; wire `prepush` to `node tools/clasp-auth.js --quiet` where there is a `package.json`. A self-deploying repo has nothing credential-shaped to wire.
 
 15. **Workflow scripts** — copy `templates/ticket-fleet.js` to `.claude/workflows/ticket-fleet.js`.
     - A named script for Claude Code's in-session Workflow tool (`Workflow({name: 'ticket-fleet'})`):

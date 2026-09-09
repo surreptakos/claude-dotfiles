@@ -31,7 +31,6 @@ $required = @(
     @{ Name = 'node';   Command = 'node' },
     @{ Name = 'python'; Command = 'py' },
     @{ Name = 'claude'; Command = 'claude' },
-    @{ Name = 'clasp';  Command = 'clasp' },
     @{ Name = 'gh';     Command = 'gh' }
 )
 $missing = @()
@@ -48,8 +47,7 @@ foreach ($tool in $required) {
 if ($missing.Count -gt 0) {
     Write-Host ''
     Write-Host ("Install these first: {0}" -f ($missing -join ', ')) -ForegroundColor Yellow
-    Write-Host '  clasp:  npm install -g @google/clasp'
-    Write-Host ''
+        Write-Host ''
 }
 
 Write-Host ''
@@ -70,7 +68,7 @@ Write-Host ''
 Write-Host '  2. Logins:'
 Write-Host '       claude            then /login'
 Write-Host '       gh auth login'
-Write-Host '       node tools/clasp-auth.js   (from a project repo - never a bare clasp login)'
+Write-Host '       node <claude-dotfiles>\gas\cli\gas.js login   (once per Google account; Apps Script repos deploy themselves - no clasp)'
 Write-Host ''
 Write-Host '  3. Plugins reinstall themselves from the marketplaces in claude/settings.json on'
 Write-Host '     first launch. The statusLine command points into plugins\cache\... with a build'
