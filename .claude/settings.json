@@ -9,8 +9,29 @@
     "",
     "Wires the dotfiles-freshness loop (issue 12) - see tools/dotfiles-freshness.ps1",
     "and tools/dotfiles-freshness-hook.js. Runs only for sessions in this repo,",
-    "which is where the freshness of ~/.claude vs origin actually matters."
+    "which is where the freshness of ~/.claude vs origin actually matters.",
+    "",
+    "extraKnownMarketplaces + enabledPlugins make cloud sessions (claude.ai/code)",
+    "install the aac-skills plugin from this repo at startup. Two other routes were",
+    "tried and do not work: the claude.ai account-level plugin sync returns zero",
+    "plugins for this account (plugins_sync_no_changes count:0 in the session diag",
+    "log), and the cloud environment setup script runs before the session's git",
+    "credentials exist, so cloning a private marketplace fails there. Declaring it",
+    "here is the documented path and the one verified 2026-09-09: Claude Code clones",
+    "the marketplace itself after credentials are wired up, loads all 56 skills and",
+    "runs the plugin's SessionStart hook."
   ],
+  "extraKnownMarketplaces": {
+    "claude-dotfiles": {
+      "source": {
+        "source": "github",
+        "repo": "surreptakos/claude-dotfiles"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "aac-skills@claude-dotfiles": true
+  },
   "hooks": {
     "SessionStart": [
       {
