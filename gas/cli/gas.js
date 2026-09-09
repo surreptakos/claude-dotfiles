@@ -404,10 +404,15 @@ async function gh(method, suffix, body) {
   return r;
 }
 async function refs(repo) {
-  const r = await gh('GET', '/repos/' + repo + '/git/matching-refs/heads/' + REF_PREFIX);
+  // No trailing slash on the prefix: the claude.ai/code session proxy refuses to canonicalize `heads/deploy/`
+  // (400). `heads/deploy` also matches `deploy-*`, so the prefix is applied here. The library keeps the slash.
+  const r = await gh('GET', '/repos/' + repo + '/git/matching-refs/heads/' + REF_PREFIX.replace(/\/$/, ''));
   if (r.status !== 200) throw new Error('matching-refs answered ' + r.status + ': ' + (r.text || '').slice(0, 200));
   const out = {};
-  for (const x of r.body || []) out[String(x.ref).replace(/^refs\/heads\//, '')] = x.object.sha;
+  for (const x of r.body || []) {
+    const name = String(x.ref).replace(/^refs\/heads\//, '');
+    if (name.indexOf(REF_PREFIX) === 0) out[name] = x.object.sha;
+  }
   return out;
 }
 async function latestStatus(repo, sha, context) {
