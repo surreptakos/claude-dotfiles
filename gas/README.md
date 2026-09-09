@@ -118,7 +118,11 @@ cannot reach `script.google.com` at all, because everything goes through GitHub.
 
 - The consent, once per Google account (`gas login`), and again only if the token is revoked (a
   password change on an account whose grants include Gmail, an explicit revocation, six months unused).
-- `gasInstall()` once per script, from the editor, or one line in an existing trigger.
+- Starting the tick, once per script. A project that already has a trigger needs no editor: add
+  `gasEnsureTrigger_();` to that trigger's function and deploy; its next run installs the tick. Only a
+  project with no trigger at all needs `gasInstall()` run from the editor.
+- Authorizing a brand-new script the first time it runs, in its editor. No API grants a script's own
+  OAuth consent; the canary needs this once, an already-running project never does.
 - The GitHub token, once per account, and its rotation if it is ever revoked.
 - Deleting versions by hand at the 200 cap. Only promotes create versions; the library warns at 180
   and refuses at 199.
