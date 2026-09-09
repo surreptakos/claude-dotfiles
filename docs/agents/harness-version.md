@@ -1,8 +1,8 @@
 # Harness version
 
-    harness-version: 13
+    harness-version: 17
 
-Installed/upgraded: 2026-08-21 by the `project-harness` skill.
+Installed/upgraded: 2026-09-09 by the `project-harness` skill.
 
 This file exists so "which generation of the harness does this repo have?" is a question you can
 answer by reading, instead of by remembering. Before this marker, a new harness capability only
