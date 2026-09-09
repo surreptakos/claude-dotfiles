@@ -18,3 +18,4 @@
 - [Environment verification log](environment-verification-log.md) — dated proof behind the global CLAUDE.md environment-claim rules, moved out in the 2026-09-03 trim
 - [Cowork does not surface plugin hooks](cowork-runs-plugin-hooks.md) — tested 2026-09-03 with the aac-skills marker; neither user-level nor plugin hooks govern Cowork, only CLAUDE.md text and Cowork memory do
 - [PR merge from a worktree needs a manual branch delete](pr-merge-from-worktree-needs-manual-branch-delete.md) — gh merges on GitHub, then fails checking out master; verify MERGED and delete the remote branch by hand
+- [Account enforcement is a warning](account-enforcement-is-a-warning.md) — ~/.claude/accounts.json maps accounts to repos and routines; session check and watchdog warn on mismatch, never block (Dan, 2026-09-09)

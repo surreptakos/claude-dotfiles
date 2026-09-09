@@ -15,7 +15,10 @@
     "Dan-AAC": {
       "uuid": "b138160d-44d0-413d-951b-2400081be086",
       "email": "",
-      "orgs": { "171309ff-cab7-4fb1-8b7c-acb95c18a675": "current" },
+      "orgs": {
+        "171309ff-cab7-4fb1-8b7c-acb95c18a675": "team",
+        "4f58f937-a153-44d4-9f1c-2b4f0baae7cc": "work"
+      },
       "surfaces": ["desktop"]
     },
     "Dan": {
