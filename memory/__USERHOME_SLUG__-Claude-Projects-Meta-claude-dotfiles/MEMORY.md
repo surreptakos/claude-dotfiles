@@ -17,3 +17,4 @@
 - [Trust dialog fires despite accepted flag](trust-dialog-fires-despite-accepted-flag.md) — interactive launch in a clone with pre-approved permissions re-shows the folder-trust dialog; unattended masters park on it
 - [Environment verification log](environment-verification-log.md) — dated proof behind the global CLAUDE.md environment-claim rules, moved out in the 2026-09-03 trim
 - [Cowork does not surface plugin hooks](cowork-runs-plugin-hooks.md) — tested 2026-09-03 with the aac-skills marker; neither user-level nor plugin hooks govern Cowork, only CLAUDE.md text and Cowork memory do
+- [PR merge from a worktree needs a manual branch delete](pr-merge-from-worktree-needs-manual-branch-delete.md) — gh merges on GitHub, then fails checking out master; verify MERGED and delete the remote branch by hand
