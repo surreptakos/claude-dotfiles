@@ -1,0 +1,26 @@
+name: Promote Apps Script (PROD)
+
+# Copy to .github/workflows/promote.yml in a repo that has a PROD deployment (gas.json `prod.deploymentId`).
+# By hand from the Actions tab, or on a schedule. Moves `deploy/prod` to the commit; the script promotes
+# only a commit `deploy/test` has verified. Freeze days are ISO weekdays in the named timezone.
+
+on:
+  workflow_dispatch:
+    inputs:
+      emergency_override:
+        description: Promote even on a freeze day
+        type: boolean
+        default: false
+  # schedule:
+  #   - cron: '0 13 * * 4'   # Thursday 8am CT
+
+jobs:
+  promote:
+    uses: surreptakos/claude-dotfiles/.github/workflows/gas-promote.yml@master
+    permissions:
+      contents: write
+      statuses: read
+    with:
+      freeze_days: '1,2,3'
+      timezone: America/Chicago
+      emergency_override: ${{ inputs.emergency_override == true }}

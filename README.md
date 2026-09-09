@@ -29,6 +29,8 @@ CI regenerates it on every push and every issue event and force-pushes there —
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` | Codex's half of the global rules |
 | `memory/<slug>/` | `~/.claude/projects/<slug>/memory/` | per-project memory files |
 
+Repo-only tooling that is NOT synced to any machine: `gas/`, the Apps Script self-deploy package (no clasp, no Google credential in CI; `gas/README.md`), with the reusable `gas-deploy.yml` / `gas-promote.yml` workflows other repos call.
+
 Nothing else is read. `sync.ps1` copies the whitelist in `lib/manifest.ps1` by name, so a credential
 file or a session transcript cannot be swept up by a pattern that was slightly too broad. The
 `.gitignore` is only a backstop for things copied in by hand.

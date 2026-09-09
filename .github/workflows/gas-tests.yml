@@ -1,0 +1,23 @@
+name: gas tests
+
+# The gas package (gas/) is plain Node and runs on Linux; the repo's other suite is the PowerShell
+# restore test on Windows. This job keeps the library, the CLI and the workflow contract green on
+# every push that touches them.
+
+on:
+  push:
+    paths: ['gas/**', '.github/workflows/gas-*.yml']
+  pull_request:
+    paths: ['gas/**', '.github/workflows/gas-*.yml']
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check gas/lib/SelfDeploy.js && node --check gas/cli/gas.js
+      - run: node --test gas/tests/self_deploy.test.js gas/tests/cli.test.js gas/tests/workflows.test.js
