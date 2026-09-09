@@ -47,7 +47,7 @@
 //
 // LOGGING: every line starts with [gas]. In Cloud Logging, filter on that.
 
-var GAS_SELF_DEPLOY_VERSION = '0.1.0';
+var GAS_SELF_DEPLOY_VERSION = '0.1.1';
 // THE RUNTIME'S OWN BUILD MARKER. The deploy replaces the placeholder with the commit it writes, so the
 // code that runs can always say which commit it is. Compared against the pending record each tick.
 var GAS_DEPLOYED_SHA = '__GAS_SHA__';
@@ -174,6 +174,23 @@ function gasTickTest_(repo, sha, state) {
 function gasDeployCommit_(repo, sha, state) {
   var cfg = gasFetchConfig_(repo, sha);
   var files = gasDeployables_(repo, sha, cfg);
+  // updateContent replaces HEAD's whole file set. Anything HEAD holds that the repo does not would vanish,
+  // so it is carried over when gas.json preserves it and refused otherwise (dropUnknown opts into the wipe).
+  var carry = gasCarryOver_(files, cfg);
+  if (carry.unknown.length && !cfg.dropUnknown) {
+    var why = 'refused: HEAD carries ' + carry.unknown.length + ' file(s) the repo at ' + sha.slice(0, 7) + ' does not ('
+      + carry.unknown.join(', ') + ') and a deploy would delete them — name them in gas.json "preserve" to carry them over, '
+      + 'delete them from the script, or set "dropUnknown": true';
+    state.test = { sha: sha, pending: false, ok: false, error: why, at: new Date().toISOString() };
+    gasSaveState_(state);
+    gasStatus_(repo, sha, GAS_STATUS_DEPLOY_, 'failure', why);
+    gasNotify_('[gas] deploy of ' + sha.slice(0, 7) + ' refused', why, true);
+    gasLog_('deploy of ' + sha.slice(0, 7) + ' ' + why);
+    return { refused: sha, unknown: carry.unknown };
+  }
+  if (carry.kept.length) gasLog_('carrying over ' + carry.kept.length + ' file(s) the repo does not hold: ' + carry.kept.map(function (f) { return f.name; }).join(', '));
+  if (carry.unknown.length) gasLog_('dropping ' + carry.unknown.length + ' file(s) the repo does not hold (dropUnknown): ' + carry.unknown.join(', '));
+  files = files.concat(carry.kept);
   var bytes = files.reduce(function (n, f) { return n + f.source.length; }, 0);
   gasStatus_(repo, sha, GAS_STATUS_DEPLOY_, 'pending', 'writing HEAD (' + files.length + ' files)');
   gasProjectUpdateContent_(files);
@@ -363,6 +380,11 @@ function gasNormalizeConfig_(cfg) {
   out.hooks = { postDeploy: (cfg.hooks && cfg.hooks.postDeploy) ? String(cfg.hooks.postDeploy) : '', notify: (cfg.hooks && cfg.hooks.notify) ? String(cfg.hooks.notify) : '' };
   out.runnable = Array.isArray(cfg.runnable) ? cfg.runnable.map(String) : [];
   out.pollMinutes = Number(cfg.pollMinutes || 0) || GAS_TICK_MINUTES_DEFAULT_;
+  // Files HEAD carries that the repo does not (hand-pushed data files, gitignored for what they hold): names
+  // or globs against the Apps Script file name. Matching ones ride along unchanged on every deploy; any other
+  // HEAD-only file REFUSES the deploy unless dropUnknown says the repo is the whole truth.
+  out.preserve = Array.isArray(cfg.preserve) ? cfg.preserve.map(String) : [];
+  out.dropUnknown = !!cfg.dropUnknown;
   return out;
 }
 // The deployable set at a commit: every blob under rootDir matching include and not exclude, as Apps
@@ -481,10 +503,22 @@ function gasScriptApi_(method, suffix, payload, query) {
   return text ? JSON.parse(text) : {};
 }
 function gasProjectUpdateContent_(files) { return gasScriptApi_('put', '/content', { files: files }); }
-// The build HEAD carries, read through the API (never through this runtime, which may be older).
+// HEAD's files as the API holds them, and the build they carry (never read through this runtime, which may be older).
+function gasHeadContent_() { return (gasScriptApi_('get', '/content') || {}).files || []; }
+// HEAD-only files split into the ones gas.json preserves (carried verbatim) and the rest (unknown).
+function gasCarryOver_(files, cfg) {
+  var have = {};
+  files.forEach(function (f) { have[f.name] = true; });
+  var kept = [], unknown = [];
+  gasHeadContent_().forEach(function (h) {
+    if (have[h.name]) return;
+    if (gasMatchesAny_(h.name, cfg.preserve || [])) kept.push({ name: h.name, type: h.type, source: h.source });
+    else unknown.push(h.name);
+  });
+  return { kept: kept, unknown: unknown };
+}
 function gasHeadSha_() {
-  var content = gasScriptApi_('get', '/content');
-  var files = content.files || [];
+  var files = gasHeadContent_();
   for (var i = 0; i < files.length; i++) {
     var m = /var GAS_DEPLOYED_SHA = '([0-9a-f]{40})'/.exec(files[i].source || '');
     if (m) return m[1];
