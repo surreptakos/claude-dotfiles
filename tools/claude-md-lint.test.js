@@ -263,6 +263,21 @@ test('repoContext: reads package.json and finds formatter configs beside the fil
   }
 });
 
+test('the claude-md-lint skill carries a byte-identical copy of the linter', () => {
+  // The skill (~/.claude/skills/claude-md-lint, mirrored as claude/skills/claude-md-lint) is how
+  // other repos and cloud sessions run this; tools/ is where it is tested. Same pattern as the
+  // ticket-fleet copies: two files, one assertion, no silent drift. Whichever copies exist on this
+  // machine are checked; a fresh CI clone with neither still passes.
+  const here = fs.readFileSync(path.join(__dirname, 'claude-md-lint.js'), 'utf8');
+  const copies = [
+    path.join(os.homedir(), '.claude', 'skills', 'claude-md-lint', 'claude-md-lint.js'),
+    path.join(__dirname, '..', 'claude', 'skills', 'claude-md-lint', 'claude-md-lint.js'),
+  ].filter((p) => fs.existsSync(p));
+  for (const p of copies) {
+    assert.equal(fs.readFileSync(p, 'utf8'), here, `${p} differs from tools/claude-md-lint.js — copy the tools/ version over it`);
+  }
+});
+
 test('CLI: exit 0 clean, 1 findings, 2 usage; repo context and --against', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-md-lint-'));
   try {
