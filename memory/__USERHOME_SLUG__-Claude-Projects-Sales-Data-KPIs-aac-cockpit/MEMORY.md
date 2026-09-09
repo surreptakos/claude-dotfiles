@@ -47,3 +47,4 @@
 - [Closing keywords in commit bodies](closing-keywords-in-commit-bodies.md) — "closes #482's corruption vector" auto-closed the issue on push.
 - [Nightly local ticket agent](nightly-local-ticket-agent.md) — Task Scheduler 11:05pm CT headless claude; currently disabled (2026-08-25).
 - [Workflow scripts: LF + session cache](workflow-scripts-lf-session-cache.md) — named form serves session-start cache; use `{scriptPath}`.
+- [Deploys itself — no clasp](deploys-itself-no-clasp.md) — ADR-0033 since 2026-09-08: merge to main = deploy, script promotes PROD itself; CLASPRC_JSON retired; older clasp notes are retired

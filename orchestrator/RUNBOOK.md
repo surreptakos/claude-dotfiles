@@ -206,8 +206,9 @@ notices nothing was lost.
 - Ground truth over self-reports: verify every worker claim against the tracker and PR state.
 - Never fleet a repo not in the priority list; never touch `aac-sales-commissions`,
   `aac-message-board`, `aac-task-management`, `aac-routines` without a new ruling from Dan.
-- Apps Script deploys stay on their existing paths (cockpit CI, or Dan's machine for clasp-manual
-  repos). Workers and fleets never run clasp and never touch production data paths.
+- Apps Script deploys stay on their existing path: every AAC script deploys itself from GitHub on a
+  merge to its default branch (claude-dotfiles `gas/`). Workers and fleets never move a `deploy/*` ref,
+  never run clasp, and never touch production data paths.
 - Respect repo CLAUDE.md rails absolutely; a worker that reports a rail conflict parks the ticket
   `ready-for-human` instead of bending the rail.
 - Cost: the per-day wave caps are hard. When a cap is hit, the state issue says so and the repo

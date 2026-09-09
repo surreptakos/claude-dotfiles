@@ -75,9 +75,16 @@ could not audit, which is not a pass.
 ## Releasing
 
 <!-- HARNESS: this section is only meaningful for a repo that deploys. Delete it if this one does
-     not, and replace the commands if it deploys some other way than clasp. -->
+     not. An Apps Script repo with gas.json deploys itself (the default since 2026-09-09); keep the
+     first block. A repo that still deploys with clasp keeps the second. -->
 
-In order, no skipping:
+**Self-deploying Apps Script (`gas.json`):** a merge to the default branch is the release.
+`.github/workflows/deploy.yml` runs the suite (and the canary, if the repo has one), then moves the
+`deploy/test` ref; the script's own five-minute tick writes itself, the next tick verifies, and the
+commit is marked `gas/deploy` green or red. Confirm with `gas status owner/repo` rather than assuming;
+`gas run owner/repo <fn> '[args]'` runs a function on the live script and prints the answer.
+
+**Still on clasp (legacy):**
 
 ```bash
 node tools/clasp-auth.js    # credential alive AND correctly scoped?
@@ -85,11 +92,7 @@ node tools/canary.js        # if the repo has one: does the code load and run?
 clasp push                  # main checkout only, never a worktree
 ```
 
-Then confirm what the deployed thing reports about itself, rather than assuming the push landed, and
-watch the first real piece of work through it.
-
 `clasp-auth.js` is the only correct way to re-authenticate. **Never hand-write a `clasp login`**: a
 bare one authorizes clasp's own OAuth client with narrower default scopes, and `~/.clasprc.json` is
 shared by every clasp project on the machine — so the result pushes fine here while silently dropping
-scopes another repo depends on. That is the worst failure shape available, because everything looks
-fine where you are standing. The tool prints the exact command to paste; do not shorten it.
+scopes another repo depends on. The tool prints the exact command to paste; do not shorten it.

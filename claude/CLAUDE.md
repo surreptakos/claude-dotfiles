@@ -161,8 +161,8 @@ a live test.
 deploy code, you can run any function: add an execution path (endpoint, handler, script entry point,
 test, `main`) and invoke it. For a deployed web app, edit the code and POST to its endpoint (Apps
 Script `/exec`, a serverless route); it runs with the deployer's authorization and bypasses per-caller
-gates. Direct runners (CLI, `clasp run`, REST, running the file locally) first; edit-commit-deploy-
-and-invoke is the universal fallback.
+gates. Direct runners (CLI, `gas run owner/repo <fn>` for a self-deploying Apps Script repo, REST,
+running the file locally) first; edit-commit-deploy-and-invoke is the universal fallback.
 
 **Pinning a subagent to a specific model version (e.g. Opus 4.7) is always possible — never claim
 otherwise.** The Agent tool's `model` param takes only family aliases and agent definitions cannot be
@@ -218,7 +218,9 @@ You already have durable, owner-grade access to the AAC Google stack (shared GCP
 service account, a clasp token with full Gmail and Drive grant). It is on disk; never claim otherwise
 or ask the operator for it. The `aac-google-access` skill carries the IDs, key paths, verified scope
 list, the re-auth tool (never a bare `clasp login`), and the Apps Script run and history recipes.
-Load it before any Sheets, Drive, Gmail or Apps Script work.
+Load it before any Sheets, Drive, Gmail or Apps Script work. Since 2026-09-09 every AAC Apps Script
+repo deploys itself from GitHub (claude-dotfiles `gas/`): a merge is the release and `gas run` is the
+headless run, so no deploy or run ever waits on a clasp token.
 
 ## Browser Automation
 

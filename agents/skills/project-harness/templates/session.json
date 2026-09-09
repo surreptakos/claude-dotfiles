@@ -4,7 +4,7 @@
     "node ~/.claude/skills/session-check/check.js [--end].",
     "",
     "ONLY what the checker cannot auto-detect belongs here. It already finds git, npm test,",
-    "tools/clasp-auth.js, tools/tracker-audit.js, tools/canary.js and the GitHub ticket list on its",
+    "gas.json (self-deploying script), tools/clasp-auth.js, tools/tracker-audit.js, tools/canary.js and the GitHub ticket list on its",
     "own. A repo whose tests run via `npm test` can delete the `test` key entirely.",
     "",
     "PRESERVE THIS FILE ON UPGRADE. Same rule as build-dashboard.js's CONFIG block: the test command",

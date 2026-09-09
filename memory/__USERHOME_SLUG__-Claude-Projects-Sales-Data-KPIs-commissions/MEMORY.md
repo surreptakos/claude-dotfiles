@@ -15,3 +15,4 @@
 - [Publish gate hook](publish-gate-hook.md) — gh issue create gated by flow + AskUserQuestion evidence; Dan wants general policy gates; Fable: trim to one governance injection
 - [Cloud skill sync](cloud-skill-sync.md) — dan-skills/caveman/i-have-adhd uploaded to claude.ai 2026-08-28, sync into all cloud containers; rebuild via claude-dotfiles `tools/build-cloud-plugin.py` + re-upload after skill edits; validator: 6 frontmatter keys, no XML in descriptions, no top-level bin/
 
+- [Deploys itself — no clasp](deploys-itself-no-clasp.md) — since 2026-09-09: merge to `master` = release (gas.json + SelfDeploy.js, claude-dotfiles gas/); `gas run` replaces clasp run-function; older clasp notes are retired

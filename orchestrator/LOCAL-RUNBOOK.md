@@ -134,8 +134,8 @@ the flag is acceptable:
 
 - Never force-push. Never commit directly to `main` (or the repo's default branch); everything
   lands through a PR that passed the bar.
-- Workers and fleets never run `clasp` and never touch production data paths; Apps Script deploys
-  stay on their existing paths.
+- Workers and fleets never move a `deploy/*` ref, never run `clasp`, and never touch production data
+  paths; Apps Script deploys happen on the merge, by the script itself (claude-dotfiles `gas/`).
 - Never fleet a repo outside the priority list; never touch `aac-sales-commissions`,
   `aac-message-board`, `aac-task-management`, `aac-routines` without a new ruling.
 - A PR that fails the bar stays open. The master does not "fix it up" to make it pass.
