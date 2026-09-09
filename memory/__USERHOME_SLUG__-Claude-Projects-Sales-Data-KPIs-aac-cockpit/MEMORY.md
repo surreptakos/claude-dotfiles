@@ -11,7 +11,7 @@
 - [Surface everything in chat](surface-everything-in-chat.md) — Dan rarely reads files/tracker; say decisions in chat.
 - [Verify before filing, cite check](verify-before-filing-cite-the-check.md) — check git/sheet/code first; put the check in the issue.
 - [Live workbook id, SA-readable](live-workbook-id-sa-readable.md) — `AAC_Deal_Snapshots_2026` / `1IZZkTMjRRUEPAwQutlkMD5W6oh8Tiy4zQyH5pgqtG7Q`.
-- [Message Board workbook](message-board-workbook.md) — 3-year Leads/Jobs history; `1dBhSY…`; join on `Lead #` = `Deal Number`.
+- [Message Board workbook](message-board-workbook.md) — Leads/Jobs is the only populated tab; Deals is header-only.
 - [Run capture early, don't wait for trigger](run-early-dont-wait-for-the-trigger.md) — first live run surfaces bugs; failed trigger loses history.
 - [Snapshots ARE Zoho — nothing to reconcile](usable-means-reconciled-against-an-independent-source.md) — verified = every figure explained.
 - [Git Bash /tmp invisible to Windows python](git-bash-tmp-invisible-to-windows-python.md) — use scratchpad path; silent no-op trap.

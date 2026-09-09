@@ -894,6 +894,18 @@ if (Test-Path $fleetBranchTest) {
         ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 20)
 }
 
+# claude-md-lint: the CLAUDE.md concision check. One case per paradigm rule, plus the CLI
+# exit codes, so a regex regression or a broken suppression comment fails the restore suite.
+$mdLintModule = Join-Path $Clone 'tools\claude-md-lint.js'
+$mdLintTest   = Join-Path $Clone 'tools\claude-md-lint.test.js'
+Check 'tools/claude-md-lint.js shipped' (Test-Path $mdLintModule)
+Check 'tools/claude-md-lint.test.js shipped' (Test-Path $mdLintTest)
+if (Test-Path $mdLintTest) {
+    $out = & node --test $mdLintTest 2>&1
+    Check 'claude-md-lint passes its own test suite (one case per paradigm rule)' `
+        ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 20)
+}
+
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
 # The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the
