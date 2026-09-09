@@ -42,6 +42,11 @@ rather than main.
 **`!! N uncommitted files`** — left from last time. Show `git status --short` and ask whether to
 keep, commit or discard. Do not build on a tree nobody has looked at.
 
+**`self-deploying Apps Script project`** — the repo carries `gas.json` (or the cockpit's own endpoint):
+a merge to the default branch is the deploy, the commit's `gas/deploy` status is the verdict, and no
+clasp credential exists anywhere. Every AAC Apps Script repo has been on this since 2026-09-09; the
+three clasp findings below only appear in a repo that still deploys with clasp.
+
 **`!! clasp credential needs re-authorizing`** — deploys are blocked until someone re-authorizes in
 a browser. If the project has `tools/clasp-auth.js`, run it: it prints the exact command. **Never
 substitute a bare `clasp login`** — that authorizes clasp's own OAuth client with narrower default

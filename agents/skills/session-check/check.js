@@ -21,6 +21,9 @@
  *   a GitHub remote         open tickets by label — via gh, or the GitHub REST API when gh is
  *                           missing (cloud containers have no gh, but their egress proxy
  *                           authenticates api.github.com, private repos included)
+ *   ~/.claude/accounts.json which Claude account owns this repo, versus the one the session runs
+ *                           under (identity.js); in the registry's auditRepo, also which desktop
+ *                           routines are enabled outside their owner. Warnings only, never STOP.
  *
  * OPTIONAL `.claude/session.json`, all keys optional:
  *   {
@@ -497,12 +500,75 @@ function ticketChecks() {
   if (list.length > 8) note(`...and ${list.length - 8} more`);
 }
 
+/* -------------------------------------------------------------- account ---------------------- */
+
+/** Which Claude account this session runs under, against ~/.claude/accounts.json (identity.js).
+ *  Two accounts share this machine and the product never says which one a session is using; the
+ *  owner kept losing track (claude-dotfiles issue 103). A mismatch is a WARNING, never a STOP —
+ *  the owner's ruling (2026-09-09): switching accounts is their call, the report just has to say. */
+function accountChecks() {
+  let identity;
+  try { identity = require('./identity.js'); } catch (e) { return; }
+  const reg = identity.loadRegistry(process.env);
+  if (!reg) return;
+  head('Account');
+  if (reg.error) { warn(reg.error); return; }
+
+  const slug = parseGithubSlug(tryRun('git', ['remote', 'get-url', 'origin']));
+  const entry = identity.repoEntry(reg, slug);
+  const me = identity.resolveIdentity(process.env);
+  const meText = identity.describe(reg, me);
+
+  if (!slug) note(`no GitHub remote — cannot look this repo up; session runs as ${meText}`);
+  else if (!entry) {
+    warn(`${slug.owner}/${slug.repo} is not in the accounts registry — session runs as ${meText}`);
+    note(`add it under "repos" in ${reg._path}`);
+  } else {
+    const ownerUuid = (reg.accounts[entry.owner] || {}).uuid;
+    if (entry.status === 'dead') {
+      warn(`${entry.key} is marked ${entry.status} in the accounts registry (owner ${entry.owner})`);
+    }
+    if (!me) note(`${entry.key} belongs to ${entry.owner}; this surface leaves no account identity on disk (cloud?), so that is unchecked`);
+    else if (!ownerUuid) note(`${entry.key} belongs to ${entry.owner}, which has no uuid in the registry; session runs as ${meText}`);
+    else if (ownerUuid.toLowerCase() === me.accountUuid.toLowerCase()) ok(`${entry.owner} owns ${entry.key}; session runs as ${meText}`);
+    else {
+      warn(`${entry.key} belongs to ${entry.owner}; this session runs as ${meText}`);
+      note(`switch account for this repo, or move it under "repos" in ${reg._path}`);
+    }
+  }
+
+  // Desktop routines fire under whichever account+org the desktop app is signed into, and the
+  // registry it keeps per account+org silently retains enabled copies after a switch (three
+  // registries held the same six routines on 2026-09-09, two of them stale). Walk them all, but
+  // only from the one repo that owns this concern — a finding in every repo would get muted.
+  if (!IS_CLOUD && slug && reg.auditRepo
+      && reg.auditRepo.toLowerCase() === `${slug.owner}/${slug.repo}`.toLowerCase()) {
+    const root = identity.desktopSessionsRoot(process.env);
+    if (!root || !fs.existsSync(root)) note('no desktop routine registry on this machine — routine audit skipped');
+    else {
+      const r = identity.auditRoutines(reg, root);
+      if (!r.stray.length && !r.unregistered.length) ok(`desktop routines enabled only under their owner (${r.scanned} registries scanned)`);
+      if (r.stray.length) {
+        warn(`${r.stray.length} desktop routine(s) enabled outside their owner account/org — duplicates fire after an account or org switch`);
+        r.stray.forEach((s) => note(`${s.taskId} [${s.cron}] enabled under ${s.where}; owner ${s.owner}`));
+        note('disable them in the desktop app while signed into that account/org, or set "enabled": false in that scheduled-tasks.json');
+      }
+      if (r.unregistered.length) {
+        warn(`${r.unregistered.length} enabled desktop routine(s) missing from the accounts registry`);
+        r.unregistered.forEach((u) => note(`${u.taskId} [${u.cron}] enabled under ${u.where}`));
+        note(`add them under "routines" in ${reg._path}`);
+      }
+    }
+  }
+}
+
 /* ---------------------------------------------------------------------------------------------- */
 
 async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
   gitChecks();
+  accountChecks();
   claspChecks();
   await workChecks();
   ticketChecks();

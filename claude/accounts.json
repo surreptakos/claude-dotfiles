@@ -1,0 +1,58 @@
+{
+  "_comment": [
+    "Which Claude account works which repo and fires which routine. Hand-written; the owner",
+    "maintains it. Read by ~/.claude/skills/session-check/check.js (Account section, every repo),",
+    "by orchestrator/master-watchdog.ps1 in claude-dotfiles, and by nobody else.",
+    "Enforcement is a warning, never a hard gate (Dan, 2026-09-09).",
+    "accounts: label -> { uuid, email, orgs: { uuid: label }, surfaces }. uuid is the claude.ai",
+    "account id: desktop sessions carry it in the path of their host-session file under",
+    "%APPDATA%\\Claude\\claude-code-sessions; CLI sessions carry it in oauthAccount of .claude.json.",
+    "repos: GitHub slug -> owner label, optional status 'dead'.",
+    "routines: desktop scheduled-task id -> owner label and the org it must be enabled under.",
+    "auditRepo: the one repo whose session check walks every desktop registry for stray routines."
+  ],
+  "accounts": {
+    "Dan-AAC": {
+      "uuid": "b138160d-44d0-413d-951b-2400081be086",
+      "email": "",
+      "orgs": {
+        "171309ff-cab7-4fb1-8b7c-acb95c18a675": "team",
+        "4f58f937-a153-44d4-9f1c-2b4f0baae7cc": "work"
+      },
+      "surfaces": ["desktop"]
+    },
+    "Dan": {
+      "uuid": "a5782f9f-611c-4939-a2a0-60f65b0e3832",
+      "email": "djgatsakos@gmail.com",
+      "orgs": { "65b7921c-7ce6-4d93-b590-b93c2e3c1be0": "personal" },
+      "surfaces": ["cli", "mobile", "web", "task-scheduler"]
+    },
+    "Active Alarm": {
+      "uuid": "",
+      "email": "",
+      "orgs": {},
+      "surfaces": ["cowork", "cloud-routines"]
+    }
+  },
+  "repos": {
+    "surreptakos/claude-dotfiles":        { "owner": "Dan-AAC" },
+    "surreptakos/aac-routines":           { "owner": "Dan-AAC" },
+    "surreptakos/aac-message-board":      { "owner": "Dan-AAC" },
+    "surreptakos/aac-sales-commissions":  { "owner": "Dan-AAC" },
+    "surreptakos/aac-task-management":    { "owner": "Dan-AAC", "status": "dead" },
+    "surreptakos/aac-bill-intake":        { "owner": "Dan" },
+    "surreptakos/zoho-source-of-truth":   { "owner": "Dan" },
+    "surreptakos/aac-sales-cockpit":      { "owner": "Dan" },
+    "surreptakos/aac-contract-builder":   { "owner": "Dan" }
+  },
+  "routines": {
+    "daily-forgotten-tasks": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "o3-prep-steffi":        { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "o3-prep-rob":           { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "o3-prep-nick":          { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "o3-prep-mark":          { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "o3-prep-lynne":         { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "todoist-triage":        { "owner": "Active Alarm", "org": "", "surface": "cloud" }
+  },
+  "auditRepo": "surreptakos/claude-dotfiles"
+}

@@ -234,6 +234,39 @@ function Stop-MasterWindow {
 
 Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  idle=${IdleMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
 
+# --- Account guard (issue 103): a WARNING, never a gate ----------------------------------------
+# The masters run under whatever account ~/.claude.json is signed into (the bare `claude` launch
+# below reads the default profile). ~/.claude/accounts.json says which account owns each repo. A
+# mismatch spends the wrong account's quota, so it is logged every tick - and only logged: the
+# owner ruled enforcement stays a warning (Dan, 2026-09-09).
+function Write-AccountGuard {
+    param([array]$Rows)
+    $registryPath = Join-Path $env:USERPROFILE '.claude\accounts.json'
+    $statePath = Join-Path $env:USERPROFILE '.claude.json'
+    if (-not (Test-Path $registryPath)) { Write-Info "account guard: no registry at $registryPath - unchecked"; return }
+    $registry = $null
+    try { $registry = Get-Content $registryPath -Raw | ConvertFrom-Json } catch { Write-Info "account guard: registry unreadable ($($_.Exception.Message)) - unchecked"; return }
+    # A registry with "accounts": null or no "repos" key must degrade to a note, not a throw:
+    # .PSObject.Properties on $null is the one call below that can raise.
+    if (-not $registry -or -not $registry.accounts -or -not $registry.repos) { Write-Info "account guard: registry has no accounts or repos section - unchecked"; return }
+    $uuid = $null
+    try { $uuid = (Get-Content $statePath -Raw | ConvertFrom-Json).oauthAccount.accountUuid } catch { }
+    if (-not $uuid) { Write-Info "account guard: no oauthAccount in $statePath - unchecked"; return }
+    $me = $null
+    foreach ($p in $registry.accounts.PSObject.Properties) { if ($p.Value -and $p.Value.uuid -and ($p.Value.uuid -ieq $uuid)) { $me = $p.Name } }
+    if (-not $me) { Write-Info "account guard: WARN CLI account $uuid is not in the accounts registry"; return }
+    $warned = 0
+    foreach ($r in $Rows) {
+        $entry = $registry.repos.PSObject.Properties | Where-Object { $_.Name -ieq $r.Repo } | Select-Object -First 1
+        if (-not $entry -or -not $entry.Value) { Write-Info "[$($r.Slug)] WARN account: $($r.Repo) is not in the accounts registry (masters run as $me)"; $warned++; continue }
+        if ($entry.Value.owner -ne $me) { Write-Info "[$($r.Slug)] WARN account: $($r.Repo) belongs to $($entry.Value.owner); masters here run as $me"; $warned++ }
+    }
+    if ($warned -eq 0) { Write-Info "account guard: masters run as $me, registry owner of all $($Rows.Count) repos" }
+}
+# Whatever the registry holds, the guard is a log line. A throw here would stop the tick and
+# leave every master unserved, which is the opposite of a warning.
+try { Write-AccountGuard -Rows $Repos } catch { Write-Info "account guard: failed ($($_.Exception.Message)) - unchecked" }
+
 # -Only arrives as one comma-joined string when the script is run with -File; split it.
 $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $selected = @($Repos | Where-Object { $Only.Count -eq 0 -or $Only -contains $_.Slug })

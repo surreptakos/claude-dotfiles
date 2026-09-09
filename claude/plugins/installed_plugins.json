@@ -49,6 +49,24 @@
         "installedAt": "2026-09-02T20:47:25.994Z",
         "lastUpdated": "2026-09-09T15:10:15.571Z",
         "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.91004",
+        "version": "2026.9.91004",
+        "installedAt": "2026-09-09T19:40:30.429Z",
+        "lastUpdated": "2026-09-09T19:40:30.429Z",
+        "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.91004",
+        "version": "2026.9.91004",
+        "installedAt": "2026-09-09T19:41:38.797Z",
+        "lastUpdated": "2026-09-09T19:41:38.797Z",
+        "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\project-harness-v17-patch-5f6243"
       }
     ],
     "yes@sstklen": [
