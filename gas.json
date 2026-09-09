@@ -1,0 +1,25 @@
+{
+  "scriptId": "1Wy3TlnSt3-8Q-8LXadNv3-2QsETOi0ElDAdZNRBpVs34D7FrkOXgla8U",
+  "gcpProject": "gpt-sheets-access-475817",
+  "rootDir": "gas",
+  "include": [
+    "**/*.js",
+    "**/*.gs",
+    "**/*.html",
+    "appsscript.json"
+  ],
+  "exclude": [
+    "**/*.test.js",
+    "tests/**",
+    "test/**",
+    "node_modules/**"
+  ],
+  "hooks": {
+    "postDeploy": "canaryCheck",
+    "notify": ""
+  },
+  "runnable": [
+    "hello"
+  ],
+  "pollMinutes": 5
+}
