@@ -117,9 +117,13 @@ opens a "WARNING: Claude Code running in Bypass Permissions mode" dialog until t
 writes that key. The first serial master (bill-intake, 2026-09-02 16:50 local) sat on that dialog
 for four minutes until Dan clicked "Yes, I accept" (settings.json written 16:54:12, first prompt
 processed 16:54:39). The key is now set, so later launches start straight away. If a fresh machine
-or profile shows the dialog again, that key is the fix, not a watchdog change. The other dialogs a
-launch can show — "Yes, I trust this folder" and "Yes, I trust these settings" — are per-project
-and already accepted for all four clones; a new repo row needs one interactive first launch.
+or profile shows the dialog again, that key is the fix, not a watchdog change. The folder-trust
+dialog is a separate, unsolved stall: "Accessing workspace ... This folder pre-approves N tool
+permissions in .claude/settings.json and .claude/settings.local.json ... Yes, I trust this folder"
+rendered on an interactive launch in the contract-builder clone on 2026-09-02 even though
+`hasTrustDialogAccepted` was already true for that path in `~/.claude.json` (reproduced through
+winpty, captured verbatim). Until that is fixed a fresh master can sit on it until someone clicks;
+the watchdog log shows the launch, the state issue shows no Heartbeat 1.
 
 Stated plainly: with bypass permissions on, an unattended master can merge, push, delete branches,
 edit issues and run any shell command with no prompt and nobody watching. The merge bar in

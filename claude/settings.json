@@ -91,6 +91,19 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" claude-post-tool",
+            "timeout": 5,
+            "statusMessage": "Counting failures for the YES escalation ladder..."
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -154,6 +167,7 @@
       }
     }
   },
+  "outputStyle": "Concise",
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,

@@ -127,10 +127,26 @@ junctioned skill being stored twice, once under each path.
 
 ## Cloud sessions load the skills as an uploaded plugin
 
-Claude Code cloud containers (claude.ai/code, Cowork) never see this machine's `~/.claude` — no
-dotfiles support, and user-scope plugin installs don't transfer. The only account-wide mechanism is
-plugin sync: a plugin enabled on the claude.ai account downloads into every cloud session as
+Claude Code cloud containers (claude.ai/code) never see this machine's `~/.claude` — no dotfiles
+support, and user-scope plugin installs don't transfer. The only account-wide mechanism is plugin
+sync: a plugin enabled on the claude.ai account downloads into every cloud session as
 `<name>@synced`, whatever repo it runs against.
+
+Cowork is different and this paragraph used to lump it in wrongly (corrected 2026-09-03). The
+memory docs state that "in Cowork sessions on your desktop" Claude Code loads `~/.claude/CLAUDE.md`,
+skipping only imports and symlinked rules that resolve outside the session's working directory. So
+the global instructions DO reach Cowork; hooks are another matter — Cowork runs its agent in a VM
+(`%APPDATA%\Claude\logs\cowork_vm_node.log`), the docs say nothing about hook execution there, and a
+hook command pointing at a Windows path cannot run inside it. A plugin's own `hooks.json` does NOT
+reach the model there either, on the evidence so far (2026-09-03): the aac-skills SessionStart hook
+echoes an `AAC-SKILLS HOOK MARKER` sentence carrying the hostname and a UTC timestamp, and a fresh
+Cowork session with the plugin's skills listed reported no such sentence anywhere in its context.
+An earlier Cowork session had "quoted" the marker — that quote matched the hook file verbatim and
+carried none of the runtime values, so it was a file read or a fabrication, and this paragraph
+briefly claimed the opposite on its strength. Cowork's own explanation: project chats are not
+Claude Code sessions, so hooks do not run. What does reach Cowork is text: the global `CLAUDE.md`,
+the plugin's skill descriptions and bodies, and Cowork's own memory. The marker hook stays in the
+plugin as a standing probe (harmless one-liner) so a future surface change is noticed.
 
 `tools/build-cloud-plugin.py` packages the live `~/.claude/skills` tree into that shape:
 
