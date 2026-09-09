@@ -858,8 +858,11 @@ $registry = $null
 try { $registry = Get-Content $accounts -Raw | ConvertFrom-Json } catch { }
 $watchdogRepos = @([regex]::Matches((Get-Content (Join-Path $Clone 'orchestrator\master-watchdog.ps1') -Raw), "Repo\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
 $unregistered = @($watchdogRepos | Where-Object { -not ($registry -and $registry.repos -and ($registry.repos.PSObject.Properties.Name -contains $_)) })
+$accountsDetail = @($unregistered)
+if ($watchdogRepos.Count -eq 0) { $accountsDetail = @("no Repo = '<owner/repo>' rows found in orchestrator\master-watchdog.ps1 - the table format changed; update this regex") }
+elseif ($null -eq $registry) { $accountsDetail = @("$accounts missing or not JSON") }
 Check ("restored accounts.json parses and names all {0} watchdog repos" -f $watchdogRepos.Count) `
-    ($null -ne $registry -and $watchdogRepos.Count -gt 0 -and $unregistered.Count -eq 0) $unregistered
+    ($null -ne $registry -and $watchdogRepos.Count -gt 0 -and $unregistered.Count -eq 0) $accountsDetail
 
 $identityTest = Join-Path $FakeHome '.claude\skills\session-check\identity.test.js'
 if (Test-Path $identityTest) {
