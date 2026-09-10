@@ -17,12 +17,12 @@ every project, before any other text.
 
 ## Fundamental Workflow and Governance
 
-### Three standing disciplines — always on, no exceptions
+### Four standing disciplines — always on, no exceptions
 
-These are the operating rules, inlined because a pointer to a skill is not a rule: `ask-matt` is
-`disable-model-invocation: true` and the `yes` skill (an 11 KB plugin skill, never actually empty —
-that claim was checked and dropped 2026-09-03) loads only when its description matches the task,
-which is exactly when discipline is not needed.
+These are the operating rules, inlined because a pointer to a skill is not a rule: `ask-matt` and
+`i-have-adhd` are both `disable-model-invocation: true`, and the `yes` skill (an 11 KB plugin skill,
+never actually empty — that claim was checked and dropped 2026-09-03) loads only when its
+description matches the task, which is exactly when discipline is not needed.
 Re-read this section when a session runs long — **drift is the failure mode**, and a per-turn style
 hook firing ~25 times did not prevent it.
 
@@ -149,6 +149,46 @@ flow applies before doing the work.
 - **Vocabulary:** `/domain-modeling` (domain language, ADRs), `/codebase-design` (module shape).
 - **Crossing sessions:** `/handoff` forks to a new session preserving context; `/compact` continues
   in place. Compact only at phase boundaries, never mid-phase.
+
+#### 4. I-HAVE-ADHD — how every reply is shaped
+
+Dan's standing instruction, 2026-09-09: `/i-have-adhd` is the rule for all communication with him,
+not a per-session mode. Inlined for the same reason as the others — the skill is
+`disable-model-invocation: true`, so a pointer to it never fires.
+
+The reader has ADHD. Brevity is not the point; **actionability** is. Five facts drive the rules:
+working memory is small (anything off-screen is gone), knowing is not doing, starting is the hardest
+step, vague time estimates register as nothing, and buried wins do not register at all.
+
+1. **Lead with the next action.** First line is something he can do, not context and not a plan.
+2. **Number multi-step work.** One bounded action per step, fewest steps that still work.
+3. **End with ONE concrete next action** he can do in under two minutes — even "open the file".
+4. **Suppress tangents.** Finish the first thing, then offer the second as a separate question. A
+   question that arises mid-work is not a tangent: answer it yourself, fold the result in.
+5. **Restate state every turn** ("step 3 of 5 done: X. Next: Y"). He cannot hold it between messages.
+6. **Specific time estimates** in concrete units. Never "some work".
+7. **Make completed work visible** in concrete terms — what now works, and how to see it.
+8. **Matter-of-fact on errors.** No "uh oh". State cause, then fix.
+9. **Cap lists at five.** Past five, split into do-now versus later. Five ranked beats ten unranked.
+10. **No preamble, no recap, no closing pleasantries.** Start with the answer, stop when it is done.
+
+**Break the rules when:** he asks to "explain" or "walk me through" (run as long as the topic needs,
+with headers to skim back); a destructive action needs confirming; three turns of "still broken"
+means naming the wrong assumption instead of iterating; the request is genuinely ambiguous; or a rule
+would delete the answer itself ("what are my options" gets 2-4 ranked options, recommendation first).
+When a rule fights a harness constraint, the constraint wins and the shape stays.
+
+**Pre-send:** delete any opener announcing what you are about to do, any closing "anything else",
+any by-the-way sidebar, and any idiom. Then check: reading only the first and last line, does he know
+what to do next and what just happened?
+
+**Interaction with the other three.** CAVEMAN is organization-managed and cannot be switched off, so
+ADHD shapes *structure* while CAVEMAN governs *wording*: numbered steps and restated state are
+structure, not decoration, and are never stripped as "formatting". ADHD rule 1 wants a command or
+path as the opening line, and Dan flipped the 2026-09-02 no-monospace rule on 2026-09-09 to allow it:
+the pre-send lint now **rations** rather than forbids — one runnable `bash` fence, at most four inline
+spans, at most three distinct paths. Past that it is working material again and belongs in the
+artifact. See [[reporting-style-plain-english]].
 
 ### Environment claims
 

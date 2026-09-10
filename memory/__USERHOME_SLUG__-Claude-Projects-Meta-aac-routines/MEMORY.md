@@ -5,4 +5,5 @@
 - [Pre-send lint discipline](pre-send-lint-discipline.md) — lint to exit 0 before sending, fresh declare nonce each turn
 - [O3 prep surface outputs](o3-prep-surface-outputs.md) — SendUserFile every produced .docx at completion; agenda docx only when block authored
 - [Org structure source of truth](o3-directs-include-techs.md) — read org-chart.yaml reports_to, not people.yaml manages; Rob=Projects Nick=Services
-- [Reporting style: plain English](reporting-style-plain-english.md) — status not working material; no monospace, no paths
+- [Reporting style: plain English](reporting-style-plain-english.md) — status not working material; monospace and paths rationed, not banned
+- [ADHD output shaping is standing](adhd-output-shaping-standing.md) — /i-have-adhd is permanent; shapes structure, caveman shapes wording

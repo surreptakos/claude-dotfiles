@@ -772,6 +772,13 @@ INLINE_CODE_PATTERN = re.compile(r"`[^`\n]+`")
 # in a reply is a tell that the reply is carrying working material rather than a
 # status. Say it in words, or put it in the artifact where it belongs.
 PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|json|md|ya?ml|js|ts)\b")
+# Dan, 2026-09-09, flipping the 2026-09-02 rule after making /i-have-adhd standing:
+# that skill's first rule is to open with the command or path he can act on, and a
+# blanket ban deleted exactly that. So monospace and paths are now rationed rather
+# than forbidden. A handful is the actionable opener; a pile is still the working
+# material he objected to. Caps sized to the ADHD skill's own five-item list cap.
+INLINE_SPAN_CAP = 4
+PATH_CAP = 3
 
 
 def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
@@ -794,18 +801,21 @@ def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
     runnable = len(RUNNABLE_FENCE_PATTERN.findall(text))
     fences = max(0, len(FENCE_PATTERN.findall(text)) // 2 - runnable)
     spans = len(INLINE_CODE_PATTERN.findall(text))
-    if fences or spans:
+    if fences or spans > INLINE_SPAN_CAP:
         violations.append(
             f"monospaced text in a reply: {fences} code block(s), {spans} inline span(s)"
-            " — say it in plain words"
+            f" — a lead-in command is fine, at most {INLINE_SPAN_CAP} spans and no"
+            " non-runnable fence; put the rest in the artifact"
         )
     # Web links are citations, not working material — Dan objected to file paths,
     # not to sources. Strip URLs before scanning so a cited link is never flagged.
     pathless = re.sub(r"https?://\S+", " ", prose)
     paths = sorted({m.group(0) for m in PATH_PATTERN.finditer(pathless)})
-    if paths:
+    if len(paths) > PATH_CAP:
         violations.append(
-            "file paths or filenames in a reply: " + ", ".join(paths[:4]) + " — name the thing, not its path"
+            f"file paths in a reply: {len(paths)} distinct ("
+            + ", ".join(paths[:4])
+            + f") — at most {PATH_CAP}, the ones he acts on; name the rest in words"
         )
     fillers = sorted({m.group(0).lower() for m in FILLER_PATTERN.finditer(prose)})
     if fillers:

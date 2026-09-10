@@ -68,6 +68,12 @@ const LINES = [
   '   2 failures switch approach, 3 five-step audit, 4 minimal repro, 5+ structured handoff.',
   '   Check real exit codes, not piped output.',
   '3. ASK-MATT: name which flow applies before starting work (see the map in ~/.claude/CLAUDE.md).',
+  '4. I-HAVE-ADHD: shape every reply so Dan can act. Lead with the next action; number multi-step',
+  '   work; restate where we are ("step 3 of 5 done: X. Next: Y"); end with ONE thing he can do in',
+  '   under two minutes. Concrete time estimates, never "some work". Show what now works. Errors as',
+  '   cause then fix, no "uh oh". Cap lists at five, ranked. No preamble, no recap, no closer.',
+  '   Suppress tangents — finish one thing, then offer the next as its own question.',
+  '   Standing rule, not a mode. ADHD shapes structure; caveman shapes wording; they do not compete.',
 ];
 
 let buf = '';
