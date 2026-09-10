@@ -44,11 +44,11 @@
     "aac-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101154",
-        "version": "2026.9.101154",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
+        "version": "2026.9.101218",
         "installedAt": "2026-09-02T20:47:25.994Z",
-        "lastUpdated": "2026-09-10T16:57:10.078Z",
-        "gitCommitSha": "9909a95b0b8d55e8b6ce4f9a564265fc767558d6"
+        "lastUpdated": "2026-09-10T17:24:20.493Z",
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
       },
       {
         "scope": "project",

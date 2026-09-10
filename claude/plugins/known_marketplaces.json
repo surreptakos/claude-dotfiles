@@ -5,7 +5,7 @@
       "url": "https://github.com/sstklen/yes.md.git"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\sstklen",
-    "lastUpdated": "2026-09-02T21:17:11.585Z"
+    "lastUpdated": "2026-09-10T17:22:08.412Z"
   },
   "mattpocock": {
     "source": {
@@ -13,7 +13,7 @@
       "repo": "mattpocock/skills"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\mattpocock",
-    "lastUpdated": "2026-09-02T21:17:13.419Z"
+    "lastUpdated": "2026-09-10T17:22:10.622Z"
   },
   "claude-plugins-official": {
     "source": {
@@ -21,7 +21,7 @@
       "url": "https://github.com/anthropics/claude-plugins-official.git"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-plugins-official",
-    "lastUpdated": "2026-09-10T14:52:04.497Z"
+    "lastUpdated": "2026-09-10T17:22:12.608Z"
   },
   "caveman": {
     "source": {
@@ -29,7 +29,7 @@
       "repo": "JuliusBrussee/caveman"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\caveman",
-    "lastUpdated": "2026-09-02T21:17:16.669Z"
+    "lastUpdated": "2026-09-10T17:22:15.523Z"
   },
   "i-have-adhd": {
     "source": {
@@ -37,7 +37,7 @@
       "repo": "ayghri/i-have-adhd"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\i-have-adhd",
-    "lastUpdated": "2026-09-02T21:17:18.352Z"
+    "lastUpdated": "2026-09-10T17:22:17.437Z"
   },
   "local-desktop-app-uploads": {
     "source": {
@@ -45,7 +45,7 @@
       "path": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads",
-    "lastUpdated": "2026-09-02T21:17:18.353Z"
+    "lastUpdated": "2026-09-10T17:22:17.444Z"
   },
   "claude-dotfiles": {
     "source": {
@@ -53,6 +53,6 @@
       "repo": "surreptakos/claude-dotfiles"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles",
-    "lastUpdated": "2026-09-10T16:57:08.425Z"
+    "lastUpdated": "2026-09-10T17:23:50.916Z"
   }
 }
