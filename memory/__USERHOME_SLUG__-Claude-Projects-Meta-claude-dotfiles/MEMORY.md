@@ -21,3 +21,4 @@
 - [Account enforcement is a warning](account-enforcement-is-a-warning.md) — ~/.claude/accounts.json maps accounts to repos and routines; session check and watchdog warn on mismatch, never block (Dan, 2026-09-09)
 - [Scratchpad path too long for git clone](scratchpad-path-too-long-for-git-clone.md) — clone throwaway repos under a short root like C:\hv17; the scratchpad slug breaks pack keep files
 - [MSYS mangles git rev:path](msys-mangles-git-rev-colon-path.md) — `git show origin/master:file` breaks in the Bash tool; use MSYS_NO_PATHCONV=1 or read the local file
+- [Cowork scheduled tasks live in session uploads](cowork-scheduled-tasks-live-in-session-uploads.md) — one SKILL.md inside the creating session on that machine; no registry lists it; recover the prompt from the run record enqueue line

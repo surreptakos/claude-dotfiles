@@ -1,6 +1,6 @@
 ---
 name: update-cloud-plugin
-description: Rebuild and republish the aac-skills plugin (the single 53-skill package built from ~/.claude/skills plus the repo aac-skills/ tree) when the session-end sweep reports drift. Marketplace push is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
+description: Rebuild and republish the aac-skills plugin (the single package built from ~/.claude/skills plus the repo aac-skills/ tree) when the session-end sweep reports drift. Marketplace push is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
 ---
 
 # Update the cloud plugin
@@ -9,8 +9,8 @@ description: Rebuild and republish the aac-skills plugin (the single 53-skill pa
 > call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
 > every run is fresh.
 
-**Since 2026-08-31 evening there is ONE plugin: `aac-skills` (54 skills)** — Dan's personal set
-from `~/.claude/skills` plus the four AAC team skills from the repo's hand-edited `aac-skills/`
+**Since 2026-08-31 evening there is ONE plugin: `aac-skills`** — Dan's personal set
+from `~/.claude/skills` plus the AAC team skills from the repo's hand-edited `aac-skills/`
 tree, merged by the packager. `dan-skills` no longer exists as a plugin name anywhere.
 
 **One button now exists.** `sync.ps1 -Mode push` refreshes `marketplace/dan-skills/` and

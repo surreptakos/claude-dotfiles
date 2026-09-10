@@ -13,7 +13,9 @@ Account-to-repo and account-to-routine enforcement is a **warning, never a hard 
 dotfiles): Dan-AAC (desktop app) owns claude-dotfiles, aac-routines, aac-message-board,
 aac-sales-commissions and the six desktop routines; Dan (CLI, mobile, web, Task Scheduler) owns
 aac-bill-intake, zoho-source-of-truth, aac-sales-cockpit, aac-contract-builder and the watchdog
-masters; Active Alarm (Cowork, cloud routines) owns Todoist Triage and leaves nothing on disk.
+masters. Todoist Triage is a Cowork scheduled task (`todoist-triage-friday`, weekdays 8 AM) on the
+work laptop under Dan-AAC org 4f58f937, not a claude.ai Code routine; the personal laptop holds
+no record of it (checked 2026-09-10, see [[cowork-scheduled-tasks-live-in-session-uploads]]).
 
 **Why:** the owner kept losing track of which account did what, and a stale desktop registry had
 six routines enabled under the wrong account. A block would fire on every deliberate cross-account

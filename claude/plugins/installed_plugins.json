@@ -44,11 +44,11 @@
     "aac-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.91004",
-        "version": "2026.9.91004",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101154",
+        "version": "2026.9.101154",
         "installedAt": "2026-09-02T20:47:25.994Z",
-        "lastUpdated": "2026-09-09T15:10:15.571Z",
-        "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56"
+        "lastUpdated": "2026-09-10T16:57:10.078Z",
+        "gitCommitSha": "9909a95b0b8d55e8b6ce4f9a564265fc767558d6"
       },
       {
         "scope": "project",
@@ -133,12 +133,12 @@
       },
       {
         "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Financial\\aac-bill-intake\\.claude\\worktrees\\grill-ready-for-human-dd2070",
         "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.91004",
         "version": "2026.9.91004",
         "installedAt": "2026-09-10T14:27:45.327Z",
         "lastUpdated": "2026-09-10T14:27:45.327Z",
-        "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56",
-        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Financial\\aac-bill-intake\\.claude\\worktrees\\grill-ready-for-human-dd2070"
+        "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56"
       }
     ],
     "yes@sstklen": [

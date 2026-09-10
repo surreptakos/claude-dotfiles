@@ -17,8 +17,9 @@ Repo `surreptakos/aac-contract-builder` (local: `__USERHOME__\Claude\Projects\Sa
 
 **Dan rulings (with rationale, not recorded elsewhere or easy to miss):**
 - Q3 (2026-08-25): state_of_incorporation required-when-assumed-name, no Illinois default, full state names from SOS record. ~1 deal ever had d/b/a; typical subscriber names are plain legal entities. '[Legal Entity], an Illinois corporation, d/b/a [Name]' fires only on assumed-name deals.
-- Row layout ticket (issue #39 as of 2026-08-26) deferred until real deal examples arrive (golden set #18 is the source); stays needs-info until Dan rules. Query the tracker for the ticket's live label before assuming state.
-- docs/facts.schema.json = working doc, hard rule 1 does NOT govern it; schema locks once Dan grants access to past year's closed deals (recorded docs/agents/domain.md).
+- Row layout: ruled 2026-08-31 grouped-fill, shipped PR #153. Closed.
+- Spec session 2026-09-10 (issue #123 → spec #215, ADR-0001/0002): Dan's domain model — Customer has many Sites, Site has many Systems, Project = one work-order number spanning any sites+systems within ONE contract family; folder carries Z-number until sold then Amanda renames to WO number. Dan chose BUILD multi-site+multi-system (against the refuse recommendation) because golden-12/17 already carry 3 systems. Missing package situation on commercial = refuse, no default. FSI worksheet required only when THIS project sells Repair Service/Inspection. Release: auto on every skill-touching merge, PR into claude-dotfiles marketplace. Sweep doc stays frozen dated snapshot. History-leak (#188): accept ALL identifier classes, no rewrite ever.
+- facts schema: 2026-08-25 'working doc' ruling SUPERSEDED 2026-09-10 — Dan ratified it as v1.0 into references/ (spec #215 stream A; effective when that ratification PR merges). Until then DRAFT markers accurate.
 - MAPPING-APPENDIX 'duplicate cellular row' was a misread — one row only; note refers to upstream price-source duplicate.
 
 **Standing lessons:**
