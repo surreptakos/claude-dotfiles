@@ -25,12 +25,12 @@ One ticket per turn. No queue-wide summary that lets the owner batch-close or ba
 ## Per ticket
 
 1. `gh issue view N --repo <repo> --comments` — read the body and every comment before opening the grill. Prior comments carry earlier owner language and partial rulings.
-2. Run `/grilling` scoped to this ticket's decision. Facts are looked up (blast radius via `grep`, downstream dependents, related tickets via `gh issue list --search`). Decisions are the owner's alone. One question at a time. Recommended answer supplied per question. Do not act until the owner confirms shared understanding on the ruling.
+2. Run `/grilling` scoped to this ticket's decision. Facts are looked up (blast radius via `grep`, downstream dependents, related tickets via `gh issue list --search`). Decisions are the owner's alone. One question at a time. Recommended answer supplied per question. A picked option IS the ruling; act on it.
 
    **Ask shape.** When the ticket body already enumerates the ruling's discrete options (2-4 choices — e.g. an `Options:` block or a numbered list under "What to build"), default to the `AskUserQuestion` tool with those exact options, and put `(Recommended)` on the option you back. Free-form prose questions are for turns where the options are still being surfaced — a first-principles trade the ticket hasn't named yet, or a scoping question that has to come before options exist. A single yes/no can go either way; a picker is fine there.
 
    **Plain-English framing — always.** The owner has zero coding context and never opens the GitHub ticket. Put the plain-English explanation of what the ticket is about, in real-world terms, into the **question body itself** — not the options. Translate every code symbol, filename, ticket number, and jargon term into what it does for the owner in the real world. Options carry the trade-off, still plain English, with the recommended one flagged. Preserve technical terms only where they name something the owner will touch (a UI label, a Todoist body line they read); everything internal stays translated. A picker whose options quote source paths and issue numbers is unusable — no answer possible, dismissal follows.
-3. When a ruling lands, quote it back verbatim once and ask "landing this?" Wait for a clear yes.
+3. Land the ruling the moment the owner picks an option or states it in prose. No second prompt ("landing this?", "confirm?", a quoted read-back picker): the owner has already answered, and a confirmation round is a wasted click (Dan, 2026-09-10). Fold the landing consequence into the option's description instead ("closes as not planned", "relabels for an agent") so the pick carries it. Ask again only when the pick leaves a real fork the ticket needs settled, or a result only the owner saw (a UI outcome, a test they ran).
 
 ## Land the ruling
 
