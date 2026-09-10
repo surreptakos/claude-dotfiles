@@ -1,11 +1,11 @@
 ---
 name: todoist-triage
-description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, decide what to delegate, or says his list is out of control.
+description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 ---
 
 # todoist-triage
 
-Dan rules; the skill reads, proposes, and writes once after approval. Two earlier systems failed on either side of this line: aacx re-derived every task's state daily and fought Dan's own edits; aac-routines (live) is intake only and never touches a task after creating it. This skill sits between them. Labels are rulings, applied once, changed only when Dan says.
+Dan rules; the skill reads, proposes, and writes once after approval. aac-routines (live) is intake only and never touches a task after creating it; this skill picks up from there. Labels are rulings, applied once, changed only when Dan says.
 
 ## Scope
 
