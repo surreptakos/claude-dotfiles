@@ -43,6 +43,10 @@ Priority sorts within a ball, never sets it. The 10-item `do` cap in Current Wor
 - Job descriptions, pay bands, employee pricing for AAC services, retention metrics, vendor price lists that feed RMR pricing, and any regulatory or insurance signature: Dan.
 - Handoffs to directs happen in O3s. Draft a message only when Dan asks.
 
+## Standing rulings (Dan, 2026-09-10)
+
+- ThreatLocker (ExcalTech approval requests for scripts on Dan's machines): ignore. Do not triage or alarm; when the routine creates one, propose Delete in the same pass and delete on approval. Other ExcalTech tickets are still triaged normally.
+
 ## Procedure
 
 ### 1. Read
