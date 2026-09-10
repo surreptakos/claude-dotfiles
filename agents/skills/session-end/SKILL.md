@@ -233,23 +233,18 @@ quoted in an issue comment points at something nobody else can reach. Push per s
 
 **`STOP release gate FAILS`** — do not release. Say which gate and what it said.
 
-**`!! tracker audit: N drift finding(s)`** — run it and check whether any are from this session.
-Pre-existing findings are somebody else's; new ones are not. Fix your own before finishing.
+**`!! tracker audit: N drift finding(s)`** — run it and fix every finding, whatever session caused
+it (Dan, 2026-09-10, after a session left three pre-existing dangling references standing under the
+older "yours versus theirs" reading). The audit prints the fix beside each finding: qualify a bare
+cross-repo `#N` as `owner/repo#N`, tick or justify an open box on a closed issue, add the missing
+triage label. A finding that needs an owner ruling gets a `ready-for-human` ticket, not a pass.
 
-**Scope, because this rule and step 9 read as if they disagree.** They govern different things and
-both are live:
-
-- *Step 9* sweeps the WHOLE tracker, but only for its own two checks — no milestone, and a fully
-  ticked acceptance ledger. Origin is irrelevant there; a pre-existing hit is still yours to fix.
-- *This rule* governs the tracker audit's findings. Drift you caused this session is yours. Drift
-  that predates the session is not, and clearing it is optional.
-
-One exception inside this rule, because it is cheap and the audit already tells you how: a
-`landed-but-open?` advisory is resolved regardless of origin. Read the named commit, then either
-close the issue or comment on it saying what is left. That advisory is close kin to step 9's
-delivered-but-open check, and leaving it costs the next session the same investigation. Ruling
+**Scope.** Step 9's two checks and this rule together sweep the WHOLE tracker, origin irrelevant:
+`/session-end` is the housekeeping pass, and a hit left for "the session that caused it" is a hit
+the next session re-investigates from scratch. Advisories count too: a `landed-but-open?` line is
+resolved by reading the named commit, then closing the issue or commenting on what is left (ruling
 2026-09-02, after a session cleared only its own advisory and reported the other two as somebody
-else's — technically correct under this rule, and still the wrong call.
+else's).
 
 **`!! cloud plugin is STALE`** (or `no upload recorded`) — the skills on this machine changed since
 the plugin was uploaded to claude.ai, so every cloud container is still loading the old ones. The

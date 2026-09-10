@@ -22,3 +22,4 @@
 - [Scratchpad path too long for git clone](scratchpad-path-too-long-for-git-clone.md) — clone throwaway repos under a short root like C:\hv17; the scratchpad slug breaks pack keep files
 - [MSYS mangles git rev:path](msys-mangles-git-rev-colon-path.md) — `git show origin/master:file` breaks in the Bash tool; use MSYS_NO_PATHCONV=1 or read the local file
 - [Cowork scheduled tasks live in session uploads](cowork-scheduled-tasks-live-in-session-uploads.md) — one SKILL.md inside the creating session on that machine; no registry lists it; recover the prompt from the run record enqueue line
+- [Session-end fixes all drift](session-end-fixes-all-drift.md) — every tracker-audit finding is fixed at /session-end regardless of which session caused it (Dan, 2026-09-10)
