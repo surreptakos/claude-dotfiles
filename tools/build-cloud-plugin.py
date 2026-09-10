@@ -156,9 +156,8 @@ def main():
                 "version": version,
                 "author": {"name": "Dan Gatsakos"},
                 "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
-                "Company team skills (aac-sop, aac-contract-package, writing, "
-                "software-decision, yes). Built by tools/build-cloud-plugin.py from "
-                "~/.claude/skills and the repo's aac-skills/ tree.",
+                "Company team skills from the repo's aac-skills/ tree. Built by "
+                "tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/.",
             },
             indent=2,
         )
