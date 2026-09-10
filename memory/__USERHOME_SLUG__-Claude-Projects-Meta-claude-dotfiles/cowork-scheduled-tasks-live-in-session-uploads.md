@@ -8,9 +8,10 @@ metadata:
   modified: 2026-09-10T16:58:47.324Z
 ---
 
-Cowork scheduled tasks (Desktop app, Cowork tab, "Scheduled") are not claude.ai Code routines and
-not desktop Code scheduled tasks. Verified 2026-09-10 while hunting the deleted Todoist Triage
-task:
+Cowork scheduled tasks (Desktop app, Cowork tab, "Scheduled") run in the cloud, but are neither
+claude.ai Code routines nor desktop Code scheduled tasks, and no tool on this laptop lists them.
+Owner ruling 2026-09-10: Todoist Triage is Active Alarm's cloud routine. Verified the same day
+while hunting it after it vanished:
 
 - `RemoteTrigger list` (claude.ai/code/routines) returned zero under both the personal and the
   Active Alarm account; the task never lived there.

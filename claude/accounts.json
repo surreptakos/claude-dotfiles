@@ -52,7 +52,7 @@
     "o3-prep-nick":          { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-mark":          { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-lynne":         { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
-    "todoist-triage":        { "owner": "Dan-AAC", "org": "4f58f937-a153-44d4-9f1c-2b4f0baae7cc", "surface": "cowork", "taskId": "todoist-triage-friday" }
+    "todoist-triage":        { "owner": "Active Alarm", "org": "", "surface": "cloud", "taskId": "todoist-triage-friday" }
   },
   "auditRepo": "surreptakos/claude-dotfiles"
 }
