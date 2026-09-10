@@ -71,7 +71,7 @@ Counts changed, what Dan declined, alarms still open, `do` count in Current Work
 
 ## Cadence
 
-On demand, plus the scheduled proposal (steps 1 through 3 only; no writes) weekdays at 16:00. Writes happen only in a live session after step 4. The Friday run also proposes which backlog `do` items move up for the coming week.
+On demand, plus the scheduled proposal (steps 1 through 3 only; no writes) weekdays at 8:00 AM. Writes happen only in a live session after step 4. The Friday run also proposes which backlog `do` items move up for the coming week.
 
 ## Filters (exist in Todoist, favorited)
 
