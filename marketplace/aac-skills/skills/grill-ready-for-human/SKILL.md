@@ -7,30 +7,28 @@ metadata:
 
 # Grill ready-for-human
 
-Every `ready-for-human` ticket is waiting on a **ruling** only the owner can give. This walks the complete open queue in the current repo, one ticket at a time, and refuses to move on until the current ticket's ruling has landed on the tracker.
-
-Leading words: **ruling** (what the ticket waits on) and **relentless** (borrowed from `/grilling`, which this runs per ticket).
+Every `ready-for-human` ticket waits on a **ruling** only the owner can give. Walk the open queue in the current repo one ticket at a time: a ticket is finished when its ruling is on the tracker, and only then does the next one open.
 
 ## One ticket per grill
 
-One ticket per turn. No queue-wide summary that lets the owner batch-close or batch-defer — a batch ruling is unfinished work. If the owner tries to short-circuit ("just close them all"), grill the batch premise itself before accepting it: which ticket, what ruling, and why the shared answer holds.
+One ticket per turn: surface it, grill it, land it, move on. A batch ruling ("just close them all") is grilled as its own premise first — which ticket, what ruling, why the shared answer holds — because a batch ruling is unfinished work.
 
 ## Setup
 
-- Detect repo from cwd: `gh repo view --json nameWithOwner --jq .nameWithOwner`.
-- Fetch queue: `gh issue list --repo <repo> --label ready-for-human --state open --json number,title,body,labels --limit 100`.
-- Empty queue → report "no ready-for-human tickets" and stop.
-- State the count. Do not list every title. Surface only the ticket about to be worked.
+- Repo: `gh repo view --json nameWithOwner --jq .nameWithOwner`.
+- Queue: `gh issue list --repo <repo> --label ready-for-human --state open --json number,title,body,labels --limit 100`.
+- Empty queue: report "no ready-for-human tickets" and stop.
+- State the count, then surface only the ticket about to be worked.
 
 ## Per ticket
 
-1. `gh issue view N --repo <repo> --comments` — read the body and every comment before opening the grill. Prior comments carry earlier owner language and partial rulings.
-2. Run `/grilling` scoped to this ticket's decision. Facts are looked up (blast radius via `grep`, downstream dependents, related tickets via `gh issue list --search`). Decisions are the owner's alone. One question at a time. Recommended answer supplied per question. A picked option IS the ruling; act on it.
+1. `gh issue view N --repo <repo> --comments` — body and every comment, before the grill opens. Prior comments carry earlier owner language and partial rulings.
+2. Run `/grilling` scoped to this ticket's decision: relentless, one question at a time, facts looked up first (blast radius via `grep`, downstream dependents, related tickets via `gh issue list --search`).
 
-   **Ask shape.** When the ticket body already enumerates the ruling's discrete options (2-4 choices — e.g. an `Options:` block or a numbered list under "What to build"), default to the `AskUserQuestion` tool with those exact options, and put `(Recommended)` on the option you back. Free-form prose questions are for turns where the options are still being surfaced — a first-principles trade the ticket hasn't named yet, or a scoping question that has to come before options exist. A single yes/no can go either way; a picker is fine there.
+   **Ask shape.** When the ticket enumerates 2-4 discrete options (an `Options:` block, a numbered list under "What to build"), ask with `AskUserQuestion` using those options, `(Recommended)` on the one you back, and each option's description naming its landing consequence ("closes as not planned", "relabels for an agent"). Prose questions are for surfacing options the ticket has not named yet; a yes/no goes either way.
 
-   **Plain-English framing — always.** The owner has zero coding context and never opens the GitHub ticket. Put the plain-English explanation of what the ticket is about, in real-world terms, into the **question body itself** — not the options. Translate every code symbol, filename, ticket number, and jargon term into what it does for the owner in the real world. Options carry the trade-off, still plain English, with the recommended one flagged. Preserve technical terms only where they name something the owner will touch (a UI label, a Todoist body line they read); everything internal stays translated. A picker whose options quote source paths and issue numbers is unusable — no answer possible, dismissal follows.
-3. Land the ruling the moment the owner picks an option or states it in prose. No second prompt ("landing this?", "confirm?", a quoted read-back picker): the owner has already answered, and a confirmation round is a wasted click (Dan, 2026-09-10). Fold the landing consequence into the option's description instead ("closes as not planned", "relabels for an agent") so the pick carries it. Ask again only when the pick leaves a real fork the ticket needs settled, or a result only the owner saw (a UI outcome, a test they ran).
+   **Plain English.** The owner never opens the ticket and holds no coding context. The question body explains the ticket in real-world terms: every code symbol, filename, ticket number and jargon term becomes what it does for the owner. Options carry the trade-off in the same register. A technical term survives only where it names something the owner will touch (a UI label they click).
+3. The pick is the ruling. Land it in the same turn, the pick being the confirmation — the owner has already answered (Dan, 2026-09-10). One more question only when the pick leaves a fork the ticket needs settled, or hinges on a result only the owner saw (a UI outcome, a test they ran).
 
 ## Land the ruling
 
@@ -47,23 +45,8 @@ Verify: `gh issue view N --json labels,state`. A tracker that does not reflect t
 
 ## Completion criterion
 
-Every ticket open at start now carries a landed ruling comment **and** a label/state reflecting it. Report per-ticket outcome (relabeled / closed-completed / closed-wontfix / kept-with-note) plus the ticket number. A summary that reports "N grilled" without per-ticket outcomes is unfinished.
+Every ticket open at start carries a landed ruling comment **and** a label/state reflecting it. Report each ticket's number and outcome (relabeled / closed-completed / closed-wontfix / kept-with-note).
 
-## In a cloud container: same duties, different instruments
+## In a cloud container
 
-A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Every step above still applies; only the tool changes. Do not report a step as impossible because its `gh` spelling failed — use the GitHub MCP equivalent, same shape as `orchestrator/ticket-fleet-cloud.js`:
-
-| The step says | In a container use |
-| --- | --- |
-| `gh repo view --json nameWithOwner` | derive `<owner>/<repo>` from `git remote get-url origin` |
-| `gh issue list --label ready-for-human --state open --json ...` | MCP `list_issues` (label: "ready-for-human", state: "open") |
-| `gh issue view N --comments` | MCP `issue_read` (body) then its comments method for the thread |
-| `gh issue list --search ...` | MCP `search_issues` |
-| `gh issue comment N --body-file <path>` | MCP `add_issue_comment` |
-| `gh issue edit N --add-label ... --remove-label ...` | MCP `update_issue` (labels) |
-| `gh issue close N --reason completed` / `--reason "not planned"` | MCP `update_issue` (state: closed, state_reason: completed / not_planned) |
-| `gh issue view N --json labels,state` | MCP `issue_read` (verify labels + state) |
-
-Read-only checks can also go straight to REST — `curl https://api.github.com/repos/<owner>/<repo>/issues?labels=ready-for-human&state=open` — the session's egress proxy authenticates api.github.com, private repos included.
-
-MCP write calls (comment, update, close) may raise a permission prompt; when the user typed `/grill-ready-for-human`, that prompt is the confirmation, not a reason to skip the step.
+A cloud session (claude.ai/code, Cowork) has no `gh`; `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Same steps, GitHub MCP instruments: read [`cloud.md`](cloud.md) for the substitution table before the first tracker call.
