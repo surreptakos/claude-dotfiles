@@ -128,7 +128,13 @@ Version in `docs/agents/harness-version.md`.
   trusting the tracker — exit 2 means it could not audit, which is not a pass.
 - `node tools/claude-md-lint.js <CLAUDE.md>` checks a CLAUDE.md against the concision paradigm
   (would removing this line cause a mistake?). Findings are prompts to ask that question, not
-  verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one.
+  verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one. The restore
+  suite runs it against `CLAUDE.md` and `claude/CLAUDE.md` as a gate (issue 97) with
+  `--warn size` — the size caps warn but do not fail, because the mirror is a copy of a live
+  file that grows outside this repo; trimming for size happens at the source, and everything
+  else (self-evident, ambiguous, duplicate, code-derivable, tutorial, volatile, tech-stack,
+  file-inventory, api-dump, lazy-candidate, emphasis, enforced-elsewhere, guessable-command,
+  std-convention) still blocks. `--warn <rules>` demotes named rules to advisory in that run.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
 ## The freshness loop

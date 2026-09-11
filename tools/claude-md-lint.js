@@ -53,6 +53,10 @@
  * silences those rules for the file. Fenced code blocks are never linted as prose; only the
  * guessable-command and file-inventory (tree) rules look inside them.
  *
+ * CLI: `--warn rule,rule` prints those rules' findings but excludes them from the exit code —
+ * for a gate that treats certain categories as advisory (typically `size`) while keeping the
+ * rest hard. Distinct from in-file `claude-md-lint-disable`, which drops the finding entirely.
+ *
  * Repo context: the CLI reads package.json (scripts, dependencies) and looks for formatter /
  * linter configs in the same directory as the file. Library callers pass `manifest` and
  * `formatterConfigs` in opts instead.
@@ -436,18 +440,27 @@ function repoContext(dir) {
 }
 
 function parseArgs(argv) {
-  const out = { file: null, json: false, against: [], opts: {} };
+  const out = { file: null, json: false, against: [], opts: {}, warn: new Set() };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
     else if (a === '--max-lines') out.opts.maxLines = Number(argv[++i]);
     else if (a === '--max-words') out.opts.maxWords = Number(argv[++i]);
     else if (a === '--against') { const f = argv[++i]; if (!f) throw new Error('--against needs a file'); out.against.push(f); }
+    else if (a === '--warn') {
+      const v = argv[++i];
+      if (!v) throw new Error('--warn needs a comma-separated rule list');
+      for (const r of v.split(',')) {
+        const n = r.trim(); if (!n) continue;
+        if (!RULES.includes(n)) throw new Error(`--warn: unknown rule "${n}"`);
+        out.warn.add(n);
+      }
+    }
     else if (a.startsWith('--')) throw new Error(`unknown flag ${a}`);
     else if (!out.file) out.file = a;
     else throw new Error(`unexpected argument ${a}`);
   }
-  if (!out.file) throw new Error('usage: claude-md-lint <CLAUDE.md> [--max-lines N] [--max-words N] [--against <other.md>]... [--json]');
+  if (!out.file) throw new Error('usage: claude-md-lint <CLAUDE.md> [--max-lines N] [--max-words N] [--against <other.md>]... [--warn rule,rule] [--json]');
   for (const k of ['maxLines', 'maxWords']) {
     if (k in out.opts && !(Number.isInteger(out.opts[k]) && out.opts[k] > 0)) throw new Error(`${k} must be a positive integer`);
   }
@@ -467,16 +480,28 @@ function main(argv) {
   const ctx = repoContext(path.dirname(path.resolve(args.file)));
   const { findings, stats } = lint(text, { ...args.opts, ...ctx, against });
   const rel = path.relative(process.cwd(), args.file) || args.file;
+  // `--warn r,r` demotes those rules to advisories: they still print (with a WARN tag) but
+  // do not affect the exit code. Kept as a CLI flag, not a lint option, because the
+  // fail/warn split is a decision each caller makes about what its gate is for.
+  const warned = findings.filter((f) => args.warn.has(f.rule));
+  const failing = findings.filter((f) => !args.warn.has(f.rule));
   if (args.json) {
-    process.stdout.write(JSON.stringify({ file: rel, context: ctx, stats, findings }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({
+      file: rel, context: ctx, stats,
+      findings: failing, warnings: warned,
+    }, null, 2) + '\n');
   } else {
-    for (const f of findings) process.stdout.write(`${rel}:${f.line}\t${f.rule}\t${f.message}\n`);
+    for (const f of failing) process.stdout.write(`${rel}:${f.line}\t${f.rule}\t${f.message}\n`);
+    for (const f of warned) process.stdout.write(`${rel}:${f.line}\tWARN\t${f.rule}\t${f.message}\n`);
+    const summaryTail = failing.length === 0
+      ? (warned.length === 0 ? 'already lean, nothing to cut' : `0 blocking, ${warned.length} advisory (${[...args.warn].join(',')})`)
+      : (warned.length === 0 ? `${failing.length} finding(s)` : `${failing.length} blocking, ${warned.length} advisory`);
     process.stdout.write(
       `${rel}: ${stats.nonBlankLines} lines, ${stats.proseWords} prose words, ~${stats.estTokens} tokens, ${stats.fencedBlocks} fenced blocks, ` +
-      `${stats.emphasisMarkers} emphasis markers — ${findings.length === 0 ? 'already lean, nothing to cut' : findings.length + ' finding(s)'}\n`
+      `${stats.emphasisMarkers} emphasis markers — ${summaryTail}\n`
     );
   }
-  return findings.length === 0 ? 0 : 1;
+  return failing.length === 0 ? 0 : 1;
 }
 
 module.exports = { lint, repoContext, DEFAULTS, RULES, STANDARD_COMMANDS, FORMATTER_CONFIGS };

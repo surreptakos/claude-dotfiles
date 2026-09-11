@@ -325,3 +325,47 @@ test('CLI: exit 0 clean, 1 findings, 2 usage; repo context and --against', () =>
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('CLI: --warn demotes named rules to advisory (still printed, do not affect exit code)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-md-lint-warn-'));
+  try {
+    // A file with two distinct-category findings: ambiguous ("if possible") and self-evident.
+    const mixed = path.join(dir, 'mixed.md');
+    fs.writeFileSync(mixed, 'If possible, do the thing.\nAlways write clean code.\n');
+
+    // Baseline: two blocking findings, exit 1.
+    const base = spawnSync(process.execPath, [CLI, mixed], { encoding: 'utf8' });
+    assert.equal(base.status, 1);
+    assert.match(base.stdout, /ambiguous/);
+    assert.match(base.stdout, /self-evident/);
+
+    // Demote just one: the other still fails.
+    const one = spawnSync(process.execPath, [CLI, mixed, '--warn', 'ambiguous'], { encoding: 'utf8' });
+    assert.equal(one.status, 1);
+    assert.match(one.stdout, /\tWARN\tambiguous\t/);
+    assert.match(one.stdout, /:2\tself-evident\t/);
+
+    // Demote both: exit 0, both still printed as WARN.
+    const both = spawnSync(process.execPath, [CLI, mixed, '--warn', 'ambiguous,self-evident'], { encoding: 'utf8' });
+    assert.equal(both.status, 0);
+    assert.match(both.stdout, /\tWARN\tambiguous\t/);
+    assert.match(both.stdout, /\tWARN\tself-evident\t/);
+    assert.match(both.stdout, /0 blocking, 2 advisory/);
+
+    // JSON: warned findings go to `warnings`, blocking to `findings`.
+    const jsonRun = spawnSync(process.execPath, [CLI, mixed, '--warn', 'ambiguous', '--json'], { encoding: 'utf8' });
+    assert.equal(jsonRun.status, 1);
+    const parsed = JSON.parse(jsonRun.stdout);
+    assert.equal(parsed.findings.length, 1);
+    assert.equal(parsed.findings[0].rule, 'self-evident');
+    assert.equal(parsed.warnings.length, 1);
+    assert.equal(parsed.warnings[0].rule, 'ambiguous');
+
+    // Unknown rule name is a usage error (exit 2), never silently ignored.
+    const bad = spawnSync(process.execPath, [CLI, mixed, '--warn', 'not-a-real-rule'], { encoding: 'utf8' });
+    assert.equal(bad.status, 2);
+    assert.match(bad.stderr, /unknown rule/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

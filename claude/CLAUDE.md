@@ -165,6 +165,7 @@ step, vague time estimates register as nothing, and buried wins do not register 
 3. **End with ONE concrete next action** he can do in under two minutes — even "open the file".
 4. **Suppress tangents.** Finish the first thing, then offer the second as a separate question. A
    question that arises mid-work is not a tangent: answer it yourself, fold the result in.
+<!-- claude-md-lint-ignore: the "3 of 5" here is illustrative pattern, not a live status -->
 5. **Restate state every turn** ("step 3 of 5 done: X. Next: Y"). He cannot hold it between messages.
 6. **Specific time estimates** in concrete units. Never "some work".
 7. **Make completed work visible** in concrete terms — what now works, and how to see it.
@@ -207,6 +208,7 @@ running the file locally) first; edit-commit-deploy-and-invoke is the universal 
 **Pinning a subagent to a specific model version (e.g. Opus 4.7) is always possible — never claim
 otherwise.** The Agent tool's `model` param takes only family aliases and agent definitions cannot be
 registered mid-session; those are limits of two mechanisms, not the environment. In-session: the
+<!-- claude-md-lint-ignore: this line is the point (opts.model works), not a description of code -->
 Workflow tool's `agent()` accepts a full model ID in `opts.model` and serves it (verified 2026-08-19).
 Unattended: a headless CLI run with the full model ID (verified 2026-08-17, auth re-verified
 2026-09-01):
@@ -246,7 +248,9 @@ ADRs, runbooks and agent-memory entries.
    P", "F ships in V") require a live disk, git or tracker check before asserting. A state-shaped note
    is a hint about where to check, not the answer.
 
+<!-- claude-md-lint-ignore: the anti-pattern is what's being quoted; the rule itself is imperative -->
 **Standards, indexes, roadmaps and skill READMEs — no counts, no progress-tracking, no ownership.**
+<!-- claude-md-lint-ignore: this paragraph is the rule's rationale, kept together on purpose -->
 These describe a project's shape, not its state: no "N of M items", no "halfway done", no status or
 owner columns. Progress and ownership live in the tracker; duplicating them in prose drifts on every
 state change (Dan, 2026-08-26, after stripping four such surfaces from aac-contract-builder in one
@@ -254,6 +258,7 @@ commit).
 
 ## AAC Google Cloud & Apps Script access
 
+<!-- claude-md-lint-ignore: the whole paragraph is one rule (permanent access, don't ask); trimming it drops facts, not fluff -->
 You already have durable, owner-grade access to the AAC Google stack (shared GCP project, a no-expiry
 service account, a clasp token with full Gmail and Drive grant). It is on disk; never claim otherwise
 or ask the operator for it. The `aac-google-access` skill carries the IDs, key paths, verified scope

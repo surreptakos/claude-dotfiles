@@ -69,8 +69,10 @@ param(
     #   dead-link    a junctioned skill's target never travelled      -> check 6b
     #   collision    two overlapping runs share one scratch root      -> check 10
     #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
+    #   md-lint      an unsuppressed finding lands in claude/CLAUDE.md -> check 9d (mirror)
+    #   md-lint-root an unsuppressed finding lands in CLAUDE.md        -> check 9d (root)
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
-                 'collision', 'locked-scratch')]
+                 'collision', 'locked-scratch', 'md-lint', 'md-lint-root')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -268,6 +270,19 @@ if ($Fault -eq 'secret') {
     $pair = '{ "' + 'refresh' + '_token": "' + ('A1b2C3d4E5' * 3) + '" }'
     Set-Content -Path (Join-Path $Clone 'claude\skills\secret-probe.json') -Value $pair -Encoding utf8
     Note 'fault: planted a credential value in the repo'
+}
+if ($Fault -eq 'md-lint' -or $Fault -eq 'md-lint-root') {
+    # A line the linter's `ambiguous` rule fires on ("if possible") - a category deliberately
+    # left blocking by both invocations, so the plant fails the gate without needing --warn
+    # to be off. Appended, not inserted, so the reported line number is deterministic (last
+    # line of the file, no matter how the file grows above). Runs pre-install so install
+    # copies the plant into the fake home too; that keeps the round-trip check (7) happy -
+    # otherwise the clone would have the plant and the fake home would not, and check 7 would
+    # flag drift the fault never intended to trip.
+    $victim = if ($Fault -eq 'md-lint') { Join-Path $Clone 'claude\CLAUDE.md' } else { Join-Path $Clone 'CLAUDE.md' }
+    Add-Content -Path $victim -Value ''  # ensure a newline before the plant
+    Add-Content -Path $victim -Value 'If possible, add this rule when appropriate.'
+    Note ('fault: planted an unsuppressed claude-md-lint finding into {0}' -f (Split-Path $victim -Leaf))
 }
 if ($Fault -eq 'dead-link') {
     # Has to be a directory something actually links TO. agents/skills holds more skills than
@@ -926,6 +941,72 @@ if (Test-Path $mdLintTest) {
     Check 'claude-md-lint passes its own test suite (one case per paradigm rule)' `
         ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 20)
 }
+
+# ------------------------------------------------------------------ 9d. claude-md-lint gates the CLAUDE.md files (issue 97)
+
+# The linter runs against both checked-in instruction files here in the restore suite - the root
+# CLAUDE.md that hand-written repo work reads, and the claude/CLAUDE.md mirror that ships to a
+# fresh machine. Runs against the CLONE, because the CLONE is what a restore would install; a
+# regression in either file (a new finding without a suppression) fails the run with the file and
+# line named. Size findings are demoted to warn via --warn (see CLAUDE.md near the linter's
+# entry): they still print, they do not fail the gate. The fault modes md-lint and md-lint-root
+# each plant an "if possible" line that trips the `ambiguous` rule - a rule left blocking - and
+# show the check turning red on the planted file with a real line number.
+Write-Host ''
+Write-Host 'CLAUDE.md linter gate'
+foreach ($pair in @(
+    @{ Rel = 'CLAUDE.md';        Label = 'root CLAUDE.md';        Fault = 'md-lint-root' },
+    @{ Rel = 'claude\CLAUDE.md'; Label = 'mirrored global CLAUDE.md'; Fault = 'md-lint' }
+)) {
+    $target = Join-Path $Clone $pair.Rel
+    if (-not (Test-Path $target)) {
+        Check ("{0} present in clone" -f $pair.Label) $false @('missing from clone: ' + $target)
+        continue
+    }
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        # --warn size: over-budget is documented in the root CLAUDE.md as a warning, not a
+        # failure, because the mirror is a copy of a live file that grows outside the repo.
+        $out = & node $mdLintModule $target '--warn' 'size' 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    $expectFault = ($Fault -eq $pair.Fault)
+    if ($expectFault) {
+        # A planted finding must show up on a real line, with the file named in the output.
+        $nameHit = $out -match [regex]::Escape((Split-Path $target -Leaf))
+        $hasFinding = $out -match ':\d+\tambiguous\t'
+        Check ("{0}: planted finding fails the gate, with file and line named" -f $pair.Label) `
+            (($exit -eq 1) -and $nameHit -and $hasFinding) @(($out -split "`r?`n") | Select-Object -Last 8)
+    } else {
+        Check ("{0} passes claude-md-lint (--warn size)" -f $pair.Label) `
+            ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 8)
+    }
+}
+
+# Positive suppression check: plant a finding WITH the in-file ignore comment on the line above,
+# in a throwaway copy under the fake home. Proves the ignore mechanism is honoured end-to-end -
+# not just in the linter's unit tests, but in the wired gate the restore suite runs.
+$suppressProbe = Join-Path $FakeHome '.claude-md-lint-suppress-probe.md'
+$suppressBody  = @(
+    '# probe',
+    '',
+    'A first ordinary line of prose to keep the file non-trivial.',
+    '',
+    '<!-- claude-md-lint-ignore -->',
+    'If possible, add this rule when appropriate.',
+    ''
+) -join "`n"
+Set-Content -Path $suppressProbe -Value $suppressBody -Encoding utf8
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    $out = & node $mdLintModule $suppressProbe 2>&1 | Out-String
+    $exit = $LASTEXITCODE
+} finally { $ErrorActionPreference = $prev }
+Remove-Item -Path $suppressProbe -Force -ErrorAction SilentlyContinue
+Check 'in-file ignore comment suppresses the finding it covers' `
+    ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 8)
 
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
