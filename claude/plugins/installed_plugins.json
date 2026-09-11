@@ -44,11 +44,11 @@
     "aac-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
-        "version": "2026.9.101218",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.112047",
+        "version": "2026.9.112047",
         "installedAt": "2026-09-02T20:47:25.994Z",
-        "lastUpdated": "2026-09-10T17:24:20.493Z",
-        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
+        "lastUpdated": "2026-09-11T20:49:36.893Z",
+        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d"
       },
       {
         "scope": "project",
@@ -178,12 +178,12 @@
       },
       {
         "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\session-ticket-fleet-setup-600e55",
         "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
         "version": "2026.9.101218",
         "installedAt": "2026-09-11T20:46:25.917Z",
         "lastUpdated": "2026-09-11T20:46:25.917Z",
-        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f",
-        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\session-ticket-fleet-setup-600e55"
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
       }
     ],
     "yes@sstklen": [

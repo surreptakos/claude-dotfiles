@@ -483,11 +483,20 @@ function ticketChecks() {
   const label = CFG.ticketLabel || 'ready-for-agent';
   let list;
   if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
-    const rows = tryRun('gh', ['issue', 'list', '--label', label, '--state', 'open',
-                               '--json', 'number,title', '-q', '.[] | "#\\(.number)  \\(.title)"'],
-                        { timeout: 25000 });
-    if (rows === null) { note('(could not reach GitHub for the ticket list)'); return; }
-    list = rows ? rows.split('\n') : [];
+    // `gh api` REST (not `gh issue list`, which is GraphQL under the hood). Cloud containers
+    // only route REST through their egress proxy — GraphQL 403s there — so the audit and this
+    // check both live on `gh api ...` (issue 130). /issues returns PRs too, so filter them out
+    // to match the old `gh issue list` behaviour.
+    const path = 'repos/' + slug.owner + '/' + slug.repo
+      + '/issues?labels=' + encodeURIComponent(label) + '&state=open&per_page=100';
+    const raw = tryRun('gh', ['api', '--paginate', path], { timeout: 25000 });
+    if (raw === null) { note('(could not reach GitHub for the ticket list)'); return; }
+    let items;
+    try { items = JSON.parse(raw); } catch (e) {
+      note('(GitHub returned unparseable JSON for the ticket list)'); return;
+    }
+    if (!Array.isArray(items)) items = [];
+    list = items.filter((i) => i && !i.pull_request).map((i) => `#${i.number}  ${i.title}`);
   } else {
     const r = curlTicketRows(slug, label);
     if (r.error) { note(`(no gh, and the GitHub API did not answer — ${r.error})`); return; }
