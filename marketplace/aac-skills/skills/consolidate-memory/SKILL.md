@@ -2,7 +2,7 @@
 name: consolidate-memory
 description: Full holistic pass over every memory file — merge duplicates, fix stale facts, prune the index. Never a delta sweep.
 metadata:
-  modified: '2026-09-02T19:03:20Z'
+  modified: '2026-08-26T14:35:01Z'
   previous-modified: none
   revision: '1'
   content-sha: 5213c7309dfb

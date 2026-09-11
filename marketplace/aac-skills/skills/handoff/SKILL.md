@@ -4,8 +4,8 @@ description: Compact the current conversation into a handoff document for anothe
 metadata:
   argument-hint: What will the next session be used for?
   disable-model-invocation: 'true'
-  modified: '2026-09-02T19:03:20Z'
-  previous-modified: none
+  modified: '2026-09-01T23:47:09Z'
+  previous-modified: '2026-08-25T14:57:11Z'
   revision: '1'
   content-sha: 959ae6570b25
 ---

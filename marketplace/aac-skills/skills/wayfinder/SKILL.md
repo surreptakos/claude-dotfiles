@@ -3,8 +3,8 @@ name: wayfinder
 description: Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-02T19:03:20Z'
-  previous-modified: none
+  modified: '2026-08-25T14:57:11Z'
+  previous-modified: '2026-08-20T00:41:59Z'
   revision: '1'
   content-sha: 2f9ff2274405
 ---

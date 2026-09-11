@@ -3,8 +3,8 @@ name: implement
 description: Implement a piece of work based on a spec or set of tickets.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-02T19:03:20Z'
-  previous-modified: none
+  modified: '2026-08-20T00:41:59Z'
+  previous-modified: '2026-08-12T21:14:59Z'
   revision: '1'
   content-sha: 79d4b70b16a1
 ---

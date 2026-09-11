@@ -5,7 +5,7 @@ metadata:
   author: vercel
   version: 1.0.0
   argument-hint: <file-or-pattern>
-  modified: '2026-09-02T19:03:20Z'
+  modified: '2026-08-12T23:42:25Z'
   previous-modified: none
   revision: '1'
   content-sha: fadd84f9cc48

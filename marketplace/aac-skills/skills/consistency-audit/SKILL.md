@@ -2,8 +2,8 @@
 name: consistency-audit
 description: Repo-wide prose-vs-reality audit. Verifies every factual claim in the repo's documents (README, CLAUDE.md, ADRs, PRDs, runbooks, trace docs, state logs, agent memory) against primary sources — code, git, the tracker, live state — fixes what is stale, hunts the scripts that generate drift, and reports root causes. Use when docs contradict each other or claim work states wrongly ("X is already implemented" when it isn't, or the reverse).
 metadata:
-  modified: '2026-09-02T19:03:20Z'
-  previous-modified: none
+  modified: '2026-08-26T14:35:01Z'
+  previous-modified: '2026-08-25T17:31:03Z'
   revision: '1'
   content-sha: 7a23a53ad049
 ---

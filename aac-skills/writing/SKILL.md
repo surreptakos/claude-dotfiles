@@ -2,8 +2,8 @@
 name: "writing"
 description: "Revise prose with AI writing tells stripped, or audit prose against the same rules without editing. Use whenever the user asks to \"fix\", \"clean up\", \"rewrite\", \"edit\", \"revise\", \"polish\", \"tighten\", or \"audit\" writing — email, memo, doc, PRD, ADR, README, runbook, release note, feedback, policy — or hands over text that reads as AI-generated (hedged, metronomic, padded). Add --docs to layer Vercel's structural conventions (sentence-case headings, Steps components, curly quotes, unit spacing) on top for API docs, PRDs, ADRs, READMEs, runbooks, marketing pages. Add --audit to return file:line findings without touching the text — use for specs, contracts, or quoted wording where a human keeps final say. Trigger even when the user does not name the skill — \"make this better\", \"does this sound AI\", \"slop check\" all apply. Voice-neutral: strips AI tells, does not impose a house voice. Ends with a required six-dimension scoring gate (42/60) before any text is returned."
 metadata:
-  modified: "2026-09-02T19:03:20Z"
-  previous-modified: "none"
+  modified: "2026-08-31T21:59:52Z"
+  previous-modified: "2026-08-31T21:52:13Z"
   revision: "1"
   content-sha: "e66c304015a0"
 ---

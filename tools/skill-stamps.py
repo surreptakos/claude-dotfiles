@@ -271,10 +271,20 @@ def _git(repo, *args):
     return res.stdout if res.returncode == 0 else None
 
 
+_shallow_warned = set()
+
+
 def git_dates(repo, rel_paths, count=2):
     """Last `count` distinct commit dates (UTC strings, newest first) touching any of rel_paths."""
     if not repo or not rel_paths:
         return []
+    # A shallow clone (cloud containers, CI without fetch-depth: 0) reports its oldest visible
+    # commit as the first change to everything. Those dates are wrong, and they are committed.
+    if str(repo) not in _shallow_warned:
+        _shallow_warned.add(str(repo))
+        if (_git(repo, "rev-parse", "--is-shallow-repository") or "").strip() == "true":
+            print(f"WARNING: {repo} is a shallow clone; first-stamp dates would be truncated. "
+                  "Run `git fetch --unshallow` first.", file=sys.stderr)
     out = _git(repo, "log", f"-{count * 4}", "--format=%cI", "--", *rel_paths)
     if not out:
         return []

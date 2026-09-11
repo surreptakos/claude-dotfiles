@@ -3,7 +3,7 @@ name: research-synthesis
 description: Synthesize user research into themes, insights, and recommendations. Use when you have interview transcripts, survey results, usability test notes, support tickets, or NPS responses that need to be distilled into patterns, user segments, and prioritized next steps.
 metadata:
   argument-hint: <research data, transcripts, or survey results>
-  modified: '2026-09-02T19:03:20Z'
+  modified: '2026-08-12T20:29:42Z'
   previous-modified: none
   revision: '1'
   content-sha: 7103cfafcc77

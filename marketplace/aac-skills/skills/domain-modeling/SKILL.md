@@ -2,8 +2,8 @@
 name: domain-modeling
 description: Build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, or when another skill needs to maintain the domain model.
 metadata:
-  modified: '2026-09-02T19:03:20Z'
-  previous-modified: none
+  modified: '2026-08-20T00:41:59Z'
+  previous-modified: '2026-08-12T21:14:59Z'
   revision: '1'
   content-sha: 715fd565e8fe
 ---
