@@ -22,12 +22,35 @@ self-deploy package; `gas/README.md`), the `gas-*.yml` reusable workflows, and t
 generated too — the packager (`tools/build-cloud-plugin.py`, run by every push) rebuilds them from
 `~/.claude/skills` and `aac-skills/`. Edit `aac-skills/` directly; never edit `marketplace/`.
 
+## Skill stamps
+
+Every `SKILL.md` carries four keys under `metadata:` — `modified`, `previous-modified`, `revision`,
+`content-sha` (`tools/skill-stamps.py`). The packager rotates them on every sync push when a
+skill's content hash moved, and writes them back into the *source* file, so the live tree, the
+mirror and the plugin all say the same thing. Never edit the four by hand and never bump one to
+make a check pass: the hash is what makes the dates believable. The previous text of any skill
+is `git log -p -- <skill>/SKILL.md`; the stamp tells you it is there to look for.
+
+After editing anything under `aac-skills/` on a branch with no live tree (a cloud session), run
+both, or CI (`skill-stamps.yml`) fails the branch:
+
+```bash
+python3 tools/skill-stamps.py stamp aac-skills
+python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
+```
+
+The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`; `--home`
+puts the owner's path back where the mirror holds `__USERHOME__` tokens, so the payload matches
+one built on that machine. CI checks exactly that: a rebuild from the mirror must reproduce the
+committed payload.
+
 ## Layout
 
 - `lib/manifest.ps1` — the whitelist of what travels, the exclusions, the path templating, the secret
   guard. Adding something to the setup means adding it to `Get-DotfileItems` here, nowhere else.
-- `sync.ps1 -Mode push|pull [-DryRun]` — push clears the mirrored trees first so deletions propagate;
-  pull backs up to `~/.claude-dotfiles-backup-<timestamp>` before writing, and never deletes.
+- `sync.ps1 -Mode push|pull [-DryRun]` — push runs the packager (which stamps the live skills),
+  then clears the mirrored trees so deletions propagate, then copies; pull backs up to
+  `~/.claude-dotfiles-backup-<timestamp>` before writing, and never deletes.
 - `install.ps1 [-DryRun]` — fresh machine: prerequisites, pull, then the manual list.
 - `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md`, `worker-cycle.md`,
   `ticket-fleet-cloud.js` (GitHub-MCP port of `.claude/workflows/ticket-fleet.js` — keep the two in

@@ -5,6 +5,10 @@ metadata:
   author: vercel
   version: 1.0.0
   argument-hint: <file-or-pattern>
+  modified: '2026-09-02T19:03:20Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: fadd84f9cc48
 ---
 
 # Writing Guidelines

@@ -2,6 +2,11 @@
 name: software-decision
 description: Decide whether to adopt a new paid software tool, with the amount of analysis scaled to the size of the decision. Use whenever someone proposes buying or subscribing to new software, wants a tool evaluated, or is comparing tools — from a low-cost utility to a multi-year platform. Produces a written decision (yes / no / not yet) and, if yes, a rollout plan. Trigger on "should we get [tool]", "evaluate [tool]", "we're thinking about buying [software]", "compare [tool] vs [tool]".
 argument-hint: "<tool name, or the problem a tool would solve>"
+metadata:
+  modified: "2026-09-02T19:03:20Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "41ea2298c9d4"
 ---
 
 # Software Decision

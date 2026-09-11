@@ -1,6 +1,11 @@
 ---
 name: counterparty-redline
 description: Minimal strike/insert redlines on a counterparty's contract, tiered by a walk-away test, with a one-page countersign addendum. Use when replying to vendor pushback on redlines or fixing the final conditions before signature.
+metadata:
+  modified: '2026-09-10T16:56:47Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: 55153538ed77
 ---
 
 # Counterparty redline

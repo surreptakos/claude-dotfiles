@@ -49,6 +49,12 @@ failed — which is how the guard got overridden the first time it ever fired.
 Push after editing a skill, the global `CLAUDE.md`, or a hook. Pull on the other machine. Add
 `-DryRun` to either to see the file list without writing anything.
 
+A push also stamps every skill it packages: `metadata.modified`, `metadata.previous-modified`,
+`metadata.revision` and `metadata.content-sha` in the SKILL.md frontmatter rotate whenever the
+skill's content changed since the last stamp (`tools/skill-stamps.py`). Open any skill and the
+frontmatter says when it last changed and when it changed before that; `git log -p` on the file
+shows what. An agent that revises a skill can no longer do it invisibly.
+
 `push` clears the mirrored trees (`claude/skills`, `claude/hooks`, `codex/hooks`, `memory`) before
 copying, so a skill deleted locally also leaves the repo. `pull` never deletes: it writes over what
 it carries and leaves anything else alone, after copying the current state to

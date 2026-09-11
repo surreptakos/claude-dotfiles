@@ -17,20 +17,38 @@ Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and wri
 plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
 remains for the claude.ai org-Skills surface, which only takes uploads.
 
+Every source skill is stamped before it is packaged (tools/skill-stamps.py): four keys under
+`metadata:` - modified, previous-modified, revision, content-sha - rotate whenever the skill's
+content hash no longer matches the recorded one, and are written back into the SOURCE SKILL.md
+(the live tree, or aac-skills/) so the mirror, the package and the file an agent edits all say
+the same thing. --no-stamp-write computes them for the package only.
+
 Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR] [--no-marketplace]
+                                          [--from-mirror [--home C:\\Users\\Dan]] [--no-stamp-write]
+--from-mirror builds from this repo's generated mirror (claude/skills, agents/skills via
+claude/skill-links.json, plus the previous build's dead-junction skills) instead of ~/.claude/skills,
+so a cloud session with no live tree can still republish. --home de-tokenizes __USERHOME__ back to
+the owner's path so the package matches one built on that machine.
 Exit 0 on success, 1 on any skill that could not be packaged.
 """
 
 import argparse
+import importlib.util
 import json
 import re
 import shutil
 import sys
+import tempfile
 import zipfile
 from datetime import date
 from pathlib import Path
 
 import yaml
+
+REPO = Path(__file__).resolve().parent.parent
+_spec = importlib.util.spec_from_file_location("skill_stamps", Path(__file__).with_name("skill-stamps.py"))
+skill_stamps = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(skill_stamps)
 
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
 PLUGIN_NAME = "aac-skills"
@@ -94,9 +112,18 @@ def split_frontmatter(text):
     return None, text
 
 
-def transform_skill_md(path):
-    """Rewrite one SKILL.md's frontmatter. Returns (new_text, moved_keys)."""
-    text = path.read_text(encoding="utf-8")
+def transform_skill_md(path, stamp=None):
+    """Rewrite one SKILL.md's frontmatter. Returns (new_text, moved_keys, retargeted).
+
+    `stamp` (from tools/skill-stamps.py) is merged under metadata so the packaged copy carries
+    it even when the source was not written back (--no-stamp-write).
+
+    The source's own line ending is kept: the mirror is a byte copy of the live tree, so a build
+    from either produces the same package, on Windows or Linux.
+    """
+    raw = path.read_bytes().decode("utf-8")
+    eol = "\r\n" if "\r\n" in raw else "\n"
+    text = raw.replace("\r\n", "\n")
     fm_str, body = split_frontmatter(text)
     if fm_str is None:
         raise ValueError(f"{path}: no frontmatter")
@@ -115,6 +142,17 @@ def transform_skill_md(path):
             meta.setdefault(k, v if isinstance(v, str) else json.dumps(v))
         fm["metadata"] = meta
 
+    if stamp:
+        meta = fm.get("metadata")
+        if not isinstance(meta, dict):
+            meta = {} if meta in (None, "", {}) else {"original-metadata": str(meta)}
+        # Stamp keys go last, after anything moved under metadata above, whichever order the
+        # source held them in: a build with write-back and one without must emit the same bytes.
+        for k in stamp:
+            meta.pop(k, None)
+        meta.update({k: str(v) for k, v in stamp.items()})
+        fm["metadata"] = meta
+
     fm.setdefault("name", path.parent.name)
     if "description" not in fm:
         raise ValueError(f"{path}: missing description")
@@ -125,7 +163,57 @@ def transform_skill_md(path):
     body, retargeted = retarget_paths(body)
 
     new_fm = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True, width=100000).strip()
-    return f"---\n{new_fm}\n---\n{body}", sorted(moved), retargeted
+    return f"---\n{new_fm}\n---\n{body}".replace("\n", eol), sorted(moved), retargeted
+
+
+def stamp_source(entry, history_paths, mirror_dir, home, write):
+    """Refresh the modified/previous-modified stamp of one source skill. Returns (stamp, changed)."""
+    return skill_stamps.stamp_skill(entry, write=write, home=home, repo=REPO,
+                                    history_paths=history_paths, mirror_dir=mirror_dir)
+
+
+def source_from_mirror(repo, home, tmp):
+    """Assemble what ~/.claude/skills holds on the owner's machine from the repo's generated mirror.
+
+    Real skill dirs live in claude/skills; junctions are recorded in claude/skill-links.json and
+    resolve to agents/skills. A dead junction (its target reads empty on the owner's machine, so
+    the packager falls back to ~/.agents/skills) is in neither list - the previous build's skill
+    set names those. Text files get the owner's home path back when --home is given.
+    """
+    src = Path(tmp) / "skills"
+    src.mkdir()
+    names = {}
+    for entry in sorted((repo / "claude" / "skills").iterdir()):
+        if entry.is_dir():
+            names[entry.name] = entry
+    links_file = repo / "claude" / "skill-links.json"
+    if links_file.is_file():
+        for link in json.loads(links_file.read_text(encoding="utf-8-sig")):
+            names.setdefault(link["Name"], repo / "agents" / "skills" / link["Name"])
+    aac = {p.name for p in (repo / "aac-skills").iterdir()} if (repo / "aac-skills").is_dir() else set()
+    prev = repo / "marketplace" / PLUGIN_NAME / "skills"
+    if prev.is_dir():
+        for entry in sorted(prev.iterdir()):
+            if entry.name in names or entry.name in aac:
+                continue
+            cand = repo / "agents" / "skills" / entry.name
+            if (cand / "SKILL.md").is_file():
+                names[entry.name] = cand
+    for name, path in names.items():
+        if (path / "SKILL.md").is_file():
+            shutil.copytree(path, src / name, ignore=ignore_noise)
+    if home:
+        for f in src.rglob("*"):
+            if not f.is_file():
+                continue
+            raw = f.read_bytes()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+            if "__USERHOME" in text:
+                f.write_bytes(skill_stamps.detokenize(text, home).encode("utf-8"))
+    return src
 
 
 def main():
@@ -134,9 +222,25 @@ def main():
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "dist"))
     ap.add_argument("--no-marketplace", action="store_true",
                     help="skip refreshing <repo>/marketplace and marketplace.json")
+    ap.add_argument("--from-mirror", action="store_true",
+                    help="build from this repo's generated mirror instead of --source")
+    ap.add_argument("--home", default=None,
+                    help="the owner's home path (C:\\Users\\Dan): de-tokenizes the mirror with "
+                         "--from-mirror and is folded out of every content hash. Default: this user's home")
+    ap.add_argument("--no-stamp-write", action="store_true",
+                    help="stamp the packaged copies only; leave every source SKILL.md untouched")
     args = ap.parse_args()
 
-    src = Path(args.source)
+    home = args.home if args.home is not None else str(Path.home())
+    stamp_write = not args.no_stamp_write
+    tmp = None
+    if args.from_mirror:
+        tmp = tempfile.TemporaryDirectory()
+        src = source_from_mirror(REPO, args.home, tmp.name)
+        if not args.home:
+            print("--from-mirror without --home: packaged copies keep the __USERHOME__ tokens")
+    else:
+        src = Path(args.source)
     out = Path(args.out)
     plugin_root = out / PLUGIN_NAME
     if plugin_root.exists():
@@ -149,7 +253,8 @@ def main():
     # new. Never zero-padded at the front (day >= 1), so it stays valid semver.
     from datetime import datetime
     version = f"{today.year}.{today.month}.{today.day}{datetime.now():%H%M}"
-    (plugin_root / ".claude-plugin" / "plugin.json").write_text(
+    # write_bytes, not write_text: the payload must not depend on the building OS's newline.
+    (plugin_root / ".claude-plugin" / "plugin.json").write_bytes((
         json.dumps(
             {
                 "name": PLUGIN_NAME,
@@ -161,12 +266,11 @@ def main():
             },
             indent=2,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n").encode("utf-8")
     )
 
     fallback = Path.home() / ".agents" / "skills"
-    packaged, failures = [], []
+    packaged, failures, restamped = [], [], []
     for entry in sorted(src.iterdir()):
         if not entry.is_dir():
             continue  # stray files like PROVENANCE-design-skills.md
@@ -180,13 +284,20 @@ def main():
                 failures.append(f"{entry.name}: no SKILL.md")
                 continue
         dest = plugin_root / "skills" / entry.name
+        mirror = next((REPO / t / entry.name for t in ("claude/skills", "agents/skills")
+                       if (REPO / t / entry.name / "SKILL.md").is_file()), None)
         try:
-            new_text, moved, retargeted = transform_skill_md(skill_md)
+            stamp, changed = stamp_source(
+                entry, [f"claude/skills/{entry.name}", f"agents/skills/{entry.name}"],
+                mirror, home, stamp_write)
+            new_text, moved, retargeted = transform_skill_md(skill_md, stamp)
         except Exception as exc:  # noqa: BLE001 - report and keep packaging the rest
             failures.append(f"{entry.name}: {exc}")
             continue
+        if changed:
+            restamped.append((entry.name, stamp))
         shutil.copytree(entry, dest, ignore=ignore_noise)
-        (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
+        (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
         packaged.append((entry.name, moved, retargeted))
 
     # Marker hook (Dan, 2026-09-03): the docs are silent on whether a plugin's hooks execute in
@@ -214,7 +325,7 @@ def main():
         '{\\"hookSpecificOutput\\":{\\"hookEventName\\":\\"SessionStart\\",'
         '\\"additionalContext\\":\\"' + marker_text + '\\"}}'
     )
-    (hooks_dir / "hooks.json").write_text(
+    (hooks_dir / "hooks.json").write_bytes((
         json.dumps(
             {
                 "hooks": {
@@ -233,8 +344,7 @@ def main():
             },
             indent=2,
         )
-        + "\n",
-        encoding="utf-8",
+        + "\n").encode("utf-8")
     )
 
     zip_path = out / f"{PLUGIN_NAME}.zip"
@@ -261,12 +371,16 @@ def main():
                 failures.append(f"aac/{entry.name}: name collides with a personal skill")
                 continue
             try:
-                new_text, moved, retargeted = transform_skill_md(entry / "SKILL.md")
+                stamp, changed = stamp_source(
+                    entry, [f"aac-skills/{entry.name}"], None, home, stamp_write)
+                new_text, moved, retargeted = transform_skill_md(entry / "SKILL.md", stamp)
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"aac/{entry.name}: {exc}")
                 continue
+            if changed:
+                restamped.append((entry.name, stamp))
             shutil.copytree(entry, dest, ignore=ignore_noise)
-            (dest / "SKILL.md").write_text(new_text, encoding="utf-8")
+            (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
             packaged.append((entry.name, moved, retargeted))
 
     # ------------------------------------------------------------------ repo marketplace
@@ -282,7 +396,7 @@ def main():
             shutil.rmtree(stale)
         mkt_dir = repo / ".claude-plugin"
         mkt_dir.mkdir(exist_ok=True)
-        (mkt_dir / "marketplace.json").write_text(
+        (mkt_dir / "marketplace.json").write_bytes((
             json.dumps(
                 {
                     "name": "claude-dotfiles",
@@ -301,8 +415,7 @@ def main():
                 },
                 indent=2,
             )
-            + NL,
-            encoding="utf-8",
+            + NL).encode("utf-8")
         )
         print(f"marketplace payload refreshed -> {mkt_payload} + .claude-plugin/marketplace.json")
 
@@ -316,6 +429,13 @@ def main():
             print(f"  {name}: {', '.join(moved)}")
     print(f"local paths retargeted at the plugin in {len(retargeted)} skills"
           + (f": {', '.join(retargeted)}" if retargeted else ""))
+    print(f"stamps rotated in {len(restamped)} skills"
+          + ("" if stamp_write else " (not written back: --no-stamp-write)"))
+    for name, stamp in restamped:
+        print(f"  {name}: rev {stamp['revision']}, modified {stamp['modified']}, "
+              f"previous {stamp['previous-modified']}")
+    if tmp:
+        tmp.cleanup()
     if failures:
         print("FAILURES:")
         for f in failures:

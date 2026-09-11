@@ -3,6 +3,11 @@ name: aac-sop
 description: 'Create or rewrite an Active Alarm Company (AAC) procedure or work instruction in AAC''s house format and writing standards, delivered as a styled Word (.docx). Two tiers: a full Procedure (cross-role process) and a lean Work Instruction (one person, one task, usually one tool). Use whenever the user asks to write, draft, build, standardize, format, or recast an SOP, "standard operating procedure," "work instruction," or "WI" - or to put an existing process, checklist, or rough document "into our SOP format." Also use when documenting any repeatable AAC process or task (service calls, monitoring termination, billing, payroll, the Service-to-Sales handoff, estimating, month-end close, or a tool how-to such as System Surveyor or Zoho). Trigger even without the words "template," "SOP," or "work instruction" - "write up how we handle X," "document the X process," or "turn this into a procedure/checklist" all apply. Prefer this over generic process-doc/runbook output for any AAC procedure or work instruction.
 
   '
+metadata:
+  modified: '2026-09-02T19:03:20Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: a968307daf96
 ---
 
 # AAC SOP Builder

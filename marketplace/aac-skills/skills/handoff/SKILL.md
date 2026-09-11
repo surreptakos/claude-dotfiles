@@ -4,6 +4,10 @@ description: Compact the current conversation into a handoff document for anothe
 metadata:
   argument-hint: What will the next session be used for?
   disable-model-invocation: 'true'
+  modified: '2026-09-02T19:03:20Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: 959ae6570b25
 ---
 
 Write a handoff document summarising the current conversation so a fresh agent can continue the work. Save to the temporary directory of the user's OS - not the current workspace.

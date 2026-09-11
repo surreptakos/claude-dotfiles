@@ -1,6 +1,11 @@
 ---
 name: user-research
 description: Plan, conduct, and synthesize user research. Trigger with "user research plan", "interview guide", "usability test", "survey design", "research questions", or when the user needs help with any aspect of understanding their users through research.
+metadata:
+  modified: '2026-09-02T19:03:20Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: c9ea13048da1
 ---
 
 # User Research

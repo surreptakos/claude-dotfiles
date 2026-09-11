@@ -3,6 +3,10 @@ name: design-system
 description: Audit, document, or extend your design system. Use when checking for naming inconsistencies or hardcoded values across components, writing documentation for a component's variants, states, and accessibility notes, or designing a new pattern that fits the existing system.
 metadata:
   argument-hint: '[audit | document | extend] <component or system>'
+  modified: '2026-09-02T19:03:20Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: 6e68fc947e35
 ---
 
 # /design-system

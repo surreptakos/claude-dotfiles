@@ -4,6 +4,10 @@ description: Teach the user a new skill or concept, within this workspace.
 metadata:
   disable-model-invocation: 'true'
   argument-hint: What would you like to learn about?
+  modified: '2026-09-02T19:03:20Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: 8075c51d4805
 ---
 
 The user has asked you to teach them something. This is a stateful request - they intend to learn the topic over multiple sessions.
