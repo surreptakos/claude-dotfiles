@@ -139,6 +139,51 @@
         "installedAt": "2026-09-10T14:27:45.327Z",
         "lastUpdated": "2026-09-10T14:27:45.327Z",
         "gitCommitSha": "727bdcfbfb7df131612bbbfe215a4a9b52264f56"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Sales Data KPIs\\aac-cockpit",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
+        "version": "2026.9.101218",
+        "installedAt": "2026-09-10T22:00:07.153Z",
+        "lastUpdated": "2026-09-10T22:00:07.153Z",
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Operations\\zoho-source-of-truth",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
+        "version": "2026.9.101218",
+        "installedAt": "2026-09-10T22:30:06.237Z",
+        "lastUpdated": "2026-09-10T22:30:06.237Z",
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\aac-routines\\.claude\\worktrees\\ticket-fleet-session-start-646cd5",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
+        "version": "2026.9.101218",
+        "installedAt": "2026-09-11T20:43:27.371Z",
+        "lastUpdated": "2026-09-11T20:43:27.371Z",
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\peaceful-payne-9fd2cf",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
+        "version": "2026.9.101218",
+        "installedAt": "2026-09-11T20:45:55.179Z",
+        "lastUpdated": "2026-09-11T20:45:55.179Z",
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.101218",
+        "version": "2026.9.101218",
+        "installedAt": "2026-09-11T20:46:25.917Z",
+        "lastUpdated": "2026-09-11T20:46:25.917Z",
+        "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\session-ticket-fleet-setup-600e55"
       }
     ],
     "yes@sstklen": [

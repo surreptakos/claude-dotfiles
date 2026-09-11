@@ -1,6 +1,11 @@
 ---
 name: claude-md-lint
 description: Audit or trim a CLAUDE.md, AGENTS.md or other always-loaded instructions file against the concision paradigm ("would removing this line cause a mistake?"). Use when asked to lint, audit, trim, shrink or review a CLAUDE.md, when a rulebook feels ignored or bloated, or before adding a new section to one. Bundles the deterministic linter; the trim pass is the model's job.
+metadata:
+  modified: "2026-09-09T15:06:35Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "42953a204051"
 ---
 
 # claude-md-lint — keep instruction files to what a session cannot derive

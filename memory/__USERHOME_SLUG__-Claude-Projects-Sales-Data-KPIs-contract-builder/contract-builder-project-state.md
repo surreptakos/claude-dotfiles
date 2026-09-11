@@ -5,13 +5,15 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 3b0c0ef5-c1fe-441f-87e6-d0e7df614ebe
-  modified: 2026-08-26T17:15:33.310Z
+  modified: 2026-09-10T23:38:40.955Z
 ---
 
 Repo `surreptakos/aac-contract-builder` (local: `__USERHOME__\Claude\Projects\Sales Data KPIs\contract-builder`). Wayfinder map issue #1; spec #49; rulings on #41. **Scope rule (2026-08-25): this file holds only what repo/tracker cannot show — Dan rulings + rationale, environment facts, active constraints. Milestone status, merged PRs, backlog lists: query tracker fresh, never cache here.** See [[wrong-notes-self-perpetuate]] — a stale cached line here caused the templates incident.
 
 **Environment (not in repo):**
 - Scheduled task `AAC contract-pilot tick` operational details live in docs/pilot-runbook.md §2a — read that, don't trust memory for paths.
+- **This dev PC (DAN-INSPIRON15) IS the pilot PC**: `schtasks /Query /TN "AAC contract-pilot tick"` finds the task here (Disabled at 2026-09-10). Pilot-PC acceptance criteria are checkable locally — a wave-3 verifier wrongly called one "physically outside this machine" (PR #241).
+- aac-cockpit's Zoho Self Client token is NOT read-only (cockpit ADR-0018 line 21: re-minted 2026-07-16 with wider CRM + Desk scope, Tasks write proven). Never document it as read-only.
 - Gate quirk: `gh issue create` blocked unless declared route is triage/to-spec/to-tickets; declare route per turn with the hook-supplied turn nonce. PreToolUse block kills the ENTIRE Bash call, including earlier commands in it. `gh issue edit` not blocked. See [[workflow-model-pinning]].
 - Amanda field guide artifact: https://claude.ai/code/artifact/418f34c0-ad88-4021-8cbb-fe6fadf66c24 — hold handout until the template-staging ticket lands (currently issue #119; check `gh issue view` for live state before assuming).
 

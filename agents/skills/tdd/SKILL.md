@@ -1,6 +1,11 @@
 ---
 name: tdd
 description: Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions "red-green-refactor", or wants integration tests.
+metadata:
+  modified: "2026-08-20T00:41:59Z"
+  previous-modified: "2026-08-12T21:14:59Z"
+  revision: "1"
+  content-sha: "77dc461a4f41"
 ---
 
 # Test-Driven Development

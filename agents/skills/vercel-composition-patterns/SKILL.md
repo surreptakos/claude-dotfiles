@@ -10,6 +10,10 @@ license: MIT
 metadata:
   author: vercel
   version: '1.0.0'
+  modified: "2026-08-12T23:42:25Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "a8aeecde85d7"
 ---
 
 # React Composition Patterns
