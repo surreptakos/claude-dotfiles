@@ -2,6 +2,11 @@
 name: to-spec
 description: Turn the current conversation into a spec and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.
 disable-model-invocation: false
+metadata:
+  modified: "2026-08-20T00:41:59Z"
+  previous-modified: "2026-08-12T21:14:59Z"
+  revision: "1"
+  content-sha: "bf6ed2bec537"
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a spec (you may know this document as a PRD). Do NOT interview the user — just synthesize what you already know.

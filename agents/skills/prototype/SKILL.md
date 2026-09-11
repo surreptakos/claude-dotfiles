@@ -1,6 +1,11 @@
 ---
 name: prototype
 description: Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.
+metadata:
+  modified: "2026-08-20T00:41:59Z"
+  previous-modified: "2026-08-12T21:14:59Z"
+  revision: "1"
+  content-sha: "3bdcc37f313f"
 ---
 
 # Prototype

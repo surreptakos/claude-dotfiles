@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: reference
   originSessionId: 3fba5f80-137f-4816-826f-f4db0d32829e
-  modified: 2026-08-06T15:10:33.706Z
+  modified: 2026-09-10T23:21:39.277Z
 ---
 
 `python "__USERHOME__\.codex\hooks\ask_matt_gate.py" declare-claude "<session>" "<nonce>" <flow>`
@@ -29,6 +29,10 @@ seven failed attempts and a wrong "the hook blocks its own declare command, need
 conclusion. It does not need one.
 
 Success looks like: `Governance recorded: direct-answer; yes; caveman-ultra`, exit 0.
+
+**Run the command exactly as printed, nothing appended.** On 2026-09-10 a declare with
+`; echo "exit=$?"` tacked on (and a PowerShell `py -3` variant) was blocked with the same "missing"
+message; the bare command, via Bash, succeeded first try. The hook matches the command text itself.
 
 Flows: `implement`, `diagnosing-bugs`, `triage`, `wayfinder`, `code-review`, `research`,
 `direct-answer` (no engineering flow).

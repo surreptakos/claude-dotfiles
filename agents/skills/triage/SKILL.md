@@ -2,6 +2,11 @@
 name: triage
 description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
 disable-model-invocation: false
+metadata:
+  modified: "2026-09-02T00:14:41Z"
+  previous-modified: "2026-08-31T23:15:19Z"
+  revision: "1"
+  content-sha: "7f0d9ca816e6"
 ---
 
 # Triage
