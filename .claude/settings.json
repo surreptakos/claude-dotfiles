@@ -19,8 +19,25 @@
     "credentials exist, so cloning a private marketplace fails there. Declaring it",
     "here is the documented path and the one verified 2026-09-09: Claude Code clones",
     "the marketplace itself after credentials are wired up, loads all 56 skills and",
-    "runs the plugin's SessionStart hook."
+    "runs the plugin's SessionStart hook. Not reproduced 2026-09-11: that session's",
+    "installed_plugins.json was empty (evidence on issue 106).",
+    "",
+    ".claude/hooks/session-start.sh runs first on SessionStart and only in a cloud",
+    "container (CLAUDE_CODE_REMOTE=true): installs gh so the session has the same",
+    "GitHub instrument a local one has. Only `gh api` works through the cloud proxy;",
+    "GraphQL-backed gh commands return 403 there (issue 130).",
+    "",
+    "permissions.allow names the two Bash shapes the cloud auto-mode classifier",
+    "refused during session-end housekeeping on 2026-09-11: deleting a merged remote",
+    "branch, and calling gh. gh is bounded by the session's injected token, and a",
+    "remote branch delete is the last step of every merged PR here."
   ],
+  "permissions": {
+    "allow": [
+      "Bash(git push origin --delete:*)",
+      "Bash(gh:*)"
+    ]
+  },
   "extraKnownMarketplaces": {
     "claude-dotfiles": {
       "source": {
@@ -34,6 +51,16 @@
   },
   "hooks": {
     "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
+            "timeout": 120,
+            "statusMessage": "Cloud container: installing gh..."
+          }
+        ]
+      },
       {
         "hooks": [
           {
