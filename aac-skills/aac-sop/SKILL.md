@@ -12,6 +12,11 @@ description: >
   or Zoho). Trigger even without the words "template," "SOP," or "work instruction" - "write up how
   we handle X," "document the X process," or "turn this into a procedure/checklist" all apply.
   Prefer this over generic process-doc/runbook output for any AAC procedure or work instruction.
+metadata:
+  modified: "2026-08-31T21:20:12Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "a968307daf96"
 ---
 
 # AAC SOP Builder

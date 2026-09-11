@@ -1,6 +1,11 @@
 ---
 name: session-start
 description: Re-print the start-of-session checks for a git project — what the remote did, what is uncommitted, whether the deploy credential is alive, whether tests pass, and which tickets are open. The checks already run automatically at session start; use this to see them again, or with --refresh to re-run them mid-session.
+metadata:
+  modified: '2026-09-09T19:15:00Z'
+  previous-modified: '2026-09-01T23:47:09Z'
+  revision: '1'
+  content-sha: a7d9b45d0ce8
 ---
 
 # Start a session

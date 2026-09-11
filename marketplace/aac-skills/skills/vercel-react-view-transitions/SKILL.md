@@ -5,6 +5,10 @@ license: MIT
 metadata:
   author: vercel
   version: 1.0.0
+  modified: '2026-08-12T23:42:25Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: 4041679e47d9
 ---
 
 # React View Transitions

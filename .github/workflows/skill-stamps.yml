@@ -1,0 +1,45 @@
+name: Skill stamps
+
+# Every SKILL.md carries modified / previous-modified / revision / content-sha under metadata
+# (tools/skill-stamps.py). This job fails a branch where:
+#   - a skill under aac-skills/ was edited without a re-stamp (its content hash moved), or
+#   - the committed plugin payload no longer matches what the packager builds from the mirror,
+#     i.e. someone changed a skill and did not republish the plugin.
+# The fix for both is the same two commands, from the repo root:
+#   python3 tools/skill-stamps.py stamp aac-skills
+#   python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
+# The dashboard branch is a force-pushed snapshot artifact and is never checked.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [dashboard]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # a first-time stamp reads its dates from the git history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      - name: Unit tests
+        run: python3 tools/skill-stamps.test.py
+      - name: Stamps current on aac-skills
+        run: python3 tools/skill-stamps.py check aac-skills --home 'C:\Users\Dan'
+      - name: Plugin payload matches a rebuild from the mirror
+        run: |
+          python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan' \
+            --out /tmp/dist --no-marketplace --no-stamp-write
+          if ! diff -r /tmp/dist/aac-skills/skills marketplace/aac-skills/skills; then
+            echo "::error::marketplace/aac-skills is stale - rebuild it with tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'"
+            exit 1
+          fi
+          diff /tmp/dist/aac-skills/hooks/hooks.json marketplace/aac-skills/hooks/hooks.json

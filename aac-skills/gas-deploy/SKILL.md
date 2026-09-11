@@ -1,6 +1,11 @@
 ---
 name: gas-deploy
 description: Deploy, promote, run and diagnose an AAC Apps Script project without clasp, through the gas package in claude-dotfiles (a vendored SelfDeploy.js, deploy/* refs on GitHub, one time trigger). Use when a repo's clasp credential died again, when asked to "move this repo off clasp", "adopt gas", "deploy the script", "promote PROD", "run <function> on the script", or to read why a gas/deploy status is red.
+metadata:
+  modified: "2026-09-09T16:42:14Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "f25835e7a334"
 ---
 
 # gas-deploy

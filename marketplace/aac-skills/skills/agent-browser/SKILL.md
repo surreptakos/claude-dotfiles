@@ -4,6 +4,10 @@ description: Browser automation CLI for AI agents. Use when the user needs to in
 allowed-tools: Bash(agent-browser:*), Bash(npx agent-browser:*)
 metadata:
   hidden: 'true'
+  modified: '2026-08-12T21:14:59Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: 609155389a98
 ---
 
 # agent-browser

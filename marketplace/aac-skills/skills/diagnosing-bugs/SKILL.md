@@ -1,6 +1,11 @@
 ---
 name: diagnosing-bugs
 description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
+metadata:
+  modified: '2026-08-20T00:41:59Z'
+  previous-modified: '2026-08-12T21:14:59Z'
+  revision: '1'
+  content-sha: ec8273ac5035
 ---
 
 # Diagnosing Bugs

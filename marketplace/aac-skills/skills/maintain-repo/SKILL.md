@@ -3,6 +3,10 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
+  modified: '2026-08-26T14:35:01Z'
+  previous-modified: '2026-08-25T22:33:19Z'
+  revision: '1'
+  content-sha: 3cdb0a47d334
 ---
 
 # Maintain repo

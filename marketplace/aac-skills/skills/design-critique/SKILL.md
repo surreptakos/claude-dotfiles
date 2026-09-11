@@ -3,6 +3,10 @@ name: design-critique
 description: Get structured design feedback on usability, hierarchy, and consistency. Trigger with "review this design", "critique this mockup", "what do you think of this screen?", or when sharing a Figma link or screenshot for feedback at any stage from exploration to final polish.
 metadata:
   argument-hint: <Figma URL, screenshot, or description>
+  modified: '2026-08-12T20:29:42Z'
+  previous-modified: none
+  revision: '1'
+  content-sha: f56b6faadcf8
 ---
 
 # /design-critique

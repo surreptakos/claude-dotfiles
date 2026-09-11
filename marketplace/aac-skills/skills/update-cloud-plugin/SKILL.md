@@ -1,6 +1,11 @@
 ---
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin (the single package built from ~/.claude/skills plus the repo aac-skills/ tree) when the session-end sweep reports drift. Marketplace push is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
+metadata:
+  modified: '2026-09-10T16:59:12Z'
+  previous-modified: '2026-08-31T22:17:34Z'
+  revision: '1'
+  content-sha: d394bc8a8d65
 ---
 
 # Update the cloud plugin

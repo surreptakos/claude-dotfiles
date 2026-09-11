@@ -1,6 +1,11 @@
 ---
 name: "aac-house-writing-standard"
 description: "AAC house writing and document standard (AAC-WR-001 v0.2, Gregg-based). Load before drafting or formatting any AAC email, memo, letter, report, SOP, proposal, scope, Word document, or table. Performance reviews and their audits use the review-project standards first; this skill fills the gaps."
+metadata:
+  modified: "2026-09-10T16:56:47Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "73b7570db66f"
 ---
 
 # AAC house writing standard
