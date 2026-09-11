@@ -398,7 +398,11 @@ function readJson(file) {
  *  nothing says so: `claude plugin install` happily reinstalls whatever the cached clone holds.
  *  Measured 2026-09-02 — a clone frozen at 2026-08-31 kept serving that build for two days
  *  while GitHub carried the new one, and the only symptom was a skill that would not update.
- *  Machine-wide, silent when no marketplace is configured. */
+ *  The comparison is a semver-shaped numeric compare, not string !== (issue 85): the CLONE can
+ *  itself be stale, so installed > offered means the marketplace clone needs refreshing, not
+ *  that the plugin needs updating (an update would reinstall the same version from the same
+ *  stale clone). Machine-wide, silent when no marketplace is configured. */
+const { compareVersions } = require('./plugin-version');
 function installedPluginChecks() {
   if (IS_CLOUD) return;
   const root = path.join(os.homedir(), '.claude', 'plugins');
@@ -406,7 +410,8 @@ function installedPluginChecks() {
   const installed = readJson(path.join(root, 'installed_plugins.json'));
   if (!known || !installed || !installed.plugins) return;
 
-  const rows = [];
+  const behindRows = [];
+  const aheadRows = [];
   for (const [id, entries] of Object.entries(installed.plugins)) {
     const at = id.lastIndexOf('@');
     if (at < 1) continue;
@@ -420,9 +425,9 @@ function installedPluginChecks() {
     if (!manifest || !Array.isArray(manifest.plugins)) continue;
     const offered = manifest.plugins.find((p) => p && p.name === name);
     if (!offered || !offered.version) continue;
-    if (String(offered.version) !== String(entry.version)) {
-      rows.push({ name, market, have: entry.version, offered: offered.version });
-    }
+    const cmp = compareVersions(entry.version, offered.version);
+    if (cmp === 'behind') behindRows.push({ name, market, have: entry.version, offered: offered.version });
+    else if (cmp === 'ahead') aheadRows.push({ name, market, have: entry.version, offered: offered.version });
   }
 
   // Age of each clone, because a current-looking install proves nothing when the clone
@@ -436,11 +441,15 @@ function installedPluginChecks() {
     if (days >= 7) stale.push({ market, days });
   }
 
-  if (!rows.length && !stale.length) return;
+  if (!behindRows.length && !aheadRows.length && !stale.length) return;
   head('Plugins');
-  rows.forEach((r) => {
+  behindRows.forEach((r) => {
     warn(`${r.name} is behind its marketplace — installed ${r.have}, available ${r.offered}`);
     note(`\`claude plugin update ${r.name}\`, then restart`);
+  });
+  aheadRows.forEach((r) => {
+    warn(`the marketplace clone of ${r.market} is stale — installed ${r.name} ${r.have}, clone offers ${r.offered}`);
+    note(`\`claude plugin marketplace update ${r.market}\` refreshes the clone (do NOT \`claude plugin update\` — the clone would reinstall ${r.offered})`);
   });
   stale.forEach((s) => {
     note(`marketplace ${s.market} last fetched ${s.days}d ago — `
