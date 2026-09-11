@@ -365,6 +365,12 @@ function report(kind, issue, detail) {
 }
 
 const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
+// A master-orchestrator state notebook carries `orchestrator` alone (a living document each master
+// rewrites every heartbeat, no pending ruling), so `orchestrator` counts as a triage state for the
+// untriaged check. It is a category, not a workflow state, so it does not participate in the
+// conflicting-triage check — a decision brief legitimately carries `orchestrator` AND
+// `ready-for-human`.
+const TRIAGED = TRIAGE.concat(['orchestrator']);
 let edgesUnavailable = false;
 
 // ---- 1. A prose blocker with no native edge is an ungated dependency -----------------------------
@@ -435,7 +441,8 @@ open.forEach((i) => {
 open.forEach((i) => {
   const names = i.labels.map((l) => l.name);
   const states = names.filter((n) => TRIAGE.includes(n));
-  if (states.length === 0) report('untriaged', i, 'carries no triage label, so it is invisible to every triage query.');
+  const triaged = names.filter((n) => TRIAGED.includes(n));
+  if (triaged.length === 0) report('untriaged', i, 'carries no triage label, so it is invisible to every triage query.');
   if (states.length > 1) report('conflicting-triage', i, 'carries ' + states.join(' AND ') + ' — pick one.');
 });
 
