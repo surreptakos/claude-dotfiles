@@ -40,7 +40,7 @@ import shutil
 import sys
 import tempfile
 import zipfile
-from datetime import date
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -216,6 +216,21 @@ def source_from_mirror(repo, home, tmp):
     return src
 
 
+def plugin_version(now=None):
+    """Version string for plugin.json: YYYY.M.DHHMM in UTC.
+
+    Patch segment = day followed by HHMM, so several builds on one day carry distinct, increasing
+    versions. Five builds on 2026-09-03 all said 2026.9.3 and a Cowork plugin update saw nothing
+    new. Never zero-padded at the front (day >= 1), so it stays valid semver.
+
+    Always UTC: cloud CI builds in UTC and a local Windows build in America/Chicago, so with local
+    time a later local build produced a LOWER version than an earlier cloud one (2026-09-11: cloud
+    2026.9.111802, local 2026.9.111542). One clock keeps versions monotonic across machines.
+    """
+    now = now.astimezone(timezone.utc) if now is not None else datetime.now(timezone.utc)
+    return f"{now.year}.{now.month}.{now.day}{now:%H%M}"
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--source", default=str(Path.home() / ".claude" / "skills"))
@@ -247,12 +262,7 @@ def main():
         shutil.rmtree(plugin_root)
     (plugin_root / ".claude-plugin").mkdir(parents=True)
 
-    today = date.today()
-    # Patch segment = day followed by HHMM, so several builds on one day carry distinct, increasing
-    # versions. Five builds on 2026-09-03 all said 2026.9.3 and a Cowork plugin update saw nothing
-    # new. Never zero-padded at the front (day >= 1), so it stays valid semver.
-    from datetime import datetime
-    version = f"{today.year}.{today.month}.{today.day}{datetime.now():%H%M}"
+    version = plugin_version()
     # write_bytes, not write_text: the payload must not depend on the building OS's newline.
     (plugin_root / ".claude-plugin" / "plugin.json").write_bytes((
         json.dumps(

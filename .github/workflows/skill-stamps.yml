@@ -31,7 +31,9 @@ jobs:
           python-version: '3.12'
       - run: pip install pyyaml
       - name: Unit tests
-        run: python3 tools/skill-stamps.test.py
+        run: |
+          python3 tools/skill-stamps.test.py
+          python3 tests/build-cloud-plugin.test.py
       - name: Stamps current on aac-skills
         run: python3 tools/skill-stamps.py check aac-skills --home 'C:\Users\Dan'
       - name: Plugin payload matches a rebuild from the mirror
