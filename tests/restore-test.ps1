@@ -69,8 +69,10 @@ param(
     #   dead-link    a junctioned skill's target never travelled      -> check 6b
     #   collision    two overlapping runs share one scratch root      -> check 10
     #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
+    #   lint-root    unsuppressed finding planted in the root CLAUDE.md   -> claude-md-lint gate
+    #   lint-mirror  unsuppressed finding planted in claude/CLAUDE.md     -> claude-md-lint gate
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
-                 'collision', 'locked-scratch')]
+                 'collision', 'locked-scratch', 'lint-root', 'lint-mirror')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -926,6 +928,81 @@ if (Test-Path $mdLintTest) {
     Check 'claude-md-lint passes its own test suite (one case per paradigm rule)' `
         ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 20)
 }
+
+# Issue 97: the linter gates the checked-in instruction files. Root CLAUDE.md and the mirrored
+# global claude/CLAUDE.md are both linted; any unsuppressed finding whose rule is not in the
+# warn-only set fails the run with the file and line named. `size` warns on both files - the
+# decision is stated in the project's CLAUDE.md next to the linter's entry. The mirror also
+# warns on volatile, code-derivable and tutorial, because it is a byte copy of Dan's personal
+# ~/.claude/CLAUDE.md whose text quotes counterexamples that trip those regexes ("3 of 5",
+# "halfway done", `func()` accepts ...). Every other rule stays blocking on both files.
+$rootLintTarget   = Join-Path $Clone 'CLAUDE.md'
+$mirrorLintTarget = Join-Path $Clone 'claude\CLAUDE.md'
+$mdLintWarnRoot   = @('size')
+$mdLintWarnMirror = @('size', 'volatile', 'code-derivable', 'tutorial')
+$mdLintFindingRe  = '^(?<file>.+):(?<line>\d+)\t(?<rule>[\w-]+)\t(?<msg>.*)$'
+
+# Fault plant runs BEFORE the gate reads the file, so the gate goes red the same way any
+# real unsuppressed finding would. Injected here (not in the pre-install fault block up top)
+# because a plant before the clone fidelity check (0) would fail check 0 as well, and only
+# the gate is the subject under test.
+if ($Fault -eq 'lint-root') {
+    Add-Content -Path $rootLintTarget -Value "`nAlways write clean code."
+    Note 'fault: planted a self-evident line at the end of CLAUDE.md'
+}
+if ($Fault -eq 'lint-mirror') {
+    Add-Content -Path $mirrorLintTarget -Value "`nAlways write clean code."
+    Note 'fault: planted a self-evident line at the end of claude/CLAUDE.md'
+}
+
+function Invoke-MdLint {
+    param([string]$Path, [string]$CloneDir)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $script = Join-Path $CloneDir 'tools\claude-md-lint.js'
+    Push-Location $CloneDir
+    try {
+        $raw = & node $script $Path 2>&1
+    } finally { Pop-Location; $ErrorActionPreference = $prev }
+    $out = @()
+    foreach ($f in $raw) {
+        $s = [string]$f
+        $m = [regex]::Match($s, $mdLintFindingRe)
+        if ($m.Success) {
+            $out += [pscustomobject]@{
+                File = $m.Groups['file'].Value
+                Line = [int]$m.Groups['line'].Value
+                Rule = $m.Groups['rule'].Value
+                Raw  = ("{0}:{1}`t{2}`t{3}" -f $m.Groups['file'].Value, $m.Groups['line'].Value, $m.Groups['rule'].Value, $m.Groups['msg'].Value)
+            }
+        }
+    }
+    return , $out
+}
+
+function Test-MdLintGate {
+    param([string]$Label, [string]$Path, [string[]]$WarnRules, [string]$CloneDir)
+    $findings = Invoke-MdLint -Path $Path -CloneDir $CloneDir
+    $gating   = @($findings | Where-Object { $WarnRules -notcontains $_.Rule })
+    $warns    = @($findings | Where-Object { $WarnRules -contains $_.Rule })
+    $tag = if ($warns.Count) { " (warns: {0})" -f $warns.Count } else { '' }
+    Check ("{0}: no unsuppressed gating findings{1}" -f $Label, $tag) `
+        ($gating.Count -eq 0) @($gating | ForEach-Object { $_.Raw })
+}
+
+Test-MdLintGate -Label 'CLAUDE.md'       -Path $rootLintTarget   -WarnRules $mdLintWarnRoot   -CloneDir $Clone
+Test-MdLintGate -Label 'claude/CLAUDE.md' -Path $mirrorLintTarget -WarnRules $mdLintWarnMirror -CloneDir $Clone
+
+# Suppression: an in-file `<!-- claude-md-lint-ignore -->` above a line silences the finding on
+# that line, so the linter itself emits nothing and the gate stays green. A throwaway file, so
+# the check does not depend on the two production files carrying an example of the mechanism.
+$suppressProbe = Join-Path $FakeRoot 'md-lint-suppress-probe.md'
+$suppressText  = "<!-- claude-md-lint-ignore -->`nAlways write clean code.`n"
+[System.IO.File]::WriteAllText($suppressProbe, $suppressText, (New-Object System.Text.UTF8Encoding($false)))
+$sfindings = Invoke-MdLint -Path $suppressProbe -CloneDir $Clone
+Check 'in-file `claude-md-lint-ignore` silences a finding (linter emits nothing)' `
+    ($sfindings.Count -eq 0) @($sfindings | ForEach-Object { $_.Raw })
+
 
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
