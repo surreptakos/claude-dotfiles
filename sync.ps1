@@ -39,7 +39,7 @@ Write-Host ("{0}  (home: {1}){2}" -f $Mode.ToUpper(), $UserHome, $(if ($DryRun) 
 Write-Host ''
 
 $items       = Get-DotfileItems -RepoRoot $RepoRoot -UserHome $UserHome
-$mirrorRoots = @('claude\skills', 'claude\hooks', 'agents\skills', 'codex\hooks', 'memory')
+$mirrorRoots = @('claude\skills', 'claude\hooks', 'claude\agents', 'agents\skills', 'codex\hooks', 'memory')
 
 function Backup-LocalTargets {
     $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'

@@ -1004,6 +1004,53 @@ Check 'in-file `claude-md-lint-ignore` silences a finding (linter emits nothing)
     ($sfindings.Count -eq 0) @($sfindings | ForEach-Object { $_.Raw })
 
 
+# Fleet verifier subagent (issue 86): the ticket-fleet's blind refuter runs under a tool-restricted
+# subagent definition that ships in ~/.claude/agents/fleet-verifier.md. The whitelist entry
+# claude/agents in lib/manifest.ps1 is what carries it; without an assertion behind that entry, a
+# silent drop (missing frontmatter key, wrong tool set, model drift, or a fleet script that forgets
+# to pass agentType) would slip past the file-count check (line 434) unnoticed. This block reads the
+# restored agent file and both fleet-script copies out of the fake home, and asserts the tool
+# restriction and the agentType wiring the ticket contracts for.
+$fleetVerifier      = Join-Path $FakeHome '.claude\agents\fleet-verifier.md'
+$fleetScriptLocal   = Join-Path $Clone    '.claude\workflows\ticket-fleet.js'
+$fleetScriptHarness = Join-Path $Clone    'agents\skills\project-harness\templates\ticket-fleet.js'
+$fleetScriptCloud   = Join-Path $Clone    'orchestrator\ticket-fleet-cloud.js'
+Check 'fleet-verifier agent definition restored under fake home' (Test-Path $fleetVerifier)
+if (Test-Path $fleetVerifier) {
+    $verifierText = Get-Content $fleetVerifier -Raw
+    # Frontmatter parse: name, tools, model. Fenced by two --- lines at the top.
+    $fm = if ($verifierText -match '(?ms)^---\r?\n(.*?)\r?\n---') { $Matches[1] } else { '' }
+    $toolsLine = if ($fm -match '(?m)^tools:\s*(.+)$') { $Matches[1].Trim() } else { '' }
+    $modelLine = if ($fm -match '(?m)^model:\s*(.+)$') { $Matches[1].Trim() } else { '' }
+    $toolSet   = @($toolsLine -split '\s*,\s*' | Where-Object { $_ })
+    Check 'fleet-verifier tools cap at Read, Grep, Glob, Bash (no Edit, no Write)' `
+        (($toolSet -contains 'Read') -and ($toolSet -contains 'Grep') -and
+         ($toolSet -contains 'Glob') -and ($toolSet -contains 'Bash') -and
+         ($toolSet -notcontains 'Edit') -and ($toolSet -notcontains 'Write')) `
+        @("tools = $toolsLine")
+    Check 'fleet-verifier model pins the fleet verifyModel default (claude-sonnet-5)' `
+        ($modelLine -eq 'claude-sonnet-5') `
+        @("model = $modelLine")
+}
+if (Test-Path $fleetScriptLocal) {
+    $localText = Get-Content $fleetScriptLocal -Raw
+    Check '.claude/workflows/ticket-fleet.js verify stage passes agentType: fleet-verifier' `
+        ($localText -match "agentType:\s*'fleet-verifier'") `
+        @('inline verify agent() call must carry agentType: ''fleet-verifier''')
+}
+if (Test-Path $fleetScriptHarness) {
+    $harnessText = Get-Content $fleetScriptHarness -Raw
+    Check 'harness template ticket-fleet.js verify stage passes agentType: fleet-verifier' `
+        ($harnessText -match "agentType:\s*'fleet-verifier'") `
+        @('template must mirror the local fleet script')
+}
+if (Test-Path $fleetScriptCloud) {
+    $cloudText = Get-Content $fleetScriptCloud -Raw
+    Check 'cloud port ticket-fleet-cloud.js contains no agentType reference (containers do not load the agent registry)' `
+        ($cloudText -notmatch 'agentType') `
+        @('cloud verifier restraint is the container sandbox, not an agentType')
+}
+
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
 # The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the

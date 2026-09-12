@@ -29,6 +29,11 @@ function Get-DotfileItems {
         [pscustomobject]@{ Type = 'File'; Repo = 'claude/accounts.json';                    Local = (Join-Path $claude 'accounts.json') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/skills';                          Local = (Join-Path $claude 'skills') }
         [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/hooks';                           Local = (Join-Path $claude 'hooks') }
+        # User-level subagent definitions (issue 86). Claude Code auto-discovers *.md files here
+        # for the agent registry the Agent tool and Workflow's `agentType` share. Carrying this
+        # tree via sync means the ticket-fleet's tool-restricted verifier reaches every repo the
+        # fleet runs in on any machine, without a per-repo install step.
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/agents';                          Local = (Join-Path $claude 'agents') }
         # Most of the flow skills the global CLAUDE.md names (implement, tdd, triage, handoff,
         # to-spec...) live here and reach ~/.claude/skills through junctions. Carrying only
         # ~/.claude/skills captured 13 of 37 skills and said nothing about the other 24.
