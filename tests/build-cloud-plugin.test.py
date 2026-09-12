@@ -7,6 +7,8 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
 REPO = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("build_cloud_plugin", REPO / "tools" / "build-cloud-plugin.py")
 bcp = importlib.util.module_from_spec(_spec)
@@ -51,6 +53,61 @@ class PluginVersion(unittest.TestCase):
         candidates = {bcp.plugin_version(t) for t in (before, after)}
         self.assertIn(got, candidates)
         self.assertRegex(got, re.compile(r"^\d{4}\.\d{1,2}\.\d{5,6}$"))
+
+
+# Regression guard for issue 45 (cloud sessions can't invoke the session skills). The fix landed
+# by including the session skills in the packaged plugin and by teaching each user-invocable one
+# to fall back to GitHub MCP tools where `gh` is absent. Once shipped, a silent regression --
+# a skill dropped from the build, or its cloud-container section deleted -- would put the ticket
+# right back where it started with no test to notice. Assert the shape here so the packager owns
+# it too.
+SESSION_ENGINE = "session-check"                  # non-invocable; cloud awareness in check.js
+SESSION_INVOCABLE = (                             # the five SKILL.md files acceptance-criterion 3 names
+    "session-end",
+    "session-start",
+    "triage",
+    "to-tickets",
+    "grill-ready-for-human",
+)
+MARKETPLACE_SKILLS = REPO / "marketplace" / "aac-skills" / "skills"
+
+
+class SessionSkillsInCloudPlugin(unittest.TestCase):
+    def test_engine_and_five_invocable_skills_ship_in_the_plugin(self):
+        for name in (SESSION_ENGINE, *SESSION_INVOCABLE):
+            skill_md = MARKETPLACE_SKILLS / name / "SKILL.md"
+            self.assertTrue(skill_md.is_file(),
+                            f"{name}: expected {skill_md.relative_to(REPO)} in the built plugin")
+
+    def test_each_invocable_session_skill_carries_a_cloud_container_section(self):
+        for name in SESSION_INVOCABLE:
+            body = (MARKETPLACE_SKILLS / name / "SKILL.md").read_text(encoding="utf-8")
+            self.assertIn(
+                "cloud container", body.lower(),
+                f"{name}: SKILL.md lost its 'In a cloud container' fallback section (issue 45)",
+            )
+
+    def test_session_check_engine_branches_on_the_cloud_env_var(self):
+        # Cloud awareness for the engine lives in check.js, not the SKILL.md (the engine is
+        # disable-model-invocation and its SKILL.md exists only to satisfy the skill-shape check).
+        body = (MARKETPLACE_SKILLS / SESSION_ENGINE / "check.js").read_text(encoding="utf-8")
+        self.assertIn("CLAUDE_CODE_REMOTE_SESSION_ID", body,
+                      "session-check/check.js lost its cloud-env-var branch (issue 45)")
+
+    def test_packaged_frontmatter_is_validator_clean(self):
+        # The claude.ai upload validator accepts only ALLOWED_KEYS at the top level; every other
+        # source key must have been moved under `metadata` by the packager. If a session skill
+        # slipped through with a top-level disable-model-invocation (or similar), the plugin
+        # would fail to upload and cloud sessions would drop back to "Unknown command".
+        for name in (SESSION_ENGINE, *SESSION_INVOCABLE):
+            skill_md = MARKETPLACE_SKILLS / name / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8").replace("\r\n", "\n")
+            fm_str, _ = bcp.split_frontmatter(text)
+            self.assertIsNotNone(fm_str, f"{name}: no frontmatter in packaged SKILL.md")
+            fm = yaml.safe_load(fm_str) or {}
+            extras = sorted(k for k in fm if k not in bcp.ALLOWED_KEYS)
+            self.assertEqual(extras, [],
+                             f"{name}: packaged frontmatter carries validator-rejected keys {extras}")
 
 
 if __name__ == "__main__":
