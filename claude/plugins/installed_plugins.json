@@ -44,11 +44,11 @@
     "aac-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.112047",
-        "version": "2026.9.112047",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.141406",
+        "version": "2026.9.141406",
         "installedAt": "2026-09-02T20:47:25.994Z",
-        "lastUpdated": "2026-09-11T20:49:36.893Z",
-        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d"
+        "lastUpdated": "2026-09-14T14:27:01.195Z",
+        "gitCommitSha": "2ee864673781e19fd771ac52fa03fbe4a9387bca"
       },
       {
         "scope": "project",
@@ -205,12 +205,12 @@
       },
       {
         "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Sales Data KPIs\\aac-cockpit\\.claude\\worktrees\\aac-cockpit-monday-check-ad43dd",
         "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.112047",
         "version": "2026.9.112047",
         "installedAt": "2026-09-14T14:03:55.242Z",
         "lastUpdated": "2026-09-14T14:03:55.242Z",
-        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d",
-        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Sales Data KPIs\\aac-cockpit\\.claude\\worktrees\\aac-cockpit-monday-check-ad43dd"
+        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d"
       }
     ],
     "yes@sstklen": [
