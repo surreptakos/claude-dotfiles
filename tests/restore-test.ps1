@@ -1051,6 +1051,83 @@ if (Test-Path $fleetScriptCloud) {
         @('cloud verifier restraint is the container sandbox, not an agentType')
 }
 
+# owner-account-line (issue 114): the CLAUDE.md line naming which Claude account owns this
+# repo, generated from claude/accounts.json so a wrong-account cloud session cannot happen
+# silently. The tool + tests + registry are read from $RepoRoot (the worktree we ran from),
+# not $Clone, so these checks fire under every -From mode - not only worktree.
+$ownerModule   = Join-Path $RepoRoot 'tools\owner-account-line.js'
+$ownerTest     = Join-Path $RepoRoot 'tools\owner-account-line.test.js'
+$ownerRegistry = Join-Path $RepoRoot 'claude\accounts.json'
+$ownerClaudeMd = Join-Path $RepoRoot 'CLAUDE.md'
+Check 'tools/owner-account-line.js shipped (issue 114 registry-driven owner-account block)' (Test-Path $ownerModule)
+Check 'tools/owner-account-line.test.js shipped (issue 114)' (Test-Path $ownerTest)
+if (Test-Path $ownerTest) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $out = & node --test $ownerTest 2>&1; $exit = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prev }
+    Check 'owner-account-line passes its own test suite (idempotent apply, drift fails check, AGENTS.md fallback, real-file drift guard)' `
+        ($exit -eq 0) @($out | Select-Object -Last 20)
+}
+# Direct AC2 check on THIS repo's own real CLAUDE.md vs its real accounts.json. A wrong or
+# missing block in the checked-in CLAUDE.md fails restore-test in every -From mode - the exact
+# hole the previous attempt left.
+if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry) -and (Test-Path $ownerClaudeMd)) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+        $out = & node $ownerModule check --repo $RepoRoot --registry $ownerRegistry --slug 'surreptakos/claude-dotfiles' 2>&1
+        $checkExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'this repo''s CLAUDE.md carries the owner-account line that claude/accounts.json says it should (AC2)' `
+        ($checkExit -eq 0) @($out)
+}
+# Synthetic sweep across every live registered repo: seed a fake clones root, run apply-all
+# then check-all (idempotent), then seed drift on one repo and re-run check-all - it must
+# exit 1 and name the drifted slug. Covers AC1 across the eight live repos and AC2 end-to-end.
+if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry)) {
+    $sweepRoot = Join-Path $FakeRoot 'owner-account-sweep'
+    if (Test-Path $sweepRoot) { Remove-Item $sweepRoot -Recurse -Force }
+    New-Item -ItemType Directory -Path $sweepRoot | Out-Null
+    $registry = Get-Content $ownerRegistry -Raw | ConvertFrom-Json
+    $liveSlugs = @()
+    foreach ($pp in $registry.repos.PSObject.Properties) {
+        $entry = $pp.Value
+        if ($entry.PSObject.Properties.Name -contains 'status' -and $entry.status -eq 'dead') { continue }
+        $liveSlugs += $pp.Name
+        $repoName = ($pp.Name -split '/')[1]
+        $repoDir  = Join-Path $sweepRoot $repoName
+        New-Item -ItemType Directory -Path $repoDir | Out-Null
+        & git -c "init.defaultBranch=main" init -q $repoDir 2>&1 | Out-Null
+        & git -C $repoDir remote add origin "https://github.com/$($pp.Name)" 2>&1 | Out-Null
+        if ($pp.Name -eq 'surreptakos/zoho-source-of-truth') {
+            Set-Content -Path (Join-Path $repoDir 'AGENTS.md') -Value "# $repoName`n`nbody paragraph.`n" -Encoding utf8
+        } else {
+            Set-Content -Path (Join-Path $repoDir 'CLAUDE.md') -Value "# $repoName`n`nbody paragraph.`n" -Encoding utf8
+        }
+    }
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+        $applyOut = & node $ownerModule apply-all --via clones --registry $ownerRegistry --clones-root $sweepRoot 2>&1
+        $applyExit = $LASTEXITCODE
+        Check ('owner-account-line apply-all --via clones writes the block into every live registered repo (' + $liveSlugs.Count + ' repos) (AC1)') `
+            ($applyExit -eq 0) @($applyOut)
+        $sweepOut = & node $ownerModule check-all --via clones --registry $ownerRegistry --clones-root $sweepRoot 2>&1
+        $sweepExit = $LASTEXITCODE
+        Check 'owner-account-line check-all --via clones passes for every live registered repo after apply-all (idempotent)' `
+            ($sweepExit -eq 0) @($sweepOut)
+        if ($liveSlugs.Count -gt 0) {
+            $victim = $liveSlugs[0]
+            $victimDir = Join-Path $sweepRoot (($victim -split '/')[1])
+            $victimFile = Join-Path $victimDir 'CLAUDE.md'
+            if (-not (Test-Path $victimFile)) { $victimFile = Join-Path $victimDir 'AGENTS.md' }
+            Set-Content -Path $victimFile -Value "# drifted`n`nno owner block here.`n" -Encoding utf8
+            $driftOut = & node $ownerModule check-all --via clones --registry $ownerRegistry --clones-root $sweepRoot 2>&1
+            $driftExit = $LASTEXITCODE
+            Check 'owner-account-line check-all reports drift on the seeded repo (exit=1) (AC2)' `
+                ($driftExit -eq 1 -and ($driftOut -join "`n") -match [regex]::Escape($victim)) @($driftOut | Select-Object -Last 8)
+        }
+    } finally { $ErrorActionPreference = $prev }
+}
+
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
 # The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the
