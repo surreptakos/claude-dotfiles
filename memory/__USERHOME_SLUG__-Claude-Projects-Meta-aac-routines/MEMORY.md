@@ -7,3 +7,4 @@
 - [Org structure source of truth](o3-directs-include-techs.md) — read org-chart.yaml reports_to, not people.yaml manages; Rob=Projects Nick=Services
 - [Reporting style: plain English](reporting-style-plain-english.md) — status not working material; monospace and paths rationed, not banned
 - [ADHD output shaping is standing](adhd-output-shaping-standing.md) — /i-have-adhd is permanent; shapes structure, caveman shapes wording
+- [Ask-matt gate exact command](ask-matt-gate-exact-command.md) — declare command must stand alone in Bash; gh issue create needs to-tickets route declared

@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-10T17:18:48Z"
-  previous-modified: "2026-09-09T19:15:00Z"
-  revision: "1"
-  content-sha: "97af695d6508"
+  modified: "2026-09-14T15:06:58Z"
+  previous-modified: "2026-09-10T17:18:48Z"
+  revision: "2"
+  content-sha: "96d431a48171"
 ---
 
 # Finish a session
@@ -25,7 +25,9 @@ node ~/.claude/hooks/session-gate.js report --end
 Add `--refresh` to force a fresh run — do that after any commit or push, since the point of the
 check is the state of the tree *now*. If that hook file does not exist (a cloud container with the
 skills but not the hooks), run the engine directly — same report, always fresh:
-`node ~/.claude/skills/session-check/check.js --end`.
+`node ~/.claude/skills/session-check/check.js --end`. If that path is missing too, the plugin did
+not load (claude-dotfiles#157): clone `surreptakos/claude-dotfiles` and run
+`marketplace/aac-skills/skills/session-check/check.js --end` from that clone, and say so in the report.
 
 ## When the user types `/session-end`: auto-drive to archive-ready
 
@@ -65,7 +67,10 @@ step's `gh` spelling through the substitution table in the cloud section below):
    section below): in a container, skip it with a stated reason and name it for a local session.
 7. **Batch surfaced items through `/to-tickets`** (see ticket sweep below). This is required, not
    optional. `/to-tickets` handles its own breakdown/approval/publish flow — invoke it once with
-   all NEEDS-A-TICKET items collected during the sweep. Never `gh issue create` ad hoc.
+   all NEEDS-A-TICKET items collected during the sweep. Never `gh issue create` ad hoc. In a
+   container where the plugin did not load and `/to-tickets` is uninvocable, read
+   `marketplace/aac-skills/skills/to-tickets/SKILL.md` from a clone of `surreptakos/claude-dotfiles`
+   and follow it by hand; the create call is then that skill's publish step, not ad hoc.
 8. **Refresh tracker audit** — `node tools/tracker-audit.js` (or the project's equivalent). If the
    audit flags acceptance boxes on issues touched this session, tick them or record N/A with a
    justification before finishing.
@@ -203,9 +208,9 @@ step as impossible because its `gh` spelling failed — use the equivalent:
 | --- | --- |
 | `gh pr create` | GitHub MCP `create_pull_request` |
 | `gh pr merge --squash --delete-branch` | MCP `merge_pull_request` (method squash), then `git push origin --delete <branch>` |
-| `gh issue list --json … --jq …` | MCP `list_issues` / `search_issues` — milestone and body come back as fields; do the filtering yourself |
+| `gh issue list --json … --jq …` | MCP `search_issues` (returns milestone) or REST `curl .../issues?state=open&milestone=none&per_page=100`; `list_issues` returned no milestone field in a cloud session on 2026-09-14 (claude-dotfiles#154 evidence), so it cannot drive step 9a |
 | `gh issue edit <n> --milestone` | MCP `issue_write` (update) |
-| `gh pr list --state open` | MCP `list_pull_requests` |
+| `gh pr list --state open` | MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
 
 Quick read-only checks can also go straight to REST — `curl
