@@ -84,6 +84,26 @@ function isNotPlanned(text) {
   return NOT_PLANNED_PATTERNS.some((rx) => rx.test(text));
 }
 
+/** Same-repo issue citations in a body: `#N` as its own token. Returns a Map of issue number to
+ *  the offset of its FIRST such citation, so a caller can look at the wording around it.
+ *
+ *  A bare `#(\d+)` scan is wrong in two ways that produced 16 of 29 stale-premise? advisories on
+ *  this repo (2026-09-14): it reads the tail of a qualified cross-repo reference
+ *  (`surreptakos/aac-contract-builder#157`) as this repo's #157, and it reads the leading digits of
+ *  a hex colour (`#9a690f`, `#1f7a43`) as #9 and #1. So: no word character or `/` directly before
+ *  the `#`, and no word character directly after the digits. Exported for the test suite. */
+function citedIssueNumbers(body) {
+  const text = String(body || '');
+  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  const first = new Map();
+  let m;
+  while ((m = rx.exec(text))) {
+    const n = Number(m[1]);
+    if (!first.has(n)) first.set(n, m.index);
+  }
+  return first;
+}
+
 /** Is the follow-up-ticket premise already acknowledged?
  *
  *  A ticket that exists BECAUSE a closed issue shipped is a follow-up, not a stale premise. Two
@@ -201,6 +221,7 @@ function parseGithubSlug(remote) {
 // test does not shell out to gh or exit the process.
 if (require.main !== module) {
   module.exports = {
+    citedIssueNumbers,
     isFollowUpAcknowledgment,
     isNotPlanned,
     NOT_PLANNED_PATTERNS,
@@ -708,7 +729,10 @@ open.forEach((i) => {
   // produced all ten advisories in a repo, which is how a useful check becomes one people scroll past.
   if (i.labels.some((l) => l.name === 'prd')) return;
   const body = String(i.body || '').replace(/\r\n/g, '\n');
-  const citedNums = Array.from(new Set((body.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))));
+  // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
+  // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
+  const cited = citedIssueNumbers(body);
+  const citedNums = Array.from(cited.keys());
   const citedClosed = citedNums.filter((n) => {
     const o = byNumber.get(n);
     return o && o.state === 'CLOSED' && n !== i.number;
@@ -723,7 +747,8 @@ open.forEach((i) => {
   if (bodyIsFollowUp) return;
   citedClosed.forEach((n) => {
     const other = byNumber.get(n);
-    const idx = body.indexOf('#' + n);
+    // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
+    const idx = cited.get(n);
     // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
     const lineStart = body.lastIndexOf('\n', idx) + 1;
     if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
