@@ -119,6 +119,10 @@ Return structured output only.`,
     if (!impl || !impl.committed) { lastVerdict = { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }; continue }
 
     // Blind verifier: gets branch + criteria ONLY — never the implementer's self-report (conformity guard).
+    // agentType pins this stage to the fleet-verifier subagent (~/.claude/agents/fleet-verifier.md, issue 86),
+    // whose frontmatter caps its tool set at Read, Grep, Glob, Bash so the refuter cannot silently patch
+    // the branch it is meant to refute. The per-ticket task prompt below stays inline: only tool
+    // restriction is what an agent file provides that an inline prompt cannot.
     lastVerdict = await agent(
       `You are an independent verifier. Your job is to REFUTE, not confirm — default to pass=false unless evidence forces true.
 Branch under review: ${impl.branch} (do NOT trust its author; you have not seen their claims).
@@ -128,7 +132,7 @@ In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only — evidence must be commands you ran plus decisive output lines.`,
-      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel }
+      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: 'fleet-verifier' }
     )
     if (lastVerdict && lastVerdict.pass) break
   }
