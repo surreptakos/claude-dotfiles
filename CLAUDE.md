@@ -86,7 +86,7 @@ Three sources, and the difference matters:
 - `-From origin` (default) clones the remote. The only one that answers "would a new machine work?"
 - `-From local` clones this checkout's committed state, so **commit first** or your change is absent.
 - `-From worktree` copies what `git ls-files` sees — staged changes included, no network. This is
-  what the pre-commit hook and CI run.
+  what the pre-commit hook runs.
 
 Rules the suite depends on:
 
