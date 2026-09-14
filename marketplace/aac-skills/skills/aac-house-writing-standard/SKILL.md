@@ -1,36 +1,59 @@
 ---
 name: aac-house-writing-standard
-description: AAC house writing and document standard (AAC-WR-001, Gregg-based). Load before drafting or formatting any AAC email, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load before a performance review or review audit, where Rule 2 hands off to the review standards.
+description: 'AAC-WR-001, the controlled copy of AAC''s house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit.'
 metadata:
-  modified: '2026-09-11T20:42:21Z'
-  previous-modified: '2026-09-11T18:21:41Z'
-  revision: '1'
-  content-sha: 79a4523a1b89
+  standard-version: '0.5'
+  modified: '2026-09-12T03:21:56Z'
+  previous-modified: '2026-09-11T22:21:29Z'
+  revision: '3'
+  content-sha: 0cabe6164554
 ---
 
 # AAC house writing standard
 
-This skill holds no rules. The rules live in AAC-WR-001, fetched fresh on each use.
+AAC-WR-001 travels in this skill. The controlled copy is in `references/`; the
+mechanical check is in `scripts/`.
+
+## The rule that shapes this skill
+
+**`references/` holds the controlled copy. Never restate a rule — not in this
+file, not in a job folder, not from memory. Read the file and cite the rule by
+number.**
+
+A condensation of v0.2 rode in this skill for months while the standard moved to
+v0.4. It carried no rule numbers, so nothing it claimed could be checked against
+the text it came from.
+
+If a summary anywhere disagrees with the controlled copy, the controlled copy
+wins. Say so rather than picking.
 
 ## How it works
 
-1. Fetch the canonical standard from the source URL below.
-2. Read Rule 2 first. It sets precedence and names the documents that outrank this one.
-3. Draft or review the deliverable against the rules that came back.
-4. Cite rules by number when flagging a problem: "Rule 23 prohibits em dashes in company writing."
+1. Read `references/00-INDEX.md`. It routes the deliverable to the files it
+   needs, routes work that belongs to another controlled document, and
+   describes the mechanical check.
+2. Read `references/CORE.md`, then the files the index names.
+3. Run the mechanical check on anything already written, as the index describes.
+4. Draft or review against the rules you read, citing each by number: "Rule 23
+   prohibits em dashes in company writing."
+5. Confirm the result against Rule 166, item by item. Every condition it names
+   is answered before release.
 
-## Source
+## What stays human
+
+Whether a clarification belongs in a scope, which exclusions a job earns, what
+the customer was actually quoted, and who verified an installed sequence. The
+controlled copy governs how those are written, not what they say. Where a fact
+about AAC is not in the source you were given, leave `[CONFIRM]` and say what
+would settle it.
+
+## Regenerating after a revision of the standard
 
 ```
-https://raw.githubusercontent.com/surreptakos/aac-standards/v0.5/AAC-WR-001.md
+python3 scripts/build_references.py <AAC-WR-001.md> references/
 ```
 
-The tag is the approval gate. `main` is drafting; the tag is what the General Manager approved. Never point this at `main`.
-
-## If the fetch fails
-
-Say so and stop. Do not draft from remembered or inferred house rules, and do not substitute general style advice. An unfetchable standard means the deliverable waits, not that the rules are optional.
-
-## Documents this one defers to
-
-Rule 2 names two controlled documents that outrank AAC-WR-001 within their scope: the AAC performance review standards and "AAC House Layout Standard (Gregg-based)." Neither is in this repo. If a deliverable falls under either, say which document is needed and stop rather than substituting AAC-WR-001 for it.
+It prints a new `content-sha`. Put it in this file's `metadata`, raise
+`revision`, and move `modified` to `previous-modified`. The script exits
+non-zero if any section of the source lands in no file, so a new Part cannot go
+missing.
