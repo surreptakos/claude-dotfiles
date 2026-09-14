@@ -14,7 +14,7 @@
 - [PS 5.1 scripts need a BOM](ps51-scripts-need-a-bom.md) — Task Scheduler runs powershell.exe 5.1; BOM-less .ps1 with an em dash fails to parse; register tasks against pwsh
 - [Gate declare must be the bare command](gate-declare-bare-command.md) — any appended `; echo` or pipe makes the PreToolUse gate block every tool with 'Ask Matt, Yes, and caveman ultra missing'
 - [Cowork transcripts are not kept locally](cowork-transcripts-not-local.md) — only the live session dir under local-agent-mode-sessions holds a jsonl; history is server-side; desktop Claude Code sessions map via claude-code-sessions cliSessionId
-- [Trust dialog fires despite accepted flag](trust-dialog-fires-despite-accepted-flag.md) — interactive launch in a clone with pre-approved permissions re-shows the folder-trust dialog; unattended masters park on it
+- [Trust dialog fires despite accepted flag](trust-dialog-fires-despite-accepted-flag.md) — interactive launch in a clone with pre-approved permissions re-shows the folder-trust dialog; watchdog preflight strips permissions.allow before launch (issue 88) so a fresh master reaches Heartbeat 1 unattended
 - [Environment verification log](environment-verification-log.md) — dated proof behind the global CLAUDE.md environment-claim rules, moved out in the 2026-09-03 trim
 - [Cowork does not surface plugin hooks](cowork-runs-plugin-hooks.md) — tested 2026-09-03 with the aac-skills marker; neither user-level nor plugin hooks govern Cowork, only CLAUDE.md text and Cowork memory do
 - [PR merge from a worktree needs a manual branch delete](pr-merge-from-worktree-needs-manual-branch-delete.md) — gh merges on GitHub, then fails checking out master; verify MERGED and delete the remote branch by hand
@@ -23,3 +23,5 @@
 - [MSYS mangles git rev:path](msys-mangles-git-rev-colon-path.md) — `git show origin/master:file` breaks in the Bash tool; use MSYS_NO_PATHCONV=1 or read the local file
 - [Cowork scheduled tasks live in session uploads](cowork-scheduled-tasks-live-in-session-uploads.md) — one SKILL.md inside the creating session on that machine; no registry lists it; recover the prompt from the run record enqueue line
 - [Session-end fixes all drift](session-end-fixes-all-drift.md) — every tracker-audit finding is fixed at /session-end regardless of which session caused it (Dan, 2026-09-10)
+- [Restore test reads live skill copies](restore-test-reads-live-skill-copies.md) — claude-md-lint copy test compares the live ~/.claude skill to tools/; a fleet worker's live edit fails every other worktree's restore test, md5 against worktrees before chasing it
+- [Fleet implementers edit the live tree](fleet-implementers-edit-the-live-tree.md) — worktree isolation does not cover ~/.claude, ~/.codex, ~/.agents; sweep and diff after every run, restore failed branches from their .bak-issueN

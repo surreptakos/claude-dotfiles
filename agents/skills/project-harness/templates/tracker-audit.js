@@ -7,7 +7,17 @@
 //
 // Why it exists: on 2026-07-29 the owner said "I don't understand why I keep having to double check
 // your admin work." The honest answer was that the code path had a pre-commit gate, 300+ tests and
-// two adversarial review passes, while the tracker had an agent remembering to update things. Every
+// two adversarial review passes, while the tracker had an agent remembering to update things.
+//
+// GH CALLS — every list call here is `gh api ...` REST (repos/<slug>/issues, /pulls, /issues/<n>/
+// comments, /issues/<n>/dependencies/blocked_by). GraphQL (`gh issue list`, `gh pr list`,
+// `gh repo view --json X`) works from a laptop but 403s inside a claude.ai/code container, whose
+// egress proxy only authenticates REST. Two GraphQL-only fields — projectItems (Projects v2) and
+// closedByPullRequestsReferences — have no REST equivalent, so the shape adapter leaves them
+// empty, and the checks that need them either say "unknown, not clean" or degrade to their prose
+// leg (claude-dotfiles issue 130).
+//
+// Every
 // class below is drift that actually shipped on a harnessed repo, not a hypothetical:
 //
 //   * Nine blocking edges existed only as prose. The documented frontier query reads GitHub's native
@@ -95,6 +105,59 @@ function isNotPlanned(text) {
  *
  *  Exported so a test suite can pin the wording without shelling out through the whole audit.
  *  (Ported from aac-routines issue 97, where every follow-up ticket tripped stale-premise?.) */
+/** REST-shape adapters. Cloud containers (claude.ai/code) route only REST through their egress
+ *  proxy — `gh` GraphQL calls (`gh issue list`, `gh pr list`, `gh repo view --json X`) 403 there,
+ *  so the audit lives on `gh api` REST (claude-dotfiles issue 130). The REST JSON shape differs
+ *  from what the old GraphQL calls returned, so these adapters normalize back to the
+ *  GraphQL-flavoured shape the checks below already expect: state uppercased, `html_url` renamed
+ *  `url`, labels reduced to `{name}`, milestone reduced to `{title}`, and the two GraphQL-only
+ *  fields (`projectItems`, `closedByPullRequestsReferences`) left as empty arrays — a NOTE is
+ *  emitted when the checks that need them run so a reader sees the degradation instead of a
+ *  silent false clean.
+ *
+ *  Exported so the unit test can pin the mapping against fixtures without shelling out to gh. */
+function restIssueToShape(i) {
+  return {
+    number: i.number,
+    title: i.title || '',
+    state: String(i.state || '').toUpperCase(),
+    body: i.body || '',
+    labels: (i.labels || []).map((l) => typeof l === 'string' ? { name: l } : { name: l && l.name }),
+    url: i.html_url || '',
+    projectItems: [],
+    closedByPullRequestsReferences: [],
+    milestone: i.milestone && i.milestone.title ? { title: i.milestone.title } : null,
+  };
+}
+
+function restPrToShape(p) {
+  return {
+    number: p.number,
+    title: p.title || '',
+    state: String(p.state || '').toUpperCase(),
+    url: p.html_url || '',
+    commentCount: null,
+    lastComment: null,
+  };
+}
+
+/** GitHub shares one number space across issues and pull requests, and the REST /issues endpoint
+ *  returns BOTH — every PR carries a `pull_request` sub-object, real issues do not. The old
+ *  `gh issue list` filtered PRs out; this restores that so the number set fed into byNumber has
+ *  no PR pretending to be an issue (which would poison every check that looks up `#N`). Exported
+ *  so a fixture can pin the filter. */
+function filterIssuesOnly(items) {
+  return (items || []).filter((i) => i && !i.pull_request);
+}
+
+/** Parse `owner/repo` out of a git remote URL (https, ssh, or scp-style), trimming a trailing
+ *  `.git` and any whitespace. Returns null when the URL does not name a GitHub repository, so
+ *  the caller can bail cleanly instead of exploding on undefined. Exported for the same reason. */
+function parseGithubSlug(remote) {
+  const m = /github\.com[/:]([^/]+?)\/([^/\s]+?)(?:\.git)?\s*$/i.exec(String(remote || ''));
+  return m ? { owner: m[1], repo: m[2] } : null;
+}
+
 function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
   const text = String(body || '').replace(/\r\n/g, '\n');
   const ackPattern = new RegExp(
@@ -117,7 +180,8 @@ function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
 // module is invoked directly, so `require('./tracker-audit.js')` from a test does not shell out to
 // gh or exit the process.
 if (require.main !== module) {
-  module.exports = { isFollowUpAcknowledgment, isNotPlanned, NOT_PLANNED_PATTERNS };
+  module.exports = { isFollowUpAcknowledgment, isNotPlanned, NOT_PLANNED_PATTERNS,
+                     restIssueToShape, restPrToShape, parseGithubSlug, filterIssuesOnly };
   return;
 }
 
@@ -145,29 +209,53 @@ function cannotAudit(why, detail) {
   process.exit(2);
 }
 
+/** gh api REST. Goes through sh() (cmd.exe on Windows) rather than execFileSync so a `gh.cmd`
+ *  shim on PATH gets resolved via PATHEXT — the parent claude-dotfiles repo's git-env-leak test
+ *  relies on that (Node's execFileSync spawns without shell and does not walk PATHEXT, so `gh`
+ *  there only ever finds `gh.exe`). Endpoints get double-quoted so cmd.exe's `&` and `?` (and
+ *  sh's glob `?`) stay literal inside the URL; endpoints omit a leading slash so git bash's MSYS
+ *  path-conversion of a leading `/repos/...` cannot fire. `--paginate` is a gh CLI flag that
+ *  walks Link headers and concatenates JSON arrays for us, so list endpoints come back as one
+ *  array without our own paging loop. Cloud containers route only REST through their egress
+ *  proxy (claude-dotfiles issue 130), so every list call here is REST. */
+function ghApi(pathOrArgs) {
+  const args = typeof pathOrArgs === 'string' ? [pathOrArgs] : pathOrArgs;
+  const cmd = 'gh api ' + args.map((a) =>
+    a.startsWith('--') ? a : '"' + String(a).replace(/"/g, '\\"') + '"'
+  ).join(' ');
+  return sh(cmd);
+}
+
 let REPO, DEFAULT_BRANCH;
 try {
-  const repoInfo = JSON.parse(sh('gh repo view --json nameWithOwner,defaultBranchRef'));
-  REPO = repoInfo.nameWithOwner;
+  // `gh repo view --json X` speaks GraphQL, which 403s in cloud containers. Resolve the slug from
+  // the git remote instead, and fetch the repo metadata over REST.
+  const remote = git(['remote', 'get-url', 'origin']).trim();
+  const slug = parseGithubSlug(remote);
+  if (!slug) cannotAudit('cannot parse a GitHub slug from `git remote get-url origin`.', remote);
+  REPO = slug.owner + '/' + slug.repo;
+  const repoInfo = JSON.parse(ghApi('repos/' + REPO));
   // The branch work has to REACH before "it already landed" is true. Read, never assumed: a repo whose
   // trunk is not `main` would otherwise be audited against a branch that does not exist.
-  DEFAULT_BRANCH = (repoInfo.defaultBranchRef && repoInfo.defaultBranchRef.name) || '';
+  DEFAULT_BRANCH = repoInfo.default_branch || '';
 } catch (e) {
-  cannotAudit('`gh repo view` failed — not a GitHub clone, or gh is not authenticated.', e.message);
+  cannotAudit('`gh api repos/<owner>/<repo>` failed — not a GitHub clone, or gh is not authenticated.',
+              e.message);
 }
 
 /** Every issue, open and closed. Closed ones are needed for the unticked-box check and to tell a
- *  released blocker from a dangling reference; `closedByPullRequestsReferences` feeds the follow-up
- *  acknowledgment in the stale-premise check. */
+ *  released blocker from a dangling reference. `closedByPullRequestsReferences` and `projectItems`
+ *  are GraphQL-only fields the REST endpoint cannot return, so restIssueToShape leaves them as
+ *  empty arrays and NOTE lines below say when a check degraded because of that. */
 let issues;
 try {
-  issues = JSON.parse(sh(
-    'gh issue list --state all --limit 1000 --json number,title,state,body,labels,url,projectItems,closedByPullRequestsReferences,milestone'
-  ));
+  const raw = JSON.parse(ghApi(['--paginate', 'repos/' + REPO + '/issues?state=all&per_page=100']));
+  // /issues returns pull requests too; filter to real issues to match the old `gh issue list`.
+  issues = filterIssuesOnly(raw).map(restIssueToShape);
 } catch (e) {
-  cannotAudit('`gh issue list` failed.', e.message);
+  cannotAudit('`gh api repos/<owner>/<repo>/issues` failed.', e.message);
 }
-if (!Array.isArray(issues)) cannotAudit('`gh issue list` did not return an array.');
+if (!Array.isArray(issues)) cannotAudit('`gh api ...issues` did not return an array.');
 if (issues.length === 0) {
   // The false-zero guard. A tracker with zero issues is possible but is far more often an auth
   // problem, a wrong repo, or a phantom working directory — all of which previously read as success.
@@ -189,21 +277,18 @@ let prNumbers = new Set();
 let prByNumber = new Map();
 let prsUnavailable = false;
 try {
-  const prs = JSON.parse(sh('gh pr list --state all --limit 1000 --json number,title,state,url,comments'));
-  prNumbers = new Set(prs.map((p) => p.number));
-  prByNumber = new Map(prs.map((p) => {
-    const dates = (p.comments || []).map((c) => c.createdAt).filter(Boolean).sort();
-    return [p.number, Object.assign({}, p, {
-      commentCount: (p.comments || []).length,
-      lastComment: dates[dates.length - 1] || null
-    })];
-  }));
+  // `gh pr list --json comments` speaks GraphQL. REST /pulls returns the base PR fields but no
+  // comment thread — the blocker-may-be-answered check needs those, so comment counts and their
+  // last date get filled in later (below), and only for the PRs cited by open issues (bounded).
+  const rawPrs = JSON.parse(ghApi(['--paginate', 'repos/' + REPO + '/pulls?state=all&per_page=100']));
+  prNumbers = new Set(rawPrs.map((p) => p.number));
+  rawPrs.forEach((p) => prByNumber.set(p.number, restPrToShape(p)));
 } catch (e) {
   // "Only risks a visible false positive" was wrong twice over on aac-bill-intake, where this catch
   // made the audit run red four times a day for two weeks: an issue cited a perfectly good PR the run
   // could not see, and the finding named the issue rather than the blindness. In Actions the cause is
   // the token — a `permissions:` block sets every scope it does not name to `none`, so a missing
-  // `pull-requests: read` 403s `gh pr list` here while it works from a laptop. The failure is
+  // `pull-requests: read` 403s `gh api ...pulls` here while it works from a laptop. The failure is
   // recorded rather than swallowed: the dangling-reference check drops to advisory, because without
   // PRs it genuinely cannot tell a merged PR from a pointer to nothing, and blocker-may-be-answered
   // goes silent on its own (empty prByNumber) — which the NOTE at the bottom then says out loud.
@@ -497,9 +582,14 @@ open.forEach((i) => {
 //
 // Whether a board is in use is inferred from the data rather than discovered: if no issue anywhere
 // carries a card, there is no board to compare against.
+// Projects v2 cards live only in GraphQL, which cloud containers cannot reach (claude-dotfiles
+// issue 130), so the REST-shape adapter above leaves projectItems empty. The board check is
+// skipped and the NOTE says so — no false-clean here; a reader sees the check did not run rather
+// than a silent pass.
 const boardInUse = issues.some((i) => (i.projectItems || []).length > 0);
 if (!boardInUse) {
-  console.log('NOTE: no issue carries a Projects board card, so board/issue state was not compared.\n');
+  console.log('NOTE: Projects v2 card state is a GraphQL-only field, unreadable over REST, so the ' +
+              'board/issue check did not run. Treat as unknown, not clean.\n');
 } else {
   open.forEach((i) => {
     const card = (i.projectItems || [])[0];
@@ -539,6 +629,29 @@ if (!boardInUse) {
 //     <!-- blocker-verified: #34 @2026-07-30 -->
 //
 // A later comment on that PR invalidates the marker and the finding returns, because the date moved.
+// Comment counts and last-comment dates come from a separate REST call per PR
+// (`repos/<slug>/issues/<n>/comments`). Only PRs cited in open-issue bodies matter here, which is
+// a bounded set — so we skip the "fetch every PR's comments" that `gh pr list --json comments` did
+// and pay the API cost only for the ones a check could actually fire on. A failure per PR leaves
+// commentCount null, and the loop below then skips it harmlessly.
+if (!prsUnavailable) {
+  const citedByOpen = new Set();
+  open.forEach((i) => {
+    (String(i.body || '').match(/#(\d+)/g) || []).forEach((s) => citedByOpen.add(Number(s.slice(1))));
+  });
+  citedByOpen.forEach((n) => {
+    const pr = prByNumber.get(n);
+    if (!pr) return;
+    try {
+      const cs = JSON.parse(ghApi(['--paginate',
+        'repos/' + REPO + '/issues/' + n + '/comments?per_page=100']));
+      const dates = (cs || []).map((c) => c.created_at).filter(Boolean).sort();
+      pr.commentCount = (cs || []).length;
+      pr.lastComment = dates[dates.length - 1] || null;
+    } catch (e) { /* leave commentCount null; loop 7 skips this PR. */ }
+  });
+}
+
 const BLOCK_NEAR = /\b(blocked|blocker|waits? on|waiting on|gated on|depends on|until)\b/i;
 open.forEach((i) => {
   const body = String(i.body || '').replace(/\r\n/g, '\n');

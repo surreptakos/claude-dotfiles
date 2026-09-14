@@ -184,6 +184,33 @@
         "installedAt": "2026-09-11T20:46:25.917Z",
         "lastUpdated": "2026-09-11T20:46:25.917Z",
         "gitCommitSha": "ca0a010bcf904425bca8ecb8dbb71e0796ad414f"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\AppData\\Local\\Temp\\repro-issue87",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.112047",
+        "version": "2026.9.112047",
+        "installedAt": "2026-09-11T21:27:43.405Z",
+        "lastUpdated": "2026-09-11T21:27:43.405Z",
+        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d"
+      },
+      {
+        "scope": "project",
+        "projectPath": "C:\\hv87\\repro-real",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.112047",
+        "version": "2026.9.112047",
+        "installedAt": "2026-09-12T18:18:11.303Z",
+        "lastUpdated": "2026-09-12T18:18:11.303Z",
+        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.112047",
+        "version": "2026.9.112047",
+        "installedAt": "2026-09-14T14:03:55.242Z",
+        "lastUpdated": "2026-09-14T14:03:55.242Z",
+        "gitCommitSha": "59fc8c75d03863f30de848627168d097599bbf7d",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Sales Data KPIs\\aac-cockpit\\.claude\\worktrees\\aac-cockpit-monday-check-ad43dd"
       }
     ],
     "yes@sstklen": [
