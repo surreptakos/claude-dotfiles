@@ -35,7 +35,8 @@
   "permissions": {
     "allow": [
       "Bash(git push origin --delete:*)",
-      "Bash(gh:*)"
+      "Bash(gh:*)",
+      "mcp__github__issue_read"
     ]
   },
   "extraKnownMarketplaces": {
