@@ -70,6 +70,16 @@
             "statusMessage": "Checking dotfiles freshness..."
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/probe-175.sh",
+            "timeout": 120,
+            "statusMessage": "Probe 175: writing skill + user hook into ~/.claude..."
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
