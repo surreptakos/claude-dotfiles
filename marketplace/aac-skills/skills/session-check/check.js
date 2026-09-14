@@ -32,7 +32,9 @@
  *     "ticketLabel": "ready-for-agent",
  *     "releaseGates":[ "node tools/canary.js" ],     // run at --end
  *     "checks":      [ { "name": "...", "run": "...", "when": "end" } ],
- *     "note":        "anything to print every time"
+ *     "note":        "anything to print every time",
+ *     "harness":     false                            // silence the harness-version check on
+ *                                                    // a deliberately unharnessed repo
  *   }
  *
  * READ ONLY. It fetches (which changes no files) and reports. It never commits, pushes, merges or
@@ -518,6 +520,48 @@ function ticketChecks() {
   if (list.length > 8) note(`...and ${list.length - 8} more`);
 }
 
+/* -------------------------------------------------------------- harness --------------------- */
+
+/** Whether the repo's project harness is current, against the project-harness skill's own
+ *  version marker. The skill writes `docs/agents/harness-version.md` on every install or
+ *  upgrade; this reads it against the same number the skill would write today
+ *  (`templates/harness-version.md` next to the skill's SKILL.md), so an out-of-date harness
+ *  becomes a STOP at session start instead of something someone has to remember (issue 139).
+ *  Read-only — the upgrade is `/project-harness`, not this. */
+const harnessLib = require('./harness-version');
+function harnessChecks() {
+  if (CFG.harness === false) return;
+  const skillDir = harnessLib.findSkillDir(__dirname, process.env);
+  const s = harnessLib.harnessState(REPO, skillDir);
+  head('Harness');
+  if (s.state === 'stamp-mismatch') {
+    warn(`the project-harness skill is inconsistent — template v${s.template}, SKILL.md v${s.skill}`);
+    note('rebuild the plugin: `python3 tools/build-cloud-plugin.py --from-mirror --home <your-home>`');
+    return;
+  }
+  if (s.state === 'skill-missing') {
+    note(`project-harness skill not available here — cannot check the version${s.reason ? ` (${s.reason})` : ''}`);
+    return;
+  }
+  if (s.state === 'not-harnessed') {
+    warn('repo is not harnessed — run `/project-harness`');
+    note('set `"harness": false` in .claude/session.json to silence this on a deliberately unharnessed repo');
+    return;
+  }
+  if (s.state === 'current') {
+    ok(`harness v${s.repo}, current`);
+    return;
+  }
+  if (s.state === 'ahead') {
+    warn(`harness stamp says v${s.repo} but the skill is at v${s.current} — someone edited the marker without bumping the template`);
+    return;
+  }
+  // behind
+  const shown = s.v1Implicit ? 'v1 (no docs/agents/harness-version.md; pre-marker)' : `v${s.repo}`;
+  stop(`harness ${shown} is behind v${s.current} — run \`/project-harness\` (upgrade path, step 7)`);
+  note('the upgrade table lives in project-harness/SKILL.md ("Upgrading an existing install")');
+}
+
 /* -------------------------------------------------------------- account ---------------------- */
 
 /** Which Claude account this session runs under, against ~/.claude/accounts.json (identity.js).
@@ -586,6 +630,7 @@ async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
   gitChecks();
+  harnessChecks();
   accountChecks();
   claspChecks();
   await workChecks();
