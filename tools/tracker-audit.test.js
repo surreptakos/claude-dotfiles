@@ -32,6 +32,7 @@ const {
   closerPrsByIssue,
   parseGithubSlug,
   isFollowUpAcknowledgment,
+  citedIssueNumbers,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -170,4 +171,27 @@ test('isFollowUpAcknowledgment: PR number list is accepted from REST-derived clo
   const body = 'Follow-up to work in PR #77.';
   assert.strictEqual(isFollowUpAcknowledgment(body, 42, [77]), true);
   assert.strictEqual(isFollowUpAcknowledgment(body, 42, [999]), false);
+});
+
+// ---- citedIssueNumbers: what the stale-premise? check counts as a citation --------
+// ---- of THIS repo's issue. Measured 2026-09-14: 16 of 29 advisories on this ------
+// ---- repo came from cross-repo tails and hex colours read as bare #N. -----------
+
+test('citedIssueNumbers: bare #N tokens only, first offset kept', () => {
+  const body = 'See #12 and then #12 again; also #7.';
+  const got = citedIssueNumbers(body);
+  assert.deepStrictEqual(Array.from(got.keys()), [12, 7]);
+  assert.strictEqual(got.get(12), body.indexOf('#12'));
+  assert.strictEqual(got.get(7), body.indexOf('#7'));
+});
+
+test('citedIssueNumbers: a qualified cross-repo reference is not this repo\'s issue', () => {
+  const body = 'Blocked on surreptakos/aac-contract-builder#157 and `surreptakos/aac-sales-cockpit#60`.';
+  assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), []);
+});
+
+test('citedIssueNumbers: hex colours and longer numbers are not citations', () => {
+  // `#9a690f` used to read as #9, `#1f7a43` as #1, and `#730` as #73 via indexOf.
+  const body = 'Contrast on `#9a690f` and `#1f7a43`; see #730 for the real one.';
+  assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [730]);
 });

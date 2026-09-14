@@ -84,6 +84,26 @@ function isNotPlanned(text) {
   return NOT_PLANNED_PATTERNS.some((rx) => rx.test(text));
 }
 
+/** Same-repo issue citations in a body: `#N` as its own token. Returns a Map of issue number to
+ *  the offset of its FIRST such citation, so a caller can look at the wording around it.
+ *
+ *  A bare `#(\d+)` scan is wrong in two ways that produced 16 of 29 stale-premise? advisories on
+ *  this repo (2026-09-14): it reads the tail of a qualified cross-repo reference
+ *  (`surreptakos/aac-contract-builder#157`) as this repo's #157, and it reads the leading digits of
+ *  a hex colour (`#9a690f`, `#1f7a43`) as #9 and #1. So: no word character or `/` directly before
+ *  the `#`, and no word character directly after the digits. Exported for the test suite. */
+function citedIssueNumbers(body) {
+  const text = String(body || '');
+  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  const first = new Map();
+  let m;
+  while ((m = rx.exec(text))) {
+    const n = Number(m[1]);
+    if (!first.has(n)) first.set(n, m.index);
+  }
+  return first;
+}
+
 /** Is the follow-up-ticket premise already acknowledged?
  *
  *  A ticket that exists BECAUSE a closed issue shipped is a follow-up, not a stale premise. Two
@@ -201,6 +221,7 @@ function parseGithubSlug(remote) {
 // test does not shell out to gh or exit the process.
 if (require.main !== module) {
   module.exports = {
+    citedIssueNumbers,
     isFollowUpAcknowledgment,
     isNotPlanned,
     NOT_PLANNED_PATTERNS,
@@ -253,6 +274,28 @@ function gh(args) {
   return sh('gh ' + parts.join(' '));
 }
 
+/** Walk a list endpoint page by page and return every row as one array. `path` must already
+ *  carry its query string with `per_page=100` (the API maximum); `&page=N` is appended here.
+ *
+ *  This replaces `gh api --paginate`, which follows the `Link: rel="next"` header GitHub sends
+ *  back. That URL is the numeric-ID form, `/repositories/{id}/issues?page=2`, and the Claude-Code
+ *  cloud egress proxy refuses it: "Numeric-ID repository paths (repositories/{id}/...) are not
+ *  supported through this proxy. Use repos/{owner}/{repo}/... endpoints instead. (HTTP 403)". So
+ *  in every cloud container page one came back and page two killed the audit with exit 2 — on a
+ *  repo with more than 100 issues that is every run. Paging by hand keeps each request on the
+ *  `repos/{owner}/{repo}` path. A short page (fewer than 100 rows) is the end; the page cap is a
+ *  guard against an endpoint that never returns one. */
+function ghPaginate(path) {
+  const all = [];
+  for (let page = 1; page <= 200; page++) {
+    const rows = JSON.parse(gh(['api', path + '&page=' + page]));
+    if (!Array.isArray(rows)) throw new Error('non-array page ' + page + ' from ' + path);
+    for (const r of rows) all.push(r);
+    if (rows.length < 100) break;
+  }
+  return all;
+}
+
 /** Bail with exit 2 rather than reporting a clean run we cannot stand behind. */
 function cannotAudit(why, detail) {
   console.error('CANNOT AUDIT: ' + why);
@@ -295,11 +338,8 @@ try {
  *  populates the GraphQL field on the same repo. */
 let issuesRaw;
 try {
-  // --paginate concatenates array pages into one JSON array. per_page 100 is the API's max, so a
-  // 500-issue repo is five pages instead of fifty.
-  issuesRaw = JSON.parse(gh([
-    'api', '--paginate', 'repos/' + REPO + '/issues?state=all&per_page=100',
-  ]));
+  // per_page 100 is the API's max, so a 500-issue repo is five pages instead of fifty.
+  issuesRaw = ghPaginate('repos/' + REPO + '/issues?state=all&per_page=100');
 } catch (e) {
   cannotAudit('`gh api repos/' + REPO + '/issues` failed.', e.message);
 }
@@ -333,10 +373,7 @@ let prNumbers = new Set();
 let prByNumber = new Map();
 let prsUnavailable = false;
 try {
-  const prsRaw = JSON.parse(gh([
-    'api', '--paginate', 'repos/' + REPO + '/pulls?state=all&per_page=100',
-  ]));
-  if (!Array.isArray(prsRaw)) throw new Error('non-array from /pulls');
+  const prsRaw = ghPaginate('repos/' + REPO + '/pulls?state=all&per_page=100');
   prs = prsRaw.map(normalizePr);
   prNumbers = new Set(prs.map((p) => p.number));
 } catch (e) {
@@ -358,10 +395,7 @@ if (!prsUnavailable) {
   // stays silent for that PR, which is safer than firing on stale data.
   let commentsRaw = [];
   try {
-    commentsRaw = JSON.parse(gh([
-      'api', '--paginate', 'repos/' + REPO + '/issues/comments?per_page=100',
-    ]));
-    if (!Array.isArray(commentsRaw)) commentsRaw = [];
+    commentsRaw = ghPaginate('repos/' + REPO + '/issues/comments?per_page=100');
   } catch (e) { /* comments-less PRs are fine */ }
   const commentsByNumber = new Map();
   for (const c of commentsRaw) {
@@ -695,7 +729,10 @@ open.forEach((i) => {
   // produced all ten advisories in a repo, which is how a useful check becomes one people scroll past.
   if (i.labels.some((l) => l.name === 'prd')) return;
   const body = String(i.body || '').replace(/\r\n/g, '\n');
-  const citedNums = Array.from(new Set((body.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))));
+  // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
+  // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
+  const cited = citedIssueNumbers(body);
+  const citedNums = Array.from(cited.keys());
   const citedClosed = citedNums.filter((n) => {
     const o = byNumber.get(n);
     return o && o.state === 'CLOSED' && n !== i.number;
@@ -710,7 +747,8 @@ open.forEach((i) => {
   if (bodyIsFollowUp) return;
   citedClosed.forEach((n) => {
     const other = byNumber.get(n);
-    const idx = body.indexOf('#' + n);
+    // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
+    const idx = cited.get(n);
     // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
     const lineStart = body.lastIndexOf('\n', idx) + 1;
     if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
