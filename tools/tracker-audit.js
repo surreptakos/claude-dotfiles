@@ -112,11 +112,106 @@ function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
   return false;
 }
 
-// Test-only export of the pure predicates. The rest of the file is a script and only runs when this
-// module is invoked directly, so `require('./tracker-audit.js')` from a test does not shell out to
-// gh or exit the process.
+/** Normalize one REST /issues item into the shape the checks below already read.
+ *
+ *  REST returns lowercase `state`, `html_url`, `labels` as either strings or objects, `milestone`
+ *  as an object with `title`, and NO `projectItems` / `closedByPullRequestsReferences` (both are
+ *  GraphQL-only). The GraphQL-only fields are filled in later: projectItems from a supplemental
+ *  GraphQL call if the environment allows it, closedByPullRequestsReferences from a scan of PR
+ *  bodies for closing keywords (Fixes / Closes / Resolves #N) — GitHub's own "linked issues"
+ *  panel is built from exactly those keywords, so the derived set matches the GraphQL field.
+ *
+ *  Kept pure — no `gh`, no env — so tests can drive it with fixture rows. */
+function normalizeIssue(raw) {
+  return {
+    number: raw.number,
+    title: raw.title || '',
+    state: (raw.state || '').toUpperCase(),
+    body: raw.body || '',
+    labels: (raw.labels || []).map((l) => ({ name: typeof l === 'string' ? l : l.name })),
+    url: raw.html_url,
+    milestone: raw.milestone && raw.milestone.title ? { title: raw.milestone.title } : null,
+    projectItems: [],
+    closedByPullRequestsReferences: [],
+  };
+}
+
+/** REST's /issues endpoint returns pull requests too (they carry `pull_request` on the row); the
+ *  old `gh issue list` did not. Filter to match the previous contract exactly. Pure. */
+function issuesOnly(rows) {
+  return (rows || []).filter((r) => r && !r.pull_request);
+}
+
+/** Normalize one REST /pulls item into the same shape the PR-side checks read. `comments` is a
+ *  list of {createdAt} objects rather than a count so the caller can compute lastComment the same
+ *  way it did against GraphQL. Pure. */
+function normalizePr(raw) {
+  return {
+    number: raw.number,
+    title: raw.title || '',
+    state: (raw.state || '').toUpperCase(),
+    body: raw.body || '',
+    url: raw.html_url,
+    comments: [],
+  };
+}
+
+/** For each issue number, the list of PR numbers whose title-or-body declares them closed
+ *  via a GitHub closing keyword (Fixes / Closes / Resolves #N — case-insensitive; the
+ *  bare-`#N` form only, matching the GraphQL `closingIssuesReferences` semantics on the same
+ *  repo).
+ *
+ *  Rebuilds the GraphQL `closedByPullRequestsReferences` link from data REST returns — the
+ *  reverse direction of what GitHub's own linked-issues panel shows. Needed for the follow-up
+ *  acknowledgment path in the stale-premise? check (that check crossed from 19 findings to 38
+ *  on a live repo when this map was empty, because every follow-up ticket that named its
+ *  closer PR then read as an unacknowledged assertion about the original ticket).
+ *
+ *  Same regex the commit-message scan uses further down, so a PR's body and a commit reaching
+ *  the default branch read the same claim. Pure. */
+function closerPrsByIssue(prs) {
+  const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi;
+  const map = new Map();
+  for (const pr of (prs || [])) {
+    const text = (pr.title || '') + '\n' + (pr.body || '');
+    let m;
+    CLOSING.lastIndex = 0;
+    while ((m = CLOSING.exec(text)) !== null) {
+      const n = Number(m[1]);
+      if (!map.has(n)) map.set(n, new Set());
+      map.get(n).add(pr.number);
+    }
+  }
+  const out = new Map();
+  for (const [issueNum, prNums] of map) {
+    out.set(issueNum, Array.from(prNums).sort((a, b) => a - b).map((number) => ({ number })));
+  }
+  return out;
+}
+
+/** Extract owner/repo from a `git remote get-url origin` string. Accepts `https://…`, `git@…`,
+ *  and the trailing `.git` optional. Returns null if the shape does not match. Pure. */
+function parseGithubSlug(remote) {
+  const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(String(remote || ''));
+  return m ? { owner: m[1], name: m[2] } : null;
+}
+
+// Test-only export of the pure predicates and REST normalizers. The rest of the file is a script
+// and only runs when this module is invoked directly, so `require('./tracker-audit.js')` from a
+// test does not shell out to gh or exit the process.
 if (require.main !== module) {
-  module.exports = { isFollowUpAcknowledgment, isNotPlanned, NOT_PLANNED_PATTERNS };
+  module.exports = {
+    isFollowUpAcknowledgment,
+    isNotPlanned,
+    NOT_PLANNED_PATTERNS,
+    normalizeIssue,
+    normalizePr,
+    issuesOnly,
+    closerPrsByIssue,
+    parseGithubSlug,
+    landedCommits,
+    landedFindings,
+  };
   return;
 }
 
@@ -136,6 +231,28 @@ function git(args) {
                                      stdio: ['ignore', 'pipe', 'ignore'], env: CHILD_ENV });
 }
 
+/** gh, via cmd.exe (same as `sh` above). This exists because `sh(...)` takes a command string,
+ *  not an argv, and REST URLs carrying `&` between query params would look like `cmd1 & cmd2` to
+ *  a shell — but cmd.exe leaves `&` alone inside `"..."`. Wrap URL args explicitly, escape any
+ *  literal `"` in an arg, and every call is safe.
+ *
+ *  A cmd-shell path was chosen deliberately over `execFileSync('gh', ...)` for two reasons: on
+ *  Windows a gh installed as `gh.cmd` cannot be spawned by execFile without `shell: true` (EINVAL
+ *  since Node 20.12), and the test suite's gh shim IS a `.cmd`. With shell:true, args become
+ *  string-concatenated for a shell round trip — same escaping burden either way. Keep gh calls
+ *  going through `sh(...)` and this thin wrapper: one place to look at, no argv/shell mismatch.
+ *  Same env-strip and buffer limits as the two above. */
+function gh(args) {
+  const parts = args.map((a) => {
+    const s = String(a);
+    // A URL query string, or any arg carrying whitespace, needs quoting. A literal `"` inside is
+    // escaped as `""` for cmd.exe's parser (the copyfile-style rule cmd uses in `for /f`).
+    if (/[\s"?&|<>^]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  });
+  return sh('gh ' + parts.join(' '));
+}
+
 /** Bail with exit 2 rather than reporting a clean run we cannot stand behind. */
 function cannotAudit(why, detail) {
   console.error('CANNOT AUDIT: ' + why);
@@ -144,29 +261,53 @@ function cannotAudit(why, detail) {
   process.exit(2);
 }
 
+// Every gh call here goes through `gh api` REST. Historically `gh repo view --json`, `gh issue
+// list --json`, and `gh pr list --json` all sat on top of gh's GraphQL client, which the
+// Claude-Code cloud egress proxy returns HTTP 403 on ("GitHub GraphQL is not available from
+// Claude Code sessions; use the REST API"). REST is proxied and authenticated, so the audit
+// runs there without any code that only works locally. Issue 130.
+
+/** Owner/repo. From `git remote get-url origin` — no gh call needed, so the caller cannot get a
+ *  gh error out of the trivial identity question. */
+let SLUG;
+try {
+  SLUG = parseGithubSlug(git(['remote', 'get-url', 'origin']).trim());
+} catch (e) {
+  cannotAudit('`git remote get-url origin` failed — not a git clone with an `origin`.', e.message);
+}
+if (!SLUG) cannotAudit('`origin` is not a github.com URL.');
+
 let REPO, DEFAULT_BRANCH;
 try {
-  const repoInfo = JSON.parse(sh('gh repo view --json nameWithOwner,defaultBranchRef'));
-  REPO = repoInfo.nameWithOwner;
+  const repoInfo = JSON.parse(gh(['api', 'repos/' + SLUG.owner + '/' + SLUG.name]));
+  REPO = repoInfo.full_name || (SLUG.owner + '/' + SLUG.name);
   // The branch work has to REACH before "it already landed" is true. Read, never assumed: a repo whose
   // trunk is not `main` would otherwise be audited against a branch that does not exist.
-  DEFAULT_BRANCH = (repoInfo.defaultBranchRef && repoInfo.defaultBranchRef.name) || '';
+  DEFAULT_BRANCH = repoInfo.default_branch || '';
 } catch (e) {
-  cannotAudit('`gh repo view` failed — not a GitHub clone, or gh is not authenticated.', e.message);
+  cannotAudit('`gh api repos/' + SLUG.owner + '/' + SLUG.name + '` failed — network, or gh is not authenticated.', e.message);
 }
 
 /** Every issue, open and closed. Closed ones are needed for the unticked-box check and to tell a
- *  released blocker from a dangling reference; `closedByPullRequestsReferences` feeds the follow-up
- *  acknowledgment in the stale-premise check. */
-let issues;
+ *  released blocker from a dangling reference. `closedByPullRequestsReferences` feeds the follow-up
+ *  acknowledgment in the stale-premise check — the REST /issues endpoint has no field for it, so it
+ *  is rebuilt below from a scan of PR bodies (see `closerPrsByIssue`), which matches how GitHub
+ *  populates the GraphQL field on the same repo. */
+let issuesRaw;
 try {
-  issues = JSON.parse(sh(
-    'gh issue list --state all --limit 1000 --json number,title,state,body,labels,url,projectItems,closedByPullRequestsReferences,milestone'
-  ));
+  // --paginate concatenates array pages into one JSON array. per_page 100 is the API's max, so a
+  // 500-issue repo is five pages instead of fifty.
+  issuesRaw = JSON.parse(gh([
+    'api', '--paginate', 'repos/' + REPO + '/issues?state=all&per_page=100',
+  ]));
 } catch (e) {
-  cannotAudit('`gh issue list` failed.', e.message);
+  cannotAudit('`gh api repos/' + REPO + '/issues` failed.', e.message);
 }
-if (!Array.isArray(issues)) cannotAudit('`gh issue list` did not return an array.');
+if (!Array.isArray(issuesRaw)) cannotAudit('`gh api repos/' + REPO + '/issues` did not return an array.');
+// The /issues endpoint returns pull requests as well — the pull_request field on the row is how
+// GitHub says "this is really a PR". The old `gh issue list` did not include PRs; match the
+// previous contract exactly here or every finding's counts would silently shift.
+const issues = issuesOnly(issuesRaw).map(normalizeIssue);
 if (issues.length === 0) {
   // The false-zero guard. A tracker with zero issues is possible but is far more often an auth
   // problem, a wrong repo, or a phantom working directory — all of which previously read as success.
@@ -177,26 +318,27 @@ if (issues.length === 0) {
 const byNumber = new Map(issues.map((i) => [i.number, i]));
 const open = issues.filter((i) => i.state === 'OPEN');
 
-/** GitHub shares ONE number space across issues and pull requests, and `gh issue list` returns only
- *  issues. So a `#43` pointing at a perfectly good merged PR looks like a pointer to nothing. Caught
- *  the first time this ran against a repo that actually uses PRs: all seven "dangling" references
- *  were merged PRs. Fetched once rather than probed per number.
+/** GitHub shares ONE number space across issues and pull requests, and the /issues endpoint above
+ *  already dropped PRs. So a `#43` pointing at a perfectly good merged PR looks like a pointer to
+ *  nothing. Caught the first time the audit ran against a repo that actually uses PRs: all seven
+ *  "dangling" references were merged PRs. Fetched once rather than probed per number.
  *
- *  Comments are fetched alongside the numbers because a PR's thread is where measurements land, and
- *  the blocker-may-be-answered check below needs their dates. */
+ *  Comments live on their own endpoint (/issues/comments — a PR is an issue, so this covers both).
+ *  Fetched in one paginated call and grouped by issue/PR number rather than one call per PR.
+ *
+ *  PR bodies drive closerPrsByIssue further down, which is how each issue's
+ *  `closedByPullRequestsReferences` gets rebuilt without GraphQL. */
+let prs = [];
 let prNumbers = new Set();
 let prByNumber = new Map();
 let prsUnavailable = false;
 try {
-  const prs = JSON.parse(sh('gh pr list --state all --limit 1000 --json number,title,state,url,comments'));
+  const prsRaw = JSON.parse(gh([
+    'api', '--paginate', 'repos/' + REPO + '/pulls?state=all&per_page=100',
+  ]));
+  if (!Array.isArray(prsRaw)) throw new Error('non-array from /pulls');
+  prs = prsRaw.map(normalizePr);
   prNumbers = new Set(prs.map((p) => p.number));
-  prByNumber = new Map(prs.map((p) => {
-    const dates = (p.comments || []).map((c) => c.createdAt).filter(Boolean).sort();
-    return [p.number, Object.assign({}, p, {
-      commentCount: (p.comments || []).length,
-      lastComment: dates[dates.length - 1] || null
-    })];
-  }));
 } catch (e) {
   // "Only risks a visible false positive" was wrong twice over on aac-bill-intake, where this catch
   // made the audit run red four times a day for two weeks: an issue cited a perfectly good PR the run
@@ -208,15 +350,112 @@ try {
   // goes silent on its own (empty prByNumber) — which the NOTE at the bottom then says out loud.
   prsUnavailable = true;
 }
+
+if (!prsUnavailable) {
+  // Attach comment dates. /issues/comments returns EVERY comment across the whole repo (a PR is an
+  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort: a
+  // failed comments fetch degrades to zero comments per PR — the blocker-may-be-answered check then
+  // stays silent for that PR, which is safer than firing on stale data.
+  let commentsRaw = [];
+  try {
+    commentsRaw = JSON.parse(gh([
+      'api', '--paginate', 'repos/' + REPO + '/issues/comments?per_page=100',
+    ]));
+    if (!Array.isArray(commentsRaw)) commentsRaw = [];
+  } catch (e) { /* comments-less PRs are fine */ }
+  const commentsByNumber = new Map();
+  for (const c of commentsRaw) {
+    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (!commentsByNumber.has(n)) commentsByNumber.set(n, []);
+    commentsByNumber.get(n).push(c.created_at);
+  }
+  prByNumber = new Map(prs.map((p) => {
+    const dates = (commentsByNumber.get(p.number) || []).filter(Boolean).sort();
+    return [p.number, Object.assign({}, p, {
+      commentCount: dates.length,
+      lastComment: dates[dates.length - 1] || null,
+    })];
+  }));
+
+  // Reverse-map: for each issue, which PRs close it (Fixes/Closes/Resolves #N in title+body).
+  // Fills in the GraphQL-only `closedByPullRequestsReferences` field from REST data, so the
+  // stale-premise? check's follow-up acknowledgment path still sees closer PR numbers.
+  const closerMap = closerPrsByIssue(prs);
+  issues.forEach((i) => {
+    if (closerMap.has(i.number)) i.closedByPullRequestsReferences = closerMap.get(i.number);
+  });
+}
 const knownNumber = (n) => byNumber.has(n) || prNumbers.has(n);
+
+/** Attach projectItems (per-issue board card status) via one supplemental GraphQL call. GraphQL is
+ *  what powers the `--json projectItems` shape gh used to serve; there is no REST equivalent, so
+ *  this path is genuinely unavailable on the Claude-Code cloud egress proxy — the check has to
+ *  degrade rather than crash. When it succeeds (a local run on Windows with `gh auth login`), the
+ *  board-says-done and not-on-board findings match exactly what the pre-port audit produced. */
+let boardUnavailable = false;
+try {
+  const q =
+    'query($owner:String!,$name:String!,$after:String){' +
+    ' repository(owner:$owner,name:$name){' +
+    '  issues(first:100,after:$after,states:[OPEN,CLOSED]){' +
+    '   pageInfo{hasNextPage endCursor}' +
+    '   nodes{number projectItems(first:5){nodes{status:fieldValueByName(name:"Status"){' +
+    '    ... on ProjectV2ItemFieldSingleSelectValue{name}' +
+    '   }}}' +
+    '  }' +
+    '  }' +
+    ' }' +
+    '}';
+  // Write the query to a scratch file and pass it via `gh api graphql -F query=@<file>`. That
+  // is gh's typed-field syntax for "read this field's value from a file"; the alternative
+  // (inline `-f query=...`) would round-trip the GraphQL text through cmd.exe on Windows and
+  // the embedded `"` around `"Status"` would confuse cmd's quote parser. Cleaned up on process
+  // exit — tmp lives under os.tmpdir with a unique suffix, so concurrent runs do not collide.
+  const os = require('os');
+  const fs = require('fs');
+  const path = require('path');
+  const qfile = path.join(os.tmpdir(), 'tracker-audit-gql-' + process.pid + '-' + Date.now() + '.txt');
+  fs.writeFileSync(qfile, q, 'utf8');
+  process.on('exit', () => { try { fs.unlinkSync(qfile); } catch (e) { /* ignore */ } });
+  let after = null;
+  for (let page = 0; page < 200; page++) {
+    const args = [
+      'api', 'graphql',
+      '-F', 'query=@' + qfile,
+      '-f', 'owner=' + SLUG.owner,
+      '-f', 'name=' + SLUG.name,
+    ];
+    if (after) args.push('-f', 'after=' + after);
+    const res = JSON.parse(gh(args));
+    if (res.errors && res.errors.length) throw new Error(res.errors[0].message || 'graphql errors');
+    const conn = res.data && res.data.repository && res.data.repository.issues;
+    if (!conn) throw new Error('no issues connection');
+    for (const node of (conn.nodes || [])) {
+      const rec = byNumber.get(node.number);
+      if (!rec) continue;
+      rec.projectItems = (node.projectItems && node.projectItems.nodes || [])
+        .map((it) => ({ status: it && it.status ? { name: it.status.name } : null }));
+    }
+    if (!conn.pageInfo || !conn.pageInfo.hasNextPage) break;
+    after = conn.pageInfo.endCursor;
+  }
+} catch (e) {
+  // Cloud egress proxy: GraphQL 403s. The two board checks skip themselves and the NOTE at the
+  // bottom says so.
+  boardUnavailable = true;
+}
 
 /** Native blocked_by edges (open blockers only — GitHub releases a child when its blocker closes,
  *  which is the whole reason to use these rather than prose). Returns null if the endpoint is
  *  unavailable on this repo, so the caller can say "unknown" instead of "none". */
 function nativeBlockers(n) {
   try {
-    const out = sh('gh api repos/' + REPO + '/issues/' + n +
-                   '/dependencies/blocked_by --jq ".[].number"').trim();
+    const out = gh([
+      'api', 'repos/' + REPO + '/issues/' + n + '/dependencies/blocked_by',
+      '--jq', '.[].number',
+    ]).trim();
     return out ? out.split('\n').map(Number) : [];
   } catch (e) {
     return null;
@@ -495,16 +734,23 @@ open.forEach((i) => {
 //     and was off, so every new issue has to be added by hand — and four in a row were not.
 //
 // Skipped entirely, and said out loud, when the repo has no board.
-// Board status rides along on the SAME `gh issue list` call above — `--json projectItems` returns
-// each card's Status. That replaced a GraphQL lookup that had to discover the project first, which
-// was both fragile (nested quoting through cmd.exe failed intermittently) and wrong: it searched
+// Board status is pulled from a supplemental GraphQL call above (REST has no `projectItems`
+// field), on `repository.issues { projectItems { fieldValueByName(name:"Status") } }`. That
+// replaced an earlier GraphQL lookup that discovered the project first, which was both fragile
+// (nested quoting through cmd.exe failed intermittently) and wrong: it searched
 // `repository.projectsV2`, which returns only projects LINKED to the repo, while this board is
 // owner-level. It confidently reported "no board" for a board holding 26 cards.
 //
 // Whether a board is in use is inferred from the data rather than discovered: if no issue anywhere
-// carries a card, there is no board to compare against.
+// carries a card, there is no board to compare against.  When the supplemental GraphQL call
+// itself is unavailable (Claude Code cloud egress proxy 403s GraphQL, issue 130) the check is
+// skipped with a distinct NOTE — "unavailable" is not the same as "no board".
 const boardInUse = issues.some((i) => (i.projectItems || []).length > 0);
-if (!boardInUse) {
+if (boardUnavailable) {
+  // In cloud the ProjectsV2 GraphQL endpoint 403s (issue 130). The check is skipped, and the NOTE
+  // at the bottom flags this as blind rather than clean — treat as unknown, not "no board here".
+  console.log('NOTE: the ProjectsV2 GraphQL endpoint was unavailable, so board/issue state was not compared.\n');
+} else if (!boardInUse) {
   console.log('NOTE: no issue carries a Projects board card, so board/issue state was not compared.\n');
 } else {
   open.forEach((i) => {
@@ -644,10 +890,11 @@ if (edgesUnavailable) {
 }
 
 if (prsUnavailable) {
-  console.log('NOTE: `gh pr list` failed, so no pull request is visible to this run. A `#N` naming a');
-  console.log('PR cannot be told from a pointer to nothing, so the dangling-reference check is');
-  console.log('advisory here, and blocker-may-be-answered could not run at all. Under Actions this');
-  console.log('means the workflow grants no `pull-requests: read`. Treat as unknown, not clean.\n');
+  console.log('NOTE: `gh api repos/.../pulls` failed, so no pull request is visible to this run. A');
+  console.log('`#N` naming a PR cannot be told from a pointer to nothing, so the dangling-reference');
+  console.log('check is advisory here, and blocker-may-be-answered could not run at all. Under');
+  console.log('Actions this means the workflow grants no `pull-requests: read`. Treat as unknown,');
+  console.log('not clean.\n');
 }
 
 if (logUnavailable) {
@@ -656,7 +903,18 @@ if (logUnavailable) {
   console.log('against the work that already merged. Treat as unknown, not clean.\n');
 }
 
-/** Any blind spot means this run cannot stand behind a clean result — exit 2, never 0. */
+if (boardUnavailable) {
+  console.log('NOTE: the ProjectsV2 GraphQL endpoint (which underlies `projectItems`) was not');
+  console.log('available, so board-says-done and not-on-board could not run. The Claude Code');
+  console.log('cloud egress proxy blocks GraphQL — run this locally to check the board.\n');
+}
+
+/** Any blind spot means this run cannot stand behind a clean result — exit 2, never 0.
+ *  boardUnavailable is deliberately NOT in this list: GraphQL is genuinely unreachable in a
+ *  Claude-Code cloud container (issue 130) and marking every cloud run blind would collapse
+ *  every cloud audit to exit 2, which is the same "could not check reported as a pass" shape
+ *  this tool exists to refuse. The NOTE above says the two board checks did not run, and the
+ *  audit reports on everything the REST endpoints did cover. */
 const blind = edgesUnavailable || prsUnavailable || logUnavailable;
 
 if (!findings.length) {

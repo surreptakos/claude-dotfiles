@@ -271,16 +271,19 @@ try {
 
     # The earlier version of this block asserted only that the leaked bare stayed byte-identical
     # after tracker-audit ran. That was insufficient: tracker-audit exits at code 2 the moment
-    # `gh repo view` fails, and a fake target with no GitHub remote makes it fail. So the tool
+    # its first gh call fails, and a fake target with no GitHub remote makes it fail. So the tool
     # never reaches the git subprocesses the guard exists to protect, and deleting CHILD_ENV
     # from tracker-audit.js still passes the block. Reviewer proved that (issue 28 attempt3).
     #
     # This version stubs `gh` on PATH so tracker-audit runs to completion, gives the target repo
-    # a commit whose body says `Fixes #999`, and stubs `gh issue list` to return #999 as OPEN.
-    # tracker-audit's landed-but-open check then emits a finding for #999 IFF `git log` ran
-    # against the target repo. Under a leaked GIT_DIR without the guard, git log would run
-    # against the empty leaked bare and NEITHER the finding nor the target's fake nameWithOwner
+    # a commit whose body says `Fixes #999`, and stubs the REST /issues endpoint to return #999
+    # as an open issue. tracker-audit's landed-but-open check then emits a finding for #999 IFF
+    # `git log` ran against the target repo. Under a leaked GIT_DIR without the guard, git log
+    # would run against the empty leaked bare and NEITHER the finding nor the target's repo name
     # would appear in output. That is the positive assertion.
+    #
+    # tracker-audit reads owner/repo from `git remote get-url origin` (REST port, issue 130), so
+    # the target repo gets a fake `origin` matching the shim's chosen slug.
     $target = Join-Path $sandbox3 'target-repo'
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     & git -C $target init --quiet --initial-branch=master | Out-Null
@@ -291,36 +294,56 @@ try {
     # Body carries the closing keyword; tracker-audit's CLOSING regex reads the whole message.
     & git -C $target commit --quiet -m 'seed' -m 'Fixes #999' | Out-Null
 
-    # A gh shim on PATH. tracker-audit calls `gh repo view`, `gh issue list`, `gh pr list`,
-    # and `gh api ... /dependencies/blocked_by`; all four are dispatched here.
+    # A gh shim on PATH. tracker-audit calls `gh api repos/OWNER/REPO`, `gh api --paginate
+    # repos/OWNER/REPO/issues`, `gh api --paginate repos/OWNER/REPO/pulls`, `gh api --paginate
+    # repos/OWNER/REPO/issues/comments`, `gh api graphql` (projectItems supplemental — allowed
+    # to degrade), and `gh api ... /dependencies/blocked_by`. All get a canned answer here.
     $shimDir = Join-Path $sandbox3 'gh-shim'
     New-Item -ItemType Directory -Path $shimDir -Force | Out-Null
     $shimRepoName = 'tracker-audit-probe/target-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 8))
+    # Give the target an `origin` remote pointing at the shim's chosen slug; parseGithubSlug
+    # reads owner/name off that. A cd-into-target then `git remote get-url origin` returns it.
+    & git -C $target remote add origin ("https://github.com/{0}.git" -f $shimRepoName) | Out-Null
     $shimJs = @'
 'use strict';
-const args = process.argv.slice(2).join(' ');
+const args = process.argv.slice(2);
 function out(s) { process.stdout.write(s); process.exit(0); }
-if (args.startsWith('repo view')) {
-  out(JSON.stringify({
-    nameWithOwner: process.env.SHIM_REPO_NAME,
-    defaultBranchRef: { name: 'master' }
-  }));
+if (args[0] === '--version') out('gh version 0.0.0-shim\n');
+if (args[0] === 'api') {
+  // First non-flag operand is the REST path (or `graphql`). --paginate / --jq / -f / -F are
+  // flags that may sit in front of it. Skip any leading `-`-prefixed args and any values that
+  // follow the flags that take one (`-f`, `-F`, `--jq`).
+  const flagsWithValue = new Set(['-f', '-F', '--jq', '--header', '-H']);
+  let i = 1, apiPath = '';
+  while (i < args.length) {
+    if (args[i].startsWith('-')) {
+      if (flagsWithValue.has(args[i])) i += 2; else i += 1;
+    } else { apiPath = args[i]; break; }
+  }
+  if (apiPath === 'graphql') {
+    // projectItems supplemental — return an empty issues page. The audit treats that as "no board
+    // data", boardUnavailable stays false, and the two board checks are skipped for lack of cards.
+    out(JSON.stringify({ data: { repository: { issues: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } } }));
+  }
+  const repo = process.env.SHIM_REPO_NAME;
+  if (apiPath === 'repos/' + repo) {
+    out(JSON.stringify({ full_name: repo, default_branch: 'master' }));
+  }
+  if (apiPath.startsWith('repos/' + repo + '/issues?')) {
+    out(JSON.stringify([{
+      number: 999,
+      title: 'landed-but-open probe',
+      state: 'open',
+      body: 'probe body',
+      labels: [{ name: 'ready-for-agent' }],
+      html_url: 'https://example.test/issues/999',
+      milestone: { title: 'probe-milestone' },
+    }]));
+  }
+  if (apiPath.startsWith('repos/' + repo + '/pulls')) out('[]');
+  if (apiPath.startsWith('repos/' + repo + '/issues/comments')) out('[]');
+  if (apiPath.indexOf('/dependencies/blocked_by') !== -1) out('');
 }
-if (args.startsWith('issue list')) {
-  out(JSON.stringify([{
-    number: 999,
-    title: 'landed-but-open probe',
-    state: 'OPEN',
-    body: 'probe body',
-    labels: [{ name: 'ready-for-agent', description: '', color: '' }],
-    url: 'https://example.test/issues/999',
-    projectItems: [],
-    closedByPullRequestsReferences: [],
-    milestone: { title: 'probe-milestone' }
-  }]));
-}
-if (args.startsWith('pr list')) out('[]');
-if (args.startsWith('api')) out('');
 out('{}');
 '@
     Set-Content -Path (Join-Path $shimDir 'gh-shim.js') -Value $shimJs -Encoding utf8
