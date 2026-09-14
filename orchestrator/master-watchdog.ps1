@@ -1,7 +1,8 @@
 ﻿<#
 .SYNOPSIS
     Relaunch watchdog for the local master orchestrators (issue 64; one master per repo since
-    issue 70; ONE MASTER AT A TIME since issue 79; idle guard and log since issue 82).
+    issue 70; ONE MASTER AT A TIME since issue 79; idle guard and log since issue 82; stalled
+    master is recycled since issue 89).
 
 .DESCRIPTION
     Runs from Windows Task Scheduler every -IntervalMinutes while Dan is logged on. Exactly one
@@ -31,9 +32,16 @@
               22:20, Dan resumed it at 22:27, it launched a fleet at 22:30:01, and the 22:30 slot
               stopped it on the stale marker (issue 82).
          Done: stop the claude process and its cmd.exe wrapper window and record that.
-         Otherwise the master is still working: exit, launch nothing. A master whose latest
-         marker is older than -MaxHeartbeatAgeMinutes is reported as possibly stalled but NOT
-         killed - an interactive session mid-work is Dan's to stop.
+         Otherwise the master is still working: exit, launch nothing. Recycle rule (Dan, grill
+         2026-09-10, issue 89): a master whose latest state-issue marker is older than
+         -MaxHeartbeatAgeMinutes (default 120 = 2h) AND whose transcript has been idle for at
+         least -StallIdleMinutes (default 30) is stopped and the next repo is launched. Both
+         conditions must hold: age alone is not enough (an interactive session mid-work is
+         Dan's to keep), and idleness alone is not enough (a fresh master with only one
+         Heartbeat has an idle transcript by definition). The pass-complete close path keeps
+         its own -IdleMinutes (default 5). If only the marker is stale but the transcript has
+         been touched inside -StallIdleMinutes, log "possibly stalled; not killed" and leave
+         it alone.
       3. Nothing alive: pick the next repo - never-served repos first in priority order, then
          the one whose latest marker (heartbeat or pass complete) is oldest - and launch it:
            set AAC_ORCHESTRATOR_AUTONOMOUS=1 && claude --dangerously-skip-permissions
@@ -68,6 +76,12 @@
 .PARAMETER IdleMinutes
     A finished master is closed only when its transcript has been untouched this long. 5.
 
+.PARAMETER StallIdleMinutes
+    Stall recycle path (issue 89). A master whose latest marker is older than
+    -MaxHeartbeatAgeMinutes is stopped only when its transcript has also been untouched at
+    least this long. Default 30. Keep it above the master's own heartbeat cadence so a slow
+    but live pass is not recycled.
+
 .PARAMETER LogFile
     Append-only decision log. Empty string disables it.
 
@@ -87,6 +101,7 @@ param(
     [string[]]$Only = @(),
     [int]$MaxHeartbeatAgeMinutes = 120,
     [int]$IdleMinutes = 5,
+    [int]$StallIdleMinutes = 30,
     [string]$LogFile = (Join-Path $env:USERPROFILE '.claude\hook-state\master-watchdog\watchdog.log'),
     [string]$ClaudeExe = 'claude',
     [switch]$Force,
@@ -232,7 +247,7 @@ function Stop-MasterWindow {
     }
 }
 
-Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  idle=${IdleMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
+Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  idle=${IdleMinutes}m  stallIdle=${StallIdleMinutes}m  repos=$(($Repos | ForEach-Object { $_.Slug }) -join ',')"
 
 # --- Account guard (issue 103): a WARNING, never a gate ----------------------------------------
 # The masters run under whatever account ~/.claude.json is signed into (the bare `claude` launch
@@ -325,7 +340,16 @@ foreach ($p in $rcProcs) {
         if ($latest) {
             $ageMin = [int](([datetime]::UtcNow - $latest).TotalMinutes)
             if ($ageMin -ge $MaxHeartbeatAgeMinutes) {
-                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old - possibly stalled; not killed, Dan decides"
+                # Stall recycle path (issue 89, Dan's ruling 2026-09-10): stop only when the
+                # transcript is also idle at least -StallIdleMinutes. Both conditions must
+                # hold, and a missing transcript ($idleMin -eq -1) never counts as idle.
+                if ($idleMin -ge $StallIdleMinutes -and -not $Force) {
+                    Write-Info "$tag STALLED at $($latest.ToString('u')) (${ageMin}m old, transcript idle ${idleMin}m >= ${StallIdleMinutes}m) - recycling pid=$($p.ProcessId)"
+                    if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
+                    else { Stop-MasterWindow -Proc $p -Tag $tag }
+                    continue
+                }
+                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old, transcript idle ${idleMin}m (< ${StallIdleMinutes}m) - possibly stalled; not killed"
             } else {
                 Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), working (latest marker ${ageMin}m ago, transcript idle ${idleMin}m)"
             }

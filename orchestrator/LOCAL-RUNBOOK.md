@@ -100,6 +100,19 @@ master lives there.
   the window is closed it launches the next repo on its next slot. Disabling the task
   (`schtasks /Change /Disable /TN "Claude master watchdog"`) stops every launch at once. The state
   issues mean nothing is lost either way.
+- **Stall recycle (Dan's ruling, grill session 2026-09-10, issue 89).** Verbatim:
+
+  > Option 1, recycle. N=2 hours, M=30 minutes. Watchdog stops a master whose latest state-issue
+  > marker is older than 2h AND whose transcript has been idle 30min, then launches the next
+  > repo.
+
+  This overrides the earlier "possibly stalled; not killed" behavior. A stalled master holding
+  the only serial slot starves the other three repos, and 2h with no marker plus 30m with no
+  transcript write is the shape of a hang, not a slow live pass. The two-condition rule is
+  deliberate: age alone kills interactive sessions mid-work; idleness alone kills a fresh
+  master before it heartbeats. The pass-complete close path keeps its five-minute idle guard
+  unchanged. Defaults live in `master-watchdog.ps1` as `-MaxHeartbeatAgeMinutes 120` and
+  `-StallIdleMinutes 30`.
 - **Grill phase & ratification.** Same procedure; the decision brief is still a claude-dotfiles
   issue, but rulings can also land straight from Dan typing in a master's terminal — land each one
   on its ticket before moving on.
@@ -179,9 +192,14 @@ slot does this:
    heartbeat means the pass was reopened); and the newest transcript under
    `~/.claude/projects/<clone slug>/` untouched for five minutes (`-IdleMinutes`). Then the
    watchdog stops the `claude` process and its `cmd.exe /k` wrapper window and records that. Any
-   other alive master is still working, and the slot ends with no launch. A master whose latest
-   marker is older than 120 minutes is reported as possibly stalled but is not killed — an
-   interactive session mid-work is Dan's to stop.
+   other alive master is still working, and the slot ends with no launch. **Stall recycle
+   (Dan, grill session 2026-09-10, issue 89):** a master whose latest state-issue marker is
+   older than `-MaxHeartbeatAgeMinutes` (default 120, N=2h) AND whose transcript has been idle
+   at least `-StallIdleMinutes` (default 30, M=30m) is stopped and the next repo is launched
+   on the same slot. Both conditions must hold — age alone would kill a live interactive
+   session mid-work, idleness alone would kill a fresh master that has only written one
+   Heartbeat. If only the marker is stale but the transcript has been touched inside M, the
+   watchdog logs "possibly stalled; not killed" and moves on.
 3. **Launch the next repo.** With nothing alive, pick the repo never served yet (priority order:
    bill-intake, contract-builder, sales-cockpit, zoho), else the one whose latest marker is oldest,
    and run `Start-Process cmd.exe /k cd /d "<clone>" && claude --dangerously-skip-permissions
