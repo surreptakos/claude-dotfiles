@@ -253,6 +253,28 @@ function gh(args) {
   return sh('gh ' + parts.join(' '));
 }
 
+/** Walk a list endpoint page by page and return every row as one array. `path` must already
+ *  carry its query string with `per_page=100` (the API maximum); `&page=N` is appended here.
+ *
+ *  This replaces `gh api --paginate`, which follows the `Link: rel="next"` header GitHub sends
+ *  back. That URL is the numeric-ID form, `/repositories/{id}/issues?page=2`, and the Claude-Code
+ *  cloud egress proxy refuses it: "Numeric-ID repository paths (repositories/{id}/...) are not
+ *  supported through this proxy. Use repos/{owner}/{repo}/... endpoints instead. (HTTP 403)". So
+ *  in every cloud container page one came back and page two killed the audit with exit 2 — on a
+ *  repo with more than 100 issues that is every run. Paging by hand keeps each request on the
+ *  `repos/{owner}/{repo}` path. A short page (fewer than 100 rows) is the end; the page cap is a
+ *  guard against an endpoint that never returns one. */
+function ghPaginate(path) {
+  const all = [];
+  for (let page = 1; page <= 200; page++) {
+    const rows = JSON.parse(gh(['api', path + '&page=' + page]));
+    if (!Array.isArray(rows)) throw new Error('non-array page ' + page + ' from ' + path);
+    for (const r of rows) all.push(r);
+    if (rows.length < 100) break;
+  }
+  return all;
+}
+
 /** Bail with exit 2 rather than reporting a clean run we cannot stand behind. */
 function cannotAudit(why, detail) {
   console.error('CANNOT AUDIT: ' + why);
@@ -295,11 +317,8 @@ try {
  *  populates the GraphQL field on the same repo. */
 let issuesRaw;
 try {
-  // --paginate concatenates array pages into one JSON array. per_page 100 is the API's max, so a
-  // 500-issue repo is five pages instead of fifty.
-  issuesRaw = JSON.parse(gh([
-    'api', '--paginate', 'repos/' + REPO + '/issues?state=all&per_page=100',
-  ]));
+  // per_page 100 is the API's max, so a 500-issue repo is five pages instead of fifty.
+  issuesRaw = ghPaginate('repos/' + REPO + '/issues?state=all&per_page=100');
 } catch (e) {
   cannotAudit('`gh api repos/' + REPO + '/issues` failed.', e.message);
 }
@@ -333,10 +352,7 @@ let prNumbers = new Set();
 let prByNumber = new Map();
 let prsUnavailable = false;
 try {
-  const prsRaw = JSON.parse(gh([
-    'api', '--paginate', 'repos/' + REPO + '/pulls?state=all&per_page=100',
-  ]));
-  if (!Array.isArray(prsRaw)) throw new Error('non-array from /pulls');
+  const prsRaw = ghPaginate('repos/' + REPO + '/pulls?state=all&per_page=100');
   prs = prsRaw.map(normalizePr);
   prNumbers = new Set(prs.map((p) => p.number));
 } catch (e) {
@@ -358,10 +374,7 @@ if (!prsUnavailable) {
   // stays silent for that PR, which is safer than firing on stale data.
   let commentsRaw = [];
   try {
-    commentsRaw = JSON.parse(gh([
-      'api', '--paginate', 'repos/' + REPO + '/issues/comments?per_page=100',
-    ]));
-    if (!Array.isArray(commentsRaw)) commentsRaw = [];
+    commentsRaw = ghPaginate('repos/' + REPO + '/issues/comments?per_page=100');
   } catch (e) { /* comments-less PRs are fine */ }
   const commentsByNumber = new Map();
   for (const c of commentsRaw) {

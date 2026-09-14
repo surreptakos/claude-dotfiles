@@ -294,10 +294,12 @@ try {
     # Body carries the closing keyword; tracker-audit's CLOSING regex reads the whole message.
     & git -C $target commit --quiet -m 'seed' -m 'Fixes #999' | Out-Null
 
-    # A gh shim on PATH. tracker-audit calls `gh api repos/OWNER/REPO`, `gh api --paginate
-    # repos/OWNER/REPO/issues`, `gh api --paginate repos/OWNER/REPO/pulls`, `gh api --paginate
-    # repos/OWNER/REPO/issues/comments`, `gh api graphql` (projectItems supplemental — allowed
-    # to degrade), and `gh api ... /dependencies/blocked_by`. All get a canned answer here.
+    # A gh shim on PATH. tracker-audit calls `gh api repos/OWNER/REPO`, then pages by hand
+    # (`&page=N`, no --paginate: the cloud proxy 403s the numeric-ID next-page URL) through
+    # `repos/OWNER/REPO/issues`, `repos/OWNER/REPO/pulls` and `repos/OWNER/REPO/issues/comments`,
+    # plus `gh api graphql` (projectItems supplemental — allowed to degrade) and
+    # `gh api ... /dependencies/blocked_by`. All get a canned answer here; one short page ends
+    # each walk.
     $shimDir = Join-Path $sandbox3 'gh-shim'
     New-Item -ItemType Directory -Path $shimDir -Force | Out-Null
     $shimRepoName = 'tracker-audit-probe/target-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 8))
