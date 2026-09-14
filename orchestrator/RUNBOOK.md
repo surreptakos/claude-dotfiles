@@ -45,8 +45,8 @@ from the 2026-08-26 owner review; its concerns live on as ordinary tickets).
 Lives in GitHub issues in `surreptakos/claude-dotfiles`. Issue #44 ("Master orchestrator state") is
 the registry: the shared config defaults, the table of per-repo state issues, and the run history
 from before the split. Each repo has its own issue titled **"Master orchestrator state — <owner/repo>"**
-(label `orchestrator` + `ready-for-human`; create on first boot if missing and add it to the
-registry). A master rewrites only its own repo's issue — never #44 and never a peer's — so
+(label `orchestrator` only — no `ready-for-human`; create on first boot if missing and add it to
+the registry). A master rewrites only its own repo's issue — never #44 and never a peer's — so
 heartbeats from several masters cannot overwrite each other. The per-repo body = a fenced JSON block
 plus the handoff summary; the shared-registry shape below is the single-master original, kept for
 the cloud variant. Per-repo fields are the inner `repos.<owner/repo>` object plus `repo`, `venue`,
@@ -79,11 +79,13 @@ shape defined under Master rebirth below); heartbeats keep it current, not only 
 lives in another repository is written fully qualified as `owner/repo#N` (e.g.
 `surreptakos/aac-bill-intake#562`), never bare `#N` — the state issue lives in
 `surreptakos/claude-dotfiles`, so `#562` there resolves against claude-dotfiles and reads to
-`tools/tracker-audit.js` as a `dangling-reference`. The state issue AND every decision brief carry
-BOTH the `orchestrator` label AND the `ready-for-human` label (they are documents for Dan, not
-agent work); a single-label `orchestrator` issue trips the audit's `untriaged` check because
-`orchestrator` is not in the triage vocabulary. When rewriting the state body on a heartbeat, keep
-both rules holding; when opening a decision brief, apply both labels at creation.
+`tools/tracker-audit.js` as a `dangling-reference`. Every decision brief carries BOTH the
+`orchestrator` label AND the `ready-for-human` label — it is the one thing a master hands Dan for a
+ruling. A state notebook carries `orchestrator` alone: it is a living document each master rewrites
+every heartbeat, with no pending ruling, so it does not belong in the `ready-for-human` queue; the
+audit's `untriaged` check counts `orchestrator` as a triage state for this reason. When rewriting
+the state body on a heartbeat, keep the cross-repo `owner/repo#N` rule holding and leave
+`ready-for-human` off; when opening a decision brief, apply both labels at creation.
 
 ## Heartbeat procedure (every Routine wake, and on any message)
 
