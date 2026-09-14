@@ -110,3 +110,56 @@ for (const file of WORKFLOW_FILES) {
     assert.match(src, /concurrent/i, 'workflow must document the concurrent-run guard');
   });
 }
+
+// ---- Live-tree hard-rail sentence (issue 149) ----
+// The implementer prompt in .claude/workflows/ticket-fleet.js and its lockstep
+// copy in orchestrator/ticket-fleet-cloud.js must both carry the same sentence
+// naming ~/.claude, ~/.codex, ~/.agents and any path outside the worktree as
+// read-only. A drift here reopens the failure documented in issue 149
+// (fleet run wf_911fa64d-102: implementers wrote to the live tree, breaking
+// concurrent workers and reaching master without a PR via dotfiles-freshness
+// auto-push).
+
+const HARD_RAIL_PAIR = [
+  path.join(REPO_ROOT, '.claude', 'workflows', 'ticket-fleet.js'),
+  path.join(REPO_ROOT, 'orchestrator', 'ticket-fleet-cloud.js'),
+];
+
+const HARD_RAIL_SENTENCE =
+  'Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are ' +
+  'read-only production paths — never write to them, never leave .bak files there; a change that ' +
+  'would need a live-tree edit to land is committed to the branch only and named as a discovery.';
+
+for (const file of HARD_RAIL_PAIR) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+  test(`implementer prompt in ${rel} carries the live-tree hard-rail sentence`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    assert.ok(
+      src.includes(HARD_RAIL_SENTENCE),
+      `${rel} is missing the live-tree hard-rail sentence — it must match the string in this test verbatim`
+    );
+  });
+
+  test(`verifier prompt in ${rel} instructs the live-tree hard-rail check`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    assert.match(
+      src,
+      /Live-tree hard rail: the implementer must not have written to ~\/\.claude, ~\/\.codex, ~\/\.agents/,
+      `${rel} verifier prompt must instruct a check for files under the live-tree roots modified after the attempt's first commit`
+    );
+    assert.match(
+      src,
+      /-newermt/,
+      `${rel} verifier prompt must instruct a find -newermt against the attempt's first-commit time`
+    );
+  });
+}
+
+test('the two implementer prompts do not drift on the live-tree sentence', () => {
+  const sentences = HARD_RAIL_PAIR.map(f => {
+    const src = fs.readFileSync(f, 'utf8');
+    return src.includes(HARD_RAIL_SENTENCE);
+  });
+  assert.ok(sentences.every(Boolean),
+    'both fleet scripts must carry the identical live-tree hard-rail sentence; edit both when you change one');
+});
