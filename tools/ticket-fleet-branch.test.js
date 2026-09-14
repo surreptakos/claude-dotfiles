@@ -2,12 +2,14 @@
 /**
  * node --test tools/ticket-fleet-branch.test.js
  *
- * Covers issue 29: ticket-fleet scout template must handle concurrent
- * attempts. The workflow's branch-naming logic is factored into
- * `tools/ticket-fleet-branch.js`; this suite exercises it directly and also
- * asserts that both workflow files (the live one at .claude/workflows and the
- * project-harness template) reference the runId + workerIndex pattern, so the
- * two copies cannot drift silently.
+ * Covers issue 29 (concurrent-attempt-safe branch naming) and issue 138
+ * (plugin-served merged fleet script with a gh/MCP instrument switch).
+ * The workflow's naming and instrument-switch logic are factored into
+ * `tools/ticket-fleet-branch.js` so their tests can run without spinning
+ * up the Workflow tool. This suite exercises those pure functions and also
+ * asserts that the plugin-served copy of the fleet at
+ * `aac-skills/ticket-fleet/ticket-fleet.js` still inlines the same shape,
+ * so the pure module and the workflow file cannot drift silently.
  */
 'use strict';
 
@@ -17,7 +19,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const { generateRunId, buildBranchName, workerSuffix } = require('./ticket-fleet-branch.js');
+const { generateRunId, buildBranchName, workerSuffix, pickInstrument } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -46,9 +48,6 @@ test('buildBranchName includes ticket, attempt, runId and workerIndex', () => {
 });
 
 test('two concurrent scouts against the same ticket produce distinct branch names', () => {
-  // Simulates two ticket-fleet runs both picking up issue 29 at the same time.
-  // Each run mints its own runId; the workerIndex is 0 on both because the
-  // ticket is the first in each wave. Attempt is 1 (fresh attempt on both).
   const runIdA = generateRunId();
   const runIdB = generateRunId();
   assert.notEqual(runIdA, runIdB, 'runIds must differ for two concurrent runs');
@@ -58,8 +57,6 @@ test('two concurrent scouts against the same ticket produce distinct branch name
 });
 
 test('two workers within the same run against the same ticket produce distinct branches', () => {
-  // Belt-and-braces: even if a caller ever put the same ticket into a wave
-  // twice, workerIndex still separates the branches.
   const runId = 'sharedrun';
   const branchA = buildBranchName(29, runId, 0, 1);
   const branchB = buildBranchName(29, runId, 1, 1);
@@ -80,86 +77,118 @@ test('missing arguments throw rather than silently colliding', () => {
   assert.throws(() => buildBranchName(29, 'r', 0, null), /attempt/);
 });
 
-// ---- Workflow-file drift guards ----
-// The workflow environment cannot reliably `require` from tools/, so the same
-// naming shape is inlined in both workflow files. These tests fail if the
-// inline logic no longer matches this module's contract.
+// ---- pickInstrument (issue 138) ----
 
-const WORKFLOW_FILES = [
-  path.join(REPO_ROOT, '.claude', 'workflows', 'ticket-fleet.js'),
-  path.join(REPO_ROOT, 'agents', 'skills', 'project-harness', 'templates', 'ticket-fleet.js'),
-];
-
-for (const file of WORKFLOW_FILES) {
-  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
-  test(`workflow file ${rel} declares a runId`, () => {
-    const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /const runId\s*=/, 'workflow must mint a runId per invocation');
-  });
-
-  test(`workflow file ${rel} embeds runId+workerIndex in the branch name`, () => {
-    const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /wf_\$\{runId\}/, 'branch name must embed the runId');
-    assert.match(src, /w\$\{workerIndex\}/, 'branch name must embed the workerIndex');
-    // Retries within a worker must still be distinct.
-    assert.match(src, /attempt\$\{attempt\}/, 'branch name must embed the attempt counter');
-  });
-
-  test(`workflow file ${rel} documents concurrent-attempt handling`, () => {
-    const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /concurrent/i, 'workflow must document the concurrent-run guard');
-  });
-}
-
-// ---- Live-tree hard-rail sentence (issue 149) ----
-// The implementer prompt in .claude/workflows/ticket-fleet.js and its lockstep
-// copy in orchestrator/ticket-fleet-cloud.js must both carry the same sentence
-// naming ~/.claude, ~/.codex, ~/.agents and any path outside the worktree as
-// read-only. A drift here reopens the failure documented in issue 149
-// (fleet run wf_911fa64d-102: implementers wrote to the live tree, breaking
-// concurrent workers and reaching master without a PR via dotfiles-freshness
-// auto-push).
-
-const HARD_RAIL_PAIR = [
-  path.join(REPO_ROOT, '.claude', 'workflows', 'ticket-fleet.js'),
-  path.join(REPO_ROOT, 'orchestrator', 'ticket-fleet-cloud.js'),
-];
-
-const HARD_RAIL_SENTENCE =
-  'Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are ' +
-  'read-only production paths — never write to them, never leave .bak files there; a change that ' +
-  'would need a live-tree edit to land is committed to the branch only and named as a discovery.';
-
-for (const file of HARD_RAIL_PAIR) {
-  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
-  test(`implementer prompt in ${rel} carries the live-tree hard-rail sentence`, () => {
-    const src = fs.readFileSync(file, 'utf8');
-    assert.ok(
-      src.includes(HARD_RAIL_SENTENCE),
-      `${rel} is missing the live-tree hard-rail sentence — it must match the string in this test verbatim`
-    );
-  });
-
-  test(`verifier prompt in ${rel} instructs the live-tree hard-rail check`, () => {
-    const src = fs.readFileSync(file, 'utf8');
-    assert.match(
-      src,
-      /Live-tree hard rail: the implementer must not have written to ~\/\.claude, ~\/\.codex, ~\/\.agents/,
-      `${rel} verifier prompt must instruct a check for files under the live-tree roots modified after the attempt's first commit`
-    );
-    assert.match(
-      src,
-      /-newermt/,
-      `${rel} verifier prompt must instruct a find -newermt against the attempt's first-commit time`
-    );
-  });
-}
-
-test('the two implementer prompts do not drift on the live-tree sentence', () => {
-  const sentences = HARD_RAIL_PAIR.map(f => {
-    const src = fs.readFileSync(f, 'utf8');
-    return src.includes(HARD_RAIL_SENTENCE);
-  });
-  assert.ok(sentences.every(Boolean),
-    'both fleet scripts must carry the identical live-tree hard-rail sentence; edit both when you change one');
+test('pickInstrument returns gh in a local session with gh on PATH', () => {
+  assert.equal(pickInstrument({}, true, undefined), 'gh');
+  assert.equal(pickInstrument({}, true, 'auto'), 'gh');
 });
+
+test('pickInstrument returns mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set', () => {
+  assert.equal(pickInstrument({ CLAUDE_CODE_REMOTE_SESSION_ID: 'abc' }, true, undefined), 'mcp');
+  assert.equal(pickInstrument({ CLAUDE_CODE_REMOTE_SESSION_ID: 'abc' }, undefined, 'auto'), 'mcp');
+});
+
+test('pickInstrument returns mcp when CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE is set', () => {
+  assert.equal(pickInstrument({ CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE: 'container' }, true, undefined), 'mcp');
+});
+
+test('pickInstrument returns mcp when gh is absent even without the remote env vars', () => {
+  assert.equal(pickInstrument({}, false, undefined), 'mcp');
+});
+
+test('pickInstrument override wins over env detection', () => {
+  assert.equal(pickInstrument({ CLAUDE_CODE_REMOTE_SESSION_ID: 'abc' }, true, 'gh'), 'gh');
+  assert.equal(pickInstrument({}, true, 'mcp'), 'mcp');
+});
+
+test('pickInstrument tolerates a missing env argument', () => {
+  assert.equal(pickInstrument(undefined, true, undefined), 'gh');
+  assert.equal(pickInstrument(null, false, undefined), 'mcp');
+});
+
+// ---- Fleet-script drift guard (issue 138) ----
+// The workflow environment cannot reliably `require` from tools/, so the same
+// naming and instrument-switch shape is inlined in the plugin-served script.
+// These tests fail if the inline logic no longer matches this module's contract.
+
+const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
+const FLEET_SCRIPT_REL = path.relative(REPO_ROOT, FLEET_SCRIPT).replace(/\\/g, '/');
+
+test(`fleet script ${FLEET_SCRIPT_REL} is served by the plugin`, () => {
+  assert.ok(fs.existsSync(FLEET_SCRIPT),
+    `plugin-served fleet script must live at ${FLEET_SCRIPT_REL} (issue 138)`);
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} takes runId from args`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /if \(!cfg\.runId\)/,
+    'fleet must throw on missing args.runId, not mint one with Date.now()');
+  assert.match(src, /const runId = String\(cfg\.runId\)/,
+    'fleet must derive runId from cfg.runId');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} embeds runId+workerIndex+attempt in the branch name`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /wf_\$\{runId\}/, 'branch name must embed the runId');
+  assert.match(src, /w\$\{workerIndex\}/, 'branch name must embed the workerIndex');
+  assert.match(src, /attempt\$\{attempt\}/, 'branch name must embed the attempt counter');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} carries the defaultBranch scout output`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /defaultBranch/, 'SCOUT schema must require defaultBranch');
+  assert.match(src, /scout\.defaultBranch/, 'the deliver/verify stages must use scout.defaultBranch');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} carries keepOpen (Refs vs Closes)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /keepOpen/, 'SCOUT must classify keepOpen');
+  assert.match(src, /Refs #\$\{t\.number\}/, 'deliver must offer Refs #N under keepOpen');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /function pickInstrument/,
+    'fleet must inline pickInstrument so the workflow runtime does not need require()');
+  assert.match(src, /CLAUDE_CODE_REMOTE_SESSION_ID/,
+    'fleet must sniff CLAUDE_CODE_REMOTE_SESSION_ID for the mcp branch');
+  assert.match(src, /trackerRules/,
+    'fleet must route tracker prompts through the instrument-specific rules');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} carries the live-tree hard-rail sentence`, () => {
+  const HARD_RAIL_SENTENCE =
+    'Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are ' +
+    'read-only production paths - never write to them, never leave .bak files there; a change that ' +
+    'would need a live-tree edit to land is committed to the branch only and named as a discovery.';
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(src.includes(HARD_RAIL_SENTENCE),
+    `${FLEET_SCRIPT_REL} is missing the live-tree hard-rail sentence (issue 149)`);
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} verifier prompt still runs the live-tree check`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src,
+    /Live-tree hard rail: the implementer must not have written to ~\/\.claude, ~\/\.codex, ~\/\.agents/,
+    `${FLEET_SCRIPT_REL} verifier prompt must instruct a check for files under the live-tree roots modified after the attempt's first commit`);
+  assert.match(src, /-newermt/,
+    `${FLEET_SCRIPT_REL} verifier prompt must instruct a find -newermt against the attempt's first-commit time`);
+});
+
+// ---- Three-copies gone (issue 138) ----
+// The consolidation ticket deletes the pre-plugin copies. A regression that re-adds one
+// silently re-opens the drift the plugin move was meant to close.
+
+const REMOVED_COPIES = [
+  '.claude/workflows/ticket-fleet.js',
+  'orchestrator/ticket-fleet-cloud.js',
+  'agents/skills/project-harness/templates/ticket-fleet.js',
+];
+
+for (const rel of REMOVED_COPIES) {
+  test(`pre-plugin copy ${rel} no longer exists in the repo`, () => {
+    assert.ok(!fs.existsSync(path.join(REPO_ROOT, rel)),
+      `${rel} was superseded by aac-skills/ticket-fleet/ticket-fleet.js in issue 138 and must not come back`);
+  });
+}

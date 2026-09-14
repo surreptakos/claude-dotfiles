@@ -901,12 +901,11 @@ if (Test-Path $freshnessHookTest) {
         ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
 }
 
-# ticket-fleet branch-naming (issue 29): the workflow's concurrent-attempt guard
-# lives in a pure helper (tools/ticket-fleet-branch.js) so its test can run
-# without spinning up the Workflow tool. Wiring it here means a regression in
-# the runId/workerIndex shape (or a drift between .claude/workflows/ticket-fleet.js
-# and agents/skills/project-harness/templates/ticket-fleet.js) fails the restore
-# suite the same way the freshness-hook regressions do.
+# ticket-fleet branch-naming + gh/mcp instrument switch (issues 29, 138): the workflow's
+# concurrent-attempt guard and the tracker instrument switch both live in a pure helper
+# (tools/ticket-fleet-branch.js) so their tests can run without spinning up the Workflow tool.
+# Since issue 138 the fleet is served by the aac-skills plugin as one merged script, so this
+# suite exercises the drift guards between the pure helper and aac-skills/ticket-fleet/ticket-fleet.js.
 $fleetBranchModule = Join-Path $Clone 'tools\ticket-fleet-branch.js'
 $fleetBranchTest   = Join-Path $Clone 'tools\ticket-fleet-branch.test.js'
 Check 'tools/ticket-fleet-branch.js shipped' (Test-Path $fleetBranchModule)
@@ -1008,13 +1007,11 @@ Check 'in-file `claude-md-lint-ignore` silences a finding (linter emits nothing)
 # subagent definition that ships in ~/.claude/agents/fleet-verifier.md. The whitelist entry
 # claude/agents in lib/manifest.ps1 is what carries it; without an assertion behind that entry, a
 # silent drop (missing frontmatter key, wrong tool set, model drift, or a fleet script that forgets
-# to pass agentType) would slip past the file-count check (line 434) unnoticed. This block reads the
-# restored agent file and both fleet-script copies out of the fake home, and asserts the tool
-# restriction and the agentType wiring the ticket contracts for.
+# to pass agentType) would slip past the file-count check (line 434) unnoticed. Since issue 138
+# the fleet lives in one plugin-served script; the restore suite asserts against that copy
+# (in the marketplace payload) rather than the three pre-plugin copies.
 $fleetVerifier      = Join-Path $FakeHome '.claude\agents\fleet-verifier.md'
-$fleetScriptLocal   = Join-Path $Clone    '.claude\workflows\ticket-fleet.js'
-$fleetScriptHarness = Join-Path $Clone    'agents\skills\project-harness\templates\ticket-fleet.js'
-$fleetScriptCloud   = Join-Path $Clone    'orchestrator\ticket-fleet-cloud.js'
+$fleetScriptPlugin  = Join-Path $Clone    'marketplace\aac-skills\skills\ticket-fleet\ticket-fleet.js'
 Check 'fleet-verifier agent definition restored under fake home' (Test-Path $fleetVerifier)
 if (Test-Path $fleetVerifier) {
     $verifierText = Get-Content $fleetVerifier -Raw
@@ -1032,23 +1029,15 @@ if (Test-Path $fleetVerifier) {
         ($modelLine -eq 'claude-sonnet-5') `
         @("model = $modelLine")
 }
-if (Test-Path $fleetScriptLocal) {
-    $localText = Get-Content $fleetScriptLocal -Raw
-    Check '.claude/workflows/ticket-fleet.js verify stage passes agentType: fleet-verifier' `
-        ($localText -match "agentType:\s*'fleet-verifier'") `
-        @('inline verify agent() call must carry agentType: ''fleet-verifier''')
-}
-if (Test-Path $fleetScriptHarness) {
-    $harnessText = Get-Content $fleetScriptHarness -Raw
-    Check 'harness template ticket-fleet.js verify stage passes agentType: fleet-verifier' `
-        ($harnessText -match "agentType:\s*'fleet-verifier'") `
-        @('template must mirror the local fleet script')
-}
-if (Test-Path $fleetScriptCloud) {
-    $cloudText = Get-Content $fleetScriptCloud -Raw
-    Check 'cloud port ticket-fleet-cloud.js contains no agentType reference (containers do not load the agent registry)' `
-        ($cloudText -notmatch 'agentType') `
-        @('cloud verifier restraint is the container sandbox, not an agentType')
+if (Test-Path $fleetScriptPlugin) {
+    $pluginText = Get-Content $fleetScriptPlugin -Raw
+    Check 'plugin fleet script passes agentType: fleet-verifier when the instrument is gh' `
+        ($pluginText -match "agentType:\s*instrument === 'gh' \? 'fleet-verifier'") `
+        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138)')
+    Check 'plugin fleet script inlines the pickInstrument switch (issue 138)' `
+        (($pluginText -match 'function pickInstrument') -and
+         ($pluginText -match 'CLAUDE_CODE_REMOTE_SESSION_ID')) `
+        @('plugin fleet must sniff CLAUDE_CODE_REMOTE_SESSION_ID for the mcp branch')
 }
 
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must

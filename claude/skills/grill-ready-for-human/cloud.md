@@ -1,6 +1,6 @@
 # Cloud container instruments
 
-Every step in `SKILL.md` still applies in a container; only the tool changes. A `gh` spelling that fails is a cue to use the GitHub MCP equivalent, same shape as `orchestrator/ticket-fleet-cloud.js` in claude-dotfiles:
+Every step in `SKILL.md` still applies in a container; only the tool changes. A `gh` spelling that fails is a cue to use the GitHub MCP equivalent, same shape as the mcp branch of `aac-skills/ticket-fleet/ticket-fleet.js` in claude-dotfiles:
 
 | The step says | In a container use |
 | --- | --- |

@@ -18,14 +18,14 @@ vice versa. Record the venue on boot (`"venue": "local-pc"` in that issue's JSON
 the pass completes. Two masters on one repo is the double-run that exhausted the weekly limit on
 2026-09-01; two masters on two repos at once was ruled out on 2026-09-02 for the same usage reason.
 
-**The claude-dotfiles checkout is not a valid root for a master.** Every target repo's
-`.claude/workflows/ticket-fleet.js` is cwd-relative throughout: its scout runs `gh issue list`
-with no `-R`, its implement stage uses `isolation: 'worktree'`, and its verifier runs `git
-worktree add` "in this repo". A Workflow launched from a session rooted in claude-dotfiles resolves
-all three against claude-dotfiles, and the run on 2026-09-02 stalled on exactly that (issue #44,
-heartbeats 7 and 8). Triage got away with it only because a subagent can `cd` first; the fleet
-cannot. The runbooks are read from the dotfiles checkout by absolute path; nothing else about a
-master lives there.
+**The claude-dotfiles checkout is not a valid root for a master.** The plugin-served fleet
+(`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` in `aac-skills`) is cwd-relative
+throughout: its scout runs `gh api` with no `-R`, its implement stage uses
+`isolation: 'worktree'`, and its verifier runs `git worktree add` "in this repo". A Workflow
+launched from a session rooted in claude-dotfiles resolves all three against claude-dotfiles,
+and the run on 2026-09-02 stalled on exactly that (issue #44, heartbeats 7 and 8). Triage got
+away with it only because a subagent can `cd` first; the fleet cannot. The runbooks are read
+from the dotfiles checkout by absolute path; nothing else about a master lives there.
 
 ## What changes from the cloud runbook
 
@@ -35,11 +35,11 @@ master lives there.
   master keeps working: it runs the merge pass over the repo's open fleet PRs (same policy as
   `RUNBOOK.md` — verifier evidence + green CI + no conflict + no human changes-requested, via
   `gh pr merge`; the CI-never-ran clause and the keep-open rule are there too) and performs the
-  takeover-guard check. The fleet (Workflow tool on the repo's ORIGINAL
-  `.claude/workflows/ticket-fleet.js` — `gh` exists here, no cloud port needed; pass `runId` in
-  `args`, minted with `printf %x $(date +%s)`, because the workflow runtime forbids `Date.now()`
-  in scripts; launch by `scriptPath`, since a workflow registered by name is a session-start
-  snapshot that ignores later edits) is only started AFTER the repo's `/triage` and `/to-tickets`
+  takeover-guard check. The fleet (Workflow tool with
+  `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` — the plugin-served
+  copy that picks the tracker instrument at run time; `gh` exists here, so it uses REST; pass
+  `runId` in `args`, minted with `printf %x $(date +%s)`, because the workflow runtime forbids
+  `Date.now()` in scripts) is only started AFTER the repo's `/triage` and `/to-tickets`
   subagent results have arrived, because the fleet's scout reads the labels those steps produce.
   The master collects subagent results when their completion notifications arrive rather than
   polling. A master serves ONE repo and never fleets another: the other repos have their own

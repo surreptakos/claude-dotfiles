@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: "2026-09-12T17:17:40Z"
-  previous-modified: "2026-09-12T00:24:52Z"
-  revision: "4"
-  content-sha: "86e9d008c528"
+  modified: "2026-09-14T22:40:22Z"
+  previous-modified: "2026-09-12T17:17:40Z"
+  revision: "5"
+  content-sha: "b91c9cb10d07"
 ---
 
 # Project Harness
@@ -106,20 +106,19 @@ cross-repo Projects board instead of per-repo (see step 6).
       step 10 (`gas.json` `exclude` mirrors what `.claspignore` used to say).
     - A repo still on clasp keeps the old rule: `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` produces a credential that pushes fine here while silently breaking Gmail and Drive work in another repo; wire `prepush` to `node tools/clasp-auth.js --quiet` where there is a `package.json`. A self-deploying repo has nothing credential-shaped to wire.
 
-15. **Workflow scripts** — copy `templates/ticket-fleet.js` to `.claude/workflows/ticket-fleet.js`.
-    - A named script for Claude Code's in-session Workflow tool (`Workflow({name: 'ticket-fleet'})`):
-      scout enumerates `ready-for-agent` tickets and `Blocked by #N` edges, unblocked tickets run in
-      parallel — implementer (pinned model via `args.implModel`, default `claude-opus-4-7`; isolated
-      worktree; up to 3 attempts) then a BLIND verifier that sees only branch + acceptance criteria
-      and is prompted to refute — and a PR opens only on a verified pass. Discoveries return through
-      structured output and one writer appends them, so no append races.
-    - **Skip the copy if the file already exists** — a repo may carry hand-tuned prompts or caps, and
-      detection cannot reproduce them (same hazard as step 3.3's `CONFIG` and step 12's session.json).
-    - The Workflow tool resolves `name:` from the checkout it runs in, so the file must be COMMITTED
-      to be usable from a fresh clone; it is inert content otherwise (plain JS the tool reads —
-      nothing executes on install).
-    - First run in a repo: pass `deliver: false` (verify-only dry run) before letting it push
-      branches and open PRs.
+15. **Ticket fleet** — the fleet is served by the `aac-skills` plugin; the harness copies no
+    script. In a session with the plugin installed (step 16 makes that so), invoke it via the
+    Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`
+    and required `args.runId` (`printf %x $(date +%s)`; the workflow runtime forbids
+    `Date.now()`/`Math.random()`). One script serves local and cloud sessions - it picks between
+    the `gh` CLI and the GitHub MCP tools at run time (a cloud container sets
+    `CLAUDE_CODE_REMOTE_SESSION_ID`, or has no `gh` on PATH).
+    - **A repo needing a forked script keeps its own `.claude/workflows/ticket-fleet.js` copy**
+      (hand-tuned prompts, extra phases like aac-routines' auth/cleanup, aac-cockpit's
+      `PROMPT_CONTRACT`) and calls it by name; otherwise `scriptPath` at the plugin copy is the
+      default and the repo carries no fleet file.
+    - **First run in a repo: pass `deliver: false`** (verify-only dry run) before letting the
+      fleet push branches and open PRs.
 
 16. **Cloud plugin** — make `.claude/settings.json` declare the marketplace and the plugin, so a cloud
     session (claude.ai/code) installs `aac-skills` at startup and the harnessed repo has these skills
@@ -294,6 +293,7 @@ whole install; steps 1–7 are idempotent but re-running them churns files for n
 | 15 | 2026-08-27 | Branch-split the dashboard artifact (claude-dotfiles issue 27, ported from issue 20). `dashboard.yml`'s final `git push` becomes `git push -f origin HEAD:refs/heads/dashboard`: the commit-if-changed step still commits `DASHBOARD.md` with `[skip ci]`, but the push force-lands on a dedicated `dashboard` branch instead of advancing the default branch. Without this, every push/issue event that mutated the dashboard advanced origin on a file that has no bearing on source state, and on claude-dotfiles that flipped drifted live copies into state3 (both-diverged hard block) — the single largest source of session-start hard blocks between 2026-08-25 and 2026-08-26. Stable read URL: `https://github.com/<owner>/<repo>/blob/dashboard/DASHBOARD.md`. Affected repos on this machine (5): aac-sales-commissions, aac-sales-cockpit, aac-task-management, aac-bill-intake, message-board. **`dashboard.yml` change is small enough to patch surgically** — repo-local test-environment setup and default-branch substitutions make a wholesale re-copy destructive (same hazard as v6's dashboard.yml patch note and v14's above); swap only the final `git push` line for the branch-split block and leave the rest of the file alone | step 4 (patch `.github/workflows/dashboard.yml`: replace the final `git push` with `git push -f origin HEAD:refs/heads/dashboard`; verify no `refresh dashboard` commit lands on the default branch after the first CI run) |
 | 16 | 2026-08-27 | Finish the drift-free artifact by dropping the generation-time header (claude-dotfiles issue 26). v14 stabilized the body but the header line still read `_Generated <iso> at commit <sha> ...`, so two back-to-back runs of `build-dashboard.js` on unchanged repo + tracker state produced two different files: the timestamp always moved, and the sha moved whenever HEAD did for unrelated reasons. `build-dashboard.js` now emits `_Generated by scripts/build-dashboard.js (CI: dashboard.yml). Do not edit by hand._` — no timestamp, no sha — and the now-unused `sha` constant is deleted. Same input, same output, byte-identical, so the `git diff --quiet` guard fires only on real content movement. **Same step, patch surgically** — the fix is one call-site and one deleted `const`; keep the repo-local `CONFIG` block intact | step 3 (patch `scripts/build-dashboard.js`: delete the `const sha = ...` line and swap the header line to the timestamp-free form) |
 | 17 | 2026-09-09 | `.claude/settings.json` gains `extraKnownMarketplaces` + `enabledPlugins`, so a cloud session (claude.ai/code) installs the `aac-skills` plugin at startup. Without it a cloud session has none of these skills: the claude.ai account-level plugin sync returns zero plugins for the account (`plugins_sync_no_changes count:0` in the session diag log), and the cloud environment setup script runs before the session's git credentials exist, so `claude plugin marketplace add` fails there on the private clone. Verified in a cloud container (claude-dotfiles#100): a fresh startup with only these two keys cloned the marketplace and loaded all 56 skills plus the plugin's SessionStart hook. **Merge, never overwrite** — repo copies carry `permissions` (aac-bill-intake, aac-contract-builder) and `hooks` (aac-sales-cockpit, claude-dotfiles); `templates/add-cloud-plugin.js` adds the two keys and leaves the rest. **Sweep already performed 2026-09-09** on all eight active repos (claude-dotfiles#100, aac-bill-intake#583, aac-sales-commissions#45, aac-routines#154, zoho-source-of-truth#81, aac-contract-builder#189, aac-message-board#15, aac-sales-cockpit#593); only the marker bumps remain | step 16 (`node templates/add-cloud-plugin.js <repo>` where the keys are missing — a no-op on the eight above; bump the marker) |
+| 18 | 2026-09-14 | `ticket-fleet` becomes a team skill served by the `aac-skills` plugin (`aac-skills/ticket-fleet/ticket-fleet.js` in `claude-dotfiles`), and the harness stops copying its own `.claude/workflows/ticket-fleet.js`. One script now serves local and cloud sessions - it picks between the `gh` CLI and the GitHub MCP tools at run time (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH). The three drifted copies before v18 (`.claude/workflows/ticket-fleet.js` in `claude-dotfiles`, `orchestrator/ticket-fleet-cloud.js`, and `agents/skills/project-harness/templates/ticket-fleet.js`) are removed. Together the merged script now carries `runId` from args, `defaultBranch`, `keepOpen` (Refs vs Closes in the PR body), and the MCP/gh instrument switch — none of which the harness template ever had at once. **The plugin pointer is step 16; step 15 is now "the fleet is served by the plugin"** — a repo needing a forked script keeps its own `.claude/workflows/ticket-fleet.js` and invokes it by name (aac-routines' auth/cleanup phases and aac-cockpit's `PROMPT_CONTRACT` are the two known forks) | step 15 (delete the repo's `.claude/workflows/ticket-fleet.js` UNLESS it carries local extensions; step 16 puts the plugin pointer in `.claude/settings.json` so `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` resolves) |
 
 A row can mean "re-copy a file you already have". The marker answers *what a repo lacks*, and a
 template that changed is something the repo lacks just as much as a file it never had — so bump the

@@ -54,12 +54,14 @@ Then, in order:
    edges. Skip if nothing qualifies.
 
 6. **Fleet.** If eligible `ready-for-agent` tickets exist (open, no open blockers), run the
-   Workflow tool with `scriptPath` = the dotfiles clone's `orchestrator/ticket-fleet-cloud.js` and
-   `args` = {{FLEET_ARGS}} plus a `runId` you mint yourself (`printf %x $(date +%s)`; the
-   workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the fleet refuses
-   to start without one). This is your explicit multi-agent authorization from Dan via the
-   master. When the fleet returns, run the **merge pass** (step 3) once more over the PRs it just
-   opened.
+   Workflow tool with
+   `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` (the plugin-served
+   fleet from the `aac-skills` marketplace; one script for local and cloud, it picks between the
+   `gh` CLI and the GitHub MCP tools at run time) and `args` = {{FLEET_ARGS}} plus a `runId`
+   you mint yourself (`printf %x $(date +%s)`; the workflow runtime forbids `Date.now()` and
+   `Math.random()` inside scripts, so the fleet refuses to start without one). This is your
+   explicit multi-agent authorization from Dan via the master. When the fleet returns, run the
+   **merge pass** (step 3) once more over the PRs it just opened.
 
 7. **Session end.** If the repo has the session harness, follow
    `agents/skills/session-end/SKILL.md` — flush memory/handoff state into the repo so the next

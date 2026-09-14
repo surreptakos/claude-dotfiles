@@ -52,9 +52,10 @@ committed payload.
   then clears the mirrored trees so deletions propagate, then copies; pull backs up to
   `~/.claude-dotfiles-backup-<timestamp>` before writing, and never deletes.
 - `install.ps1 [-DryRun]` — fresh machine: prerequisites, pull, then the manual list.
-- `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md`, `worker-cycle.md`,
-  `ticket-fleet-cloud.js` (GitHub-MCP port of `.claude/workflows/ticket-fleet.js` — keep the two in
-  lockstep). Hand-written, not synced to any machine; the master session reads it from this repo.
+- `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md`, `worker-cycle.md`. The fleet
+  itself is served by the `aac-skills` plugin at `aac-skills/ticket-fleet/ticket-fleet.js`, one
+  script for local and cloud sessions (it picks between `gh` and the GitHub MCP tools at run
+  time). Hand-written, not synced to any machine; the master session reads it from this repo.
 
 ## Two invariants worth keeping
 
