@@ -283,7 +283,7 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         f"`python \"{SCRIPT}\" declare \"{turn_id}\" <flow>`. "
         f"In code mode, the only permitted bootstrap is exactly `{code_declaration}`. "
         "Engineering build: implement. Broken behavior: diagnosing-bugs. Raw issues: triage. "
-        "Large foggy effort: wayfinder. Review: code-review. Research: research. "
+        "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
         "No engineering flow: direct-answer. The gate blocks until one route is recorded. "
         "YES GOVERNANCE: ENFORCED. Evidence over intuition; investigate before asking; backup before "
         "system changes; verify every change; check ripple effects; never hand solvable work back. "
@@ -328,7 +328,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
         f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>`. "
         "Engineering build: implement. Broken behavior: diagnosing-bugs. Raw issues: triage. "
-        "Large foggy effort: wayfinder. Review: code-review. Research: research. "
+        "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
         "No engineering flow: direct-answer. YES GOVERNANCE: ENFORCED. Evidence over intuition; "
         "investigate before asking; backup before system changes; verify every change; check ripple "
         "effects; never hand solvable work back. "
@@ -385,7 +385,19 @@ def _is_claude_declaration_command(
     return re.fullmatch(pattern, command, flags=re.IGNORECASE) is not None
 
 
-TICKET_FLOWS = {"to-tickets", "to-spec", "triage"}
+# Owner audit (issue 165): every ALLOWED_FLOWS route that creates issues by design belongs here,
+# otherwise the gate refuses a `gh issue create` the route is meant to produce. wayfinder
+# publishes its map and ticket set; diagnosing-bugs files the closure ticket after a fix;
+# implement records discoveries. session-end's sweep and project-harness setup publish via
+# to-tickets (declared as that flow), so they need no separate entry.
+TICKET_FLOWS = {
+    "to-tickets",
+    "to-spec",
+    "triage",
+    "wayfinder",
+    "diagnosing-bugs",
+    "implement",
+}
 ISSUE_CREATE_PATTERN = re.compile(
     # Anchored: this is matched against ONE segment of a command line, so it fires on a command
     # actually being run, not on the same words appearing inside quoted text. `/issues` must also END
