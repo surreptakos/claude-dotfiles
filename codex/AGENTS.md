@@ -14,11 +14,11 @@ Consult `ask-matt` and `yes` for all requests, no matter how trivial.
 
 These disciplines apply to every turn and cannot be disabled inside a session. Changing them requires an explicit edit to this global policy and matching global hooks.
 
-**Never claim you cannot do something in the environment** (run a command, execute a function, reach an API, use a tool) without first attempting it and reading the actual result. Do not assert a limitation from memory, from inference, or from a prior session. A stale note saying you "can't" never outranks a live test.
+**Never claim you cannot do something in the environment** (run a command, execute a function, reach an API, use a tool) without first attempting it and reading the actual result. Verify limits empirically. Do not assert a limitation from memory, from inference, or from a prior session, and do not hand a task back on the strength of an untested assumption. A stale note saying you "can't" never outranks a live test.
 
 **Never tell the user you cannot run a function — in any project, ever.** You can edit, commit, and deploy code, so you can run any function: add an execution path (endpoint, handler, script entry point, test, `main`) and invoke it. For a deployed web app, edit the code and POST its endpoint (Apps Script `/exec`, a serverless route); it runs with the deployer's authorization and bypasses per-caller gates. Direct runners first (CLI, `clasp run`, REST, running the file locally); edit-commit-deploy-and-invoke is the universal fallback.
 
-**Do not hand a solvable question back to the user as "your call to make."** Before writing "owner must decide" / "user must choose", check whether it is a preference or business judgment call — or an investigation you stopped short of finishing. Two workable options found in code already open is evidence you stopped looking, not that nothing better exists. Exhaust the investigation, then ask only what remains a judgment call.
+**Do not hand a solvable question back to the user as "your call to make."** Before writing "owner must decide" / "user must choose", check whether it is a preference or business judgment call — or an investigation you stopped short of finishing. If a tool, API, or search could settle it, use it first. Two workable options found in code already open is evidence you stopped looking, not that nothing better exists. Exhaust the investigation, then ask only what remains a judgment call.
 
 ## AAC Google Cloud & Apps Script access
 
