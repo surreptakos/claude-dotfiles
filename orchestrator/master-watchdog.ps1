@@ -225,8 +225,15 @@ function Get-BootPrompt {
             "approval; anything that needs Dan becomes a ready-for-human ticket with the evidence in its body. " +
             "Read $runbooks\LOCAL-RUNBOOK.md and then $runbooks\RUNBOOK.md - binding, in that " +
             "order of precedence. Your state issue is surreptakos/claude-dotfiles#$($R.StateIssue); issue #44 there is the shared " +
-            "registry and config - read it, never write to it or to another repo's state issue. Check your state issue for the " +
-            "current state and that no other master serves $($R.Repo); claim venue local-pc there. Then run ONE pass, no /loop: " +
+            "registry and config - read it, never write to it or to another repo's state issue. " +
+            "CROSS-REPO REFERENCE RULE (issue 92): your state issue lives in claude-dotfiles, so a bare ``#N`` in its body points " +
+            "to a claude-dotfiles issue. Every reference to work in $($R.Repo) - including issues, PRs, and heartbeat citations - " +
+            "MUST be written as owner/repo#N (e.g. $($R.Repo)#N); a bare ``#N`` for a $($R.Repo) number trips the tracker audit's " +
+            "dangling-reference check. The watchdog sweeps all four state issues on every tick and again after your pass, so a " +
+            "bare cross-repo ``#N`` written where context names $($R.Repo) is auto-qualified within about ten minutes - but " +
+            "writing them right the first time keeps every heartbeat honest and stops needless issue edits. " +
+            "Check your state issue for the current state and that no other master serves " +
+            "$($R.Repo); claim venue local-pc there. Then run ONE pass, no /loop: " +
             "serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When the pass is done, clear " +
             "the venue, write a line **Pass complete - YYYY-MM-DD HH:MM UTC** (current UTC) at the top of your state issue's " +
             "heartbeat section, say pass complete, and stop; the watchdog closes this window once it has been idle five minutes " +
@@ -244,6 +251,31 @@ function Stop-MasterWindow {
     if ($parent -and $parent.Name -eq 'cmd.exe' -and $parent.CommandLine -match 'master-') {
         Stop-Process -Id $parent.ProcessId -Force -ErrorAction SilentlyContinue
         Write-Info "$Tag stopped cmd.exe wrapper pid=$($parent.ProcessId)"
+    }
+}
+
+function Invoke-StateRefRepair {
+    # Issue 92: sweep the master orchestrator state issues (#74-#77) so a bare `#N` reference
+    # to work in the owning repo is qualified to `owner/repo#N`. Deterministic backstop for
+    # the prose rule in Get-BootPrompt; idempotent (no `gh issue edit` call when nothing needs
+    # changing). Node is already required elsewhere in this repo (tracker-audit,
+    # dotfiles-freshness-hook, sync tooling), so this adds no new dependency.
+    #
+    # Called two ways:
+    #   * -Slug '<slug>' for a targeted sweep right after that master closes.
+    #   * with no -Slug for a sweep of ALL four state issues on every watchdog tick.
+    # The tick-wide sweep is what keeps "the next heartbeat carries no bare cross-repo #N"
+    # true within one watchdog interval regardless of which master (local or cloud) wrote.
+    param([string]$Slug, [string]$Tag = '[repair]')
+    $tool = Join-Path $DotfilesRoot 'tools\repair-state-refs.js'
+    if (-not (Test-Path $tool)) { Write-Info "$Tag $tool not found - skipped"; return }
+    $nodeArgs = @($tool)
+    if ($Slug) { $nodeArgs += @('--only', $Slug) }
+    try {
+        $out = & node @nodeArgs 2>&1
+        foreach ($line in @($out)) { Write-Info "$Tag $line" }
+    } catch {
+        Write-Info "$Tag FAILED ($($_.Exception.Message))"
     }
 }
 
@@ -288,6 +320,16 @@ $selected = @($Repos | Where-Object { $Only.Count -eq 0 -or $Only -contains $_.S
 
 $rcProcs = Get-RemoteControlProcesses
 
+# --- State-ref repair (issue 92): every tick, all four state issues -------------------
+# A bare cross-repo `#N` written into a master's state issue trips the tracker audit's
+# `dangling-reference` check. The prose rule in Get-BootPrompt / LOCAL-RUNBOOK / RUNBOOK is
+# the weaker half - the same prose rule already lived in RUNBOOK.md on 2026-09-03 and was
+# ignored, which is what filed this ticket. This tick-wide sweep is the deterministic half:
+# within one watchdog interval (~10 min), any bare `#N` for an owning-repo issue/PR that a
+# master (local OR cloud) wrote into its state issue body is qualified. Runs before the
+# close/launch stages so the alive check reads the qualified body, not stale text.
+if (-not $WhatIf) { Invoke-StateRefRepair } else { Write-Info "[repair] -WhatIf: skipped" }
+
 # --- Legacy guard --------------------------------------------------------------------
 $legacy = Test-LegacyMasterProcess -Procs $rcProcs
 if ($legacy.Count -gt 0 -and -not $Force) {
@@ -328,7 +370,12 @@ foreach ($p in $rcProcs) {
     if ($markerFresh -and $notReopened -and $idle -and -not $Force) {
         Write-Info "$tag PASS COMPLETE at $($pc.ToString('u')) (master started $($started.ToString('u')), transcript idle ${idleMin}m) - closing pid=$($p.ProcessId)"
         if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
-        else { Stop-MasterWindow -Proc $p -Tag $tag }
+        else {
+            Stop-MasterWindow -Proc $p -Tag $tag
+            # Issue 92: sweep this master's state issue for bare cross-repo #N refs now
+            # that the window has closed and no one else is writing to it.
+            Invoke-StateRefRepair -Slug $slug -Tag $tag
+        }
         continue
     }
     if ($markerFresh -and -not $notReopened) {
