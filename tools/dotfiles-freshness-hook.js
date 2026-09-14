@@ -82,6 +82,46 @@ function repoRoot(from) {
   return from;
 }
 
+// Issue 107: the classifier is a PowerShell script; a cloud Linux container has no
+// PowerShell, so spawning it produces `spawnSync powershell ENOENT` on every hook
+// entry - which reads like something broke. Detect the situation on the PATH (the
+// honest signal: is the executable actually reachable?) and skip cleanly. The
+// container env var CLAUDE_CODE_REMOTE_SESSION_ID is accepted as an override for
+// the paranoid case where a broken PATH on Windows would otherwise misclassify -
+// either signal is enough. Skip only applies when the configured tool is a .ps1;
+// a Node stub (used by tests, and available for a future non-PS reimplementation)
+// bypasses the check.
+function powershellAvailable() {
+  if (process.env.DOTFILES_ASSUME_NO_POWERSHELL === '1') return false;
+  const pathSep = process.platform === 'win32' ? ';' : ':';
+  const rawExts = process.platform === 'win32'
+    ? String(process.env.PATHEXT || '.EXE;.CMD;.BAT').split(';')
+    : [''];
+  const exts = rawExts.length ? rawExts : [''];
+  const paths = String(process.env.PATH || '').split(pathSep).filter(Boolean);
+  const names = ['powershell', 'pwsh'];
+  for (const dir of paths) {
+    for (const name of names) {
+      for (const ext of exts) {
+        try {
+          if (fs.existsSync(path.join(dir, name + ext))) return true;
+        } catch (_) { /* keep looking */ }
+      }
+    }
+  }
+  return false;
+}
+
+function detectSkipReason() {
+  const isPs = /\.ps1$/i.test(TOOL);
+  if (!isPs) return null;
+  if (powershellAvailable()) return null;
+  if (process.env.CLAUDE_CODE_REMOTE_SESSION_ID) {
+    return 'no PowerShell on PATH (cloud container: CLAUDE_CODE_REMOTE_SESSION_ID set)';
+  }
+  return 'no PowerShell on PATH (classifier is a .ps1 script)';
+}
+
 function runTool(mode) {
   const isPs = /\.ps1$/i.test(TOOL);
   const args = isPs
@@ -305,6 +345,9 @@ function modeSessionStart() {
   try { event = raw ? JSON.parse(raw) : {}; } catch (_) { event = {}; }
   if (event && String(event.source || '') === 'compact') { emitSilent(); return; }
 
+  const skip = detectSkipReason();
+  if (skip) { emitContext('DOTFILES FRESHNESS: skipped (' + skip + ')'); return; }
+
   const report = runTool('classify');
   if (!report || report.ok === false) {
     // If the classifier itself failed, do not block. Report so a human can fix it.
@@ -361,6 +404,8 @@ function modeSessionStart() {
 
 function modePrompt() {
   process.env.CLAUDE_HOOK_EVENT = 'UserPromptSubmit';
+  const skip = detectSkipReason();
+  if (skip) { emitContext('DOTFILES FRESHNESS: skipped (' + skip + ')'); return; }
   const report = runTool('classify');
   if (!report || report.ok === false) { emitSilent(); return; }
 
@@ -410,6 +455,8 @@ function modePrompt() {
 
 function modeSessionEnd() {
   process.env.CLAUDE_HOOK_EVENT = 'SessionEnd';
+  const skip = detectSkipReason();
+  if (skip) { emitContext('DOTFILES FRESHNESS: skipped (' + skip + ')'); return; }
   const report = runTool('classify');
   if (!report || report.ok === false) { emitSilent(); return; }
   if (report.state === 'state2') { emitContext(formatState2(report, true)); return; }

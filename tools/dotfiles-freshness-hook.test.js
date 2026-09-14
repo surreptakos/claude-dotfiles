@@ -471,3 +471,85 @@ test('a broken classifier reports but never blocks', () => {
   const out = JSON.parse(r.stdout);
   assert.match(out.hookSpecificOutput.additionalContext, /could not classify/);
 });
+
+// -------------------------------------------------------- issue 107 --
+
+function skipEnv(box) {
+  // Force the .ps1 code path (so runTool WOULD have spawned powershell), then
+  // force powershellAvailable() to return false via the testable seam. Together
+  // they exercise every branch that produced `spawnSync ... ENOENT` on a Linux
+  // container - without needing to actually run on one.
+  return Object.assign({}, box.env, {
+    DOTFILES_FRESHNESS_TOOL: '/nonexistent/tools/dotfiles-freshness.ps1',
+    DOTFILES_ASSUME_NO_POWERSHELL: '1',
+  });
+}
+
+function callWithSkip(mode, stdin) {
+  const box = sandbox();
+  const r = spawnSync(process.execPath, [HOOK, mode], {
+    input: stdin || '', encoding: 'utf8',
+    env: Object.assign({}, process.env, skipEnv(box)),
+    timeout: 30000,
+  });
+  return { r, box };
+}
+
+test('issue 107: session-start skips cleanly when no PowerShell (never spawns the classifier)', () => {
+  const { r, box } = callWithSkip('session-start', JSON.stringify({ source: 'startup' }));
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /ENOENT/);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.hookSpecificOutput.additionalContext, /^DOTFILES FRESHNESS: skipped/);
+  assert.match(out.hookSpecificOutput.additionalContext, /PowerShell/);
+  assert.deepStrictEqual(box.runs(), []);
+});
+
+test('issue 107: UserPromptSubmit skips cleanly when no PowerShell (never blocks, never spawns)', () => {
+  const { r, box } = callWithSkip('prompt', '');
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /ENOENT/);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.hookSpecificOutput.additionalContext, /^DOTFILES FRESHNESS: skipped/);
+  assert.match(out.hookSpecificOutput.additionalContext, /PowerShell/);
+  assert.deepStrictEqual(box.runs(), []);
+});
+
+test('issue 107: SessionEnd skips cleanly when no PowerShell (never spawns the classifier)', () => {
+  const { r, box } = callWithSkip('session-end', '');
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /ENOENT/);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.hookSpecificOutput.additionalContext, /^DOTFILES FRESHNESS: skipped/);
+  assert.match(out.hookSpecificOutput.additionalContext, /PowerShell/);
+  assert.deepStrictEqual(box.runs(), []);
+});
+
+test('issue 107: CLAUDE_CODE_REMOTE_SESSION_ID names cloud container in skip reason', () => {
+  const box = sandbox();
+  const env = Object.assign({}, process.env, skipEnv(box), {
+    CLAUDE_CODE_REMOTE_SESSION_ID: 'cloud-abc123',
+  });
+  const r = spawnSync(process.execPath, [HOOK, 'session-start'], {
+    input: '', encoding: 'utf8', env, timeout: 30000,
+  });
+  assert.strictEqual(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.hookSpecificOutput.additionalContext, /cloud container/);
+});
+
+test('issue 107: a Node stub tool (not .ps1) bypasses the skip check', () => {
+  // Even with DOTFILES_ASSUME_NO_POWERSHELL=1, a non-.ps1 tool path is honoured -
+  // which keeps the existing hermetic tests working on any host, and lets a future
+  // non-PS reimplementation of the classifier reuse this driver as-is.
+  const box = sandbox();
+  box.setClassify({ state: 'synced', summary: 'up to date', liveDrift: false, resolution: [] });
+  const env = Object.assign({}, box.env, { DOTFILES_ASSUME_NO_POWERSHELL: '1' });
+  const r = spawnSync(process.execPath, [HOOK, 'session-start'], {
+    input: JSON.stringify({ source: 'startup' }), encoding: 'utf8',
+    env: Object.assign({}, process.env, env), timeout: 30000,
+  });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, '{}');
+  assert.deepStrictEqual(box.runs(), ['classify']);
+});
