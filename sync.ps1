@@ -114,6 +114,23 @@ if ($Mode -eq 'push') {
             $pkgOut = & $py.Source -3 $packager 2>&1
             if ($LASTEXITCODE -eq 0) {
                 Write-Host '  marketplace/aac-skills refreshed from live skills (stamps rotated where content changed)'
+
+                # The marketplace push IS the upload for every skill the plugin serves, so the
+                # cloud-plugin sweep gets stamped here as a side effect of packaging - no manual
+                # `--stamp` step, no zip to re-upload at claude.ai. A later live edit then reads
+                # as drift against this fingerprint. Best-effort: a missing node or a sweep script
+                # somewhere unexpected must not block the sync.
+                $sweep = Join-Path $UserHome '.claude\skills\session-check\cloud-plugin-sweep.js'
+                $node = Get-Command node -ErrorAction SilentlyContinue
+                if ($node -and (Test-Path $sweep)) {
+                    $stampOut = & $node.Source $sweep '--stamp' '--quiet' 2>&1
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Host '  cloud-plugin sweep stamped (marketplace push == the upload)'
+                    } else {
+                        Write-Host '  cloud-plugin stamp FAILED (sync continues):' -ForegroundColor Yellow
+                        $stampOut | Select-Object -Last 3 | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
+                    }
+                }
             } else {
                 Write-Host '  marketplace refresh FAILED (sync continues):' -ForegroundColor Yellow
                 $pkgOut | Select-Object -Last 3 | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }

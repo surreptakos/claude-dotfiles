@@ -2,10 +2,10 @@
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin (the single package built from ~/.claude/skills plus the repo aac-skills/ tree) when the session-end sweep reports drift. Marketplace push is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
 metadata:
-  modified: "2026-09-11T22:43:49Z"
-  previous-modified: "2026-09-11T22:36:23Z"
-  revision: "3"
-  content-sha: "272e36920ba8"
+  modified: "2026-09-14T20:25:02Z"
+  previous-modified: "2026-09-11T22:43:49Z"
+  revision: "4"
+  content-sha: "424cc9429dd7"
 ---
 
 # Update the cloud plugin
@@ -144,24 +144,21 @@ Validator rejections, all seen in practice:
 
 A rejection means the package is wrong, not the upload. Fix the packager, rebuild, upload again.
 
-## 5. Verify, then stamp
+## 5. Verify — no manual stamp step
 
-Read the surface back — the plugin row on `claude plugin` after `marketplace update`, the Skills
-row on `claude.ai/settings/customize` — and confirm it shows the new version. When the owner
-uploaded, wait for them to say it landed — their word is the read-back. Only then:
+`sync.ps1 -Mode push` stamps the cloud-plugin sweep as a side effect of packaging (right after it
+rebuilds `marketplace/aac-skills/`). The marketplace push IS the upload for every skill the plugin
+serves, so nothing to run by hand here. After `git push`, confirm:
 
 ```bash
-node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js" --stamp --version <version> --accounts <every account uploaded to>
 node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js"
 ```
 
-`--accounts` takes a comma-separated list of emails and defaults to every account signed in on this
-machine, which is only right when the upload really did reach all of them. Name the subset when it
-did not: the sweep then reports `partial-upload` and exits 1 until the rest are done, instead of
-calling the machine current while one account still serves the old snapshot.
+Must print `cloud plugin is current`. A later live edit will move the fingerprint and the sweep
+will report drift, naming the skill — that is the loop closing, not a bug.
 
-The second run must print `cloud plugin is current`. Stamping before a verified upload is worse
-than not stamping at all — it tells every future session the cloud copy is fresh when it is not.
+The zip fallback (step 4) is separate: it reaches only the claude.ai Skills pages (channel 3), not
+the plugin, so it needs no stamp update either — the sweep does not track that channel.
 
 ## The other two plugins
 
