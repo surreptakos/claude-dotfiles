@@ -36,6 +36,8 @@ const {
   paginate,
   parseLinkHeader,
   pageFromUrl,
+  isShortFetch,
+  fetchCommentRows,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -324,6 +326,41 @@ test('paginate short-fetch names the open+closed count when Link carries rel="la
     assert.match(e.message, /5 pages/);        // ground truth from rel="last"
     assert.match(e.message, /110/);            // fetched count
   }
+});
+
+// ---- issue 281: the /issues/comments fetch must not swallow a short-fetch -------------
+// #230 fixed the swallow on /issues and /pulls but left `catch (e) { /* comments-less PRs are
+// fine */ }` around the comments walk, so a partial page degraded to zero comments and the
+// blocker-may-be-answered check under-reported while the run still exited 0 or 1.
+
+test('fetchCommentRows bails (exit 2 path) with the counts when the comments walk short-fetches', () => {
+  const err = new Error('short-fetch: page 2 returned 47 rows (< 100) but the Link header still ' +
+                        'names rel="next" — GitHub says more pages exist. Fetched 147 rows total; ' +
+                        'expected ~400+ rows in 5 pages (repo open + closed).');
+  const bailed = [];
+  // cannotAudit exits the process live, so the stub records and returns.
+  const rows = fetchCommentRows(() => { throw err; }, (e) => bailed.push(e.message));
+  assert.strictEqual(bailed.length, 1);
+  assert.match(bailed[0], /^short-fetch:/);
+  assert.match(bailed[0], /147/);            // fetched count
+  assert.match(bailed[0], /5 pages/);        // expected count
+  assert.deepStrictEqual(rows, []);
+});
+
+test('fetchCommentRows treats a repo with no comments as a clean empty set, not a bail', () => {
+  const bailed = [];
+  assert.deepStrictEqual(fetchCommentRows(() => [], (e) => bailed.push(e)), []);
+  // A non-short-fetch failure (auth 403, 404) still degrades to zero comments as before.
+  assert.deepStrictEqual(
+    fetchCommentRows(() => { throw new Error('HTTP 403: Resource not accessible'); },
+                     (e) => bailed.push(e)), []);
+  assert.deepStrictEqual(bailed, []);
+});
+
+test('isShortFetch separates a partial page from any other fetch failure', () => {
+  assert.strictEqual(isShortFetch(new Error('short-fetch: page 2 returned 47 rows')), true);
+  assert.strictEqual(isShortFetch(new Error('HTTP 403')), false);
+  assert.strictEqual(isShortFetch(null), false);
 });
 
 // ---- parseLinkHeader / pageFromUrl: the pure helpers behind ghPaginate's Link parse -----

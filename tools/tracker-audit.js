@@ -235,6 +235,8 @@ if (require.main !== module) {
     paginate,
     parseLinkHeader,
     pageFromUrl,
+    isShortFetch,
+    fetchCommentRows,
   };
   return;
 }
@@ -382,6 +384,37 @@ function ghPaginate(path) {
   });
 }
 
+/** True when `e` is the partial-page error paginate throws: rows were fetched but GitHub's Link
+ *  header says more exist. Distinct from an auth 403 or a 404 — the set is WRONG, not missing.
+ *  Pure. Exported for tests. */
+function isShortFetch(e) {
+  return /^short-fetch:/.test(String(e && e.message));
+}
+
+/** Fetch the repo-wide `/issues/comments` set for the blocker-may-be-answered check.
+ *
+ *  `fetchAll()` returns every comment row; `onShortFetch(err)` is not expected to return (live it
+ *  is cannotAudit, exit 2).
+ *
+ *  A repo with genuinely no comments returns an empty array and the run carries on to report its
+ *  own findings, and any other failure (auth, 404) still degrades to zero comments — the check
+ *  then stays silent rather than firing on stale data. A short-fetch is the one case that must
+ *  not degrade: paginate holds partial rows while Link names a next page, so a PR whose blocker
+ *  WAS answered reads as having no comments and the check reports the opposite of the truth. That
+ *  is the false negative issue 230 fixed for /issues and /pulls; this catch swallowed it for
+ *  comments. Issue 281.
+ *
+ *  Pure — no gh, no process exits of its own. Exported for tests. */
+function fetchCommentRows(fetchAll, onShortFetch) {
+  try {
+    const rows = fetchAll();
+    return Array.isArray(rows) ? rows : [];
+  } catch (e) {
+    if (isShortFetch(e)) onShortFetch(e);
+    return [];
+  }
+}
+
 /** Bail with exit 2 rather than reporting a clean run we cannot stand behind. */
 function cannotAudit(why, detail) {
   console.error('CANNOT AUDIT: ' + why);
@@ -476,7 +509,7 @@ try {
   // more exist. Degrading to advisory here would leave dangling-reference misclassifying a real
   // (usually closed / merged) PR as unknown — exactly the bug issue 230 is about. Exit 2 in that
   // case so the run does not report a false dangling reference.
-  if (/^short-fetch:/.test(String(e && e.message))) {
+  if (isShortFetch(e)) {
     cannotAudit('`gh api repos/' + REPO + '/pulls` returned a partial page.', e.message);
   }
   prsUnavailable = true;
@@ -486,11 +519,13 @@ if (!prsUnavailable) {
   // Attach comment dates. /issues/comments returns EVERY comment across the whole repo (a PR is an
   // issue, so its thread is here too), which is one call regardless of PR count. Best-effort: a
   // failed comments fetch degrades to zero comments per PR — the blocker-may-be-answered check then
-  // stays silent for that PR, which is safer than firing on stale data.
-  let commentsRaw = [];
-  try {
-    commentsRaw = ghPaginate('repos/' + REPO + '/issues/comments?per_page=100');
-  } catch (e) { /* comments-less PRs are fine */ }
+  // stays silent for that PR, which is safer than firing on stale data. A short-fetch is the
+  // exception (issue 281): partial rows with Link naming a next page mean the answered blockers in
+  // the tail read as unanswered, so bail with the counts rather than under-report.
+  const commentsRaw = fetchCommentRows(
+    () => ghPaginate('repos/' + REPO + '/issues/comments?per_page=100'),
+    (e) => cannotAudit('`gh api repos/' + REPO + '/issues/comments` returned a partial page.',
+                       e.message));
   const commentsByNumber = new Map();
   for (const c of commentsRaw) {
     const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
