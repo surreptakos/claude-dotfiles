@@ -535,13 +535,10 @@ function curlTicketRows(slug, label) {
   } catch (e) { return { error: 'unparseable response' }; }
 }
 
-function ticketChecks() {
-  const remote = tryRun('git', ['remote', 'get-url', 'origin']);
-  const slug = parseGithubSlug(remote);
-  if (!slug) return;
-
-  const label = CFG.ticketLabel || 'ready-for-agent';
-  let list;
+/** Fetch open non-PR issues carrying a single label from the repo's origin. Returns
+ *  { list, error }; the caller decides how to render each shape. Extracted so a second listing
+ *  (ready-for-local-agent, desktop only) can reuse the same gh/curl path. */
+function fetchTicketList(slug, label) {
   if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
     // `gh api` REST (not `gh issue list`, which is GraphQL under the hood). Cloud containers
     // only route REST through their egress proxy — GraphQL 403s there — so the audit and this
@@ -550,23 +547,47 @@ function ticketChecks() {
     const path = 'repos/' + slug.owner + '/' + slug.repo
       + '/issues?labels=' + encodeURIComponent(label) + '&state=open&per_page=100';
     const raw = tryRun('gh', ['api', '--paginate', path], { timeout: 25000 });
-    if (raw === null) { note('(could not reach GitHub for the ticket list)'); return; }
+    if (raw === null) return { error: 'could not reach GitHub for the ticket list' };
     let items;
     try { items = JSON.parse(raw); } catch (e) {
-      note('(GitHub returned unparseable JSON for the ticket list)'); return;
+      return { error: 'GitHub returned unparseable JSON for the ticket list' };
     }
     if (!Array.isArray(items)) items = [];
-    list = items.filter((i) => i && !i.pull_request).map((i) => `#${i.number}  ${i.title}`);
-  } else {
-    const r = curlTicketRows(slug, label);
-    if (r.error) { note(`(no gh, and the GitHub API did not answer — ${r.error})`); return; }
-    list = r.list;
+    return { list: items.filter((i) => i && !i.pull_request).map((i) => `#${i.number}  ${i.title}`) };
   }
+  const r = curlTicketRows(slug, label);
+  if (r.error) return { error: `no gh, and the GitHub API did not answer — ${r.error}` };
+  return { list: r.list };
+}
 
+function renderTicketList(label, result) {
+  if (result.error) { note(`(${result.error} for ${label})`); return; }
+  const list = result.list || [];
   if (!list.length) { ok(`no open tickets labelled ${label}`); return; }
   ok(`${list.length} ticket(s) labelled ${label}`);
   list.slice(0, 8).forEach((r) => note(r));
   if (list.length > 8) note(`...and ${list.length - 8} more`);
+}
+
+function ticketChecks() {
+  const remote = tryRun('git', ['remote', 'get-url', 'origin']);
+  const slug = parseGithubSlug(remote);
+  if (!slug) return;
+
+  const label = CFG.ticketLabel || 'ready-for-agent';
+  renderTicketList(label, fetchTicketList(slug, label));
+
+  // A desktop session sees its ready-for-local-agent queue on prompt 1 too — those are tickets a
+  // cloud container cannot take (a live-tree edit, a proxy-blocked capability). In a cloud
+  // container the queue is by definition not for this session; skip the listing with a note so
+  // the reader knows why it is missing.
+  if (label !== 'ready-for-local-agent') {
+    if (IS_CLOUD) {
+      note('(ready-for-local-agent queue is for the desktop — not listed in a cloud container)');
+    } else {
+      renderTicketList('ready-for-local-agent', fetchTicketList(slug, 'ready-for-local-agent'));
+    }
+  }
 }
 
 /* -------------------------------------------------------------- harness --------------------- */
