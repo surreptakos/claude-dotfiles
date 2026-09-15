@@ -7,7 +7,7 @@
 - [Marketplace is the distribution spine](marketplace-is-the-distribution-spine.md) — every surface syncs aac-skills from the repo; semver-clean versions only; zip is fallback for Skills pages
 - [Git Bash sed strips CRLF](sed-strips-crlf-in-this-repo.md) - edit .ps1 with PowerShell or Edit tool, never sed -i
 - [Fable usage is rationed](fable-usage-is-rationed.md) — weekly cap; fleet/subagent pins stay Opus 4.7 / Sonnet 5 / Haiku, prompt edits only
-- [Workflow runtime quirks](workflow-runtime-quirks.md) — named workflows snapshot at session start (use scriptPath); scripts cannot call Date.now()/Math.random(), fleet needs args.runId
+- [Workflow runtime quirks](workflow-runtime-quirks.md) — named workflows snapshot at session start (use scriptPath); scripts cannot call Date.now()/Math.random(), fleet needs args.runId; scriptPath refuses a CRLF file, pass an LF copy
 - [Desktop scheduled tasks are per org](desktop-scheduled-tasks-are-per-org.md) — registry per account+org under %APPDATA%\Claude\claude-code-sessions; SKILL.md shared; org switch kills sessions; catch-up fires one slot
 - [Answer yes/no in one line](answer-yes-no-in-one-line.md) — outcome, action, fix timing; no evidence dump
 - [Bash tool collapses backslashes](bash-tool-collapses-backslashes.md) — `\\` arrives as `\` even in a quoted heredoc; write backslash-bearing scripts with the Write tool
@@ -26,3 +26,4 @@
 - [Restore test reads live skill copies](restore-test-reads-live-skill-copies.md) — claude-md-lint copy test compares the live ~/.claude skill to tools/; a fleet worker's live edit fails every other worktree's restore test, md5 against worktrees before chasing it
 - [Fleet implementers edit the live tree](fleet-implementers-edit-the-live-tree.md) — worktree isolation does not cover ~/.claude, ~/.codex, ~/.agents; sweep and diff after every run, restore failed branches from their .bak-issueN
 - [Agent remote isolation runs locally](agent-remote-isolation-runs-locally.md) — "remote" agents executed on the desktop with the live home on 2026-09-14; cloud-only probes need a real claude.ai/code session
+- [Cloud-only criteria stall the desktop fleet](cloud-only-criteria-stall-the-desktop-fleet.md) — land the code with an honest proof doc, keep the issue open, prove from the cloud session (#163, 2026-09-15)

@@ -23,6 +23,10 @@ line below.
   exited 0 with `is_error: false`, `subtype: "success"`; access token auto-refreshes from
   `refreshToken`. Probe under an AAC project cwd inherited governance hooks: 40 turns, ~$0.42 on a
   trivial prompt.
+  **Failed again** 2026-09-15: `claude -p` (2.1.269) from a neutral cwd returned
+  `Failed to authenticate: OAuth session expired and could not be refreshed`, exit 1. Headless runs
+  are down until Dan runs `claude auth login` again; the hooks in the project settings still fired
+  before the auth check, so hook-shape probes work without auth.
 - **Pre-send lint is a step, not a hook** (2026-08-12, measured three times): `MessageDisplay` is
   read-only per the docs; a `Stop` block appended a second reply and every flagged message still
   reached the user. Audit trail: clean run stamps `lint_clean_nonce`; a miss is logged to

@@ -9,3 +9,5 @@
 - [ADHD output shaping is standing](adhd-output-shaping-standing.md) — /i-have-adhd is permanent; shapes structure, caveman shapes wording
 - [Ask-matt gate exact command](ask-matt-gate-exact-command.md) — declare command must stand alone in Bash; gh issue create needs to-tickets route declared
 - [PR body quoted Closes keyword](pr-body-quoted-closes-keyword.md) — any 'Closes #N' text in a PR body closes N on merge, even inside a quote; grep before opening
+- [O3 agenda is the full shareable copy](o3-agenda-is-full-shareable-copy.md) — Dan reversed the short agenda 2026-09-15; verbatim prep minus red; Assignment merged into Follow-ups
+- [Granola O3 notes lookup](granola-o3-notes-lookup.md) — O3 notes titled by bare date; match participant email + date; get_meetings returns private_notes
