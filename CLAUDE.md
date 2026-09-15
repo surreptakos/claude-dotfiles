@@ -35,11 +35,11 @@ mirror and the plugin all say the same thing. Never edit the four by hand and ne
 make a check pass: the hash is what makes the dates believable. The previous text of any skill
 is `git log -p -- <skill>/SKILL.md`; the stamp tells you it is there to look for.
 
-After editing anything under `aac-skills/` on a branch with no live tree (a cloud session), run
-both, or CI (`skill-stamps.yml`) fails the branch:
+After editing anything under `aac-skills/` — or under the `agents/skills/` mirror — on a branch
+with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`) fails the branch:
 
 ```bash
-python3 tools/skill-stamps.py stamp aac-skills
+python3 tools/skill-stamps.py stamp aac-skills agents/skills
 python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 ```
 

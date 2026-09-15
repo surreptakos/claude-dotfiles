@@ -2,10 +2,15 @@
 """Tests for tools/build-cloud-plugin.py. Run:  python3 tests/build-cloud-plugin.test.py"""
 
 import importlib.util
+import json
 import re
+import shutil
+import sys
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -108,6 +113,95 @@ class SessionSkillsInCloudPlugin(unittest.TestCase):
             extras = sorted(k for k in fm if k not in bcp.ALLOWED_KEYS)
             self.assertEqual(extras, [],
                              f"{name}: packaged frontmatter carries validator-rejected keys {extras}")
+
+
+# Regression guard for issue 237: --from-mirror wrote its rotated stamps into a tempdir copy of
+# the mirror and threw them away when the run ended, so the mirror SKILL.md kept its stale hash
+# and CI's stale check went red. The write-back must land on the real mirror path.
+STALE_MIRROR_SKILL = """---
+name: foo
+description: A regression fixture for from-mirror stamp write-back.
+metadata:
+  modified: "2026-01-01T00:00:00Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "deadbeefdead"
+---
+
+# Foo
+
+A body that no longer matches the recorded content-sha above.
+"""
+
+
+class FromMirrorStampWriteBack(unittest.TestCase):
+    def _make_fake_repo(self, tmp):
+        repo = Path(tmp) / "repo"
+        (repo / "agents" / "skills" / "foo").mkdir(parents=True)
+        (repo / "claude" / "skills").mkdir(parents=True)
+        (repo / "agents" / "skills" / "foo" / "SKILL.md").write_text(
+            STALE_MIRROR_SKILL, encoding="utf-8")
+        (repo / "claude" / "skill-links.json").write_text(
+            json.dumps([{"Name": "foo", "Target": "__USERHOME__\\.agents\\skills\\foo"}]),
+            encoding="utf-8")
+        return repo
+
+    def _run(self, repo, argv):
+        with mock.patch.object(bcp, "REPO", repo), mock.patch.object(sys, "argv", ["bcp", *argv]):
+            return bcp.main()
+
+    def test_from_mirror_restamps_agents_skills_mirror_in_place(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            out = Path(tmp) / "dist"
+            mirror_skill = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            before = mirror_skill.read_text(encoding="utf-8")
+
+            rc = self._run(repo, [
+                "--from-mirror", "--home", "C:\\Users\\Dan",
+                "--out", str(out), "--no-marketplace",
+            ])
+            self.assertEqual(rc, 0)
+
+            after = mirror_skill.read_text(encoding="utf-8")
+            self.assertNotEqual(after, before,
+                                "mirror SKILL.md should have been restamped on disk")
+            fm = yaml.safe_load(bcp.split_frontmatter(after.replace("\r\n", "\n"))[0]) or {}
+            meta = fm.get("metadata") or {}
+            self.assertNotEqual(meta.get("content-sha"), "deadbeefdead",
+                                "content-sha did not rotate; write-back missed the mirror")
+            self.assertEqual(meta.get("previous-modified"), "2026-01-01T00:00:00Z",
+                             "previous-modified should carry the pre-restamp modified value")
+            self.assertEqual(meta.get("revision"), "2",
+                             "revision should bump by one when the hash rotates")
+
+    def test_no_stamp_write_second_rebuild_reproduces_committed_payload(self):
+        # After the first rebuild has written the new stamp back to the mirror, a second rebuild
+        # with --no-stamp-write must emit the same plugin payload (CI's determinism check).
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            first_out = Path(tmp) / "dist1"
+            second_out = Path(tmp) / "dist2"
+
+            self.assertEqual(self._run(repo, [
+                "--from-mirror", "--home", "C:\\Users\\Dan",
+                "--out", str(first_out), "--no-marketplace",
+            ]), 0)
+            self.assertEqual(self._run(repo, [
+                "--from-mirror", "--home", "C:\\Users\\Dan", "--no-stamp-write",
+                "--out", str(second_out), "--no-marketplace",
+            ]), 0)
+
+            def payload_bytes(root):
+                # Everything under the plugin except plugin.json (its version stamp is time-based).
+                return {
+                    p.relative_to(root).as_posix(): p.read_bytes()
+                    for p in sorted((root / bcp.PLUGIN_NAME).rglob("*")) if p.is_file()
+                    and p.relative_to(root).as_posix() != f"{bcp.PLUGIN_NAME}/.claude-plugin/plugin.json"
+                }
+
+            self.assertEqual(payload_bytes(first_out), payload_bytes(second_out),
+                             "second --no-stamp-write rebuild did not reproduce the payload")
 
 
 if __name__ == "__main__":
