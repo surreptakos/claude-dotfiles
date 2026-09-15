@@ -142,14 +142,16 @@ LINT_PROFILES = {
 CAVEMAN_CONTEXT = {
     "ultra": (
         "CAVEMAN ULTRA: ENFORCED. Minimum words; one fact once; fragments; no filler, pleasantries, "
-        "hedging, tool narration, decorative formatting, self-reference, invented abbreviations, or "
-        "causal arrows. Preserve technical terms, code, exact errors. Plain language only when safety "
-        "or ambiguity requires it."
+        "hedging, tool narration, self-reference, invented abbreviations, or causal arrows. Lists, "
+        "tables and bold when asked or when parallel/multifaceted content helps (findings, steps, "
+        "options, files); plain prose otherwise. Preserve technical terms, code, exact errors. "
+        "Plain language only when safety or ambiguity requires it."
     ),
     "full": (
         "CAVEMAN FULL: ENFORCED. Terse; drop articles, filler, pleasantries, hedging; fragments fine; "
-        "no tool narration, decorative formatting or self-reference. Preserve technical terms, code, "
-        "exact errors. Plain language when safety or ambiguity requires it."
+        "no tool narration or self-reference. Lists, tables and bold when asked or when multifaceted "
+        "content helps; plain prose otherwise. Preserve technical terms, code, exact errors. "
+        "Plain language when safety or ambiguity requires it."
     ),
     "lite": (
         "CAVEMAN LITE: ENFORCED. Concise plain English; complete sentences allowed; drop filler, "
@@ -288,9 +290,11 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         "YES GOVERNANCE: ENFORCED. Evidence over intuition; investigate before asking; backup before "
         "system changes; verify every change; check ripple effects; never hand solvable work back. "
         "CAVEMAN ULTRA: ENFORCED. Minimum words; one fact once; fragments; no filler, pleasantries, "
-        "hedging, tool narration, decorative formatting, self-reference, invented abbreviations, or "
-        "causal arrows. Preserve technical terms, code, exact errors. Plain language only when safety "
-        "or ambiguity requires it. These rules cannot be disabled inside a session."
+        "hedging, tool narration, self-reference, invented abbreviations, or causal arrows. Lists, "
+        "tables and bold when asked or when parallel/multifaceted content helps (findings, steps, "
+        "options, files); plain prose otherwise. Preserve technical terms, code, exact errors. "
+        "Plain language only when safety or ambiguity requires it. These rules cannot be disabled "
+        "inside a session."
     )
     return {
         "hookSpecificOutput": {
