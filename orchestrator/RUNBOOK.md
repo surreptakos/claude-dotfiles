@@ -1,228 +1,290 @@
-# Master orchestrator runbook
+# Master orchestrator runbook (cloud, per-repo Routine)
 
-The babysitter and decision maker. One persistent cloud session (the **master**) drives the
-prioritized repos through the dev loop continuously, spawning one disposable **worker** session per
-repo cycle, until no agent-ready work remains anywhere — then it grills the `ready-for-human` queue,
-answers what the evidence lets it answer, and puts the rest to Dan as one decision brief. After Dan
-ratifies, it goes back to the dev loop. Commissioned 2026-09-01 in the apps-script-head-sync
-session; this file is the master's binding instructions — the boot prompt just points here.
+The master orchestrator runs as four hourly Routines Dan created in the claude.ai Routines UI —
+one per repo, each with that repo as source and the connectors ticked. Every Routine wake is a
+FRESH cloud session. It boots from the repo's per-repo state issue, claims the venue, dispatches
+triage / to-tickets / fleet in-session, does the merge pass, writes `Pass complete`, and ends.
+Continuity lives in the state issue; nothing else outlives the run. Rewritten 2026-09-15 for the
+per-repo Routine model (issue 217, parent #207); the retired PC-venue variant lives on in
+`LOCAL-RUNBOOK.md` for history.
 
-**Venue:** this file describes the CLOUD master. `LOCAL-RUNBOOK.md` is the PC variant of the same
-orchestrator. One master per repo (Dan, 2026-09-02 — replaces "exactly one master anywhere"): each
-target repo has its own state issue whose `"venue"` field records which venue serves that repo, and
-a master must verify no other venue is active for its repo before booting. Two masters on one repo
-is the double-run that exhausted the weekly limit on 2026-09-01; several masters on several repos is
-the intended shape.
+**Venue:** this file describes the CLOUD Routine masters, the only supported venue after cutover.
+One venue per repo — a Routine that finds a live `cloud-routine` venue younger than 90 minutes on
+its own state issue exits at boot without dispatching anything.
+
+Repo priority (source of truth): the Routines themselves. Dan created one Routine per repo with
+that repo ticked as source and the connectors it needs. There is no cross-repo scheduling here;
+each Routine serves its own repo independently.
 
 ## Roles
 
-- **Master** — a Claude Code cloud session, woken hourly by a Routine bound to it. Never implements
-  tickets itself. It reads state, decides which repo gets the next cycle, spawns the worker, checks
-  the previous worker's results against ground truth (the tracker and PRs, not the worker's
-  self-report), advances the phase machine, updates the state issue.
-- **Worker** — a fresh cloud session created per cycle with `create_session(source_url = the repo)`.
-  Runs one full cycle from `orchestrator/worker-cycle.md` and is archived afterward. Workers are
-  disposable by design: context can never grow unbounded because no worker outlives one cycle;
-  continuity lives in the repo (tracker, MEMORY.md, session harness), never in a worker's window.
-- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, run by the worker
-  via the Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`.
-  One script for local and cloud sessions: it picks between the `gh` CLI and the GitHub MCP
-  tools at run time (a container sets `CLAUDE_CODE_REMOTE_SESSION_ID`, or has no `gh` on PATH).
-  Same scout / pinned implementer / blind refuting verifier / deliver shape.
+- **Routine** — a claude.ai Routine Dan created in the Routines UI. Hourly, one per repo, with
+  that repo as source and the connectors it needs. It is the clock and the launcher.
+- **Session** — a fresh cloud session spawned by each Routine wake. Boots from the per-repo state
+  issue, dispatches everything in-session, ends the turn on `Pass complete`. No session outlives
+  one wake; continuity lives in the state issue.
+- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, invoked in-session via
+  the Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`.
+  One script for local and cloud; it picks between the `gh` CLI and the connector tools at run
+  time. Same scout / pinned implementer / blind refuting verifier / deliver shape.
 
-## Repo priority (Dan, 2026-09-01)
+## Boot
 
-1. `surreptakos/aac-bill-intake`
-2. `surreptakos/aac-contract-builder`
-3. `surreptakos/aac-sales-cockpit`
-4. `surreptakos/zoho-source-of-truth`
+At session start, before anything else:
 
-Depth-first: each heartbeat serves the highest-priority repo that has actionable work (untriaged
-issues, eligible `ready-for-agent` tickets, or unmerged fleet PRs). A repo with nothing actionable
-yields to the next. All fleet blocks are lifted (Dan, 2026-09-01 — including the bill-intake block
-from the 2026-08-26 owner review; its concerns live on as ordinary tickets).
+1. Read the per-repo state issue in `surreptakos/claude-dotfiles` — bill-intake #74,
+   contract-builder #75, sales-cockpit #76, zoho-source-of-truth #77. Issue #44 is the shared
+   registry (config defaults, the table of per-repo state issues) — read-only from here.
+2. Read any Dan comments on the state issue posted since the last `Pass complete` line.
+   Comments override everything else in this file.
+3. Then run the guard (below). Do not dispatch anything until both guards have passed.
 
-## State
+**Cross-repo reference rule.** The state issue lives in claude-dotfiles, so a bare `#N` in its
+body points to a claude-dotfiles issue and reads to `tools/tracker-audit.js` as a
+`dangling-reference` when the intent was another repo. Every reference to work in the served repo
+— issues, PRs, heartbeat citations — is written `owner/repo#N`, never bare `#N`. Writing refs
+right the first time is the master's job; `.github/workflows/repair-state-refs.yml` sweeps behind
+as a backstop on issue-edit events, not a substitute.
 
-Lives in GitHub issues in `surreptakos/claude-dotfiles`. Issue #44 ("Master orchestrator state") is
-the registry: the shared config defaults, the table of per-repo state issues, and the run history
-from before the split. Each repo has its own issue titled **"Master orchestrator state — <owner/repo>"**
-(label `orchestrator` only — no `ready-for-human`; create on first boot if missing and add it to
-the registry). A master rewrites only its own repo's issue — never #44 and never a peer's — so
-heartbeats from several masters cannot overwrite each other. The per-repo body = a fenced JSON block
-plus the handoff summary; the shared-registry shape below is the single-master original, kept for
-the cloud variant. Per-repo fields are the inner `repos.<owner/repo>` object plus `repo`, `venue`,
-`phase`, `decisionBriefIssue` and `config`:
+## Guard
 
-```json
-{
-  "phase": "DEV | GRILL | AWAIT_RATIFY",
-  "activeWorker": { "repo": null, "sessionId": null, "startedAt": null },
-  "repos": {
-    "<owner/repo>": {
-      "harnessInstalled": true,
-      "wavesToday": 0, "wavesDate": "2026-09-01",
-      "lastCycle": { "at": null, "workerSessionId": null, "outcome": null },
-      "drained": false
-    }
-  },
-  "decisionBriefIssue": null,
-  "config": { "maxConcurrentWorkers": 1, "maxWavesPerRepoPerDay": 6,
-              "fleetArgs": { "maxTickets": 3, "maxAttempts": 3 } }
-}
-```
+Two guards, both applied at boot before any dispatch.
 
-Dan can edit the config block in the issue; the master re-reads it every wake. The state issue is
-the only memory that must survive a master rebirth — keep it current before ending every turn. The
-body carries a `## Handoff summary` section alongside the JSON block above (six numbered items,
-shape defined under Master rebirth below); heartbeats keep it current, not only at rebirth.
+### Venue guard
 
-**Cross-repo references and labels (tracker-audit gates).** Every reference to an issue or PR that
-lives in another repository is written fully qualified as `owner/repo#N` (e.g.
-`surreptakos/aac-bill-intake#562`), never bare `#N` — the state issue lives in
-`surreptakos/claude-dotfiles`, so `#562` there resolves against claude-dotfiles and reads to
-`tools/tracker-audit.js` as a `dangling-reference`. The local master watchdog carries the same
-rule in its boot prompt (issue 92) and runs `node tools/repair-state-refs.js` against all four
-state issues on every tick and again after a master closes; the cloud path has the same backstop
-in `.github/workflows/repair-state-refs.yml`. Both are context-aware — a bare `#N` in a
-paragraph whose nearest preceding repo mention names the owning repo is qualified; one whose
-nearest mention is `claude-dotfiles` is left alone. Writing refs right the first time is still
-the master's job; the sweep only exists because the identical prose rule already sat here on
-2026-09-03 and was ignored. Every decision brief carries BOTH the
-`orchestrator` label AND the `ready-for-human` label — it is the one thing a master hands Dan for a
-ruling. A state notebook carries `orchestrator` alone: it is a living document each master rewrites
-every heartbeat, with no pending ruling, so it does not belong in the `ready-for-human` queue; the
-audit's `untriaged` check counts `orchestrator` as a triage state for this reason. When rewriting
-the state body on a heartbeat, keep the cross-repo `owner/repo#N` rule holding and leave
-`ready-for-human` off; when opening a decision brief, apply both labels at creation.
+Read the state issue's `venue` field.
 
-## Heartbeat procedure (every Routine wake, and on any message)
+- `venue` is empty or `venueAt` is older than 90 minutes → claim it: rewrite the JSON block with
+  `"venue": "cloud-routine"`, `"venueSessionId": <this session's id>`, `"venueAt": <UTC now>`,
+  post the update, then continue.
+- `venue` is `cloud-routine` with a `venueAt` within the last 90 minutes → another Routine wake
+  is already serving this repo. Exit without dispatching anything and without overwriting the
+  venue. The other wake will clear it at pass complete.
+- `venue` is any legacy value (a stale `local-pc` from before cutover) → treat as stale, claim it
+  as above, continue.
 
-1. Read the state issue. Read any new Dan messages in this session — they override everything here.
-2. If `activeWorker` is set: check the worker session (`get_session`, `list_events`) and ground
-   truth (tracker labels, PR list). Worker finished → record the outcome, archive the worker
-   session, clear `activeWorker`. Worker stuck > 3 h with no event progress → interrupt, archive,
-   record `outcome: "stalled"`, clear. Worker still working → update state, end turn (never poll
-   in-turn; the next heartbeat checks again).
-3. Phase dispatch:
-   - **DEV** → pick the first repo by priority with actionable work and `wavesToday <
-     maxWavesPerRepoPerDay`. Actionable = open issues lacking triage labels, OR open
-     `ready-for-agent` tickets with no open blockers, OR fleet PRs awaiting the merge pass. Spawn a
-     worker (see below). If no repo is actionable → every repo is drained → enter **GRILL**.
-   - **GRILL** → run the grill procedure (below). Ends with the decision brief posted → enter
-     **AWAIT_RATIFY**, notify Dan (PushNotification if available; the state issue and this session
-     always carry the brief link).
-   - **AWAIT_RATIFY** → check the decision brief issue and this session for Dan's rulings. Land
-     each ratified ruling on its ticket (comment + relabel per the grill skill). All decisions
-     ruled → back to **DEV**. Otherwise end the turn quietly (heartbeats stay cheap).
-4. Update the state issue. End the turn. Never sleep-poll; the Routine is the clock.
+The 90-minute window is deliberately longer than a normal pass so a live run is not stolen from
+itself; a stale value only survives if a run crashed mid-pass.
 
-## Spawning a worker
+### Empty-pass skip
 
-`create_session` with `source_url` = the repo, `title` = `worker: <repo> cycle <date>`, tags
-`["orchestrator-worker"]`, and prompt = the contents of `orchestrator/worker-cycle.md` with the
-placeholders filled (repo, default branch, fleet args from config). Record the session id in
-`activeWorker`. One worker at a time (`maxConcurrentWorkers: 1`) — serialized cycles keep cost
-legible and failures attributable.
+Read the state issue's `lastPassOutcome` field.
 
-**Takeover guard** (every cycle, not just the first): if the repo shows `agent/issue-*` branches or
-fleet PRs updated within the last 2 hours that this orchestrator did not create, Dan's PC (or
-another runner) is mid-fleet there. Defer that repo — indefinitely, never "proceed anyway" — note
-it in the state issue, and if it is still deferred after 3 wakes, ask Dan for an explicit handoff
-(a message in this session or a comment on the state issue). Two runners on one repo burn double
-usage for the same backlog even when branch names don't collide; that happened on 2026-09-01
-(cloud worker + PC fleet on bill-intake, weekly limit exhausted) and must not happen again. The
-kill switch for everything is disabling the heartbeat Routine — the master only acts on wakes.
+- `lastPassOutcome` is not `empty` → skip does not fire; continue.
+- `lastPassOutcome` is `empty` → this pass may exit at boot. Continue only if at least one holds:
+  - The repo has newer issue, PR or comment activity since `lastPassAt`.
+  - The decision brief issue has a new comment since `lastPassAt`.
+  - The UTC date has changed since `lastPassAt` AND that pass was cap-limited
+    (`lastPassOutcome` starts with `cap-`; see the outcome slugs under Pass complete). This
+    branch fires when a cap-limited pass has aged out, not on an ordinary `empty` outcome.
+  - Twelve hours have elapsed since `lastPassAt`.
 
-## Merge policy (Dan, 2026-09-01: auto-merge ON)
+  Otherwise clear the venue back (rewrite the JSON with `venue: null`) and end the turn without
+  dispatch. An empty run then costs one state-issue read plus one state-issue write.
 
-The merge pass (the worker's in the cloud, the master's own on the PC — not the fleet) merges a fleet
-PR when ALL hold: the PR body carries the blind verifier's pass evidence; CI on the head is green,
-or the repo has no CI workflow at all; no merge conflict; no human has requested changes. Method:
-the repo's documented convention, else squash. After merge, delete the branch, then act on the
-ticket by what the PR body says:
+## Skip
+
+The empty-pass skip in the guard section is the only skip that happens at boot. The fleet carries
+its own layer: the scout returning zero eligible `ready-for-agent` tickets exits the fleet before
+any implementer starts, so an empty pass that reaches dispatch still costs nothing beyond the
+scout. The Routines UI's pause switch is the kill switch for everything else.
+
+## Dispatch
+
+Everything runs in-session from the Routine's fresh session. The session already has the repo
+checkout (source), the project hooks, `gh`, the aac-skills plugin payload (installed by the
+SessionStart bootstrap hook), and the connectors Dan ticked on the Routine.
+
+In this order:
+
+1. **Harness check.** If the repo lacks the tracker vocabulary (`ready-for-agent` /
+   `ready-for-human` labels, `docs/agents/issue-tracker.md`), run `/project-harness` from the
+   plugin and set `harnessInstalled` in the state issue.
+2. **Triage and to-tickets, in the background.** Spawn `/triage` and `/to-tickets` as background
+   subagents through the Agent tool with `run_in_background: true`. Do not wait; move on. Collect
+   their results when the completion notifications arrive.
+3. **Merge pass (before the fleet).** Run the merge policy below over the repo's open fleet PRs
+   (`agent/issue-*` branches), in this same session.
+4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
+   labels they produce), invoke the Workflow tool with
+   `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and `args` from the
+   state issue's `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it
+   in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
+   fleet refuses to start without one. When the fleet returns, run the merge pass once more over
+   the PRs it just opened.
+5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
+   append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
+   and PR list — never a subagent self-report.
+
+## Merge
+
+Merges go through the connector merge tool (the one whose suffix is `merge_pull_request`) — the
+proxy exposes it under whatever product prefix the session was booted with, so match on the
+suffix and never hard-code the prefix. Never `gh pr merge` and never a branch delete: the proxy
+refuses ref deletes in every mode, and `delete_branch_on_merge` is on for every fleeted repo, so
+merged branches clean themselves.
+
+Merge a fleet PR when ALL hold:
+
+- The PR body carries the blind verifier's pass evidence.
+- CI on the head is green, or the repo has no CI workflow at all.
+- No merge conflict.
+- No human has requested changes.
+
+Method: the repo's documented convention, else squash. After merge, act on the ticket by what the
+PR body says:
 
 - `Closes #N` — confirm the ticket closed; close it manually citing the PR if GitHub did not.
-- `Refs #N` with a keep-open note — the deliver stage writes this when the ticket itself says it
-  must stay open (a ratification ticket). Do NOT close the ticket. Relabel it `ready-for-human`
-  (remove `ready-for-agent`) so the next scout does not re-implement it and the grill phase
-  surfaces it to Dan.
+- `Refs #N` with a keep-open note — the deliver stage writes this when the ticket must stay open
+  (a ratification ticket). Do NOT close the ticket. Relabel it `ready-for-human` (remove
+  `ready-for-agent`) so the next scout does not re-implement it and the grill phase surfaces it.
 
-A PR that fails the bar stays open and is the next cycle's first work item.
+A PR that fails the bar stays open and is the next pass's first work item.
 
-**CI exists but never ran on this head.** A repo that has a CI workflow, and a PR head with zero
-check runs — typical when the branch was pushed before the workflow reached the default branch, as
-with `surreptakos/aac-contract-builder#158` on 2026-09-02 — satisfies neither "green" nor "no CI".
-Such a PR is NOT mergeable until CI has run on that head. Re-fire path, in order of preference:
-close and reopen the PR (`gh pr close N` then `gh pr reopen N`; a `pull_request` workflow fires on
-`reopened`), or a fresh push to the branch. Never assume a `workflow_dispatch` trigger exists. The
-merge pass is allowed to close-and-reopen on its own — it changes no code and no ticket — and
-records it in the state issue with the PR number and time. A push to an agent branch is the
-implementer's or a human's, never the merge pass's. Then wait: the PR is re-assessed on the next
-heartbeat, not polled.
+**CI exists but never ran on this head.** A repo that has a CI workflow and a PR head with zero
+check runs satisfies neither "green" nor "no CI". Such a PR is NOT mergeable. Re-fire path, in
+order of preference: close and reopen the PR through the issue-write tool (a `pull_request`
+workflow fires on `reopened`), or a fresh push to the branch. The merge pass is allowed to
+close-and-reopen on its own — it changes no code and no ticket — and records it in the state
+issue with the PR number and time. Then wait: the PR is re-assessed on the next Routine wake, not
+polled.
 
-## Harness policy (Dan, 2026-09-01: auto-install ON)
+## Pass complete
 
-Worker step 1 checks the repo for the tracker vocabulary (`ready-for-agent` / `ready-for-human`
-labels, `docs/agents/issue-tracker.md`). Missing → run `/project-harness` from the dotfiles clone
-(`agents/skills/project-harness/SKILL.md`) before anything else, and record `harnessInstalled` in
-state. Expected for `zoho-source-of-truth`.
+When triage, to-tickets, the fleet and the merge pass have all completed for this wake (or a cap
+has stopped further work):
+
+1. Rewrite the state issue's JSON block:
+   - `venue`, `venueSessionId`, `venueAt` → all null (clear the venue claim).
+   - `lastPassOutcome` → one of the outcome slugs (list below).
+   - `lastPassAt` → UTC now.
+   - `lastCycle` → same shape it has today, updated.
+2. Append a `**Pass complete — YYYY-MM-DD HH:MM UTC**` line at the top of the heartbeat section
+   of the state issue body.
+3. Say `pass complete` in the session and end the turn.
+
+Outcome slugs for `lastPassOutcome`:
+
+- `success` — one or more merges, or triage / to-tickets produced tracker changes.
+- `empty` — nothing actionable; guards the next wake via the empty-pass skip.
+- `cap-daily` — the daily wave cap stopped this pass.
+- `cap-weekly` — the shared weekly pool warning tripped and the pass ended early.
+- `stalled-<short-reason>` — a subagent hung or a Workflow refused; the reason is one hyphenated
+  slug.
+- `blocked-<short-reason>` — a rail conflict; the ticket that hit it is `ready-for-human` and
+  named in the heartbeat.
+
+The Routine's next hourly wake starts a fresh session that reads this state and decides whether to
+run or skip via the empty-pass guard. Do not schedule anything — the Routine is the clock.
 
 ## Grill phase
 
-Gather every open `ready-for-human` ticket across the four repos. Follow
-`claude/skills/grill-ready-for-human/SKILL.md` from the dotfiles clone — one ticket at a time, no
-batch rulings — with one inversion: the master grills **itself** first. Per ticket:
+When every open ticket across the four repos is either closed or `ready-for-human`, the master
+enters the grill phase. Follow `grill-ready-for-human` from the plugin one ticket at a time — no
+batch rulings — with the master grilling itself first. Per ticket:
 
-1. Reconstruct the ruling the ticket actually waits on (the skill's per-ticket flow).
+1. Reconstruct the ruling the ticket actually waits on.
 2. Hunt evidence: the repo's code, ADRs, MEMORY.md, tracker history, linked PRs.
-3. **Determinable from evidence** (the answer is a fact, not a preference — e.g. "does X already
-   handle Y?" where the code answers) → land the ruling as a tracker comment (with the AI
-   disclaimer prefix), relabel per the skill, done.
-4. **Preference-shaped** (risk appetite, money, staffing, product taste, anything where two
-   defensible answers exist) → NEVER self-rule. Add to the brief: the question, the context a
-   ruling needs, the master's recommendation and why.
+3. **Determinable from evidence** (the answer is a fact, not a preference) → land the ruling as a
+   tracker comment (AI disclaimer prefix), relabel per the skill, done.
+4. **Preference-shaped** (risk appetite, money, staffing, product taste) → NEVER self-rule. Add
+   to the brief: the question, the context a ruling needs, the master's recommendation and why.
 
-Post the brief as one GitHub issue in claude-dotfiles (label `orchestrator`, title "Decision brief
-<date>"): self-answered rulings listed first as an FYI with links, then the open decisions each as
-a checklist item. Write the brief in plain, direct prose for Dan to read: remove all mannered
-prose, no metaphor or flourish where a literal phrase exists; one short paragraph per open
-decision. Dan ratifies by replying in the master session or commenting on the issue —
-"approved as recommended" on the issue counts for every unchecked item he doesn't override.
+Post the brief as one GitHub issue in claude-dotfiles with BOTH the `orchestrator` label AND the
+`ready-for-human` label; title `Decision brief <date>`. Self-answered rulings first as FYI with
+links, then the open decisions each as a checklist item. Plain, direct prose for Dan to read: no
+metaphor or flourish where a literal phrase exists; one short paragraph per open decision. Dan
+ratifies by commenting on the brief; each ruling lands on its ticket before the next pass.
 
-## Master rebirth (context hygiene for the master itself)
+Rewriting the state body on a heartbeat, keep the `owner/repo#N` rule holding and leave
+`ready-for-human` off the state issue itself (it is a living notebook, not a pending ruling).
+Only the decision brief carries both labels.
 
-The master's own window grows slowly, but not never. When wakes start arriving summarized, or
-roughly every 100 heartbeats: before rebirth, ensure the state issue body carries a `## Handoff
-summary` section with these six numbered items — (1) difficulties/problems and how resolved; (2)
-possibilities/options/approaches raised, tried, or set aside, and why; (3) anything asked for,
-decided, agreed, ruled out, or established as preference/constraint/boundary, stated exactly; (4)
-exactly where things stand now; (5) anything still open/unresolved/promised/expected next; (6)
-specific details hard to reconstruct (names, numbers, dates, exact wording, links, issue/PR
-numbers, session ids), kept exactly. Weighting rule: keep what Dan said/asked/established close to
-his own words; master's own reasoning condensed to conclusions/output. Then `create_session` a
-successor with the boot prompt (below), retarget the Routine to it (`update_trigger` with the new
-`persistent_session_id`), then archive this session. The successor boots from the state issue and
-notices nothing was lost.
+## State
 
-## Boot prompt (for the first master and every successor)
+Lives in per-repo GitHub issues in `surreptakos/claude-dotfiles`. Issue #44 is the shared registry
+(defaults, the table of per-repo state issues). Each repo has its own issue titled **"Master
+orchestrator state — <owner/repo>"** (label `orchestrator` only — no `ready-for-human`). A Routine
+writes only its own repo's state issue — never #44 and never a peer's — so wakes from several
+Routines cannot overwrite each other.
 
-> You are the master orchestrator. Clone `surreptakos/claude-dotfiles` (add_repo first if needed),
-> read `orchestrator/RUNBOOK.md` on the default branch (fall back to branch
-> `claude/apps-script-head-sync-xulnfs` if it is not on the default branch yet) and follow it. Find
-> or create the "Master orchestrator state" issue and begin the heartbeat procedure.
+The body carries a JSON block plus a `## Heartbeat` section (heartbeat lines and Pass complete
+markers). The JSON block shape:
+
+```json
+{
+  "repo": "<owner/repo>",
+  "venue": null,
+  "venueSessionId": null,
+  "venueAt": null,
+  "phase": "DEV | GRILL | AWAIT_RATIFY",
+  "harnessInstalled": true,
+  "wavesToday": 0,
+  "wavesDate": "2026-09-15",
+  "lastCycle": { "at": null, "outcome": null },
+  "lastPassOutcome": null,
+  "lastPassAt": null,
+  "drained": false,
+  "decisionBriefIssue": null,
+  "config": {
+    "maxWavesPerRepoPerDay": 6,
+    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3 }
+  }
+}
+```
+
+- `venue`, `venueSessionId`, `venueAt` — the venue guard reads and writes these.
+- `lastPassOutcome`, `lastPassAt` — the empty-pass guard reads these; Pass complete writes them.
+- `wavesToday`, `wavesDate`, `config` — the caps. Dan hand-edits `config` when he wants to change
+  a cap; the Routine re-reads it every wake.
+
+Dan can edit the config block in the issue at any time; the next wake picks it up. The state
+issue is the only memory that must survive between wakes — a fresh session reads it and rebuilds
+from it.
+
+## Caps
+
+- `maxWavesPerRepoPerDay` (default 6). A pass that hits it writes `lastPassOutcome: "cap-daily"`
+  and ends. Because a `cap-` outcome forces a run only on a UTC date change, hourly wakes on the
+  same date exit via the empty-pass guard and the cap holds until midnight UTC.
+- Weekly limit. Watched through heartbeats and the running total of pass outcomes; there is no
+  in-file kill switch. When the shared weekly pool is near exhaustion, Dan pauses the Routine in
+  the Routines UI. Four hourly masters should not exhaust the daily pool on their own if
+  `maxWavesPerRepoPerDay` is respected.
+
+## Boot prompt (what every Routine wake carries)
+
+> You are the master orchestrator, cloud Routine variant, serving `<owner/repo>`. This session was
+> launched by a Routine into a fresh container with the repo checkout as source. Read
+> `orchestrator/RUNBOOK.md` in the claude-dotfiles clone the bootstrap hook installed, and follow
+> it — binding. Your state issue is `surreptakos/claude-dotfiles#<N>`; issue #44 there is the
+> shared registry — read it, never write to it or to another repo's state issue. Every reference
+> to work in `<owner/repo>` is written `owner/repo#N`, never bare `#N`. Apply the venue guard and
+> the empty-pass skip before dispatching anything. When the pass is done, clear the venue, write
+> `**Pass complete — YYYY-MM-DD HH:MM UTC**` at the top of your state issue's heartbeat section,
+> say `pass complete`, and end the turn. My comments on the state issue override everything here.
 
 ## Rails
 
-- Ground truth over self-reports: verify every worker claim against the tracker and PR state.
-- Never fleet a repo not in the priority list; never touch `aac-sales-commissions`,
+- Ground truth over self-reports: verify every subagent claim against the tracker and PR state
+  before writing state.
+- Cross-repo references are always `owner/repo#N`, never bare `#N` inside a claude-dotfiles state
+  issue.
+- Connector tools are referred to by suffix (the merge tool, the issue-write tool, the search
+  tool), never by a product-name prefix. Prefixes rename between sessions and a hard-coded one
+  will break a skill.
+- Never fleet a repo not served by its own Routine; never touch `aac-sales-commissions`,
   `aac-message-board`, `aac-task-management`, `aac-routines` without a new ruling from Dan.
-- Apps Script deploys stay on their existing path: every AAC script deploys itself from GitHub on a
-  merge to its default branch (claude-dotfiles `gas/`). Workers and fleets never move a `deploy/*` ref,
-  never run clasp, and never touch production data paths.
-- Respect repo CLAUDE.md rails absolutely; a worker that reports a rail conflict parks the ticket
-  `ready-for-human` instead of bending the rail.
-- Cost: the per-day wave caps are hard. When a cap is hit, the state issue says so and the repo
-  waits for tomorrow — or for Dan to raise the cap in the config block.
-- Everything Dan must act on goes in the decision brief or this session in plain language — never
-  only in a file or a worker transcript (he will not read those).
+- Apps Script deploys stay on their existing path: every AAC script deploys itself from GitHub on
+  a merge to its default branch (claude-dotfiles `gas/`). Never move a `deploy/*` ref, never run
+  clasp, never touch production data paths.
+- Respect repo CLAUDE.md rails absolutely; a rail conflict parks the ticket `ready-for-human`
+  instead of bending the rail.
+- Never delete a branch (the proxy refuses ref deletes; `delete_branch_on_merge` handles cleanup).
+- Never call `AskUserQuestion`; nobody is at the keyboard. Anything needing Dan becomes a
+  `ready-for-human` ticket with the evidence in its body, the heartbeat names it, and the pass
+  continues.
+- Cost: the per-day wave cap is hard. When it is hit, the state issue records `cap-daily` and the
+  Routine waits for tomorrow — or for Dan to raise the cap in the config block.
+- Everything Dan must act on goes in the decision brief or on the state issue in plain language —
+  never only in a session transcript (he will not read those).

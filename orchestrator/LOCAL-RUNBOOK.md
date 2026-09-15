@@ -1,6 +1,14 @@
-# Local master orchestrator (PC variant)
+# Local master orchestrator (PC variant) — RETIRED
 
-The same orchestrator as `RUNBOOK.md`, run as long-lived interactive Claude Code sessions on
+> **RETIRED 2026-09-15 (issue 217, parent spec #207).** The PC venue is being decommissioned as
+> the four per-repo cloud Routines cut over. `RUNBOOK.md` is the live runbook; this file is kept
+> for history only — it describes the watchdog + long-lived interactive sessions the cloud
+> Routines replaced. Do not launch a new local master from here, do not extend it, and do not
+> treat any decision recorded below as still binding unless the current `RUNBOOK.md` restates it.
+> The watchdog scheduled task, `master-watchdog.ps1`, `install-watchdog-task.ps1` and the PID
+> guard are all part of what is retiring with this venue.
+
+The same orchestrator as `RUNBOOK.md` was, run as long-lived interactive Claude Code sessions on
 Dan's always-on PC instead of a cloud session + Routine. Everything not stated here follows
 `RUNBOOK.md`: the phase machine (DEV → GRILL → AWAIT_RATIFY), repo priorities, auto-merge and
 auto-harness policies, the grill procedure, the rails, and the state issues as the only durable
