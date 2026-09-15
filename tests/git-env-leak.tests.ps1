@@ -309,7 +309,14 @@ try {
     $shimJs = @'
 'use strict';
 const args = process.argv.slice(2);
-function out(s) { process.stdout.write(s); process.exit(0); }
+// The paged calls carry `--include` since issue 230: tracker-audit splits headers from body on
+// the first blank line and reads Link. Answer with the header block real gh prints, or the
+// parse sees bare JSON, throws "malformed HTTP response", and the audit exits 2 before #999.
+const include = args.includes('--include');
+function out(s) {
+  process.stdout.write(include ? 'HTTP/2.0 200 OK\r\nContent-Type: application/json; charset=utf-8\r\n\r\n' + s : s);
+  process.exit(0);
+}
 if (args[0] === '--version') out('gh version 0.0.0-shim\n');
 if (args[0] === 'api') {
   // First non-flag operand is the REST path (or `graphql`). --paginate / --jq / -f / -F are

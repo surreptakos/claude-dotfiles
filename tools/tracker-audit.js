@@ -233,6 +233,8 @@ if (require.main !== module) {
     landedCommits,
     landedFindings,
     paginate,
+    parseLinkHeader,
+    pageFromUrl,
   };
   return;
 }
@@ -275,20 +277,76 @@ function gh(args) {
   return sh('gh ' + parts.join(' '));
 }
 
-/** Walk a paged endpoint and return every row as one array. `fetchPage(pageNumber)` must return
- *  the parsed array for that 1-indexed page; a page shorter than 100 rows ends the walk; 200 is
- *  the safety cap in case an endpoint never returns a short page.
+/** Parse a GitHub Link response header into a map of rel -> URL.
+ *
+ *  The header looks like `<url1>; rel="next", <url2>; rel="last"`. Pure. Exported for tests. */
+function parseLinkHeader(value) {
+  const out = {};
+  const s = String(value || '');
+  const rx = /<([^>]+)>\s*;\s*rel="([^"]+)"/g;
+  let m;
+  while ((m = rx.exec(s))) out[m[2]] = m[1];
+  return out;
+}
+
+/** Pull the `page=N` query param out of a paginated URL. Returns null when absent. Pure. */
+function pageFromUrl(url) {
+  const m = /[?&]page=(\d+)/.exec(String(url || ''));
+  return m ? Number(m[1]) : null;
+}
+
+/** Walk a paged endpoint and return every row as one array. `fetchPage(pageNumber)` returns
+ *  either an array (rows for that 1-indexed page) OR an object `{rows, hasNext, lastPage}` when
+ *  the fetcher can also see the Link header GitHub sent back. A page shorter than 100 rows
+ *  ends the walk; 200 is the safety cap in case an endpoint never returns a short page.
+ *
+ *  When the fetcher exposes Link info, paginate detects the short-page-with-more-available
+ *  shape that produced issue 230: a page returning <100 rows but with `rel="next"` set means
+ *  the tail was silently dropped and every downstream check that treats the fetched set as
+ *  complete (dangling-reference, blocker-may-be-answered, ...) will misread real numbers as
+ *  unknown. Same for reaching the 200-page cap with `rel="next"` still set. In either case
+ *  paginate throws a `short-fetch:` error carrying the counts, which ghPaginate turns into
+ *  cannotAudit — exit 2 rather than a false dangling-reference finding.
  *
  *  Split out from `ghPaginate` so a test can drive the loop with a stubbed fetcher and pin the
- *  page-count / early-exit / non-array behaviour without shelling out to gh. Pure — no gh, no
- *  network, no process exits. Issue 171. */
+ *  page-count / early-exit / non-array / short-with-next behaviour without shelling out to gh.
+ *  Pure — no gh, no network, no process exits. Issue 171, issue 230. */
 function paginate(fetchPage) {
   const all = [];
+  let lastMeta = null;
   for (let page = 1; page <= 200; page++) {
-    const rows = fetchPage(page);
+    const result = fetchPage(page);
+    const rows = Array.isArray(result) ? result : (result && result.rows);
     if (!Array.isArray(rows)) throw new Error('non-array page ' + page);
+    const hasNext = !Array.isArray(result) && !!(result && result.hasNext);
+    const lastPage = Array.isArray(result) ? null : (result && result.lastPage) || null;
+    lastMeta = { hasNext, lastPage };
     for (const r of rows) all.push(r);
-    if (rows.length < 100) break;
+    if (rows.length < 100) {
+      if (hasNext) {
+        // A page returned fewer than 100 rows but the Link header names a next page — GitHub
+        // is telling us there are more rows and we would have to have fetched them to be
+        // complete. Paginate's old row-count end-of-stream heuristic swallowed exactly this
+        // and every check downstream misread the missing numbers as unknown (dangling
+        // references, missed blockers). Bail; ghPaginate turns this into cannotAudit.
+        const expected = lastPage
+          ? '~' + ((lastPage - 1) * 100) + '+ rows in ' + lastPage + ' pages'
+          : 'at least one more page (100+ additional rows)';
+        throw new Error('short-fetch: page ' + page + ' returned ' + rows.length +
+                        ' rows (< 100) but the Link header still names rel="next" — GitHub ' +
+                        'says more pages exist. Fetched ' + all.length + ' rows total; ' +
+                        'expected ' + expected + ' (repo open + closed). The tail was ' +
+                        'silently dropped, so real numbers would read as dangling references.');
+      }
+      return all;
+    }
+  }
+  // Ran the loop to the 200-page cap. If the last page still had rel="next", we did not reach
+  // the end — treat as a short fetch (the cap is a bound on the loop, not on the tracker).
+  if (lastMeta && lastMeta.hasNext) {
+    throw new Error('short-fetch: reached the 200-page safety cap with rel="next" still set. ' +
+                    'Fetched ' + all.length + ' rows; the tail past page 200 was not walked. ' +
+                    'Raise the cap or narrow the query.');
   }
   return all;
 }
@@ -302,13 +360,25 @@ function paginate(fetchPage) {
  *  supported through this proxy. Use repos/{owner}/{repo}/... endpoints instead. (HTTP 403)". So
  *  in every cloud container page one came back and page two killed the audit with exit 2 — on a
  *  repo with more than 100 issues that is every run. Paging by hand keeps each request on the
- *  `repos/{owner}/{repo}` path. A short page (fewer than 100 rows) is the end; the page cap is a
- *  guard against an endpoint that never returns one. */
+ *  `repos/{owner}/{repo}` path.
+ *
+ *  Each `gh api --include` call returns the raw HTTP response so paginate can also read the Link
+ *  header. That header carries `rel="next"` while more pages exist and `rel="last"` on offset-
+ *  paginated endpoints (e.g. /pulls). Cursor-paginated endpoints (e.g. /issues, since GitHub
+ *  moved them mid-2024) supply only `rel="next"`; a page count is not derivable there, but the
+ *  short-page-with-next signal that issue 230 needs still works. */
 function ghPaginate(path) {
   return paginate((page) => {
-    const rows = JSON.parse(gh(['api', path + '&page=' + page]));
+    const raw = gh(['api', path + '&page=' + page, '--include']);
+    const sep = raw.match(/\r?\n\r?\n/);
+    if (!sep) throw new Error('malformed HTTP response on page ' + page + ' from ' + path);
+    const headers = raw.slice(0, sep.index);
+    const body = raw.slice(sep.index + sep[0].length);
+    const linkMatch = /^link:\s*(.*)$/im.exec(headers);
+    const rels = linkMatch ? parseLinkHeader(linkMatch[1]) : {};
+    const rows = JSON.parse(body);
     if (!Array.isArray(rows)) throw new Error('non-array page ' + page + ' from ' + path);
-    return rows;
+    return { rows, hasNext: !!rels.next, lastPage: pageFromUrl(rels.last) };
   });
 }
 
@@ -401,6 +471,14 @@ try {
   // recorded rather than swallowed: the dangling-reference check drops to advisory, because without
   // PRs it genuinely cannot tell a merged PR from a pointer to nothing, and blocker-may-be-answered
   // goes silent on its own (empty prByNumber) — which the NOTE at the bottom then says out loud.
+  //
+  // The short-fetch case is different from an auth 403: paginate has partial rows but Link says
+  // more exist. Degrading to advisory here would leave dangling-reference misclassifying a real
+  // (usually closed / merged) PR as unknown — exactly the bug issue 230 is about. Exit 2 in that
+  // case so the run does not report a false dangling reference.
+  if (/^short-fetch:/.test(String(e && e.message))) {
+    cannotAudit('`gh api repos/' + REPO + '/pulls` returned a partial page.', e.message);
+  }
   prsUnavailable = true;
 }
 

@@ -71,8 +71,9 @@ param(
     #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
     #   lint-root    unsuppressed finding planted in the root CLAUDE.md   -> claude-md-lint gate
     #   lint-mirror  unsuppressed finding planted in claude/CLAUDE.md     -> claude-md-lint gate
+    #   sandbox-identity  the test suites' user.email is what this checkout would commit as -> check 0-pre2
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
-                 'collision', 'locked-scratch', 'lint-root', 'lint-mirror')]
+                 'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -245,6 +246,57 @@ if ($BootstrapOnly) {
 }
 
 . (Join-Path $Clone 'lib\manifest.ps1')
+
+# ------------------------------------------------------------------ 0-pre. worktrees guard (issue 238)
+
+# .claude/worktrees hosts this repo's own concurrent agent checkouts. Two gitlink entries
+# (mode 160000) once slipped onto master when a `git add .` from the parent checkout captured
+# worktree directories as submodules. That broke every Actions run with
+# `No url found for submodule path` and this test's clone-fidelity pass (a gitlink cannot be
+# hash-object'd). .gitignore is the primary block; this check is the backstop for a `git add -f`
+# regression and catches the fault in `-From worktree` (pre-commit) as well as against `-From
+# origin`/`local`.
+Write-Host 'Worktrees guard (issue 238)'
+$wtGitRepo = if ($From -eq 'worktree') { $RepoRoot } else { $Clone }
+$wtEntries = @(& git -C $wtGitRepo ls-files -s -- .claude/worktrees 2>$null)
+Check 'no .claude/worktrees entries in the tracked tree' `
+    ($wtEntries.Count -eq 0) $wtEntries
+Write-Host ''
+
+# ------------------------------------------------------------------ 0-pre2. sandbox identity guard (issue 122)
+
+# The PowerShell test suites commit into throwaway repos as "Test <test@example.com>". Twice
+# (2026-08-25 and again by 2026-08-28) that identity landed in the PARENT checkout's .git/config
+# instead, and every local commit for the following fortnight - sync pushes, session-start
+# captures, feature work, 39 on master by 2026-09-10 - was authored by the sandbox. Check 9c
+# only proves the config file is unchanged ACROSS a test run, so it passes when the pollution
+# is already there. This reads the identity git would stamp on the next commit from this
+# checkout - the same lookup `git commit` does, across config.worktree, the common config and
+# --global - and refuses to call the restore proven while it is the sandbox one. Always against
+# $RepoRoot: the clone is never committed from, this checkout is. The suites themselves no
+# longer write user.* into any config file (identity travels as GIT_AUTHOR_* / GIT_COMMITTER_*
+# env, which has no file to land in), so a red here means a NEW writer has appeared.
+Write-Host 'Sandbox identity guard (issue 122)'
+if ($Fault -eq 'sandbox-identity') {
+    # Inject the sandbox identity for this one read the way git itself takes overrides
+    # (GIT_CONFIG_COUNT / GIT_CONFIG_KEY_n / GIT_CONFIG_VALUE_n, git 2.31+), so the fault never
+    # writes to the real config file - which is the very thing the check exists to catch.
+    $env:GIT_CONFIG_COUNT   = '1'
+    $env:GIT_CONFIG_KEY_0   = 'user.email'
+    $env:GIT_CONFIG_VALUE_0 = 'test@example.com'
+    Note 'fault: sandbox identity injected as the effective user.email'
+}
+$identityEmail  = (& git -C $RepoRoot config --get user.email | Out-String).Trim()
+$identityName   = (& git -C $RepoRoot config --get user.name  | Out-String).Trim()
+$identityOrigin = @(& git -C $RepoRoot config --show-origin --get-all user.email)
+if ($Fault -eq 'sandbox-identity') {
+    Remove-Item -Path Env:GIT_CONFIG_COUNT, Env:GIT_CONFIG_KEY_0, Env:GIT_CONFIG_VALUE_0 -ErrorAction SilentlyContinue
+}
+Check 'this checkout would not commit as the sandbox identity' `
+    ($identityEmail -ne 'test@example.com') `
+    (@(("effective identity: {0} <{1}>" -f $identityName, $identityEmail)) + $identityOrigin +
+     @('remove user.email and user.name at the scope shown (git config --unset), then re-run'))
+Write-Host ''
 
 # ------------------------------------------------------------------ 0. inject the fault
 
