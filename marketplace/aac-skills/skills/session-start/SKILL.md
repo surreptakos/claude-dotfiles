@@ -2,10 +2,10 @@
 name: session-start
 description: Re-print the start-of-session checks for a git project — what the remote did, what is uncommitted, whether the deploy credential is alive, whether tests pass, and which tickets are open. The checks already run automatically at session start; use this to see them again, or with --refresh to re-run them mid-session.
 metadata:
-  modified: '2026-09-09T19:15:00Z'
-  previous-modified: '2026-09-01T23:47:09Z'
-  revision: '1'
-  content-sha: a7d9b45d0ce8
+  modified: '2026-09-14T21:42:38Z'
+  previous-modified: '2026-09-09T19:15:00Z'
+  revision: '2'
+  content-sha: 2d1a4c52e138
 ---
 
 # Start a session
@@ -64,6 +64,19 @@ fixing before any release.
 **`cloud container — no clasp credential is provisioned here`** — expected, not a finding. Cloud
 containers never carry `~/.clasprc.json`; deploys stay CI or local. Do not try to re-authorize from
 the container, and do not report it as a blocker.
+
+**`STOP harness vN is behind vM`** — the repo's `docs/agents/harness-version.md` says vN but
+the `project-harness` skill on this machine has moved on to vM. Run `/project-harness` (upgrade
+path, step 7 — machine-wide, not per-repo). Read-only here: the check never runs the upgrade
+itself, so an out-of-date harness has to be closed before writing code, not remembered later.
+
+**`!! repo is not harnessed`** — neither `docs/agents/harness-version.md` nor
+`scripts/build-dashboard.js` is present. Run `/project-harness`. Deliberate on a scratch repo: set
+`"harness": false` in `.claude/session.json` to silence it.
+
+**`note project-harness skill not available here`** — this machine or container has no
+`project-harness` skill to compare against. A note, never a pass — the harness version cannot
+be checked.
 
 **`STOP tests FAIL`** — find out whether it was already broken before this session. `git stash` and
 re-run, or check the last commit that touched the failing area.

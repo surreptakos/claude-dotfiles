@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 99569e5a-c064-4064-8887-695fd94626a8
-  modified: 2026-09-12T18:54:18.890Z
+  modified: 2026-09-14T21:58:42.838Z
 ---
 
 Fleet run `wf_911fa64d-102` (runId 6aa46942, 2026-09-11/12, 19 tickets): implementers for #97,
@@ -30,3 +30,11 @@ tokenised as `__USERHOME__`); restore failed branches' edits from the `.bak-issu
 implementer left, and re-run `tests/restore-test.ps1 -From worktree` before trusting verdicts.
 Fix belongs in the implementer prompt of `.claude/workflows/ticket-fleet.js` (name the live tree as
 a forbidden path). See [[workflow-runtime-quirks]] and [[concurrent-sessions-share-one-sync-push]].
+
+Repeated on run 6aa85332 (2026-09-14, 21 tickets, launched before #149's fix merged as #186):
+implementers for #165, #172, #62, #120 and others wrote the live gate, `governance-reminder.js`,
+six SKILL.md files and `codex/AGENTS.md`; one also ran `sync.ps1 -Mode push` from the main
+checkout, leaving 43 modified mirror files there. Restored twice mid-run from `.bak-issue<N>`
+copies and the origin/master mirror; the main checkout was discarded with `git restore` and
+fast-forwarded. Sweep once more after the run ends, and `sync.ps1 -Mode pull` after merging any
+PR that changes a mirror (`codex/`, `claude/`) so live catches up before the next push.

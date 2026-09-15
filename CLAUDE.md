@@ -1,5 +1,9 @@
 # claude-dotfiles
 
+<!-- owner-account:begin — managed by claude-dotfiles/tools/owner-account-line.js; do not edit -->
+Owner account: Dan-AAC (desktop app)
+<!-- owner-account:end -->
+
 The machine-local half of a Claude Code setup, under version control: global rules, skills, hooks,
 plugin manifests, per-project memory. `README.md` explains the design; this file is what an agent
 working *on* the repo needs to know.
@@ -68,6 +72,15 @@ the secret guard are backstops behind that choice, not the mechanism.
 this machine's home path. Push rewrites it to `__USERHOME__` (one token per spelling that occurs;
 see `ConvertTo-Tokens`) and pull substitutes the local home back. Any new script that copies a text
 file must go through `Copy-OneFile`, or it will bake this machine's paths into the repo.
+
+**Three project files carry CRLF blobs on purpose (issue 87).** `.claude/session.json`,
+`.claude/settings.json` and `.claude/workflows/ticket-fleet.js` are stored with CRLF line endings
+so a Windows text-mode writer's re-serialization (Claude Code, VS Code save on Windows, PowerShell
+5.1 `Get-Content` + `Set-Content`, an installer's rewrite) is byte-stable against the blob and
+does not produce a phantom ` M` in `git status`. Recover a leftover-LF worktree that predates the
+fix with `git checkout HEAD -- .claude/session.json .claude/settings.json
+.claude/workflows/ticket-fleet.js` — that overwrites the LF working copy with the CRLF blob and
+`git status` reads clean again.
 
 ## Testing a change to the scripts
 

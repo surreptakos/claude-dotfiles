@@ -1040,6 +1040,83 @@ if (Test-Path $fleetScriptPlugin) {
         @('plugin fleet must sniff CLAUDE_CODE_REMOTE_SESSION_ID for the mcp branch')
 }
 
+# owner-account-line (issue 114): the CLAUDE.md line naming which Claude account owns this
+# repo, generated from claude/accounts.json so a wrong-account cloud session cannot happen
+# silently. The tool + tests + registry are read from $RepoRoot (the worktree we ran from),
+# not $Clone, so these checks fire under every -From mode - not only worktree.
+$ownerModule   = Join-Path $RepoRoot 'tools\owner-account-line.js'
+$ownerTest     = Join-Path $RepoRoot 'tools\owner-account-line.test.js'
+$ownerRegistry = Join-Path $RepoRoot 'claude\accounts.json'
+$ownerClaudeMd = Join-Path $RepoRoot 'CLAUDE.md'
+Check 'tools/owner-account-line.js shipped (issue 114 registry-driven owner-account block)' (Test-Path $ownerModule)
+Check 'tools/owner-account-line.test.js shipped (issue 114)' (Test-Path $ownerTest)
+if (Test-Path $ownerTest) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try { $out = & node --test $ownerTest 2>&1; $exit = $LASTEXITCODE }
+    finally { $ErrorActionPreference = $prev }
+    Check 'owner-account-line passes its own test suite (idempotent apply, drift fails check, AGENTS.md fallback, real-file drift guard)' `
+        ($exit -eq 0) @($out | Select-Object -Last 20)
+}
+# Direct AC2 check on THIS repo's own real CLAUDE.md vs its real accounts.json. A wrong or
+# missing block in the checked-in CLAUDE.md fails restore-test in every -From mode - the exact
+# hole the previous attempt left.
+if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry) -and (Test-Path $ownerClaudeMd)) {
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+        $out = & node $ownerModule check --repo $RepoRoot --registry $ownerRegistry --slug 'surreptakos/claude-dotfiles' 2>&1
+        $checkExit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'this repo''s CLAUDE.md carries the owner-account line that claude/accounts.json says it should (AC2)' `
+        ($checkExit -eq 0) @($out)
+}
+# Synthetic sweep across every live registered repo: seed a fake clones root, run apply-all
+# then check-all (idempotent), then seed drift on one repo and re-run check-all - it must
+# exit 1 and name the drifted slug. Covers AC1 across the eight live repos and AC2 end-to-end.
+if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry)) {
+    $sweepRoot = Join-Path $FakeRoot 'owner-account-sweep'
+    if (Test-Path $sweepRoot) { Remove-Item $sweepRoot -Recurse -Force }
+    New-Item -ItemType Directory -Path $sweepRoot | Out-Null
+    $registry = Get-Content $ownerRegistry -Raw | ConvertFrom-Json
+    $liveSlugs = @()
+    foreach ($pp in $registry.repos.PSObject.Properties) {
+        $entry = $pp.Value
+        if ($entry.PSObject.Properties.Name -contains 'status' -and $entry.status -eq 'dead') { continue }
+        $liveSlugs += $pp.Name
+        $repoName = ($pp.Name -split '/')[1]
+        $repoDir  = Join-Path $sweepRoot $repoName
+        New-Item -ItemType Directory -Path $repoDir | Out-Null
+        & git -c "init.defaultBranch=main" init -q $repoDir 2>&1 | Out-Null
+        & git -C $repoDir remote add origin "https://github.com/$($pp.Name)" 2>&1 | Out-Null
+        if ($pp.Name -eq 'surreptakos/zoho-source-of-truth') {
+            Set-Content -Path (Join-Path $repoDir 'AGENTS.md') -Value "# $repoName`n`nbody paragraph.`n" -Encoding utf8
+        } else {
+            Set-Content -Path (Join-Path $repoDir 'CLAUDE.md') -Value "# $repoName`n`nbody paragraph.`n" -Encoding utf8
+        }
+    }
+    $prev = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
+    try {
+        $applyOut = & node $ownerModule apply-all --via clones --registry $ownerRegistry --clones-root $sweepRoot 2>&1
+        $applyExit = $LASTEXITCODE
+        Check ('owner-account-line apply-all --via clones writes the block into every live registered repo (' + $liveSlugs.Count + ' repos) (AC1)') `
+            ($applyExit -eq 0) @($applyOut)
+        $sweepOut = & node $ownerModule check-all --via clones --registry $ownerRegistry --clones-root $sweepRoot 2>&1
+        $sweepExit = $LASTEXITCODE
+        Check 'owner-account-line check-all --via clones passes for every live registered repo after apply-all (idempotent)' `
+            ($sweepExit -eq 0) @($sweepOut)
+        if ($liveSlugs.Count -gt 0) {
+            $victim = $liveSlugs[0]
+            $victimDir = Join-Path $sweepRoot (($victim -split '/')[1])
+            $victimFile = Join-Path $victimDir 'CLAUDE.md'
+            if (-not (Test-Path $victimFile)) { $victimFile = Join-Path $victimDir 'AGENTS.md' }
+            Set-Content -Path $victimFile -Value "# drifted`n`nno owner block here.`n" -Encoding utf8
+            $driftOut = & node $ownerModule check-all --via clones --registry $ownerRegistry --clones-root $sweepRoot 2>&1
+            $driftExit = $LASTEXITCODE
+            Check 'owner-account-line check-all reports drift on the seeded repo (exit=1) (AC2)' `
+                ($driftExit -eq 1 -and ($driftOut -join "`n") -match [regex]::Escape($victim)) @($driftOut | Select-Object -Last 8)
+        }
+    } finally { $ErrorActionPreference = $prev }
+}
+
 # Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
 # return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
 # The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the
@@ -1141,6 +1218,98 @@ if ((Test-Path $claimsAuditTest) -and (Test-Path $restoredEngine)) {
     if (-not (Test-Path $claimsAuditTest)) { $detail += ("tests/claims-audit.test.js missing in clone: {0}" -f $claimsAuditTest) }
     if (-not (Test-Path $restoredEngine))  { $detail += ("engine not restored under fake home: {0}" -f $restoredEngine) }
     Check 'restored claims-audit.js passes tests/claims-audit.test.js' $false $detail
+}
+
+# ------------------------------------------------------------------ 9d. issue-87 CRLF-blob byte stability
+
+# Issue 87: fresh worktrees under the repo's worktree directory used to show phantom modifications
+# on .claude/session.json, .claude/settings.json and .claude/workflows/ticket-fleet.js. Root cause:
+# `.gitattributes` sets `* -text` for the whole repo (correct for the byte-mirror trees), so git
+# does NO EOL conversion. Any Windows text-mode writer that re-serializes these three files at
+# session start (Claude Code, VS Code default save on Windows, PowerShell 5.1 `Get-Content` +
+# `Set-Content`, an installer's rewrite) produces CRLF byte-for-byte; against an LF blob, that is
+# a stat mismatch and `git status --porcelain` reports ` M` while `git diff -w --ignore-cr-at-eol`
+# is empty.
+#
+# The fix stored these three files as CRLF in the blob so any Windows writer's CRLF re-serialization
+# is byte-identical to the blob and status stays clean. Two invariants to gate:
+#   1. Fresh clone carries CRLF bytes for all three files (would fail under `text eol=lf` or an
+#      autocrlf conversion path that stripped the CRLF on the way in).
+#   2. A byte-preserving CRLF rewrite of any of the three files (the exact effect a Windows
+#      writer has) leaves `git status --porcelain` empty.
+# Worktree mode skips a real git repo; the byte-check still runs there so the pre-commit gate
+# does not silently miss a regression in the blob.
+Write-Host ''
+Write-Host 'Issue 87 - CRLF blob byte stability'
+
+$issue87Files = @(
+    (Join-Path $Clone '.claude\session.json'),
+    (Join-Path $Clone '.claude\settings.json')
+)
+# The third issue-87 file, .claude/workflows/ticket-fleet.js, moved to aac-skills/ticket-fleet/
+# with issue 138; the plugin-served copy is not rewritten by Claude Code at session start.
+$missing = @($issue87Files | Where-Object { -not (Test-Path $_) })
+if ($missing.Count -gt 0) {
+    Check 'issue-87 target files present in clone' $false @('one of session.json / settings.json missing from the clone: ' + ($missing -join '; '))
+} else {
+    $nonCrlf = @()
+    foreach ($f in $issue87Files) {
+        $bytes = [System.IO.File]::ReadAllBytes($f)
+        $hasCrlf = $false
+        for ($i = 0; $i -lt ($bytes.Length - 1); $i++) {
+            if ($bytes[$i] -eq 13 -and $bytes[$i + 1] -eq 10) { $hasCrlf = $true; break }
+        }
+        if (-not $hasCrlf) { $nonCrlf += (Split-Path -Leaf $f) }
+    }
+    if ($nonCrlf.Count -eq $issue87Files.Count) {
+        # A clone from an older ref (default -From origin against an origin/master tip that
+        # predates the fix) simply has no CRLF blob to test yet. Note the skip: reporting FAIL
+        # against an older ref would gate every restore run on this branch merging, and reporting
+        # a silent pass would let the fix regress unnoticed after landing. -From local and -From
+        # worktree run against this checkout, so they DO exercise the fix while origin catches up.
+        Note ("skipped: fresh clone has LF blobs for both files (older ref, no fix yet); From={0}" -f $From)
+    } else {
+        Check 'both files land as CRLF bytes in the fresh clone' `
+            ($nonCrlf.Count -eq 0) $nonCrlf
+
+        if ($From -ne 'worktree') {
+            # Fresh clone must be clean up-front (a mistuned fixture would give a false pass for the
+            # byte-stability check below).
+            $preStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' 2>&1
+            $preStatusStr = ($preStatus | Out-String).Trim()
+            Check 'fresh clone git status is clean on the three files' `
+                ([string]::IsNullOrWhiteSpace($preStatusStr)) @("git status: [$preStatusStr]")
+
+            # Snapshot originals for guaranteed restore, then run the byte-preserving Windows
+            # text-writer default: strip existing CR, add CRLF. On the CRLF blob this produces the
+            # exact same bytes and status must stay clean; on an LF blob it would flip to CRLF and
+            # status would show ` M` (the phantom this ticket exists to kill).
+            $originals = @{}
+            foreach ($f in $issue87Files) { $originals[$f] = [System.IO.File]::ReadAllBytes($f) }
+            try {
+                foreach ($f in $issue87Files) {
+                    $bytes = $originals[$f]
+                    $out = New-Object System.Collections.Generic.List[byte]
+                    for ($i = 0; $i -lt $bytes.Length; $i++) {
+                        if ($bytes[$i] -eq 13) { continue }
+                        if ($bytes[$i] -eq 10) { [void]$out.Add(13); [void]$out.Add(10) }
+                        else { [void]$out.Add($bytes[$i]) }
+                    }
+                    [System.IO.File]::WriteAllBytes($f, $out.ToArray())
+                }
+                $postStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' 2>&1
+                $postStatusStr = ($postStatus | Out-String).Trim()
+                Check 'byte-preserving Windows-style CRLF rewrite leaves git status clean' `
+                    ([string]::IsNullOrWhiteSpace($postStatusStr)) @("git status: [$postStatusStr]")
+            } finally {
+                foreach ($f in $issue87Files) {
+                    try { [System.IO.File]::WriteAllBytes($f, $originals[$f]) } catch {}
+                }
+            }
+        } else {
+            Note 'worktree mode: no git repo, byte-stability check via clone modes only'
+        }
+    }
 }
 
 # ------------------------------------------------------------------ 10. two runs can overlap

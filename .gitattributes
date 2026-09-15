@@ -13,3 +13,22 @@
 # bytes are canonical too; the one eol-sensitive file, .githooks/pre-commit (sh), is
 # already LF on disk and -text keeps it that way.
 * -text
+
+# Issue 87: these three project files under .claude/ are read (and, on Windows,
+# text-mode re-serialized) by Claude Code and any admin tool that touches them
+# at session start. Every Windows text-mode writer (Notepad, VS Code default
+# save on Windows, PowerShell 5.1 `Get-Content` + `Set-Content`, an installer's
+# rewrite) produces CRLF byte-for-byte. Under `* -text` above, git does NO EOL
+# conversion; if the blob is LF and the working-copy write is CRLF, `git status`
+# reports a phantom ` M` on every fresh worktree while `git diff -w
+# --ignore-cr-at-eol` prints nothing (reproduced 2026-09-03 on two worktrees at
+# once, and 2026-09-14 on a fresh clone).
+#
+# The fix is byte-stability, not writer identification: store the blob as CRLF
+# so a Windows text-mode writer's output matches the blob byte-for-byte. The
+# explicit `-text` below is redundant with `* -text` and stops a later rule
+# that removes `-text` (e.g. `.claude/** text`) from re-enabling autocrlf on
+# these three files and re-opening the phantom.
+.claude/session.json -text
+.claude/settings.json -text
+.claude/workflows/ticket-fleet.js -text

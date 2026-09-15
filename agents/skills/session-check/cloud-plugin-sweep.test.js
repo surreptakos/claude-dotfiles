@@ -5,7 +5,8 @@
  * The sweep decides whether cloud sessions are running stale skills, so every state it can report
  * is tested against a real temp tree: in-sync, added, changed, removed, packager-changed, the
  * dead-junction fallback, and the two states that must never read as a pass (never-uploaded,
- * unknown).
+ * unknown). The upload channel is the marketplace push (sync.ps1 -Mode push writes the stamp as a
+ * side effect), so no --accounts plumbing here — the tests describe the after-push state only.
  */
 const test = require('node:test');
 const assert = require('node:assert');
@@ -33,21 +34,9 @@ function scratch() {
       CLOUD_PLUGIN_FALLBACK_DIR: fallback,
       CLOUD_PLUGIN_STATE: path.join(root, 'state', 'state.json'),
       CLOUD_PLUGIN_BUILDER: builder,
-      // Hermetic by default: point account discovery at nothing, so a test that does not care
-      // about accounts is not reading this machine's real logins.
-      CLOUD_PLUGIN_ACCOUNT_DIRS: path.join(root, 'no-accounts-here'),
       CLOUD_PLUGIN_AAC_DIR: path.join(root, 'no-aac-here'),
     },
   };
-}
-
-/** A config dir holding a .claude.json for `email`, laid out like a named profile. */
-function addAccount(root, name, email) {
-  const dir = path.join(root, name);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, '.claude.json'),
-    JSON.stringify({ oauthAccount: { emailAddress: email } }));
-  return dir;
 }
 
 function addSkill(dir, name, body) {
@@ -57,7 +46,7 @@ function addSkill(dir, name, body) {
   return d;
 }
 
-/** Run the sweep, returning { code, json } — a non-zero exit is a finding, not a crash. */
+/** Run the sweep, returning { code, out } — a non-zero exit is a finding, not a crash. */
 function run(env, args) {
   try {
     const out = execFileSync(process.execPath, [SCRIPT, ...args], { env, encoding: 'utf8' });
@@ -194,81 +183,28 @@ test('a machine with neither a stamp nor the packager stays silent, exit 0', (t)
   assert.equal(code, 0);
 });
 
-// --------------------------------------------------------------- two accounts, one plugin
-// dan-skills is enabled on both of Dan's accounts, so an upload to one leaves the other serving
-// the old snapshot - in its cloud sessions and in its desktop skill list. A fingerprint match is
-// therefore not sufficient to report "current".
+// --------------------------------------------------------------- fix text
+// The single publish route now is `sync.ps1 -Mode push` (which stamps the sweep) followed by
+// `git push`. Any old "re-upload at claude.ai" wording would send the operator to the wrong
+// surface for a skill the plugin serves.
 
-test('stamping every account reads as in-sync', (t) => {
+test('drift fix text points at the sync push, not claude.ai', (t) => {
   const s = scratch();
   addSkill(s.skills, 'alpha');
-  const work = addAccount(s.root, 'work', 'work@example.com');
-  const personal = addAccount(s.root, 'personal', 'personal@example.com');
-  const env = { ...s.env, CLOUD_PLUGIN_ACCOUNT_DIRS: [work, personal].join(path.delimiter) };
-  run(env, ['--stamp', '--quiet']);
-  const { code, json } = runJson(env);
-  assert.equal(json.state, 'in-sync');
-  assert.deepEqual(json.uploaded.sort(), ['personal@example.com', 'work@example.com']);
-  assert.equal(code, 0);
+  run(s.env, ['--stamp', '--quiet']);
+  addSkill(s.skills, 'beta');
+  const r = run(s.env, []);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /sync\.ps1 -Mode push/);
+  assert.match(r.out, /git push/);
+  assert.ok(!/claude\.ai/i.test(r.out), 'fix text must not send the operator back to claude.ai');
 });
 
-test('stamping one account of two is partial-upload, not a pass', (t) => {
+test('never-uploaded fix text points at the sync push, not claude.ai', (t) => {
   const s = scratch();
   addSkill(s.skills, 'alpha');
-  const work = addAccount(s.root, 'work', 'work@example.com');
-  const personal = addAccount(s.root, 'personal', 'personal@example.com');
-  const env = { ...s.env, CLOUD_PLUGIN_ACCOUNT_DIRS: [work, personal].join(path.delimiter) };
-  run(env, ['--stamp', '--quiet', '--accounts', 'work@example.com']);
-  const { code, json } = runJson(env);
-  assert.equal(json.state, 'partial-upload');
-  assert.deepEqual(json.missing, ['personal@example.com']);
-  assert.equal(code, 1, 'partial upload must not exit 0');
-  assert.ok(json.lines.some((l) => l.includes('personal@example.com')));
-});
-
-test('an edited skill still outranks the account check', (t) => {
-  const s = scratch();
-  addSkill(s.skills, 'alpha');
-  const work = addAccount(s.root, 'work', 'work@example.com');
-  const env = { ...s.env, CLOUD_PLUGIN_ACCOUNT_DIRS: work };
-  run(env, ['--stamp', '--quiet']);
-  addSkill(s.skills, 'alpha', `---
-name: alpha
-description: edited
----
-
-new body
-`);
-  const { code, json } = runJson(env);
-  assert.equal(json.state, 'drift');
-  assert.equal(code, 1);
-});
-
-test('a stamp from before accounts were tracked does not turn into partial', (t) => {
-  const s = scratch();
-  addSkill(s.skills, 'alpha');
-  const work = addAccount(s.root, 'work', 'work@example.com');
-  const env = { ...s.env, CLOUD_PLUGIN_ACCOUNT_DIRS: work };
-  run(env, ['--stamp', '--quiet']);
-  const stamp = JSON.parse(fs.readFileSync(s.state, 'utf8'));
-  delete stamp.accounts;
-  fs.writeFileSync(s.state, JSON.stringify(stamp, null, 2));
-  const { code, json } = runJson(env);
-  assert.equal(json.state, 'in-sync');
-  assert.equal(code, 0);
-});
-
-test('the default profile keeps .claude.json beside its config dir, not inside', (t) => {
-  const s = scratch();
-  addSkill(s.skills, 'alpha');
-  // ~/.claude has no .claude.json inside it; the file is a sibling. Mirror that shape.
-  const home = path.join(s.root, 'home');
-  const dir = path.join(home, '.claude');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(home, '.claude.json'),
-    JSON.stringify({ oauthAccount: { emailAddress: 'sibling@example.com' } }));
-  const env = { ...s.env, CLOUD_PLUGIN_ACCOUNT_DIRS: dir };
-  run(env, ['--stamp', '--quiet']);
-  const { json } = runJson(env);
-  assert.deepEqual(json.uploaded, ['sibling@example.com']);
+  const r = run(s.env, []);
+  assert.equal(r.code, 1);
+  assert.match(r.out, /sync\.ps1 -Mode push/);
+  assert.ok(!/claude\.ai/i.test(r.out), 'fix text must not send the operator back to claude.ai');
 });

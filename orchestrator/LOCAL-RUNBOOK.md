@@ -163,7 +163,14 @@ but cannot merge.
 > `C:\Users\Dan\Claude\Projects\Meta\claude-dotfiles\orchestrator\LOCAL-RUNBOOK.md` and then
 > `...\orchestrator\RUNBOOK.md` — binding, in that order of precedence. Your state issue is
 > `surreptakos/claude-dotfiles#<N>`; issue #44 there is the shared registry and config — read it,
-> never write to it or to another repo's state issue. Check your state issue for the current state
+> never write to it or to another repo's state issue. **Cross-repo reference rule (issue 92):** your
+> state issue lives in claude-dotfiles, so a bare `#N` in its body points to a claude-dotfiles
+> issue. Every reference to work in `<owner/repo>` — issues, PRs, heartbeat citations — is written
+> `owner/repo#N`, never bare `#N`. The watchdog sweeps all four state issues on every tick and
+> again after a pass with `node tools/repair-state-refs.js`, so a bare cross-repo `#N` whose
+> paragraph names `<owner/repo>` is auto-qualified within about ten minutes; writing them right the
+> first time keeps every heartbeat honest and stops needless issue edits. Check your state issue
+> for the current state
 > and that no other master serves `<owner/repo>`; claim venue local-pc there. Then run ONE pass, no
 > `/loop`: serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When
 > the pass is done, clear the venue, write a line `**Pass complete - YYYY-MM-DD HH:MM UTC**`

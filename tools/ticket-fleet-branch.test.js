@@ -192,3 +192,117 @@ for (const rel of REMOVED_COPIES) {
       `${rel} was superseded by aac-skills/ticket-fleet/ticket-fleet.js in issue 138 and must not come back`);
   });
 }
+
+// ---- Resume idempotence guard (issue 150) ----
+// Extract the runCodeLane function body from each fleet script by its FLEET-CODE-LANE markers,
+// drive it with a mocked `agent`, and assert that when the pre-loop PR check reports an open PR
+// the impl/verify/deliver agents are NEVER invoked. This is the real behavior test the reviewer
+// asked for: regex-only prompt-text assertions cannot prove the agent() calls are skipped.
+
+// One script since issue 138: the plugin-served aac-skills/ticket-fleet/ticket-fleet.js.
+const RESUME_GUARD_PAIR = [FLEET_SCRIPT];
+
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+
+function extractCodeLane(src) {
+  const startTag = '// [FLEET-CODE-LANE-START]';
+  const endTag = '// [FLEET-CODE-LANE-END]';
+  const s = src.indexOf(startTag);
+  const e = src.indexOf(endTag);
+  if (s < 0 || e < 0 || e <= s) {
+    throw new Error('FLEET-CODE-LANE markers not found or out of order');
+  }
+  // Return everything between the markers (exclusive) — the const runCodeLane = ... = { ... }.
+  return src.slice(s + startTag.length, e);
+}
+
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
+  const src = fs.readFileSync(scriptPath, 'utf8');
+  const body = extractCodeLane(src);
+  // Wrap the marker body in an async factory that closes over stub bindings, then invoke the
+  // returned runCodeLane. cfg / runId / scout / log / schemas / PR_CHECK are provided as free
+  // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
+  const wrapper = new AsyncFunction(
+    'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
+    'instrument', 'rules',
+    body + '\nreturn runCodeLane;'
+  );
+  const cfg = { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' };
+  const runId = 'testrun';
+  const scout = { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' };
+  const logs = [];
+  // The unified script's lane also reads the instrument switch and the tracker rule helpers;
+  // stub them so the extracted body evaluates the same way under either instrument.
+  const rules = new Proxy({}, { get: () => () => '' });
+  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  const result = await runCodeLane(ticket, workerIndex);
+  return { result, logs };
+}
+
+for (const file of RESUME_GUARD_PAIR) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+
+  test(`${rel} declares runCodeLane between FLEET-CODE-LANE markers`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    assert.match(src, /\/\/ \[FLEET-CODE-LANE-START\]/, 'missing FLEET-CODE-LANE-START marker');
+    assert.match(src, /\/\/ \[FLEET-CODE-LANE-END\]/, 'missing FLEET-CODE-LANE-END marker');
+    const body = extractCodeLane(src);
+    assert.match(body, /const runCodeLane\s*=\s*async/, 'markers must enclose the runCodeLane arrow function');
+    // The pre-loop PR check must precede the attempt loop (structural order in the source).
+    // Match the agent opts labels (not casual references in comments) so a mention like
+    // "impl:#97.1" in the failure-scenario comment does not defeat the ordering assertion.
+    const preIdx = body.indexOf('label: `pr-check:#');
+    const loopIdx = body.indexOf('for (let attempt');
+    const implIdx = body.indexOf('label: `impl:#');
+    const verifyIdx = body.indexOf('label: `verify:#');
+    const deliverIdx = body.indexOf('label: `deliver:#');
+    assert.ok(preIdx >= 0, 'runCodeLane must call the pre-loop PR check with label pr-check:#N');
+    assert.ok(loopIdx > preIdx, 'PR check must precede the attempt for-loop');
+    assert.ok(implIdx > preIdx, 'PR check label must precede the impl agent label');
+    assert.ok(verifyIdx > preIdx, 'PR check label must precede the verify agent label');
+    assert.ok(deliverIdx > preIdx, 'PR check label must precede the deliver agent label');
+    // The early return on found must sit between the check and the loop.
+    const returnIdx = body.indexOf("ticket: t.number, done: true, kind: 'code'");
+    assert.ok(returnIdx > preIdx && returnIdx < loopIdx,
+      'early return on openPR.found must sit between the PR check and the attempt loop');
+  });
+
+  test(`${rel} runCodeLane skips impl/verify/deliver when an open PR already exists`, async () => {
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) {
+        return { found: true, prUrl: 'https://github.com/x/y/pull/137', branch: 'agent/issue-97-attempt1-wf_r1-w0' };
+      }
+      // Any other agent call means the guard failed.
+      throw new Error(`unexpected agent call after PR-found short-circuit: ${opts.label}`);
+    };
+    const { result } = await driveCodeLane(file, agentMock, { number: 97, title: 'x', criteria: '' }, 0);
+    assert.deepEqual(calls, ['pr-check:#97'], 'only the pr-check agent may be started when an open PR exists');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/137');
+    assert.equal(result.branch, 'agent/issue-97-attempt1-wf_r1-w0');
+    assert.equal(result.commentUrl, null);
+    assert.deepEqual(result.discoveries, []);
+  });
+
+  test(`${rel} runCodeLane runs the full impl/verify/deliver chain when no open PR exists`, async () => {
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-9-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-A'] };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/500' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
+    assert.deepEqual(calls, ['pr-check:#9', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
+      'when no open PR exists the pre-check must be followed by impl/verify/deliver in order');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
+    assert.deepEqual(result.discoveries, ['finding-A']);
+  });
+}

@@ -32,7 +32,9 @@
  *     "ticketLabel": "ready-for-agent",
  *     "releaseGates":[ "node tools/canary.js" ],     // run at --end
  *     "checks":      [ { "name": "...", "run": "...", "when": "end" } ],
- *     "note":        "anything to print every time"
+ *     "note":        "anything to print every time",
+ *     "harness":     false                            // silence the harness-version check on
+ *                                                    // a deliberately unharnessed repo
  *   }
  *
  * READ ONLY. It fetches (which changes no files) and reports. It never commits, pushes, merges or
@@ -274,10 +276,54 @@ function testCommand() {
   return null;
 }
 
+/** In a cloud container the configured test command can name a shell that is not on PATH
+ *  (Windows-only `powershell` is the case that hit us — issue 171). Splitting the command on
+ *  `&&` and keeping only the halves whose first token IS on PATH is enough to run the node
+ *  half; the dropped halves are named in a NOTE so the reader sees they were skipped, not
+ *  passed. Returns null when nothing survives, so the caller can leave the STOP path alone.
+ *
+ *  This only runs in a cloud container: on a real Windows box `powershell` is present and the
+ *  full command runs as configured. Pure enough to test if we ever want to. */
+function cloudTestFallback(t) {
+  if (!IS_CLOUD) return null;
+  const halves = t.label.split(/\s*&&\s*/).map((s) => s.trim()).filter(Boolean);
+  if (halves.length < 2) return null;
+  const missing = [];
+  const kept = [];
+  for (const half of halves) {
+    // A quoted path stays one bin (`"C:\Program Files\..\node.exe" -e ...`); an unquoted first
+    // token is the interpreter (`powershell -File ...`, `node --test ...`). Stripping the outer
+    // quotes lets tryRun spawn the binary directly rather than passing quotes into argv[0].
+    const m = half.match(/^"([^"]+)"|^(\S+)/);
+    const bin = m ? (m[1] || m[2]) : '';
+    if (!bin) continue;
+    if (tryRun(bin, ['--version'], { timeout: 5000 }) !== null) { kept.push(half); continue; }
+    if (tryRun(bin, ['-Command', 'exit 0'], { timeout: 5000 }) !== null) { kept.push(half); continue; }
+    missing.push({ bin, half });
+  }
+  if (!missing.length || !kept.length) return null;
+  return { kept, missing };
+}
+
 async function workChecks() {
   head('Work');
 
-  const t = testCommand();
+  let t = testCommand();
+  let skippedHalves = null;
+  if (t) {
+    // Cloud fallback for a command that names a shell the container has no binary for (issue
+    // 171). `powershell` in the configured test on Windows runs `tests/restore-test.ps1`; the
+    // container has no `powershell`, so the whole `&&` chain fails at "powershell: not found"
+    // and STOP fires on a repo whose node tests pass. Split the command, run only the halves
+    // whose interpreter IS on PATH, and note the dropped ones as covered by CI on the current
+    // head — the Windows suite runs there on every push.
+    const fallback = cloudTestFallback(t);
+    if (fallback) {
+      skippedHalves = fallback.missing;
+      const label = fallback.kept.join(' && ');
+      t = { label, argv: [label], shell: true };
+    }
+  }
   if (!t) note('no test command detected — set "test" in .claude/session.json if there is one');
   else {
     const timeout = configuredTimeout('testTimeoutMs', 300000);
@@ -290,6 +336,11 @@ async function workChecks() {
       const pass = (r.out.match(/^ℹ pass (\d+)/m) || [])[1];
       const skip = (r.out.match(/^ℹ skipped (\d+)/m) || [])[1];
       ok(`tests pass${pass ? ` (${pass}${skip && skip !== '0' ? `, ${skip} skipped` : ''})` : ''}`);
+      if (skippedHalves) {
+        for (const s of skippedHalves) {
+          note(`\`${s.half}\` — \`${s.bin}\` is not on PATH in this container; covered by CI on the current head (issue 171)`);
+        }
+      }
     } else if (r.timedOut) {
       stop(`tests TIMEOUT after ${timeout} ms — \`${t.label}\``);
       noteDiagnostics(r.out);
@@ -384,7 +435,7 @@ function cloudSkillChecks() {
     ? 'no upload recorded — cloud sessions may be running without your skills'
     : 'cloud plugin is STALE — cloud sessions load the skills as they were at the last upload');
   lines.forEach((l) => note(l));
-  note('`/update-cloud-plugin` rebuilds and re-uploads it, then stamps the sweep');
+  note('fix: `.\\sync.ps1 -Mode push -Commit "chore: rebuild aac-skills plugin"; git push` (from the main checkout)');
 }
 
 function readJson(file) {
@@ -518,6 +569,48 @@ function ticketChecks() {
   if (list.length > 8) note(`...and ${list.length - 8} more`);
 }
 
+/* -------------------------------------------------------------- harness --------------------- */
+
+/** Whether the repo's project harness is current, against the project-harness skill's own
+ *  version marker. The skill writes `docs/agents/harness-version.md` on every install or
+ *  upgrade; this reads it against the same number the skill would write today
+ *  (`templates/harness-version.md` next to the skill's SKILL.md), so an out-of-date harness
+ *  becomes a STOP at session start instead of something someone has to remember (issue 139).
+ *  Read-only — the upgrade is `/project-harness`, not this. */
+const harnessLib = require('./harness-version');
+function harnessChecks() {
+  if (CFG.harness === false) return;
+  const skillDir = harnessLib.findSkillDir(__dirname, process.env);
+  const s = harnessLib.harnessState(REPO, skillDir);
+  head('Harness');
+  if (s.state === 'stamp-mismatch') {
+    warn(`the project-harness skill is inconsistent — template v${s.template}, SKILL.md v${s.skill}`);
+    note('rebuild the plugin: `python3 tools/build-cloud-plugin.py --from-mirror --home <your-home>`');
+    return;
+  }
+  if (s.state === 'skill-missing') {
+    note(`project-harness skill not available here — cannot check the version${s.reason ? ` (${s.reason})` : ''}`);
+    return;
+  }
+  if (s.state === 'not-harnessed') {
+    warn('repo is not harnessed — run `/project-harness`');
+    note('set `"harness": false` in .claude/session.json to silence this on a deliberately unharnessed repo');
+    return;
+  }
+  if (s.state === 'current') {
+    ok(`harness v${s.repo}, current`);
+    return;
+  }
+  if (s.state === 'ahead') {
+    warn(`harness stamp says v${s.repo} but the skill is at v${s.current} — someone edited the marker without bumping the template`);
+    return;
+  }
+  // behind
+  const shown = s.v1Implicit ? 'v1 (no docs/agents/harness-version.md; pre-marker)' : `v${s.repo}`;
+  stop(`harness ${shown} is behind v${s.current} — run \`/project-harness\` (upgrade path, step 7)`);
+  note('the upgrade table lives in project-harness/SKILL.md ("Upgrading an existing install")');
+}
+
 /* -------------------------------------------------------------- account ---------------------- */
 
 /** Which Claude account this session runs under, against ~/.claude/accounts.json (identity.js).
@@ -586,6 +679,7 @@ async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
   gitChecks();
+  harnessChecks();
   accountChecks();
   claspChecks();
   await workChecks();

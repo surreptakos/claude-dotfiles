@@ -11,7 +11,7 @@
     "here is frequently hand-corrected (aac-bill-intake needs an explicit file list because",
     "`node --test gas/` does not work there), and detection cannot reproduce that."
   ],
-  "test": "powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree && node --test tests/docs-claims.test.js",
+  "test": "powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree && node --test tests/docs-claims.test.js tools/*.test.js",
   "ticketLabel": "ready-for-agent",
   "releaseGates": [],
   "note": "Release here is the push to origin/master - that is what a new machine restores from. After any merge, re-run sync.ps1 -Mode push and diff before pushing: claude/, codex/, agents/ and memory/ are generated, and git will line-merge two machine snapshots into a file matching neither."

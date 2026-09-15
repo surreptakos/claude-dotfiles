@@ -298,14 +298,50 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 }
 
 // ---- Implement + blind Verify per ticket, no barrier between tickets ----
-// Pre-annotate each ticket with a workerIndex (0-based position in the wave) so
-// the pipeline callback can build a collision-proof branch name without
-// relying on pipeline's callback signature to pass an index.
-const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
-const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
-  const t = ticket
-  if (t.kind === 'probe') return await runProbeLane(t)
-  if (t.kind === 'human') return await runHumanLane(t)
+// Pre-loop idempotence guard for resume (issue 150). Fetches the open-PR state from the tracker
+// and shapes it into a small stable structured answer so the code lane can early-return before
+// spawning any impl/verify/deliver agent. See runCodeLane below.
+const PR_CHECK = { type: 'object', required: ['found'], properties: {
+  found: { type: 'boolean' },
+  prUrl: { type: 'string' },
+  branch: { type: 'string' },
+} }
+
+// runCodeLane is bounded by the FLEET-CODE-LANE markers so the lockstep test in
+// tools/ticket-fleet-branch.test.js can extract this function verbatim and drive
+// it with a mocked `agent`, asserting that impl/verify/deliver agents are NOT
+// invoked when the pre-loop PR check reports an open PR (issue 150 acceptance).
+// [FLEET-CODE-LANE-START]
+const runCodeLane = async (t, workerIndex) => {
+  // Idempotence guard for resume (issue 150). If the tracker already has an open PR whose head
+  // ref matches this ticket's branch shape, skip the whole ticket: no impl, verify or deliver
+  // agent is spawned. The observed failure mode (wf_911fa64d-102, run id 6aa46942): a resumed
+  // run served impl:#97.1 from cache, but verify:#97.1 and deliver:#97 ran under changed cache
+  // keys, re-verified the ticket, and opened PR 145 while PR 137 was still open. What moved
+  // those keys inside the workflow runtime is opaque here; the fix short-circuits the pipeline
+  // body with this pre-loop tracker check, before any of the drifting keys are hit.
+  const prCheckSteps = instrument === 'mcp'
+    ? `There is no gh CLI here: use mcp__github__list_pull_requests with state="open" and per_page=100.
+Filter the returned array to entries whose head.ref (the branch name of the PR's head) starts with agent/issue-${t.number}-.`
+    : `Steps:
+1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
+2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\`. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
+3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
+  const openPR = await agent(
+    `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
+${prCheckSteps}
+If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
+Make no repository change, no comment, no PR. Return structured output only.`,
+    { label: `pr-check:#${t.number}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
+  )
+  if (openPR && openPR.found) {
+    log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)
+    return {
+      ticket: t.number, done: true, kind: 'code', branch: openPR.branch || null,
+      verdict: { pass: true, evidence: 'existing open PR ' + openPR.prUrl, failures: [] },
+      prUrl: openPR.prUrl, commentUrl: null, discoveries: [],
+    }
+  }
   let lastVerdict = null, impl = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
@@ -372,6 +408,18 @@ Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Retur
     )
   }
   return { ticket: t.number, done, kind: 'code', branch: impl && impl.branch, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
+}
+// [FLEET-CODE-LANE-END]
+
+// Pre-annotate each ticket with a workerIndex (0-based position in the wave) so
+// the pipeline callback can build a collision-proof branch name without
+// relying on pipeline's callback signature to pass an index.
+const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
+const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
+  const t = ticket
+  if (t.kind === 'probe') return await runProbeLane(t)
+  if (t.kind === 'human') return await runHumanLane(t)
+  return await runCodeLane(t, workerIndex)
 })
 
 // ---- Report: single writer, no append races ----
