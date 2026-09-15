@@ -178,10 +178,13 @@ if prior_hash != new_hash or not os.path.isdir(os.path.join(skills_dst, '.aac-bo
         copied += 1
     os.makedirs(os.path.join(skills_dst, '.aac-bootstrap-marker'), exist_ok=True)
 
-# Enumerate installed skills for the marker + additionalContext
+# Enumerate the payload's skills for the marker + additionalContext. The source tree, not the
+# destination: ~/.claude/skills also holds Claude Code's own `synced/` bucket and any skill a
+# harness installed, and session-check STOPs when a marker name has no SKILL.md on disk
+# (first container run, 2026-09-15: `synced` was listed and every session STOPped).
 skill_names = sorted(
-    n for n in os.listdir(skills_dst)
-    if os.path.isdir(os.path.join(skills_dst, n)) and not n.startswith('.'))
+    n for n in os.listdir(skills_src)
+    if os.path.isfile(os.path.join(skills_src, n, 'SKILL.md')))
 
 # 4. merge plugin hooks manifest into user settings, tagged so a second run replaces its entries
 MARKER = 'aac-bootstrap-plugin-hook'
