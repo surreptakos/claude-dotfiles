@@ -2,6 +2,11 @@
 name: to-issues
 description: Break a plan, spec, or PRD into independently-grabbable issues on the project issue tracker using tracer-bullet vertical slices.
 disable-model-invocation: false
+metadata:
+  modified: "2026-09-14T13:48:41Z"
+  previous-modified: "none"
+  revision: "1"
+  content-sha: "cc737b9a3c9c"
 ---
 
 # To Issues

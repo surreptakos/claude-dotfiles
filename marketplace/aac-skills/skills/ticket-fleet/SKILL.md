@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-15T20:37:03Z'
-  previous-modified: '2026-09-15T15:09:53Z'
-  revision: '6'
-  content-sha: 29d441f36f91
+  modified: '2026-09-15T21:36:24Z'
+  previous-modified: '2026-09-15T20:37:03Z'
+  revision: '7'
+  content-sha: c25c51f29dbe
 ---
 
 # ticket-fleet
@@ -74,7 +74,7 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `label` (string, default `ready-for-agent`): label the scout lists when `tickets` is empty.
 - `maxTickets` (integer, default 3): wave cap; keeps the run near the 15-agent guideline.
 - `scoutModel` / `implModel` / `verifyModel` / `deliverModel` / `reportModel`: per-stage
-  model pins. Defaults: Sonnet 5 for scout and verify, Opus 4.7 for implement, Haiku 4.5
+  model pins. Defaults: Sonnet 5 for scout and verify, Opus 5 for implement, Haiku 4.5
   for deliver and report.
 - `maxAttempts` (integer, default 3): Ralph-style bounded retry, fresh context each attempt.
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
