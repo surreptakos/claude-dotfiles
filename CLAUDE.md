@@ -35,11 +35,11 @@ mirror and the plugin all say the same thing. Never edit the four by hand and ne
 make a check pass: the hash is what makes the dates believable. The previous text of any skill
 is `git log -p -- <skill>/SKILL.md`; the stamp tells you it is there to look for.
 
-After editing anything under `aac-skills/` on a branch with no live tree (a cloud session), run
-both, or CI (`skill-stamps.yml`) fails the branch:
+After editing anything under `aac-skills/` — or under the `agents/skills/` mirror — on a branch
+with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`) fails the branch:
 
 ```bash
-python3 tools/skill-stamps.py stamp aac-skills
+python3 tools/skill-stamps.py stamp aac-skills agents/skills
 python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 ```
 
@@ -73,10 +73,11 @@ this machine's home path. Push rewrites it to `__USERHOME__` (one token per spel
 see `ConvertTo-Tokens`) and pull substitutes the local home back. Any new script that copies a text
 file must go through `Copy-OneFile`, or it will bake this machine's paths into the repo.
 
-**Keep `.claude/session.json` and `.claude/settings.json` LF on a branch (issue 87, #239).** They
-are meant to be CRLF blobs so Windows text-mode writers stay byte-stable, but master holds both as
-LF and the restore test's issue-87 check skips until #239 re-encodes them. Expect a phantom ` M` on
-a fresh worktree until then.
+**Keep `.claude/session.json` and `.claude/settings.json` as CRLF blobs (issue 87).** `.gitattributes`
+pins them with `-text` so git does no EOL conversion, and the stored blob is CRLF so a Windows
+text-mode writer's re-serialization (Claude Code at session start, VS Code default save, PowerShell
+5.1 `Get-Content` + `Set-Content`) is byte-identical to the blob and `git status` stays clean. Do
+not "normalize" them to LF: an LF blob reopens the phantom ` M` on a fresh worktree.
 
 ## Testing a change to the scripts
 

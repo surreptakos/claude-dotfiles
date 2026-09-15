@@ -296,9 +296,13 @@ def main():
         dest = plugin_root / "skills" / entry.name
         mirror = next((REPO / t / entry.name for t in ("claude/skills", "agents/skills")
                        if (REPO / t / entry.name / "SKILL.md").is_file()), None)
+        # In --from-mirror mode `entry` is a tempdir copy that vanishes at the end of the run, so
+        # a stamp written back there is lost. Stamp the actual mirror (claude/skills or
+        # agents/skills) instead, matching how the aac-skills loop stamps aac-skills/<name>.
+        stamp_target = mirror if args.from_mirror and mirror is not None else entry
         try:
             stamp, changed = stamp_source(
-                entry, [f"claude/skills/{entry.name}", f"agents/skills/{entry.name}"],
+                stamp_target, [f"claude/skills/{entry.name}", f"agents/skills/{entry.name}"],
                 mirror, home, stamp_write)
             new_text, moved, retargeted = transform_skill_md(skill_md, stamp)
         except Exception as exc:  # noqa: BLE001 - report and keep packaging the rest
@@ -370,8 +374,7 @@ def main():
     # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
     # aac-skills/yes is a vendored copy of sstklen/yes.md's English skill (MIT, LICENSE alongside);
     # the plugin's three hooks are not carried - this package ships skills only.
-    repo = Path(__file__).resolve().parent.parent
-    aac_src = repo / "aac-skills"
+    aac_src = REPO / "aac-skills"
     if aac_src.is_dir():
         for entry in sorted(aac_src.iterdir()):
             if not entry.is_dir() or not (entry / "SKILL.md").is_file():
@@ -396,15 +399,14 @@ def main():
     # ------------------------------------------------------------------ repo marketplace
     # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.
     if not args.no_marketplace:
-        repo = Path(__file__).resolve().parent.parent
-        mkt_payload = repo / "marketplace" / PLUGIN_NAME
+        mkt_payload = REPO / "marketplace" / PLUGIN_NAME
         if mkt_payload.exists():
             shutil.rmtree(mkt_payload)
         shutil.copytree(plugin_root, mkt_payload)
-        stale = repo / "marketplace" / "dan-skills"
+        stale = REPO / "marketplace" / "dan-skills"
         if stale.exists():
             shutil.rmtree(stale)
-        mkt_dir = repo / ".claude-plugin"
+        mkt_dir = REPO / ".claude-plugin"
         mkt_dir.mkdir(exist_ok=True)
         (mkt_dir / "marketplace.json").write_bytes((
             json.dumps(

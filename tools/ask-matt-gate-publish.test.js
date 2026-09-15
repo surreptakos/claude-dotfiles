@@ -8,6 +8,11 @@
  * named alongside it) is caught here. Also pin that the denial message enumerates the real set,
  * so a session declaring the wrong route sees where to move.
  *
+ * Issue 200: session-end (the closing ticket sweep) and project-harness (the initial ticket set
+ * on a new project) are also publishing routes. Both must be accepted by ALLOWED_FLOWS and
+ * TICKET_FLOWS, and both must appear in each hint string so a session finds them by reading the
+ * prompt. The tests below fail if either route is missing from either set.
+ *
  * The tests drive `codex/hooks/ask_matt_gate.py` in `claude-pre-tool` mode with a synthetic
  * Bash event and read the JSON decision. Pure end-to-end against the gate — no unit-level
  * imports — so the wiring the shell actually hits is what gets covered.
@@ -98,8 +103,76 @@ test('denial message enumerates the real publishing routes when the declared flo
     || '';
   assert.match(reason, /Publishing an issue under route/i,
     `expected denial, got stdout=${stdout} reason=${reason}`);
-  for (const flow of ['wayfinder', 'to-tickets', 'to-spec', 'triage', 'diagnosing-bugs', 'implement']) {
+  for (const flow of [
+    'wayfinder', 'to-tickets', 'to-spec', 'triage', 'diagnosing-bugs', 'implement',
+    'session-end', 'project-harness',
+  ]) {
     assert.match(reason, new RegExp(`\\b${flow}\\b`),
       `denial message missing ${flow} in its route list: ${reason}`);
   }
+});
+
+// Issue 200: session-end and project-harness are publishing routes in their own right. If either
+// is missing from ALLOWED_FLOWS the gate would refuse the declaration itself; if either is missing
+// from TICKET_FLOWS the gate would deny the `gh issue create` these routes are meant to produce.
+// Two tests cover the two sets independently so a drop from either surfaces here.
+for (const flow of ['session-end', 'project-harness']) {
+  test(`${flow} is in ALLOWED_FLOWS: declare-claude accepts it`, () => {
+    const stateDir = scratchStateDir(`${flow}-declare`);
+    const sid = `sess-${flow}-declare`;
+    const nonce = 'test-nonce';
+    // declare-claude requires a pre-existing state with a matching nonce (written by claude-prompt).
+    writeSessionState(stateDir, sid, { nonce, flow: null, yes: true, caveman: 'ultra' });
+    const [bin, base] = pyCmd();
+    const args = [...base, 'declare-claude', sid, nonce, flow];
+    const res = spawnSync(bin, args, {
+      encoding: 'utf-8',
+      env: { ...process.env, ASK_MATT_GATE_STATE_DIR: stateDir },
+    });
+    assert.strictEqual(res.status, 0,
+      `declare-claude exited non-zero for ${flow}: out=${res.stdout} err=${res.stderr}`);
+    assert.doesNotMatch(res.stderr, /route rejected/i,
+      `declare-claude rejected ${flow}: ${res.stderr}`);
+  });
+
+  test(`${flow} is in ALLOWED_FLOWS and TICKET_FLOWS: gh issue create passes on the first publish`, () => {
+    const stateDir = scratchStateDir(`${flow}-first`);
+    const sid = `sess-${flow}-1`;
+    writeSessionState(stateDir, sid, { nonce: 'n', flow, yes: true, caveman: 'ultra' });
+    const { stdout, stderr, status } = runGate('claude-pre-tool', makeEvent(sid, ISSUE_CREATE_CMD), { stateDir });
+    assert.strictEqual(status, 0, `gate exited non-zero: status=${status} out=${stdout} err=${stderr}`);
+    const decision = stdout.trim() ? JSON.parse(stdout) : {};
+    const reason = decision?.hookSpecificOutput?.permissionDecisionReason
+      || decision?.permissionDecisionReason
+      || decision?.reason
+      || '';
+    assert.doesNotMatch(reason, /Publishing an issue under route/i,
+      `${flow} route was denied at publish: ${reason}`);
+    assert.doesNotMatch(reason, /is not a declarable engineering route/i,
+      `${flow} route was refused at declaration: ${reason}`);
+    assert.notStrictEqual(decision?.hookSpecificOutput?.permissionDecision, 'deny',
+      `${flow} route produced a deny: ${stdout}`);
+  });
+}
+
+// Issue 200: both prompt-mode hint strings must name session-end and project-harness so a session
+// finds them by reading the prompt. A test in `tools/` fails when either route is missing.
+test('prompt-mode hint (codex) names session-end and project-harness', () => {
+  const event = { session_id: 'sess-hint-codex', turn_id: 'turn-hint-codex', prompt: 'hi' };
+  const { stdout, stderr, status } = runGate('prompt', event, { stateDir: scratchStateDir('hint-codex') });
+  assert.strictEqual(status, 0, `gate exited non-zero: status=${status} err=${stderr}`);
+  const decision = JSON.parse(stdout);
+  const context = decision?.hookSpecificOutput?.additionalContext || '';
+  assert.match(context, /\bsession-end\b/, `codex hint missing session-end: ${context}`);
+  assert.match(context, /\bproject-harness\b/, `codex hint missing project-harness: ${context}`);
+});
+
+test('prompt-mode hint (claude) names session-end and project-harness', () => {
+  const event = { session_id: 'sess-hint-claude', prompt: 'hi' };
+  const { stdout, stderr, status } = runGate('claude-prompt', event, { stateDir: scratchStateDir('hint-claude') });
+  assert.strictEqual(status, 0, `gate exited non-zero: status=${status} err=${stderr}`);
+  const decision = JSON.parse(stdout);
+  const context = decision?.hookSpecificOutput?.additionalContext || '';
+  assert.match(context, /\bsession-end\b/, `claude hint missing session-end: ${context}`);
+  assert.match(context, /\bproject-harness\b/, `claude hint missing project-harness: ${context}`);
 });
