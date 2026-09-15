@@ -23,8 +23,10 @@ each Routine serves its own repo independently.
 - **Session** — a fresh cloud session spawned by each Routine wake. Boots from the per-repo state
   issue, dispatches everything in-session, ends the turn on `Pass complete`. No session outlives
   one wake; continuity lives in the state issue.
-- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, invoked in-session via
-  the Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`.
+- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, copied into the repo as
+  `.claude/workflows/ticket-fleet.js` and invoked in-session via the Workflow tool with
+  `scriptPath = .claude/workflows/ticket-fleet.js`. A `${CLAUDE_PLUGIN_ROOT}` path is refused in a
+  cloud container — the Workflow tool reads only a path under the working directory (issue 233).
   One script for local and cloud; it picks between the `gh` CLI and the connector tools at run
   time. Same scout / pinned implementer / blind refuting verifier / deliver shape.
 
@@ -107,7 +109,9 @@ In this order:
    (`agent/issue-*` branches), in this same session.
 4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
    labels they produce), invoke the Workflow tool with
-   `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and `args` from the
+   `scriptPath = .claude/workflows/ticket-fleet.js` — copy it there first with `mkdir -p
+   .claude/workflows && cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js"
+   .claude/workflows/ticket-fleet.js` — and `args` from the
    state issue's `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it
    in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
    fleet refuses to start without one. When the fleet returns, run the merge pass once more over
