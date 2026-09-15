@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.js.
+try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}
 // Shared state-stash hook: one capture path for every "context is about to be
 // lost" boundary. Wired to BOTH PreCompact and SessionEnd — closing a session
 // and compacting one need the same thing: snapshot what is done or missed,

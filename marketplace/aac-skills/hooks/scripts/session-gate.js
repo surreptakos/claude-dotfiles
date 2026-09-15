@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.js.
+try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}
 /**
  * session-gate — makes the session-start / session-end checks HOOKS, not suggestions.
  *

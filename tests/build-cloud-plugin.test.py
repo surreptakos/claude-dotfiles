@@ -3,8 +3,10 @@
 
 import importlib.util
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -327,6 +329,181 @@ class PluginHooksManifest(unittest.TestCase):
                 continue  # the marker sh-c echo does not name a shipped script
             self.assertNotRegex(cmd, r"(?:~|\$HOME|%USERPROFILE%|__USERHOME__)",
                                 f"hook command reaches through a home path: {cmd!r}")
+
+
+# Regression guard for issue 208 criterion 4 (deduplication of governance hooks between the
+# plugin payload and the PC's live-tree ~/.claude/settings.json + ~/.codex/hooks.json). Even
+# before the paired live-tree/mirror edit lands via sync.ps1 -Mode push, the plugin must not
+# cause the hooks to fire twice on a PC session -- so each plugin-shipped governance script
+# self-guards: if it detects it is running as the plugin copy AND a live-tree copy exists on
+# this machine, it exits silently and leaves the user-settings entry to fire the hook once.
+class PluginHookDedupGuard(unittest.TestCase):
+    scripts_dir = REPO / "marketplace" / "aac-skills" / "hooks" / "scripts"
+
+    def test_guard_helper_files_ship_in_the_payload(self):
+        for name in ("_plugin_hook_guard.js", "_plugin_hook_guard.py"):
+            self.assertTrue((self.scripts_dir / name).is_file(),
+                            f"plugin dedup guard missing: {name}")
+
+    def test_every_governance_script_invokes_the_guard(self):
+        js_scripts = ("session-gate.js", "state-rehydrate.js", "state-stash.js",
+                      "governance-reminder.js")
+        py_scripts = ("ask_matt_gate.py",)
+        for name in js_scripts:
+            body = (self.scripts_dir / name).read_text(encoding="utf-8")
+            self.assertIn("_plugin_hook_guard.js", body,
+                          f"{name}: missing the plugin/live-tree dedup guard require()")
+            self.assertIn("skipIfLiveTreeWillFire", body,
+                          f"{name}: guard require() is present but never invoked")
+        for name in py_scripts:
+            body = (self.scripts_dir / name).read_text(encoding="utf-8")
+            self.assertIn("_plugin_hook_guard", body,
+                          f"{name}: missing the plugin/live-tree dedup guard import")
+            self.assertIn("skip_if_live_tree_will_fire", body,
+                          f"{name}: guard import present but never invoked")
+
+    def test_js_guard_skips_when_plugin_copy_has_a_live_twin(self):
+        # Simulate the PC scenario: script is invoked from inside CLAUDE_PLUGIN_ROOT and a
+        # same-named script exists at the live-tree hooks path. The guard must exit 0 without
+        # touching the caller's stdout, so the SentinelWrote line never prints.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugin"
+            plugin_scripts = plugin_root / "hooks" / "scripts"
+            plugin_scripts.mkdir(parents=True)
+            shutil.copy2(self.scripts_dir / "_plugin_hook_guard.js",
+                         plugin_scripts / "_plugin_hook_guard.js")
+            script = plugin_scripts / "fake-gate.js"
+            script.write_text(
+                "#!/usr/bin/env node\n"
+                "try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}\n"
+                "process.stdout.write('SENTINEL_WROTE');\n",
+                encoding="utf-8",
+            )
+            live_home = root / "home"
+            (live_home / ".claude" / "hooks").mkdir(parents=True)
+            (live_home / ".claude" / "hooks" / "fake-gate.js").write_text("// live twin\n",
+                                                                          encoding="utf-8")
+            env = {
+                **os.environ,
+                "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+                "CLAUDE_CONFIG_DIR": str(live_home / ".claude"),
+                "HOME": str(live_home),
+                "USERPROFILE": str(live_home),
+                "PLUGIN_HOOK_GUARD_DISABLE": "",
+            }
+            proc = subprocess.run(["node", str(script)], capture_output=True, text=True, env=env,
+                                  timeout=15)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "",
+                             "plugin script should have been skipped by the guard, but ran")
+
+    def test_js_guard_runs_when_no_live_twin_exists(self):
+        # Container scenario: same script is invoked from inside CLAUDE_PLUGIN_ROOT, but there is
+        # no live-tree hooks directory. The guard must NOT skip, so the sentinel prints.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugin"
+            plugin_scripts = plugin_root / "hooks" / "scripts"
+            plugin_scripts.mkdir(parents=True)
+            shutil.copy2(self.scripts_dir / "_plugin_hook_guard.js",
+                         plugin_scripts / "_plugin_hook_guard.js")
+            script = plugin_scripts / "fake-gate.js"
+            script.write_text(
+                "#!/usr/bin/env node\n"
+                "try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}\n"
+                "process.stdout.write('SENTINEL_WROTE');\n",
+                encoding="utf-8",
+            )
+            live_home = root / "home"  # deliberately empty
+            live_home.mkdir()
+            env = {
+                **os.environ,
+                "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+                "CLAUDE_CONFIG_DIR": str(live_home / ".claude"),
+                "HOME": str(live_home),
+                "USERPROFILE": str(live_home),
+                "PLUGIN_HOOK_GUARD_DISABLE": "",
+            }
+            proc = subprocess.run(["node", str(script)], capture_output=True, text=True, env=env,
+                                  timeout=15)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "SENTINEL_WROTE",
+                             "container has no live twin; plugin script should have run")
+
+    def test_py_guard_skips_when_plugin_copy_has_a_live_twin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugin"
+            plugin_scripts = plugin_root / "hooks" / "scripts"
+            plugin_scripts.mkdir(parents=True)
+            shutil.copy2(self.scripts_dir / "_plugin_hook_guard.py",
+                         plugin_scripts / "_plugin_hook_guard.py")
+            script = plugin_scripts / "fake_gate.py"
+            script.write_text(
+                "#!/usr/bin/env python3\n"
+                "import sys\n"
+                "from pathlib import Path\n"
+                "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+                "try:\n"
+                "    from _plugin_hook_guard import skip_if_live_tree_will_fire\n"
+                "    skip_if_live_tree_will_fire(Path(__file__).resolve())\n"
+                "except Exception:\n"
+                "    pass\n"
+                "sys.stdout.write('SENTINEL_WROTE')\n",
+                encoding="utf-8",
+            )
+            live_home = root / "home"
+            (live_home / ".codex" / "hooks").mkdir(parents=True)
+            (live_home / ".codex" / "hooks" / "fake_gate.py").write_text("# live twin\n",
+                                                                          encoding="utf-8")
+            env = {
+                **os.environ,
+                "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+                "CODEX_HOME": str(live_home / ".codex"),
+                "HOME": str(live_home),
+                "USERPROFILE": str(live_home),
+                "PLUGIN_HOOK_GUARD_DISABLE": "",
+            }
+            proc = subprocess.run([sys.executable, str(script)],
+                                  capture_output=True, text=True, env=env, timeout=15)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "",
+                             "python plugin script should have been skipped by the guard, but ran")
+
+    def test_guard_disable_env_forces_the_plugin_to_run(self):
+        # Even with a live twin present, PLUGIN_HOOK_GUARD_DISABLE=1 short-circuits the guard so
+        # a local test run can exercise the plugin copy end-to-end.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root = root / "plugin"
+            plugin_scripts = plugin_root / "hooks" / "scripts"
+            plugin_scripts.mkdir(parents=True)
+            shutil.copy2(self.scripts_dir / "_plugin_hook_guard.js",
+                         plugin_scripts / "_plugin_hook_guard.js")
+            script = plugin_scripts / "fake-gate.js"
+            script.write_text(
+                "#!/usr/bin/env node\n"
+                "try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}\n"
+                "process.stdout.write('SENTINEL_WROTE');\n",
+                encoding="utf-8",
+            )
+            live_home = root / "home"
+            (live_home / ".claude" / "hooks").mkdir(parents=True)
+            (live_home / ".claude" / "hooks" / "fake-gate.js").write_text("// live twin\n",
+                                                                          encoding="utf-8")
+            env = {
+                **os.environ,
+                "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+                "CLAUDE_CONFIG_DIR": str(live_home / ".claude"),
+                "HOME": str(live_home),
+                "USERPROFILE": str(live_home),
+                "PLUGIN_HOOK_GUARD_DISABLE": "1",
+            }
+            proc = subprocess.run(["node", str(script)], capture_output=True, text=True, env=env,
+                                  timeout=15)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "SENTINEL_WROTE")
 
 
 if __name__ == "__main__":

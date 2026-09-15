@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.js.
+try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}
 // Shared state-rehydrate hook: re-inject what state-stash.js captured at the
 // last lost-context boundary. Fires on every SessionStart source:
 //   - compact  -> same session_id, exact state-file match

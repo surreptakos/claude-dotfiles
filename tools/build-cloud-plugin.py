@@ -375,6 +375,85 @@ def main():
     gov_sources_present = (
         all((REPO / "claude" / "hooks" / n).is_file() for n in GOV_JS)
         and all((REPO / "codex" / "hooks" / n).is_file() for n in GOV_PY))
+    # Ship the plugin/live-tree dedup guard (issue 208 criterion 4) alongside the governance
+    # scripts. Sources live under tools/plugin-hook-guards/ so they are trackable and not
+    # mistaken for generated mirror content; the packager copies them in and prepends a one-line
+    # invocation to each governance script during copy. See tools/plugin-hook-guards/README.
+    guard_src_dir = REPO / "tools" / "plugin-hook-guards"
+    guard_js_name = "_plugin_hook_guard.js"
+    guard_py_name = "_plugin_hook_guard.py"
+    guard_js_src = guard_src_dir / guard_js_name
+    guard_py_src = guard_src_dir / guard_py_name
+    if gov_sources_present:
+        if not guard_js_src.is_file() or not guard_py_src.is_file():
+            raise RuntimeError(
+                "plugin hook guard sources missing under tools/plugin-hook-guards/; "
+                "issue 208 dedup requires _plugin_hook_guard.js and _plugin_hook_guard.py there.")
+        (scripts_dir / guard_js_name).write_bytes(
+            guard_js_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+        (scripts_dir / guard_py_name).write_bytes(
+            guard_py_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+
+    js_guard_call = (
+        "// issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.js.\n"
+        "try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}\n")
+    py_guard_call = (
+        "# issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.py.\n"
+        "try:\n"
+        "    import sys as _pp_sys\n"
+        "    from pathlib import Path as _pp_Path\n"
+        "    _pp_sys.path.insert(0, str(_pp_Path(__file__).resolve().parent))\n"
+        "    from _plugin_hook_guard import skip_if_live_tree_will_fire as _pp_dedup\n"
+        "    _pp_dedup(_pp_Path(__file__).resolve())\n"
+        "except Exception:\n"
+        "    pass\n")
+
+    def _insert_after_shebang_js(text, block):
+        # Keep the shebang on line 1 (the OS interpreter dispatch depends on it) and insert the
+        # guard right after. Node accepts a bare statement block anywhere at the top.
+        if text.startswith("#!"):
+            newline = text.find("\n")
+            if newline < 0:
+                return text + "\n" + block
+            return text[: newline + 1] + block + text[newline + 1 :]
+        return block + text
+
+    def _insert_after_python_prelude(text, block):
+        # Python is strict: `from __future__` imports must come before every non-comment,
+        # non-string statement. The insertion has to land AFTER the shebang, an optional module
+        # docstring, and every `from __future__` line, so a guard we splice in above them does
+        # not turn the docstring into an expression that pushes __future__ into a syntax error.
+        import ast, tokenize, io
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            # Cannot analyse: fall back to shebang-only insertion (may not be safe, but the
+            # packager catches broken payloads at load time so a bad script will show up loud).
+            return _insert_after_shebang_js(text, block)
+        # Find the line after the last __future__ import, or after the docstring, or after the
+        # shebang, in that priority.
+        last_prelude_end = 0
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                last_prelude_end = max(last_prelude_end, node.end_lineno)
+                continue
+            if (last_prelude_end == 0 and isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                # Module docstring only counts as prelude when it is the very first statement.
+                last_prelude_end = max(last_prelude_end, node.end_lineno)
+                continue
+            break
+        lines = text.splitlines(keepends=True)
+        insert_at = last_prelude_end  # 1-based line number of the last prelude line
+        if insert_at == 0 and text.startswith("#!"):
+            insert_at = 1
+        # Splice `block` between line `insert_at` and the next. Add a leading blank if the
+        # following line is not already blank, for readability.
+        prefix = "".join(lines[:insert_at])
+        suffix = "".join(lines[insert_at:])
+        sep = "" if prefix.endswith("\n\n") or suffix.startswith("\n") else "\n"
+        return prefix + sep + block + suffix
+
     for name in GOV_JS:
         src_file = REPO / "claude" / "hooks" / name
         if not gov_sources_present:
@@ -395,14 +474,16 @@ def main():
                     "session-gate.js CHECK default block has drifted; the plugin packager can no "
                     "longer rewire it to CLAUDE_PLUGIN_ROOT. Update the marker in build-cloud-plugin.py.")
             text = text.replace(marker_line, plugin_line)
+        text = _insert_after_shebang_js(text.replace("\r\n", "\n"), js_guard_call)
         # write_bytes with a fixed newline: the payload must not depend on the building OS's newline.
-        (scripts_dir / name).write_bytes(text.replace("\r\n", "\n").encode("utf-8"))
+        (scripts_dir / name).write_bytes(text.encode("utf-8"))
     for name in GOV_PY:
         src_file = REPO / "codex" / "hooks" / name
         if not gov_sources_present:
             break
-        text = src_file.read_text(encoding="utf-8")
-        (scripts_dir / name).write_bytes(text.replace("\r\n", "\n").encode("utf-8"))
+        text = src_file.read_text(encoding="utf-8").replace("\r\n", "\n")
+        text = _insert_after_python_prelude(text, py_guard_call)
+        (scripts_dir / name).write_bytes(text.encode("utf-8"))
 
     def _cmd(runner_unix, runner_win, script_name, argv):
         """Two spellings of the same command: Linux (command) and Windows (commandWindows)."""

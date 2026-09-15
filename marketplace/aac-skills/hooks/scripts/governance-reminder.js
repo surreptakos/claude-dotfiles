@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.js.
+try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}
 // UserPromptSubmit hook — re-asserts the three standing disciplines every turn.
 //
 // WHY: ~/.claude/CLAUDE.md carries the full rules, but a long session drifts off text seen once at
