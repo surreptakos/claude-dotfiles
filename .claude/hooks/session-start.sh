@@ -231,9 +231,21 @@ with open(marker_file, 'w') as f:
     }, f, indent=2)
 
 # 6. one SessionStart additionalContext line, under 2KB. The names are truncated (not the
-#    payload version and not the marker sentence session-check greps for) so a growing skill
-#    list never overruns the cap.
-sentence = f"AAC-BOOTSTRAP MARKER: payload v{version}; skills copied={copied}; gh={gh_path}"
+#    payload version, not the marker sentence session-check greps for, and not the
+#    invoke-as clause the model reads on prompt 1) so a growing skill list never overruns
+#    the cap.
+#    The invoke-as clause is load-bearing (issue 242): step 3 copies each skill into
+#    ~/.claude/skills/<bare-name>/, so it invokes as /<bare-name>. The marketplace-style
+#    /aac-skills:<skill> form has nothing to resolve to in a bootstrapped container
+#    because the bootstrap does not register the plugin — only its skills, under bare
+#    names (the issue 242 body records the owner cloud session that hit that on
+#    2026-09-15; the evidence recap is at docs/tickets/242-decision.md). Naming the
+#    working spelling here removes the coin-flip for the model on prompt 1.
+sentence = (
+    f"AAC-BOOTSTRAP MARKER: payload v{version}; skills copied={copied}; gh={gh_path};"
+    f" invoke skills as /<skill> (bare name) - the plugin-namespaced /aac-skills:<skill>"
+    f" form does not resolve in a bootstrapped container (issue 242)"
+)
 budget = 2000 - len(sentence) - len(' skills=[]')
 names_str = ','.join(skill_names)
 if len(names_str) > budget:
