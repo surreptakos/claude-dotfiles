@@ -611,6 +611,51 @@ function harnessChecks() {
   note('the upgrade table lives in project-harness/SKILL.md ("Upgrading an existing install")');
 }
 
+/* -------------------------------------------------------------- bootstrap ------------------ */
+
+/** Cloud-container bootstrap check (issue 163, spec #207 user story 7).
+ *
+ *  The bootstrap SessionStart hook is the ONE per-repo artefact that installs the aac-skills
+ *  plugin payload, gh, and the plugin's hooks into a claude.ai/code container. When it did not
+ *  run — or ran but left a stripped skills tree — a cloud session is silently ungoverned; no
+ *  other check catches it. So: read the marker the hook writes at
+ *  ~/.claude/hook-state/aac-bootstrap/state.json, and STOP with a named reason when the marker
+ *  is missing, its JSON is unreadable, or the skills it recorded are not on disk.
+ *
+ *  The comparison to master's payload version is informational (`on vX, master offers vY`);
+ *  master will overtake a session's cached copy and re-cloning is the next session's job. That
+ *  line replaces the dotfiles-freshness loop's "N commits behind" reading on the cloud path.
+ *  Local runs skip the whole block: the desktop machine IS where the payload is authored, and
+ *  the check would false-STOP on every clean local session. */
+const bootstrap = require('./bootstrap-check');
+function bootstrapChecks() {
+  if (!IS_CLOUD) return;
+  head('Cloud bootstrap');
+  const r = bootstrap.readMarker(process.env);
+  if (r.state === 'missing') {
+    stop(`aac-bootstrap marker absent at ${r.path} — the SessionStart bootstrap hook did not run`);
+    note('the hook is `.claude/hooks/session-start.sh` in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true');
+    return;
+  }
+  if (r.state === 'unreadable') {
+    stop(`aac-bootstrap marker at ${r.path} is unreadable — ${r.reason}`);
+    return;
+  }
+  const marker = r.marker;
+  const v = bootstrap.verifySkills(marker, process.env);
+  if (v.state === 'skills-missing') {
+    stop(`${v.missing.length} aac-skills skill(s) named in the marker are absent from ${bootstrap.skillsDir(process.env)}`);
+    v.missing.slice(0, 8).forEach((n) => note(`- ${n}`));
+    if (v.missing.length > 8) note(`...and ${v.missing.length - 8} more`);
+    return;
+  }
+  ok(`aac-bootstrap payload v${marker.payload_version} — ${marker.skills.length} skills, gh ${marker.gh_path && marker.gh_path !== 'missing' ? 'installed' : 'MISSING'}`);
+  const cmp = bootstrap.compareToMaster(marker, process.env);
+  if (cmp.state === 'drift') note(`payload v${cmp.marker} loaded; master offers v${cmp.master} — next container will pick it up`);
+  else if (cmp.state === 'same') note(`payload matches dotfiles master (v${cmp.master})`);
+  else note(`payload v${cmp.marker} loaded; master version could not be read here`);
+}
+
 /* -------------------------------------------------------------- account ---------------------- */
 
 /** Which Claude account this session runs under, against ~/.claude/accounts.json (identity.js).
@@ -680,6 +725,7 @@ async function main() {
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
   gitChecks();
   harnessChecks();
+  bootstrapChecks();
   accountChecks();
   claspChecks();
   await workChecks();

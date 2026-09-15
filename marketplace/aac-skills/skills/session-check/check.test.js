@@ -210,3 +210,93 @@ test('harness state: .claude/session.json "harness": false silences the section'
   });
   assert.doesNotMatch(output, /\bHarness\b/);
 });
+
+/* --------- cloud bootstrap (issue 163): STOP with a named reason when the hook did not land */
+
+function cloudEnv(extra) {
+  return { CLAUDE_CODE_REMOTE_SESSION_ID: '1', HARNESS_SKILL_DIR: '', ...(extra || {}) };
+}
+
+test('cloud bootstrap: STOP names the marker path when the file is absent', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-missing-'));
+  const marker = path.join(dir, 'state.json');
+  try {
+    const output = runChecker({}, { env: cloudEnv({
+      BOOTSTRAP_MARKER_FILE: marker,
+      BOOTSTRAP_SKILLS_DIR: dir,
+    }) });
+    assert.match(output, /Cloud bootstrap/);
+    assert.match(output, /STOP aac-bootstrap marker absent/);
+    assert.match(output, /state\.json/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cloud bootstrap: STOP names every skill missing from the tree', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-skillgap-'));
+  const marker = path.join(dir, 'state.json');
+  const skills = path.join(dir, 'skills');
+  fs.mkdirSync(skills);
+  fs.mkdirSync(path.join(skills, 'ticket-fleet'));
+  fs.writeFileSync(path.join(skills, 'ticket-fleet', 'SKILL.md'), '---\nname: ticket-fleet\n---\n');
+  fs.writeFileSync(marker, JSON.stringify({
+    payload_version: '2026.9.15',
+    skills: ['ticket-fleet', 'ask-matt', 'caveman'],
+    gh_path: '/usr/local/bin/gh',
+  }));
+  try {
+    const output = runChecker({}, { env: cloudEnv({
+      BOOTSTRAP_MARKER_FILE: marker,
+      BOOTSTRAP_SKILLS_DIR: skills,
+    }) });
+    assert.match(output, /STOP 2 aac-skills skill\(s\) named in the marker are absent/);
+    assert.match(output, /- ask-matt/);
+    assert.match(output, /- caveman/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cloud bootstrap: ok line reports the payload version and reports drift vs master', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-ok-'));
+  const marker = path.join(dir, 'state.json');
+  const skills = path.join(dir, 'skills');
+  const manifest = path.join(dir, 'plugin.json');
+  fs.mkdirSync(skills);
+  fs.mkdirSync(path.join(skills, 'ticket-fleet'));
+  fs.writeFileSync(path.join(skills, 'ticket-fleet', 'SKILL.md'), '---\nname: ticket-fleet\n---\n');
+  fs.writeFileSync(marker, JSON.stringify({
+    payload_version: '2026.9.15',
+    skills: ['ticket-fleet'],
+    gh_path: '/usr/local/bin/gh',
+  }));
+  fs.writeFileSync(manifest, JSON.stringify({ version: '2026.9.16' }));
+  try {
+    const output = runChecker({}, { env: cloudEnv({
+      BOOTSTRAP_MARKER_FILE: marker,
+      BOOTSTRAP_SKILLS_DIR: skills,
+      BOOTSTRAP_MASTER_MANIFEST: manifest,
+    }) });
+    assert.match(output, /ok\s+aac-bootstrap payload v2026\.9\.15/);
+    assert.match(output, /gh installed/);
+    assert.match(output, /master offers v2026\.9\.16/);
+    assert.doesNotMatch(output, /STOP/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('cloud bootstrap: the whole section is silent on a local (non-cloud) session', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-local-'));
+  try {
+    const output = runChecker({}, { env: {
+      HARNESS_SKILL_DIR: '',
+      BOOTSTRAP_MARKER_FILE: path.join(dir, 'state.json'),
+    } });
+    assert.doesNotMatch(output, /Cloud bootstrap/);
+    assert.doesNotMatch(output, /aac-bootstrap/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
