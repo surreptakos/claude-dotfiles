@@ -34,7 +34,7 @@ const cfg = Object.assign({
   // Per-stage model pins. Frontier only where errors compound (implement); the orchestrator is the
   // main session's own model. Mid-tier for bounded, checkable work; cheap tier for pure mechanics.
   scoutModel: 'claude-sonnet-5',            // structured extraction from gh issues
-  implModel: 'claude-opus-4-7',             // heaviest-context stage, version-stable across runs
+  implModel: 'claude-opus-5',               // heaviest-context stage, version-stable across runs
   verifyModel: 'claude-sonnet-5',           // skepticism comes from blindness + prompt, not tier
   deliverModel: 'claude-haiku-4-5-20251001',// push + PR mechanics, no judgment
   reportModel: 'claude-haiku-4-5-20251001', // formats pre-aggregated discoveries
