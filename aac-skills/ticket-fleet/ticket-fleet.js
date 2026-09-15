@@ -15,7 +15,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise)}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise)}',
   phases: [
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
@@ -41,6 +41,7 @@ const cfg = Object.assign({
   maxAttempts: 3,           // Ralph-style bounded retry, fresh context each attempt
   deliver: true,            // false = stop after verify, no push/PR
   followupsFile: 'FOLLOW-UPS.md',
+  invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves via env + PATH below
 }, args || {})
 
@@ -57,6 +58,21 @@ const cfg = Object.assign({
 // (any short unique token, e.g. the shell's `date +%s` in hex).
 if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot call Date.now()/Math.random(); pass a unique token such as `printf %x $(date +%s)`')
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+
+// ---- per-invocation freshness for the resume guard (issue 291) ----
+// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR guard in
+// runCodeLane below needs the opposite - the tracker as it is right now. It has to ask an agent
+// (a workflow script has no filesystem, shell or network of its own), and the runtime replays
+// cached agent results on resume, so under a stable cache key the guard replays the {found:false}
+// it recorded before any PR existed and the ticket is implemented, verified and delivered a
+// second time - the duplicate PR the guard exists to prevent. The freshness therefore arrives
+// through args, exactly like runId: the caller mints a NEW invocationId on EVERY launch, resume
+// included. It is spliced into the pr-check prompt and label and nowhere else, so two invocations
+// of the same runId ask that one question under different cache keys while every other stage
+// keeps its cache and the branch names stay put.
+const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+if (!invocationId) throw new Error('args.invocationId is required: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`). It busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291); keep args.runId unchanged across a resume, the branch names embed it.')
+if (invocationId === runId) throw new Error('args.invocationId must differ from args.runId: runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
 
 // ---- instrument switch (gh vs GitHub MCP) ----
 // The tracker prompts below differ in exactly one dimension: which tool set the scout, probe,
@@ -313,13 +329,19 @@ const PR_CHECK = { type: 'object', required: ['found'], properties: {
 // invoked when the pre-loop PR check reports an open PR (issue 150 acceptance).
 // [FLEET-CODE-LANE-START]
 const runCodeLane = async (t, workerIndex) => {
-  // Idempotence guard for resume (issue 150). If the tracker already has an open PR whose head
-  // ref matches this ticket's branch shape, skip the whole ticket: no impl, verify or deliver
-  // agent is spawned. The observed failure mode (wf_911fa64d-102, run id 6aa46942): a resumed
-  // run served impl:#97.1 from cache, but verify:#97.1 and deliver:#97 ran under changed cache
-  // keys, re-verified the ticket, and opened PR 145 while PR 137 was still open. What moved
-  // those keys inside the workflow runtime is opaque here; the fix short-circuits the pipeline
-  // body with this pre-loop tracker check, before any of the drifting keys are hit.
+  // Idempotence guard for resume (issue 150), kept fresh across resumes (issue 291). If the
+  // tracker already has an open PR whose head ref matches this ticket's branch shape, skip the
+  // whole ticket: no impl, verify or deliver agent is spawned. The observed failure mode
+  // (wf_911fa64d-102, run id 6aa46942): a resumed run served impl:#97.1 from cache, but
+  // verify:#97.1 and deliver:#97 ran under changed cache keys, re-verified the ticket, and
+  // opened PR 145 while PR 137 was still open. What moved those keys inside the workflow runtime
+  // is opaque here; the fix short-circuits the pipeline body with this pre-loop tracker check,
+  // before any of the drifting keys are hit.
+  // The guard is itself an agent() call, so it needs its own cache key to move: invocationId
+  // (fresh on every launch, resume included - see the block above) is spliced into both the
+  // prompt and the label, which is what stops a resume replaying the {found:false} recorded
+  // before the PR existed. Keep it in both; a key derived from runId alone is stable across a
+  // resume and the guard becomes a cached lie.
   const prCheckSteps = instrument === 'mcp'
     ? `There is no gh CLI here: use mcp__github__list_pull_requests with state="open" and per_page=100.
 Filter the returned array to entries whose head.ref (the branch name of the PR's head) starts with agent/issue-${t.number}-.`
@@ -329,10 +351,11 @@ Filter the returned array to entries whose head.ref (the branch name of the PR's
 3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
   const openPR = await agent(
     `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
+Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
 ${prCheckSteps}
 If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
 Make no repository change, no comment, no PR. Return structured output only.`,
-    { label: `pr-check:#${t.number}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
+    { label: `pr-check:#${t.number}@${invocationId}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
   )
   if (openPR && openPR.found) {
     log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)
