@@ -24,9 +24,11 @@ the intended shape.
   Runs one full cycle from `orchestrator/worker-cycle.md` and is archived afterward. Workers are
   disposable by design: context can never grow unbounded because no worker outlives one cycle;
   continuity lives in the repo (tracker, MEMORY.md, session harness), never in a worker's window.
-- **Fleet** — `orchestrator/ticket-fleet-cloud.js`, run by the worker via the Workflow tool. The
-  cloud port of `.claude/workflows/ticket-fleet.js`: same scout / pinned implementer / blind
-  refuting verifier / deliver shape, with GitHub MCP tools replacing the `gh` CLI.
+- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, run by the worker
+  via the Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`.
+  One script for local and cloud sessions: it picks between the `gh` CLI and the GitHub MCP
+  tools at run time (a container sets `CLAUDE_CODE_REMOTE_SESSION_ID`, or has no `gh` on PATH).
+  Same scout / pinned implementer / blind refuting verifier / deliver shape.
 
 ## Repo priority (Dan, 2026-09-01)
 

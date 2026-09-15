@@ -901,12 +901,11 @@ if (Test-Path $freshnessHookTest) {
         ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
 }
 
-# ticket-fleet branch-naming (issue 29): the workflow's concurrent-attempt guard
-# lives in a pure helper (tools/ticket-fleet-branch.js) so its test can run
-# without spinning up the Workflow tool. Wiring it here means a regression in
-# the runId/workerIndex shape (or a drift between .claude/workflows/ticket-fleet.js
-# and agents/skills/project-harness/templates/ticket-fleet.js) fails the restore
-# suite the same way the freshness-hook regressions do.
+# ticket-fleet branch-naming + gh/mcp instrument switch (issues 29, 138): the workflow's
+# concurrent-attempt guard and the tracker instrument switch both live in a pure helper
+# (tools/ticket-fleet-branch.js) so their tests can run without spinning up the Workflow tool.
+# Since issue 138 the fleet is served by the aac-skills plugin as one merged script, so this
+# suite exercises the drift guards between the pure helper and aac-skills/ticket-fleet/ticket-fleet.js.
 $fleetBranchModule = Join-Path $Clone 'tools\ticket-fleet-branch.js'
 $fleetBranchTest   = Join-Path $Clone 'tools\ticket-fleet-branch.test.js'
 Check 'tools/ticket-fleet-branch.js shipped' (Test-Path $fleetBranchModule)
@@ -1008,13 +1007,11 @@ Check 'in-file `claude-md-lint-ignore` silences a finding (linter emits nothing)
 # subagent definition that ships in ~/.claude/agents/fleet-verifier.md. The whitelist entry
 # claude/agents in lib/manifest.ps1 is what carries it; without an assertion behind that entry, a
 # silent drop (missing frontmatter key, wrong tool set, model drift, or a fleet script that forgets
-# to pass agentType) would slip past the file-count check (line 434) unnoticed. This block reads the
-# restored agent file and both fleet-script copies out of the fake home, and asserts the tool
-# restriction and the agentType wiring the ticket contracts for.
+# to pass agentType) would slip past the file-count check (line 434) unnoticed. Since issue 138
+# the fleet lives in one plugin-served script; the restore suite asserts against that copy
+# (in the marketplace payload) rather than the three pre-plugin copies.
 $fleetVerifier      = Join-Path $FakeHome '.claude\agents\fleet-verifier.md'
-$fleetScriptLocal   = Join-Path $Clone    '.claude\workflows\ticket-fleet.js'
-$fleetScriptHarness = Join-Path $Clone    'agents\skills\project-harness\templates\ticket-fleet.js'
-$fleetScriptCloud   = Join-Path $Clone    'orchestrator\ticket-fleet-cloud.js'
+$fleetScriptPlugin  = Join-Path $Clone    'marketplace\aac-skills\skills\ticket-fleet\ticket-fleet.js'
 Check 'fleet-verifier agent definition restored under fake home' (Test-Path $fleetVerifier)
 if (Test-Path $fleetVerifier) {
     $verifierText = Get-Content $fleetVerifier -Raw
@@ -1032,23 +1029,15 @@ if (Test-Path $fleetVerifier) {
         ($modelLine -eq 'claude-sonnet-5') `
         @("model = $modelLine")
 }
-if (Test-Path $fleetScriptLocal) {
-    $localText = Get-Content $fleetScriptLocal -Raw
-    Check '.claude/workflows/ticket-fleet.js verify stage passes agentType: fleet-verifier' `
-        ($localText -match "agentType:\s*'fleet-verifier'") `
-        @('inline verify agent() call must carry agentType: ''fleet-verifier''')
-}
-if (Test-Path $fleetScriptHarness) {
-    $harnessText = Get-Content $fleetScriptHarness -Raw
-    Check 'harness template ticket-fleet.js verify stage passes agentType: fleet-verifier' `
-        ($harnessText -match "agentType:\s*'fleet-verifier'") `
-        @('template must mirror the local fleet script')
-}
-if (Test-Path $fleetScriptCloud) {
-    $cloudText = Get-Content $fleetScriptCloud -Raw
-    Check 'cloud port ticket-fleet-cloud.js contains no agentType reference (containers do not load the agent registry)' `
-        ($cloudText -notmatch 'agentType') `
-        @('cloud verifier restraint is the container sandbox, not an agentType')
+if (Test-Path $fleetScriptPlugin) {
+    $pluginText = Get-Content $fleetScriptPlugin -Raw
+    Check 'plugin fleet script passes agentType: fleet-verifier when the instrument is gh' `
+        ($pluginText -match "agentType:\s*instrument === 'gh' \? 'fleet-verifier'") `
+        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138)')
+    Check 'plugin fleet script inlines the pickInstrument switch (issue 138)' `
+        (($pluginText -match 'function pickInstrument') -and
+         ($pluginText -match 'CLAUDE_CODE_REMOTE_SESSION_ID')) `
+        @('plugin fleet must sniff CLAUDE_CODE_REMOTE_SESSION_ID for the mcp branch')
 }
 
 # owner-account-line (issue 114): the CLAUDE.md line naming which Claude account owns this
@@ -1255,12 +1244,13 @@ Write-Host 'Issue 87 - CRLF blob byte stability'
 
 $issue87Files = @(
     (Join-Path $Clone '.claude\session.json'),
-    (Join-Path $Clone '.claude\settings.json'),
-    (Join-Path $Clone '.claude\workflows\ticket-fleet.js')
+    (Join-Path $Clone '.claude\settings.json')
 )
+# The third issue-87 file, .claude/workflows/ticket-fleet.js, moved to aac-skills/ticket-fleet/
+# with issue 138; the plugin-served copy is not rewritten by Claude Code at session start.
 $missing = @($issue87Files | Where-Object { -not (Test-Path $_) })
 if ($missing.Count -gt 0) {
-    Check 'issue-87 target files present in clone' $false @('one of session.json / settings.json / ticket-fleet.js missing from the clone: ' + ($missing -join '; '))
+    Check 'issue-87 target files present in clone' $false @('one of session.json / settings.json missing from the clone: ' + ($missing -join '; '))
 } else {
     $nonCrlf = @()
     foreach ($f in $issue87Files) {
@@ -1277,15 +1267,15 @@ if ($missing.Count -gt 0) {
         # against an older ref would gate every restore run on this branch merging, and reporting
         # a silent pass would let the fix regress unnoticed after landing. -From local and -From
         # worktree run against this checkout, so they DO exercise the fix while origin catches up.
-        Note ("skipped: fresh clone has LF blobs for all three files (older ref, no fix yet); From={0}" -f $From)
+        Note ("skipped: fresh clone has LF blobs for both files (older ref, no fix yet); From={0}" -f $From)
     } else {
-        Check 'all three files land as CRLF bytes in the fresh clone' `
+        Check 'both files land as CRLF bytes in the fresh clone' `
             ($nonCrlf.Count -eq 0) $nonCrlf
 
         if ($From -ne 'worktree') {
             # Fresh clone must be clean up-front (a mistuned fixture would give a false pass for the
             # byte-stability check below).
-            $preStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' '.claude/workflows/ticket-fleet.js' 2>&1
+            $preStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' 2>&1
             $preStatusStr = ($preStatus | Out-String).Trim()
             Check 'fresh clone git status is clean on the three files' `
                 ([string]::IsNullOrWhiteSpace($preStatusStr)) @("git status: [$preStatusStr]")
@@ -1307,7 +1297,7 @@ if ($missing.Count -gt 0) {
                     }
                     [System.IO.File]::WriteAllBytes($f, $out.ToArray())
                 }
-                $postStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' '.claude/workflows/ticket-fleet.js' 2>&1
+                $postStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' 2>&1
                 $postStatusStr = ($postStatus | Out-String).Trim()
                 Check 'byte-preserving Windows-style CRLF rewrite leaves git status clean' `
                     ([string]::IsNullOrWhiteSpace($postStatusStr)) @("git status: [$postStatusStr]")

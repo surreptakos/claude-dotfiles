@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-02T00:14:41Z"
-  previous-modified: "2026-08-31T23:15:19Z"
-  revision: "1"
-  content-sha: "7f0d9ca816e6"
+  modified: "2026-09-14T22:40:41Z"
+  previous-modified: "2026-09-02T00:14:41Z"
+  revision: "2"
+  content-sha: "69f83bc6f1b7"
 ---
 
 # Triage
@@ -118,7 +118,7 @@ If prior triage notes exist on the issue or PR, read them, check whether the rep
 
 ## In a cloud container: same duties, different instruments
 
-A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Every role and transition above still applies; only the tool changes. Do not report a step as impossible because its `gh` spelling failed — use the GitHub MCP equivalent, same shape as `orchestrator/ticket-fleet-cloud.js` and the `grill-ready-for-human` skill:
+A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Every role and transition above still applies; only the tool changes. Do not report a step as impossible because its `gh` spelling failed — use the GitHub MCP equivalent, same shape as the mcp branch of `aac-skills/ticket-fleet/ticket-fleet.js` and the `grill-ready-for-human` skill:
 
 | The step says | In a container use |
 | --- | --- |

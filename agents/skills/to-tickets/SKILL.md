@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker — edges as text in one file per ticket locally, or native blocking links on a real tracker.
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-02T00:14:41Z"
-  previous-modified: "2026-08-25T14:57:11Z"
-  revision: "1"
-  content-sha: "c7b33295a6ed"
+  modified: "2026-09-14T22:40:36Z"
+  previous-modified: "2026-09-02T00:14:41Z"
+  revision: "2"
+  content-sha: "0e7c1f0f295b"
 ---
 
 # To Tickets
@@ -113,7 +113,7 @@ In either form, avoid specific file paths or code snippets — they go stale fas
 
 ## In a cloud container: same duties, different instruments
 
-A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Every process step above still applies; only publishing changes. Do not report a step as impossible because its `gh` spelling failed — use the GitHub MCP equivalent, same shape as `orchestrator/ticket-fleet-cloud.js`:
+A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Every process step above still applies; only publishing changes. Do not report a step as impossible because its `gh` spelling failed — use the GitHub MCP equivalent, same shape as the mcp branch of `aac-skills/ticket-fleet/ticket-fleet.js`:
 
 | The step says | In a container use |
 | --- | --- |

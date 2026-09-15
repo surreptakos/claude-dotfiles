@@ -73,4 +73,32 @@ function workerSuffix(runId, workerIndex) {
   return `wf_${runId}-w${workerIndex}`;
 }
 
-module.exports = { generateRunId, buildBranchName, workerSuffix };
+/**
+ * Pick the tracker instrument at run time. Ticket-fleet runs from two shapes of
+ * session and the tracker tools differ between them:
+ *   - Local session with `gh` on PATH -> 'gh': `gh api repos/{owner}/{repo}/...`
+ *     REST paths only (GraphQL-backed `gh` subcommands 403 through the cloud
+ *     proxy, issue 130).
+ *   - Cloud container (CLAUDE_CODE_REMOTE_SESSION_ID or
+ *     CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE set, or no `gh` on PATH) -> 'mcp':
+ *     the GitHub MCP tools.
+ * `override` wins when it names either instrument, so a caller that already
+ * knows the container shape can force it. This is the pure counterpart the
+ * script inlines: same shape, same environment variables, exercised by
+ * ticket-fleet-branch.test.js so the two cannot drift silently.
+ *
+ * @param {NodeJS.ProcessEnv|Record<string,string>|undefined} env
+ * @param {boolean|undefined} hasGh - true if `gh` is on PATH; undefined lets
+ *   the caller decline to detect it (defaults to `gh` in that case).
+ * @param {'gh'|'mcp'|'auto'|null|undefined} override
+ * @returns {'gh'|'mcp'}
+ */
+function pickInstrument(env, hasGh, override) {
+  if (override === 'gh' || override === 'mcp') return override;
+  const e = env || {};
+  if (e.CLAUDE_CODE_REMOTE_SESSION_ID || e.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp';
+  if (hasGh === false) return 'mcp';
+  return 'gh';
+}
+
+module.exports = { generateRunId, buildBranchName, workerSuffix, pickInstrument };

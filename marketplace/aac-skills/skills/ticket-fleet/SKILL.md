@@ -1,0 +1,87 @@
+---
+name: ticket-fleet
+description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection. Drives open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). One script served by this plugin, invoked via the Workflow tool with `scriptPath` from local and cloud sessions alike; the script picks between the `gh` CLI and the GitHub MCP tools at run time. Use when the user asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the fleet from an orchestrator worker cycle.
+
+  '
+metadata:
+  modified: '2026-09-15T15:09:53Z'
+  previous-modified: '2026-09-15T15:07:41Z'
+  revision: '5'
+  content-sha: a0d313f862fa
+---
+
+# ticket-fleet
+
+One script, `ticket-fleet.js` alongside this SKILL.md, that serves every session shape:
+
+- **Local session** (has `gh`): the fleet talks to the tracker through `gh api repos/{owner}/{repo}/...` REST paths (GraphQL-backed `gh` subcommands 403 through the cloud proxy, so REST only - issue 130).
+- **Cloud container** (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH): the fleet talks to the tracker through the GitHub MCP tools (`mcp__github__list_issues`, `mcp__github__issue_read`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request`).
+
+The switch is made by `pickInstrument(env, hasGh, override)` inside the script; the pure
+counterpart lives at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
+`tools/ticket-fleet-branch.test.js`.
+
+## How to invoke
+
+Call the Workflow tool with `scriptPath` set to this file - the Workflow tool resolves a bare
+`name:` from the checkout's `.claude/workflows/` only, and this file lives in the plugin, not
+in a checkout. `args.runId` is required (the workflow runtime forbids `Date.now()` and
+`Math.random()` inside scripts, so the caller mints the id):
+
+```
+Workflow({
+  scriptPath: '${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js',
+  args: { runId: '<hex from `printf %x $(date +%s)`>', deliver: false }
+})
+```
+
+On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
+prompts before letting the fleet push branches and open PRs. Full args list:
+
+- `runId` (required, string): caller-minted unique token. Any short unique string; the
+  branch names embed it as `wf_<runId>-w<workerIndex>`.
+- `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
+  takes exactly those tickets regardless of label or state; otherwise it lists open tickets
+  with `args.label`.
+- `label` (string, default `ready-for-agent`): label the scout lists when `tickets` is empty.
+- `maxTickets` (integer, default 3): wave cap; keeps the run near the 15-agent guideline.
+- `scoutModel` / `implModel` / `verifyModel` / `deliverModel` / `reportModel`: per-stage
+  model pins. Defaults: Sonnet 5 for scout and verify, Opus 4.7 for implement, Haiku 4.5
+  for deliver and report.
+- `maxAttempts` (integer, default 3): Ralph-style bounded retry, fresh context each attempt.
+- `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
+  resolution comment.
+- `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to.
+- `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` returns
+  `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
+  otherwise `gh`. Pass `mcp` explicitly on a machine where `gh` is missing.
+
+## Lanes
+
+The scout classifies each ticket into one of three lanes; the wave runs them in parallel:
+
+- **code** - repository change. Implementer in an isolated worktree, then a blind refuting
+  verifier per attempt; the deliver stage pushes and opens a PR only on a verified pass.
+- **probe** - resolves by quoting command output / research / evidence in a comment, no
+  repository change asked for. Prober gathers, blind verifier re-runs the commands; the
+  deliver stage posts one resolution comment.
+- **human** - labelled `ready-for-human`, or the body says the owner performs the steps. The
+  agent verifies only what the container can do and hands the rest back in one comment; it
+  never claims an owner step was done.
+
+## Branch names
+
+`agent/issue-<N>-attempt<A>-wf_<runId>-w<workerN>` (see the block comment at the top of the
+script and the drift guards in `tools/ticket-fleet-branch.test.js`). Two concurrent scouts
+against the same ticket therefore produce distinct branches; two runs of the same worker
+still add `-attempt<A>` so a re-implement after a failed verify does not overwrite its own
+predecessor.
+
+## History
+
+Before v18 of the `project-harness` skill (2026-09-14) the fleet lived in three drifted
+copies: `.claude/workflows/ticket-fleet.js` in `claude-dotfiles`, `orchestrator/ticket-fleet-cloud.js`
+alongside it (the cloud port), and `agents/skills/project-harness/templates/ticket-fleet.js`
+(the copy the harness installed into every other repo). Each copy carried one of `runId`
+from args, `defaultBranch`, `keepOpen`, or the MCP/gh instrument branch and none carried
+all four. The harness upgrade table's v18 row records the consolidation.

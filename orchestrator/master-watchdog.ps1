@@ -12,10 +12,11 @@
     launches the next repo. Repos are served in RUNBOOK.md priority order the first time round,
     then least-recently-served first, so every repo gets a turn.
 
-    A master must run inside the repo it serves: every repo's .claude/workflows/ticket-fleet.js
-    is cwd-relative (scout `gh issue list` with no -R, implement `isolation: 'worktree'`, verify
-    `git worktree add` "in this repo"), so a master rooted in the claude-dotfiles checkout
-    cannot fleet. That is what stalled the 2026-09-02 run (claude-dotfiles issue 44).
+    A master must run inside the repo it serves: the plugin-served ticket-fleet script
+    (aac-skills/ticket-fleet/ticket-fleet.js, invoked via Workflow scriptPath) is cwd-relative
+    (scout `gh api` with no -R, implement `isolation: 'worktree'`, verify `git worktree add`
+    "in this repo"), so a master rooted in the claude-dotfiles checkout cannot fleet. That is
+    what stalled the 2026-09-02 run (claude-dotfiles issue 44).
 
     Each slot:
       1. Legacy guard. A process with the pre-issue-70 shape `--remote-control master "<prompt>"`
