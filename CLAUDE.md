@@ -73,14 +73,10 @@ this machine's home path. Push rewrites it to `__USERHOME__` (one token per spel
 see `ConvertTo-Tokens`) and pull substitutes the local home back. Any new script that copies a text
 file must go through `Copy-OneFile`, or it will bake this machine's paths into the repo.
 
-**Three project files carry CRLF blobs on purpose (issue 87).** `.claude/session.json`,
-`.claude/settings.json` and `.claude/workflows/ticket-fleet.js` are stored with CRLF line endings
-so a Windows text-mode writer's re-serialization (Claude Code, VS Code save on Windows, PowerShell
-5.1 `Get-Content` + `Set-Content`, an installer's rewrite) is byte-stable against the blob and
-does not produce a phantom ` M` in `git status`. Recover a leftover-LF worktree that predates the
-fix with `git checkout HEAD -- .claude/session.json .claude/settings.json
-.claude/workflows/ticket-fleet.js` — that overwrites the LF working copy with the CRLF blob and
-`git status` reads clean again.
+**Keep `.claude/session.json` and `.claude/settings.json` LF on a branch (issue 87, #239).** They
+are meant to be CRLF blobs so Windows text-mode writers stay byte-stable, but master holds both as
+LF and the restore test's issue-87 check skips until #239 re-encodes them. Expect a phantom ` M` on
+a fresh worktree until then.
 
 ## Testing a change to the scripts
 
