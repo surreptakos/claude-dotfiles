@@ -8,3 +8,4 @@
 - [Reporting style: plain English](reporting-style-plain-english.md) — status not working material; monospace and paths rationed, not banned
 - [ADHD output shaping is standing](adhd-output-shaping-standing.md) — /i-have-adhd is permanent; shapes structure, caveman shapes wording
 - [Ask-matt gate exact command](ask-matt-gate-exact-command.md) — declare command must stand alone in Bash; gh issue create needs to-tickets route declared
+- [PR body quoted Closes keyword](pr-body-quoted-closes-keyword.md) — any 'Closes #N' text in a PR body closes N on merge, even inside a quote; grep before opening

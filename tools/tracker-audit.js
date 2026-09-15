@@ -232,6 +232,7 @@ if (require.main !== module) {
     parseGithubSlug,
     landedCommits,
     landedFindings,
+    paginate,
   };
   return;
 }
@@ -274,6 +275,24 @@ function gh(args) {
   return sh('gh ' + parts.join(' '));
 }
 
+/** Walk a paged endpoint and return every row as one array. `fetchPage(pageNumber)` must return
+ *  the parsed array for that 1-indexed page; a page shorter than 100 rows ends the walk; 200 is
+ *  the safety cap in case an endpoint never returns a short page.
+ *
+ *  Split out from `ghPaginate` so a test can drive the loop with a stubbed fetcher and pin the
+ *  page-count / early-exit / non-array behaviour without shelling out to gh. Pure — no gh, no
+ *  network, no process exits. Issue 171. */
+function paginate(fetchPage) {
+  const all = [];
+  for (let page = 1; page <= 200; page++) {
+    const rows = fetchPage(page);
+    if (!Array.isArray(rows)) throw new Error('non-array page ' + page);
+    for (const r of rows) all.push(r);
+    if (rows.length < 100) break;
+  }
+  return all;
+}
+
 /** Walk a list endpoint page by page and return every row as one array. `path` must already
  *  carry its query string with `per_page=100` (the API maximum); `&page=N` is appended here.
  *
@@ -286,14 +305,11 @@ function gh(args) {
  *  `repos/{owner}/{repo}` path. A short page (fewer than 100 rows) is the end; the page cap is a
  *  guard against an endpoint that never returns one. */
 function ghPaginate(path) {
-  const all = [];
-  for (let page = 1; page <= 200; page++) {
+  return paginate((page) => {
     const rows = JSON.parse(gh(['api', path + '&page=' + page]));
     if (!Array.isArray(rows)) throw new Error('non-array page ' + page + ' from ' + path);
-    for (const r of rows) all.push(r);
-    if (rows.length < 100) break;
-  }
-  return all;
+    return rows;
+  });
 }
 
 /** Bail with exit 2 rather than reporting a clean run we cannot stand behind. */

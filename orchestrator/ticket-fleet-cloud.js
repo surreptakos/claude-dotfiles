@@ -100,6 +100,15 @@ const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], prope
   commented: { type: 'boolean' }, commentUrl: { type: 'string' },
 } }
 
+// Pre-loop idempotence guard for resume (issue 150). Fetches the open-PR state from the tracker
+// and shapes it into a small stable structured answer so the code lane can early-return before
+// spawning any impl/verify/deliver agent. See runCodeLane below.
+const PR_CHECK = { type: 'object', required: ['found'], properties: {
+  found: { type: 'boolean' },
+  prUrl: { type: 'string' },
+  branch: { type: 'string' },
+} }
+
 // ---- Scout ----
 phase('Scout')
 const scoutSource = explicitTickets.length
@@ -244,11 +253,35 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 }
 
 // ---- Implement + blind Verify per ticket, no barrier between tickets ----
-const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
-const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
-  const t = ticket
-  if (t.kind === 'probe') return await runProbeLane(t)
-  if (t.kind === 'human') return await runHumanLane(t)
+// runCodeLane is bounded by the FLEET-CODE-LANE markers so the lockstep test in
+// tools/ticket-fleet-branch.test.js can extract this function verbatim and drive
+// it with a mocked `agent`, asserting that impl/verify/deliver agents are NOT
+// invoked when the pre-loop PR check reports an open PR (issue 150 acceptance).
+// [FLEET-CODE-LANE-START]
+const runCodeLane = async (t, workerIndex) => {
+  // Idempotence guard for resume (issue 150). If the tracker already has an open PR whose head
+  // ref matches this ticket's branch shape, skip the whole ticket — no impl, verify or deliver
+  // agent is spawned. The observed failure mode (`wf_911fa64d-102`, run id 6aa46942): a resumed
+  // run served impl:#97.1 from cache, but verify:#97.1 and deliver:#97 ran under changed cache
+  // keys ('v2:7b2682df…' → 'v2:5b3bbedc…' and 'v2:e669ecbd…' → 'v2:8468151e…'), re-verified the
+  // ticket, and opened PR 145 while PR 137 was still open. What moved those keys inside the
+  // workflow runtime is opaque here — the fix documents it as opaque and short-circuits the
+  // pipeline body with this pre-loop tracker check, before any of the drifting keys are hit.
+  const openPR = await agent(
+    `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape \`agent/issue-${t.number}-\`.
+There is no \`gh\` CLI here — use mcp__github__list_pull_requests with state="open" and per_page=100.
+Filter the returned array to entries whose \`head.ref\` (or the equivalent field in the tool's response — the branch name of the PR's head) starts with \`agent/issue-${t.number}-\`. If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
+Make no repository change, no comment, no PR. Return structured output only.`,
+    { label: `pr-check:#${t.number}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
+  )
+  if (openPR && openPR.found) {
+    log(`#${t.number}: open PR ${openPR.prUrl} already exists — skipping (no impl/verify/deliver agents started).`)
+    return {
+      ticket: t.number, done: true, kind: 'code', branch: openPR.branch || null,
+      verdict: { pass: true, evidence: 'existing open PR ' + openPR.prUrl, failures: [] },
+      prUrl: openPR.prUrl, commentUrl: null, discoveries: [],
+    }
+  }
   let lastVerdict = null, impl = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Keep this branch shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
@@ -261,6 +294,7 @@ Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover — record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll…', 'next I would…'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
 Rules: one branch named ${branch}; commit your work; NEVER push, NEVER open a PR, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # — closing-keyword risk). Acceptance criteria that describe delivery-stage steps — pushing the branch, opening a PR, merging, or presence on the default branch — are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
+Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are read-only production paths — never write to them, never leave .bak files there; a change that would need a live-tree edit to land is committed to the branch only and named as a discovery.
 Done-condition (machine-checkable, all required): branch exists with your commits; \`${scout.testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
 Scope: if, while working or testing, you find a pre-existing bug, a performance concern, or behavior the ticket doesn't mention, don't fix, optimize or extend it in this change unless the requested behavior cannot work without it; report it as a self-contained discovery string instead. Where the ticket is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in a discovery string, and don't build for the other readings as well. Verify your work however you like; scratch scripts and quick checks need not be kept. Commit tests only where the ticket asks for them or this repository already keeps tests for this kind of change, sized like the neighboring test files — roughly one focused test per stated behavior — and don't turn scratch checks into additional permanent test files. This is about extras only: implement every behavior the ticket asks for, completely.
 Edits: the number of tokens used to edit files is best minimized, all else being equal, so when it will not affect the end result, surgically edit a file rather than rewrite the entire thing.
@@ -277,7 +311,8 @@ In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach
 1. Run \`${scout.testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${impl.branch}):\n${t.criteria}\nDelivery-stage acceptance criteria — pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} — are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
-4. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
+4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${impl.branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*'\`. Any hit is a hard-rail failure — mark pass=false and quote the file list in evidence.
+5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only — evidence must be commands you ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel }
     )
@@ -304,6 +339,15 @@ Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Retur
     )
   }
   return { ticket: t.number, done, kind: 'code', branch: impl && impl.branch, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
+}
+// [FLEET-CODE-LANE-END]
+
+const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
+const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
+  const t = ticket
+  if (t.kind === 'probe') return await runProbeLane(t)
+  if (t.kind === 'human') return await runHumanLane(t)
+  return await runCodeLane(t, workerIndex)
 })
 
 // ---- Report: single writer, no append races ----
