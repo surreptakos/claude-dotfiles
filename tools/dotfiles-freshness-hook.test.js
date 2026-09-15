@@ -519,10 +519,88 @@ test('issue 107: SessionEnd skips cleanly when no PowerShell (never spawns the c
   const { r, box } = callWithSkip('session-end', '');
   assert.strictEqual(r.status, 0, r.stderr);
   assert.doesNotMatch(r.stderr, /ENOENT/);
-  const out = JSON.parse(r.stdout);
-  assert.match(out.hookSpecificOutput.additionalContext, /^DOTFILES FRESHNESS: skipped/);
-  assert.match(out.hookSpecificOutput.additionalContext, /PowerShell/);
+  // SessionEnd has no additionalContext channel: the skip note goes to stderr, stdout is {}.
+  assert.strictEqual(r.stdout, '{}');
+  assert.match(r.stderr, /^DOTFILES FRESHNESS: skipped/);
+  assert.match(r.stderr, /PowerShell/);
   assert.deepStrictEqual(box.runs(), []);
+});
+
+// ------------------------------------------- SessionEnd never injects --
+
+// Claude Code 2.1.270 validates hookSpecificOutput.hookEventName against the events
+// that carry an additionalContext channel and rejects "SessionEnd" outright:
+//   SessionEnd hook [node "tools/dotfiles-freshness-hook.js" session-end] failed:
+//   Hook JSON output validation failed - hookSpecificOutput.hookEventName: expected
+//   one of "PreToolUse" | "UserPromptSubmit" | "UserPromptExpansion" | "SessionStart" | ...
+// Seen in a cloud container on 2026-09-14. Every session-end path must emit `{}` on
+// stdout and put any note on stderr.
+
+const SESSION_END_STDIN = JSON.stringify({ hook_event_name: 'SessionEnd', reason: 'other' });
+
+test('session-end on state2: stdout is {} and the (END) warn goes to stderr', () => {
+  const box = sandbox();
+  box.setClassify({
+    state: 'state2', summary: 'live copies edited', liveDrift: true,
+    repo: { behind: 0, ahead: 0, isWorktree: false },
+    resolution: ['cd C:/repo', '.\\sync.ps1 -Mode push -Commit "chore: sync"'],
+  });
+  const r = callHook(box, 'session-end', SESSION_END_STDIN);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, '{}');
+  assert.doesNotMatch(r.stdout, /hookSpecificOutput/);
+  assert.match(r.stderr, /DOTFILES FRESHNESS \(END\)/);
+  assert.match(r.stderr, /live-side drift is unpushed/);
+  assert.deepStrictEqual(box.runs(), ['classify']);
+});
+
+test('session-end on state3: stdout is {} and the (END) STOP goes to stderr, exit 0', () => {
+  const box = sandbox();
+  box.setClassify({
+    state: 'state3', summary: 'both diverged', liveDrift: true,
+    repo: { behind: 1, ahead: 0, isWorktree: false },
+    resolution: ['cd C:/repo', '.\\sync.ps1 -Mode push -Commit "chore: capture"', 'git pull --rebase', 'git push', '.\\sync.ps1 -Mode pull'],
+    incomingCommits: ['abc incoming'],
+  });
+  const r = callHook(box, 'session-end', SESSION_END_STDIN);
+  assert.strictEqual(r.status, 0, 'session-end never blocks');
+  assert.strictEqual(r.stdout, '{}');
+  assert.match(r.stderr, /DOTFILES FRESHNESS \(END\) STOP - BOTH DIVERGED/);
+  assert.match(r.stderr, /abc incoming/);
+  assert.deepStrictEqual(box.runs(), ['classify']);
+});
+
+test('session-end on synced: stdout is {} and stderr is empty', () => {
+  const box = sandbox();
+  box.setClassify({ state: 'synced', summary: 'up to date', liveDrift: false, resolution: [] });
+  const r = callHook(box, 'session-end', SESSION_END_STDIN);
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, '{}');
+  assert.strictEqual(r.stderr, '');
+  assert.deepStrictEqual(box.runs(), ['classify']);
+});
+
+test('session-end with a broken classifier: stdout is {} (crash path never injects either)', () => {
+  const box = sandbox();
+  const env = Object.assign({}, box.env, { DOTFILES_FRESHNESS_TOOL: STUB_TOOL + '.missing.js' });
+  const r = spawnSync(process.execPath, [HOOK, 'session-end'], {
+    input: SESSION_END_STDIN, encoding: 'utf8', env: Object.assign({}, process.env, env), timeout: 30000,
+  });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, '{}');
+});
+
+test('session-start and prompt still inject with their own hookEventName (unchanged)', () => {
+  const box = sandbox();
+  box.setClassify({
+    state: 'state2', summary: 'live copies edited', liveDrift: true,
+    repo: { behind: 0, ahead: 1, isWorktree: false },
+    resolution: ['cd C:/repo'],
+  });
+  const start = callHook(box, 'session-start', JSON.stringify({ source: 'startup' }));
+  assert.strictEqual(JSON.parse(start.stdout).hookSpecificOutput.hookEventName, 'SessionStart');
+  const { r } = callWithSkip('prompt', '');
+  assert.strictEqual(JSON.parse(r.stdout).hookSpecificOutput.hookEventName, 'UserPromptSubmit');
 });
 
 test('issue 107: CLAUDE_CODE_REMOTE_SESSION_ID names cloud container in skip reason', () => {

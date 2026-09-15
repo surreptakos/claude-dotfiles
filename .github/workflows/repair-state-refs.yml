@@ -1,0 +1,60 @@
+name: Repair state refs
+
+# Issue 92: the master orchestrator state issues (#74-#77) live in claude-dotfiles, so a bare
+# `#N` in one of them resolves against claude-dotfiles - and tools/tracker-audit.js flags any
+# such reference to a number that is not a claude-dotfiles issue/PR as `dangling-reference`.
+# Masters must write cross-repo references as `owner/repo#N`, and the boot prompt of the local
+# master watchdog now spells that out. This workflow is the deterministic backstop for the
+# CLOUD path (RUNBOOK.md - orchestrator worker sessions in claude.ai/code containers), which
+# never touches orchestrator/master-watchdog.ps1. It runs tools/repair-state-refs.js, which is
+# idempotent: a clean body triggers no `gh issue edit`.
+#
+# Triggers:
+#   * `issues: edited` on #74-#77 - a cloud master's write is caught within a minute of landing.
+#     (Note: `types: edited` fires on body edits; label / assignee / milestone changes do NOT
+#     fire it. That is deliberate - only body edits can introduce a bare cross-repo `#N`.)
+#   * A 10-minute cron - matches the local watchdog cadence and covers historic content or any
+#     write path that does not fire `issues: edited` (rare, but the belt-and-suspenders is free).
+#   * `workflow_dispatch` for a manual run.
+#
+# The workflow's own token has `issues: write` scope on the repository, which is all
+# `gh issue edit --body-file -` needs.
+
+on:
+  issues:
+    types: [edited]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: repair-state-refs
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    # Skip issue-edit runs that are not for one of the four state issues. Cron and manual runs
+    # have no `github.event.issue`, so they always pass.
+    if: |
+      github.event_name != 'issues' ||
+      github.event.issue.number == 74 ||
+      github.event.issue.number == 75 ||
+      github.event.issue.number == 76 ||
+      github.event.issue.number == 77
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (pure rewrite + injected-gh repair path)
+        run: node --test tools/repair-state-refs.test.js
+      - name: Repair state issues (idempotent; no-op when clean)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/repair-state-refs.js

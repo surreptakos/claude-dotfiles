@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: 256462ea-6b07-41a1-8f84-5bd1a21d6d26
-  modified: 2026-09-09T14:53:30.921Z
+  modified: 2026-09-14T21:19:44.745Z
 ---
 
 Running `gh pr merge N --squash --delete-branch` from an agent worktree completes the squash merge
@@ -19,3 +19,10 @@ that branch belongs to the main checkout.
 **How to apply:** treat exit 1 from that command as "verify, then finish by hand": `gh pr view N`
 confirms MERGED, then `git push origin --delete <branch>` removes the remote branch; the local branch
 goes with the worktree. Related: [[concurrent-sessions-share-one-sync-push]].
+
+**Update 2026-09-14 (PR #183):** claude-dotfiles now has `delete_branch_on_merge: true`
+(`gh api repos/surreptakos/claude-dotfiles --jq .delete_branch_on_merge`), so a plain
+`gh pr merge N --squash` from a worktree exits 0 and GitHub removes the head branch itself;
+a manual `git push origin --delete` then fails with `remote ref does not exist`. Check
+`git ls-remote --heads origin <branch>` before deleting by hand. The manual step still
+applies in repos without that setting.

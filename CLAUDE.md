@@ -1,5 +1,9 @@
 # claude-dotfiles
 
+<!-- owner-account:begin — managed by claude-dotfiles/tools/owner-account-line.js; do not edit -->
+Owner account: Dan-AAC (desktop app)
+<!-- owner-account:end -->
+
 The machine-local half of a Claude Code setup, under version control: global rules, skills, hooks,
 plugin manifests, per-project memory. `README.md` explains the design; this file is what an agent
 working *on* the repo needs to know.
@@ -68,6 +72,15 @@ this machine's home path. Push rewrites it to `__USERHOME__` (one token per spel
 see `ConvertTo-Tokens`) and pull substitutes the local home back. Any new script that copies a text
 file must go through `Copy-OneFile`, or it will bake this machine's paths into the repo.
 
+**Three project files carry CRLF blobs on purpose (issue 87).** `.claude/session.json`,
+`.claude/settings.json` and `.claude/workflows/ticket-fleet.js` are stored with CRLF line endings
+so a Windows text-mode writer's re-serialization (Claude Code, VS Code save on Windows, PowerShell
+5.1 `Get-Content` + `Set-Content`, an installer's rewrite) is byte-stable against the blob and
+does not produce a phantom ` M` in `git status`. Recover a leftover-LF worktree that predates the
+fix with `git checkout HEAD -- .claude/session.json .claude/settings.json
+.claude/workflows/ticket-fleet.js` — that overwrites the LF working copy with the CRLF blob and
+`git status` reads clean again.
+
 ## Testing a change to the scripts
 
 Run the restore test. It is the only thing here that checks the *pull* half end to end:
@@ -86,7 +99,7 @@ Three sources, and the difference matters:
 - `-From origin` (default) clones the remote. The only one that answers "would a new machine work?"
 - `-From local` clones this checkout's committed state, so **commit first** or your change is absent.
 - `-From worktree` copies what `git ls-files` sees — staged changes included, no network. This is
-  what the pre-commit hook and CI run.
+  what the pre-commit hook runs.
 
 Rules the suite depends on:
 
