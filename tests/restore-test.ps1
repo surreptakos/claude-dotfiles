@@ -1231,6 +1231,97 @@ if ((Test-Path $claimsAuditTest) -and (Test-Path $restoredEngine)) {
     Check 'restored claims-audit.js passes tests/claims-audit.test.js' $false $detail
 }
 
+# ------------------------------------------------------------------ 9d. issue-87 CRLF-blob byte stability
+
+# Issue 87: fresh worktrees under the repo's worktree directory used to show phantom modifications
+# on .claude/session.json, .claude/settings.json and .claude/workflows/ticket-fleet.js. Root cause:
+# `.gitattributes` sets `* -text` for the whole repo (correct for the byte-mirror trees), so git
+# does NO EOL conversion. Any Windows text-mode writer that re-serializes these three files at
+# session start (Claude Code, VS Code default save on Windows, PowerShell 5.1 `Get-Content` +
+# `Set-Content`, an installer's rewrite) produces CRLF byte-for-byte; against an LF blob, that is
+# a stat mismatch and `git status --porcelain` reports ` M` while `git diff -w --ignore-cr-at-eol`
+# is empty.
+#
+# The fix stored these three files as CRLF in the blob so any Windows writer's CRLF re-serialization
+# is byte-identical to the blob and status stays clean. Two invariants to gate:
+#   1. Fresh clone carries CRLF bytes for all three files (would fail under `text eol=lf` or an
+#      autocrlf conversion path that stripped the CRLF on the way in).
+#   2. A byte-preserving CRLF rewrite of any of the three files (the exact effect a Windows
+#      writer has) leaves `git status --porcelain` empty.
+# Worktree mode skips a real git repo; the byte-check still runs there so the pre-commit gate
+# does not silently miss a regression in the blob.
+Write-Host ''
+Write-Host 'Issue 87 - CRLF blob byte stability'
+
+$issue87Files = @(
+    (Join-Path $Clone '.claude\session.json'),
+    (Join-Path $Clone '.claude\settings.json'),
+    (Join-Path $Clone '.claude\workflows\ticket-fleet.js')
+)
+$missing = @($issue87Files | Where-Object { -not (Test-Path $_) })
+if ($missing.Count -gt 0) {
+    Check 'issue-87 target files present in clone' $false @('one of session.json / settings.json / ticket-fleet.js missing from the clone: ' + ($missing -join '; '))
+} else {
+    $nonCrlf = @()
+    foreach ($f in $issue87Files) {
+        $bytes = [System.IO.File]::ReadAllBytes($f)
+        $hasCrlf = $false
+        for ($i = 0; $i -lt ($bytes.Length - 1); $i++) {
+            if ($bytes[$i] -eq 13 -and $bytes[$i + 1] -eq 10) { $hasCrlf = $true; break }
+        }
+        if (-not $hasCrlf) { $nonCrlf += (Split-Path -Leaf $f) }
+    }
+    if ($nonCrlf.Count -eq $issue87Files.Count) {
+        # A clone from an older ref (default -From origin against an origin/master tip that
+        # predates the fix) simply has no CRLF blob to test yet. Note the skip: reporting FAIL
+        # against an older ref would gate every restore run on this branch merging, and reporting
+        # a silent pass would let the fix regress unnoticed after landing. -From local and -From
+        # worktree run against this checkout, so they DO exercise the fix while origin catches up.
+        Note ("skipped: fresh clone has LF blobs for all three files (older ref, no fix yet); From={0}" -f $From)
+    } else {
+        Check 'all three files land as CRLF bytes in the fresh clone' `
+            ($nonCrlf.Count -eq 0) $nonCrlf
+
+        if ($From -ne 'worktree') {
+            # Fresh clone must be clean up-front (a mistuned fixture would give a false pass for the
+            # byte-stability check below).
+            $preStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' '.claude/workflows/ticket-fleet.js' 2>&1
+            $preStatusStr = ($preStatus | Out-String).Trim()
+            Check 'fresh clone git status is clean on the three files' `
+                ([string]::IsNullOrWhiteSpace($preStatusStr)) @("git status: [$preStatusStr]")
+
+            # Snapshot originals for guaranteed restore, then run the byte-preserving Windows
+            # text-writer default: strip existing CR, add CRLF. On the CRLF blob this produces the
+            # exact same bytes and status must stay clean; on an LF blob it would flip to CRLF and
+            # status would show ` M` (the phantom this ticket exists to kill).
+            $originals = @{}
+            foreach ($f in $issue87Files) { $originals[$f] = [System.IO.File]::ReadAllBytes($f) }
+            try {
+                foreach ($f in $issue87Files) {
+                    $bytes = $originals[$f]
+                    $out = New-Object System.Collections.Generic.List[byte]
+                    for ($i = 0; $i -lt $bytes.Length; $i++) {
+                        if ($bytes[$i] -eq 13) { continue }
+                        if ($bytes[$i] -eq 10) { [void]$out.Add(13); [void]$out.Add(10) }
+                        else { [void]$out.Add($bytes[$i]) }
+                    }
+                    [System.IO.File]::WriteAllBytes($f, $out.ToArray())
+                }
+                $postStatus = & git -C $Clone status --porcelain -- '.claude/session.json' '.claude/settings.json' '.claude/workflows/ticket-fleet.js' 2>&1
+                $postStatusStr = ($postStatus | Out-String).Trim()
+                Check 'byte-preserving Windows-style CRLF rewrite leaves git status clean' `
+                    ([string]::IsNullOrWhiteSpace($postStatusStr)) @("git status: [$postStatusStr]")
+            } finally {
+                foreach ($f in $issue87Files) {
+                    try { [System.IO.File]::WriteAllBytes($f, $originals[$f]) } catch {}
+                }
+            }
+        } else {
+            Note 'worktree mode: no git repo, byte-stability check via clone modes only'
+        }
+    }
+}
+
 # ------------------------------------------------------------------ 10. two runs can overlap
 
 # The regression check for the false failure of 2026-08-13. Two children run the scratch-root code
