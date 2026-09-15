@@ -251,5 +251,83 @@ class AacSkillsSupersedesMirroredPersonalCopy(unittest.TestCase):
             self.assertNotIn("# Foo (personal)", body)
 
 
+# Regression guard for issue 208: the plugin's hooks manifest must not name a script that isn't
+# in the payload. The eight governance hooks ride inside the plugin so a container that installs
+# it is gated the same way as a PC session; if a manifest entry points at a missing script the
+# hook fails silently and the gate does not fire.
+MARKETPLACE_HOOKS = REPO / "marketplace" / "aac-skills" / "hooks"
+_SCRIPT_PATH_RE = re.compile(
+    r'"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/scripts/([A-Za-z0-9_.\-]+)"')
+
+
+def _iter_hook_commands(manifest):
+    for event_entries in (manifest.get("hooks") or {}).values():
+        for group in event_entries:
+            for hook in group.get("hooks", []):
+                for key in ("command", "commandWindows"):
+                    cmd = hook.get(key)
+                    if cmd:
+                        yield cmd
+
+
+class PluginHooksManifest(unittest.TestCase):
+    def setUp(self):
+        text = (MARKETPLACE_HOOKS / "hooks.json").read_text(encoding="utf-8")
+        self.manifest = json.loads(text)
+        self.scripts_dir = MARKETPLACE_HOOKS / "scripts"
+
+    def test_manifest_names_only_scripts_that_exist_in_the_payload(self):
+        referenced = set()
+        for cmd in _iter_hook_commands(self.manifest):
+            for m in _SCRIPT_PATH_RE.finditer(cmd):
+                referenced.add(m.group(1))
+        self.assertTrue(referenced,
+                        "manifest names no plugin-root scripts; expected the governance hooks")
+        missing = sorted(n for n in referenced if not (self.scripts_dir / n).is_file())
+        self.assertEqual(missing, [],
+                         f"hooks.json names scripts not shipped in the payload: {missing}")
+
+    def test_eight_governance_hook_entries_are_present(self):
+        # Session gate (start + end), state rehydrate, state stash (SessionEnd + PreCompact both
+        # invoke the same script), governance reminder, ask-matt gate on prompt / pre-tool /
+        # post-tool / stop. Nine hook entries in total -- state-stash rides two events -- across
+        # the six lifecycle events the PC settings.json wires today.
+        counts = {}
+        for event, entries in (self.manifest.get("hooks") or {}).items():
+            for group in entries:
+                for hook in group.get("hooks", []):
+                    cmd = hook.get("command", "")
+                    for m in _SCRIPT_PATH_RE.finditer(cmd):
+                        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+        # State-stash rides both PreCompact and SessionEnd (two entries).
+        self.assertEqual(counts.get("session-gate.js"), 3,
+                         "session-gate.js should fire on SessionStart, SessionEnd and UserPromptSubmit")
+        self.assertEqual(counts.get("state-rehydrate.js"), 1)
+        self.assertEqual(counts.get("state-stash.js"), 2,
+                         "state-stash.js rides both PreCompact and SessionEnd")
+        self.assertEqual(counts.get("governance-reminder.js"), 1)
+        self.assertEqual(counts.get("ask_matt_gate.py"), 4,
+                         "ask_matt_gate.py should fire on prompt, pre-tool, post-tool and stop")
+
+    def test_no_pwsh_only_invocation_in_the_hook_commands(self):
+        # Acceptance criterion 3: every script runs on python3 and node only. A pwsh-only branch
+        # would need to be guarded and skipped with a printed reason; there is no such branch here,
+        # and this guard makes sure a later edit does not slip one in without a paired guard. The
+        # marker hook's probe reports `command -v pwsh` -- a which-check that prints `none` when
+        # pwsh is absent, not an invocation -- so it is exempt.
+        for cmd in _iter_hook_commands(self.manifest):
+            if "hooks/scripts/" not in cmd:
+                continue
+            self.assertNotRegex(cmd, r"\bpwsh\b",
+                                f"pwsh-only invocation in hook command: {cmd!r}")
+
+    def test_scripts_reference_plugin_root_not_a_home_path(self):
+        for cmd in _iter_hook_commands(self.manifest):
+            if "hooks/scripts/" not in cmd:
+                continue  # the marker sh-c echo does not name a shipped script
+            self.assertNotRegex(cmd, r"(?:~|\$HOME|%USERPROFILE%|__USERHOME__)",
+                                f"hook command reaches through a home path: {cmd!r}")
+
+
 if __name__ == "__main__":
     unittest.main()
