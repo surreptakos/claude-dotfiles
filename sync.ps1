@@ -179,6 +179,21 @@ if ($Mode -eq 'push') {
     $links = Save-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  claude/skill-links.json  ({0} junctions recorded)" -f $links)
 
+    # Re-apply the settings.json invariants this repo owns (issue 199). The mirror is
+    # otherwise a byte-for-byte copy of live, so if live drifted off the invariant the
+    # push would carry the drift into the repo. Running the enforcer AFTER the copy
+    # keeps the mirror correct regardless of live's state; a subsequent pull propagates
+    # it back to live.
+    $invariants = Join-Path $RepoRoot 'tools\settings-invariants.ps1'
+    $mirrorSettings = Join-Path $RepoRoot 'claude\settings.json'
+    if ((Test-Path $invariants) -and (Test-Path $mirrorSettings)) {
+        Write-Host ''
+        Write-Host '  settings.json invariants (mirror)'
+        $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants, '-Path', $mirrorSettings)
+        if ($DryRun) { $args_ += '-DryRun' }
+        & powershell @args_ | ForEach-Object { Write-Host ("    {0}" -f $_) }
+    }
+
     Write-Host ''
     Write-Host ("{0} files staged in the repo." -f $total)
 
@@ -285,6 +300,19 @@ if ($Mode -eq 'pull') {
     # would be skipped as a missing target.
     $links = Restore-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  {0} skill junctions recreated" -f $links)
+
+    # Re-apply the settings.json invariants this repo owns (issue 199). Pull from a mirror
+    # that already carries them is enough on its own; running the enforcer against live
+    # here belt-and-braces catches an older mirror or a partial pull.
+    $invariants = Join-Path $RepoRoot 'tools\settings-invariants.ps1'
+    $liveSettings = Join-Path $UserHome '.claude\settings.json'
+    if ((Test-Path $invariants) -and (Test-Path $liveSettings)) {
+        Write-Host ''
+        Write-Host '  settings.json invariants (live)'
+        $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants, '-Path', $liveSettings)
+        if ($DryRun) { $args_ += '-DryRun' }
+        & powershell @args_ | ForEach-Object { Write-Host ("    {0}" -f $_) }
+    }
 
     # Last, because it reads the ~/.claude the lines above just wrote. One-way overlay onto
     # ~/.claude-personal (issue #9): skipped entirely when the profile does not exist, and

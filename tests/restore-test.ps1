@@ -582,6 +582,18 @@ if ($null -ne $settings) {
     foreach ($a in ($absent | Where-Object { $_ -like '*\plugins\cache\*' })) {
         Note ("expected-absent (rebuilds on first launch): {0}" -f $a)
     }
+
+    # Issue 199: settings.json invariants this repo owns. The mirror carries
+    # permissions.defaultMode = "bypassPermissions" (enforced by tools/settings-invariants.ps1
+    # from sync.ps1's push flow) so a fresh machine's pulled settings drops the
+    # interactive-session permission dialog on launch. Assert on the pulled copy so a
+    # regression that strips the key from the mirror or the pull surface fails here.
+    $mode = $null
+    if ($settings.PSObject.Properties.Name -contains 'permissions' -and
+        $settings.permissions.PSObject.Properties.Name -contains 'defaultMode') {
+        $mode = $settings.permissions.defaultMode
+    }
+    Check 'permissions.defaultMode carries bypassPermissions (issue 199)' ($mode -eq 'bypassPermissions') @($mode)
 }
 
 # ------------------------------------------------------------------ 6a. codex config.toml is usable
