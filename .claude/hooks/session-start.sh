@@ -223,6 +223,10 @@ with open(marker_file, 'w') as f:
         'skills_hash': new_hash,
         'skills_count': len(skill_names),
         'skills': skill_names,
+        # A bootstrap installs skills under bare names in ~/.claude/skills/, so the
+        # slash-command form that resolves is /<skill> and not /aac-skills:<skill>
+        # (issue 242). Recorded here so tools and session-check can inspect it.
+        'slash_form': '/<skill>',
         'gh_path': gh_path,
         'hooks_events': merged_events,
         'dotfiles_source': os.environ.get('BOOTSTRAP_DOTFILES_SRC', ''),
@@ -233,7 +237,16 @@ with open(marker_file, 'w') as f:
 # 6. one SessionStart additionalContext line, under 2KB. The names are truncated (not the
 #    payload version and not the marker sentence session-check greps for) so a growing skill
 #    list never overruns the cap.
-sentence = f"AAC-BOOTSTRAP MARKER: payload v{version}; skills copied={copied}; gh={gh_path}"
+# The slash-form note is load-bearing (issue 242): step 3 copies each skill into
+# ~/.claude/skills/<bare-name>/, so it invokes as /<bare-name>. The marketplace-style
+# /aac-skills:<skill> form has nothing to resolve to in a bootstrapped container (owner
+# session on 2026-09-15: /aac-skills:ticket-fleet was unknown, /ticket-fleet ran). Name the
+# working spelling here so no reader has to try both.
+sentence = (
+    f"AAC-BOOTSTRAP MARKER: payload v{version}; skills copied={copied}; gh={gh_path};"
+    f" invoke skills as /<skill> (bare name) - the plugin-namespaced /aac-skills:<skill>"
+    f" form does not resolve in a bootstrapped container"
+)
 budget = 2000 - len(sentence) - len(' skills=[]')
 names_str = ','.join(skill_names)
 if len(names_str) > budget:
