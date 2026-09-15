@@ -36,6 +36,8 @@ const {
   paginate,
   parseLinkHeader,
   pageFromUrl,
+  commentDatesByNumber,
+  fetchCommentDates,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -324,6 +326,47 @@ test('paginate short-fetch names the open+closed count when Link carries rel="la
     assert.match(e.message, /5 pages/);        // ground truth from rel="last"
     assert.match(e.message, /110/);            // fetched count
   }
+});
+
+// ---- issue 285: the comments fetch must not swallow a short-fetch either -----------------
+// /pulls already exits 2 on a short page; /issues/comments sat behind a bare `catch {}` whose
+// comment said "comments-less PRs are fine". A short page there is not a comments-less repo:
+// paginate has partial rows while Link still says rel="next", so the PRs in the dropped tail
+// read as never-answered and blocker-may-be-answered goes quiet on live threads. The counts
+// live in the short-fetch message, which the caller hands to cannotAudit.
+
+test('fetchCommentDates rethrows a short-fetch (with its counts) instead of degrading to zero comments', () => {
+  const fetchComments = () => {
+    throw new Error('short-fetch: page 2 returned 12 rows (< 100) but the Link header still ' +
+                    'names rel="next". Fetched 112 rows total; expected ~400+ rows in 5 pages.');
+  };
+  assert.throws(() => fetchCommentDates(fetchComments), (err) => {
+    assert.match(err.message, /^short-fetch:/);
+    assert.match(err.message, /112 rows/);     // fetched count reaches the exit-2 message
+    assert.match(err.message, /5 pages/);      // ground truth alongside it
+    return true;
+  });
+});
+
+test('fetchCommentDates degrades to an empty map on a non-short-fetch failure, and on a comment-less repo', () => {
+  // The negative control for the criterion: a 403 from a token without issue read, or a repo
+  // with genuinely no comments, must still let the audit reach a verdict.
+  const denied = () => { throw new Error('HTTP 403: Resource not accessible by integration'); };
+  assert.deepStrictEqual(fetchCommentDates(denied), new Map());
+  assert.deepStrictEqual(fetchCommentDates(() => []), new Map());
+});
+
+test('commentDatesByNumber groups by issue/PR number with dates sorted oldest-first', () => {
+  const rows = [
+    { issue_url: 'https://api.github.com/repos/o/r/issues/12', created_at: '2026-09-02T00:00:00Z' },
+    { issue_url: 'https://api.github.com/repos/o/r/issues/12', created_at: '2026-09-01T00:00:00Z' },
+    { issue_url: 'https://api.github.com/repos/o/r/issues/13', created_at: null },
+    { issue_url: '', created_at: '2026-09-03T00:00:00Z' },
+  ];
+  const map = commentDatesByNumber(rows);
+  assert.deepStrictEqual(map.get(12), ['2026-09-01T00:00:00Z', '2026-09-02T00:00:00Z']);
+  assert.deepStrictEqual(map.get(13), []);   // a row with no date is not a comment date
+  assert.strictEqual(map.size, 2);           // the unparseable issue_url is dropped
 });
 
 // ---- parseLinkHeader / pageFromUrl: the pure helpers behind ghPaginate's Link parse -----
