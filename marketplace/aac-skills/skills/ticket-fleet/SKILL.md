@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-15T21:36:24Z'
-  previous-modified: '2026-09-15T20:37:03Z'
-  revision: '7'
-  content-sha: c25c51f29dbe
+  modified: '2026-09-15T22:54:11Z'
+  previous-modified: '2026-09-15T21:36:24Z'
+  revision: '8'
+  content-sha: 903350a9de28
 ---
 
 # ticket-fleet
@@ -95,7 +95,14 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   deliver stage posts one resolution comment.
 - **human** - labelled `ready-for-human`, or the body says the owner performs the steps. The
   agent verifies only what the container can do and hands the rest back in one comment; it
-  never claims an owner step was done.
+  never claims an owner step was done. The delivery then relabels the ticket - `ready-for-agent`
+  off, `ready-for-human` on - so the next label listing leaves it to the owner.
+
+The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
+fleet handoff (a "Remaining for the owner" section and the Claude Code footer) with no owner
+comment after it. Such a ticket is parked, not run - no lane starts for it and nothing is
+posted - and the run result names it under `skippedAwaitingOwner`. Together with the relabel
+that is what stops a second wave repeating a handoff the owner has not answered yet (issue 266).
 
 ## Branch names
 
