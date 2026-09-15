@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-10T17:37:14Z"
-  previous-modified: "2026-09-10T16:56:47Z"
-  revision: "1"
-  content-sha: "287f8c712b87"
+  modified: "2026-09-15T19:42:45Z"
+  previous-modified: "2026-09-10T17:37:14Z"
+  revision: "2"
+  content-sha: "ede31c2a78fb"
 ---
 
 # todoist-triage
@@ -56,7 +56,14 @@ Priority sorts within a ball, never sets it. The 10-item `do` cap in Current Wor
 
 ### 1. Read
 
-`find-tasks` on both projects, `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link. Done when both projects are exhausted and every link-only title has a source read.
+Load the two prior run records first, then the exports, then the live tail.
+
+- **Prior run records.** Read the newest `aac-forgotten-tasks` run record and the previous `todoist-triage` run record before building the queue. Note each one's timestamp and filename; the report in step 6 names them, and states "none found" for either that is missing. Missing records are not a stop — they change what the run can rule on.
+- **Exports (primary source of source material).** Every ruling rests on the message and thread bodies exported to Google Drive by the `aac-forgotten-tasks` routine, not on live-connector snippets. In a cloud session, pull them with `mcp__Google_Drive__search_files` (query `name contains 'aac-forgotten-tasks' and mimeType != 'application/vnd.google-apps.folder'`, `orderBy: 'modifiedTime desc'`), then `mcp__Google_Drive__read_file_content` on the newest bundle. Record its modified time — that is the tail-window start.
+- **Live tail (tail-fill only).** Fill the window "newest export stamp → now" from Gmail (`mcp__Gmail__search_threads`), Teams (`mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`), meeting notes (Granola), and Todoist history (`find-activity`). Never widen this window past the export stamp; never let the connectors stand in as the primary reader. Any connector that fails or returns no access is recorded and carried into step 6 as an unreachable surface.
+- **Todoist queue.** `find-tasks` on both projects, `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link.
+
+Done when both run records are located or their absence recorded, the newest export is read, the tail window is fetched from every reachable connector (and every failure is logged), both projects are exhausted, and every link-only title has its source read.
 
 ### 2. Queue and alarms
 
@@ -64,7 +71,13 @@ Queue = open tasks with no ball label and no `no-sweep` or `merged`. Alarms, lis
 
 ### 3. Propose
 
-One line per queue item: title, ball label, project (Current Work if this week, else backlog), do date if Dan should see it again on a day, deadline if the source names one, one-clause reason. Ask the four questions in order and stop at the first that fires: delete (done, superseded, informational, RECORD, recruiter pitch, or 90+ days old with no date, no source, no owner); delegate (ball on a direct; non-directs route to their manager, Palm/Chris/Art/Freeman to Rob, Amanda to Mark); defer (`do`, backlog, do date for the resurface); do (`do`, Current Work). Propose a priority change only for a deadline inside 7 days at p2 or lower. Every `to-NAME` proposal on a link-only title carries a "Summary for handoff" comment in the same batch: what the source said, who said it and when, the ask for that direct, and any file that needs re-sharing to them. Duplicates are merge proposals: survivor named, dup's unique text quoted. Done when every queue item and alarm has a line.
+**Since-task-created check, before any ruling.** For every queue and alarm item, sweep from the task's creation date to now for a resolution: mail, Teams, meeting notes, Todoist activity and comments. A resolution is found by opening the referenced thread and reading it to its last message — never by keyword search alone. A keyword search finds a topic; only the last message tells you whether the topic is still open.
+
+Worked example (2026-09-15 miss): Dan reversed the "short O3 agenda" decision. A keyword search on "short" hit the earlier "make it short" line and would have ruled the item done. The last message of the thread — "I know I asked you to make it short, but I'm reversing course" — was the actual state. Rule from the last message, not the first hit. Every ruling records which thread was read and which message id was its last.
+
+If a surface the item depends on could not be read (a connector failed, the export is missing, or the thread predates the export window and the tail connector for it is unreachable), do not assert a ruling. Mark it `unknown`, name the missing surface, and carry it into step 6 so Dan sees exactly which surface was dark.
+
+One line per queue item: title, ball label, project (Current Work if this week, else backlog), do date if Dan should see it again on a day, deadline if the source names one, one-clause reason. Ask the four questions in order and stop at the first that fires: delete (done, superseded, informational, RECORD, recruiter pitch, or 90+ days old with no date, no source, no owner); delegate (ball on a direct; non-directs route to their manager, Palm/Chris/Art/Freeman to Rob, Amanda to Mark); defer (`do`, backlog, do date for the resurface); do (`do`, Current Work). Propose a priority change only for a deadline inside 7 days at p2 or lower. Every `to-NAME` proposal on a link-only title carries a "Summary for handoff" comment in the same batch: what the source said, who said it and when, the ask for that direct, and any file that needs re-sharing to them. Duplicates are merge proposals: survivor named, dup's unique text quoted. Done when every queue item and alarm has a line, and every `unknown` names the unreachable surface it depended on.
 
 ### 4. Ask
 
@@ -76,7 +89,16 @@ Order: alarms, do, delegate, defer, delete, merge, with counts. One `AskUserQues
 
 ### 6. Report
 
-Counts changed, what Dan declined, alarms still open, `do` count in Current Work. Done when Dan can see the board state without opening Todoist.
+Output contract, in this order:
+
+1. **Deadline-inside-24 h items first.** Every task with a deadline in the next 24 hours goes at the top, before any other section, so it is the first thing Dan reads.
+2. **Prior run records read.** Name the `aac-forgotten-tasks` run record and the previous `todoist-triage` run record that step 1 loaded — timestamp and filename each. For either that was missing, say "none found" plainly, so Dan sees the run built its queue without it.
+3. **Unreachable surfaces.** List every connector or export step 1 could not read this run. Beside each `unknown` ruling, name the surface it depended on. Every `unknown` from step 3 appears here, tied to the surface that was dark.
+4. **Counts changed, what Dan declined, alarms still open, active-list count over cap.**
+
+Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `merged`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. The prior-run-records line is the one exception: it may spell the record filenames so Dan can go find them.
+
+Done when Dan can see the board state without opening Todoist, and knows which surfaces were dark and which rulings that made unknown.
 
 ## Cadence
 
