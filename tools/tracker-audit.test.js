@@ -34,6 +34,8 @@ const {
   isFollowUpAcknowledgment,
   citedIssueNumbers,
   paginate,
+  parseLinkHeader,
+  pageFromUrl,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -243,4 +245,106 @@ test('paginate throws when a fetcher returns a non-array', () => {
   // exit 2 (via cannotAudit) rather than silently accept a page of zero rows.
   const fetchPage = () => ({ message: 'Not Found' });
   assert.throws(() => paginate(fetchPage), /non-array page 1/);
+});
+
+// ---- issue 230: short page with rel="next" is a silent-drop, not the end ---------------
+// Reproduces the 2026-09-15 15:06 run that reported #45/#85/#106/#109/#114/#88/#121/#44/
+// #74–#77 as dangling references when every one of those numbers existed. The root cause
+// was a page returning fewer than 100 rows while the Link header still carried rel="next"
+// — paginate's row-count end-of-stream heuristic swallowed the short page, and the tail
+// (dominated by CLOSED issues on this repo) never reached the known-number set that the
+// dangling-reference check reads. With Link info exposed, paginate now throws
+// short-fetch: and ghPaginate turns that into cannotAudit (exit 2) rather than a false
+// dangling-reference finding.
+
+test('paginate throws short-fetch when page 2 is short AND Link header carries rel="next"', () => {
+  // Simulates the observed failure: repo has more than 100 issues, page 1 returns a full
+  // 100 rows with rel="next", page 2 returns 47 rows (short) but STILL carries rel="next"
+  // — GitHub is telling us more pages exist. Paginate must not treat the short page as
+  // end-of-stream; the closed-issue tail past this page is what produced the false
+  // dangling references. Ground truth is open + closed count, which rel="next" proves is
+  // strictly greater than what we fetched.
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+  const page2 = Array.from({ length: 47 }, (_, i) => ({ number: 101 + i }));
+  const calls = [];
+  const fetchPage = (page) => {
+    calls.push(page);
+    if (page === 1) return { rows: page1, hasNext: true, lastPage: null };
+    if (page === 2) return { rows: page2, hasNext: true, lastPage: null };
+    throw new Error('paginate walked past the short-fetch trap: called for page ' + page);
+  };
+  assert.throws(() => paginate(fetchPage), (err) => {
+    assert.match(err.message, /^short-fetch:/);
+    assert.match(err.message, /page 2/);
+    assert.match(err.message, /147/);          // fetched count
+    assert.match(err.message, /rel="next"/);
+    return true;
+  });
+  assert.deepStrictEqual(calls, [1, 2]);
+});
+
+test('paginate short page WITHOUT rel="next" is a genuine end-of-stream, no throw', () => {
+  // The negative control: 103 issues total, page 1 is 100 with rel="next", page 2 is 3
+  // rows and Link carries no rel="next" — the walk is over. Paginate must return cleanly.
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+  const page2 = [{ number: 101 }, { number: 102 }, { number: 103 }];
+  const fetchPage = (page) => {
+    if (page === 1) return { rows: page1, hasNext: true, lastPage: null };
+    if (page === 2) return { rows: page2, hasNext: false, lastPage: null };
+    throw new Error('should have stopped');
+  };
+  const all = paginate(fetchPage);
+  assert.strictEqual(all.length, 103);
+});
+
+test('paginate throws short-fetch on the 200-page cap when rel="next" is still set', () => {
+  // The safety cap is a bound on the loop, not on the tracker. If we walk 200 full pages
+  // and GitHub still says there are more, the cap has silently truncated the fetch — same
+  // shape of drift as a short page mid-stream, same fix.
+  const fullPage = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+  const fetchPage = () => ({ rows: fullPage, hasNext: true, lastPage: 250 });
+  assert.throws(() => paginate(fetchPage), /200-page safety cap.*rel="next"/);
+});
+
+test('paginate short-fetch names the open+closed count when Link carries rel="last"', () => {
+  // Offset-paginated endpoints (e.g. /pulls) return rel="last" too — that gives a concrete
+  // total, which the reviewer wants named in the exit-2 message alongside what was fetched.
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+  const page2 = Array.from({ length: 10 }, (_, i) => ({ number: 101 + i }));
+  const fetchPage = (page) => {
+    if (page === 1) return { rows: page1, hasNext: true, lastPage: 5 };
+    if (page === 2) return { rows: page2, hasNext: true, lastPage: 5 };
+    throw new Error('should have stopped at the short-fetch trap');
+  };
+  try {
+    paginate(fetchPage);
+    assert.fail('expected paginate to throw');
+  } catch (e) {
+    assert.match(e.message, /^short-fetch:/);
+    assert.match(e.message, /5 pages/);        // ground truth from rel="last"
+    assert.match(e.message, /110/);            // fetched count
+  }
+});
+
+// ---- parseLinkHeader / pageFromUrl: the pure helpers behind ghPaginate's Link parse -----
+
+test('parseLinkHeader picks out rel targets from a real GitHub Link header', () => {
+  const header = '<https://api.github.com/repositories/1/pulls?page=2>; rel="next", ' +
+                 '<https://api.github.com/repositories/1/pulls?page=97>; rel="last"';
+  const rels = parseLinkHeader(header);
+  assert.strictEqual(rels.next, 'https://api.github.com/repositories/1/pulls?page=2');
+  assert.strictEqual(rels.last, 'https://api.github.com/repositories/1/pulls?page=97');
+});
+
+test('parseLinkHeader tolerates empty / missing input', () => {
+  assert.deepStrictEqual(parseLinkHeader(''), {});
+  assert.deepStrictEqual(parseLinkHeader(null), {});
+  assert.deepStrictEqual(parseLinkHeader(undefined), {});
+});
+
+test('pageFromUrl extracts page=N from any query position; null when absent', () => {
+  assert.strictEqual(pageFromUrl('https://x/y?state=all&per_page=100&page=7'), 7);
+  assert.strictEqual(pageFromUrl('https://x/y?page=3&other=1'), 3);
+  assert.strictEqual(pageFromUrl('https://x/y?state=all'), null);
+  assert.strictEqual(pageFromUrl(null), null);
 });
