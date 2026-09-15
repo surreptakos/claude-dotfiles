@@ -37,6 +37,18 @@ foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'
     }
 }
 
+# Issue 122: the sandbox identity travels as environment, never as a `git config user.*` write.
+# The env clear above is a defence, not a proof - and a config write that goes astray under any
+# leaked pointer lands in the PARENT checkout's .git/config, after which every local commit is
+# authored "Test <test@example.com>" (39 on master between 2026-08-28 and 2026-09-10). Env
+# identity has no file to land in: git reads GIT_AUTHOR_* / GIT_COMMITTER_* before any config
+# scope, child processes (the tool, sync.ps1) inherit it, and the sandbox repos commit fine.
+# restore-test.ps1 check 0-pre2 fails the suite if the sandbox identity ever becomes effective.
+$env:GIT_AUTHOR_NAME     = 'Test'
+$env:GIT_AUTHOR_EMAIL    = 'test@example.com'
+$env:GIT_COMMITTER_NAME  = 'Test'
+$env:GIT_COMMITTER_EMAIL = 'test@example.com'
+
 $TestsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $TestsRoot
 . (Join-Path $RepoRoot 'lib\manifest.ps1')
@@ -97,8 +109,6 @@ function Init-FakeRepo {
 
     New-Item -ItemType Directory -Path $LocalRoot -Force | Out-Null
     & git -C $LocalRoot init --quiet --initial-branch=master | Out-Null
-    & git -C $LocalRoot config user.email "test@example.com" | Out-Null
-    & git -C $LocalRoot config user.name  "Test" | Out-Null
     Set-Content -Path (Join-Path $LocalRoot 'README.md') -Value 'seed' -Encoding utf8
     & git -C $LocalRoot add -A | Out-Null
     & git -C $LocalRoot commit --quiet -m 'seed' | Out-Null
@@ -112,10 +122,9 @@ function New-RemoteCommit {
     # see "origin ahead" after a fetch.
     $tmp = Join-Path (Split-Path $RemoteRoot -Parent) ('helper-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 4)))
     & git clone --quiet $RemoteRoot $tmp | Out-Null
-    & git -C $tmp config user.email "helper@example.com" | Out-Null
-    & git -C $tmp config user.name  "Helper" | Out-Null
     Add-Content -Path (Join-Path $tmp 'README.md') -Value ("`n" + $Message)
-    & git -C $tmp commit --quiet -am $Message | Out-Null
+    # A distinct actor for the "someone else pushed" commits; -c is per-invocation, no config write.
+    & git -C $tmp -c user.name=Helper -c user.email=helper@example.com commit --quiet -am $Message | Out-Null
     & git -C $tmp push --quiet | Out-Null
     Remove-Item -Path $tmp -Recurse -Force
 }
@@ -160,8 +169,6 @@ try {
     $fakeRepo  = Join-Path $sandbox 'RepoA'
     New-Item -ItemType Directory -Path $fakeRepo -Force | Out-Null
     & git init --quiet $fakeRepo | Out-Null
-    & git -C $fakeRepo config user.email "test@example.com" | Out-Null
-    & git -C $fakeRepo config user.name  "Test" | Out-Null
     Set-Content -Path (Join-Path $fakeRepo 'README.md') -Value 'x' -Encoding utf8
     & git -C $fakeRepo add -A | Out-Null
     & git -C $fakeRepo commit --quiet -m 'x' | Out-Null
@@ -293,10 +300,8 @@ try {
     # BOTH the state and the worktree flag.
     $branchHelper = Join-Path $sandbox2 ('branchhelper-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 4)))
     & git clone --quiet -b feature/push-state2-guard $remote $branchHelper 2>&1 | Out-Null
-    & git -C $branchHelper config user.email "helper@example.com" | Out-Null
-    & git -C $branchHelper config user.name  "Helper" | Out-Null
     Add-Content -Path (Join-Path $branchHelper 'README.md') -Value "`nincoming for worktree"
-    & git -C $branchHelper commit --quiet -am 'incoming for worktree state3 test' | Out-Null
+    & git -C $branchHelper -c user.name=Helper -c user.email=helper@example.com commit --quiet -am 'incoming for worktree state3 test' | Out-Null
     & git -C $branchHelper push --quiet 2>&1 | Out-Null
     Remove-Item -Path $branchHelper -Recurse -Force
     # Confirm classify sees state3 (drift + incoming) inside the worktree.
