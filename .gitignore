@@ -35,3 +35,10 @@ tools/__dotfiles-freshness-stub.js
 
 # build output of tools/build-cloud-plugin.py — regenerate, never commit
 dist/
+
+# Issue 238: .claude/worktrees holds this repo's own concurrent agent checkouts.
+# `git add .` from a parent checkout grabs them as submodules (mode 160000 gitlink
+# entries) which breaks every Actions run (`No url found for submodule path`) and
+# the restore test's clone-fidelity check. The primary block. The restore-test
+# guard is the backstop for a `git add -f`.
+.claude/worktrees/

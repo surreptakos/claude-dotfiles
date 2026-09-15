@@ -246,6 +246,22 @@ if ($BootstrapOnly) {
 
 . (Join-Path $Clone 'lib\manifest.ps1')
 
+# ------------------------------------------------------------------ 0-pre. worktrees guard (issue 238)
+
+# .claude/worktrees hosts this repo's own concurrent agent checkouts. Two gitlink entries
+# (mode 160000) once slipped onto master when a `git add .` from the parent checkout captured
+# worktree directories as submodules. That broke every Actions run with
+# `No url found for submodule path` and this test's clone-fidelity pass (a gitlink cannot be
+# hash-object'd). .gitignore is the primary block; this check is the backstop for a `git add -f`
+# regression and catches the fault in `-From worktree` (pre-commit) as well as against `-From
+# origin`/`local`.
+Write-Host 'Worktrees guard (issue 238)'
+$wtGitRepo = if ($From -eq 'worktree') { $RepoRoot } else { $Clone }
+$wtEntries = @(& git -C $wtGitRepo ls-files -s -- .claude/worktrees 2>$null)
+Check 'no .claude/worktrees entries in the tracked tree' `
+    ($wtEntries.Count -eq 0) $wtEntries
+Write-Host ''
+
 # ------------------------------------------------------------------ 0. inject the fault
 
 if ($Fault -eq 'crlf') {
