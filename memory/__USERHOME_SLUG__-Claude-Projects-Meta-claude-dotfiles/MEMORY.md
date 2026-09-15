@@ -25,3 +25,4 @@
 - [Session-end fixes all drift](session-end-fixes-all-drift.md) — every tracker-audit finding is fixed at /session-end regardless of which session caused it (Dan, 2026-09-10)
 - [Restore test reads live skill copies](restore-test-reads-live-skill-copies.md) — claude-md-lint copy test compares the live ~/.claude skill to tools/; a fleet worker's live edit fails every other worktree's restore test, md5 against worktrees before chasing it
 - [Fleet implementers edit the live tree](fleet-implementers-edit-the-live-tree.md) — worktree isolation does not cover ~/.claude, ~/.codex, ~/.agents; sweep and diff after every run, restore failed branches from their .bak-issueN
+- [Agent remote isolation runs locally](agent-remote-isolation-runs-locally.md) — "remote" agents executed on the desktop with the live home on 2026-09-14; cloud-only probes need a real claude.ai/code session

@@ -33,6 +33,7 @@ const {
   parseGithubSlug,
   isFollowUpAcknowledgment,
   citedIssueNumbers,
+  paginate,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -194,4 +195,52 @@ test('citedIssueNumbers: hex colours and longer numbers are not citations', () =
   // `#9a690f` used to read as #9, `#1f7a43` as #1, and `#730` as #73 via indexOf.
   const body = 'Contrast on `#9a690f` and `#1f7a43`; see #730 for the real one.';
   assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [730]);
+});
+
+// ---- paginate: the page loop replacing `gh api --paginate` (issue 171) -----
+
+test('paginate concatenates a full first page and a short second page, then stops', () => {
+  // The realistic case in a cloud container: a repo passed 100 issues, page 1 is exactly 100 rows
+  // and page 2 is the tail. `gh api --paginate` used to follow GitHub's Link header, which points
+  // at /repositories/{id}/... — the cloud egress proxy 403s that form. This loop pages by hand
+  // against repos/{owner}/{repo}, so paging must not depend on any Link header. Two pages, in a
+  // spy: fetch is called with 1 then 2, and the loop stops without a call for 3.
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+  const page2 = [{ number: 101 }, { number: 102 }, { number: 103 }];
+  const calls = [];
+  const fetchPage = (page) => {
+    calls.push(page);
+    if (page === 1) return page1;
+    if (page === 2) return page2;
+    throw new Error('paginate walked past the short page: called for page ' + page);
+  };
+  const all = paginate(fetchPage);
+  assert.deepStrictEqual(calls, [1, 2]);
+  assert.strictEqual(all.length, 103);
+  assert.strictEqual(all[0].number, 1);
+  assert.strictEqual(all[99].number, 100);
+  assert.strictEqual(all[102].number, 103);
+});
+
+test('paginate stops on an empty page (exact multiple of 100)', () => {
+  // The other end of the short-page rule: an endpoint whose row count is a clean multiple of 100
+  // returns [] on the next page. The loop must treat that as the end, not a "throw non-array".
+  const page1 = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+  const calls = [];
+  const fetchPage = (page) => {
+    calls.push(page);
+    if (page === 1) return page1;
+    if (page === 2) return [];
+    throw new Error('paginate walked past the empty page: called for page ' + page);
+  };
+  const all = paginate(fetchPage);
+  assert.deepStrictEqual(calls, [1, 2]);
+  assert.strictEqual(all.length, 100);
+});
+
+test('paginate throws when a fetcher returns a non-array', () => {
+  // GitHub returns an object with `message` on an error rather than an array — the audit must
+  // exit 2 (via cannotAudit) rather than silently accept a page of zero rows.
+  const fetchPage = () => ({ message: 'Not Found' });
+  assert.throws(() => paginate(fetchPage), /non-array page 1/);
 });

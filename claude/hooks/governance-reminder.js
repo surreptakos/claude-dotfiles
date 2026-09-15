@@ -36,14 +36,16 @@ function cavemanMode() {
 const CAVEMAN_LINES = {
   ultra: [
     '1. CAVEMAN ULTRA: minimum words; each fact once; strip safe conjunctions. Drop articles/filler/',
-    '   hedging/pleasantries. No tool-call narration,',
-    '   no decorative tables, no self-reference. Technical terms, code and error strings stay verbatim.',
+    '   hedging/pleasantries. No tool-call narration or self-reference. Lists, tables and bold',
+    '   when asked or when parallel/multifaceted content helps (findings, steps, options, files);',
+    '   plain prose otherwise. Technical terms, code and error strings stay verbatim.',
     '   Write plainly ONLY for: security warnings, irreversible-action confirmations, genuine ambiguity,',
     '   and code/commits/PRs. Persists until /caveman changes it — long session is NOT an excuse to drift.',
   ],
   full: [
     '1. CAVEMAN FULL: terse. Drop articles/filler/hedging/pleasantries; fragments fine. No tool-call',
-    '   narration, no decorative tables, no self-reference. Technical terms, code and error strings',
+    '   narration or self-reference. Lists, tables and bold when asked or when multifaceted content',
+    '   helps; plain prose otherwise. Technical terms, code and error strings',
     '   stay verbatim. Write plainly for security warnings, irreversible actions, genuine ambiguity,',
     '   and code/commits/PRs. Persists until /caveman changes it.',
   ],

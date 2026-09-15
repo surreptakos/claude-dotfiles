@@ -79,7 +79,14 @@ shape defined under Master rebirth below); heartbeats keep it current, not only 
 lives in another repository is written fully qualified as `owner/repo#N` (e.g.
 `surreptakos/aac-bill-intake#562`), never bare `#N` — the state issue lives in
 `surreptakos/claude-dotfiles`, so `#562` there resolves against claude-dotfiles and reads to
-`tools/tracker-audit.js` as a `dangling-reference`. Every decision brief carries BOTH the
+`tools/tracker-audit.js` as a `dangling-reference`. The local master watchdog carries the same
+rule in its boot prompt (issue 92) and runs `node tools/repair-state-refs.js` against all four
+state issues on every tick and again after a master closes; the cloud path has the same backstop
+in `.github/workflows/repair-state-refs.yml`. Both are context-aware — a bare `#N` in a
+paragraph whose nearest preceding repo mention names the owning repo is qualified; one whose
+nearest mention is `claude-dotfiles` is left alone. Writing refs right the first time is still
+the master's job; the sweep only exists because the identical prose rule already sat here on
+2026-09-03 and was ignored. Every decision brief carries BOTH the
 `orchestrator` label AND the `ready-for-human` label — it is the one thing a master hands Dan for a
 ruling. A state notebook carries `orchestrator` alone: it is a living document each master rewrites
 every heartbeat, with no pending ruling, so it does not belong in the `ready-for-human` queue; the

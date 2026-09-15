@@ -31,10 +31,14 @@
  *                   prompt, and stderr is passed back to the model. Every other
  *                   state stays silent. Set DOTFILES_AUTO_RESOLVE_STATE3=0 to fall
  *                   back to the pre-issue-18 behaviour (always block on state3).
- *   session-end     run classifier; on state2 or state3, inject a warn so the
- *                   end audit records the drift alongside anything unpushed. The
- *                   session-start auto-push clears most state2s before this fires,
- *                   but a live edit made DURING the session lands here.
+ *   session-end     run classifier; on state2 or state3, print a warn to STDERR
+ *                   and emit `{}` on stdout. SessionEnd has no additionalContext
+ *                   channel - Claude Code 2.1.270 rejects hookSpecificOutput with
+ *                   hookEventName "SessionEnd" ("Hook JSON output validation
+ *                   failed", seen in a cloud container 2026-09-14) - so this mode
+ *                   never injects. The session-start auto-push clears most state2s
+ *                   before this fires, but a live edit made DURING the session
+ *                   lands here.
  *
  * WHY UserPromptSubmit for the block, not SessionStart
  *   SessionStart hooks in Claude Code can only INJECT context; they cannot refuse
@@ -180,6 +184,18 @@ function emitContext(text) {
 }
 
 function emitSilent() { process.stdout.write('{}'); }
+
+// SessionEnd has no additionalContext channel. Claude Code 2.1.270 validates
+// hookSpecificOutput.hookEventName against the events that DO carry one
+// (PreToolUse, UserPromptSubmit, SessionStart, ...) and rejects "SessionEnd":
+//   SessionEnd hook [...] failed: Hook JSON output validation failed -
+//   hookSpecificOutput.hookEventName: expected one of "PreToolUse" | ...
+// So the end-of-session mode never emits hookSpecificOutput: any note goes to
+// stderr (visible in --debug / verbose hook output) and stdout stays `{}`.
+function emitEndNote(text) {
+  process.stderr.write(String(text) + '\n');
+  emitSilent();
+}
 
 /* -------------------------------------------------------------------- wording */
 
@@ -454,13 +470,13 @@ function modePrompt() {
 }
 
 function modeSessionEnd() {
-  process.env.CLAUDE_HOOK_EVENT = 'SessionEnd';
+  // Never emitContext here: SessionEnd rejects hookSpecificOutput (see emitEndNote).
   const skip = detectSkipReason();
-  if (skip) { emitContext('DOTFILES FRESHNESS: skipped (' + skip + ')'); return; }
+  if (skip) { emitEndNote('DOTFILES FRESHNESS: skipped (' + skip + ')'); return; }
   const report = runTool('classify');
   if (!report || report.ok === false) { emitSilent(); return; }
-  if (report.state === 'state2') { emitContext(formatState2(report, true)); return; }
-  if (report.state === 'state3') { emitContext(formatState3(report, true)); return; }
+  if (report.state === 'state2') { emitEndNote(formatState2(report, true)); return; }
+  if (report.state === 'state3') { emitEndNote(formatState3(report, true)); return; }
   emitSilent();
 }
 
@@ -471,8 +487,10 @@ function main() {
     if (mode === 'prompt')        return modePrompt();
     if (mode === 'session-end')   return modeSessionEnd();
   } catch (e) {
-    // A broken check must never stop someone working. Emit a note instead.
-    emitContext('DOTFILES FRESHNESS: hook driver crashed - ' + e.message);
+    // A broken check must never stop someone working. Emit a note instead -
+    // on stderr for SessionEnd, which has no context channel to inject into.
+    const emit = mode === 'session-end' ? emitEndNote : emitContext;
+    emit('DOTFILES FRESHNESS: hook driver crashed - ' + e.message);
     return;
   }
   // Unknown mode: emit an error to stderr for a human, but exit 0 so we do not block.
