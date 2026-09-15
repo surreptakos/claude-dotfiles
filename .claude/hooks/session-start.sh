@@ -88,10 +88,14 @@ if [ -z "${BOOTSTRAP_SKIP_GH:-}" ] && ! command -v gh >/dev/null 2>&1 && [ ! -x 
   install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" "$BIN_DIR/gh"
   rm -rf "$tmp"
 fi
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) if [ -n "${CLAUDE_ENV_FILE:-}" ]; then echo "export PATH=\"$BIN_DIR:\$PATH\"" >> "$CLAUDE_ENV_FILE"; fi ;;
-esac
+# Idempotent against the double SessionStart (issue 166): the hook's own PATH never carries
+# BIN_DIR, so test the env file itself, not $PATH, before appending the export line.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  env_line="export PATH=\"$BIN_DIR:\$PATH\""
+  if ! { [ -f "$CLAUDE_ENV_FILE" ] && grep -qxF "$env_line" "$CLAUDE_ENV_FILE"; }; then
+    echo "$env_line" >> "$CLAUDE_ENV_FILE"
+  fi
+fi
 export PATH="$BIN_DIR:$PATH"
 
 python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml 2>/dev/null || true

@@ -1,7 +1,8 @@
 # Issue 163: gh in every AAC cloud container — decision + proof
 
-**Status:** hook landed on this branch; two probes captured; the two delivery-stage
-probes named in the ticket await master.
+**Status:** hook landed on this branch, exercised only in a desktop simulation; the
+first real-container run, the cross-repo proof and the two probes are listed under
+"What remains" at the end.
 
 ## Install point
 
@@ -88,92 +89,93 @@ Nothing else known to be blocked. Everything the tracker audit and session-check
 call — `gh api repos/.../issues`, `.../pulls`, `.../issues/N/comments`,
 `.../milestones`, `.../actions/runs`, `.../actions/workflows` — is REST and answers.
 
-## Fresh-container proof
+## Proof so far: a desktop simulation, not a container
 
-Captured this session (2026-09-15) with the hook exercised against a fresh clone of
-`surreptakos/aac-routines` under an empty HOME. `BOOTSTRAP_SOURCE` pointed at this
-branch so the container ran the code under review, not master. Verbatim from the run
-log at `/tmp/aac-proof-output.txt`:
+No claude.ai/code container has run this hook yet. A container clones dotfiles master at
+boot, and master does not carry this branch until it merges, so the only run available
+from a branch is a simulation: Git Bash on the Windows desktop, a fresh fake HOME,
+`BOOTSTRAP_SOURCE` pointed at the branch under test, `BOOTSTRAP_SKIP_GH=1` because the
+pinned tarball is a `linux_amd64` binary. The `gh` lines below are the desktop's own gh
+(2.96.0), resolved by `command -v gh`, not the 2.86.0 the hook installs in a container.
+
+Script: `C:\hv17\proof163.sh` (kept outside the repo). Log, verbatim, from
+`C:\hv17\proof163.log` (branch head after the env-file fix):
 
 ```
-==== container context ====
-cwd:     /tmp/aac-fresh-container/repo
-repo:    https://github.com/surreptakos/aac-routines.git
-HOME:    /tmp/aac-fresh-container/home
-before:  ~/.claude exists? no
+==== simulation context ====
+host:    MINGW64_NT-10.0-26200 (Git Bash on the desktop, not a claude.ai/code container)
+source:  /c/hv17/wt163 @ c71c256
+HOME:    /c/hv17/sim163/home
+before:  .claude exists? no
 
-==== run 1 (cold) ====
+==== run 1 ====
 exit: 0
-{
-    "hookSpecificOutput": {
-        "hookEventName": "SessionStart",
-        "additionalContext": "AAC-BOOTSTRAP MARKER: payload v2026.9.151724; skills copied=61; gh=... skills=[aac-contract-package,...,yes]"
-    }
-}
-... 61 skill dirs installed under $HOME/.claude/skills
+additionalContext bytes: 1068
+AAC-BOOTSTRAP MARKER: payload v2026.9.151724; skills copied=61; gh=C:/Program Files/GitHub CLI/gh skills=[aac-contract-package,aac-google-access,aac-house-writi ...
+marker:  payload v2026.9.151724, 61 skills, copied_this_run=61, hooks_events=['SessionStart']
+settings hooks[SessionStart]: 1 entries, tagged=1
+skills dirs: 61
 
-==== run 2 (idempotent) ====
+==== run 2 ====
 exit: 0
-additionalContext: "AAC-BOOTSTRAP MARKER: payload v2026.9.151724; skills copied=0; ..."
-one SessionStart hook entry in ~/.claude/settings.json (still 1 — dedup by _source)
+additionalContext bytes: 1067
+AAC-BOOTSTRAP MARKER: payload v2026.9.151724; skills copied=0; gh=C:/Program Files/GitHub CLI/gh skills=[aac-contract-package,aac-google-access,aac-house-writin ...
+marker:  payload v2026.9.151724, 61 skills, copied_this_run=0, hooks_events=['SessionStart']
+settings hooks[SessionStart]: 1 entries, tagged=1
+skills dirs: 61
 
-==== gh --version ====
+==== env file ====
+export PATH="/c/hv17/sim163/home/.local/bin:$PATH"
+
+==== gh --version (desktop gh, not the tarball) ====
 gh version 2.96.0 (2026-07-02)
 
-==== gh api repos/surreptakos/aac-routines (the OTHER repo) ====
-{"default_branch":"main","full_name":"surreptakos/aac-routines","name":"aac-routines","private":true,"updated_at":"2026-09-14T21:45:10Z"}
+==== gh api repos/surreptakos/aac-routines ====
+{"default_branch":"main","full_name":"surreptakos/aac-routines","private":true}
 
-==== session-check with the marker present, IS_CLOUD=1 ====
-Cloud bootstrap
-  ok   aac-bootstrap payload v2026.9.151724 — 61 skills, gh installed
+==== session-check, marker present (IS_CLOUD via CLAUDE_CODE_REMOTE_SESSION_ID=sim) ====
+13:Cloud bootstrap
+14-  ok   aac-bootstrap payload v2026.9.151724 — 61 skills, gh installed
+15-      payload v2026.9.151724 loaded; master version could not be read here
 
-==== session-check with marker MISSING, IS_CLOUD=1 ====
-Cloud bootstrap
-  STOP aac-bootstrap marker absent at .../nonexistent/path/state.json — the SessionStart bootstrap hook did not run
-      the hook is `.claude/hooks/session-start.sh` in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true
+==== session-check, marker MISSING ====
+13:Cloud bootstrap
+14-  STOP aac-bootstrap marker absent at C:\hv17\sim163\home\.claude\hook-state\aac-bootstrap\state.json — the SessionStart bootstrap hook did not run
+15-      the hook is `.claude/hooks/session-start.sh` in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true
 ```
 
-**Environment differences from a real Linux cloud container, and why they do not
-change the answer.** The proof ran under Git Bash on this Windows PC because a Linux
-cloud container cannot be launched from a branch — a container clones dotfiles master
-at boot, and master does not carry this branch's code yet. Two steps therefore ran
-differently from a container:
+What the simulation establishes: the hook exits 0 twice on one HOME, copies the 61 payload
+skills once and skips the copy on the second run, merges exactly one tagged SessionStart
+entry into the user settings and does not duplicate it, writes the marker, emits an
+additionalContext under 2 KB, and session-check reads the marker in both states. The
+first simulation run (before the fix) appended the PATH export to `$CLAUDE_ENV_FILE` on
+every run, because the hook process's own PATH never carries `~/.local/bin`; the hook now
+greps the env file for the exact line before appending, and run 2 above shows one line.
 
-- `gh` install was skipped (`BOOTSTRAP_SKIP_GH=1`): the tarball is a `linux_amd64`
-  binary and would not execute here. The `gh 2.96.0` line above is the ambient desktop
-  gh, resolved from `command -v gh` and recorded in the marker. In a container the
-  ambient gh IS the tarball install (the previous claude-dotfiles hook proved
-  `gh 2.86.0` installs cleanly, cse_014KM9VnjCoAR3CTZ8BgXfq3 on 2026-09-14; folded
-  into this hook unchanged).
-- `curl` download did not run for the same reason. Everything downstream — payload
-  copy, hook merge, marker write, additionalContext emission, session-check STOP —
-  is identical to what a container runs.
+What it does not establish: the `curl` tarball install of gh 2.86.0, the shallow clone of
+master at boot, and `$CLAUDE_ENV_FILE` being sourced by the harness. The previous
+version of this hook (master before this branch) exercised the first two in a real
+container on 2026-09-14 (session cse_014KM9VnjCoAR3CTZ8BgXfq3, quoted on this issue:
+`gh version 2.86.0 (2025-09-11)`); those lines are unchanged here.
 
-## The two probes named in the ticket
+One more local check, on the shape the hook writes into `~/.claude/settings.json`: a
+SessionStart entry carrying the extra `_source` key. A project-level `.claude/settings.json`
+with that exact shape, run through `claude -p` (Claude Code 2.1.269) from a neutral
+directory, fired the hook (two `fired-<epoch>` lines, the double SessionStart of issue 166)
+and printed no settings warning. The extra key does not invalidate the entry.
 
-Both are inherently delivery-stage — they need a real cloud container that clones
-master, i.e. this PR merged first — and are excluded from this ticket's build stage
-by the workflow rules ("Acceptance criteria that describe delivery-stage steps ... are
-out of scope for you"). They stand for the deliver stage:
+## What remains, in order
 
-- `mcp__github__merge_pull_request` from a container on a throwaway PR — opens a PR,
-  which the branch-work rails forbid (`NEVER open a PR`).
-- Prompt-free run of the fleet's command inventory in auto mode with the #205 allow
-  list — requires a real container starting a real session; a container spawn is a
-  claude.ai/code action taken by the owner, not something a branch can invoke.
+1. Merge this branch. Master then carries the hook.
+2. One fresh claude.ai/code session on claude-dotfiles quotes, on this issue: the
+   additionalContext line, `gh --version` (expected 2.86.0 from the tarball), one
+   `gh api repos/surreptakos/claude-dotfiles` call, and session-check's `Cloud bootstrap`
+   block. That is the first real-container run of this code.
+3. Proof on a repo other than claude-dotfiles needs the hook in that repo's
+   `.claude/settings.json`, which is the project-harness step (#218). The cross-repo
+   `gh --version` and `gh api repos/{owner}/{repo}` quotes land there.
+4. The two probes (merge_pull_request through the GitHub MCP on a throwaway PR; the fleet
+   command inventory prompt-free in auto mode with the #205 allow list) run in the same
+   cloud session as step 2.
 
-Both were resolved by the settings shipped in #205 (auto mode + `autoMode.allow` prose
-rule) and by the fleet-as-plugin cut in #196; nothing about this ticket changes their
-answer, and rerunning them from a branch would only produce the same simulation this
-document already captures.
-
-## Follow-ups (self-contained, not blocking this ticket)
-
-- Delivery-stage: land a Routine-launched or Owner-launched cloud session on
-  aac-routines that quotes `gh --version` (container's `2.86.0`) plus a fresh
-  `gh api repos/surreptakos/aac-routines` payload plus one merge_pull_request through
-  the GitHub MCP.
-- Follow-up: the project-harness skill's cloud-bootstrap step — copy this hook and
-  wire it into `.claude/settings.json` in every AAC repo the way the tracker-audit
-  and dashboard templates are already delivered. Spec #207 already reserves that
-  ticket for decomposition; this note is a pointer only.
+The issue stays open until step 2 is quoted on it.
