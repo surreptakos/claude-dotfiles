@@ -9,16 +9,21 @@ const test = require('node:test');
 
 const CHECKER = path.join(__dirname, 'check.js');
 
-function runChecker(config, env) {
+function runChecker(config, extra) {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'session-check-test-'));
   fs.mkdirSync(path.join(repo, '.git'));
   fs.mkdirSync(path.join(repo, '.claude'));
   fs.writeFileSync(path.join(repo, '.claude', 'session.json'), JSON.stringify(config));
+  // Second arg is either { setup, env } (issue 139 tests) or a bare env map (issue 171 tests).
+  const opts = extra && (extra.env || typeof extra.setup === 'function') ? extra : { env: extra };
+  if (typeof opts.setup === 'function') opts.setup(repo);
 
+  const env = Object.assign({}, process.env, opts.env || {});
   try {
     return execFileSync(process.execPath, [CHECKER], {
       cwd: repo,
       encoding: 'utf8',
+      env,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: Object.assign({}, process.env, env || {}),
     });
@@ -27,6 +32,29 @@ function runChecker(config, env) {
   } finally {
     fs.rmSync(repo, { recursive: true, force: true });
   }
+}
+
+/**
+ * Build a project-harness skill fixture with a chosen version, so the four harness-check
+ * states can be exercised without depending on this repo's own shipped skill number.
+ */
+function makeSkillFixture(version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-skill-fixture-'));
+  const skill = path.join(dir, 'project-harness');
+  const templates = path.join(skill, 'templates');
+  fs.mkdirSync(templates, { recursive: true });
+  fs.writeFileSync(path.join(templates, 'harness-version.md'),
+    `# Harness version\n\n    harness-version: ${version}\n\n`);
+  fs.writeFileSync(path.join(skill, 'SKILL.md'),
+    `---\nname: project-harness\n---\n\n**Current version: ${version}.**\n`);
+  return { root: dir, skill };
+}
+
+function writeRepoStamp(repo, version) {
+  const dir = path.join(repo, 'docs', 'agents');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'harness-version.md'),
+    `# Harness version\n\n    harness-version: ${version}\n\n`);
 }
 
 test('reports a passing configured command', () => {
@@ -88,4 +116,97 @@ test('prints captured diagnostics for a failing custom check', () => {
   });
   assert.match(output, /custom probe/);
   assert.match(output, /custom-fail-marker/);
+});
+
+test('harness state: current when the repo stamp matches the skill', () => {
+  const fx = makeSkillFixture(17);
+  try {
+    const output = runChecker({}, {
+      env: { HARNESS_SKILL_DIR: fx.skill },
+      setup: (repo) => writeRepoStamp(repo, 17),
+    });
+    assert.match(output, /Harness/);
+    assert.match(output, /ok\s*harness v17, current/);
+    assert.doesNotMatch(output, /STOP harness/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('harness state: behind is a STOP that names the upgrade command', () => {
+  const fx = makeSkillFixture(17);
+  try {
+    const output = runChecker({}, {
+      env: { HARNESS_SKILL_DIR: fx.skill },
+      setup: (repo) => writeRepoStamp(repo, 12),
+    });
+    assert.match(output, /STOP\s*harness v12 is behind v17/);
+    assert.match(output, /\/project-harness/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('harness state: not-harnessed warns but does not STOP', () => {
+  const fx = makeSkillFixture(17);
+  try {
+    const output = runChecker({}, {
+      env: { HARNESS_SKILL_DIR: fx.skill },
+    });
+    assert.match(output, /!!\s*repo is not harnessed/);
+    assert.doesNotMatch(output, /STOP\s*harness/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('harness state: skill not installed reports a note, never a pass', () => {
+  const output = runChecker({}, {
+    env: { HARNESS_SKILL_DIR: '' },
+    setup: (repo) => writeRepoStamp(repo, 12),
+  });
+  assert.match(output, /Harness/);
+  assert.match(output, /project-harness skill not available/);
+  assert.doesNotMatch(output, /ok\s*harness v/);
+  assert.doesNotMatch(output, /STOP\s*harness/);
+});
+
+test('harness state: this repo (v17) reads current against the shipped skill', () => {
+  // The ticket's third acceptance line: running the check IN THIS REPO says current.
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  let output;
+  try {
+    output = execFileSync(process.execPath, [CHECKER], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    output = String(error.stdout || '') + String(error.stderr || '');
+  }
+  assert.match(output, /Harness/);
+  assert.match(output, /ok\s*harness v\d+, current/);
+});
+
+test('harness state: v1-implicit (no marker, build-dashboard.js present) is behind on a modern skill', () => {
+  const fx = makeSkillFixture(17);
+  try {
+    const output = runChecker({}, {
+      env: { HARNESS_SKILL_DIR: fx.skill },
+      setup: (repo) => {
+        fs.mkdirSync(path.join(repo, 'scripts'), { recursive: true });
+        fs.writeFileSync(path.join(repo, 'scripts', 'build-dashboard.js'), '// stub');
+      },
+    });
+    assert.match(output, /STOP\s*harness v1 \(no docs\/agents\/harness-version\.md; pre-marker\) is behind v17/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('harness state: .claude/session.json "harness": false silences the section', () => {
+  const output = runChecker({ harness: false }, {
+    env: { HARNESS_SKILL_DIR: '' },
+  });
+  assert.doesNotMatch(output, /\bHarness\b/);
 });
