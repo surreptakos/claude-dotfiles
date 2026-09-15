@@ -731,7 +731,7 @@ function report(kind, issue, detail) {
   findings.push({ kind, number: issue.number, title: issue.title, url: issue.url, detail });
 }
 
-const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
+const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
 // A master-orchestrator state notebook carries `orchestrator` alone (a living document each master
 // rewrites every heartbeat, no pending ruling), so `orchestrator` counts as a triage state for the
 // untriaged check. It is a category, not a workflow state, so it does not participate in the
