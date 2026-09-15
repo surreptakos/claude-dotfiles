@@ -59,12 +59,58 @@ mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$STATE_DIR" "$BIN_DIR"
 if [ -n "${BOOTSTRAP_SOURCE:-}" ]; then
   DOTFILES_SRC="$BOOTSTRAP_SOURCE"
 else
+  # Issue 241: the previous shape was `git fetch --depth 1 ... || true; git reset --hard ...
+  # || true`, so a failed fetch — or a force-push / orphan-reroot on origin that leaves the
+  # local <ref> with NO merge-base against origin/<ref> — was silently swallowed. The next
+  # step then read plugin.json out of a stale checkout. Repair-in-place at bootstrap time:
+  # after fetch, classify the local vs origin <ref> pair BEFORE reset. If fetch failed, or
+  # either ref is unresolved, or the two share no history (deepen once first to
+  # distinguish a healthy shallow fast-forward from a real orphan-reroot), print the named
+  # reason and rebuild the clone from origin — the "reset to origin" branch of the ticket's
+  # acceptance criterion. Otherwise proceed to reset --hard as before.
+  _bootstrap_needs_reclone=""
+  _bootstrap_reclone_reason=""
   if [ ! -d "$DOTFILES_CLONE/.git" ]; then
+    _bootstrap_needs_reclone=1
+    _bootstrap_reclone_reason="no cached clone yet"
+  else
+    if ! git -C "$DOTFILES_CLONE" fetch --depth 1 origin "$DOTFILES_REF" >&2; then
+      _bootstrap_needs_reclone=1
+      _bootstrap_reclone_reason="git fetch --depth 1 origin $DOTFILES_REF failed"
+    else
+      _local_ref="$(git -C "$DOTFILES_CLONE" rev-parse --verify "refs/heads/$DOTFILES_REF" 2>/dev/null || echo "")"
+      _origin_ref="$(git -C "$DOTFILES_CLONE" rev-parse --verify "refs/remotes/origin/$DOTFILES_REF" 2>/dev/null || echo "")"
+      if [ -z "$_origin_ref" ]; then
+        _bootstrap_needs_reclone=1
+        _bootstrap_reclone_reason="origin/$DOTFILES_REF ref missing after fetch"
+      elif [ -z "$_local_ref" ]; then
+        _bootstrap_needs_reclone=1
+        _bootstrap_reclone_reason="local $DOTFILES_REF ref missing (issue 241)"
+      elif [ "$_local_ref" != "$_origin_ref" ]; then
+        # Shallow clones (--depth 1) hide merge-base for perfectly linear fast-forward
+        # history — the local tip is a shallow boundary and merge-base cannot walk past
+        # it. Deepen once so a real fast-forward reads as one, and only a true
+        # unrelated-history case surfaces below.
+        git -C "$DOTFILES_CLONE" fetch --deepen=100 origin "$DOTFILES_REF" >&2 || true
+        if ! git -C "$DOTFILES_CLONE" merge-base "$_local_ref" "$_origin_ref" >/dev/null 2>&1; then
+          _bootstrap_needs_reclone=1
+          _bootstrap_reclone_reason="local $DOTFILES_REF has no merge-base with origin/$DOTFILES_REF (issue 241)"
+        fi
+      fi
+    fi
+    if [ -z "$_bootstrap_needs_reclone" ]; then
+      if ! git -C "$DOTFILES_CLONE" reset --hard "origin/$DOTFILES_REF" >&2; then
+        _bootstrap_needs_reclone=1
+        _bootstrap_reclone_reason="git reset --hard origin/$DOTFILES_REF failed"
+      fi
+    fi
+  fi
+  if [ -n "$_bootstrap_needs_reclone" ]; then
+    if [ -d "$DOTFILES_CLONE/.git" ]; then
+      echo "aac-bootstrap: rebuilding cached clone at $DOTFILES_CLONE — $_bootstrap_reclone_reason" >&2
+    fi
     rm -rf "$DOTFILES_CLONE"
     git clone --depth 1 --branch "$DOTFILES_REF" "$DOTFILES_REPO" "$DOTFILES_CLONE" >&2
-  else
-    git -C "$DOTFILES_CLONE" fetch --depth 1 origin "$DOTFILES_REF" >&2 || true
-    git -C "$DOTFILES_CLONE" reset --hard "origin/$DOTFILES_REF" >&2 || true
   fi
   DOTFILES_SRC="$DOTFILES_CLONE"
 fi
