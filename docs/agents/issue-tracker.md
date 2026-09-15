@@ -84,3 +84,15 @@ tracker, and a query returning nothing must never read as health.
 
 Issue forms in `.github/ISSUE_TEMPLATE/` label everything `needs-triage` on arrival. That is the
 intake guarantee: nothing enters the tracker unlabelled.
+
+## Triage states
+
+One state label per open issue: `needs-triage`, `needs-info`, `ready-for-agent`,
+`ready-for-local-agent`, `ready-for-human`, `wontfix`.
+
+`ready-for-local-agent` marks work a cloud container cannot do but a desktop session can, with no
+person in the loop: an edit to the live `~/.claude` or `~/.codex` tree followed by
+`sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep
+that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container.
+`ready-for-human` is reserved for a person's judgment, credential or sign-off. A step a local
+session can perform never carries `ready-for-human` (Dan, 2026-09-15).

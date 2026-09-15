@@ -35,7 +35,7 @@ function esc(s) { return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g,
 // step can be the only thing that ever advances the artifact and the daily safety cron is redundant.
 function ymd(iso) { return String(iso || '').slice(0, 10); }
 
-const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
+const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
 const issues = ghJson('gh issue list --state open --limit 500 --json number,title,labels,assignees,updatedAt,url,body,subIssuesSummary,parent') || [];
 issues.forEach(i => {
   const names = i.labels.map(l => l.name);
