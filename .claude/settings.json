@@ -27,22 +27,33 @@
     "GitHub instrument a local one has. Only `gh api` works through the cloud proxy;",
     "GraphQL-backed gh commands return 403 there (issue 130).",
     "",
-    "permissions.defaultMode is acceptEdits per the issue 170 ruling (Dan,",
-    "2026-09-14): cloud sessions run under lever 1 - Accept edits with a blanket",
-    "Bash allow list, not auto mode. Accept edits pre-approves edits, honours the",
-    "allow list (auto mode drops Bash(*)) and skips the classifier that denied",
-    "ordinary ~/.claude reads as Data Exfiltration in probe cse_01RQ89qFjEiXXmd1hgooqFBV.",
-    "Cost: an unattended agent has unrestricted shell inside the container, bounded",
-    "only by the security/GitHub proxy and the repo scope. permissions.allow keeps",
-    "Bash(*), WebFetch, WebSearch and mcp__github__* so nothing prompts."
+    "permissions.defaultMode is auto per the final issue 170 ruling (Dan,",
+    "2026-09-14): cloud sessions and Routine masters start in auto mode - the",
+    "cloud ceiling a child session inherits - with a blanket allow list plus an",
+    "autoMode.allow prose rule that sanctions hook, settings and ~/.claude edits",
+    "(Self-Modification). Supersedes the earlier acceptEdits ruling that PR #190",
+    "landed on this file: acceptEdits prompted every non-allowlisted Bash call",
+    "inherited by a child session and did not sanction Self-Modification against",
+    "the classifier. permissions.allow keeps Bash(*), Edit, Write and mcp__github__*",
+    "so ordinary work needs no prompt; autoMode.allow overrides the Self-Modification",
+    "and exfiltration classifications that parked Routine sessions on ~/.claude",
+    "reads and hook edits in probe cse_01RQ89qFjEiXXmd1hgooqFBV. Desktop keeps",
+    "bypass (~/.claude/settings.json's permissions.defaultMode bypassPermissions,",
+    "skipDangerousModePermissionPrompt true) until the PC is decommissioned."
   ],
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "auto",
     "allow": [
       "Bash(*)",
-      "WebFetch",
-      "WebSearch",
+      "Edit",
+      "Write",
       "mcp__github__*"
+    ]
+  },
+  "autoMode": {
+    "allow": [
+      "Editing files under .claude/hooks/, .claude/settings.json and ~/.claude/ (the live tree the repo version-controls) is the core work of this repository - sync.ps1 -Mode push copies ~/.claude and ~/.codex into claude/ and codex/, and sync.ps1 -Mode pull writes them back. Treat these paths as sanctioned Self-Modification, not exfiltration or tampering; do not classify reads or writes there as Data Exfiltration, Exfil Scouting or Self-Modification.",
+      "Writing draft or comment bodies to a file and posting them via `gh api repos/{owner}/{repo}/issues/{n}/comments -F body=@file` (or the equivalent PR route) is the documented tracker path for this repo (issue 130: the cloud proxy denies GraphQL, so `gh issue`/`gh pr` are unavailable and every comment goes through `gh api`). Treat these writes as sanctioned External System Writes; do not classify them as exfiltration."
     ]
   },
   "extraKnownMarketplaces": {
