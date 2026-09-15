@@ -590,6 +590,32 @@ test('session-end with a broken classifier: stdout is {} (crash path never injec
   assert.strictEqual(r.stdout, '{}');
 });
 
+// Issue 184: reproduce the exact command from the ticket's AC1 -
+//   `node tools/dotfiles-freshness-hook.js session-end`
+// and assert stdout carries no `hookSpecificOutput` key at all. This is the
+// bare-invocation shape a `claude -p` run reaches when it invokes the SessionEnd
+// hook headlessly - the same shape that previously produced Claude Code's
+// "Hook JSON output validation failed - hookSpecificOutput.hookEventName" error.
+// Every SessionEnd path is covered above by fixture-driven tests; this one
+// pins the ticket's literal reproduction case so a future regression on the
+// bare CLI would be caught here first.
+test('issue 184: bare `session-end` invocation prints no hookSpecificOutput', () => {
+  const box = sandbox();
+  box.setClassify({
+    state: 'state2', summary: 'live copies edited', liveDrift: true,
+    repo: { behind: 0, ahead: 0, isWorktree: false },
+    resolution: ['cd C:/repo'],
+  });
+  const r = spawnSync(process.execPath, [HOOK, 'session-end'], {
+    input: '', encoding: 'utf8',
+    env: Object.assign({}, process.env, box.env), timeout: 30000,
+  });
+  assert.strictEqual(r.status, 0, r.stderr);
+  assert.strictEqual(r.stdout, '{}');
+  assert.doesNotMatch(r.stdout, /hookSpecificOutput/);
+  assert.doesNotMatch(r.stdout, /hookEventName/);
+});
+
 test('session-start and prompt still inject with their own hookEventName (unchanged)', () => {
   const box = sandbox();
   box.setClassify({
