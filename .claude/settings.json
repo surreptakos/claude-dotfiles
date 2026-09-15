@@ -27,15 +27,22 @@
     "GitHub instrument a local one has. Only `gh api` works through the cloud proxy;",
     "GraphQL-backed gh commands return 403 there (issue 130).",
     "",
-    "permissions.allow names the two Bash shapes the cloud auto-mode classifier",
-    "refused during session-end housekeeping on 2026-09-11: deleting a merged remote",
-    "branch, and calling gh. gh is bounded by the session's injected token, and a",
-    "remote branch delete is the last step of every merged PR here."
+    "permissions.defaultMode is acceptEdits per the issue 170 ruling (Dan,",
+    "2026-09-14): cloud sessions run under lever 1 - Accept edits with a blanket",
+    "Bash allow list, not auto mode. Accept edits pre-approves edits, honours the",
+    "allow list (auto mode drops Bash(*)) and skips the classifier that denied",
+    "ordinary ~/.claude reads as Data Exfiltration in probe cse_01RQ89qFjEiXXmd1hgooqFBV.",
+    "Cost: an unattended agent has unrestricted shell inside the container, bounded",
+    "only by the security/GitHub proxy and the repo scope. permissions.allow keeps",
+    "Bash(*), WebFetch, WebSearch and mcp__github__* so nothing prompts."
   ],
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
-      "Bash(git push origin --delete:*)",
-      "Bash(gh:*)"
+      "Bash(*)",
+      "WebFetch",
+      "WebSearch",
+      "mcp__github__*"
     ]
   },
   "extraKnownMarketplaces": {
