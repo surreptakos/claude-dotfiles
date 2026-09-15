@@ -120,6 +120,21 @@ test(`fleet script ${FLEET_SCRIPT_REL} is served by the plugin`, () => {
     `plugin-served fleet script must live at ${FLEET_SCRIPT_REL} (issue 138)`);
 });
 
+// Issue 233: the Workflow tool reads the file behind `scriptPath` and refuses any CR byte
+// ("script contains control characters that would be hidden in the approval dialog"). The
+// repo pins `* -text`, so a CRLF blob reaches every surface verbatim - the desktop plugin
+// cache and the container payload the bootstrap hook copies out of a clone. Both the source
+// and the packaged copy must be LF or the fleet cannot launch from the plugin path anywhere.
+const FLEET_SCRIPT_PACKAGED = path.join(REPO_ROOT, 'marketplace', 'aac-skills', 'skills', 'ticket-fleet', 'ticket-fleet.js');
+for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+  test(`fleet script ${rel} carries no CR byte (Workflow scriptPath refuses CRLF, issue 233)`, () => {
+    const bytes = fs.readFileSync(file);
+    const crs = bytes.filter((b) => b === 0x0d).length;
+    assert.equal(crs, 0, `${rel} holds ${crs} CR byte(s); re-encode as LF and rebuild the plugin`);
+  });
+}
+
 test(`fleet script ${FLEET_SCRIPT_REL} takes runId from args`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src, /if \(!cfg\.runId\)/,
