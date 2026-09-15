@@ -35,8 +35,10 @@ ALLOWED_FLOWS = {
     "handoff",
     "implement",
     "improve-codebase-architecture",
+    "project-harness",
     "prototype",
     "research",
+    "session-end",
     "setup-matt-pocock-skills",
     "tdd",
     "teach",
@@ -286,6 +288,7 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         f"In code mode, the only permitted bootstrap is exactly `{code_declaration}`. "
         "Engineering build: implement. Broken behavior: diagnosing-bugs. Raw issues: triage. "
         "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
+        "End-of-session sweep (publishes follow-up tickets): session-end. New project bootstrap (publishes initial ticket set): project-harness. "
         "No engineering flow: direct-answer. The gate blocks until one route is recorded. "
         "YES GOVERNANCE: ENFORCED. Evidence over intuition; investigate before asking; backup before "
         "system changes; verify every change; check ripple effects; never hand solvable work back. "
@@ -333,6 +336,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>`. "
         "Engineering build: implement. Broken behavior: diagnosing-bugs. Raw issues: triage. "
         "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
+        "End-of-session sweep (publishes follow-up tickets): session-end. New project bootstrap (publishes initial ticket set): project-harness. "
         "No engineering flow: direct-answer. YES GOVERNANCE: ENFORCED. Evidence over intuition; "
         "investigate before asking; backup before system changes; verify every change; check ripple "
         "effects; never hand solvable work back. "
@@ -389,11 +393,12 @@ def _is_claude_declaration_command(
     return re.fullmatch(pattern, command, flags=re.IGNORECASE) is not None
 
 
-# Owner audit (issue 165): every ALLOWED_FLOWS route that creates issues by design belongs here,
-# otherwise the gate refuses a `gh issue create` the route is meant to produce. wayfinder
-# publishes its map and ticket set; diagnosing-bugs files the closure ticket after a fix;
-# implement records discoveries. session-end's sweep and project-harness setup publish via
-# to-tickets (declared as that flow), so they need no separate entry.
+# Owner audit (issue 165, extended by issue 200): every ALLOWED_FLOWS route that creates issues by
+# design belongs here, otherwise the gate refuses a `gh issue create` the route is meant to
+# produce. wayfinder publishes its map and ticket set; diagnosing-bugs files the closure ticket
+# after a fix; implement records discoveries. session-end's ticket sweep and project-harness's
+# initial ticket set are also publishing routes in their own right (issue 200), so a session that
+# declared either flow is allowed to publish under it without re-declaring as to-tickets.
 TICKET_FLOWS = {
     "to-tickets",
     "to-spec",
@@ -401,6 +406,8 @@ TICKET_FLOWS = {
     "wayfinder",
     "diagnosing-bugs",
     "implement",
+    "session-end",
+    "project-harness",
 }
 ISSUE_CREATE_PATTERN = re.compile(
     # Anchored: this is matched against ONE segment of a command line, so it fires on a command
