@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-15T15:09:53Z'
-  previous-modified: '2026-09-15T15:07:41Z'
-  revision: '5'
-  content-sha: a0d313f862fa
+  modified: '2026-09-15T20:37:03Z'
+  previous-modified: '2026-09-15T15:09:53Z'
+  revision: '6'
+  content-sha: 29d441f36f91
 ---
 
 # ticket-fleet
@@ -23,17 +23,45 @@ counterpart lives at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exerci
 
 ## How to invoke
 
-Call the Workflow tool with `scriptPath` set to this file - the Workflow tool resolves a bare
-`name:` from the checkout's `.claude/workflows/` only, and this file lives in the plugin, not
-in a checkout. `args.runId` is required (the workflow runtime forbids `Date.now()` and
-`Math.random()` inside scripts, so the caller mints the id):
+Call the Workflow tool with `scriptPath` set to a copy of this file inside the current
+checkout's `.claude/workflows/`. The Workflow tool resolves a bare `name:` from that same
+directory, and it reads the file behind `scriptPath` byte-for-byte before showing the approval
+dialog - a CR anywhere in the payload trips "script contains control characters that would be
+hidden in the approval dialog" and the launch is refused (issue 233 - and this repo pins
+`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` is required (the
+workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the caller
+mints the id).
+
+**Checkout-path invocation (works on desktop and in cloud sessions).** Once
+`.claude/workflows/ticket-fleet.js` exists in the cwd, either spelling launches the fleet:
 
 ```
 Workflow({
-  scriptPath: '${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js',
-  args: { runId: '<hex from `printf %x $(date +%s)`>', deliver: false }
+  scriptPath: '.claude/workflows/ticket-fleet.js',
+  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
 })
 ```
+
+```
+Workflow({
+  name: 'ticket-fleet',
+  args: { runId: '<hex>', tickets: [], deliver: false }
+})
+```
+
+**Copy-into-cwd step (for any repo, including `claude-dotfiles` itself).** This plugin path
+holds the source of truth, but a bare `name:` and a checkout-relative `scriptPath` both need
+the script to live under `.claude/workflows/` in the current working directory. Copy it there
+before the first invocation:
+
+```bash
+mkdir -p .claude/workflows
+cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
+```
+
+On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
+edited in place; on every other repo the copy stays a byte-identical mirror of the plugin
+source and is refreshed by re-running the `cp` above whenever the plugin bumps.
 
 On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
 prompts before letting the fleet push branches and open PRs. Full args list:
