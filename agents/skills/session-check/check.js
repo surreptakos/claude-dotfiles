@@ -435,7 +435,7 @@ function cloudSkillChecks() {
     ? 'no upload recorded — cloud sessions may be running without your skills'
     : 'cloud plugin is STALE — cloud sessions load the skills as they were at the last upload');
   lines.forEach((l) => note(l));
-  note('`/update-cloud-plugin` rebuilds and re-uploads it, then stamps the sweep');
+  note('fix: `.\\sync.ps1 -Mode push -Commit "chore: rebuild aac-skills plugin"; git push` (from the main checkout)');
 }
 
 function readJson(file) {

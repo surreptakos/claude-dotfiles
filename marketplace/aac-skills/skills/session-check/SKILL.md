@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. Invoked automatically by hooks/session-gate.js; /session-start and /session-end re-print its report. Not a flow skill; do not invoke it to answer a user request.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-15T14:56:38Z'
+  modified: '2026-09-15T15:00:46Z'
   previous-modified: '2026-09-15T14:53:08Z'
   revision: '6'
-  content-sha: 414c9b4c529e
+  content-sha: 9dbe22d1052d
 ---
 
 # Session check (engine)
