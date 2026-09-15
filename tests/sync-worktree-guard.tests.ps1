@@ -33,6 +33,15 @@ foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR'
     }
 }
 
+# Issue 122: sandbox identity as environment, never a `git config user.*` write - a stray write
+# lands in the parent checkout's .git/config and every later local commit is authored by the
+# sandbox. Same shape as tests\dotfiles-freshness.tests.ps1; restore-test.ps1 check 0-pre2 is
+# the guard.
+$env:GIT_AUTHOR_NAME     = 'Sync WT Test'
+$env:GIT_AUTHOR_EMAIL    = 'test@example.com'
+$env:GIT_COMMITTER_NAME  = 'Sync WT Test'
+$env:GIT_COMMITTER_EMAIL = 'test@example.com'
+
 $TestsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $TestsRoot
 
@@ -106,8 +115,6 @@ try {
     # Bare "remote" and a working clone.
     Invoke-Git @('init', '--quiet', '--bare', $remote)             | Out-Null
     Invoke-Git @('clone', '--quiet', $remote, $local)              | Out-Null
-    Invoke-Git @('-C', $local, 'config', 'user.email', 'test@example.com') | Out-Null
-    Invoke-Git @('-C', $local, 'config', 'user.name',  'Sync WT Test')     | Out-Null
 
     # Drop the current sync.ps1 + lib\ into the clone as tracked files. Both must be
     # committed so `git worktree add` checks them out into the new working tree.

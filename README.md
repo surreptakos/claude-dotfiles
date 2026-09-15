@@ -225,7 +225,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|crlf|home-leak|secret|drift|broken-hook|dead-link|collision|locked-scratch` breaks one thing on purpose so the
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|dead-link|collision|locked-scratch|sandbox-identity` breaks one thing on purpose so the
 matching check can be watched going red. A check that has only ever passed is not yet a check —
 `dead-link` passed on its first attempt because it deleted a directory nothing linked to.
 
