@@ -848,8 +848,10 @@ foreach ($command in $pCommands) {
         }
     }
 }
+# Zero commands is a legitimate count since issue 208: the governance hooks ride in the aac-skills
+# plugin and the work profile hooks key is {}, so the personal profile inherits nothing to rewrite.
 Check ("all {0} personal hook commands are rewritten to .claude-personal and resolve" -f $pCommands.Count) `
-    (($pCommands.Count -gt 0) -and ($pCmdBad.Count -eq 0)) $pCmdBad
+    ($pCmdBad.Count -eq 0) $pCmdBad
 
 $pLinksBad = @()
 $workJunctions = @(Get-ChildItem -Path (Join-Path $FakeHome '.claude\skills') -Directory -Force |
