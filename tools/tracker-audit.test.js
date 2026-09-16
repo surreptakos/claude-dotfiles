@@ -201,6 +201,29 @@ test('citedIssueNumbers: hex colours and longer numbers are not citations', () =
   assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [730]);
 });
 
+test('citedIssueNumbers: #N inside inline code or a fenced block is quoted, not cited', () => {
+  // Issue 274: a bug report quoting a fleet journal — `impl:#205.2` — read as a citation of #205.
+  const body = [
+    'Journal shows `verify:#203.2` and a plain `#207` in a span.',
+    '',
+    '```',
+    'impl:#205.2 rebuilt #209',
+    '```',
+    '',
+    'Only #12 is a real citation.',
+  ].join('\n');
+  const got = citedIssueNumbers(body);
+  assert.deepStrictEqual(Array.from(got.keys()), [12]);
+  // Masking preserves offsets, so the wording check still reads the text around the citation.
+  assert.strictEqual(got.get(12), body.indexOf('#12'));
+});
+
+test('citedIssueNumbers: a label:#N / label:#N.k agent label is not this repo\'s issue', () => {
+  // The fleet writes these to its journal for whichever repo the run was clearing.
+  const body = 'Cache keys: impl:#205.2 hit, verify:#203.2 missed, impl:#205 replayed; see #12.';
+  assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [12]);
+});
+
 // ---- paginate: the page loop replacing `gh api --paginate` (issue 171) -----
 
 test('paginate concatenates a full first page and a short second page, then stops', () => {
