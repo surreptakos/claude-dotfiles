@@ -335,6 +335,40 @@ function extractMarked(src, name) {
   return src.slice(s + startTag.length, e);
 }
 
+// A stand-in for any module-scope binding the lane references that this harness does not model:
+// callable, constructable, property-readable, and it renders as '' inside a template literal. It is
+// deliberately inert - it exists so an unmodelled reference resolves instead of throwing.
+const PERMISSIVE = new Proxy(function stub() {}, {
+  get(_t, prop) {
+    if (prop === Symbol.toPrimitive) return () => '';
+    if (prop === 'then') return undefined; // never look thenable to `await`
+    return PERMISSIVE;
+  },
+  apply: () => PERMISSIVE,
+  construct: () => PERMISSIVE,
+});
+
+// Issue 340: the lane body used to be evaluated with a hand-maintained parameter list, so every new
+// module-scope binding in the fleet (verifierAgentType, dedupeBrief, ...) failed here as a bare
+// `ReferenceError: X is not defined` that read like a lane regression. Instead the body now runs
+// inside `with (scope)` over a Proxy whose `has` trap claims every name: a name this harness stubs
+// resolves to the stub, a real global resolves to itself, and anything else resolves to PERMISSIVE.
+// Adding a binding to the lane therefore needs no edit here. Bodies built by the Function
+// constructor are non-strict whatever the enclosing module says, so `with` is legal.
+function laneScope(stubs) {
+  return new Proxy(stubs, {
+    has: (_t, prop) => prop !== Symbol.unscopables,
+    get(target, prop) {
+      // Symbols are never free identifiers, and `with` reads Symbol.unscopables off the scope
+      // object: answering PERMISSIVE there marks every name unscopable and blocks the binding.
+      if (typeof prop === 'symbol') return undefined;
+      if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
+      if (prop in globalThis) return globalThis[prop];
+      return PERMISSIVE;
+    },
+  });
+}
+
 // The runCodeLane body — the const runCodeLane = async (...) => { ... }.
 function extractCodeLane(src) { return extractMarked(src, 'FLEET-CODE-LANE'); }
 
@@ -347,39 +381,59 @@ function loadStableHelpers(scriptPath) {
   return new Function(`${body}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
 }
 
+// Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
+// the bindings the assertions depend on (the lane also reads the instrument switch, the tracker
+// rule helpers, the resume-stable helpers, the verifier agent type, the dedupe brief and the test
+// command, stubbed so the body evaluates the same way under either instrument). `stubs` overrides
+// any of them for one test.
+async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}) {
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runCodeLane;\n}`);
+  return wrapper(laneScope(Object.assign({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    cfg: { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' },
+    runId: 'testrun',
+    invocationId: 'inv1',
+    scout: { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' },
+    instrument: 'gh',
+    rules: new Proxy({}, { get: () => () => '' }),
+    verifierAgentType: 'fleet-verifier',
+    // The discovery-triage dedupe brief (issue 319) is empty for every ticket that is not a
+    // discovery-triage chore.
+    dedupeBrief: () => '',
+    testCommand: 'echo ok',
+  }, stubs)));
+}
+
 async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1') {
-  const src = fs.readFileSync(scriptPath, 'utf8');
-  const body = extractCodeLane(src);
+  const body = extractCodeLane(fs.readFileSync(scriptPath, 'utf8'));
   const helpers = loadStableHelpers(scriptPath);
-  // Wrap the marker body in an async factory that closes over stub bindings, then invoke the
-  // returned runCodeLane. cfg / runId / invocationId / scout / log / schemas / PR_CHECK are
-  // provided as free parameters so the body's references resolve. The stub `agent` is a spy the
-  // test drives. runId is fixed while invocationId varies - the resume shape of issue 291.
-  const wrapper = new AsyncFunction(
-    'agent', 'log', 'cfg', 'runId', 'invocationId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock', 'verifierAgentType', 'dedupeBrief', 'testCommand',
-    body + '\nreturn runCodeLane;'
-  );
-  const cfg = Object.assign(
-    { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' },
-    cfgOverrides
-  );
-  const runId = 'testrun';
-  const scout = { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' };
   const logs = [];
-  // The unified script's lane also reads the instrument switch and the tracker rule helpers;
-  // stub them so the extracted body evaluates the same way under either instrument.
-  const rules = new Proxy({}, { get: () => () => '' });
-  // The lane also embeds the discovery-triage dedupe brief (issue 319), which is empty for every
-  // ticket that is not a discovery-triage chore; stub it so the extracted body evaluates.
-  const dedupeBrief = () => '';
-  const runCodeLane = await wrapper(
-    agentMock, (m) => logs.push(m), cfg, runId, invocationId, scout, {}, {}, {}, {}, 'gh', rules,
-    helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock, 'fleet-verifier', dedupeBrief, scout.testCommand
-  );
+  // runId is fixed while invocationId varies - the resume shape of issue 291. The resume-stable
+  // helpers are the script's own (issue 271), so the prompts under test are the real ones.
+  const runCodeLane = await instantiateCodeLane(body, agentMock, logs, {
+    cfg: Object.assign({ maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' }, cfgOverrides),
+    invocationId,
+    stableJson: helpers.stableJson, stableText: helpers.stableText,
+    stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+  });
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
 }
+
+test('lane harness resolves a module-scope binding it does not model (issue 340)', async () => {
+  // Stands in for a future fleet edit: the lane references bindings this harness never names.
+  const body = `const runCodeLane = async (t) => {
+    const out = await agent(\`brief: \${dedupeBrief(t.number)}\`,
+      { label: \`impl:#\${t.number}\`, schema: IMPL, agentType: verifierAgentType });
+    return { ticket: t.number, out };
+  }`;
+  const calls = [];
+  const runCodeLane = await instantiateCodeLane(body, async (_p, opts) => { calls.push(opts.label); return 'ok'; });
+  const result = await runCodeLane({ number: 7 });
+  assert.deepEqual(calls, ['impl:#7'], 'unmodelled bindings must not stop the lane from running');
+  assert.deepEqual(result, { ticket: 7, out: 'ok' });
+});
 
 for (const file of RESUME_GUARD_PAIR) {
   const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
