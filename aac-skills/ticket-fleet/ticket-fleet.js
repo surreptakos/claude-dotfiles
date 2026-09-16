@@ -171,62 +171,245 @@ const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '')
 if (!invocationId) throw contractError(' and the launcher declared v2 but passed no args.invocationId: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`), which busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291).')
 if (invocationId === runId) throw contractError(': args.invocationId must differ from args.runId. runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
 
-// ---- instrument switch (gh vs GitHub MCP) ----
-// The tracker prompts below differ in exactly one dimension: which tool set the scout, probe,
-// handoff and deliver stages call. Pure form lives in tools/ticket-fleet-branch.js so the
-// unit tests can pin it; the same shape is inlined here because the workflow runtime cannot
-// reach node_modules. A wrong pick presents itself as a stage failure, not silent drift.
+// ---- pure helpers, GENERATED from tools/ticket-fleet-branch.js (issue 440) ----
+// The instrument switch (gh vs GitHub MCP), the verifier-agent decision, the scout gate's
+// candidate filter, the blocker-state filter and the resume-stable prompt projections are pure
+// functions. The workflow runtime cannot require(), so they have to be in this file - but they
+// are no longer hand-copied here. `node tools/build-fleet-inline.js` splices them in from
+// tools/ticket-fleet-branch.js, and tools/fleet-inline-template.test.js fails while the block
+// below is stale. Never edit between the markers: edit the module, then re-run the generator.
+// [FLEET-GENERATED-START]
+// GENERATED - do not hand-edit. Built from tools/ticket-fleet-branch.js (the region between its
+// FLEET-INLINE markers) by tools/build-fleet-inline.js (claude-dotfiles issue 440). The Workflow
+// runtime cannot require(), so these pure helpers have to live in the script text; they are no
+// longer a hand-kept copy. Edit tools/ticket-fleet-branch.js and re-run the generator;
+// tools/fleet-inline-template.test.js fails while this block is stale.
+/**
+ * Pick the tracker instrument at run time. Ticket-fleet runs from two shapes of
+ * session and the tracker tools differ between them:
+ *   - Local session with `gh` on PATH -> 'gh': `gh api repos/{owner}/{repo}/...`
+ *     REST paths only (GraphQL-backed `gh` subcommands 403 through the cloud
+ *     proxy, issue 130).
+ *   - Cloud container (CLAUDE_CODE_REMOTE_SESSION_ID or
+ *     CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE set, or no `gh` on PATH) -> 'mcp':
+ *     the GitHub MCP tools.
+ * `override` wins when it names either instrument, so a caller that already
+ * knows the container shape can force it. This is the definition the fleet
+ * script's generated block carries, so the shape it runs is this one.
+ *
+ * @param {NodeJS.ProcessEnv|Record<string,string>|null|undefined} env - null or
+ *   undefined means nothing read the environment at all (the workflow runtime
+ *   hides `process`), which is an UNKNOWN session, not a desktop one.
+ * @param {boolean|undefined} hasGh - true if `gh` is on PATH; undefined lets
+ *   the caller decline to detect it.
+ * @param {'gh'|'mcp'|'auto'|null|undefined} override
+ * @returns {'gh'|'mcp'|null} null when the environment is unknown and no
+ *   override names an instrument - the caller must then ask for one.
+ */
 function pickInstrument(env, hasGh, override) {
-  if (override === 'gh' || override === 'mcp') return override
-  // Unknown environment (issues 316, 322): a null/undefined env means NOTHING read the
-  // environment, so the sniff below cannot fire and a container is indistinguishable from a
-  // desktop session. It used to fall through to gh, and that is the issue 322 failure - the gh
-  // path can neither verify (it pins an agent type the container's registry lacks) nor deliver
-  // (a GraphQL-backed PR call is HTTP 403 here) there. So an unknown environment resolves to
-  // NOTHING: the caller names `instrument`, or passes `remote` and lets the switch resolve.
-  // Only hasGh === false is positive evidence a measurement landed: no `gh`, therefore mcp.
-  if (env === undefined || env === null) return hasGh === false ? 'mcp' : null
-  if (env.CLAUDE_CODE_REMOTE_SESSION_ID || env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp'
-  if (hasGh === false) return 'mcp'
-  return 'gh'
+  if (override === 'gh' || override === 'mcp') return override;
+  // Unknown environment (issues 316, 322): a null/undefined `env` means nothing read the
+  // environment - the workflow runtime hides `process`, so the remote-session sniff below
+  // never fires and a claude.ai/code container is indistinguishable from a desktop session.
+  // It used to fall through to 'gh', and that is the issue 322 failure: under `gh` the cloud
+  // run pinned an agent type its registry did not hold and its deliver prompt reached for a
+  // GraphQL-backed `gh pr create`, so twelve verifiers died and nothing shipped. An unknown
+  // environment therefore resolves to nothing at all and the caller must name the instrument
+  // (or pass what it knows about remoteness). Only `hasGh === false` is positive evidence a
+  // measurement did reach: no `gh` on PATH means mcp whatever the env said.
+  if (env === undefined || env === null) return hasGh === false ? 'mcp' : null;
+  const e = env;
+  if (e.CLAUDE_CODE_REMOTE_SESSION_ID || e.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp';
+  if (hasGh === false) return 'mcp';
+  return 'gh';
 }
-// Whether the fleet may pin its `fleet-verifier` subagent type. Custom agent types are a
-// desktop-only facility (issue 339): Claude Code reads the agent registry BEFORE SessionStart
-// hooks run, so the cloud bootstrap hook cannot register ~/.claude/agents/fleet-verifier.md
-// for the session that would use it, and pinning it there fails the launch with "Agent type
-// 'fleet-verifier' not found" (how issue 316 surfaced). Keyed on remoteness, never on the
-// tracker instrument - conflating the two is what made a container that picked `gh` try to
-// launch a type it could never have.
-function pickVerifierAgent(remote, agentFilePresent) {
-  if (remote) return null
-  return agentFilePresent ? 'fleet-verifier' : null
-}
-// The workflow runtime does not expose `process.env` (issue 322: a container run read an empty
-// env and fell through to `gh`), so the environment is not guessed here at all - it is measured
-// by the env-probe subagent below, which has a real shell. That removes the container-specific
-// workaround the caller used to have to remember (`instrument: 'mcp'` by hand): `auto` now
-// resolves correctly from either session shape with no argument.
 
-// Which agent type the blind verifier launches under. Agent types are registered once at
-// session start from ~/.claude/agents/; the desktop registry holds fleet-verifier.md (tools
-// capped at Read, Grep, Glob, Bash - issue 86) and a cloud container's does not, where pinning
-// it fails every verifier launch with `agent type 'fleet-verifier' not found` (issue 316).
-// Pure counterpart: resolveVerifierAgent in tools/ticket-fleet-branch.js.
-function resolveVerifierAgent(mode, override, facts) {
-  if (override === undefined || override === null) {
-    // No override: the env probe decides (issue 339) - never a custom type in a cloud session,
-    // and on the desktop only when the agent file is on disk. Without probe facts nothing has
-    // said the file is there, so there is no pin at all: the instrument must never stand in for
-    // the registry (issue 322 - a container that picked `gh` lost every verifier to
-    // `agent type 'fleet-verifier' not found`), and an unpinned verifier merely runs under the
-    // session's default type.
-    if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined
-    return undefined
-  }
-  const name = String(override).trim()
-  return name || undefined
+/**
+ * Decide whether the fleet may pin its `fleet-verifier` subagent type.
+ *
+ * Custom agent types are a desktop-only facility (issue 339). Claude Code reads
+ * the agent registry before SessionStart hooks run, so the cloud bootstrap hook
+ * cannot register `~/.claude/agents/fleet-verifier.md` for the session that
+ * would use it - measured in a container on 2026-09-16, transcript in
+ * docs/tickets/339-decision.md. Pinning the type there fails the launch with
+ * "Agent type 'fleet-verifier' not found", which is how issue 316 surfaced.
+ *
+ * So: never pin in a remote session, and on a desktop session pin only when the
+ * agent file was actually on disk (it is authored there, before session start,
+ * so disk presence is a sound proxy for registration). The decision is keyed on
+ * remoteness, NOT on the tracker instrument - conflating the two is what made a
+ * container that picked `gh` try to launch a type it could never have.
+ *
+ * @param {boolean} remote - true in a cloud container session
+ * @param {boolean} agentFilePresent - true when ~/.claude/agents/fleet-verifier.md exists
+ * @returns {'fleet-verifier'|null} the agentType to pin, or null for none
+ */
+function pickVerifierAgent(remote, agentFilePresent) {
+  if (remote) return null;
+  return agentFilePresent ? 'fleet-verifier' : null;
 }
-// `verifierAgentType` is resolved right after the env probe in the Scout phase below.
+
+/**
+ * Resolve the agent type the blind verifier launches under.
+ *
+ * Agent types are registered once at session start from `~/.claude/agents/`. On the desktop
+ * that registry holds `fleet-verifier.md`, whose frontmatter caps the verifier's tools at
+ * Read, Grep, Glob, Bash (issue 86). A cloud container has no such entry - the bootstrap hook
+ * copies the definition into a clone the registry never reads, and the registry is not re-read
+ * mid-session - so pinning the type there fails every verifier launch with
+ * `agent type 'fleet-verifier' not found` (issue 316).
+ *
+ * @param {'gh'|'mcp'} instrument
+ * @param {{remote:boolean, verifierAgentFile:boolean}} [facts] - the env probe's facts;
+ *   when given they decide the default through pickVerifierAgent (issue 339).
+ * @param {string|null|undefined} override - args.verifierAgent. undefined/null takes the
+ *   default, which is a pin ONLY when `facts` prove the agent is registered: the instrument
+ *   never decides it (issue 322 - a container that picked `gh` had no registry and every
+ *   verifier launch died with `agent type 'fleet-verifier' not found`). An empty or
+ *   whitespace string clears the pin so the verifier runs under the session's default agent
+ *   type; any other string pins that agent on either instrument.
+ * @returns {string|undefined} the agentType to pass, or undefined for an unpinned verifier.
+ */
+function resolveVerifierAgent(instrument, override, facts) {
+  if (override === undefined || override === null) {
+    // The env probe's facts decide the default (issue 339). Without them nothing has said the
+    // agent file is on disk, so there is no pin: an unregistered type fails every launch, while
+    // an unpinned verifier merely runs under the session's default type (issue 322).
+    if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined;
+    return undefined;
+  }
+  const name = String(override).trim();
+  return name || undefined;
+}
+
+/**
+ * Confine the scout's ticket list to the candidate set it was given (issue 298).
+ *
+ * The scout is asked for exactly one listing - the issues carrying `label`, or
+ * the numbers named in `args.tickets`. When that listing comes back empty a
+ * model is prone to treat it as a dead end to route around and returns every
+ * open ticket it can find instead, so the fleet spawns pr-check and implementer
+ * agents for work nobody asked for. The prompt now says an empty listing is a
+ * valid answer; this is the mechanical half of the same guard: whatever the
+ * scout reports, only tickets whose number appeared in the listing survive.
+ *
+ * @param {Array<{number:number|string}>|null|undefined} tickets - scout output
+ * @param {Array<number|string>|null|undefined} candidateNumbers - the issue
+ *   numbers the listing returned, before any filtering. A non-array (the scout
+ *   did not report one) means there is nothing to confine against and the
+ *   tickets pass through unchanged; an empty array confines to nothing, which
+ *   is the whole point of the ticket.
+ * @returns {Array} the surviving tickets, in the scout's order
+ */
+function confineToCandidates(tickets, candidateNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (!Array.isArray(candidateNumbers)) return list;
+  const allowed = new Set(
+    candidateNumbers.map((n) => parseInt(n, 10)).filter((n) => n > 0)
+  );
+  return list.filter((t) => t && allowed.has(parseInt(t.number, 10)));
+}
+
+/**
+ * Drop blockers that have already closed (issue 403).
+ *
+ * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
+ * `effort: 'low'` it never reads those issues, so a ticket whose blocker landed
+ * hours ago is skipped wave after wave until somebody rewrites the body by hand.
+ * The fleet therefore reads each named blocker's state through the tracker
+ * instrument and passes the answers here: a blocker whose state comes back
+ * `closed` is dropped from the ticket's `blockedBy`, while everything else -
+ * `open`, `unknown`, a number the reader never reported - keeps blocking,
+ * because the gate may only be opened by positive evidence that it has landed.
+ *
+ * Tickets are not mutated: one whose blockers all still hold is returned as-is,
+ * one that loses a blocker is returned as a copy with the shorter `blockedBy`.
+ *
+ * @param {Array<{number:number, blockedBy:Array<number|string>}>|null|undefined} tickets
+ * @param {Array<{number:number|string, state:string}>|null|undefined} blockers - one
+ *   entry per blocker number read, carrying the tracker's state verbatim
+ * @returns {{tickets:Array, cleared:Array<{ticket:number, blocker:number}>}} the
+ *   tickets with closed blockers removed, and the (ticket, blocker) pairs cleared
+ *   so the run can log them
+ */
+function applyBlockerStates(tickets, blockers) {
+  const states = new Map();
+  for (const b of (Array.isArray(blockers) ? blockers : [])) {
+    const n = parseInt(b && b.number, 10);
+    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase());
+  }
+  const cleared = [];
+  const resolved = (Array.isArray(tickets) ? tickets : []).map((t) => {
+    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : [];
+    const open = named.filter((n) => {
+      const num = parseInt(n, 10);
+      if (states.get(num) !== 'closed') return true;
+      cleared.push({ ticket: t.number, blocker: num });
+      return false;
+    });
+    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open });
+  });
+  return { tickets: resolved, cleared };
+}
+
+/**
+ * Resume-stable projections of a previous agent's structured result (issue 271).
+ *
+ * The Workflow runtime replays an agent() call from cache only while its cache
+ * key - which covers the prompt text - is unchanged. A ticket-fleet prompt built
+ * out of an earlier agent's result therefore has to render the same bytes whether
+ * that result arrived live from the tool call or was re-read from the run journal
+ * on resume. The two differ exactly as a JSON round trip differs: key order,
+ * absent vs null vs undefined members, values a live run held as numbers or
+ * booleans, and CR bytes inside quoted output. A `deliver: false` run resumed
+ * with `deliver: true` missed the cache on `impl:#N.2` and `verify:#N.2` for that
+ * reason, re-implementing tickets whose verified branches already existed.
+ *
+ * `stableText` and `stableList` are the only doors a prior result may pass
+ * through on its way into a prompt, and `priorFindingsBlock` is the one place
+ * that renders a failed verdict into the next attempt's prompt. The fleet script
+ * runs these very definitions, spliced into its generated block.
+ */
+
+/** Deterministic JSON: object keys sorted, undefined rendered as null. */
+function stableJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map((k) => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}';
+  }
+  if (value === undefined) return 'null';
+  return JSON.stringify(value);
+}
+
+/** Any prior-result value as prompt text: absent/null collapse to '', CRLF folds to LF. */
+function stableText(value) {
+  if (value === null || value === undefined) return '';
+  const raw = typeof value === 'string' ? value
+    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
+      : stableJson(value);
+  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim();
+}
+
+/** Any prior-result list as prompt lines: non-arrays wrap, empty entries drop. */
+function stableList(value) {
+  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value];
+  return items.map(stableText).filter((s) => s.length > 0);
+}
+
+/**
+ * The block the next attempt's implementer/prober prompt carries after a failed
+ * verdict. `howToFix` is the lane's wording; everything else comes from the
+ * verdict through stableList.
+ */
+function priorFindingsBlock(verdict, howToFix) {
+  return verdict
+    ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
+    : '';
+}
+// [FLEET-GENERATED-END]
+// `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
+// workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
+// env-probe subagent measures the session and pickInstrument is fed what it measured.
 
 // The tracker rule lines the scout and every delivery prompt embed. Same wording on both
 // instruments except for the tool spellings and the "how to detect the tracker root" note.
@@ -275,35 +458,9 @@ const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n =>
 // values, and CR bytes inside quoted output. A `deliver: false` run resumed with
 // `deliver: true` missed on `impl:#N.2` and `verify:#N.2` for that reason and re-implemented
 // tickets whose verified branches already existed. Every prior result now reaches a prompt
-// through one of these doors, and the verifier and deliver prompts name the branch this script
-// computed rather than the one the implementer reported - so the branch delivered is the branch
-// that was verified. Pure counterparts live in tools/ticket-fleet-branch.js; the block between
-// the FLEET-RESUME-STABLE markers is extracted verbatim by tools/ticket-fleet-branch.test.js
-// and compared against them, so the two copies cannot drift.
-// [FLEET-RESUME-STABLE-START]
-const stableJson = (value) => {
-  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']'
-  if (value && typeof value === 'object') {
-    return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}'
-  }
-  if (value === undefined) return 'null'
-  return JSON.stringify(value)
-}
-const stableText = (value) => {
-  if (value === null || value === undefined) return ''
-  const raw = typeof value === 'string' ? value
-    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
-    : stableJson(value)
-  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
-}
-const stableList = (value) => {
-  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value]
-  return items.map(stableText).filter(s => s.length > 0)
-}
-const priorFindingsBlock = (verdict, howToFix) => verdict
-  ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
-  : ''
-// [FLEET-RESUME-STABLE-END]
+// through stableText/stableList/priorFindingsBlock, and the verifier and deliver prompts name
+// the branch this script computed rather than the one the implementer reported - so the branch
+// delivered is the branch that was verified. The three live in the generated block above.
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const ENVFACTS = { type: 'object', required: ['remote', 'hasGh', 'verifierAgentFile'], properties: {
@@ -817,14 +974,7 @@ Return structured output only.`,
 // open ticket it can find; the fleet would then spawn pr-check and implementer agents for work
 // nobody asked for (issue 298). The prompt says an empty listing is a valid answer - this is the
 // mechanical half: only tickets whose number was in the candidate set (the label listing, or the
-// explicitly named numbers) survive. Pure counterpart: confineToCandidates in
-// tools/ticket-fleet-branch.js, which ticket-fleet-branch.test.js pins against this inline copy.
-function confineToCandidates(tickets, candidateNumbers) {
-  const list = Array.isArray(tickets) ? tickets : []
-  if (!Array.isArray(candidateNumbers)) return list
-  const allowed = new Set(candidateNumbers.map(n => parseInt(n, 10)).filter(n => n > 0))
-  return list.filter(t => t && allowed.has(parseInt(t.number, 10)))
-}
+// explicitly named numbers) survive, through confineToCandidates in the generated block above.
 const candidateSet = explicitTickets.length ? explicitTickets : (scout && scout.candidateNumbers)
 const scoutTickets = confineToCandidates(scout && scout.tickets, candidateSet)
 const offListing = ((scout && Array.isArray(scout.tickets)) ? scout.tickets.length : 0) - scoutTickets.length
@@ -849,8 +999,8 @@ if (cfg.testCommand) log(`testCommand overridden by args: ${testCommand} (scout 
 // number it finds and one cheap agent reads each distinct blocker's state through the instrument;
 // the closed ones are dropped and logged as cleared. Anything that does not come back a plain
 // `closed` - unknown, unreadable, a failed agent - keeps blocking: the gate may only ever be
-// opened by positive evidence. Pure counterpart: applyBlockerStates in
-// tools/ticket-fleet-branch.js, pinned against this inline copy by ticket-fleet-branch.test.js.
+// opened by positive evidence. The filter itself is applyBlockerStates in the generated block
+// above; what is here is the read that feeds it.
 // [FLEET-BLOCKER-STATE-START]
 const BLOCKER_STATES = { type: 'object', required: ['blockers'], properties: {
   blockers: { type: 'array', items: { type: 'object', required: ['number', 'state'], properties: {
@@ -858,25 +1008,6 @@ const BLOCKER_STATES = { type: 'object', required: ['blockers'], properties: {
     state: { type: 'string', description: 'the tracker\'s state for that issue VERBATIM - "open" or "closed"; use "unknown" only when the read failed, never a guess' },
   } } },
 } }
-function applyBlockerStates(tickets, blockers) {
-  const states = new Map()
-  for (const b of (Array.isArray(blockers) ? blockers : [])) {
-    const n = parseInt(b && b.number, 10)
-    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase())
-  }
-  const cleared = []
-  const resolved = (Array.isArray(tickets) ? tickets : []).map(t => {
-    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : []
-    const open = named.filter(n => {
-      const num = parseInt(n, 10)
-      if (states.get(num) !== 'closed') return true
-      cleared.push({ ticket: t.number, blocker: num })
-      return false
-    })
-    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open })
-  })
-  return { tickets: resolved, cleared }
-}
 async function resolveBlockerStates(tickets) {
   const numbers = [...new Set((Array.isArray(tickets) ? tickets : [])
     .flatMap(t => (Array.isArray(t && t.blockedBy) ? t.blockedBy : []))

@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T20:22:45Z"
-  previous-modified: "2026-09-16T19:25:51Z"
-  revision: "15"
-  content-sha: "a16e9513ef52"
+  modified: "2026-09-16T20:34:53Z"
+  previous-modified: "2026-09-16T20:22:45Z"
+  revision: "16"
+  content-sha: "c638db21f53c"
 ---
 
 # ticket-fleet
@@ -24,9 +24,13 @@ One script, `ticket-fleet.js` alongside this SKILL.md, that serves every session
 - **Cloud container** (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH): the fleet talks to the tracker through the GitHub MCP tools (`mcp__github__list_issues`, `mcp__github__issue_read`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request`).
 
 The switch is made by `pickInstrument(env, hasGh, override)` inside the script, and the
-verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`; the pure
-counterparts live at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
-`tools/ticket-fleet-branch.test.js`.
+verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`. Both live at
+`tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
+`tools/ticket-fleet-branch.test.js` — and so does every other pure helper the script needs. The
+Workflow runtime cannot `require()`, so the block between the script's `[FLEET-GENERATED-START]`
+/ `[FLEET-GENERATED-END]` markers is **generated** from that module by
+`node tools/build-fleet-inline.js`; never hand-edit it, and `tools/fleet-inline-template.test.js`
+fails while it is stale (issue 440).
 
 The script does not guess which shape it is in. The first agent of every run is a cheap
 `env-probe` that reads the remote env vars, `gh` on PATH and the verifier agent file, and the
