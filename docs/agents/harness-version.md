@@ -1,8 +1,8 @@
 # Harness version
 
-    harness-version: 18
+    harness-version: 19
 
-Installed/upgraded: 2026-09-15 by the `project-harness` skill (v18: fleet served by the aac-skills plugin, repo copy removed in #196).
+Installed/upgraded: 2026-09-15 by the `project-harness` skill (v19: widened autoMode.allow ruling from #245 delivered by step 16).
 
 This file exists so "which generation of the harness does this repo have?" is a question you can
 answer by reading, instead of by remembering. Before this marker, a new harness capability only

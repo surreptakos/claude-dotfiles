@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { compareVersions } = require('./plugin-version');
+const { compareVersions, classifyInstall } = require('./plugin-version');
 
 test('installed older than offered reports behind', () => {
   assert.equal(compareVersions('1.0.0', '1.1.0'), 'behind');
@@ -35,4 +35,31 @@ test('unparseable but equal strings report equal', () => {
 test('null or missing versions return null', () => {
   assert.equal(compareVersions(null, '1.0.0'), null);
   assert.equal(compareVersions('1.0.0', undefined), null);
+});
+
+test('classifyInstall: same commit on both sides turns a version disagreement into manifest-lag', () => {
+  // sstklen 2026-09-15: plugin.json 1.1.0 installed, marketplace.json 1.0.0, both at 4752148.
+  assert.equal(classifyInstall({
+    installed: '1.1.0', offered: '1.0.0',
+    installedSha: '47521489a4fc0537b633339372dcd7514032acfb',
+    cloneSha: '47521489a4fc0537b633339372dcd7514032acfb\n',
+  }), 'manifest-lag');
+  assert.equal(classifyInstall({
+    installed: '1.0.0', offered: '1.1.0', installedSha: 'abc', cloneSha: 'abc',
+  }), 'manifest-lag');
+});
+
+test('classifyInstall: different commits keep the version verdict', () => {
+  assert.equal(classifyInstall({ installed: '1.1.0', offered: '1.0.0', installedSha: 'aaa', cloneSha: 'bbb' }), 'ahead');
+  assert.equal(classifyInstall({ installed: '1.0.0', offered: '1.1.0', installedSha: 'aaa', cloneSha: 'bbb' }), 'behind');
+});
+
+test('classifyInstall: missing shas fall back to the version verdict', () => {
+  assert.equal(classifyInstall({ installed: '1.1.0', offered: '1.0.0' }), 'ahead');
+  assert.equal(classifyInstall({ installed: '1.1.0', offered: '1.0.0', installedSha: 'aaa', cloneSha: null }), 'ahead');
+});
+
+test('classifyInstall: equal or unparseable versions pass through untouched', () => {
+  assert.equal(classifyInstall({ installed: '1.1.0', offered: '1.1.0', installedSha: 'aaa', cloneSha: 'bbb' }), 'equal');
+  assert.equal(classifyInstall({ installed: 'abc', offered: '1.0.0', installedSha: 'aaa', cloneSha: 'aaa' }), null);
 });
