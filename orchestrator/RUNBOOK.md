@@ -112,16 +112,17 @@ In this order:
    `scriptPath = .claude/workflows/ticket-fleet.js` — copy it there first with `mkdir -p
    .claude/workflows && cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js"
    .claude/workflows/ticket-fleet.js` — and `args` from the
-   state issue's `config.fleetArgs`. Mint a `runId` and a separate `invocationId` inline
-   (`printf %x%x $(date +%s) $$` each) and pass both in `args`; the workflow runtime forbids
-   `Date.now()` and `Math.random()` in scripts, so the fleet refuses to start without them.
-   Resuming a run (`resumeFromRunId`) keeps the same `runId` - the branch names embed it - and
-   takes a NEW `invocationId`, which is what makes the open-PR guard re-ask the tracker instead
-   of replaying the cached "no PR" it recorded before the PRs existed. Always pass
-   `verifierAgent: ''` from a cloud session: the workflow runtime hides `process.env`, so the
-   fleet cannot tell a container from the desktop and defaults to pinning its verifiers to the
-   `fleet-verifier` agent type, which this container's registry does not hold - every verifier
-   then fails to launch and the wave delivers nothing (issue 316). When the fleet returns, run the merge pass once more over
+   state issue's `config.fleetArgs`, plus the three contract args: `contractVersion: 2`, a `runId`
+   minted inline (`printf %x $(date +%s)`) and an `invocationId` minted fresh on every launch,
+   resume included (`printf %x%x $(date +%s) $$`), never equal to the `runId`. The workflow runtime
+   forbids `Date.now()` and `Math.random()` in scripts, so the caller mints both ids; a launch that
+   omits any of the three is refused with a contract-mismatch error naming the version on both
+   sides (the ripple table is in the ticket-fleet SKILL.md). Resuming a run (`resumeFromRunId`)
+   keeps the same `runId` - the branch names embed it - and takes a NEW `invocationId`, which is
+   what makes the open-PR guard re-ask the tracker instead of replaying the cached "no PR" it
+   recorded before the PRs existed. A cloud session needs no `instrument` or `verifierAgent`
+   argument: the fleet's env probe measures the session and runs its verifiers unpinned there,
+   because custom agent types are desktop-only (issue 339). When the fleet returns, run the merge pass once more over
    the PRs it just opened.
 
    **Record the wave before doing anything else with it.** The moment the Workflow returns, run

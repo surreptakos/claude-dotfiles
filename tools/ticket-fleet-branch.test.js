@@ -277,9 +277,9 @@ test(`fleet script ${FLEET_SCRIPT_REL} keys the open-PR guard on a per-invocatio
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src, /const invocationId = String\(cfg\.invocationId/,
     'invocationId must come from args - a value derived from runId is stable across a resume');
-  assert.match(src, /if \(!invocationId\) throw new Error/,
+  assert.match(src, /if \(!invocationId\) throw (?:new Error|contractError)\(/,
     'the fleet must refuse to run without a per-invocation token rather than guard on a stale cache');
-  assert.match(src, /if \(invocationId === runId\) throw new Error/,
+  assert.match(src, /if \(invocationId === runId\) throw (?:new Error|contractError)\(/,
     'invocationId must be rejected when it merely repeats runId');
   const body = extractCodeLane(src);
   assert.match(body, /label: `pr-check:#\$\{t\.number\}@\$\{invocationId\}`/,

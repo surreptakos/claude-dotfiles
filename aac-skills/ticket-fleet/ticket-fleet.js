@@ -21,7 +21,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -35,7 +35,9 @@ export const meta = {
 
 // ---- config (all overridable via args) ----
 const cfg = Object.assign({
+  contractVersion: null,    // REQUIRED from the caller; must equal CONTRACT_VERSION below
   runId: null,              // REQUIRED from the caller; see concurrent-run safety below
+  invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   tickets: null,            // explicit issue numbers; overrides label listing (any label, any state)
   label: 'ready-for-agent',
   maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
@@ -75,6 +77,36 @@ const cfg = Object.assign({
   treeGuardStateDir: '.git/orchestrator-tree-guard', // inside .git, so the baseline never shows in `git status`
 }, args || {})
 
+// ---- launch contract (issue 333) ----
+// [FLEET-CONTRACT-VERSION 2]
+// This script is served by the aac-skills plugin, but two repos keep an edited fork of it under
+// .claude/workflows/ticket-fleet.js and three runbooks spell out the launch args. Whenever the
+// arg list moved, those copies failed on a bare "args.X is required" and the message gave no clue
+// that the copy - not the call - was out of date. So the contract carries a version: the caller
+// declares the version it was written for, and any mismatch fails naming both sides and the
+// ripple list. Pure counterpart (plus the fork auditor) in tools/ticket-fleet-contract.js;
+// tools/ticket-fleet-contract.test.js pins the two together, so a bump here that misses the
+// module or the SKILL.md ripple table turns the suite red.
+const CONTRACT_VERSION = 2
+const CONTRACT_REQUIRED_ARGS = ['contractVersion', 'runId', 'invocationId']
+const CONTRACT_COPIES = [
+  'surreptakos/aac-routines .claude/workflows/ticket-fleet.js',
+  'surreptakos/aac-cockpit .claude/workflows/ticket-fleet.js',
+  'claude-dotfiles orchestrator/RUNBOOK.md',
+  'claude-dotfiles orchestrator/LOCAL-RUNBOOK.md',
+  'claude-dotfiles aac-skills/ticket-fleet/SKILL.md',
+  'claude-dotfiles agents/skills/project-harness/SKILL.md',
+]
+function contractError(detail) {
+  return new Error(`ticket-fleet contract mismatch: this script implements contract v${CONTRACT_VERSION}${detail} Contract v${CONTRACT_VERSION} requires args {${CONTRACT_REQUIRED_ARGS.join(', ')}}; its scout must return {candidateNumbers, tickets, repoMap, testCommand, defaultBranch} with per-ticket {number, title, criteria, blockedBy, keepOpen, kind, kindReason, discoveryTriage}. Forks and runbooks that must move with the contract: ${CONTRACT_COPIES.join(', ')}. Refresh a fork by re-copying the plugin script over it (keeping that fork's own edits) - see the ripple table in aac-skills/ticket-fleet/SKILL.md.`)
+}
+if (cfg.contractVersion === null || cfg.contractVersion === undefined || cfg.contractVersion === '') {
+  throw contractError(' and the launcher declared no args.contractVersion, so it was written for an older contract (v1 passed runId alone). Pass contractVersion: 2.')
+}
+if (parseInt(cfg.contractVersion, 10) !== CONTRACT_VERSION) {
+  throw contractError(`, but the launcher declared contractVersion ${cfg.contractVersion}. One of the two is stale: refresh the fork copy of the script, or the runbook that launches it, whichever is older.`)
+}
+
 // ---- reusing a dead run's work (issue 317) ----
 // A run can lose every verifier after its implementers have already committed their branches.
 // Replaying it through the runtime's own resume does not help: the cache key of an
@@ -96,7 +128,7 @@ const cfg = Object.assign({
 // The workflow runtime throws on Date.now(), new Date() and Math.random() inside scripts (they
 // would break resume), so the id cannot be minted here: the caller passes it as args.runId
 // (any short unique token, e.g. the shell's `date +%s` in hex).
-if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot call Date.now()/Math.random(); pass a unique token such as `printf %x $(date +%s)`')
+if (!cfg.runId) throw contractError(' and the launcher declared v2 but passed no args.runId: workflow scripts cannot call Date.now()/Math.random(), so the caller mints it (`printf %x $(date +%s)`).')
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- per-invocation freshness for the resume guard (issue 291) ----
@@ -105,14 +137,13 @@ const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 // (a workflow script has no filesystem, shell or network of its own), and the runtime replays
 // cached agent results on resume, so under a stable cache key the guard replays the {found:false}
 // it recorded before any PR existed and the ticket is implemented, verified and delivered a
-// second time - the duplicate PR the guard exists to prevent. The freshness therefore arrives
-// through args, exactly like runId: the caller mints a NEW invocationId on EVERY launch, resume
-// included. It is spliced into the pr-check prompt and label and nowhere else, so two invocations
-// of the same runId ask that one question under different cache keys while every other stage
-// keeps its cache and the branch names stay put.
+// second time. The freshness therefore arrives through args, exactly like runId: the caller mints
+// a NEW invocationId on EVERY launch, resume included. It is spliced into the pr-check prompt and
+// label and nowhere else, so two invocations of the same runId ask that one question under
+// different cache keys while every other stage keeps its cache and the branch names stay put.
 const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
-if (!invocationId) throw new Error('args.invocationId is required: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`). It busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291); keep args.runId unchanged across a resume, the branch names embed it.')
-if (invocationId === runId) throw new Error('args.invocationId must differ from args.runId: runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
+if (!invocationId) throw contractError(' and the launcher declared v2 but passed no args.invocationId: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`), which busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291).')
+if (invocationId === runId) throw contractError(': args.invocationId must differ from args.runId. runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
 
 // ---- instrument switch (gh vs GitHub MCP) ----
 // The tracker prompts below differ in exactly one dimension: which tool set the scout, probe,
@@ -614,6 +645,7 @@ const skippedHandoff = selection.pendingHandoff.map(t => t.number)
 if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
 if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awaiting the owner after a fleet handoff comment - ${skippedHandoff.map(n => '#' + n).join(', ')}.`)
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
+log(`Scout listed ${(scout.candidateNumbers || []).length} candidate(s); ${scout.tickets.length} returned as tickets.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 
 // Every branch this wave can possibly produce, offered to every checkpoint as a

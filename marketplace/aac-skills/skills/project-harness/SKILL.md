@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-16T15:17:40Z'
-  previous-modified: '2026-09-16T15:15:54Z'
-  revision: '16'
-  content-sha: b8f14c8e84dd
+  modified: '2026-09-16T15:18:40Z'
+  previous-modified: '2026-09-16T15:14:41Z'
+  revision: '15'
+  content-sha: 7fdc209c66c7
 ---
 
 # Project Harness
@@ -114,14 +114,19 @@ cross-repo Projects board instead of per-repo (see step 6).
 15. **Ticket fleet** — the fleet is served by the `aac-skills` plugin; the harness copies no
     script. In a session with the plugin installed (step 16 makes that so), invoke it via the
     Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`
-    and required `args.runId` (`printf %x $(date +%s)`; the workflow runtime forbids
-    `Date.now()`/`Math.random()`). One script serves local and cloud sessions - it picks between
+    and the three required contract args `contractVersion: 2`, `runId` (`printf %x $(date +%s)`,
+    held across a resume) and `invocationId` (`printf %x%x $(date +%s) $$`, fresh on every launch,
+    never equal to `runId`) - the workflow runtime forbids `Date.now()`/`Math.random()`, so the
+    caller mints both ids, and a launch missing any of the three is refused with a
+    contract-mismatch error naming the version on both sides. One script serves local and cloud sessions - it picks between
     the `gh` CLI and the GitHub MCP tools at run time (a cloud container sets
     `CLAUDE_CODE_REMOTE_SESSION_ID`, or has no `gh` on PATH).
     - **A repo needing a forked script keeps its own `.claude/workflows/ticket-fleet.js` copy**
       (hand-tuned prompts, extra phases like aac-routines' auth/cleanup, aac-cockpit's
       `PROMPT_CONTRACT`) and calls it by name; otherwise `scriptPath` at the plugin copy is the
-      default and the repo carries no fleet file.
+      default and the repo carries no fleet file. A fork goes stale the moment the plugin's
+      contract moves: `node tools/ticket-fleet-contract.js <fork>` in `claude-dotfiles` says
+      which forks are behind, and the ripple table in the ticket-fleet SKILL.md lists them.
     - **First run in a repo: pass `deliver: false`** (verify-only dry run) before letting the
       fleet push branches and open PRs.
 

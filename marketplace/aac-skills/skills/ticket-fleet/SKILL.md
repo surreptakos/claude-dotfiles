@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T15:15:55Z'
-  previous-modified: '2026-09-16T15:14:09Z'
-  revision: '10'
-  content-sha: 82db749dc630
+  modified: '2026-09-16T15:18:31Z'
+  previous-modified: '2026-09-16T06:35:49Z'
+  revision: '11'
+  content-sha: 6ad75a5f9441
 ---
 
 # ticket-fleet
@@ -50,9 +50,11 @@ directory can reach; the Workflow tool also resolves a bare `name:` from the cwd
 `.claude/workflows/`. It reads the file behind `scriptPath` byte-for-byte before showing the
 approval dialog - a CR anywhere in the payload trips "script contains control characters that
 would be hidden in the approval dialog" and the launch is refused (issue 233 - and this repo
-pins `* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` and
-`args.invocationId` are both required (the workflow runtime forbids `Date.now()` and
-`Math.random()` inside scripts, so the caller mints them).
+pins `* -text`, so a CRLF blob reaches every surface verbatim). Three args are required and
+they are the contract: `contractVersion`, `runId` and `invocationId` (the workflow runtime
+forbids `Date.now()` and `Math.random()` inside scripts, so the caller mints both ids). A launch
+that omits any of them fails with a contract-mismatch error naming the version on both sides and
+the ripple list - see **Contract and ripple list** below.
 
 **In a `claude-dotfiles` checkout, name the checkout copy - do not copy anything.** The
 source file is already in the tree, so point `scriptPath` straight at it (verified from a
@@ -110,14 +112,19 @@ Then either spelling launches the fleet:
 ```
 Workflow({
   scriptPath: '.claude/workflows/ticket-fleet.js',
-  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
+  args: {
+    contractVersion: 2,
+    runId: '<hex from `printf %x $(date +%s)`>',
+    invocationId: '<fresh hex from `printf %x%x $(date +%s) $$`, re-minted on every launch>',
+    tickets: [], deliver: false,
+  }
 })
 ```
 
 ```
 Workflow({
   name: 'ticket-fleet',
-  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
+  args: { contractVersion: 2, runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
 ```
 
@@ -128,16 +135,14 @@ source and is refreshed by re-running the `cp` above whenever the plugin bumps.
 On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
 prompts before letting the fleet push branches and open PRs. Full args list:
 
-- `runId` (required, string): caller-minted unique token. Any short unique string; the
-  branch names embed it as `wf_<runId>-w<workerIndex>`. A resume (`resumeFromRunId`) passes
-  the SAME `runId`, so the resumed attempts land on the branches they already own.
-- `invocationId` (required, string): a second caller-minted token, re-minted on EVERY launch
-  including every resume, and rejected if it equals `runId`. It is spliced into the open-PR
-  guard's prompt and label and nowhere else. The guard asks an agent whether this ticket
-  already has an open PR, and the runtime replays cached agent answers on resume; without a
-  key that moves per invocation the guard replays the `{found:false}` it recorded before any
-  PR existed and the ticket is implemented, verified and delivered twice (issue 291). Mint
-  both with `printf %x%x $(date +%s) $$`.
+- `contractVersion` (required, integer): the contract the caller was written for. It must equal
+  the version the script implements (2 today) or the launch is refused - that is what makes a
+  stale fork or a stale runbook say so instead of dying on the first arg it does not know.
+- `runId` (required, string): caller-minted unique token, kept the SAME across a resume. Any
+  short unique string; the branch names embed it as `wf_<runId>-w<workerIndex>`.
+- `invocationId` (required, string): a DIFFERENT fresh token per launch, resume included. It is
+  spliced into the open-PR guard's prompt and label so a resumed run re-asks the tracker instead
+  of replaying a cached "no PR" answer (issue 291); the script refuses it when it equals `runId`.
 - `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
   takes exactly those tickets regardless of label or state; otherwise it lists open tickets
   with `args.label`.
@@ -222,6 +227,41 @@ Pass the same `tickets` list as the dead run, a **new** `runId` (branch names fo
 that does re-implement must not collide with the dead run's), and the `testCommand` the dead
 run should have used. An entry whose `committed` is false, or a probe entry with no items, is
 treated as a failed attempt 1: attempt 2 runs the stage normally.
+
+## Contract and ripple list
+
+The launch contract is versioned. `tools/ticket-fleet-contract.js` in `claude-dotfiles` holds it as
+data (version, required args, the SCOUT fields, this ripple list); the script inlines the same
+version behind a `[FLEET-CONTRACT-VERSION N]` marker, and `tools/ticket-fleet-contract.test.js`
+fails the branch when the two, or this table, disagree.
+
+**contract v2** - args `{contractVersion, runId, invocationId}`; SCOUT returns
+`{candidateNumbers, tickets, repoMap, testCommand, defaultBranch}`, each ticket carrying
+`{number, title, criteria, blockedBy, keepOpen, kind, kindReason, discoveryTriage}`.
+(v1 was `runId` alone, with no `candidateNumbers` and no `discoveryTriage`.)
+
+Copies this repo does not rebuild, all of which move when the contract does:
+
+| Where | What | Keeps its own edits |
+| --- | --- | --- |
+| `surreptakos/aac-routines` | `.claude/workflows/ticket-fleet.js` | Setup phase (sub-session auth, issue 83) and the no-cleanup history |
+| `surreptakos/aac-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
+| `claude-dotfiles` | `orchestrator/RUNBOOK.md` | launch args |
+| `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
+| `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | this page |
+| `claude-dotfiles` | `agents/skills/project-harness/SKILL.md` | step 15, the harness's own launch instruction |
+
+Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
+`tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
+above, then refresh each fork - re-copy the plugin script over it and re-apply that fork's edits.
+To see which forks are behind before a run does:
+
+```bash
+node tools/ticket-fleet-contract.js ../aac-routines/.claude/workflows/ticket-fleet.js
+```
+
+It prints each copy's contract version against the plugin's and exits 1 when any is stale; a copy
+with no marker at all is a pre-v2 fork.
 
 ## Lanes
 
