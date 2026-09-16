@@ -1141,11 +1141,14 @@ if (Test-Path $fleetVerifier) {
 }
 if (Test-Path $fleetScriptPlugin) {
     $pluginText = Get-Content $fleetScriptPlugin -Raw
-    Check 'plugin fleet script resolves the verifier agentType (fleet-verifier by default under gh)' `
+    # Issue 322 moved the pin off the instrument: pickVerifierAgent keys on the env probe's
+    # remoteness and agent-file facts, and resolveVerifierAgent defers to it when nothing overrides.
+    Check 'plugin fleet script resolves the verifier agentType (fleet-verifier when the probe finds the agent file, never in a container)' `
         (($pluginText -match 'function resolveVerifierAgent') -and
-         ($pluginText -match "mode === 'gh' \? 'fleet-verifier'") -and
+         ($pluginText -match 'function pickVerifierAgent') -and
+         ($pluginText -match "agentFilePresent \? 'fleet-verifier' : null") -and
          ($pluginText -match 'agentType: verifierAgentType')) `
-        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138) through resolveVerifierAgent, which args.verifierAgent clears in a container (issue 316)')
+        @('the plugin-served fleet must pin the fleet-verifier subagent through resolveVerifierAgent -> pickVerifierAgent (issues 138, 316, 322), never keyed on the gh/mcp instrument')
     Check 'plugin fleet script inlines the pickInstrument switch (issue 138)' `
         (($pluginText -match 'function pickInstrument') -and
          ($pluginText -match 'CLAUDE_CODE_REMOTE_SESSION_ID')) `
