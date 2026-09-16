@@ -318,7 +318,7 @@ test('cloud bootstrap: the whole section is silent on a local (non-cloud) sessio
  * outage (issue 394). The loop now asks for `...&page=N` itself; these drive it with a stub.
  */
 
-const { paginateTicketPages } = require('./check.js');
+const { curlTicketRows, paginateTicketPages } = require('./check.js');
 
 const fullPage = (from) => JSON.stringify(
   Array.from({ length: 100 }, (unused, i) => ({ number: from + i, title: `t${from + i}` })));
@@ -340,6 +340,25 @@ test('a failing second page reports the page rather than a bare unreachable GitH
   const result = paginateTicketPages((page) => (page === 1 ? fullPage(1) : null));
   assert.equal(result.list, undefined);
   assert.match(result.error, /page 2/);
+});
+
+// The no-gh fallback fetched one page and stopped, so a >100-ticket label printed as exactly
+// 100 with no error (issue 400). It runs the same loop now; the stub stands in for curl.
+test('the no-gh curl path pages too, so a two-page label arrives whole', () => {
+  const urls = [];
+  const result = curlTicketRows({ owner: 'o', repo: 'r' }, 'ready-for-agent', (cmd, args) => {
+    assert.equal(cmd, 'curl');
+    const url = args[args.length - 1];
+    urls.push(url);
+    return { out: /&page=1$/.test(url) ? fullPage(1) : JSON.stringify([{ number: 101, title: 'last' }]), code: 0 };
+  });
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], /per_page=100&page=1$/);
+  assert.match(urls[1], /per_page=100&page=2$/);
+  assert.equal(result.error, undefined);
+  assert.equal(result.list.length, 101);
+  assert.equal(result.list[0], '#1  t1');
+  assert.equal(result.list[100], '#101  last');
 });
 
 /* --------- host predicate (issue 345): a desktop-only check must not run in a container ------- */
