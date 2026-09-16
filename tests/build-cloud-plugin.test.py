@@ -204,5 +204,52 @@ class FromMirrorStampWriteBack(unittest.TestCase):
                              "second --no-stamp-write rebuild did not reproduce the payload")
 
 
+# Issue 172: aac-google-access started life as a personal skill, so the only copy of it in this
+# repo was the generated claude/ mirror -- which no branch may hand-edit. Moving the source into
+# the hand-edited aac-skills/ tree is the only way a cloud branch can revise such a skill, and for
+# as long as the owner's personal copy still exists both trees hold the name. That overlap used to
+# fail the build outright, so the move could not land in one commit. The team copy must win, and
+# exactly one copy must ship.
+TEAM_SKILL = """---
+name: foo
+description: The hand-edited team source, which supersedes the mirrored personal copy.
+---
+
+# Foo (team)
+"""
+
+PERSONAL_SKILL = """---
+name: foo
+description: The mirrored personal copy, stale during the migration window.
+---
+
+# Foo (personal)
+"""
+
+
+class AacSkillsSupersedesMirroredPersonalCopy(unittest.TestCase):
+    def test_team_source_ships_and_the_build_still_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            (repo / "claude" / "skills" / "foo").mkdir(parents=True)
+            (repo / "claude" / "skills" / "foo" / "SKILL.md").write_text(
+                PERSONAL_SKILL, encoding="utf-8")
+            (repo / "aac-skills" / "foo").mkdir(parents=True)
+            (repo / "aac-skills" / "foo" / "SKILL.md").write_text(TEAM_SKILL, encoding="utf-8")
+            out = Path(tmp) / "dist"
+
+            with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
+                    sys, "argv", ["bcp", "--from-mirror", "--home", "C:\\Users\\Dan",
+                                  "--out", str(out), "--no-marketplace"]):
+                rc = bcp.main()
+
+            self.assertEqual(rc, 0, "the name in both trees must not fail the build")
+            body = (out / bcp.PLUGIN_NAME / "skills" / "foo" / "SKILL.md").read_text(
+                encoding="utf-8")
+            self.assertIn("# Foo (team)", body,
+                          "the hand-edited aac-skills/ source must be the copy that ships")
+            self.assertNotIn("# Foo (personal)", body)
+
+
 if __name__ == "__main__":
     unittest.main()
