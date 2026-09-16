@@ -1,13 +1,13 @@
 ---
 name: aac-sop
-description: 'Create or rewrite an Active Alarm Company (AAC) procedure or work instruction in AAC''s house format and writing standards, delivered as a styled Word (.docx). Two tiers: a full Procedure (cross-role process) and a lean Work Instruction (one person, one task, usually one tool). Use whenever the user asks to write, draft, build, standardize, format, or recast an SOP, "standard operating procedure," "work instruction," or "WI" - or to put an existing process, checklist, or rough document "into our SOP format." Also use when documenting any repeatable AAC process or task (service calls, monitoring termination, billing, payroll, the Service-to-Sales handoff, estimating, month-end close, or a tool how-to such as System Surveyor or Zoho). Trigger even without the words "template," "SOP," or "work instruction" - "write up how we handle X," "document the X process," or "turn this into a procedure/checklist" all apply. Prefer this over generic process-doc/runbook output for any AAC procedure or work instruction.
+description: 'Create or rewrite an Active Alarm Company (AAC) procedure or work instruction in AAC''s house format and writing standards, delivered as a styled Word (.docx). Two tiers: a full Procedure (cross-role process) and a lean Work Instruction (one person, one task, usually one tool). Use whenever the user asks to write, draft, standardize, or recast an SOP, "standard operating procedure," "work instruction," or "WI" - or to put an existing process, checklist, or rough document "into our SOP format." Also use when documenting any repeatable AAC process or task (service calls, monitoring termination, billing, payroll, the Service-to-Sales handoff, estimating, month-end close, or a tool how-to such as System Surveyor or Zoho). Trigger even without the words "template," "SOP," or "work instruction" - "write up how we handle X," "document the X process," or "turn this into a procedure/checklist" all apply. Prefer this over generic process-doc/runbook output for any AAC procedure or work instruction.
 
   '
 metadata:
-  modified: '2026-08-31T21:20:12Z'
-  previous-modified: none
-  revision: '1'
-  content-sha: a968307daf96
+  modified: '2026-09-16T04:48:08Z'
+  previous-modified: '2026-08-31T21:20:12Z'
+  revision: '2'
+  content-sha: '826114093903'
 ---
 
 # AAC SOP Builder
@@ -34,29 +34,29 @@ template and the `mode`.
 the instruction as a Work Instruction and reference the hand-off as a separate Procedure rather than
 bundling a procedure inside it.
 
-Most of what a field shop documents day to day is Work Instructions, so that is the common case. Do
-not force the Procedure template onto a single-task tool how-to - that is the main
-over-documentation risk.
+Most of what a field shop documents day to day is Work Instructions, so that is the common case: a
+single-task tool how-to stays one however important it feels. Reaching for the Procedure template
+there is the main over-documentation risk.
 
 ## Step 1 - Discovery (before you write)
 
 An SOP is only as good as the process behind it. Before writing anything, separate what you can
 verify from a system from what lives in someone's head, resolve the first yourself, and confirm the
-second from a source. Do not write an unverified process as if it were fact.
+second from a source.
 
 **Split the content into two layers.**
 
 - *Config / data layer* - facts that live in a system: field names and picklist values, org and
   account IDs, record owners, statuses in use, cycle times, counts. Resolve these directly from the
-  connectors and data. State them plainly; do not flag them and do not ask about them. Going as far
-  as the tools allow is the standard here.
+  connectors and data. A fact the tools resolve is stated plainly, with no flag and no question
+  back to the user; going as far as the tools allow is the standard here.
 - *Process / tribal-knowledge layer* - how the work actually runs: the real sequence, what triggers
   each step, who does it and when, the required-vs-recommended calls, the sign-off gate, and the
   exceptions ("usually X, but sometimes Y"). This lives in practice, not in a system. Verify it from
   a source before stating it. If it stays unverified, it stays a red flag - never a committed default.
 
-**Gather from sources in this order; asking a person is the last resort, and guessing is not an
-alternative to asking.**
+**Gather from sources in this order; asking a person is the last resort, and a red flag is what an
+unanswered item becomes.**
 
 1. This conversation, an attached document, or an existing SOP you are recasting (read it first;
    preserve its content).
@@ -64,8 +64,7 @@ alternative to asking.**
 3. Process evidence, for the tribal-knowledge layer: Fathom transcripts, email threads, and past
    chats where the team described how the work is actually done.
 4. Only what none of the above resolves: put the open items to the user in a single batch (see
-   below), or leave them as red flags. Do not drip questions one at a time, and do not fill the gap
-   with a plausible guess.
+   below), or leave them as red flags.
 
 **What to establish before writing** (from the sources above; only ask for what is still missing):
 
@@ -87,8 +86,7 @@ as a red item. Exhaust the sources first, then make one consolidated pass.
 **Scale discovery to where the content lives.** A single-tool Work Instruction whose facts are all
 in-system or already in the conversation needs little or no elicitation - resolve and build. A
 multi-role process with judgment and exceptions gets the full pass. Match the effort to how much of
-the content lives in people's heads versus systems; do not run a heavy discovery on a task that is
-fully specified in front of you.
+the content lives in people's heads versus systems.
 
 ## Workflow
 
@@ -97,7 +95,7 @@ fully specified in front of you.
    are recasting an existing SOP, you have read it and will **preserve its content** - only
    restructure, reformat, and clean wording.
 2. **Apply the writing standards** (below) to every line.
-3. **Apply the evidence rule** (below) - never invent facts.
+3. **Apply the evidence rule** (below).
 4. **For a Procedure, run the brainstorm - curate - draft loop** on every judgment section (Trigger,
    Done when, Exceptions rows, Responsibilities rows, and each `ifthen` branch). See
    [Brainstorm - curate - draft](#brainstorm---curate---draft-procedure-judgment-sections) below.
@@ -116,8 +114,8 @@ fully specified in front of you.
 7. **Reader-test the `.docx`** as a cold performer. See [Reader Testing](#reader-testing) below. Fix
    every gap in the JSON, regenerate, re-read. Deliver only after a clean pass.
 8. **Deliver.** Present the `.docx` and end with a short note listing every field still flagged in
-   red (derived, assumed, or unverified) so the user verifies it. Do not empty that list by
-   converting an unverified process-layer item into a stated fact.
+   red (derived, assumed, or unverified), so the user verifies it. The list is as long as the
+   evidence leaves it.
 
 ## Brainstorm - curate - draft (Procedure judgment sections)
 
@@ -144,19 +142,18 @@ items skip the loop. A Work Instruction skips it entirely.
 3. **Draft** - write the surviving candidate into the JSON. If none survives, the section stays a
    red flag (`[ confirm ]` or `*_flag`), not a wording you settled for.
 
-The loop is internal. Never surface the alternatives in the `.docx` or the delivery note - only the
-winner ships.
+The loop is internal: only the winner ships.
 
 ## Reader Testing
 
-Reader Testing is its own stage, not a checkbox at the end. A `.docx` that generates cleanly can
+Reader Testing is its own stage. A `.docx` that generates cleanly can
 still be unreadable to the person it was written for. The purpose is to catch what the author cannot
 see: assumptions, missing preconditions, undefined terms, and unstated decisions that a cold reader
 hits and stalls on.
 
 Read the whole document from the first heading with **only what the document itself provides**, plus
-the named tools and a realistic input for the role. Do not use the discovery conversation, the
-source thread, or your own memory of the process. If a subagent is available, spawn one with only
+the named tools and a realistic input for the role - the discovery conversation, the source thread
+and your own memory of the process all stay shut. If a subagent is available, spawn one with only
 the document and a role brief - the fresh context is exactly the reader you are simulating.
 
 **Checkpoints, applied to every step:**
@@ -178,8 +175,8 @@ Any "no" is a defect, not a nit. Fix it in the JSON, regenerate, re-read. Delive
 pass.
 
 For a Work Instruction, apply the same checkpoints to Steps and Watch out for; read Sections and
-Appendices for reference value (does someone consulting this later find what they need). Do not
-skip the stage because the tier is small - a wrong SOP shipped is more expensive than the test.
+Appendices for reference value (does someone consulting this later find what they need). The stage
+runs at both tiers - a wrong SOP shipped costs more than the test does.
 
 ## Document layouts
 
@@ -215,8 +212,7 @@ sections and appendices that don't apply rather than padding them.
   long or multi-phase WI.
 
 A checklist and quick-reference are a *different tier* (a filled checklist is a Form/Record), so they
-render as appendices at the end of the document. Do not let the checklist drift into a copy of the steps - that
-recreates the duplication appendices are meant to remove.
+render as appendices at the end of the document.
 
 ## Responsibilities (simple table)
 
@@ -228,17 +224,17 @@ procedures need, so keep this plain.
 
 These standards are what make it an AAC SOP. Hold the line on them:
 
-- **Plain, declarative procedure language. No editorializing, slogans, aphorisms, or opinions.**
-  Lines like "the goal is not paperwork" or "a stale procedure is worse than none" do not belong in
-  an SOP - they are commentary. State the action or the standard, nothing else.
+- **Plain, declarative procedure language: state the action or the standard and stop.** Commentary
+  is what this catches - lines like "the goal is not paperwork" or "a stale procedure is worse than
+  none" are slogans, and an SOP carries neither them nor opinions.
 - **One action per step, starting with a verb.**
 - **Pick the format that fits the work:** checklist (default), step-by-step (strict order matters),
   hierarchical (only where steps genuinely nest), flowchart (branching / troubleshooting).
-- **Write branches as `IF <condition> → THEN <action / which step>`.** One condition per line; never
-  bury a branch inside a paragraph. (Use procedure items of kind `ifthen`.)
+- **Write branches as `IF <condition> → THEN <action / which step>`.** One condition per line, each
+  on a line of its own. (Use procedure items of kind `ifthen`.)
 - **Mark required vs. recommended:** "must" for a required action, "may"/"should" for a
-  recommendation, so the requirement is not confused with advice.
-- **Two separate success measures - do not merge them:**
+  recommendation, so a requirement reads as one.
+- **Two separate success measures, kept apart:**
   - *Done when* (required): the completion criterion for a single run - how the person performing
     the task confirms this instance is complete and correct.
   - *Success Metrics* (optional): aggregate performance over time, each with a target, reviewed by
@@ -246,9 +242,9 @@ These standards are what make it an AAC SOP. Hold the line on them:
 - **Name components precisely** - model plus part number where it reduces error (panels, cameras,
   controllers).
 
-## Evidence rule (do not invent)
+## Evidence rule
 
-When content comes from the user or a document, do not fabricate facts.
+Every fact the document states traces to the user, a document, or a system.
 
 - If asked to look something up and the evidence is not present, state **"Insufficient evidence in
   provided documents"** rather than inferring.
@@ -258,9 +254,9 @@ When content comes from the user or a document, do not fabricate facts.
 - Leave genuinely unknown values as `"[ confirm ]"` rather than guessing - especially Effective
   Date and metric Targets.
 - **Separate the two layers (see Step 1 - Discovery).** A config/data fact resolved from a system is
-  stated plainly. A process/tribal-knowledge fact that no source confirmed stays a red flag; **do not
-  convert it into a committed default.** A confidently stated wrong process is worse than a flagged
-  gap, because people follow it.
+  stated plainly. **A process/tribal-knowledge fact that no source confirmed stays a red flag for as
+  long as it stays unconfirmed** - a confidently stated wrong process is worse than a flagged gap,
+  because people follow it.
 
 ## Review cadence
 
