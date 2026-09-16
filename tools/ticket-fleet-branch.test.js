@@ -308,11 +308,39 @@ test(`fleet script ${FLEET_SCRIPT_REL} measures the environment instead of readi
 
 test(`fleet script ${FLEET_SCRIPT_REL} opens PRs through REST on the gh instrument (issue 322)`, () => {
   const ghRules = loadTrackerRules(FLEET_SCRIPT, 'gh');
-  assert.match(ghRules.prCreate(), /gh api --method POST repos\/\{owner\}\/\{repo\}\/pulls/,
+  const bodyFile = '/tmp/fleet-testrun/pr-9-body.md';
+  assert.match(ghRules.prCreate(bodyFile), /gh api --method POST repos\/\{owner\}\/\{repo\}\/pulls/,
     'the gh deliver prompt must open the PR with the REST pulls endpoint');
-  assert.match(ghRules.prCreate(), /NEVER `gh pr create`/,
+  assert.match(ghRules.prCreate(bodyFile), /NEVER `gh pr create`/,
     'the prompt must name the GraphQL-backed spelling it forbids (HTTP 403 here - issues 130, 322)');
-  assert.match(loadTrackerRules(FLEET_SCRIPT, 'mcp').prCreate(), /mcp__github__create_pull_request/);
+  assert.match(loadTrackerRules(FLEET_SCRIPT, 'mcp').prCreate(bodyFile), /mcp__github__create_pull_request/);
+});
+
+// Issue 439: the scratchpad a sub-agent is told is "session-specific" is keyed by project and
+// parent session, so every worker of one wave shares it - one worker's `msg.txt` commit message
+// was overwritten by another's mid-run. Every prompt that asks for a file must therefore name the
+// path itself, and that path must carry the run id, so two workers cannot pick the same one.
+test(`fleet script ${FLEET_SCRIPT_REL} names a per-worker path for every file it asks a worker to write (issue 439)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const scratchRoot = `\/tmp\/fleet-\$\{runId\}`/,
+    'the scratch root must carry the run id so two concurrent runs cannot share it');
+  assert.doesNotMatch(src, /body=@<file>|<scratch dir>|<a fresh scratch directory>/,
+    'no prompt may leave the file or worktree path to the worker: a generic name collides in the shared scratchpad');
+  const bodyFile = '/tmp/fleet-testrun/probe-9-comment.md';
+  const ghRules = loadTrackerRules(FLEET_SCRIPT, 'gh');
+  assert.match(ghRules.commentPost(bodyFile), /-F body=@\/tmp\/fleet-testrun\/probe-9-comment\.md/,
+    'the gh comment rule must post the body file it names, not an unspecified <file>');
+  assert.match(ghRules.prComment(bodyFile), /-F body=@\/tmp\/fleet-testrun\/probe-9-comment\.md/,
+    'the gh PR-comment rule must post the body file it names');
+  // Every per-ticket scratch path is built from a template, and each must carry the ticket number:
+  // the run id alone is shared by every worker of the wave. The two run-level writers (the
+  // discovery branch and its PR body) are single-writer per run and pass a plain string.
+  for (const call of src.match(/scratchFile\(`[^`]+`\)/g) || []) {
+    assert.match(call, /\$\{t\.number\}/,
+      `${call} must carry the ticket number, not a name every worker of the wave would pick`);
+  }
+  assert.match(src, /SCRATCH_RAIL/,
+    'the implementer and prober prompts must carry the scratch-file rail');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} dates the Report phase heading (issue 322)`, () => {
@@ -1129,11 +1157,12 @@ function loadTrackerRules(scriptPath, mode) {
 async function driveHumanLane(scriptPath, agentMock, ticket, mode) {
   const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-HUMAN-LANE');
   const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'HANDOFF', 'COMMENTED', 'stableList', 'stableText',
-    body + '\nreturn runHumanLane;');
+    'scratchFile', body + '\nreturn runHumanLane;');
   const cfg = { deliver: true, verifyModel: 'v', deliverModel: 'd' };
   const helpers = loadStableHelpers(scriptPath);
+  // The lane names its own comment-body path (issue 439); the run's scratch root is module scope.
   const runHumanLane = await wrapper(agentMock, cfg, loadTrackerRules(scriptPath, mode), {}, {},
-    helpers.stableList, helpers.stableText);
+    helpers.stableList, helpers.stableText, (name) => `/tmp/fleet-testrun/${name}`);
   return await runHumanLane(ticket);
 }
 

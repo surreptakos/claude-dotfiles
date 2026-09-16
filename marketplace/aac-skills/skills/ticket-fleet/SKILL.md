@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T22:00:52Z'
-  previous-modified: '2026-09-16T20:50:03Z'
-  revision: '17'
-  content-sha: c03065112dae
+  modified: '2026-09-16T22:49:33Z'
+  previous-modified: '2026-09-16T22:00:52Z'
+  revision: '18'
+  content-sha: d9036d617e8e
 ---
 
 # ticket-fleet
@@ -459,6 +459,27 @@ where it was produced and not for what it concluded", so the re-run is not read 
 change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
 and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
 log says the cross-check was skipped: a guess is not a rejection.
+
+## The scratchpad is one per run, not one per worker
+
+Every sub-agent is told its scratchpad directory is "session-specific, isolated from the project".
+It is keyed by project and parent session, not by sub-session, so every worker of one wave is
+handed the same path. In run `6aaacc32` one worker wrote its commit message to
+`<scratchpad>/msg.txt` and a concurrent worker overwrote it mid-task (issue 439). Nothing errors -
+the reader simply gets the other worker's bytes - so a swapped commit message lands in history and
+a swapped issue body lands on the tracker, silently. The files fleet prompts ask for are exactly
+the collision-prone ones: a commit message for `git commit -F`, a comment or PR body for
+`gh api -F body=@…`, a fixture.
+
+The working rule: **a path two workers could name the same way is a path they will overwrite.**
+Write scratch inside your own worktree where you have one - the implementer and the prober always
+do - and otherwise under `/tmp/fleet-<runId>/`, with the ticket number in the name. In the script
+that is `scratchFile(...)`, and every prompt that asks for a file names the path itself instead of
+leaving the choice to the worker: the comment and PR bodies behind `-F body=@…`, the verifier,
+deliver and discoveries worktrees. `SCRATCH_RAIL` carries the rule itself to the implementer and
+the prober, the two agents that write files nobody named for them.
+`tools/ticket-fleet-branch.test.js` fails the script if a prompt goes back to `<file>` or
+`<scratch dir>`, or if a per-ticket scratch path drops the ticket number.
 
 ## Shell shapes the worktree guard refuses
 
