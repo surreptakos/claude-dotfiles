@@ -35,18 +35,23 @@ mirror and the plugin all say the same thing. Never edit the four by hand and ne
 make a check pass: the hash is what makes the dates believable. The previous text of any skill
 is `git log -p -- <skill>/SKILL.md`; the stamp tells you it is there to look for.
 
-After editing anything under `aac-skills/` — or under the `agents/skills/` mirror — on a branch
-with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`) fails the branch:
+After editing anything under `aac-skills/` — or under the `agents/skills/` or `claude/skills/`
+mirrors — on a branch with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`)
+fails the branch:
 
 ```bash
-python3 tools/skill-stamps.py stamp aac-skills agents/skills
+python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills
 python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 ```
 
 The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`; `--home`
 puts the owner's path back where the mirror holds `__USERHOME__` tokens, so the payload matches
 one built on that machine. CI checks exactly that: a rebuild from the mirror must reproduce the
-committed payload.
+committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
+
+Both commands stamp, and so does a second edit after them: run them as often as you like, the
+commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
+never from an intermediate one, so `previous-modified` names the published version (issue 363).
 
 ## Layout
 
@@ -141,9 +146,10 @@ Version in `docs/agents/harness-version.md`.
   (would removing this line cause a mistake?). Findings are prompts to ask that question, not
   verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one. The restore
   suite gates this file and `claude/CLAUDE.md` (the mirror of `~/.claude/CLAUDE.md`) on
-  unsuppressed findings, with the file and line named in the failure. `size` warns only so a
-  slow creep is visible without going red; the mirror also warns on `volatile`, `code-derivable`
-  and `tutorial` because it quotes counterexamples that trip those regexes.
+  unsuppressed findings, naming the file and line. `size` warns only so a slow creep shows
+  without going red; the mirror also warns on `volatile`, `code-derivable` and `tutorial`, which
+  its counterexamples trip on purpose. The exit code follows that split (issue 337): warn-only
+  findings print and exit 0; `--warn-only a,b` replaces the per-file set.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
 ## The freshness loop
