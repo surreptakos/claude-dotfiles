@@ -67,6 +67,40 @@ function Backup-LocalTargets {
     return $backup
 }
 
+function Invoke-SettingsInvariants {
+    <#
+        Run tools\settings-invariants.ps1 and HONOUR ITS EXIT CODE. The tool exits non-zero
+        when it cannot apply an invariant; both call sites used to pipe its output and walk
+        on regardless, so a sync whose settings.json half had failed still reported success -
+        and on push went on to commit the mirror (issue 362).
+
+        stderr is folded into the output stream so the tool's failure text reaches this
+        console, and $ErrorActionPreference is 'Continue' for the duration: under 'Stop' a
+        single stderr line from a native command becomes a terminating NativeCommandError,
+        which would surface the failure as a PowerShell crash rather than as an exit code.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string[]]$ScriptArgs,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+    # Defaults to failure: a path that never reaches the assignment (the child could not be
+    # launched at all) must not read as a clean run.
+    $code = 1
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & powershell @ScriptArgs 2>&1 | ForEach-Object { Write-Host ("    {0}" -f $_) }
+        $code = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $previous }
+    if ($code -ne 0) {
+        [Console]::Error.WriteLine(
+            ("sync.ps1 -Mode {0}: tools\settings-invariants.ps1 ({1}) exited {2}." -f $Mode, $Label, $code) +
+            "`n  The invariant it could not apply is named above. Fix that settings.json and" +
+            "`n  re-run the sync - it is idempotent.")
+        exit $code
+    }
+}
+
 # ------------------------------------------------------------------------ push
 
 if ($Mode -eq 'push') {
@@ -191,7 +225,7 @@ if ($Mode -eq 'push') {
         Write-Host '  settings.json invariants (mirror)'
         $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants, '-Path', $mirrorSettings)
         if ($DryRun) { $args_ += '-DryRun' }
-        & powershell @args_ | ForEach-Object { Write-Host ("    {0}" -f $_) }
+        Invoke-SettingsInvariants -ScriptArgs $args_ -Label 'mirror'
     }
 
     Write-Host ''
@@ -323,7 +357,9 @@ if ($Mode -eq 'pull') {
         $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants,
                    '-Path', $liveSettings, '-Trust', '-UserHome', $UserHome)
         if ($DryRun) { $args_ += '-DryRun' }
-        & powershell @args_ | ForEach-Object { Write-Host ("    {0}" -f $_) }
+        # Fails fast: the stamp below must not record a clean pull when the invariants the
+        # repo owns could not be applied to the live tree.
+        Invoke-SettingsInvariants -ScriptArgs $args_ -Label 'live'
     }
 
     # Last, because it reads the ~/.claude the lines above just wrote. One-way overlay onto

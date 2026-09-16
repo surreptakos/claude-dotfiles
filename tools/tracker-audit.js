@@ -84,20 +84,68 @@ function isNotPlanned(text) {
   return NOT_PLANNED_PATTERNS.some((rx) => rx.test(text));
 }
 
-/** Same-repo issue citations in a body: `#N` as its own token. Returns a Map of issue number to
- *  the offset of its FIRST such citation, so a caller can look at the wording around it.
+/** Blank out every code region in a body, keeping its length, so text quoted verbatim inside code is
+ *  not read as prose. Fenced blocks (``` or ~~~, three or more, closed by a fence of the same
+ *  character and at least the same length, or by end of body) go first; inline spans go second, on
+ *  what the fence pass left, so backticks inside a fenced block cannot open one. Every masked
+ *  character becomes a space and line breaks survive, so an offset into the result is still an offset
+ *  into the input — the stale-premise? check reports the wording AROUND a citation. */
+function maskCodeRegions(text) {
+  const out = text.split('');
+  const blank = (start, end) => {
+    for (let i = start; i < end && i < out.length; i++) {
+      if (out[i] !== '\n' && out[i] !== '\r') out[i] = ' ';
+    }
+  };
+  const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*/gm;
+  let open = null;
+  let m;
+  while ((m = FENCE.exec(text)) !== null) {
+    const marker = m[1];
+    if (!open) { open = { start: m.index, char: marker[0], len: marker.length }; continue; }
+    if (marker[0] === open.char && marker.length >= open.len) {
+      blank(open.start, m.index + m[0].length);
+      open = null;
+    }
+  }
+  if (open) blank(open.start, text.length);
+  // Inline spans: a run of N backticks is closed by the next run of exactly N (CommonMark). An
+  // unmatched run masks nothing, so a stray backtick in prose cannot swallow the rest of the body.
+  const runs = [];
+  const TICKS = /`+/g;
+  let t;
+  while ((t = TICKS.exec(out.join('')))) runs.push({ index: t.index, len: t[0].length });
+  let i = 0;
+  while (i < runs.length) {
+    let j = i + 1;
+    while (j < runs.length && runs[j].len !== runs[i].len) j++;
+    if (j >= runs.length) { i++; continue; }
+    blank(runs[i].index, runs[j].index + runs[j].len);
+    i = j + 1;
+  }
+  return out.join('');
+}
+
+/** Same-repo issue citations in a body: `#N` as its own token, in prose. Returns a Map of issue
+ *  number to the offset of its FIRST such citation, so a caller can look at the wording around it.
  *
- *  A bare `#(\d+)` scan is wrong in two ways that produced 16 of 29 stale-premise? advisories on
- *  this repo (2026-09-14): it reads the tail of a qualified cross-repo reference
- *  (`surreptakos/aac-contract-builder#157`) as this repo's #157, and it reads the leading digits of
- *  a hex colour (`#9a690f`, `#1f7a43`) as #9 and #1. So: no word character or `/` directly before
- *  the `#`, and no word character directly after the digits. Exported for the test suite. */
+ *  A bare `#(\d+)` scan is wrong in four ways. Three are shapes that are not this repo's issue at
+ *  all: the tail of a qualified cross-repo reference (`surreptakos/aac-contract-builder#157`) read as
+ *  #157, the leading digits of a hex colour (`#9a690f`, `#1f7a43`) read as #9 and #1 — together 16 of
+ *  29 stale-premise? advisories here on 2026-09-14 — and a fleet agent label (`impl:#205.2`,
+ *  `verify:#203.2`), whose number belongs to whichever repo that run was clearing. So: no word
+ *  character or `/` directly before the `#`, no `word:` directly before it, and no word character
+ *  directly after the digits. The fourth is context, not shape: a `#N` inside inline code or a fenced
+ *  block is quoted material — a journal line, a log, a command — and quoting is not asserting, so
+ *  code is masked out before the scan (issue 274, where a bug report quoting a fleet journal could
+ *  not be written without tripping the check). Exported for the test suite. */
 function citedIssueNumbers(body) {
   const text = String(body || '');
-  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  const prose = maskCodeRegions(text);
+  const rx = /(?<![\w/])(?<!\w:)#(\d+)(?![\w])/g;
   const first = new Map();
   let m;
-  while ((m = rx.exec(text))) {
+  while ((m = rx.exec(prose))) {
     const n = Number(m[1]);
     if (!first.has(n)) first.set(n, m.index);
   }
@@ -209,11 +257,84 @@ function closerPrsByIssue(prs) {
   return out;
 }
 
+/** Group /issues/comments rows (every comment in the repo — a PR is an issue, so PR threads are
+ *  here too) by issue/PR number, each value a sorted list of created_at dates. Pure. */
+function commentDatesByNumber(rows) {
+  const out = new Map();
+  for (const c of (rows || [])) {
+    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (!out.has(n)) out.set(n, []);
+    if (c.created_at) out.get(n).push(c.created_at);
+  }
+  for (const dates of out.values()) dates.sort();
+  return out;
+}
+
+/** Run the comments fetch and group it. A comments-less repo, a 403 from a token without issue
+ *  read, or a network blip degrades to an empty map — the blocker-may-be-answered check then
+ *  stays silent for every PR, which is safer than firing on stale data.
+ *
+ *  A SHORT-FETCH is not that case, and issue 285 is that this catch swallowed it too: paginate
+ *  has partial rows while the Link header still says more pages exist, so some PRs' real comments
+ *  are simply missing and those PRs read as never-answered — a silent wrong answer dressed as a
+ *  comment-less degrade. Rethrown so the caller exits 2 with the fetched/expected counts the
+ *  short-fetch message carries. Pure apart from the injected fetcher. */
+function fetchCommentDates(fetchComments) {
+  let raw = [];
+  try {
+    raw = fetchComments();
+  } catch (e) {
+    if (/^short-fetch:/.test(String(e && e.message))) throw e;
+  }
+  return commentDatesByNumber(raw);
+}
+
 /** Extract owner/repo from a `git remote get-url origin` string. Accepts `https://…`, `git@…`,
  *  and the trailing `.git` optional. Returns null if the shape does not match. Pure. */
 function parseGithubSlug(remote) {
   const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(String(remote || ''));
   return m ? { owner: m[1], name: m[2] } : null;
+}
+
+/** Stop words and qualifiers that do not change what a ticket is ABOUT. Two open tickets whose
+ *  titles differ only by these are the same finding filed twice — the shape issue 319 was filed
+ *  for: two discovery-triage chores ran in one fleet wave and each filed the `tools/tracker-audit.js`
+ *  short-fetch as its own ticket (#281 and #285), two minutes apart. */
+const TITLE_STOPWORDS = new Set(['a', 'an', 'the', 'still', 'again', 'also', 'yet', 'now', 'just', 'once', 'another', 'more']);
+
+/** Lowercase a title, drop punctuation, then drop the stop words above. Pure. Deliberately
+ *  conservative: it removes nothing that carries meaning, so a match is a strong signal rather
+ *  than a fuzzy one. */
+function normalizeTitle(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9#]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w && !TITLE_STOPWORDS.has(w))
+    .join(' ');
+}
+
+/** Group open issues by normalized title and return one entry per later member of each group:
+ *  `{ issue, duplicateOf, normalized }`, the lowest-numbered issue of the group being the one
+ *  the others duplicate. Pure — the caller decides how loudly to report it. */
+function duplicateTitleFindings(openIssues) {
+  const groups = new Map();
+  for (const i of Array.isArray(openIssues) ? openIssues : []) {
+    const key = normalizeTitle(i && i.title);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+  const out = [];
+  for (const [normalized, members] of groups) {
+    if (members.length < 2) continue;
+    const sorted = members.slice().sort((a, b) => a.number - b.number);
+    for (const later of sorted.slice(1)) out.push({ issue: later, duplicateOf: sorted[0], normalized });
+  }
+  return out;
 }
 
 // Test-only export of the pure predicates and REST normalizers. The rest of the file is a script
@@ -229,8 +350,12 @@ if (require.main !== module) {
     normalizePr,
     issuesOnly,
     closerPrsByIssue,
+    commentDatesByNumber,
+    fetchCommentDates,
     parseGithubSlug,
     proseBlockers,
+    normalizeTitle,
+    duplicateTitleFindings,
     landedCommits,
     landedFindings,
     paginate,
@@ -485,23 +610,18 @@ try {
 
 if (!prsUnavailable) {
   // Attach comment dates. /issues/comments returns EVERY comment across the whole repo (a PR is an
-  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort: a
-  // failed comments fetch degrades to zero comments per PR — the blocker-may-be-answered check then
-  // stays silent for that PR, which is safer than firing on stale data.
-  let commentsRaw = [];
+  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort for an
+  // unavailable endpoint (see fetchCommentDates), but a short-fetch is a partial answer, not an
+  // absent one, and exits 2 like the /pulls one above rather than degrading to zero comments.
+  let commentsByNumber = new Map();
   try {
-    commentsRaw = ghPaginate('repos/' + REPO + '/issues/comments?per_page=100');
-  } catch (e) { /* comments-less PRs are fine */ }
-  const commentsByNumber = new Map();
-  for (const c of commentsRaw) {
-    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (!commentsByNumber.has(n)) commentsByNumber.set(n, []);
-    commentsByNumber.get(n).push(c.created_at);
+    commentsByNumber = fetchCommentDates(
+      () => ghPaginate('repos/' + REPO + '/issues/comments?per_page=100'));
+  } catch (e) {
+    cannotAudit('`gh api repos/' + REPO + '/issues/comments` returned a partial page.', e.message);
   }
   prByNumber = new Map(prs.map((p) => {
-    const dates = (commentsByNumber.get(p.number) || []).filter(Boolean).sort();
+    const dates = commentsByNumber.get(p.number) || [];
     return [p.number, Object.assign({}, p, {
       commentCount: dates.length,
       lastComment: dates[dates.length - 1] || null,
@@ -1038,6 +1158,21 @@ if (!LOG_REF) {
   }
 }
 
+// ---- 10. The same finding filed twice -----------------------------------------------------------
+// Advisory, and title-only: it cannot read two bodies and tell one finding from two. What it can see
+// is the shape issue 319 recorded — #281 and #285, filed two minutes apart by two discovery-triage
+// chores running in the same fleet wave, for one `tools/tracker-audit.js` short-fetch. A second
+// scout listed both as startable and two implementers built the same fix on two branches. Titles
+// that survive stop-word and qualifier stripping identically ("still", "again", "the") are that
+// collision, visible before the second implementer starts.
+duplicateTitleFindings(open).forEach((d) => {
+  report('duplicate-title?', d.issue,
+    'normalizes to the same title as open #' + d.duplicateOf.number + ' ("' + String(d.duplicateOf.title).slice(0, 60) +
+    '") once stop words and qualifiers (still, again, the) are stripped — both read as "' + d.normalized +
+    '". Two open tickets for one finding: read both, keep the one carrying the evidence, close the other ' +
+    'as a duplicate (gh issue close ' + d.issue.number + ' --reason "not planned"). Advisory only.');
+});
+
 // ---- Output ------------------------------------------------------------------------------------
 // Anything ending in '?' is advisory: reported, never fails the run. A check that cannot tell a
 // real problem from a shape it misreads must not be able to block anyone. (blocker-may-be-answered
@@ -1045,7 +1180,8 @@ if (!LOG_REF) {
 const ORDER = ['ungated-dependency', 'landed-but-open', 'blocker-may-be-answered',
                'closed-with-open-boxes', 'dangling-reference', 'untriaged', 'conflicting-triage',
                'board-says-done', 'not-on-board', 'unmilestoned', 'landed-but-open?',
-               'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?'];
+               'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?',
+               'duplicate-title?'];
 findings.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.number - b.number);
 
 console.log('Tracker audit — ' + REPO + ' (' + open.length + ' open, ' + issues.length + ' total)\n');
