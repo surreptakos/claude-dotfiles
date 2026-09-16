@@ -102,6 +102,34 @@ function pickInstrument(env, hasGh, override) {
 }
 
 /**
+ * Confine the scout's ticket list to the candidate set it was given (issue 298).
+ *
+ * The scout is asked for exactly one listing - the issues carrying `label`, or
+ * the numbers named in `args.tickets`. When that listing comes back empty a
+ * model is prone to treat it as a dead end to route around and returns every
+ * open ticket it can find instead, so the fleet spawns pr-check and implementer
+ * agents for work nobody asked for. The prompt now says an empty listing is a
+ * valid answer; this is the mechanical half of the same guard: whatever the
+ * scout reports, only tickets whose number appeared in the listing survive.
+ *
+ * @param {Array<{number:number|string}>|null|undefined} tickets - scout output
+ * @param {Array<number|string>|null|undefined} candidateNumbers - the issue
+ *   numbers the listing returned, before any filtering. A non-array (the scout
+ *   did not report one) means there is nothing to confine against and the
+ *   tickets pass through unchanged; an empty array confines to nothing, which
+ *   is the whole point of the ticket.
+ * @returns {Array} the surviving tickets, in the scout's order
+ */
+function confineToCandidates(tickets, candidateNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (!Array.isArray(candidateNumbers)) return list;
+  const allowed = new Set(
+    candidateNumbers.map((n) => parseInt(n, 10)).filter((n) => n > 0)
+  );
+  return list.filter((t) => t && allowed.has(parseInt(t.number, 10)));
+}
+
+/**
  * Resume-stable projections of a previous agent's structured result (issue 271).
  *
  * The Workflow runtime replays an agent() call from cache only while its cache
@@ -159,6 +187,6 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 module.exports = {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates,
   stableJson, stableText, stableList, priorFindingsBlock,
 };
