@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-15T22:39:49Z"
-  previous-modified: "2026-09-15T21:36:24Z"
-  revision: "8"
-  content-sha: "2085cf664ae0"
+  modified: "2026-09-16T03:31:10Z"
+  previous-modified: "2026-09-15T22:39:49Z"
+  revision: "9"
+  content-sha: "8bd675786532"
 ---
 
 # ticket-fleet
@@ -89,6 +89,64 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` returns
   `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
   otherwise `gh`. Pass `mcp` explicitly on a machine where `gh` is missing.
+- `testCommand` (string, optional): replaces the gate the scout read, for every lane, logged
+  once. See **Overriding the test command** below.
+- `priorImpl` / `priorProbe` (objects keyed by ticket number, optional): results from an
+  earlier run's implementers and probers. See **Finishing a run whose verifiers died** below.
+
+## Overriding the test command
+
+The scout reports the gate the repo documents, and that gate can be one the fleet's container
+cannot run. In `claude-dotfiles` the documented gate is the PowerShell restore test
+(`powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1`), which no Linux container
+has a shell for: every implementer reports exit 127 and every verifier refutes on its first
+step. Pass the Linux half of CI instead:
+
+```
+testCommand: "node --test tools/*.test.js tests/*.test.js && python3 tools/skill-stamps.test.py && python3 tests/build-cloud-plugin.test.py && python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"
+```
+
+The override reaches both the implementer's done-condition and the verifier's step 1, so the
+two stages never disagree about which gate counts. The run logs
+`testCommand overridden by args: ...` once, next to the scout's own value.
+
+## Finishing a run whose verifiers died
+
+A run can lose every verifier after its implementers have already committed their branches.
+The runtime's own resume does not recover that: the cache key of an `isolation: 'worktree'`
+agent includes the worktree slot the runtime assigned, and a resumed run assigns new slots, so
+the replay starts a fresh implementer inside another ticket's slot. Hand the finished results
+back instead:
+
+- `priorImpl`: `{<ticket number>: <IMPL-shaped result>}` - `{branch, committed, testExitCode,
+  testTail, discoveries}`.
+- `priorProbe`: `{<ticket number>: <PROBE-shaped result>}` - `{items, blocked, discoveries}`.
+
+A ticket with an entry skips its **attempt-1** implementer or prober entirely - the recorded
+result is used as-is and the reuse is logged (`reusing prior implementer result from
+args.priorImpl (branch ...)`). Everything downstream is unchanged: the verifier still runs
+blind against the branch, and attempt 2+ re-implements or re-probes normally, so a reused
+branch the verifier refutes is retried exactly as a fresh one would be. The pre-loop open-PR
+check still runs first, so a ticket already delivered is skipped before the entry is read.
+
+The values come from the dead run's `journal.jsonl`, which carries one `result` line per
+agent label - `impl:#<N>.1` for the code lane, `probe:#<N>.1` for the probe lane. Take the
+attempt-1 line per ticket, key it by the ticket number in the label, and pass the structured
+result as the value:
+
+```json
+{
+  "priorImpl": {
+    "274": { "branch": "agent/issue-274-attempt1-wf_dd0cf9a4091-w0", "committed": true,
+             "testExitCode": 0, "testTail": "# pass 31\n# fail 0", "discoveries": [] }
+  }
+}
+```
+
+Pass the same `tickets` list as the dead run, a **new** `runId` (branch names for any ticket
+that does re-implement must not collide with the dead run's), and the `testCommand` the dead
+run should have used. An entry whose `committed` is false, or a probe entry with no items, is
+treated as a failed attempt 1: attempt 2 runs the stage normally.
 
 ## Lanes
 
