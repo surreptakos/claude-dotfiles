@@ -232,3 +232,59 @@
 - tests/restore-test.ps1 foreach loop originally used \ as the iteration variable, which is case-insensitive-equal to the script-scope \ (the fake-repo clone path). PowerShell's variable-scope semantics clobbered \ mid-run and later Push-Location \ failed with a trust-record path. Renamed to \. A cross-test lint that flags foreach variables colliding with script-scope names would prevent the same silent bug from recurring - probably worth its own ticket.
 - Live-tree edit deferred to delivery/owner machine: the ~/.codex/hooks/ask_matt_gate.py source must be updated to match the committed codex/hooks/ask_matt_gate.py mirror. Hard rail forbids this worktree from writing to ~/.codex, so the branch carries only the repo mirror change. Owner path after merge to master: pull the repo on the owner machine, then run sync.ps1 -Mode pull (repo -> live) to propagate the new route line into ~/.codex/hooks/ask_matt_gate.py. The alternate direction (sync.ps1 -Mode push from a hand-edited live file) is the same content but originates from the owner's live edit. Either way, the delivery-stage AC 'live file and repo mirror match after sync push' and 'verified by starting a session and confirming the injected context names the spec route' can only be executed on the owner's desktop, not in this isolated worktree.
 - Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
+
+## Triage: run 6aa9c56e discoveries, waves 12 and 13 (issue 393)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 12 and 13 has a
+disposition below. As with waves 2/3 through 10/11, the bullets are not on master: they were
+committed to the run's own branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `7cdd58e` "chore:
+fleet discoveries from run 6aa9c56e wave 12" (5 bullets) and `22fd981` "…wave 13" (5). Read them with
+`git show 7cdd58e -- FOLLOW-UPS.md` and `git show 22fd981 -- FOLLOW-UPS.md`; the W12-nn / W13-nn
+numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
+fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
+symbol or failure as an open ticket became a comment on that ticket, not a second ticket, and every
+open fleet PR from #304 to #392 was checked first.
+
+**The waves 10/11 ledger's "this is the run's last triage chore" is wrong, and this is the sixth.**
+Wave 11 was not the last report writer: wave 12 is that very triage pass reporting on itself and wave
+13 is #390's implementer, so the run now has twelve discovery commits and 210 bullets, not ten and
+200. The per-pass bullet count keeps falling — 84, 65, 33, 20, 11, 10 — and the tickets filed with it
+— 7 (waves 6/7), 3 (4/5), 1, 1, and 1 here — but it has not reached zero: eight of these ten bullets
+are the two implementers' own scope, assumption and merge-order records, and two carried something
+live.
+
+Ticket filed: #394 (`fetchTicketList()` in `agents/skills/session-check/check.js` still calls `gh api
+--paginate`; gh follows GitHub's `Link: rel="next"` URL, which is the numeric-ID form the cloud egress
+proxy refuses with HTTP 403, so a label with more than 100 open tickets renders as "could not reach
+GitHub for the ticket list"). Reproduced here: `gh api --paginate
+'repos/surreptakos/claude-dotfiles/issues?state=open&per_page=100'` printed page one's 100 rows and
+then exited 1 on the proxy refusal. Not a duplicate of #375 (PR #382), which is about shell shapes the
+worktree-isolation guard refuses, and not of #336 (PR #350), which generates the harness template from
+`tools/tracker-audit.js` — the audit's own `ghPaginate()` page loop (issue 171) is the fix this ticket
+ports into the session gate, which is the last caller in the repo still using the Link header.
+
+Comments added: [#376](https://github.com/surreptakos/claude-dotfiles/issues/376#issuecomment-5695483142),
+[#378](https://github.com/surreptakos/claude-dotfiles/issues/378#issuecomment-5695481895),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5695484069).
+
+Nothing was fixed outside a ticket in this pass, and no ticket body was edited. `node
+tools/tracker-audit.js` reaches a verdict and exits 0 with 0 drift findings, plus the one pre-existing
+`stale-premise?` advisory on #358 — byte-identical before and after #394 was filed, so the new ticket
+introduced no drift. #394's `## Blocked by` says "None. Can start immediately." and its PR #331
+ordering note sits in "What to build", the shape #390 exists to replace.
+
+### Wave 12 (`7cdd58e`, 5 bullets)
+
+- **W12-01** "Wave 10's bullet W10-03 has a false premise that I corrected on issue 376…" — No action, and **re-verified**: `git check-attr text -- FOLLOW-UPS.md` reports `text: unset`, so the total `* -text` rule at `.gitattributes:15` already pins this file and the `.gitattributes` entry W10-03 proposed would be a no-op. #376 is the open ticket that rules on this file's shape, and this pass added the fact to it as a comment rather than acting on it.
+- **W12-02** "Ambiguity resolved (assumption stated): issue 389 says a scope note that names no defect gets a 'no action' line…" — No action: an assumption record that names no defect. This pass took the same reading — dedupe at the level of the failing file or symbol — which is why the second half of W12-05 became #394 rather than a fifth comment on #375: #375 is about the shapes the Bash guard refuses, not about gh's pagination flag.
+- **W12-03** "The run's triage cycle is now closed and this is worth acting on at the orchestrator level…" — Comment on #378: its own premise is falsified by the two commits this ledger triages. The rescue table is now twelve discovery commits and 210 bullets (`git log --oneline origin/master..22fd981` lists 12 "fleet discoveries" subjects), six ledgers key dispositions to shas on that branch, and acceptance criterion 3 should read `W2-` … `W13-`. Recorded there, not edited into the body.
+- **W12-04** "Wave 11's bullet W11-04 (FOLLOW-UPS.md line 126 claims agents/skills/to-issues…) is confirmed stale…" — No action, folded into the #376 comment: line 126 stays as written (this file is a dated append-only log, not a set of live claims), and the fact that three consecutive passes have now spent a bullet on one stale line is evidence for #376's option (b) or (c) over option (a). Re-verified: both skills carry rev 1 stamps dated `2026-09-14T13:48:41Z`.
+- **W12-05** "The Bash worktree-isolation guard refused a `for p in 1 2 3 4 5; do gh api …` loop…" — Two halves. The guard half: no action, already #375 (PR #382) and its first listed shape; this session hit it twice more (an `awk` program over a local text file, and a `cat` heredoc chain writing three comment bodies), with no git in either command, which makes five consecutive triage sessions. The `--paginate` half: **#394** — a different file, symbol and failure, verified live in this container.
+
+### Wave 13 (`22fd981`, 5 bullets)
+
+- **W13-01** "Vocabulary chosen (assumption, stated because issue 390 offered two shapes)…" — No action: an assumption record for #390, carried by PR #392; it names no defect, and one vocabulary rather than both is what the scope rule asks for.
+- **W13-02** "The live tree copy at ~/.claude/skills/project-harness is read-only from this session…" — Comment on #335, the ticket that exists for exactly this: PR #392 is a fifth branch from this run that edited a generated mirror, so the pull-before-push table gains `agents/skills/project-harness/templates/issue-forms/ticket.yml` and the `project-harness` stamp rotation plus rebuilt payload.
+- **W13-03** "Issue 390's body states PR #372 (issue #364) rewrites the same regex pair in `proseBlockers()`…" — No action: a merge-order record already stated in #390's own body, against two PRs that are both open (#372, #392). The bullet itself says the behaviours compose and the merge is mechanical, so there is nothing to file.
+- **W13-04** "Scope note: beyond the named `.github/ISSUE_TEMPLATE/ticket.yml`, I also updated the harness template form…" — No action: an implementation record naming one extra file. The extra file is a generated mirror, so it is listed in the #335 comment as a row that a `-Mode push` before a `-Mode pull` would revert; as a scope question it is settled — a harnessed repo that gets the audit change without the vocabulary on its own form is the worse outcome.
+- **W13-05** "Pre-existing, not touched: `node tools/tracker-audit.js` reports one advisory…" — No action: both halves are already ticketed. The `stale-premise?` class that fires on a meta-ticket quoting another ticket on purpose is #374 (PR #384), and a container not running the ProjectsV2 board checks is #345 (PR #355). Re-verified on this branch today: the audit exits 0 with 0 drift findings and exactly that one advisory on #358.
