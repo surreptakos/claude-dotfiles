@@ -21,7 +21,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -83,6 +83,11 @@ const cfg = Object.assign({
   treeGuardScript: 'tools/orchestrator-tree-guard.js', // the served repo's copy of the guard tool
   orchestratorCwd: '.',     // the orchestrator's OWN checkout, as the guard agents see it
   treeGuardStateDir: '.git/orchestrator-tree-guard', // inside .git, so the baseline never shows in `git status`
+  // ---- editable-install guard (claude-dotfiles issue 413) ----
+  // 'auto' (default) runs the guard wherever a copy of the tool can be found and skips it
+  // silently otherwise; true makes a missing tool a loud run failure; false disables it.
+  editableGuard: 'auto',
+  editableGuardScript: null, // extra path to try first; the defaults below cover repo and plugin copies
 }, args || {})
 
 // The command the ORCHESTRATING SESSION runs the moment this workflow returns, to distil the run's
@@ -657,6 +662,23 @@ async function treeGuardCheck(label, ticketNumber) {
   throw new Error(breachMessage())
 }
 
+// ---------------------------------------------------------------------------
+// Python editable-install rail (claude-dotfiles issue 413)
+// ---------------------------------------------------------------------------
+// A container has ONE interpreter and ONE site-packages, so a Python project is installed
+// editable exactly once: a pointer file naming a project directory, last writer wins. The
+// 2026-09-16 aac-routines waves left it naming `/tmp/verify-306` - a verifier's scratch
+// worktree - which was then deleted, so every later `python -c 'import aac_routines'` died
+// with ModuleNotFoundError on main while the code was fine, and three subprocess-spawning
+// tests read as broken code instead of a broken environment.
+//
+// Prevention is this one sentence in both worktree-facing prompts: tests find the package
+// through the repo's own pytest config and, for subprocess-spawning tests, PYTHONPATH - never
+// through an install. Repair is the guard that runs once the wave has drained, below, because
+// the served repo's own SessionStart hook can fire inside a fleet worktree and install from
+// there before any prompt of ours is read.
+const PYTHON_RAIL = `Python editable-install rail (claude-dotfiles issue 413, non-negotiable): this container has ONE interpreter and ONE editable-install pointer, shared with the main checkout - never run \`pip install -e\` / \`pip install --editable\` from your worktree, and never run a bootstrap or SessionStart script that does. It repoints that single install at your scratch path, and deleting the worktree then orphans it: every \`python -c 'import <pkg>'\` in the container fails with ModuleNotFoundError afterwards while the code on disk is fine. Your worktree's code is already what runs - pytest reads the repo's own config from it - and a test that SPAWNS a subprocess picks it up with \`PYTHONPATH=<your worktree>/src\` in that command's environment. If an import fails, set PYTHONPATH; do not install anything.`
+
 // Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
 // #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
 // stops them racing; this brief is the other half, and it travels with any discovery-triage ticket
@@ -917,6 +939,7 @@ This ticket resolves by evidence, not by changing the repository (${t.kindReason
 The main checkout is never a test surface (issue 404): the repository at the session's root sits on whatever branch this session is on, which is not the code this ticket is about, so evidence gathered there is about the wrong tree - work inside your own isolated worktree, and where an item is about the repository as it stands, \`git fetch origin\` first and read origin/${scout.defaultBranch}.
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
+${PYTHON_RAIL}
 Rules:
 - NEVER fabricate, guess or reconstruct output. Quote it exactly as printed, errors and noise included.
 - Record the REAL exit code of each command, not the exit code of a pipeline.
@@ -1300,6 +1323,7 @@ Make no repository change, no comment, no PR. Return structured output only.`,
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
+${PYTHON_RAIL}
 Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
@@ -1392,6 +1416,7 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
+${PYTHON_RAIL}
 In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
@@ -1399,7 +1424,7 @@ In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - br
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*'\`. Those two exclusions are the harness's own scratch, not implementer output: ~/.claude/hook-state is hook bookkeeping and ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes - keep both exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
-Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
+Clean up your scratch worktree (git worktree remove) when done. If this repo is a Python package, check afterwards that the container's editable install still names the MAIN checkout (\`python -m pip show -f <dist> | grep -i 'editable project location'\`): when it names a scratch path, quote that line in evidence and leave it alone - do NOT repair it by installing from the orchestrator's checkout, because pip writes .egg-info into the very tree the isolation checkpoint is watching. This run's editable-install guard repairs it once the wave has drained. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
         { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
         )
       } catch (err) {
@@ -1517,6 +1542,57 @@ const results = (grouped || []).flat()
 // run never finishes quietly.
 await treeGuardCheck('pre-report', 0)
 assertNoBreach()
+
+// ---- editable-install guard (claude-dotfiles issue 413) ----
+// Every worktree of this wave is gone by now, so this is the moment the damage is visible: a
+// pointer file in site-packages naming a scratch checkout that no longer exists. Prompts cannot
+// prevent all of it - the served repo's SessionStart hook installs before any agent of ours
+// reads a word - so the wave repairs what it caused instead of leaving the next session to
+// debug a ModuleNotFoundError that looks like broken code. The guard rewrites the pointer only;
+// it never runs pip here, because `pip install -e` writes .egg-info into the orchestrator's own
+// tree and that is exactly what checkpoint 4 above just cleared.
+if (cfg.editableGuard === false) {
+  log('Editable-install guard DISABLED by args (editableGuard:false) - a worktree that captured this container\'s editable install will stay captured (claude-dotfiles issue 413).')
+} else {
+  // One `;`-joined probe per candidate, never a loop: the Bash tool refuses a loop whose body
+  // it cannot prove is not git (SKILL.md, "Shell shapes the worktree guard refuses"), and the
+  // tree guard's `[ -f x ] || exit 3; node x ...` is the shape that is known to go through.
+  // Candidates in order: the caller's override, the served repo's own copy (the tree-guard
+  // convention), this repo's plugin source, and the copy the cloud bootstrap leaves in ~/.claude. Literal paths only - a $VAR in the
+  // command is refused by the Bash tool as an operand computed at run time.
+  const guardPaths = [
+    cfg.editableGuardScript,
+    'tools/editable-install-guard.js',
+    'aac-skills/ticket-fleet/editable-install-guard.js',
+    '~/.claude/skills/ticket-fleet/editable-install-guard.js',
+  ].filter(Boolean)
+  const editableCmd = guardPaths
+    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${cfg.orchestratorCwd} --repair`)
+    .join('; ') + '; exit 3'
+  let res = null, resError = null
+  try {
+    res = await agent(guardAgentPrompt(editableCmd),
+      { label: 'editable-guard:post-wave', phase: 'Report', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+  } catch (err) {
+    resError = unusableReason('editable-guard:post-wave', (err && err.message) || err)
+  }
+  let parsed = null
+  try { parsed = JSON.parse(String((res && res.stdout) || '')) } catch (e) { parsed = null }
+  const hard = cfg.editableGuard === true
+  if (res && res.exitCode === 3) {
+    const absent = `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${guardPaths.join(' or ')} (claude-dotfiles issue 413). Copy it into the served repo's tools/ to have the wave repair its own worktree damage.`
+    if (hard) throw new Error(`ticket-fleet run FAILED after the wave - ${absent}`)
+    log(absent)
+  } else if (!res || !parsed || res.exitCode === 2) {
+    const blind = `Editable-install guard COULD NOT AUDIT (claude-dotfiles issue 413): exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''} error=${resError || 'none'}. Run \`python -m pip show -f <dist>\` yourself before trusting this container's test results.`
+    if (hard) throw new Error(`ticket-fleet run FAILED after the wave - ${blind}`)
+    log(blind)
+  } else if ((parsed.repaired || []).length) {
+    log(`Editable-install REPAIRED (claude-dotfiles issue 413): ${parsed.repaired.map(r => `${r.from} -> ${r.to}`).join('; ')}. A worktree of this wave had captured the container's editable install; re-run \`${parsed.repair}\` to refresh the install metadata too.`)
+  } else {
+    log(`Editable-install guard clean: ${parsed.note || `the editable install still names ${parsed.main}`}.`)
+  }
+}
 
 // ---- Report: single writer, no append races ----
 // The writer used to append the bullets to the follow-ups file in the session's own checkout and
