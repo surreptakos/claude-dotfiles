@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-15T23:48:51Z'
-  previous-modified: '2026-09-15T22:33:00Z'
-  revision: '11'
-  content-sha: 5cc97c6751e8
+  modified: '2026-09-16T00:15:10Z'
+  previous-modified: '2026-09-15T23:48:51Z'
+  revision: '12'
+  content-sha: 1db3e0f48cbd
 ---
 
 # Project Harness
@@ -85,7 +85,7 @@ cross-repo Projects board instead of per-repo (see step 6).
 8. **Live tracker audit** — copy `templates/tracker-audit.js` to `tools/tracker-audit.js`. No substitutions: it infers the repo from `gh repo view`. It reads live GitHub state (prose `Blocked by #N` with no native dependency edge, closed issues with unticked acceptance boxes, a `#N` that is neither an issue nor a PR, missing/conflicting triage labels, an open issue whose Projects card says Done, an open issue on no board at all, plus two advisory checks) — the drift no file-level test can see. Exit 0 clean / 1 drift / **2 could not audit**; preserve that third code in any edit, because a tracker query returning nothing must never read as a pass.
    - It needs the network and an authenticated `gh`, so it does **NOT** go in the pre-commit hook — a commit gate that needs the network breaks committing offline. It is a command, optionally a CI step (separate workflow or a job in `dashboard.yml`, never the test job).
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 18.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139) — so an out-of-date harness has to be closed before writing code, not remembered later.
+9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 19.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139) — so an out-of-date harness has to be closed before writing code, not remembered later.
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
