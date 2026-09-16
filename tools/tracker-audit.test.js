@@ -36,6 +36,9 @@ const {
   paginate,
   parseLinkHeader,
   pageFromUrl,
+  duplicateTitleFindings,
+  commentDatesByNumber,
+  fetchCommentDates,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -199,6 +202,29 @@ test('citedIssueNumbers: hex colours and longer numbers are not citations', () =
   assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [730]);
 });
 
+test('citedIssueNumbers: #N inside inline code or a fenced block is quoted, not cited', () => {
+  // Issue 274: a bug report quoting a fleet journal — `impl:#205.2` — read as a citation of #205.
+  const body = [
+    'Journal shows `verify:#203.2` and a plain `#207` in a span.',
+    '',
+    '```',
+    'impl:#205.2 rebuilt #209',
+    '```',
+    '',
+    'Only #12 is a real citation.',
+  ].join('\n');
+  const got = citedIssueNumbers(body);
+  assert.deepStrictEqual(Array.from(got.keys()), [12]);
+  // Masking preserves offsets, so the wording check still reads the text around the citation.
+  assert.strictEqual(got.get(12), body.indexOf('#12'));
+});
+
+test('citedIssueNumbers: a label:#N / label:#N.k agent label is not this repo\'s issue', () => {
+  // The fleet writes these to its journal for whichever repo the run was clearing.
+  const body = 'Cache keys: impl:#205.2 hit, verify:#203.2 missed, impl:#205 replayed; see #12.';
+  assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [12]);
+});
+
 // ---- paginate: the page loop replacing `gh api --paginate` (issue 171) -----
 
 test('paginate concatenates a full first page and a short second page, then stops', () => {
@@ -326,6 +352,47 @@ test('paginate short-fetch names the open+closed count when Link carries rel="la
   }
 });
 
+// ---- issue 285: the comments fetch must not swallow a short-fetch either -----------------
+// /pulls already exits 2 on a short page; /issues/comments sat behind a bare `catch {}` whose
+// comment said "comments-less PRs are fine". A short page there is not a comments-less repo:
+// paginate has partial rows while Link still says rel="next", so the PRs in the dropped tail
+// read as never-answered and blocker-may-be-answered goes quiet on live threads. The counts
+// live in the short-fetch message, which the caller hands to cannotAudit.
+
+test('fetchCommentDates rethrows a short-fetch (with its counts) instead of degrading to zero comments', () => {
+  const fetchComments = () => {
+    throw new Error('short-fetch: page 2 returned 12 rows (< 100) but the Link header still ' +
+                    'names rel="next". Fetched 112 rows total; expected ~400+ rows in 5 pages.');
+  };
+  assert.throws(() => fetchCommentDates(fetchComments), (err) => {
+    assert.match(err.message, /^short-fetch:/);
+    assert.match(err.message, /112 rows/);     // fetched count reaches the exit-2 message
+    assert.match(err.message, /5 pages/);      // ground truth alongside it
+    return true;
+  });
+});
+
+test('fetchCommentDates degrades to an empty map on a non-short-fetch failure, and on a comment-less repo', () => {
+  // The negative control for the criterion: a 403 from a token without issue read, or a repo
+  // with genuinely no comments, must still let the audit reach a verdict.
+  const denied = () => { throw new Error('HTTP 403: Resource not accessible by integration'); };
+  assert.deepStrictEqual(fetchCommentDates(denied), new Map());
+  assert.deepStrictEqual(fetchCommentDates(() => []), new Map());
+});
+
+test('commentDatesByNumber groups by issue/PR number with dates sorted oldest-first', () => {
+  const rows = [
+    { issue_url: 'https://api.github.com/repos/o/r/issues/12', created_at: '2026-09-02T00:00:00Z' },
+    { issue_url: 'https://api.github.com/repos/o/r/issues/12', created_at: '2026-09-01T00:00:00Z' },
+    { issue_url: 'https://api.github.com/repos/o/r/issues/13', created_at: null },
+    { issue_url: '', created_at: '2026-09-03T00:00:00Z' },
+  ];
+  const map = commentDatesByNumber(rows);
+  assert.deepStrictEqual(map.get(12), ['2026-09-01T00:00:00Z', '2026-09-02T00:00:00Z']);
+  assert.deepStrictEqual(map.get(13), []);   // a row with no date is not a comment date
+  assert.strictEqual(map.size, 2);           // the unparseable issue_url is dropped
+});
+
 // ---- parseLinkHeader / pageFromUrl: the pure helpers behind ghPaginate's Link parse -----
 
 test('parseLinkHeader picks out rel targets from a real GitHub Link header', () => {
@@ -347,4 +414,22 @@ test('pageFromUrl extracts page=N from any query position; null when absent', ()
   assert.strictEqual(pageFromUrl('https://x/y?page=3&other=1'), 3);
   assert.strictEqual(pageFromUrl('https://x/y?state=all'), null);
   assert.strictEqual(pageFromUrl(null), null);
+});
+
+test('duplicateTitleFindings pairs open tickets whose titles differ only by a stop word or qualifier', () => {
+  const open = [
+    { number: 285, title: "tracker-audit's comments fetch still swallows a short page" },
+    { number: 281, title: "The tracker-audit's comments fetch swallows a short page again" },
+    { number: 290, title: 'Dashboard build drops the triage column' },
+  ];
+  const found = duplicateTitleFindings(open);
+  assert.strictEqual(found.length, 1);
+  assert.strictEqual(found[0].issue.number, 285);
+  assert.strictEqual(found[0].duplicateOf.number, 281);
+  assert.strictEqual(found[0].normalized, 'tracker audit s comments fetch swallows short page');
+  // A title that differs by a real word is a different ticket, not a duplicate.
+  assert.deepStrictEqual(duplicateTitleFindings([
+    { number: 1, title: 'Fetch swallows a short page' },
+    { number: 2, title: 'Fetch swallows a long page' },
+  ]), []);
 });
