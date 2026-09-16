@@ -450,6 +450,7 @@ class AskMattGateTests(unittest.TestCase):
                 "that the owner set to the waiting stage, and the owner agreed to that in chat. "
                 "The fix is in the router. The test covers it. The deploy is queued for the morning "
                 "window and the owner has the link."
+                "\nNext: open the router."
             )
             ultra = self.run_presend_lint("s-scale", wordy, state_dir, caveman="ultra")
             self.assertEqual(ultra.returncode, 1)
@@ -755,7 +756,9 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-clean"}, state_dir)
             nonce = self._state(state_dir, "s-clean")["nonce"]
             self.run_claude_declare("s-clean", nonce, "implement", state_dir)
-            self.run_presend_lint("s-clean", "Hook wired. Tests pass.", state_dir)
+            self.run_presend_lint(
+                "s-clean", "Hook wired. Tests pass.\nNext: reload the session.", state_dir
+            )
             # "Tests pass" is a verification claim; it is clean only because a Bash run backs it.
             transcript = self._transcript_with_tools(state_dir, ["Bash"], "Hook wired. Tests pass.")
             stopped = json.loads(
@@ -801,7 +804,7 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-stale"}, state_dir)
             first = self._state(state_dir, "s-stale")["nonce"]
             self.run_claude_declare("s-stale", first, "implement", state_dir)
-            self.run_presend_lint("s-stale", "Clean enough.", state_dir)
+            self.run_presend_lint("s-stale", "Clean enough.\nNext: send it.", state_dir)
             self.assertEqual(self._state(state_dir, "s-stale")["lint_clean_nonce"], first)
             # Next turn: new nonce, same stamp, and the audit must not accept it.
             self.run_gate("claude-prompt", {"session_id": "s-stale"}, state_dir)
@@ -828,7 +831,8 @@ class AskMattGateTests(unittest.TestCase):
                  "the one that owns the approver, so the assignment that the relay attempts is the "
                  "action that BILL refuses on the bill that the owner set to the stage that waits. "
                  "The comment that the relay posts on the ticket is the thing that tells the person "
-                 "who made the decision that the approval did not reach the system that holds it.")
+                 "who made the decision that the approval did not reach the system that holds it."
+                 "\nNext: open the router.")
         done = subprocess.run(
             [sys.executable, str(SCRIPT), "lint", "-"],
             input=dirty, text=True, capture_output=True, check=False,
@@ -860,7 +864,7 @@ class AskMattGateTests(unittest.TestCase):
         # ~/.claude/CLAUDE.md orders every reply to open with this diff fence. It is a directive,
         # not working material, so the lint ignores it - at the top only, and only that block.
         prefix = "```diff\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\n```\n\n"
-        clean = prefix + "Queue empty. Tests pass. Deployed bytes match."
+        clean = prefix + "Queue empty. Tests pass. Deployed bytes match.\nNext: open the log."
         done = subprocess.run(
             [sys.executable, str(SCRIPT), "lint", "-"],
             input=clean, text=True, capture_output=True, check=False,
@@ -924,7 +928,10 @@ class AskMattGateTests(unittest.TestCase):
             declared = self.run_claude_declare("s-switch", nonce, "implement", state_dir)
             self.assertIn("caveman-off", declared.stdout)
             lint = self.run_presend_lint(
-                "s-switch", "The queue is empty and the deploy is scheduled for the morning.", state_dir
+                "s-switch",
+                "The queue is empty and the deploy is scheduled for the morning."
+                "\nNext: open the deploy log.",
+                state_dir,
             )
             self.assertEqual(lint.returncode, 0, lint.stdout)
             self.assertIn("caveman off", lint.stdout)
@@ -1051,7 +1058,10 @@ class AskMattGateTests(unittest.TestCase):
     def test_lint_subcommand_reads_a_file_as_well_as_stdin(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             draft = Path(folder) / "draft.md"
-            draft.write_text("Queue empty. Tests pass. Deployed bytes match.", encoding="utf-8")
+            draft.write_text(
+                "Queue empty. Tests pass. Deployed bytes match.\nNext: open the log.",
+                encoding="utf-8",
+            )
             done = subprocess.run(
                 [sys.executable, str(SCRIPT), "lint", str(draft)],
                 text=True, capture_output=True, check=False,

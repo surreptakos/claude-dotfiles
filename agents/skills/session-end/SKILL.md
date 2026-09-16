@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-16T04:41:24Z"
-  previous-modified: "2026-09-15T22:34:53Z"
-  revision: "4"
-  content-sha: "de578922ae0c"
+  modified: "2026-09-16T14:38:09Z"
+  previous-modified: "2026-09-16T00:26:01Z"
+  revision: "5"
+  content-sha: "b38080b998e1"
 ---
 
 # Finish a session
@@ -137,7 +137,8 @@ step's `gh` spelling through the substitution table in the cloud section below):
    (deferred; load via `ToolSearch` with `select:ExitWorktree`) to exit and remove it in one
    step. If `ExitWorktree` is unavailable, print the exact command the user should run from the
    main checkout: `git worktree remove <path>` (add `--force` only if the tree is unclean and the
-   user OKs discarding).
+   user OKs discarding) **and** file a `ready-for-human` ticket carrying that exact command, since
+   a printed command the session cannot run is a step it cannot finish.
 11. **Sweep the repo's stale branches, worktrees, and PRs** — session cleanup runs beyond this
     session's own branch, because fleet attempts, prior sessions, and abandoned scratch trees
     accumulate silently and no built-in check surfaces them. This is the branch/worktree/PR half of
@@ -165,7 +166,9 @@ step's `gh` spelling through the substitution table in the cloud section below):
        same commit messages says whether those commits were squash-landed under a different SHA
        (common with `gh pr merge --squash`). Force-delete (`git branch -D`) any branch whose
        commits are all present on main under different SHAs, or whose PR was closed as
-       superseded. Never force-delete a branch with genuinely stranded work — hand it to the user.
+       superseded. Never force-delete a branch with genuinely stranded work: file it as a
+       `ready-for-human` ticket naming the branch, its unique commits and why they look stranded,
+       and quote that number in the reply. Handing it over in prose loses it.
 
     e. **Prune remote branches** — `git branch -r` after the fetch. Any remote branch whose PR
        merged or closed but that survived (auto-delete off, or a manual push after merge) gets
@@ -177,19 +180,53 @@ step's `gh` spelling through the substitution table in the cloud section below):
        Any fleet-attempt PR older than the ADRs, spec revisions, or scope decisions made this
        session should be closed with a comment naming what superseded it, then its branch
        deleted (`gh pr close <n> --delete-branch --comment "..."`). If the assistant cannot
-       tell whether an open PR is superseded, leave it and name it for the user.
+       tell whether an open PR is superseded, leave it open and file a `ready-for-human` ticket
+       naming the PR, what it would collide with, and the evidence that is missing — not a line
+       in the reply.
 
 12. **Re-run the end check** — `node ~/.claude/hooks/session-gate.js report --end --refresh` — and
     report the fresh result. Every STOP line must be resolved before the `Ready to archive` line
     is emitted.
 
-If any step in 1–11 is blocked, name the blocker, list what IS done, and stop; `Ready to archive`
-is reserved for a state the user can archive without checking.
+If any step in 1–11 fails or is blocked for a reason the assistant cannot resolve, name the
+blocker, **file it as a ticket — `ready-for-agent` when another session can finish it,
+`ready-for-human` when only the owner can — or as a comment on the ticket that already owns the
+step** (rule below), list what IS done, and stop; `Ready to archive` is reserved for a state the
+user can archive without checking, and an unfiled blocker is a step nobody will ever see again.
 
 **A blocker is a narrow thing:** a CI failure, a protected-branch refusal, a credential the
 assistant cannot mint, or a choice that needs an owner ruling (values, risk tolerance, priorities).
 Tracker housekeeping that reading the body settles — an un-milestoned issue, a prose-bullet
 acceptance, a delivered-but-open hit — is work this pass does, and step 9 says how.
+
+### Every step the session cannot finish becomes a ticket
+
+Owner ruling 2026-09-15: nothing said in a session reply is seen. A step of the sequence that
+this session cannot complete — blocked, unavailable in this environment, or refused — has
+exactly one durable landing place, chosen before the reply is written:
+
+- **A comment on the ticket that already owns the step**, when one exists — a discovery an open
+  ticket already tracks goes there, naming the repo and the date, and files no new ticket.
+- **A `ready-for-agent` ticket**, when another cloud session can finish it — a rebuild, an audit
+  re-run, a follow-up edit.
+- **A `ready-for-local-agent` ticket**, when only a desktop session can — the skipped board sweep
+  (step 6), a live-tree edit plus `sync.ps1 -Mode push`, a remote branch delete the session proxy
+  refuses, a command the container's auto-mode classifier blocks. Never `ready-for-human` for
+  these: a desktop session runs them without the owner.
+- **A `ready-for-human` ticket**, when only the owner can: stranded work to judge, a credential
+  to mint, a UI action no API covers, a superseded-or-not call the session cannot make. The
+  owner's queue is a label query, so an unlabelled ticket is invisible to it.
+
+File new tickets through `/to-tickets` in the step-7 batch (comments go through `gh issue
+comment`, or MCP `add_issue_comment` in a container), then quote every number in the wrap-up.
+"Named it for the user" and "needs a local session" are not outcomes.
+
+**A classifier-denied cleanup is one of these cases, not an exception.** In auto mode the
+destructive-action classifier can refuse `git push origin --delete <branch>`, `git branch -D
+<branch>` or `git worktree remove --force <path>` mid-sweep. Do not retry it and do not leave
+the refusal sitting in the reply: file a `ready-for-local-agent` ticket carrying the exact command,
+the branch or path, and the evidence that its work already landed (the squash SHA on `main`,
+the merged PR number), so running it is read-and-paste for the owner.
 
 ## In a cloud container: same duties, different instruments
 
@@ -211,7 +248,9 @@ https://api.github.com/repos/<owner>/<repo>/...` — the session's egress proxy 
 api.github.com, private repos included. Git itself (push, fetch, branch delete) works normally
 through the same proxy.
 
-Three genuine differences, all to be said out loud rather than skipped silently:
+Three genuine differences. Each is said out loud **and filed** — a ticket, or a comment on the
+ticket that owns the step (rule above); a container's missing instrument is the commonest way a
+step ends up living only in the reply:
 
 - **Step 6 (board sweep)** has no cloud substitute — the MCP has no ProjectsV2 tools. Skip it with
   a stated reason and hand it on.
@@ -302,8 +341,27 @@ For every item found, exactly one of three outcomes, stated explicitly:
 - **Needs a ticket** — collect these for the single **`/to-tickets`** batch in step 7; when the
   user typed `/session-end`, that IS the confirmation its approval gate asks for.
 
-The wrap-up summary lists every new ticket by number (from `/to-tickets` output) so nothing is
-named as "remaining" without a number next to it.
+### The wrap-up template
+
+The reply that ends a `/session-end` pass has these parts, in this order:
+
+```
+Landed: <PR or commit, one line each>
+Filed:  #<n> <title> — ready-for-agent | ready-for-human      (one line per ticket filed this pass)
+        #<n> comment — <what was recorded on the ticket that already owns the step>
+Left:   <nothing, or one line per item, each carrying a #number from the Filed block>
+Ready to archive
+```
+
+Every ticket `/to-tickets` published this pass appears under `Filed:` by number, and so does
+every comment landed on an owning ticket. `Filed:` is never omitted when empty — write
+`Filed: none`, so a clean pass reads differently from a forgotten one.
+
+**A line saying work is left for someone else — "needs you", "needs a local session", "for the
+owner", "could not delete X", "hand this to" — is malformed unless a `#number` sits in it.** If
+you are about to write one without a number, the ticket has not been filed yet: file it, then
+write the line. `Ready to archive` is not emitted while any surfaced item exists only in the
+reply.
 
 ## Two things the script cannot check
 

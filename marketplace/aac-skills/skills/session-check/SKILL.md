@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-16T04:36:53Z'
-  previous-modified: '2026-09-15T23:58:01Z'
-  revision: '10'
-  content-sha: cb9ee093b483
+  modified: '2026-09-16T14:38:10Z'
+  previous-modified: '2026-09-16T02:50:41Z'
+  revision: '12'
+  content-sha: bfaaf6459e3f
 ---
 
 # Session check (engine)
@@ -35,7 +35,11 @@ owns which repo and desktop routine — and compares it with the account the ses
 (desktop: the host-session file's path; CLI: `oauthAccount` in the profile's `.claude.json`;
 cloud: unknown, so unchecked). Findings there carry warning severity by ruling.
 
-Regression tests live next to it: `node --test check.test.js identity.test.js` from this directory.
+Regression tests live next to it: `node --test *.test.js` from this directory — all six files, and
+they assume nothing about where this copy is installed (issue 300: two of them located "this repo"
+by counting three directories up, which is the home directory here, and they were red). CI runs
+the same files twice, from the claude-dotfiles mirror and from a copy outside any checkout:
+`.github/workflows/skill-tests.yml`, and the repo's own test command in `.claude/session.json`.
 
 ## Related
 
