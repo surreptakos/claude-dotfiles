@@ -46,8 +46,9 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   takeover-guard check. The fleet (Workflow tool with
   `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` — the plugin-served
   copy that picks the tracker instrument at run time; `gh` exists here, so it uses REST; pass
-  `runId` in `args`, minted with `printf %x $(date +%s)`, because the workflow runtime forbids
-  `Date.now()` in scripts) is only started AFTER the repo's `/triage` and `/to-tickets`
+  `runId` and `invocationId` in `args`, both minted with `printf %x%x $(date +%s) $$`, because
+  the workflow runtime forbids `Date.now()` in scripts - on a resume keep `runId` and re-mint
+  `invocationId`, which is what keeps the open-PR guard from replaying a stale "no PR" answer) is only started AFTER the repo's `/triage` and `/to-tickets`
   subagent results have arrived, because the fleet's scout reads the labels those steps produce.
   The master collects subagent results when their completion notifications arrive rather than
   polling. A master serves ONE repo and never fleets another: the other repos have their own
