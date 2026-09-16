@@ -264,6 +264,17 @@ from it.
 > `**Pass complete — YYYY-MM-DD HH:MM UTC**` at the top of your state issue's heartbeat section,
 > say `pass complete`, and end the turn. My comments on the state issue override everything here.
 
+## Naming tools in a prompt
+
+MCP tool names are not stable within a session. On a fresh cloud session's **first turn** every MCP
+server is mounted under a UUID prefix — `mcp__<uuid>__create_session`, and the connectors likewise;
+the product-named prefixes (`mcp__Claude_Code_Remote__*`, `mcp__Microsoft_365__*`) only appear on
+later turns. `mcp__github__*` is the exception and is stable throughout (issue 166, container C,
+item 10). A prompt that names a tool by its product prefix therefore works when a human tries it
+interactively and fails on the first turn of the session it was written for — which is every wake
+this runbook dispatches. Name tools by suffix or by capability ("the session-create tool", "the
+issue-write tool") in every boot prompt, dispatch brief and skill this runbook writes.
+
 ## Rails
 
 - Ground truth over self-reports: verify every subagent claim against the tracker and PR state
