@@ -125,6 +125,26 @@ In this order:
    because custom agent types are desktop-only (issue 339). When the fleet returns, run the merge pass once more over
    the PRs it just opened.
 
+   **A wave that died mid-delivery is finished, not re-run.** Every implementer pushes its branch
+   as soon as it commits (issue 405), so a run that lost its container, its Deliver step or its
+   turn to an interrupt still has its verified branches on origin. Launch the fleet again with
+   `finishRunId` set to the dead run's id — the `wf_...` workflow id its journal directory carries,
+   or the `runId` its branch names embed — plus the three contract args, and nothing else:
+
+   ```
+   Workflow({ scriptPath: '.claude/workflows/ticket-fleet.js',
+              args: { contractVersion: 2, runId: '<hex>', invocationId: '<fresh hex>',
+                      finishRunId: '<the dead run id>' } })
+   ```
+
+   That pass reads the dead run's journal and does delivery only: a PR for every branch the journal
+   records as verified and undelivered, a skip naming the PR for every ticket it already delivered,
+   nothing at all for a ticket no verifier passed, then the report writer over that run's
+   discoveries. It starts no scout, no implementer and no verifier, and the deliverer is told to
+   reuse an existing open PR for the branch, so repeating the pass is safe. It must run in the same
+   container as the dead run — the journal is machine-local. Where that container is gone, fall back
+   to the recorded run digest and a normal run with `priorImpl`.
+
    **Record the wave before doing anything else with it.** The moment the Workflow returns, run
    `node tools/fleet-run-record.js --latest` in the served repo, in THIS session's own shell —
    never through a subagent, which would re-derive the run from its own context instead of reading
