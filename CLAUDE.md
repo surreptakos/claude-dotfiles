@@ -40,14 +40,16 @@ mirrors — on a branch with no live tree (a cloud session), run both, or CI (`s
 fails the branch:
 
 ```bash
-python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills
+python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\Users\Dan'
 python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 ```
 
-The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`; `--home`
-puts the owner's path back where the mirror holds `__USERHOME__` tokens, so the payload matches
-one built on that machine. CI checks exactly that: a rebuild from the mirror must reproduce the
-committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
+The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`. `--home`
+names the owner's home on both: the stamper folds that path into the sync tokens before hashing
+(without it a Linux container hashes against its own home and re-stamps skills nobody touched —
+issue 431), and the packager puts it back where the mirror holds `__USERHOME__` tokens, so the
+payload matches one built on that machine. CI checks exactly that: a rebuild from the mirror
+must reproduce the committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
 
 Both commands stamp, and so does a second edit after them: run them as often as you like, the
 commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
