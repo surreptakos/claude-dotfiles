@@ -208,6 +208,64 @@ for (const rel of REMOVED_COPIES) {
   });
 }
 
+// ---- Desktop-only tickets (issue 275) ----
+// A ticket can be `ready-for-agent` and still need the desktop (live tree + sync.ps1, a
+// project-scoped gh token, /project-harness). The scout records that marker as `desktopOnly`;
+// a cloud run must start no lane for such a ticket and report it under skippedDesktopOnly,
+// while a local run takes it normally. The wave-selection block is extracted by its
+// FLEET-SELECT markers and driven directly, so this is a behavior test, not a prompt regex.
+
+function extractSelect(src) {
+  const startTag = '// [FLEET-SELECT-START]';
+  const endTag = '// [FLEET-SELECT-END]';
+  const a = src.indexOf(startTag);
+  const b = src.indexOf(endTag);
+  if (a < 0 || b < 0 || b <= a) {
+    throw new Error('FLEET-SELECT markers not found or out of order');
+  }
+  return src.slice(a + startTag.length, b);
+}
+
+function driveSelect(instrument, tickets, maxTickets = 3) {
+  const body = extractSelect(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  const logs = [];
+  const wrapper = new Function(
+    'scout', 'cfg', 'instrument', 'log',
+    body + '\nreturn { wave, droppedBlocked, droppedDesktopOnly, droppedCap };'
+  );
+  const out = wrapper({ tickets }, { maxTickets }, instrument, (m) => logs.push(m));
+  return { ...out, logs };
+}
+
+const DESKTOP_TICKET = { number: 216, title: 'desktop pass', kind: 'code', blockedBy: [], desktopOnly: true };
+const PLAIN_TICKET = { number: 275, title: 'code change', kind: 'code', blockedBy: [], desktopOnly: false };
+
+test(`fleet script ${FLEET_SCRIPT_REL} carries the desktop-only marker in the scout schema and the report`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /required: \[[^\]]*'desktopOnly'[^\]]*\]/,
+    `${FLEET_SCRIPT_REL} scout schema must require desktopOnly per ticket (issue 275)`);
+  assert.match(src, /desktop-only/,
+    `${FLEET_SCRIPT_REL} must name the desktop-only label the scout reads`);
+  assert.match(src, /skippedDesktopOnly: droppedDesktopOnly/,
+    `${FLEET_SCRIPT_REL} must report the skipped desktop-only tickets as a count`);
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} starts no lane for a desktop-only ticket on a cloud (mcp) run`, () => {
+  const { wave, droppedDesktopOnly, logs } = driveSelect('mcp', [DESKTOP_TICKET, PLAIN_TICKET]);
+  assert.deepEqual(wave.map(t => t.number), [275],
+    'a cloud run must leave the desktop-only ticket out of the wave, so no implementer starts for it');
+  assert.equal(droppedDesktopOnly, 1, 'the skipped desktop-only ticket must be counted');
+  assert.ok(logs.some(m => /desktop-only/.test(m) && /#216/.test(m)),
+    `the run must name the skipped ticket; logs were: ${JSON.stringify(logs)}`);
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} runs a desktop-only ticket normally on a local (gh) run`, () => {
+  const { wave, droppedDesktopOnly } = driveSelect('gh', [DESKTOP_TICKET, PLAIN_TICKET]);
+  assert.deepEqual(wave.map(t => t.number), [216, 275],
+    'a local run is the desktop: it must take a desktop-only ticket like any other');
+  assert.equal(droppedDesktopOnly, 0, 'nothing is skipped as desktop-only on a local run');
+});
+
 // ---- Resume idempotence guard (issue 150) ----
 // Extract the runCodeLane function body from each fleet script by its FLEET-CODE-LANE markers,
 // drive it with a mocked `agent`, and assert that when the pre-loop PR check reports an open PR

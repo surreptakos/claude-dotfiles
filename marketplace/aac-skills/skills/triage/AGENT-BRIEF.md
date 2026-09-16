@@ -36,6 +36,10 @@ The agent needs to know when it's done. Every agent brief must have concrete, te
 
 State what is out of scope. This prevents the agent from gold-plating or making assumptions about adjacent features.
 
+### Say so when it needs the desktop
+
+Write the brief for a cloud container unless a step genuinely cannot run in one — the live tree under `~/.claude` or `~/.codex` plus `sync.ps1 -Mode push`, a project-scoped `gh` token, `/project-harness`, a remote branch delete the session proxy refuses, or an edit the auto-mode classifier blocks. When one does, apply the `desktop-only` label alongside `ready-for-agent` and open the brief with a `**Desktop-only.**` line naming the capability the container lacks — that line is the marker itself in a tracker without the label. The ticket-fleet scout reads the marker: a cloud run skips the ticket instead of spending an implement + verify cycle on it, a local run takes it. A brief that mentions the desktop only in prose is picked up by a cloud run and fails there.
+
 ## Template
 
 ```markdown
@@ -43,6 +47,8 @@ State what is out of scope. This prevents the agent from gold-plating or making 
 
 **Category:** bug / enhancement
 **Summary:** one-line description of what needs to happen
+
+**Desktop-only.** (only when it is — name the capability a cloud container lacks)
 
 **Current behavior:**
 Describe what happens now. For bugs, this is the broken behavior.

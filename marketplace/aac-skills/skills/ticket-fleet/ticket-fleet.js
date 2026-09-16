@@ -107,11 +107,12 @@ const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n =>
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
-  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason'], properties: {
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'desktopOnly'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
     keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     kind: { type: 'string', enum: ['code', 'probe', 'human'], description: 'which lane runs this ticket: code = repository change; probe = resolves by quoting command output/research/evidence in a comment, no repository change asked for; human = labelled ready-for-human or the body says the owner performs the steps' },
     kindReason: { type: 'string', description: 'one line: the words in the ticket that decided the kind' },
+    desktopOnly: { type: 'boolean', description: "true when the ticket carries the desktop-only marker: the `desktop-only` label, or - where the repo has no such label - a line in the body or a comment beginning '**Desktop-only.**'. It marks ready-for-agent work that still needs the desktop live tree, a project-scoped gh token or another capability no container has; it rides alongside the kind and never changes it" },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -172,23 +173,35 @@ const scout = await agent(
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
    - code: everything else.
-5. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs - never a glob if docs forbid it).
-6. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
-7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
+5. Set desktopOnly per ticket: true when the ticket carries the \`desktop-only\` label, or - where the repo has no such label - when a line in its body or one of its comments begins "**Desktop-only.**"; false otherwise. The marker rides alongside the kind and never changes it: a desktop-only ticket is still code, probe or human.
+6. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs - never a glob if docs forbid it).
+7. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
+8. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
 Return structured output only.`,
   { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: 'low' }
 )
 if (!scout || !scout.tickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
 
+// [FLEET-SELECT-START]
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
 // wave (its lane is the handoff), and label listing keeps today's behaviour.
-const eligible = scout.tickets.filter(t => t.blockedBy.length === 0)
+const unblocked = scout.tickets.filter(t => t.blockedBy.length === 0)
+// Desktop-only tickets (issue 275): ready-for-agent work that still needs the desktop live tree,
+// a project-scoped gh token or another capability no container has. A cloud run (instrument mcp)
+// starts no lane for one - it would burn an implement + verify cycle on work it cannot do - and
+// reports the numbers under skippedDesktopOnly so the count is durable. A local run (gh) is the
+// desktop, so it takes them like any other ticket.
+const desktopOnly = instrument === 'mcp' ? unblocked.filter(t => t.desktopOnly === true) : []
+const eligible = instrument === 'mcp' ? unblocked.filter(t => t.desktopOnly !== true) : unblocked
 const wave = eligible.slice(0, cfg.maxTickets)
-const droppedBlocked = scout.tickets.length - eligible.length
+const droppedBlocked = scout.tickets.length - unblocked.length
+const droppedDesktopOnly = desktopOnly.length
 const droppedCap = eligible.length - wave.length
 if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
+if (droppedDesktopOnly) log(`${droppedDesktopOnly} ticket(s) skipped as desktop-only, no lane started: ${desktopOnly.map(t => '#' + t.number).join(', ')} - run the fleet from the desktop to take them.`)
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
+// [FLEET-SELECT-END]
 
 // ---- Lanes ----
 // Every lane is run by subagents: the orchestrating session delegates, it never does ticket work
@@ -446,5 +459,7 @@ return {
   failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, kind: r.kind, failures: r.verdict ? r.verdict.failures : ['no verdict'] })),
   discoveries: allDiscoveries.length,
   skippedBlocked: droppedBlocked,
+  skippedDesktopOnly: droppedDesktopOnly,
+  desktopOnlyTickets: desktopOnly.map(t => t.number),
   skippedOverCap: droppedCap,
 }

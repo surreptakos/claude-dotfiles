@@ -96,3 +96,11 @@ person in the loop: an edit to the live `~/.claude` or `~/.codex` tree followed 
 that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container.
 `ready-for-human` is reserved for a person's judgment, credential or sign-off. A step a local
 session can perform never carries `ready-for-human` (Dan, 2026-09-15).
+
+`desktop-only` is a marker, not a state: it rides alongside a state label. Container-blocked work
+an agent can still do is `ready-for-agent` + `desktop-only` - `ready-for-agent` is what puts it in
+a fleet queue at all, `desktop-only` is what makes a *cloud* fleet run skip it instead of spending
+an implement + verify cycle on work no container can do. In a repo without the label, a body or
+comment line beginning `**Desktop-only.**` is the same marker; the ticket-fleet scout reads either
+(issue 275, ruling of 2026-09-15). A `ready-for-local-agent` ticket carries it too, so the scout
+reads one marker whatever the state label says.

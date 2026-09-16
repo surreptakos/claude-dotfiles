@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: '2026-09-15T22:34:53Z'
-  previous-modified: '2026-09-14T15:06:58Z'
-  revision: '3'
-  content-sha: ccaab8167a05
+  modified: '2026-09-16T00:21:18Z'
+  previous-modified: '2026-09-15T22:34:53Z'
+  revision: '4'
+  content-sha: e5929fe5b5a2
 ---
 
 # Finish a session
@@ -69,7 +69,8 @@ step's `gh` spelling through the substitution table in the cloud section below):
    Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. Local
    machines only — it needs gh with project scope, and no cloud substitute exists (see the cloud
    section below): in a container, skip it with a stated reason and file or update a
-   `ready-for-local-agent` ticket that names the skipped sweep — never a reply line.
+   desktop-only ticket (the outcome in *the ticket sweep* below) that names the skipped sweep —
+   never a reply line.
 7. **Batch surfaced items through `/to-tickets`** (see ticket sweep below). This is required, not
    optional. `/to-tickets` handles its own breakdown/approval/publish flow — invoke it once with
    all NEEDS-A-TICKET items collected during the sweep. Never `gh issue create` ad hoc. In a
@@ -180,7 +181,7 @@ step's `gh` spelling through the substitution table in the cloud section below):
     e. **Prune remote branches** — `git branch -r` after the fetch. Any remote branch whose PR
        merged or closed but that survived (auto-delete off, or a manual push after merge) gets
        `git push origin --delete <branch>`. In a cloud container where the proxy refuses the
-       remote delete, file or update a `ready-for-local-agent` ticket naming the branches for a
+       remote delete, file or update a desktop-only ticket naming the branches for a
        desktop session; do not leave the item in a reply.
 
     f. **Audit open PRs the assistant did not open this session** — `gh pr list --state open`.
@@ -192,6 +193,14 @@ step's `gh` spelling through the substitution table in the cloud section below):
 12. **Re-run the end check** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end --refresh` — and
     report the fresh result. Every STOP line must be resolved before the `Ready to archive` line
     is emitted.
+
+    **A STOP this session's instruments cannot clear is a ticket, not a sentence.** Nothing said
+    in a reply is seen again — the window closes and the STOP is rediscovered from scratch. So a
+    STOP the container cannot clear (a harness upgrade that needs `/project-harness`, a `gh`-only
+    audit, a board sweep) is filed as a desktop-only ticket — the outcome in *the ticket sweep*
+    below — and the STOP line is then reported with that issue number beside it. The gate reads:
+    **every remaining STOP has a ticket number.** Ruling 2026-09-15, after a cloud `/session-end`
+    ended with two STOP lines and two un-runnable audits named only in the reply.
 
 If any step in 1–11 fails or is blocked for a reason the assistant cannot resolve, name the
 blocker, list what IS done, and stop. Do NOT emit `Ready to archive` — the whole point of the
@@ -228,11 +237,11 @@ through the same proxy.
 Three genuine differences, all to be said out loud rather than skipped silently:
 
 - **Step 6 (board sweep)** has no cloud substitute — the MCP has no ProjectsV2 tools. Skip it with
-  a stated reason and file or update a `ready-for-local-agent` ticket that names the skipped sweep;
-  never a reply line, and never `ready-for-human` — a desktop session can run it.
+  a stated reason and file or update a desktop-only ticket that names the skipped sweep; never a
+  reply line, and never `ready-for-human` — a desktop session can run it.
 - **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container. Still
-  not a pass: run the same audit through the MCP tools, or file/update a `ready-for-local-agent`
-  ticket naming the tool that needs a desktop run.
+  not a pass: run the same audit through the MCP tools, or file/update a desktop-only ticket
+  naming the tool that needs a desktop run.
 - **The cloud-plugin staleness check** does not run in containers — the container IS the
   downstream copy. Nothing to do there.
 
@@ -305,9 +314,19 @@ For every item found, exactly one of three outcomes, stated explicitly:
 - **Already tracked** — name the ticket number. Tracked means an OPEN ISSUE ON THE TRACKER,
   nothing else: a PR body or comment, a HANDOFF/DECISIONS/FOLLOW-UPS line, or a session reply is
   where items go to be lost, and citing one is naming the burial site, not the ticket. A step
-  a local session can perform must additionally carry the `ready-for-local-agent` label (or the
-  project's equivalent); only a person's judgment, credential or sign-off carries `ready-for-human`.
-  Each label drives a queue, and an unlabeled ticket is invisible to both.
+  a local session can perform must additionally carry the desktop-only marker below; only a
+  person's judgment, credential or sign-off carries `ready-for-human`. Each label drives a queue,
+  and an unlabeled ticket is invisible to both.
+- **Desktop-only agent work** — the step is fully specified and an agent can do it, but not from
+  this container: it needs the live tree under `~/.claude` or `~/.codex` plus `sync.ps1 -Mode push`,
+  a project-scoped `gh` token, a remote branch delete the proxy refuses, `/project-harness`, or an
+  edit the auto-mode classifier blocks. File it — through `/to-tickets` with the rest of the batch,
+  or by updating the open one — with **`ready-for-agent` plus the `desktop-only` label**, or, in a
+  repo that has no such label, a body line beginning `**Desktop-only.**` as the same marker. Both
+  halves earn their place: `ready-for-agent` is what puts it in a fleet queue at all, and
+  `desktop-only` is what makes a *cloud* fleet run skip it instead of burning an implement + verify
+  cycle on work it cannot do. Never `ready-for-human` — nobody's judgment is being asked for — and
+  never a line in the wrap-up instead of a ticket.
 - **Not worth tracking** — say so and why, in one line. Silence is not this option.
 - **Needs a ticket** — collect these and invoke **`/to-tickets`** in one batch, no confirmation
   needed when the user typed `/session-end` (that IS the confirmation). `/to-tickets` runs its

@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-15T22:39:49Z'
-  previous-modified: '2026-09-15T21:36:24Z'
-  revision: '8'
-  content-sha: 2085cf664ae0
+  modified: '2026-09-16T00:22:54Z'
+  previous-modified: '2026-09-15T22:39:49Z'
+  revision: '9'
+  content-sha: d91b8c4ade48
 ---
 
 # ticket-fleet
@@ -99,6 +99,20 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   session** heading; the delivery moves the label to `ready-for-local-agent` unless the
   remaining steps are genuinely a person's judgment, credential or sign-off, in which
   case the label is `ready-for-human`. It never claims an owner step was done.
+
+## Desktop-only tickets
+
+A ticket can be `ready-for-agent` and still need the desktop: the live tree under `~/.claude`
+plus `sync.ps1 -Mode push`, a project-scoped `gh` token, a remote branch delete the session
+proxy refuses. Those carry the **`desktop-only`** label alongside `ready-for-agent` - or, in a
+repo without that label, a line in the body or a comment beginning `**Desktop-only.**`, which
+the scout reads as the same marker.
+
+The scout records it per ticket as `desktopOnly`; it never changes the ticket's lane. A cloud
+run (`instrument` `mcp`) starts no lane for a marked ticket - one implement + verify cycle on
+work the container cannot do is the failure this marker exists to stop - and returns the count
+as `skippedDesktopOnly` with the numbers in `desktopOnlyTickets`. A local run (`gh`) is the
+desktop, so it takes them like any other ticket.
 
 ## Branch names
 

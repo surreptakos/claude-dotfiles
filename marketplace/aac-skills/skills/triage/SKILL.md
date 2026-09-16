@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-15T22:34:24Z'
-  previous-modified: '2026-09-14T22:40:41Z'
-  revision: '3'
-  content-sha: 1c3b555ebb59
+  modified: '2026-09-16T00:22:09Z'
+  previous-modified: '2026-09-15T22:34:24Z'
+  revision: '4'
+  content-sha: 7029556292cb
 ---
 
 # Triage
@@ -41,6 +41,15 @@ Six **state** roles:
 - `ready-for-local-agent` — fully specified, but the next step needs the desktop's live tree or a proxy-blocked capability, so a cloud container cannot do it — an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container
 - `ready-for-human` — reserved for a person's judgment, credential or sign-off; a step a local session can perform never carries `ready-for-human`
 - `wontfix` — will not be actioned
+
+One **marker** role, applied alongside a state role, never instead of one:
+
+- `desktop-only` — the next step needs the desktop: the live tree under `~/.claude` or `~/.codex`
+  plus `sync.ps1 -Mode push`, a project-scoped `gh` token, `/project-harness`, a remote branch
+  delete the session proxy refuses, or an edit the auto-mode classifier blocks in a container.
+  Where the tracker has no such label, a body line beginning `**Desktop-only.**` is the same
+  marker. The ticket-fleet scout reads it: a cloud run skips a marked ticket instead of spending
+  an implement + verify cycle on work the container cannot do, and a local run takes it normally.
 
 For a PR, the same states read against the attached code: `ready-for-agent` means a brief is attached and an agent should take the next step on the diff; `ready-for-human` means it's ready for a human to merge.
 
@@ -83,7 +92,8 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
 5. **Apply the outcome:**
    - `ready-for-agent` — post an agent brief comment ([AGENT-BRIEF.md](AGENT-BRIEF.md)).
-   - `ready-for-local-agent` — same structure as an agent brief, but name the live-tree edit or proxy-blocked capability that keeps a cloud container from taking it (an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep needing a project-scoped `gh` token, or an edit the auto-mode classifier blocks). A desktop session can pick it up.
+   - `ready-for-agent` + `desktop-only` — apply the marker whenever the brief is complete and an agent could do the work, but not from a cloud container (the capabilities listed under the marker role above). `ready-for-agent` is what puts it in a fleet queue at all; `desktop-only` is what makes a cloud fleet run skip it. The brief additionally names the live-tree edit or proxy-blocked capability that keeps a container from taking it. Never `ready-for-human` for it — no person's judgment is being asked for.
+   - `ready-for-local-agent` — the same work when the tracker queues it by state instead: same structure as an agent brief, naming the live-tree edit or proxy-blocked capability. Carry `desktop-only` here too, so the scout reads one marker whatever the state label. A desktop session can pick it up.
    - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). A step a local session can perform never carries `ready-for-human`.
    - `needs-info` — post triage notes (template below).
    - `wontfix` — close, with the comment depending on *why*:
