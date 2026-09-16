@@ -111,8 +111,8 @@ node <claude-dotfiles>/gas/cli/gas.js <command>
 | `promote <scriptId> --deployment ID` | One version, deployment moved, read back. By hand. |
 | `logs --project P [--minutes 60] [--filter F] [--all]` | Cloud Logging; `[gas]` lines by default. |
 | `status <o/r>` | The three refs and the latest `gas/*` status on each. |
-| `ref <o/r> deploy/test <sha> --wait 15` | Move a ref and wait for the verdict. What CI does. |
-| `run <o/r> <fn> '[args]' --wait 10` | Run a function on HEAD through `deploy/run`; prints the result. |
+| `ref <o/r> deploy/test <sha> --wait 15 [--via-git]` | Move a ref and wait for the verdict. What CI does. |
+| `run <o/r> <fn> '[args]' --wait 10 [--via-git]` | Run a function on HEAD through `deploy/run`; prints the result. |
 | `vendor <repo>`, `init <repo> --script-id ID` | The two adoption steps. |
 
 GitHub calls use `GITHUB_TOKEN` / `GH_TOKEN`, else `gh auth token`. Google calls go through the
@@ -125,6 +125,53 @@ next tick runs it on HEAD and the result comes back as a commit status (first 14
 commit comment (up to 60 KB), which the command prints. Latency is the tick interval. This replaces
 `clasp run`, which could only ever work with a Testing-client token, and it works from a container that
 cannot reach `script.google.com` at all, because everything goes through GitHub.
+
+## From a claude.ai/code container (the git fallback)
+
+A cloud session reaches GitHub through a proxy that answers **403 to every Git Data API write** — create
+blob, create tree, create commit, move ref — while letting git over HTTPS through. `run` and `ref` are
+the two commands that write, so both build the same objects with git plumbing instead when that happens:
+`hash-object` → `mktree` → `commit-tree` → `git push`, in a scratch bare repo under the temp directory,
+and a `git push` of the sha for a ref move. The commit is byte for byte the one the API would have made:
+one `gas-run.json` at the root, message `gas run <fn> (<id>)`, parent the previous run request.
+
+- Nothing to configure. On the first 403 the command says `the GitHub API answered 403 (…) — falling
+  back to git plumbing`, then names the road it took: `pushed as 7330d12 via git push`.
+- `--via-git` skips the API attempt entirely. Use it when you already know the session is proxied.
+- **Only a 403 falls back.** A 404, a 422, a token without `contents: write`, GitHub down — those are
+  answers about the request, and retrying them through git would only bury the reason.
+- The token is the same one: git pushes to `https://x-access-token:<token>@github.com/<owner/repo>.git`.
+  `GAS_GIT_REMOTE` overrides that URL (a mirror, or a bare repo in a test); `GAS_GIT_SCRATCH` moves the
+  scratch repo off the temp directory. A ref move needs the commit itself to be on the remote already —
+  `gas ref` fetches it, and says so if it cannot.
+
+## A script on Google's default Cloud project
+
+`gas logs` reads Cloud Logging, which needs a Cloud project someone can be granted `logging.read` on. A
+script that was never attached to one runs on the project Apps Script makes for it, named
+`project-id-<digits>` (aac-message-board's is `project-id-3741568742576186263`, in its `.clasp.json`).
+Nobody can grant anything on that project, so its logs are readable only in the editor's executions
+pane. `gas logs` names it and stops rather than come back empty and read as "the script logged nothing".
+
+What is still observable for such a script, and enough to run it from a container:
+
+- the `gas/deploy`, `gas/promote` and `gas/run` commit statuses, which `gas status <o/r>` prints;
+- the run comment on the `deploy/run` commit, which `gas run --wait` prints — a function that returns
+  its own state is a log line you can read from anywhere;
+- the Drive seed file disappearing, which is how you know the tick ingested it;
+- the owner mail the library sends on a failed deploy.
+
+To get the logs back, attach a standard Cloud project to the script (editor → Project Settings → Google
+Cloud Platform project) and put its id in `gas.json` as `gcpProject`.
+
+## The first CI run of a migrated repo
+
+Moving a repo off clasp usually moves it onto this repo's reusable workflows, and the first run is the
+first time the repo's own test command runs in GitHub Actions rather than on a machine with the AAC
+dotfiles on it. Any test that reaches for the dotfiles claims-audit engine fails there unless it skips
+on CI — surreptakos/aac-bill-intake#574 and surreptakos/aac-message-board#13 both had to add that skip;
+commissions already had it. Expect it, and fix it as a skip in the test, not by loosening the gate: the
+ref only moves when the gate is green, so a red first run means no deploy.
 
 ## What still needs a person
 

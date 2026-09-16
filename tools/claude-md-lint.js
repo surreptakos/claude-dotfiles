@@ -3,7 +3,7 @@
  * claude-md-lint — check a CLAUDE.md against the "keep it concise" paradigm.
  *
  *   node tools/claude-md-lint.js <path/to/CLAUDE.md> [--max-lines N] [--max-words N]
- *                                [--against <other.md>]... [--json]
+ *                                [--against <other.md>]... [--warn-only a,b] [--json]
  *
  * The paradigm (Anthropic's CLAUDE.md guidance): for each line ask "would removing this cause
  * Claude to make mistakes?" — if not, cut it. Bloated files make Claude ignore the rules that
@@ -57,13 +57,28 @@
  * linter configs in the same directory as the file. Library callers pass `manifest` and
  * `formatterConfigs` in opts instead.
  *
- * Exit 0 clean, 1 findings, 2 usage / read error. Output one line per finding:
+ * Warn-only rules (issue 337): some rules are prompts rather than verdicts, and which ones is a
+ * per-file fact this repo already states — `size` on any file, so a slow creep is visible without
+ * going red, plus `volatile`, `code-derivable` and `tutorial` on `claude/CLAUDE.md`, the byte
+ * mirror of a personal ~/.claude/CLAUDE.md whose text quotes counterexamples that trip those
+ * regexes on purpose. A warn-only finding prints like any other and does not set the exit code,
+ * so a caller that trusts the exit code reads the file the way the repo does. `--warn-only a,b`
+ * replaces the per-file set; `--warn-only ''` makes every rule gate.
+ *
+ * Exit 0 when nothing is left after the warn-only split, 1 on a gating finding, 2 usage / read
+ * error. Output one line per finding:
  *   <path>:<line>\t<rule>\t<message>
  */
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
+
+// Bumped when this file changes ahead of the generated skill copies (claude/skills/claude-md-lint,
+// marketplace/...), which only `sync.ps1 -Mode push` can refresh from a Windows machine. The drift
+// test in claude-md-lint.test.js allows a mirror that is behind by revision — a declaration that
+// shows up in the diff — and still fails on an undeclared byte difference.
+const MIRROR_REVISION = 2;
 
 const DEFAULTS = Object.freeze({
   maxLines: 200,      // non-blank lines (docs: "target under 200 lines")
@@ -82,6 +97,23 @@ const RULES = Object.freeze([
   'tutorial', 'file-inventory', 'api-dump', 'lazy-candidate', 'volatile', 'code-derivable',
   'ambiguous', 'duplicate', 'emphasis',
 ]);
+
+// Rules that print but do not gate. WARN_ONLY_DEFAULT applies to any file; PATH_WARN_ONLY names
+// the files whose set differs, matched on a path suffix so an absolute path works too.
+const WARN_ONLY_DEFAULT = Object.freeze(['size']);
+const PATH_WARN_ONLY = Object.freeze([
+  { suffix: 'claude/CLAUDE.md', rules: Object.freeze(['size', 'volatile', 'code-derivable', 'tutorial']) },
+]);
+
+/** The warn-only rule set for a file. `override` (from --warn-only) replaces it wholesale. */
+function warnOnlyFor(file, override) {
+  if (Array.isArray(override)) return new Set(override);
+  const p = String(file).replace(/\\/g, '/');
+  for (const e of PATH_WARN_ONLY) {
+    if (p === e.suffix || p.endsWith('/' + e.suffix)) return new Set(e.rules);
+  }
+  return new Set(WARN_ONLY_DEFAULT);
+}
 
 const PROHIBITION = /\b(never|do not|don'?t|must not|forbidden|prohibited)\b/i;
 
@@ -436,18 +468,24 @@ function repoContext(dir) {
 }
 
 function parseArgs(argv) {
-  const out = { file: null, json: false, against: [], opts: {} };
+  const out = { file: null, json: false, against: [], warnOnly: null, opts: {} };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
     else if (a === '--max-lines') out.opts.maxLines = Number(argv[++i]);
     else if (a === '--max-words') out.opts.maxWords = Number(argv[++i]);
     else if (a === '--against') { const f = argv[++i]; if (!f) throw new Error('--against needs a file'); out.against.push(f); }
+    else if (a === '--warn-only') {
+      const v = argv[++i];
+      if (v === undefined) throw new Error('--warn-only needs a comma-separated rule list (empty for none)');
+      out.warnOnly = v.split(',').map((r) => r.trim()).filter(Boolean);
+      for (const r of out.warnOnly) if (!RULES.includes(r)) throw new Error(`--warn-only: unknown rule ${r}`);
+    }
     else if (a.startsWith('--')) throw new Error(`unknown flag ${a}`);
     else if (!out.file) out.file = a;
     else throw new Error(`unexpected argument ${a}`);
   }
-  if (!out.file) throw new Error('usage: claude-md-lint <CLAUDE.md> [--max-lines N] [--max-words N] [--against <other.md>]... [--json]');
+  if (!out.file) throw new Error('usage: claude-md-lint <CLAUDE.md> [--max-lines N] [--max-words N] [--against <other.md>]... [--warn-only a,b] [--json]');
   for (const k of ['maxLines', 'maxWords']) {
     if (k in out.opts && !(Number.isInteger(out.opts[k]) && out.opts[k] > 0)) throw new Error(`${k} must be a positive integer`);
   }
@@ -467,18 +505,30 @@ function main(argv) {
   const ctx = repoContext(path.dirname(path.resolve(args.file)));
   const { findings, stats } = lint(text, { ...args.opts, ...ctx, against });
   const rel = path.relative(process.cwd(), args.file) || args.file;
+  const warnOnly = warnOnlyFor(rel, args.warnOnly);
+  const gating = findings.filter((f) => !warnOnly.has(f.rule));
   if (args.json) {
-    process.stdout.write(JSON.stringify({ file: rel, context: ctx, stats, findings }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify(
+      { file: rel, context: ctx, warnOnly: [...warnOnly], stats, findings: findings.map((f) => ({ ...f, gating: !warnOnly.has(f.rule) })) },
+      null, 2) + '\n');
   } else {
     for (const f of findings) process.stdout.write(`${rel}:${f.line}\t${f.rule}\t${f.message}\n`);
+    const tally = findings.length === 0
+      ? 'already lean, nothing to cut'
+      : `${findings.length} finding(s), ${gating.length} gating` +
+        (findings.length > gating.length ? ` (warn-only here: ${[...warnOnly].join(', ')})` : '');
     process.stdout.write(
       `${rel}: ${stats.nonBlankLines} lines, ${stats.proseWords} prose words, ~${stats.estTokens} tokens, ${stats.fencedBlocks} fenced blocks, ` +
-      `${stats.emphasisMarkers} emphasis markers — ${findings.length === 0 ? 'already lean, nothing to cut' : findings.length + ' finding(s)'}\n`
+      `${stats.emphasisMarkers} emphasis markers — ${tally}\n`
     );
   }
-  return findings.length === 0 ? 0 : 1;
+  return gating.length === 0 ? 0 : 1;
 }
 
-module.exports = { lint, repoContext, DEFAULTS, RULES, STANDARD_COMMANDS, FORMATTER_CONFIGS };
+module.exports = {
+  lint, repoContext, warnOnlyFor,
+  DEFAULTS, RULES, STANDARD_COMMANDS, FORMATTER_CONFIGS,
+  WARN_ONLY_DEFAULT, PATH_WARN_ONLY, MIRROR_REVISION,
+};
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
