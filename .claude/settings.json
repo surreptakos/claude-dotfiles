@@ -51,7 +51,19 @@
     "ticket. The blanket rule below sanctions every classification the",
     "classifier can raise against a cloud/Routine session; the two prior narrow",
     "rules are retained as elaboration, not gates. Delivered to every harnessed",
-    "repo by project-harness step 16 (issue 218)."
+    "repo by project-harness step 16 (issue 218).",
+    "",
+    ".claude/hooks/caveman-bootstrap.sh (SessionStart) and caveman-prompt.sh",
+    "(UserPromptSubmit) install the full caveman suite (JuliusBrussee/caveman, pinned",
+    "tag) in a cloud container, where neither the caveman@caveman plugin the desktop",
+    "runs nor the @caveman-ai/cli proxy exists: the twenty plugin skills, the plugin's",
+    "activate and mode-tracker hooks, the CLI with its signed Go binaries, the local",
+    "proxy, and `caveman enable claude` (shrink hook, native hooks, recovery MCP in",
+    "~/.claude). Both exit 0 at once in a local session. Evidence, and the one thing",
+    "the hook cannot do (route this session's own model traffic: the host pins",
+    "ANTHROPIC_BASE_URL in the process environment), are in",
+    "docs/caveman-cloud-2026-09-16.md. The 600s timeout covers the first-run download",
+    "of the CLI and ~170 MB of binaries; every later run is a no-op in seconds."
   ],
   "permissions": {
     "defaultMode": "auto",
@@ -96,6 +108,16 @@
         "hooks": [
           {
             "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/caveman-bootstrap.sh",
+            "timeout": 600,
+            "statusMessage": "Cloud container: installing the caveman suite..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "node \"tools/dotfiles-freshness-hook.js\" session-start",
             "timeout": 120,
             "statusMessage": "Checking dotfiles freshness..."
@@ -111,6 +133,16 @@
             "command": "node \"tools/dotfiles-freshness-hook.js\" prompt",
             "timeout": 30,
             "statusMessage": "Guarding against dotfiles divergence..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/caveman-prompt.sh",
+            "timeout": 30,
+            "statusMessage": "Tracking caveman mode..."
           }
         ]
       }
