@@ -110,6 +110,32 @@ function pickInstrument(env, hasGh, override) {
 }
 
 /**
+ * Decide whether the fleet may pin its `fleet-verifier` subagent type.
+ *
+ * Custom agent types are a desktop-only facility (issue 339). Claude Code reads
+ * the agent registry before SessionStart hooks run, so the cloud bootstrap hook
+ * cannot register `~/.claude/agents/fleet-verifier.md` for the session that
+ * would use it - measured in a container on 2026-09-16, transcript in
+ * docs/tickets/339-decision.md. Pinning the type there fails the launch with
+ * "Agent type 'fleet-verifier' not found", which is how issue 316 surfaced.
+ *
+ * So: never pin in a remote session, and on a desktop session pin only when the
+ * agent file was actually on disk (it is authored there, before session start,
+ * so disk presence is a sound proxy for registration). The decision is keyed on
+ * remoteness, NOT on the tracker instrument - conflating the two is what made a
+ * container that picked `gh` try to launch a type it could never have.
+ *
+ * @param {boolean} remote - true in a cloud container session
+ * @param {boolean} agentFilePresent - true when ~/.claude/agents/fleet-verifier.md exists
+ * @returns {'fleet-verifier'|null} the agentType to pin, or null for none
+ */
+function pickVerifierAgent(remote, agentFilePresent) {
+  if (remote) return null;
+  return agentFilePresent ? 'fleet-verifier' : null;
+}
+
+
+/**
  * Resolve the agent type the blind verifier launches under.
  *
  * Agent types are registered once at session start from `~/.claude/agents/`. On the desktop
@@ -120,14 +146,19 @@ function pickInstrument(env, hasGh, override) {
  * `agent type 'fleet-verifier' not found` (issue 316).
  *
  * @param {'gh'|'mcp'} instrument
+ * @param {{remote:boolean, verifierAgentFile:boolean}} [facts] - the env probe's facts;
+ *   when given they decide the default through pickVerifierAgent (issue 339).
  * @param {string|null|undefined} override - args.verifierAgent. undefined/null takes the
  *   default (`fleet-verifier` under gh, unpinned under mcp); an empty or whitespace string
  *   clears the pin so the verifier runs under the session's default agent type; any other
  *   string pins that agent on either instrument.
  * @returns {string|undefined} the agentType to pass, or undefined for an unpinned verifier.
  */
-function resolveVerifierAgent(instrument, override) {
+function resolveVerifierAgent(instrument, override, facts) {
   if (override === undefined || override === null) {
+    // The env probe's facts decide the default (issue 339); without them the
+    // instrument-keyed default stands.
+    if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined;
     return instrument === 'gh' ? 'fleet-verifier' : undefined;
   }
   const name = String(override).trim();
@@ -221,6 +252,6 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 module.exports = {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   stableJson, stableText, stableList, priorFindingsBlock,
 };

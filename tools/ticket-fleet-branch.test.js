@@ -20,7 +20,7 @@ const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   stableJson, stableText, stableList, priorFindingsBlock,
 } = require('./ticket-fleet-branch.js');
 
@@ -108,6 +108,21 @@ test('pickInstrument override wins over env detection', () => {
 test('pickInstrument tolerates a missing env argument', () => {
   assert.equal(pickInstrument(undefined, true, undefined), 'gh');
   assert.equal(pickInstrument(null, false, undefined), 'mcp');
+});
+
+// ---- pickVerifierAgent (issue 339) ----
+// A SessionStart hook's write to ~/.claude/agents/ is not visible to that session's agent
+// registry (experiment recorded in docs/tickets/339-decision.md), so a cloud session must
+// never be handed a dotfiles-defined agentType.
+
+test('pickVerifierAgent never pins a custom agent type in a remote session (issue 339)', () => {
+  assert.equal(pickVerifierAgent(true, true), null, 'a container cannot resolve a dotfiles agent even when the file is on disk');
+  assert.equal(pickVerifierAgent(true, false), null);
+});
+
+test('pickVerifierAgent pins fleet-verifier locally only when the agent file exists', () => {
+  assert.equal(pickVerifierAgent(false, true), 'fleet-verifier');
+  assert.equal(pickVerifierAgent(false, false), null);
 });
 
 // ---- unknown environment + verifier agent type (issue 316) ----
@@ -205,24 +220,41 @@ test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () =>
     'fleet must route tracker prompts through the instrument-specific rules');
 });
 
+test(`fleet script ${FLEET_SCRIPT_REL} measures the environment instead of reading process.env (issues 322, 339)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /label: 'env-probe'/,
+    'fleet must resolve the instrument from an env-probe agent, not from a caller-passed flag');
+  assert.doesNotMatch(src, /typeof process !== 'undefined'/,
+    'fleet must not sniff process.env: the workflow runtime does not expose it (issue 322)');
+  assert.match(src, /re-run with instrument: "gh"[\s\S]*?or instrument: "mcp"/,
+    'a failed probe on instrument:auto must stop the run and name what to pass, not default to gh');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} gates the verifier agentType on remoteness, not the instrument (issue 339)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /function pickVerifierAgent/,
+    'fleet must inline pickVerifierAgent so the workflow runtime does not need require()');
+  assert.doesNotMatch(src, /agentType: instrument ===/,
+    "the agentType pin must not be keyed on the tracker instrument (issue 316's container picked gh and had no registry)");
+  const pins = src.match(/agentType: [^,}\n]+/g) || [];
+  assert.ok(pins.length > 0, 'expected at least one agentType pin in the fleet script');
+  for (const pin of pins) {
+    assert.match(pin, /verifierAgent/, `agentType pin must come from pickVerifierAgent, found: ${pin}`);
+  }
+});
+
 test(`fleet script ${FLEET_SCRIPT_REL} resolves the verifier agentType from args.verifierAgent`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src, /verifierAgent: null/,
     'fleet must expose verifierAgent in cfg so a container can clear the pin (issue 316)');
   assert.match(src, /function resolveVerifierAgent/,
     'fleet must inline resolveVerifierAgent so the workflow runtime does not need require()');
-  assert.match(src, /const verifierAgentType = resolveVerifierAgent\(instrument, cfg\.verifierAgent\)/,
+  assert.match(src, /const verifierAgentType = resolveVerifierAgent\(instrument, cfg\.verifierAgent, facts\)/,
     'fleet must resolve the verifier agentType once from the instrument and cfg.verifierAgent');
   assert.equal((src.match(/agentType: verifierAgentType/g) || []).length, 2,
     'both verify stages (probe lane and code lane) must pass the resolved agentType');
   assert.ok(!/agentType: instrument === 'gh'/.test(src),
     'the hard-coded fleet-verifier pin must be gone - it fails every launch in a container (issue 316)');
-});
-
-test(`fleet script ${FLEET_SCRIPT_REL} passes a null env when process is missing`, () => {
-  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /const _env = \(typeof process !== 'undefined' && process && process\.env\) \? process\.env : null/,
-    'a missing process binding must reach pickInstrument as null (unknown environment), not as {} (issue 316)');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} VERDICT schema does not require failures (issue 265)`, () => {
@@ -593,7 +625,7 @@ for (const file of RESUME_GUARD_PAIR) {
     const unwrapped = [];
     lines.forEach((line, i) => {
       if (!/await agent\(/.test(line)) return;
-      if (/const scout = await agent\(/.test(line)) return; // runs before any ticket exists
+      if (/const (?:scout|envFacts) = await agent\(/.test(line)) return; // runs before any ticket exists
       let j = i - 1;
       while (j >= 0 && lines[j].trim() === '') j--;
       if (!/try \{$/.test(lines[j] || '')) unwrapped.push(`${i + 1}: ${line.trim()}`);

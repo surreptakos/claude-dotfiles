@@ -9,13 +9,19 @@
 // set, or `gh` absent) uses the GitHub MCP tools. The scout is told which set of tools
 // to use in one place, so a wrong pick fails loudly instead of silently swapping one
 // prompt shape for another. The pure branch of the switch lives in
-// tools/ticket-fleet-branch.js (pickInstrument, trackerRules), which the workflow
-// runtime cannot require - the same shape is inlined below and both are covered by
+// tools/ticket-fleet-branch.js (pickInstrument, pickVerifierAgent, trackerRules), which the
+// workflow runtime cannot require - the same shape is inlined below and both are covered by
 // tools/ticket-fleet-branch.test.js so the two cannot drift silently.
+//
+// Which session shape this is gets MEASURED, not guessed: the first agent of every run is a
+// cheap env-probe that reads the remote env vars, `gh` on PATH and whether
+// ~/.claude/agents/fleet-verifier.md exists. The workflow runtime does not reliably expose
+// `process.env` (issue 322), and a caller who has to remember `instrument: 'mcp'` in a
+// container is a workaround, not a switch (issue 339). Nothing here needs an argument now.
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; a container caller passes it explicitly because the workflow runtime hides process.env), verifierAgent (agent type for the blind verifier; default `fleet-verifier` under gh, empty string runs it under the session default agent type), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -44,7 +50,7 @@ const cfg = Object.assign({
   deliver: true,            // false = stop after verify, no push/PR
   followupsFile: 'FOLLOW-UPS.md',
   invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
-  instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves via env + PATH below
+  instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves from the env probe below
   testCommand: null,        // replaces scout.testCommand when set; see the override note below
   priorImpl: null,          // {ticketNumber: IMPL-shaped result} - attempt 1 reuses it, no implementer
   priorProbe: null,         // {ticketNumber: PROBE-shaped result} - attempt 1 reuses it, no prober
@@ -59,7 +65,7 @@ const cfg = Object.assign({
   // "read them out of CLAUDE.md" - this repo names both in its 'Skill stamps' section, and a
   // fork with different tooling passes its own list instead.
   regenCommands: null,
-  verifierAgent: null,      // null = default (`fleet-verifier` under gh, unpinned under mcp); '' = unpinned
+  verifierAgent: null,      // null = default (`fleet-verifier` on a desktop that has the agent file, unpinned in a cloud session); '' = unpinned
   // ---- orchestrator-tree isolation guard (aac-routines issue 192) ----
   // 'auto' (default) turns the guard on wherever the served repo ships the guard tool and off
   // where it does not; true makes a missing tool a hard abort; false disables the guard.
@@ -123,27 +129,40 @@ function pickInstrument(env, hasGh, override) {
   if (hasGh === false) return 'mcp'
   return 'gh'
 }
-// The workflow runtime may or may not expose `process`; guard so a missing binding does not
-// crash the script. A missing binding is an UNKNOWN environment, not an empty one (issue 316):
-// pass null, so pickInstrument falls back rather than reading a fabricated `{}` env and
-// concluding "local desktop". In practice the runtime hides `process`, so the
-// CLAUDE_CODE_REMOTE_SESSION_ID sniff usually cannot fire at all and a cloud container looks
-// exactly like a desktop session - a container caller passes `instrument: 'mcp'` (or 'gh')
-// explicitly. `hasGh` cannot be checked from a pure JS context either, so it stays undefined.
-const _env = (typeof process !== 'undefined' && process && process.env) ? process.env : null
-const instrument = pickInstrument(_env, undefined, cfg.instrument)
+// Whether the fleet may pin its `fleet-verifier` subagent type. Custom agent types are a
+// desktop-only facility (issue 339): Claude Code reads the agent registry BEFORE SessionStart
+// hooks run, so the cloud bootstrap hook cannot register ~/.claude/agents/fleet-verifier.md
+// for the session that would use it, and pinning it there fails the launch with "Agent type
+// 'fleet-verifier' not found" (how issue 316 surfaced). Keyed on remoteness, never on the
+// tracker instrument - conflating the two is what made a container that picked `gh` try to
+// launch a type it could never have.
+function pickVerifierAgent(remote, agentFilePresent) {
+  if (remote) return null
+  return agentFilePresent ? 'fleet-verifier' : null
+}
+// The workflow runtime does not expose `process.env` (issue 322: a container run read an empty
+// env and fell through to `gh`), so the environment is not guessed here at all - it is measured
+// by the env-probe subagent below, which has a real shell. That removes the container-specific
+// workaround the caller used to have to remember (`instrument: 'mcp'` by hand): `auto` now
+// resolves correctly from either session shape with no argument.
 
 // Which agent type the blind verifier launches under. Agent types are registered once at
 // session start from ~/.claude/agents/; the desktop registry holds fleet-verifier.md (tools
 // capped at Read, Grep, Glob, Bash - issue 86) and a cloud container's does not, where pinning
 // it fails every verifier launch with `agent type 'fleet-verifier' not found` (issue 316).
 // Pure counterpart: resolveVerifierAgent in tools/ticket-fleet-branch.js.
-function resolveVerifierAgent(mode, override) {
-  if (override === undefined || override === null) return mode === 'gh' ? 'fleet-verifier' : undefined
+function resolveVerifierAgent(mode, override, facts) {
+  if (override === undefined || override === null) {
+    // No override: the env probe decides (issue 339) - never a custom type in a cloud session,
+    // and on the desktop only when the agent file is on disk. Without probe facts (a unit test,
+    // a caller that skipped the probe) the old instrument-keyed default stands.
+    if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined
+    return mode === 'gh' ? 'fleet-verifier' : undefined
+  }
   const name = String(override).trim()
   return name || undefined
 }
-const verifierAgentType = resolveVerifierAgent(instrument, cfg.verifierAgent)
+// `verifierAgentType` is resolved right after the env probe in the Scout phase below.
 
 // The tracker rule lines the scout and every delivery prompt embed. Same wording on both
 // instruments except for the tool spellings and the "how to detect the tracker root" note.
@@ -175,9 +194,8 @@ function trackerRules(mode) {
   }
 }
 // [FLEET-TRACKER-RULES-END]
-const rules = trackerRules(instrument)
-log(`instrument = ${instrument}${_env ? '' : ' (environment unknown: no process binding - pass args.instrument explicitly from a container)'}`)
-log(`verifier agentType = ${verifierAgentType || '(session default - unpinned)'}`)
+// `rules`, `instrument` and `verifierAgentType` are resolved from the env probe in the Scout phase
+// below - the first thing the run does - so every prompt built after that point sees them.
 
 // Explicit selection wins over the label: a named ticket is fetched whatever its labels or state.
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
@@ -222,6 +240,12 @@ const priorFindingsBlock = (verdict, howToFix) => verdict
 // [FLEET-RESUME-STABLE-END]
 
 // ---- schemas: crisp machine-checkable done-conditions ----
+const ENVFACTS = { type: 'object', required: ['remote', 'hasGh', 'verifierAgentFile'], properties: {
+  remote: { type: 'boolean', description: 'true when CLAUDE_CODE_REMOTE_SESSION_ID or CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE printed a non-empty value' },
+  hasGh: { type: 'boolean', description: 'true when the gh CLI is on PATH and `gh --version` exits 0' },
+  verifierAgentFile: { type: 'boolean', description: 'true when ~/.claude/agents/fleet-verifier.md exists on disk' },
+} }
+
 const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
   candidateNumbers: { type: 'array', items: { type: 'integer' }, description: 'every issue number the one listing in step 2 returned, before any filtering - [] when it returned none. The whole candidate set: no ticket outside it may appear in tickets.' },
   tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'discoveryTriage', 'handoffPending'], properties: {
@@ -487,6 +511,32 @@ Discovery-triage dedupe rail: this ticket turns findings into tracker items. Bef
 
 // ---- Scout ----
 phase('Scout')
+
+// Env probe: the one thing in this run that cannot be decided from inside the workflow runtime.
+// A subagent has a real shell, so it reads the facts instead of the script guessing them from a
+// `process` binding the runtime may not expose (issue 322) - and the caller no longer has to
+// remember `instrument: 'mcp'` in a container. Cheap tier, no judgment, three commands.
+const envFacts = await agent(
+  `Report three facts about the session YOU are running in. Run exactly these commands and answer only from their output - never from assumption.
+1. \`printenv CLAUDE_CODE_REMOTE_SESSION_ID; printenv CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE\` - remote = true when either prints a non-empty value, false when both are empty or unset.
+2. \`command -v gh && gh --version\` - hasGh = true only when a path is printed AND \`gh --version\` exits 0.
+3. \`test -f "$HOME/.claude/agents/fleet-verifier.md" && echo present || echo absent\` - verifierAgentFile = true on "present".
+Print no secret value: these three are paths, a version string and set/unset, nothing else. Make no repository change, no commit, no comment. Return structured output only.`,
+  { label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: 'low' }
+)
+// A failed probe must not silently become `gh` - that is the issue 322 failure. With an explicit
+// instrument the run can continue on the caller's word; on `auto` it stops and says what to pass.
+if (!envFacts && (cfg.instrument !== 'gh' && cfg.instrument !== 'mcp')) {
+  throw new Error('env-probe returned nothing and instrument is "auto": re-run with instrument: "gh" (local session with the gh CLI) or instrument: "mcp" (cloud container)')
+}
+const facts = envFacts || { remote: false, hasGh: true, verifierAgentFile: false }
+const instrument = pickInstrument(
+  facts.remote ? { CLAUDE_CODE_REMOTE_SESSION_ID: 'probed' } : {}, facts.hasGh, cfg.instrument)
+const verifierAgentType = resolveVerifierAgent(instrument, cfg.verifierAgent, facts)
+const rules = trackerRules(instrument)
+log(`instrument = ${instrument} (remote=${facts.remote}, gh=${facts.hasGh}${envFacts ? '' : ', probe failed - using args.instrument'})`)
+log(`verifier agentType = ${verifierAgentType || 'none (unpinned: custom agent types are desktop-only, issue 339)'}`)
+
 const scoutSource = explicitTickets.length ? rules.scoutExplicit(explicitTickets) : rules.scoutList(cfg.label)
 const scout = await agent(
   `Scout this repository for tickets to run. ${rules.scoutNotes} Steps:
@@ -866,11 +916,11 @@ Return structured output only.`,
     if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Blind verifier: gets branch + criteria ONLY - never the implementer's self-report (conformity
-    // guard). By default the gh instrument runs the verifier under the fleet-verifier subagent
+    // guard). On a desktop session the verifier runs under the fleet-verifier subagent
     // (~/.claude/agents/fleet-verifier.md, issue 86) whose frontmatter caps its tool set at
-    // Read, Grep, Glob, Bash. A cloud container has no such registry entry, so a run there
-    // passes `verifierAgent: ''` (or `instrument: 'mcp'`) and the verifier launches under the
-    // session default agent type; the restraint there is the container sandbox itself.
+    // Read, Grep, Glob, Bash. A cloud session gets no agentType at all: its registry is read
+    // before the bootstrap hook can write one (issue 339, docs/tickets/339-decision.md), so the
+    // restraint there is the container sandbox plus the detached scratch worktree.
     // Wrapped (aac-routines issues 191, 270).
     try {
       lastVerdict = await agent(

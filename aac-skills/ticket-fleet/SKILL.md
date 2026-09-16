@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T14:45:57Z"
-  previous-modified: "2026-09-16T14:45:56Z"
-  revision: "35"
-  content-sha: "8bda215b69f5"
+  modified: "2026-09-16T14:50:28Z"
+  previous-modified: "2026-09-16T14:50:18Z"
+  revision: "37"
+  content-sha: "df2088db7719"
 ---
 
 # ticket-fleet
@@ -27,6 +27,27 @@ The switch is made by `pickInstrument(env, hasGh, override)` inside the script, 
 verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`; the pure
 counterparts live at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
 `tools/ticket-fleet-branch.test.js`.
+
+The script does not guess which shape it is in. The first agent of every run is a cheap
+`env-probe` that reads the remote env vars, `gh` on PATH and the verifier agent file, and the
+switch resolves from what it reports - the workflow runtime does not reliably expose
+`process.env` (issue 322), and a cloud caller who has to remember `instrument: 'mcp'` is a
+workaround, not a switch (issue 339). Pass `instrument` only to override the measurement.
+
+## Custom agent types are desktop-only
+
+**Pinning a dotfiles-defined `agentType` does not work in a cloud session.** Claude Code reads
+the agent registry before `SessionStart` hooks run, so the cloud bootstrap hook cannot install
+`claude/agents/` in time for the session that would use it; the launch fails with
+`Agent type '<name>' not found`, an error that names the type and not the cause. Measured in a
+container on 2026-09-16 - control, hook-write and second-session arms - in issue 339; the
+transcript is at `docs/tickets/339-decision.md` in `claude-dotfiles`.
+
+The fleet therefore pins its `fleet-verifier` subagent (`~/.claude/agents/fleet-verifier.md`,
+issue 86) only on a desktop session that has the file on disk; `pickVerifierAgent(remote,
+agentFilePresent)` makes that call from the env probe's facts. In a cloud session the verifier
+runs unpinned and its restraint is the container sandbox plus the detached scratch worktree. No
+plugin-served script may pin a dotfiles-defined `agentType`.
 
 ## How to invoke
 
@@ -135,45 +156,23 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
   resolution comment.
 - `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to.
-- `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` returns
-  `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
-  otherwise `gh`. **A container caller passes `mcp` or `gh` explicitly** - see below. Pass `mcp`
-  explicitly on a machine where `gh` is missing.
+- `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` measures
+  the session with the `env-probe` agent and returns `mcp` when
+  `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set or `gh` is
+  missing, `gh` otherwise. A cloud session needs no argument. Pass a value only to override
+  the measurement; on `auto`, a probe that returns nothing stops the run rather than guessing.
 - `generatedPaths` (array of globs, default `['.claude-plugin/marketplace.json', 'marketplace/**']`):
   the paths the pre-push merge may resolve by taking the default branch's side.
 - `regenCommands` (array of shell commands, default `null`): what re-stamps and rebuilds those
   paths after such a merge. `null` tells the deliver stage to read the commands out of CLAUDE.md.
 - `verifierAgent` (string, default `null`): the agent type the blind verifier launches under.
-  `null` takes the default - `fleet-verifier` under `gh`, unpinned under `mcp`. `''` clears the
-  pin so the verifier runs under the session's default agent type; any other string pins that
-  agent on either instrument. Pass `''` from a cloud container running under `gh`.
+  `null` takes the default the env probe decides - `fleet-verifier` on a desktop session whose
+  `~/.claude/agents/fleet-verifier.md` is on disk, unpinned in a cloud session (custom agent
+  types are desktop-only, see above). `''` forces unpinned; any other string pins that agent.
 - `testCommand` (string, optional): replaces the gate the scout read, for every lane, logged
   once. See **Overriding the test command** below.
 - `priorImpl` / `priorProbe` (objects keyed by ticket number, optional): results from an
   earlier run's implementers and probers. See **Finishing a run whose verifiers died** below.
-
-## Unknown environment, and the verifier's agent type
-
-The workflow runtime does not expose `process`, so `pickInstrument` usually gets **no env to
-sniff at all**: it treats a missing `process` binding as an unknown environment (not an empty
-one) and falls back to `gh`, whose REST paths work in a container as well as on the desktop.
-A container is therefore indistinguishable from a desktop session, which is why a container
-caller passes `instrument: 'mcp'` (or `'gh'`) explicitly rather than trusting the sniff.
-
-What must not be inferred from an unknown environment is the verifier's **agent type**. Agent
-types are registered once at session start from `~/.claude/agents/`; on the desktop that
-registry holds `fleet-verifier.md`, whose frontmatter caps the verifier's tools at Read, Grep,
-Glob, Bash (issue 86). A cloud container has no such entry - the bootstrap hook copies the
-dotfiles clone to `~/.aac-dotfiles/claude/agents/fleet-verifier.md`, a path the registry never
-reads, and the registry is not re-read mid-session, so copying the file in later cannot help.
-Pinning the type there fails every verifier launch with `agent type 'fleet-verifier' not
-found`, and the wave ends with every implementer committed and nothing delivered (issue 316).
-
-**Containers therefore run verifiers unpinned** - pass `instrument: 'mcp'` (unpinned by
-default) or `verifierAgent: ''` under `gh`. The restraint there is the container sandbox
-itself: the verifier's writes cannot reach the owner's machine, the branch under review is a
-detached scratch worktree, and the deliver stage - not the verifier - is what pushes. The
-`fleet-verifier` pin buys a tool-set cap on the desktop, where no sandbox exists.
 
 ## Overriding the test command
 
