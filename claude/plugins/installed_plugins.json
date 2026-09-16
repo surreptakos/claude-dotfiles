@@ -44,11 +44,11 @@
     "aac-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.160015",
-        "version": "2026.9.160015",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
+        "version": "2026.9.161952",
         "installedAt": "2026-09-02T20:47:25.994Z",
-        "lastUpdated": "2026-09-16T00:19:19.081Z",
-        "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd"
+        "lastUpdated": "2026-09-16T19:54:24.213Z",
+        "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5"
       },
       {
         "scope": "project",
@@ -250,12 +250,12 @@
       },
       {
         "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\208-push-to-main-9367cd",
         "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.160015",
         "version": "2026.9.160015",
         "installedAt": "2026-09-16T19:29:31.304Z",
         "lastUpdated": "2026-09-16T19:29:31.304Z",
-        "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd",
-        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\208-push-to-main-9367cd"
+        "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd"
       }
     ],
     "yes@sstklen": [
