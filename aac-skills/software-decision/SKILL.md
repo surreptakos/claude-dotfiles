@@ -1,37 +1,33 @@
 ---
 name: software-decision
-description: Decide whether to adopt a new paid software tool, with the amount of analysis scaled to the size of the decision. Use whenever someone proposes buying or subscribing to new software, wants a tool evaluated, or is comparing tools — from a low-cost utility to a multi-year platform. Produces a written decision (yes / no / not yet) and, if yes, a rollout plan. Trigger on "should we get [tool]", "evaluate [tool]", "we're thinking about buying [software]", "compare [tool] vs [tool]".
+description: Decide whether to adopt a new paid software tool, with the analysis scaled to the size of the decision. Use when someone proposes buying or subscribing to software ("should we get [tool]"), wants a tool evaluated, or is comparing tools — from a low-cost utility to a multi-year platform.
 argument-hint: "<tool name, or the problem a tool would solve>"
 metadata:
-  modified: "2026-08-31T21:20:12Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "41ea2298c9d4"
+  modified: "2026-09-16T04:45:28Z"
+  previous-modified: "2026-08-31T21:20:12Z"
+  revision: "2"
+  content-sha: "8fcd7f2fc514"
 ---
 
 # Software Decision
 
-Runs AAC's software adoption decision with the user. This skill is the active form of the procedure in `reference/decision-guide.md`.
-
-**Files in this skill (read by relative path from this folder):**
-- `reference/decision-guide.md` — full criteria, tier thresholds, scorecard, and worksheet.
-- `reference/decision-analysis-prompt.md` — the engine for Major decisions only.
+Runs AAC's software adoption decision with the user — the active form of the procedure in `reference/decision-guide.md`, which holds the full criteria, tier thresholds, scorecard and worksheet. `reference/decision-analysis-prompt.md` is the engine the Major tier opens. Both are read by relative path from this folder.
 
 **Operating principles.**
-1. Scale the analysis to the size of the decision. A low-cost, cancel-anytime tool is decided in minutes; a multi-year platform takes weeks. Do not run the full process on a small tool.
-2. Tool selection is one part of the decision; rollout and adoption are the other. Do not record a "yes" without an owner, a go-live date, and an adoption measure.
+1. Scale the analysis to the size of the decision: a low-cost, cancel-anytime tool is decided in minutes, a multi-year platform takes weeks. The tier in step 3 is that judgement, and getting it right matters in both directions — over-processing a small tool and under-processing a major one are equally wrong.
+2. Tool selection is one part of the decision; rollout and adoption are the other. Every "yes" records an owner, a go-live date and an adoption measure — an adopted tool missing those is the common failure mode.
 
 ## When to use
-- Use for any decision to pay for new software, expand a paid tool, or replace one.
-- Do not use for free, single-use utilities with no data access, or for configuring a tool already approved.
+- Any decision to pay for new software, expand a paid tool, or replace one.
+- Free single-use utilities with no data access, and configuration of an already-approved tool, sit outside it.
 
 ## Workflow
 
-Ask the most relevant question first and fill gaps as the conversation proceeds; do not present the full list at once. Pull from connected tools before asking the user for information the tools already hold.
+Ask the most relevant question first, one at a time, and fill gaps as the conversation proceeds. Pull from connected tools before asking the user for information the tools already hold.
 
 ### 1. Pull context (if tools are connected)
 - **Zoho CRM / Google Drive / Microsoft 365:** locate the current tool or process this would replace, any existing contract, and current spend. Use this to ground the analysis and the integration test.
-- If nothing is connected, work from user input. Do not ask the user to connect tools.
+- If nothing is connected, work from user input and carry on.
 
 ### 2. The three gates (every tool — a "no" on any one stops the process)
 Confirm a specific answer to each:
@@ -55,18 +51,18 @@ State the tier and the reason. Basis: apply heavier analysis only when a wrong c
 
 ### 4. Set the threshold
 - **Revenue tool** (sales / win rate / recurring revenue / customer experience): estimate the conservative annual upside; require at least 2–3× the annual cost. Record the estimate and its assumptions.
-- **Internal / cost tool:** estimate annual hours saved × loaded rate, plus any subscription replaced, minus the owner's time to run it; the result must exceed the annual cost. General efficiency claims do not qualify; count only quantifiable dollars or hours.
+- **Internal / cost tool:** estimate annual hours saved × loaded rate, plus any subscription replaced, minus the owner's time to run it; the result must exceed the annual cost. Count only quantifiable dollars or hours.
 
 ### 5. Run the tier
 
-**Small** — confirm cancel-anytime, decide, and set a check ~60 days after adoption to confirm use; cancel if not in use. No scorecard or stakeholder review.
+**Small** — confirm cancel-anytime, decide, and set a check ~60 days after adoption to confirm use; cancel if it is idle. The scorecard and stakeholder review start at Standard.
 
 **Standard**
 1. List 2–3 options, including "continue current process."
 2. Run a free trial targeting the factors most likely to cause failure: integration with Zoho / QuickBooks Desktop, and adoption by the intended users (have 2–3 of them use it).
 3. Consult the intended users and the budget holder before deciding.
 4. Total the real annual cost (subscription + setup + training time + likely per-user increases + cost to leave). Buy only the modules to be used.
-5. Contract check (self-serve): cancellation terms, auto-renewal, price-increase clause, data-export rights. No attorney at this tier.
+5. Contract check (self-serve): cancellation terms, auto-renewal, price-increase clause, data-export rights. Attorney review starts at Major.
 6. Decide against the threshold from step 4.
 
 **Major** — run the full structured analysis. Open and follow `reference/decision-analysis-prompt.md` (the engine), then:
@@ -91,7 +87,5 @@ Produce:
 - For Major decisions: the one-page recommendation.
 
 ## Notes
-- Calibrate the tier (step 3) accurately: over-processing a small tool and under-processing a major one are both errors.
-- Complete the rollout plan (step 7) for every "yes." An adopted tool without an owner and an adoption measure is the common failure mode.
 - Treat outside resources as references, not requirements.
 - Do not include the company's ownership, sale, or exit plans in any internally shared output.

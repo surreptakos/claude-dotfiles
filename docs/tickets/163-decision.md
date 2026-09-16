@@ -84,6 +84,17 @@ substitution table after this ticket lands:
 - Branch delete via any route (`gh api -X DELETE repos/{}/git/refs/heads/{}`, and any
   gh subcommand that would). Only `delete_branch_on_merge` on the repo settings
   cleans a merged branch up.
+- Any REST call whose target repo is not attached to the session — HTTP 403 `not
+  enabled for this session`, with an `add_repo` remedy in the body. Attaching the
+  repo is the only substitute; no path spelling works around it.
+- Review threads, auto-merge, ready-for-review and convert-to-draft have no REST
+  equivalent. The 403 body names the CCR-hosted route to call instead; use the path
+  it quotes.
+
+`gh auth status` reports `The token in GH_TOKEN is invalid` in a container even while
+`gh api repos/...` answers on the same session — the proxy does the auth, not
+GH_TOKEN. Expected noise, not a blocked command: it does not belong in the
+substitution table, and an agent that chases it is chasing nothing.
 
 Nothing else known to be blocked. Everything the tracker audit and session-check
 call — `gh api repos/.../issues`, `.../pulls`, `.../issues/N/comments`,
