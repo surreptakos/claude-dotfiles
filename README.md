@@ -27,7 +27,7 @@ CI regenerates it on every push and every issue event and force-pushes there —
 | `codex/hooks.json` | `~/.codex/hooks.json` | the wiring that calls it — without this the script above is inert |
 | `codex/config.toml` | `~/.codex/config.toml` | Codex's settings — model, sandbox, marketplaces, plugin enables, project trust. The counterpart of `claude/settings.json`; carried since issue #2 so the hooks above don't land on default settings. Scanned for credential values (2026-08-12 and 2026-08-19): none — the `sha256:` values in it are trust pins for `hooks.json` entries, not secrets |
 | `codex/AGENTS.md` | `~/.codex/AGENTS.md` | Codex's half of the global rules |
-| `memory/<slug>/` | `~/.claude/projects/<slug>/memory/` | per-project memory files |
+| `memory/<slug>/` | `~/.claude/projects/<slug>/memory/` | per-project memory files — every project except this one (issue 210: this repo's notes are committed at `docs/agents/memory/`, the plugin's SessionStart hook loads them, and both sync modes empty the live copy to a pointer) |
 
 Repo-only tooling that is NOT synced to any machine: `gas/`, the Apps Script self-deploy package (no clasp, no Google credential in CI; `gas/README.md`), with the reusable `gas-deploy.yml` / `gas-promote.yml` workflows other repos call.
 

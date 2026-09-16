@@ -26,6 +26,12 @@ self-deploy package; `gas/README.md`), the `gas-*.yml` reusable workflows, and t
 generated too — the packager (`tools/build-cloud-plugin.py`, run by every push) rebuilds them from
 `~/.claude/skills` and `aac-skills/`. Edit `aac-skills/` directly; never edit `marketplace/`.
 
+This repo's own memory notes are the one exception to `memory/`: they are hand-written at
+`docs/agents/memory/` with `MEMORY.md` as the index, and the plugin's SessionStart hook
+(`tools/repo-memory-load.js`) injects that index, so cloud sessions have them too. Add a note
+there and commit — that commit is the whole publish; both sync modes run
+`tools/repo-memory-pointer.js`, which empties the PC copy to a pointer so the two cannot diverge.
+
 ## Skill stamps
 
 Every `SKILL.md` carries four keys under `metadata:` — `modified`, `previous-modified`, `revision`,

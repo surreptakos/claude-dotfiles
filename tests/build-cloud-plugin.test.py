@@ -311,6 +311,20 @@ class PluginHooksManifest(unittest.TestCase):
         self.assertEqual(counts.get("ask_matt_gate.py"), 4,
                          "ask_matt_gate.py should fire on prompt, pre-tool, post-tool and stop")
 
+    def test_repo_memory_loader_is_a_sessionstart_hook_in_the_payload(self):
+        # Issue 210: the loader that injects this repo's committed memory notes rides the same
+        # manifest as the governance hooks, in its own SessionStart group (so the gate's 200s
+        # group cannot delay or skip it), and the script it names ships in the payload.
+        groups = (self.manifest.get("hooks") or {}).get("SessionStart") or []
+        loader_groups = [g for g in groups
+                         if any("repo-memory-load.js" in h.get("command", "")
+                                for h in g.get("hooks", []))]
+        self.assertEqual(len(loader_groups), 1,
+                         "expected exactly one SessionStart group for repo-memory-load.js")
+        self.assertEqual(len(loader_groups[0]["hooks"]), 1,
+                         "the memory loader must not share a group with another hook")
+        self.assertTrue((self.scripts_dir / "repo-memory-load.js").is_file())
+
     def test_no_pwsh_only_invocation_in_the_hook_commands(self):
         # Acceptance criterion 3: every script runs on python3 and node only. A pwsh-only branch
         # would need to be guarded and skipped with a printed reason; there is no such branch here,

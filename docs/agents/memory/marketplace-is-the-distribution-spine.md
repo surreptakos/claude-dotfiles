@@ -31,4 +31,4 @@ marketplace manifest. When an org marketplace lists zero plugins, check semver v
 GitHub App repo access before anything else. The zip build (`dist/dan-skills.zip`) survives only
 for claude.ai Skills pages (Customize > Skills, admin-settings > Skills), which remain upload-only.
 
-Related: [[three-skill-channels]], [[concurrent-sessions-share-one-sync-push]]
+Related: [[three-skill-channels]]

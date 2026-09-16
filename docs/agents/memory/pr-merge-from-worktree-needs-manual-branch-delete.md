@@ -18,7 +18,7 @@ that branch belongs to the main checkout.
 
 **How to apply:** treat exit 1 from that command as "verify, then finish by hand": `gh pr view N`
 confirms MERGED, then `git push origin --delete <branch>` removes the remote branch; the local branch
-goes with the worktree. Related: [[concurrent-sessions-share-one-sync-push]].
+goes with the worktree.
 
 **Update 2026-09-14 (PR #183):** claude-dotfiles now has `delete_branch_on_merge: true`
 (`gh api repos/surreptakos/claude-dotfiles --jq .delete_branch_on_merge`), so a plain

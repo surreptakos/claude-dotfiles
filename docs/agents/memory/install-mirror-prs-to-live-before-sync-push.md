@@ -25,4 +25,4 @@ your intended edits. `sync.ps1 -Mode push` refuses a worktree; `-FromWorktree` i
 branch is rebased on `origin/master`. Fleet workers cannot do any of this (no live tree), so a
 `ready-for-local-agent` ticket that needs a live edit is the desktop session's own work after the
 fleet, not a fleet ticket — run `6aa9c553` failed 4 of 4 such tickets and the session landed them
-directly. See [[fleet-implementers-edit-the-live-tree]] and [[concurrent-sessions-share-one-sync-push]].
+directly.

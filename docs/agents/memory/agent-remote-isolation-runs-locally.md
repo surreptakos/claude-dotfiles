@@ -15,8 +15,7 @@ the live `~/.claude/settings.json`. No cloud container was involved. `ToolSearch
 session-creating tool, and `claude --cloud` refused to combine with `--print` or `--bg`.
 
 **Why:** a probe that must run inside a claude.ai/code container cannot be delegated from the
-desktop this way; the agent also treats the live home as scratch, the same hazard as
-[[fleet-implementers-edit-the-live-tree]].
+desktop this way; the agent also treats the live home as scratch, which worktree isolation does not cover.
 
 **How to apply:** cloud-only probes go to a claude.ai/code session started by Dan (or a Routine
 with the repo as source). Never hand a remote-isolation agent a task that writes under `~/.claude`.
