@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T15:10:45Z'
-  previous-modified: '2026-09-16T07:10:22Z'
-  revision: '11'
-  content-sha: 2e0c67378080
+  modified: '2026-09-16T15:13:01Z'
+  previous-modified: '2026-09-16T15:10:45Z'
+  revision: '12'
+  content-sha: 82db749dc630
 ---
 
 # ticket-fleet
@@ -149,14 +149,8 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `maxAttempts` (integer, default 3): Ralph-style bounded retry, fresh context each attempt.
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
   resolution comment.
-<<<<<<< HEAD
 - `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to. See
   Discoveries below for where that file is written.
-- `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` returns
-  `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
-  otherwise `gh`. Pass `mcp` explicitly on a machine where `gh` is missing.
-=======
-- `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to.
 - `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` measures
   the session with the `env-probe` agent and returns `mcp` when
   `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set or `gh` is
@@ -228,7 +222,6 @@ Pass the same `tickets` list as the dead run, a **new** `runId` (branch names fo
 that does re-implement must not collide with the dead run's), and the `testCommand` the dead
 run should have used. An entry whose `committed` is false, or a probe entry with no items, is
 treated as a failed attempt 1: attempt 2 runs the stage normally.
->>>>>>> origin/master
 
 ## Lanes
 
@@ -247,28 +240,6 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   remaining steps are genuinely a person's judgment, credential or sign-off, in which
   case the label is `ready-for-human`. It never claims an owner step was done.
 
-<<<<<<< HEAD
-## Discoveries
-
-Every lane returns out-of-scope findings. The Report phase is one writer, and it does not append
-into the session's own checkout: it cuts `agent/fleet-discoveries-wf_<runId>` from
-`origin/<defaultBranch>` in a scratch worktree, appends the bullets to `followupsFile` under a
-`## Run (ticket-fleet <runId>)` heading, commits that file alone, and — when `deliver` is true —
-pushes the branch and opens a discoveries-only PR against the default branch.
-
-Before issue 360 the writer appended in place and committed nothing, so the bullets rode whatever
-branch the session was on. Run `6aa9c56e` left 136 bullets on an unrelated PR's branch, and the
-`6aa46942` / issue-120 block still on master cites four commits that were never landed — both
-triage chores filed against those bullets found nothing on the default branch.
-
-The run's return value carries `discoveryReport` (`{ branch, sha, prUrl, bullets }`), so a triage
-chore filed for the bullets can name the commit sha and branch even before the PR merges. The
-discoveries PR carries no verifier evidence because there is no ticket behind it; the orchestrator
-merge pass has its own rule for it (`orchestrator/RUNBOOK.md`, Merge).
-
-`tools/ticket-fleet-branch.test.js` pins the mechanism: the Report block is bracketed by
-`[FLEET-REPORT-START]` / `[FLEET-REPORT-END]` markers and driven with a mocked `agent`.
-=======
 The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
 fleet handoff (a "Remaining for a local session" or "Remaining for a person" section and the
 Claude Code footer) with no owner comment after it. Such a ticket is parked, not run - no lane
@@ -289,6 +260,28 @@ prober brief also carries a dedupe rail - search the open issues for the same fi
 failure immediately before filing, and comment on a match instead of creating a second ticket -
 which covers a wave that holds only one chore. A caller that would rather not rely on either can
 put the chores in separate waves.
+
+## Discoveries
+
+Every lane returns out-of-scope findings. The Report phase is one writer, and it does not append
+into the session's own checkout: it cuts `agent/fleet-discoveries-wf_<runId>` from
+`origin/<defaultBranch>` in a scratch worktree, appends the bullets to `followupsFile` under a
+`## Run (ticket-fleet <runId>)` heading, commits that file alone, and — when `deliver` is true —
+pushes the branch and opens a discoveries-only PR against the default branch.
+
+Before issue 360 the writer appended in place and committed nothing, so the bullets rode whatever
+branch the session was on. Run `6aa9c56e` left 136 bullets on an unrelated PR's branch, and the
+`6aa46942` / issue-120 block still on master cites four commits that were never landed — both
+triage chores filed against those bullets found nothing on the default branch.
+
+The run's return value carries `discoveryReport` (`{ branch, sha, prUrl, bullets }`), so a triage
+chore filed for the bullets can name the commit sha and branch even before the PR merges. The
+discoveries PR carries no verifier evidence because there is no ticket behind it; the orchestrator
+merge pass has its own rule for it (`orchestrator/RUNBOOK.md`, Merge).
+
+`tools/ticket-fleet-branch.test.js` pins the mechanism: the Report block is bracketed by
+`[FLEET-REPORT-START]` / `[FLEET-REPORT-END]` markers and driven with a mocked `agent`.
+
 
 ## Pre-push merge
 
@@ -319,7 +312,6 @@ merge, pushes nothing and opens no PR; the ticket appears in the run result's `f
 with `conflictPaths` naming every path still in conflict. A test command that fails after an
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
->>>>>>> origin/master
 
 ## Branch names
 
