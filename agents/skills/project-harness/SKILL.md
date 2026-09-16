@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: "2026-09-15T22:34:06Z"
-  previous-modified: "2026-09-15T15:18:59Z"
-  revision: "10"
-  content-sha: "12ea7ee26d99"
+  modified: "2026-09-16T00:20:54Z"
+  previous-modified: "2026-09-16T00:15:10Z"
+  revision: "13"
+  content-sha: "a9fe11a4abe6"
 ---
 
 # Project Harness
@@ -81,7 +81,7 @@ cross-repo Projects board instead of per-repo (see step 6).
 8. **Live tracker audit** — copy `templates/tracker-audit.js` to `tools/tracker-audit.js`. No substitutions: it infers the repo from `gh repo view`. It reads live GitHub state (prose `Blocked by #N` with no native dependency edge, closed issues with unticked acceptance boxes, a `#N` that is neither an issue nor a PR, missing/conflicting triage labels, an open issue whose Projects card says Done, an open issue on no board at all, plus two advisory checks) — the drift no file-level test can see. Exit 0 clean / 1 drift / **2 could not audit**; preserve that third code in any edit, because a tracker query returning nothing must never read as a pass.
    - It needs the network and an authenticated `gh`, so it does **NOT** go in the pre-commit hook — a commit gate that needs the network breaks committing offline. It is a command, optionally a CI step (separate workflow or a job in `dashboard.yml`, never the test job).
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 18.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139) — so an out-of-date harness has to be closed before writing code, not remembered later.
+9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 19.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139) — so an out-of-date harness has to be closed before writing code, not remembered later.
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
@@ -120,15 +120,27 @@ cross-repo Projects board instead of per-repo (see step 6).
     - **First run in a repo: pass `deliver: false`** (verify-only dry run) before letting the
       fleet push branches and open PRs.
 
-16. **Cloud plugin** — make `.claude/settings.json` declare the marketplace and the plugin, so a cloud
-    session (claude.ai/code) installs `aac-skills` at startup and the harnessed repo has these skills
-    there too. Run `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`: it
-    creates the file when absent (equivalent to copying `templates/claude-settings.json`) and otherwise
-    merges the two keys, leaving `permissions`, `hooks` and everything else verbatim. Then confirm it
-    still parses: `node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`.
+16. **Cloud plugin + widened autoMode.allow** — make `.claude/settings.json` declare the marketplace,
+    the plugin AND the widened autoMode.allow ruling (Dan, 2026-09-15, issue 245), so a cloud
+    session (claude.ai/code) installs `aac-skills` at startup and any unattended session (cloud or
+    Routine master) is sanctioned to run every action its work requires — destructive and
+    irreversible included — instead of the classifier parking it. Run
+    `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`: it creates
+    the file when absent (equivalent to copying `templates/claude-settings.json`) and otherwise
+    merges four keys (`extraKnownMarketplaces`, `enabledPlugins`, `permissions.defaultMode` +
+    `permissions.allow` union, `autoMode.allow` union with the ruling prose), leaving `hooks` and
+    everything else verbatim. Then confirm it still parses:
+    `node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`.
     - **PRESERVE an existing `.claude/settings.json`.** Same hazard as step 12's session.json: repo
       copies carry hand-built `permissions` allowlists (aac-bill-intake, aac-contract-builder) and
-      `hooks` (aac-sales-cockpit, claude-dotfiles). Never regenerate the file; the script only adds keys.
+      `hooks` (aac-sales-cockpit, claude-dotfiles). Never regenerate the file; the script only adds
+      keys and unions arrays. An existing `permissions.defaultMode` (e.g. `bypassPermissions` on a
+      desktop-only repo, or `acceptEdits` if a repo chose that) is preserved unchanged; only
+      absence gets filled with `auto`.
+    - **The widened autoMode.allow ruling** (Dan, 2026-09-15, issue 245) supersedes the 2026-09-14
+      acceptEdits ruling and the narrow prose rules that followed it. Recorded on master in
+      `docs/cloud-permission-posture-2026-09-15.md`; the 2026-09-14 doc is retained and marked
+      superseded so history is legible.
     - Why here and not at the account or the environment: cloud sessions read only the repo. The
       claude.ai account-level plugin sync returns zero plugins for the account even with the plugin
       enabled there (`plugins_sync_no_changes count:0` in the session diag log), and the cloud
@@ -294,6 +306,7 @@ whole install; steps 1–7 are idempotent but re-running them churns files for n
 | 16 | 2026-08-27 | Finish the drift-free artifact by dropping the generation-time header (claude-dotfiles issue 26). v14 stabilized the body but the header line still read `_Generated <iso> at commit <sha> ...`, so two back-to-back runs of `build-dashboard.js` on unchanged repo + tracker state produced two different files: the timestamp always moved, and the sha moved whenever HEAD did for unrelated reasons. `build-dashboard.js` now emits `_Generated by scripts/build-dashboard.js (CI: dashboard.yml). Do not edit by hand._` — no timestamp, no sha — and the now-unused `sha` constant is deleted. Same input, same output, byte-identical, so the `git diff --quiet` guard fires only on real content movement. **Same step, patch surgically** — the fix is one call-site and one deleted `const`; keep the repo-local `CONFIG` block intact | step 3 (patch `scripts/build-dashboard.js`: delete the `const sha = ...` line and swap the header line to the timestamp-free form) |
 | 17 | 2026-09-09 | `.claude/settings.json` gains `extraKnownMarketplaces` + `enabledPlugins`, so a cloud session (claude.ai/code) installs the `aac-skills` plugin at startup. Without it a cloud session has none of these skills: the claude.ai account-level plugin sync returns zero plugins for the account (`plugins_sync_no_changes count:0` in the session diag log), and the cloud environment setup script runs before the session's git credentials exist, so `claude plugin marketplace add` fails there on the private clone. Verified in a cloud container (claude-dotfiles#100): a fresh startup with only these two keys cloned the marketplace and loaded all 56 skills plus the plugin's SessionStart hook. **Merge, never overwrite** — repo copies carry `permissions` (aac-bill-intake, aac-contract-builder) and `hooks` (aac-sales-cockpit, claude-dotfiles); `templates/add-cloud-plugin.js` adds the two keys and leaves the rest. **Sweep already performed 2026-09-09** on all eight active repos (claude-dotfiles#100, aac-bill-intake#583, aac-sales-commissions#45, aac-routines#154, zoho-source-of-truth#81, aac-contract-builder#189, aac-message-board#15, aac-sales-cockpit#593); only the marker bumps remain | step 16 (`node templates/add-cloud-plugin.js <repo>` where the keys are missing — a no-op on the eight above; bump the marker) |
 | 18 | 2026-09-14 | `ticket-fleet` becomes a team skill served by the `aac-skills` plugin (`aac-skills/ticket-fleet/ticket-fleet.js` in `claude-dotfiles`), and the harness stops copying its own `.claude/workflows/ticket-fleet.js`. One script now serves local and cloud sessions - it picks between the `gh` CLI and the GitHub MCP tools at run time (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH). The three drifted copies before v18 (`.claude/workflows/ticket-fleet.js` in `claude-dotfiles`, `orchestrator/ticket-fleet-cloud.js`, and `agents/skills/project-harness/templates/ticket-fleet.js`) are removed. Together the merged script now carries `runId` from args, `defaultBranch`, `keepOpen` (Refs vs Closes in the PR body), and the MCP/gh instrument switch — none of which the harness template ever had at once. **The plugin pointer is step 16; step 15 is now "the fleet is served by the plugin"** — a repo needing a forked script keeps its own `.claude/workflows/ticket-fleet.js` and invokes it by name (aac-routines' auth/cleanup phases and aac-cockpit's `PROMPT_CONTRACT` are the two known forks) | step 15 (delete the repo's `.claude/workflows/ticket-fleet.js` UNLESS it carries local extensions; step 16 puts the plugin pointer in `.claude/settings.json` so `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` resolves) |
+| 19 | 2026-09-15 | Widened `autoMode.allow` ruling (Dan, 2026-09-15, issue 245) reaches every harnessed repo via step 16. `templates/claude-settings.json` gains `permissions.defaultMode: auto` + a blanket allow list (`Bash(*)`, `Edit`, `Write`, `mcp__github__*`) and a single `autoMode.allow` prose entry that sanctions **every action an unattended session takes, destructive and irreversible included** — across every classifier category (Self-Modification, Data Exfiltration, Exfil Scouting, External System Writes, Destructive Operations, Irreversible Operations, Credential Handling and any successor). `templates/add-cloud-plugin.js` now merges four keys instead of two: it fills `permissions.defaultMode` only if absent (never downgrades an existing `bypassPermissions` / `acceptEdits`), unions the allow list, and prepends the ruling into `autoMode.allow` if not present. Idempotent verified against empty and partial fixtures. Supersedes the 2026-09-14 acceptEdits ruling (`docs/cloud-permission-posture-2026-09-14.md`) and the narrow prose rules that followed it; the 2026-09-14 doc is retained marked-superseded and the successor lives at `docs/cloud-permission-posture-2026-09-15.md`. **Delivered by issue #218 across every harnessed repo** | step 16 (`node templates/add-cloud-plugin.js <repo>` on every harnessed repo — idempotent no-op on the eight already at v17/v18 for the marketplace keys but WILL add the widened rules; bump the marker) |
 
 A row can mean "re-copy a file you already have". The marker answers *what a repo lacks*, and a
 template that changed is something the repo lacks just as much as a file it never had — so bump the

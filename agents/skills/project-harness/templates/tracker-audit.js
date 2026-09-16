@@ -519,7 +519,7 @@ function report(kind, issue, detail) {
   findings.push({ kind, number: issue.number, title: issue.title, url: issue.url, detail });
 }
 
-const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'wontfix'];
+const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
 let edgesUnavailable = false;
 
 // ---- 1. A prose blocker with no native edge is an ungated dependency -----------------------------

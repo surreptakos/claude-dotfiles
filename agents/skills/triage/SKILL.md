@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-14T22:40:41Z"
-  previous-modified: "2026-09-02T00:14:41Z"
-  revision: "2"
-  content-sha: "69f83bc6f1b7"
+  modified: "2026-09-15T22:34:24Z"
+  previous-modified: "2026-09-14T22:40:41Z"
+  revision: "3"
+  content-sha: "1c3b555ebb59"
 ---
 
 # Triage
@@ -33,12 +33,13 @@ Two **category** roles:
 - `bug` — something is broken
 - `enhancement` — new feature or improvement
 
-Five **state** roles:
+Six **state** roles:
 
 - `needs-triage` — maintainer needs to evaluate
 - `needs-info` — waiting on reporter for more information
 - `ready-for-agent` — fully specified, ready for an AFK agent
-- `ready-for-human` — needs human implementation
+- `ready-for-local-agent` — fully specified, but the next step needs the desktop's live tree or a proxy-blocked capability, so a cloud container cannot do it — an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container
+- `ready-for-human` — reserved for a person's judgment, credential or sign-off; a step a local session can perform never carries `ready-for-human`
 - `wontfix` — will not be actioned
 
 For a PR, the same states read against the attached code: `ready-for-agent` means a brief is attached and an agent should take the next step on the diff; `ready-for-human` means it's ready for a human to merge.
@@ -47,7 +48,7 @@ Every triaged issue should carry exactly one category role and one state role. I
 
 These are canonical role names — the actual label strings used in the issue tracker may differ. The mapping should have been provided to you - run `/setup-matt-pocock-skills` if not.
 
-State transitions: an unlabeled issue normally goes to `needs-triage` first; from there it moves to `needs-info`, `ready-for-agent`, `ready-for-human`, or `wontfix`. `needs-info` returns to `needs-triage` once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
+State transitions: an unlabeled issue normally goes to `needs-triage` first; from there it moves to `needs-info`, `ready-for-agent`, `ready-for-local-agent`, `ready-for-human`, or `wontfix`. `needs-info` returns to `needs-triage` once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
 
 ## Invocation
 
@@ -82,7 +83,8 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
 5. **Apply the outcome:**
    - `ready-for-agent` — post an agent brief comment ([AGENT-BRIEF.md](AGENT-BRIEF.md)).
-   - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing).
+   - `ready-for-local-agent` — same structure as an agent brief, but name the live-tree edit or proxy-blocked capability that keeps a cloud container from taking it (an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep needing a project-scoped `gh` token, or an edit the auto-mode classifier blocks). A desktop session can pick it up.
+   - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). A step a local session can perform never carries `ready-for-human`.
    - `needs-info` — post triage notes (template below).
    - `wontfix` — close, with the comment depending on *why*:
      - **Already implemented** — the change already exists in the codebase. Point to where it lives; do **not** write to `.out-of-scope/` (that KB is for *rejected* requests, not built ones).
