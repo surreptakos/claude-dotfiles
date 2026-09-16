@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T00:22:54Z"
-  previous-modified: "2026-09-15T22:39:49Z"
-  revision: "9"
-  content-sha: "06f70f1f8b23"
+  modified: "2026-09-16T14:20:27Z"
+  previous-modified: "2026-09-16T00:22:54Z"
+  revision: "10"
+  content-sha: "aa11060e3fb4"
 ---
 
 # ticket-fleet
@@ -105,6 +105,13 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   session** heading; the delivery moves the label to `ready-for-local-agent` unless the
   remaining steps are genuinely a person's judgment, credential or sign-off, in which
   case the label is `ready-for-human`. It never claims an owner step was done.
+
+The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
+fleet handoff (a "Remaining for a local session" or "Remaining for a person" section and the
+Claude Code footer) with no owner comment after it. Such a ticket is parked, not run - no lane
+starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
+Together with the relabel that is what stops a second wave repeating a handoff nobody has
+answered yet (issue 266).
 
 ## Branch names
 
