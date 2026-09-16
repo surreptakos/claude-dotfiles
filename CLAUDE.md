@@ -35,18 +35,19 @@ mirror and the plugin all say the same thing. Never edit the four by hand and ne
 make a check pass: the hash is what makes the dates believable. The previous text of any skill
 is `git log -p -- <skill>/SKILL.md`; the stamp tells you it is there to look for.
 
-After editing anything under `aac-skills/` — or under the `agents/skills/` mirror — on a branch
-with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`) fails the branch:
+After editing anything under `aac-skills/` — or under the `agents/skills/` or `claude/skills/`
+mirrors — on a branch with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`)
+fails the branch:
 
 ```bash
-python3 tools/skill-stamps.py stamp aac-skills agents/skills
+python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills
 python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 ```
 
 The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`; `--home`
 puts the owner's path back where the mirror holds `__USERHOME__` tokens, so the payload matches
 one built on that machine. CI checks exactly that: a rebuild from the mirror must reproduce the
-committed payload.
+committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
 
 ## Layout
 
