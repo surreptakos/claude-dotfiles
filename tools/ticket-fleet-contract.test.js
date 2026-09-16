@@ -76,7 +76,7 @@ test('the plugin-served script enforces the same contract this module describes'
   assert.match(src, /throw contractError\(/, 'every required-arg failure must go through contractError');
   assert.ok(!/throw new Error\('args\./.test(src), 'no bare "args.X is required" throw may survive');
   assert.match(src, /invocationId === runId/, 'the script must refuse invocationId equal to runId');
-  assert.match(src, /pr-check:#\$\{t\.number\}@\$\{invocationId\}/, 'invocationId must key the open-PR guard');
+  assert.match(src, /open-pr-scan@\$\{invocationId\}/, 'invocationId must key the open-PR scan (issue 430)');
   assert.match(src, /required: \['candidateNumbers', 'tickets'/, 'SCOUT must require candidateNumbers');
   assert.match(src, /'kindReason', 'discoveryTriage', 'handoffPending'\]/, 'SCOUT tickets must require discoveryTriage and handoffPending');
 });

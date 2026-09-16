@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T22:49:33Z"
-  previous-modified: "2026-09-16T22:00:52Z"
+  modified: "2026-09-16T22:50:32Z"
+  previous-modified: "2026-09-16T22:12:54Z"
   revision: "18"
-  content-sha: "d9036d617e8e"
+  content-sha: "d7759d9f66f6"
 ---
 
 # ticket-fleet
@@ -168,8 +168,9 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `runId` (required, string): caller-minted unique token, kept the SAME across a resume. Any
   short unique string; the branch names embed it as `wf_<runId>-w<workerIndex>`.
 - `invocationId` (required, string): a DIFFERENT fresh token per launch, resume included. It is
-  spliced into the open-PR guard's prompt and label so a resumed run re-asks the tracker instead
-  of replaying a cached "no PR" answer (issue 291); the script refuses it when it equals `runId`.
+  spliced into the `open-pr-scan@<invocationId>` prompt and label so a resumed run re-asks the
+  tracker instead of replaying a cached "no PR" answer (issue 291); the script refuses it when it
+  equals `runId`.
 - `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
   takes exactly those tickets regardless of label or state; otherwise it lists open tickets
   with `args.label`.
@@ -241,8 +242,9 @@ A ticket with an entry skips its **attempt-1** implementer or prober entirely - 
 result is used as-is and the reuse is logged (`reusing prior implementer result from
 args.priorImpl (branch ...)`). Everything downstream is unchanged: the verifier still runs
 blind against the branch, and attempt 2+ re-implements or re-probes normally, so a reused
-branch the verifier refutes is retried exactly as a fresh one would be. The pre-loop open-PR
-check still runs first, so a ticket already delivered is skipped before the entry is read.
+branch the verifier refutes is retried exactly as a fresh one would be. The Scout-phase open-PR
+scan still runs first, so a ticket handed in from a dead run that already has a PR is dropped
+before the entry is read.
 
 The values come from the dead run's `journal.jsonl`, which carries one `result` line per
 agent label - `impl:#<N>.1` for the code lane, `probe:#<N>.1` for the probe lane. Take the
@@ -360,6 +362,19 @@ Claude Code footer) with no owner comment after it. Such a ticket is parked, not
 starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
 Together with the relabel that is what stops a second wave repeating a handoff nobody has
 answered yet (issue 266).
+
+## A ticket that already has a PR never enters the wave
+
+One `open-pr-scan@<invocationId>` agent runs in the **Scout** phase, after blocker state and before
+wave selection. It lists the repo's open PRs once through the instrument and reports which
+candidate numbers have one whose head ref starts with `agent/issue-<N>-`; those candidates are
+dropped, so the `maxTickets` cap fills with tickets that will actually run and the drops are named
+in the run result under `skippedOpenPR` with their PR urls. It used to be the first agent of every
+code lane instead: twelve tickets meant twelve agents asking for the same list, and the ticket with
+a PR was selected and then skipped inside its lane, burning a wave slot while a runnable candidate
+sat unselected (issue 430). An unusable answer - retry cap, empty output - is read as "no candidate
+has an open PR" for the whole wave and logged once; the worst case is a duplicate PR a human
+closes, which is the trade the per-lane check made too.
 
 ## Blocker state is read, not believed
 

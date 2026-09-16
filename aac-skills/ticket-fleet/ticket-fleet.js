@@ -158,14 +158,14 @@ if (!cfg.runId) throw contractError(' and the launcher declared v2 but passed no
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- per-invocation freshness for the resume guard (issue 291) ----
-// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR guard in
-// runCodeLane below needs the opposite - the tracker as it is right now. It has to ask an agent
+// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR scan in
+// the Scout phase below needs the opposite - the tracker as it is right now. It has to ask an agent
 // (a workflow script has no filesystem, shell or network of its own), and the runtime replays
 // cached agent results on resume, so under a stable cache key the guard replays the {found:false}
 // it recorded before any PR existed and the ticket is implemented, verified and delivered a
 // second time. The freshness therefore arrives through args, exactly like runId: the caller mints
-// a NEW invocationId on EVERY launch, resume included. It is spliced into the pr-check prompt and
-// label and nowhere else, so two invocations of the same runId ask that one question under
+// a NEW invocationId on EVERY launch, resume included. It is spliced into the open-pr-scan prompt
+// and label and nowhere else, so two invocations of the same runId ask that one question under
 // different cache keys while every other stage keeps its cache and the branch names stay put.
 const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 if (!invocationId) throw contractError(' and the launcher declared v2 but passed no args.invocationId: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`), which busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291).')
@@ -833,7 +833,7 @@ Return structured output only.`,
 )
 // [FLEET-SCOUT-GATE-START]
 // A scout whose listing matched nothing is prone to route around the dead end and hand back every
-// open ticket it can find; the fleet would then spawn pr-check and implementer agents for work
+// open ticket it can find; the fleet would then spawn open-PR scans and implementer agents for work
 // nobody asked for (issue 298). The prompt says an empty listing is a valid answer - this is the
 // mechanical half: only tickets whose number was in the candidate set (the label listing, or the
 // explicitly named numbers) survive. Pure counterpart: confineToCandidates in
@@ -927,6 +927,87 @@ These are blocker edges named by tickets this run is about to select from, so th
 // [FLEET-BLOCKER-STATE-END]
 const resolvedTickets = await resolveBlockerStates(scoutTickets)
 
+// ---- open-PR filter: one listing per launch, before wave selection (issue 430) ----
+// The same question the code lane used to ask per ticket, asked once for the whole candidate set.
+// Per lane it cost an agent per ticket AND a wave slot: a ticket with an open PR was selected,
+// then skipped inside its lane, so the wave ran fewer real tickets than `maxTickets` while
+// runnable candidates sat unselected, and the blocker-state and discovery-triage chaining spent
+// effort on tickets that were then skipped anyway. Here every candidate that already has an open
+// `agent/issue-<N>-` PR is dropped BEFORE selectWave, so the cap fills with tickets that will run,
+// and the dropped ones are named in the run result under `skippedOpenPR` with their PR urls.
+// The freshness rule of issue 291 is unchanged and still load-bearing: this is an agent() call and
+// the runtime replays cached agent results on resume, so `invocationId` (fresh on EVERY launch,
+// resume included) is spliced into the label and the prompt. That, and nothing else, is what makes
+// a resumed run re-ask the tracker instead of replaying the {found:false} it recorded before any
+// PR existed. Keep it in both.
+// An unusable answer (retry cap, empty output) is read as "no candidate has an open PR" for the
+// whole wave and logged once: the worst case is a duplicate PR a human closes, the same trade the
+// per-lane check made. It runs before `priorImpl`/`priorProbe` is read, so a ticket handed in from
+// a dead run that already has a PR is dropped here too.
+// [FLEET-OPEN-PR-START]
+const OPEN_PR_SET = { type: 'object', required: ['withOpenPr'], properties: {
+  withOpenPr: { type: 'array', description: 'one entry per CANDIDATE number that has an open PR whose head ref starts with agent/issue-<number>- ; [] when none does', items: { type: 'object', required: ['number', 'prUrl'], properties: {
+    number: { type: 'integer', description: 'the candidate ticket number the open PR belongs to' },
+    prUrl: { type: 'string', description: "that PR's html_url" },
+    branch: { type: 'string', description: "that PR's head ref" },
+  } } },
+} }
+function applyOpenPrs(tickets, withOpenPr) {
+  const found = new Map()
+  for (const p of (Array.isArray(withOpenPr) ? withOpenPr : [])) {
+    const n = parseInt(p && p.number, 10)
+    const url = String((p && p.prUrl) || '').trim()
+    // A number with no url is not evidence of anything: dropping a ticket on it would leave the
+    // run report unable to point anyone at the PR that stopped it. Only a named PR skips a ticket.
+    if (n > 0 && url) found.set(n, { prUrl: url, branch: String((p && p.branch) || '').trim() || null })
+  }
+  const list = Array.isArray(tickets) ? tickets : []
+  const skipped = []
+  const kept = list.filter(t => {
+    const hit = found.get(parseInt(t && t.number, 10))
+    if (!hit) return true
+    skipped.push({ ticket: parseInt(t.number, 10), prUrl: hit.prUrl, branch: hit.branch })
+    return false
+  })
+  return { tickets: kept, skipped }
+}
+async function dropTicketsWithOpenPr(tickets) {
+  const list = Array.isArray(tickets) ? tickets : []
+  const numbers = [...new Set(list.map(t => parseInt(t && t.number, 10)).filter(n => n > 0))]
+  if (!numbers.length) return { tickets: list, skipped: [] }
+  const listSteps = instrument === 'mcp'
+    ? `There is no gh CLI here: call mcp__github__list_pull_requests ONCE with state="open" and per_page=100, and read head.ref (each PR's head branch name) off the entries it returns.`
+    : `Steps:
+1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
+2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\` ONCE. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
+3. Read head.ref off each entry it returns.`
+  let found = null
+  try {
+    found = await agent(
+      `List this repository's OPEN pull requests ONCE, then report which of these candidate tickets already has one: ${numbers.map(n => '#' + n).join(', ')}.
+Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
+${listSteps}
+A candidate number N counts as having an open PR when some open PR's head ref starts with agent/issue-N- (the branch shape this fleet pushes). Return one withOpenPr entry per such candidate - {number: N, prUrl: <that PR's html_url>, branch: <that PR's head ref>}, the first match where several exist - and no entry at all for a candidate nothing matched. When no candidate matches, return withOpenPr: [].
+Report only numbers from the candidate list above. Make no repository change, no commit, no comment, no PR. Return structured output only.`,
+      { label: `open-pr-scan@${invocationId}`, phase: 'Scout', schema: OPEN_PR_SET, model: cfg.deliverModel, effort: 'low' }
+    )
+  } catch (err) {
+    log(`${unusableReason('open-pr-scan', (err && err.message) || err)} - proceeding as if no candidate has an open PR (worst case a duplicate PR a human closes, issue 430).`)
+    return { tickets: list, skipped: [] }
+  }
+  if (!found || !Array.isArray(found.withOpenPr)) {
+    log('open-pr-scan came back with no list - proceeding as if no candidate has an open PR (worst case a duplicate PR a human closes, issue 430).')
+    return { tickets: list, skipped: [] }
+  }
+  const applied = applyOpenPrs(list, found.withOpenPr)
+  for (const s of applied.skipped) log(`#${s.ticket}: open PR ${s.prUrl} already exists - dropped before wave selection, so it burns no wave slot (issue 430).`)
+  if (!applied.skipped.length) log(`open-pr-scan: none of the ${numbers.length} candidate(s) has an open agent/issue-<N>- PR.`)
+  return applied
+}
+// [FLEET-OPEN-PR-END]
+const openPrFilter = await dropTicketsWithOpenPr(resolvedTickets)
+const skippedOpenPR = openPrFilter.skipped
+
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
 // wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose latest
 // comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
@@ -941,7 +1022,7 @@ const selectWave = (tickets, maxTickets) => {
   return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) }
 }
 // [FLEET-WAVE-SELECT-END]
-const selection = selectWave(resolvedTickets, cfg.maxTickets)
+const selection = selectWave(openPrFilter.tickets, cfg.maxTickets)
 const wave = selection.wave
 const droppedBlocked = selection.blocked.map(t => ({ ticket: t.number, blockedBy: t.blockedBy }))
 const droppedCap = selection.overCap.length
@@ -1165,14 +1246,9 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // [FLEET-HUMAN-LANE-END]
 
 // ---- Implement + blind Verify per ticket, no barrier between tickets ----
-// Pre-loop idempotence guard for resume (issue 150). Fetches the open-PR state from the tracker
-// and shapes it into a small stable structured answer so the code lane can early-return before
-// spawning any impl/verify/deliver agent. See runCodeLane below.
-const PR_CHECK = { type: 'object', required: ['found'], properties: {
-  found: { type: 'boolean' },
-  prUrl: { type: 'string' },
-  branch: { type: 'string' },
-} }
+// The open-PR idempotence guard (issues 150, 291) is no longer here: it is one Scout-phase
+// listing for the whole candidate set, above, so a ticket that already has a PR never reaches
+// a lane and never occupies a wave slot (issue 430).
 
 // ---- the Deliver prompt (shared by the code lane and the finish mode, issue 405) ----
 // One text, two callers: the code lane delivers a branch it has just verified, and the finish mode
@@ -1298,55 +1374,13 @@ async function runFinish(journal) {
 // runCodeLane is bounded by the FLEET-CODE-LANE markers so the lockstep test in
 // tools/ticket-fleet-branch.test.js can extract this function verbatim and drive
 // it with a mocked `agent`, asserting that impl/verify/deliver agents are NOT
-// invoked when the pre-loop PR check reports an open PR (issue 150 acceptance).
+// invoked in the shapes the tests below pin. The open-PR guard is NOT here: it runs once in
+// the Scout phase for the whole candidate set (issue 430).
 // [FLEET-CODE-LANE-START]
 const runCodeLane = async (t, workerIndex) => {
-  // Idempotence guard for resume (issue 150), kept fresh across resumes (issue 291). If the
-  // tracker already has an open PR whose head ref matches this ticket's branch shape, skip the
-  // whole ticket: no impl, verify or deliver agent is spawned. The observed failure mode
-  // (wf_911fa64d-102, run id 6aa46942): a resumed run served impl:#97.1 from cache, but
-  // verify:#97.1 and deliver:#97 ran under changed cache keys, re-verified the ticket, and
-  // opened PR 145 while PR 137 was still open. What moved those keys inside the workflow runtime
-  // is opaque here; the fix short-circuits the pipeline body with this pre-loop tracker check,
-  // before any of the drifting keys are hit.
-  // The guard is itself an agent() call, so it needs its own cache key to move: invocationId
-  // (fresh on every launch, resume included - see the block above) is spliced into both the
-  // prompt and the label, which is what stops a resume replaying the {found:false} recorded
-  // before the PR existed. Keep it in both; a key derived from runId alone is stable across a
-  // resume and the guard becomes a cached lie.
-  const prCheckSteps = instrument === 'mcp'
-    ? `There is no gh CLI here: use mcp__github__list_pull_requests with state="open" and per_page=100.
-Filter the returned array to entries whose head.ref (the branch name of the PR's head) starts with agent/issue-${t.number}-.`
-    : `Steps:
-1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
-2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\`. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
-3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
-  // Wrapped (aac-routines issue 270): a pr-check that blows the StructuredOutput retry cap must
-  // not null the whole ticket. An unusable answer is treated as "no open PR" - the worst case is
-  // a duplicate PR, which a human can close; the alternative is a ticket that never runs and
-  // never appears in the run report.
-  let openPR = null
-  try {
-    openPR = await agent(
-    `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
-Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
-${prCheckSteps}
-If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
-Make no repository change, no comment, no PR. Return structured output only.`,
-    { label: `pr-check:#${t.number}@${invocationId}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
-    )
-  } catch (err) {
-    log(`${unusableReason(`pr-check:#${t.number}`, (err && err.message) || err)} - proceeding as if no open PR exists.`)
-    openPR = null
-  }
-  if (openPR && openPR.found) {
-    log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)
-    return {
-      ticket: t.number, done: true, kind: 'code', branch: openPR.branch || null,
-      verdict: { pass: true, evidence: 'existing open PR ' + openPR.prUrl, failures: [] },
-      prUrl: openPR.prUrl, commentUrl: null, discoveries: [],
-    }
-  }
+  // No open-PR check here (issue 430): a candidate whose `agent/issue-<N>-` PR is already open
+  // was dropped in the Scout phase, before wave selection, so this lane only ever runs tickets
+  // that have no PR. The guard's freshness rule (issue 291) moved with it.
   let lastVerdict = null, impl = null, branch = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
@@ -1776,6 +1810,9 @@ return {
   skippedBlocked: droppedBlocked,
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,
+  // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
+  // (issue 430): they never entered the wave, so the cap ran this many real tickets more.
+  skippedOpenPR,
   skippedOverCap: droppedCap,
   recordCommand: RECORD_COMMAND,
 }
