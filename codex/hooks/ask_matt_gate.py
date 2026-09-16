@@ -1452,7 +1452,9 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     can — but a skipped step stops being invisible.
     """
     try:
-        text = sys.stdin.read() if (not path or path == "-") else io.open(path, encoding="utf-8").read()
+        # utf-8-sig: Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes a BOM, and a BOM that
+        # survives into a violation message crashed the cp1252 console print (restore test, 2026-09-16).
+        text = sys.stdin.read() if (not path or path == "-") else io.open(path, encoding="utf-8-sig").read()
     except OSError as error:
         print(f"caveman lint could not read draft: {error}", file=sys.stderr)
         return 2
@@ -1537,4 +1539,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A cp1252 console cannot print every character a draft may contain; never let the lint
+    # die on the report instead of reporting.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     raise SystemExit(main())
