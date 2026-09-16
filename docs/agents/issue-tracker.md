@@ -16,7 +16,8 @@ Infer the repo from `git remote -v` — `gh` does this automatically when run in
 ## From a cloud session (no GraphQL)
 
 A claude.ai/code or Cowork container reaches this tracker through the Anthropic proxy, which
-refuses two `gh` code paths (confirmed 2026-09-15, issue 163):
+refuses three `gh` code paths (first two confirmed 2026-09-15, issue 163; the third 2026-09-16,
+issue 416):
 
 - **Every GraphQL call** — `gh issue list`, `gh issue view` and the other `--json` spellings above
   — answers HTTP 403 with a message pointing at REST. Use `gh api repos/<owner>/<repo>/issues...`
@@ -25,6 +26,11 @@ refuses two `gh` code paths (confirmed 2026-09-15, issue 163):
   already say.
 - **Every REST call whose target repo is not attached to the session** answers HTTP 403 "not
   enabled for this session", with `add_repo` as the remedy.
+- **Every search path** — `gh api search/issues`, and `search/*` generally — answers HTTP 403
+  "sessions are bound to their configured repositories", even for the attached repo. There is no
+  search instrument to switch to: page
+  `gh api 'repos/<owner>/<repo>/issues?state=open&per_page=100&page=N'` one page at a time and
+  filter the result locally. Dedupe checks before filing an issue are the usual caller.
 
 `gh auth status` reports "The token in GH_TOKEN is invalid." in these containers while `gh api`
 calls against the attached repo succeed: the proxy, not `gh`'s own auth, is what gates access.
