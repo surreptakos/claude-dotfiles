@@ -233,6 +233,58 @@
 - Live-tree edit deferred to delivery/owner machine: the ~/.codex/hooks/ask_matt_gate.py source must be updated to match the committed codex/hooks/ask_matt_gate.py mirror. Hard rail forbids this worktree from writing to ~/.codex, so the branch carries only the repo mirror change. Owner path after merge to master: pull the repo on the owner machine, then run sync.ps1 -Mode pull (repo -> live) to propagate the new route line into ~/.codex/hooks/ask_matt_gate.py. The alternate direction (sync.ps1 -Mode push from a hand-edited live file) is the same content but originates from the owner's live edit. Either way, the delivery-stage AC 'live file and repo mirror match after sync push' and 'verified by starting a session and confirming the injected context names the spec route' can only be executed on the owner's desktop, not in this isolated worktree.
 - Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
 
+## Triage: run 6aa9c56e discoveries, waves 10 and 11 (issue 389)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 10 and 11 has a
+disposition below. As with waves 2/3, 4/5, 6/7 and 8/9, the bullets are not on master: they were
+committed to the run's own branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `f5d091d` "chore:
+fleet discoveries from run 6aa9c56e wave 10" (6 bullets) and `a4165eb` "…wave 11" (5). Read them with
+`git show f5d091d -- FOLLOW-UPS.md` and `git show a4165eb -- FOLLOW-UPS.md`; the W10-nn / W11-nn
+numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
+fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
+symbol or failure as an open ticket became a comment on that ticket, not a second ticket, and every
+open fleet PR from #304 to #388 was checked first.
+
+**The set has converged, and this is the run's last triage chore.** Wave 11 was the run's last report
+writer — there is no wave 12 — so waves 2 through 11 are now fully dispositioned and the next session
+need not file a sixth discovery-triage chore for run `6aa9c56e`. The pass filed **one** ticket, #390,
+matching the waves 8/9 pass's one where waves 6/7 filed seven and waves 4/5 filed three. Nine of the
+eleven bullets are the two implementers' own scope, assumption and merge-order records, which is what
+a converged tail looks like: wave 10 is the waves 8/9 triage chore reporting on itself and wave 11 is
+#386's implementer reporting on itself. Beyond its open PRs the only thing the run still owes master
+is #378, the rescue of its own discovery commits — now ten of them.
+
+Ticket filed: #390 (`proseBlockers()` in `tools/tracker-audit.js` reads every `#N` under
+`## Blocked by` as a hard blocker, so a merge-order preference has to be deleted from the
+machine-readable half of the tracker or raise a false `ungated-dependency` finding).
+
+Comments added: [#376](https://github.com/surreptakos/claude-dotfiles/issues/376#issuecomment-5695075371),
+[#378](https://github.com/surreptakos/claude-dotfiles/issues/378#issuecomment-5695074541).
+
+Nothing was fixed outside a ticket in this pass, and no ticket body was edited. `node
+tools/tracker-audit.js` reaches a verdict and exits 0 with 0 drift findings, plus the one pre-existing
+`stale-premise?` advisory on #358 — unchanged before and after #390, so the new ticket introduced no
+drift. Its `## Blocked by` says "None. Can start immediately." and the PR #372 ordering note sits in
+"What to build", exactly the workaround W10-04 is filed to remove.
+
+### Wave 10 (`f5d091d`, 6 bullets)
+
+- **W10-01** "The 20 bullets issue 385 names are NOT on master…" — Comment on #378: the table is now ten commits and 200 bullets (`f5d091d` 6 and `a4165eb` 5 on top of the eight/189 the waves 8/9 pass recorded), plus `d56864f`, and wave 11 being the run's last makes ten the final count.
+- **W10-02** "Issue #378's acceptance criterion 3 says the W2- through W7- numbering must still resolve…" — Comment on #378, in the same comment as W10-01: with five ledgers the criterion should read `W2-` … `W11-`. Recorded there rather than edited into the body, for the reason W10-02 itself gives.
+- **W10-03** "The Edit tool silently normalized FOLLOW-UPS.md's single trailing CR to LF…" — Comment on #376, **with a correction**: the file *is* pinned — `.gitattributes:15` is a total `* -text` rule and `git check-attr text -- FOLLOW-UPS.md` reports `text: unset` — so the `.gitattributes` entry the bullet proposes is a no-op. Git converts nothing here; the normalization is a working-copy write no attribute can reach. The byte belongs in #376's ruling, which is deciding this file's shape anyway. This pass appended bytes rather than editing, so the CR is intact.
+- **W10-04** "tools/tracker-audit.js's ungated-dependency check fires on any new ticket whose '## Blocked by' section names an issue number…" — **#390**. Not a duplicate of #364 (PR #372): that ticket bounds the section so a provenance footer stops reading as a blocker, this one gives the section a non-gating vocabulary so a merge-order preference can be stated at all. Both rewrite `proseBlockers()`, so #390 names #372 as merge order rather than a block.
+- **W10-05** "ASSUMPTION: the dedupe rule from issue 319 ('same file, symbol or failure') was applied at the level of the failing symbol…" — No action: an assumption record for the waves 8/9 pass, taken the same way here (see W10-04). The conflict it predicts between PR #383 and #386 is already named in #386's body, and PR #388 is open against it.
+- **W10-06** "The Bash worktree-isolation guard's refusal is shape-sensitive…" — No action: already #375 (PR #382). Confirmed a third time in this pass — a `for` loop issuing paginated `gh api` calls was refused with no git in the command — but that is the first shape #375's body already lists, so the ticket needs no fourth comment.
+
+### Wave 11 (`a4165eb`, 5 bullets)
+
+- **W11-01** "Change is confined to …/.github/workflows/skill-stamps.yml: a new step `- name: Stamps current on agents/skills`…" — No action: an implementation record for #386, carried by PR #388; it names no defect.
+- **W11-02** "Ambiguity resolved (assumption stated): the ticket allows one combined check or per-tree checks…" — No action: the reading #386's criteria most directly support, and the limitation behind it (`skill-stamps.py`'s report prints the skill name, never its tree) is what the two named steps route around rather than a defect the ticket left open.
+- **W11-03** "The mirror step carries `if: ${{ !cancelled() }}` so it still reports when the aac-skills step already failed…" — No action: an implementation record for #386, and a deliberate addition PR #388 describes; a both-trees-drifted branch reporting both trees in one run is strictly better than the literal wording.
+- **W11-04** "Pre-existing, not fixed: FOLLOW-UPS.md line 126 is stale…" — No action, and **verified**: `agents/skills/to-issues/SKILL.md` and `agents/skills/to-prd/SKILL.md` both carry rev 1 stamps dated `2026-09-14T13:48:41Z`, and `python3 tools/skill-stamps.py check agents/skills --home 'C:\Users\Dan'` exits 0 over all 38 mirror skills on master today. Line 126 stays as written: this file is a dated append-only log of what each agent found when it looked, not a set of live claims, and #376 is the open ticket on what to do about that.
+- **W11-05** "Committed with `git commit --no-verify`: .githooks/pre-commit runs tests/restore-test.ps1…" — No action: already #211 / #213. The same constraint applied to this commit.
+- Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
+
 ## Triage: run 6aa9c56e discoveries, waves 8 and 9 (issue 385)
 
 Every discovery bullet the run `6aa9c56e` report writers appended for waves 8 and 9 has a disposition
