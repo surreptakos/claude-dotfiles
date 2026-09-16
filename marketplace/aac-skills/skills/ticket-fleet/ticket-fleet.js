@@ -107,11 +107,12 @@ const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n =>
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
-  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason'], properties: {
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'discoveryTriage'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
     keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     kind: { type: 'string', enum: ['code', 'probe', 'human'], description: 'which lane runs this ticket: code = repository change; probe = resolves by quoting command output/research/evidence in a comment, no repository change asked for; human = labelled ready-for-human or the body says the owner performs the steps' },
     kindReason: { type: 'string', description: 'one line: the words in the ticket that decided the kind' },
+    discoveryTriage: { type: 'boolean', description: 'true when the ticket is a discovery-triage chore: it asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run\'s follow-ups, a review list) to be turned into tracker items - tickets filed, doc fixes landed, noise struck. Two of these in one wave file the same finding twice if they run concurrently, so the fleet chains them.' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -160,6 +161,13 @@ const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], prope
   commented: { type: 'boolean' }, commentUrl: { type: 'string' },
 } }
 
+// Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
+// #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
+// stops them racing; this brief is the other half, and it travels with any discovery-triage ticket
+// so a lone chore also dedupes against what earlier waves already filed.
+const dedupeBrief = (t) => t.discoveryTriage ? `
+Discovery-triage dedupe rail: this ticket turns findings into tracker items. Before creating ANY ticket, search the OPEN issues for the same file, symbol or failure - by what the finding is about, not just its wording - and list them fresh at the moment you are about to file, not once at the start: another chore in this same wave may have filed one minutes ago. On a match, comment on that existing ticket with the new evidence instead of creating a second one, and record that comment's URL as the finding's outcome. File a new ticket only when no open ticket covers the finding.` : ''
+
 // ---- Scout ----
 phase('Scout')
 const scoutSource = explicitTickets.length ? rules.scoutExplicit(explicitTickets) : rules.scoutList(cfg.label)
@@ -172,6 +180,7 @@ const scout = await agent(
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
    - code: everything else.
+   Also set discoveryTriage: true when the ticket asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run's follow-ups, a review list) to be triaged into tracker items - tickets filed, doc fixes landed, noise struck - and false otherwise. Say in kindReason which words decided it.
 5. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs - never a glob if docs forbid it).
 6. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
 7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
@@ -203,7 +212,7 @@ const runProbeLane = async (t) => {
     probe = await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
-Criteria (verbatim):\n${t.criteria}${priorFindings}
+Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 Rules:
 - NEVER fabricate, guess or reconstruct output. Quote it exactly as printed, errors and noise included.
@@ -359,7 +368,7 @@ Make no repository change, no comment, no PR. Return structured output only.`,
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
 Repo map from scout:\n${scout.repoMap}
-Acceptance criteria (verbatim):\n${t.criteria}${priorFindings}
+Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
 Rules: one branch named ${branch}; commit your work; NEVER push, NEVER open a PR, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - pushing the branch, opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
 Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are read-only production paths - never write to them, never leave .bak files there; a change that would need a live-tree edit to land is committed to the branch only and named as a discovery.
@@ -422,12 +431,27 @@ Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Retur
 // the pipeline callback can build a collision-proof branch name without
 // relying on pipeline's callback signature to pass an index.
 const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
-const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
+const runWorker = async ({ ticket, workerIndex }) => {
   const t = ticket
   if (t.kind === 'probe') return await runProbeLane(t)
   if (t.kind === 'human') return await runHumanLane(t)
   return await runCodeLane(t, workerIndex)
+}
+// Discovery-triage chores are the one kind of ticket that writes to the tracker rather than to the
+// repository, so two of them running side by side cannot see each other's tickets and file the same
+// finding twice (issue 319). They go into ONE lane and run one after the other - the second reads a
+// tracker the first has already added to. Every other ticket still runs in parallel; a wave holding
+// at most one chore behaves exactly as before.
+const chores = workers.filter(w => w.ticket.discoveryTriage === true)
+const lanes = workers.filter(w => w.ticket.discoveryTriage !== true).map(w => [w])
+if (chores.length > 1) log(`${chores.length} discovery-triage chores in this wave (${chores.map(w => '#' + w.ticket.number).join(', ')}) - running them one after another so each sees the tickets the previous one filed.`)
+if (chores.length) lanes.push(chores)
+const grouped = await pipeline(lanes, async (lane) => {
+  const out = []
+  for (const w of lane) out.push(await runWorker(w))
+  return out
 })
+const results = (grouped || []).flat()
 
 // ---- Report: single writer, no append races ----
 phase('Report')

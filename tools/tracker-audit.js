@@ -216,6 +216,45 @@ function parseGithubSlug(remote) {
   return m ? { owner: m[1], name: m[2] } : null;
 }
 
+/** Stop words and qualifiers that do not change what a ticket is ABOUT. Two open tickets whose
+ *  titles differ only by these are the same finding filed twice — the shape issue 319 was filed
+ *  for: two discovery-triage chores ran in one fleet wave and each filed the `tools/tracker-audit.js`
+ *  short-fetch as its own ticket (#281 and #285), two minutes apart. */
+const TITLE_STOPWORDS = new Set(['a', 'an', 'the', 'still', 'again', 'also', 'yet', 'now', 'just', 'once', 'another', 'more']);
+
+/** Lowercase a title, drop punctuation, then drop the stop words above. Pure. Deliberately
+ *  conservative: it removes nothing that carries meaning, so a match is a strong signal rather
+ *  than a fuzzy one. */
+function normalizeTitle(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9#]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w && !TITLE_STOPWORDS.has(w))
+    .join(' ');
+}
+
+/** Group open issues by normalized title and return one entry per later member of each group:
+ *  `{ issue, duplicateOf, normalized }`, the lowest-numbered issue of the group being the one
+ *  the others duplicate. Pure — the caller decides how loudly to report it. */
+function duplicateTitleFindings(openIssues) {
+  const groups = new Map();
+  for (const i of Array.isArray(openIssues) ? openIssues : []) {
+    const key = normalizeTitle(i && i.title);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+  const out = [];
+  for (const [normalized, members] of groups) {
+    if (members.length < 2) continue;
+    const sorted = members.slice().sort((a, b) => a.number - b.number);
+    for (const later of sorted.slice(1)) out.push({ issue: later, duplicateOf: sorted[0], normalized });
+  }
+  return out;
+}
+
 // Test-only export of the pure predicates and REST normalizers. The rest of the file is a script
 // and only runs when this module is invoked directly, so `require('./tracker-audit.js')` from a
 // test does not shell out to gh or exit the process.
@@ -230,6 +269,8 @@ if (require.main !== module) {
     issuesOnly,
     closerPrsByIssue,
     parseGithubSlug,
+    normalizeTitle,
+    duplicateTitleFindings,
     landedCommits,
     landedFindings,
     paginate,
@@ -1004,6 +1045,21 @@ if (!LOG_REF) {
   }
 }
 
+// ---- 10. The same finding filed twice -----------------------------------------------------------
+// Advisory, and title-only: it cannot read two bodies and tell one finding from two. What it can see
+// is the shape issue 319 recorded — #281 and #285, filed two minutes apart by two discovery-triage
+// chores running in the same fleet wave, for one `tools/tracker-audit.js` short-fetch. A second
+// scout listed both as startable and two implementers built the same fix on two branches. Titles
+// that survive stop-word and qualifier stripping identically ("still", "again", "the") are that
+// collision, visible before the second implementer starts.
+duplicateTitleFindings(open).forEach((d) => {
+  report('duplicate-title?', d.issue,
+    'normalizes to the same title as open #' + d.duplicateOf.number + ' ("' + String(d.duplicateOf.title).slice(0, 60) +
+    '") once stop words and qualifiers (still, again, the) are stripped — both read as "' + d.normalized +
+    '". Two open tickets for one finding: read both, keep the one carrying the evidence, close the other ' +
+    'as a duplicate (gh issue close ' + d.issue.number + ' --reason "not planned"). Advisory only.');
+});
+
 // ---- Output ------------------------------------------------------------------------------------
 // Anything ending in '?' is advisory: reported, never fails the run. A check that cannot tell a
 // real problem from a shape it misreads must not be able to block anyone. (blocker-may-be-answered
@@ -1011,7 +1067,8 @@ if (!LOG_REF) {
 const ORDER = ['ungated-dependency', 'landed-but-open', 'blocker-may-be-answered',
                'closed-with-open-boxes', 'dangling-reference', 'untriaged', 'conflicting-triage',
                'board-says-done', 'not-on-board', 'unmilestoned', 'landed-but-open?',
-               'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?'];
+               'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?',
+               'duplicate-title?'];
 findings.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.number - b.number);
 
 console.log('Tracker audit — ' + REPO + ' (' + open.length + ' open, ' + issues.length + ' total)\n');

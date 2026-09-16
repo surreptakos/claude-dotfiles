@@ -239,7 +239,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules',
+    'instrument', 'rules', 'dedupeBrief',
     body + '\nreturn runCodeLane;'
   );
   const cfg = { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' };
@@ -249,7 +249,10 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
-  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  // The lane also embeds the discovery-triage dedupe brief (issue 319), which is empty for every
+  // ticket that is not a discovery-triage chore; stub it so the extracted body evaluates.
+  const dedupeBrief = () => '';
+  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules, dedupeBrief);
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
 }
