@@ -24,6 +24,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 
+/** A literal path inside a RegExp: Windows separators are regex escapes otherwise. */
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 const REPO_ROOT = path.resolve(__dirname, '..');
 const GUARD = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'editable-install-guard.js');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
@@ -76,7 +79,7 @@ test('a worktree that captures the editable install is repaired after the worktr
   // Exactly what `pip install -e .` run from that worktree leaves behind: one
   // interpreter, one pointer file, last writer wins.
   fs.writeFileSync(fx.pointer, path.join(wt, 'src') + '\n');
-  assert.match(importFromMain(fx).stdout, new RegExp(`^${wt}`), 'the repoint must actually take effect');
+  assert.match(importFromMain(fx).stdout, new RegExp(`^${escapeRegExp(wt)}`), 'the repoint must actually take effect');
 
   fx.git('worktree', 'remove', '--force', wt);
   const orphaned = importFromMain(fx);
@@ -96,7 +99,7 @@ test('a worktree that captures the editable install is repaired after the worktr
 
   const after = importFromMain(fx);
   assert.equal(after.status, 0, `import from the main checkout must work again: ${after.stderr}`);
-  assert.match(after.stdout, new RegExp(`^${fx.main}`), 'and it must resolve inside the main checkout');
+  assert.match(after.stdout, new RegExp(`^${escapeRegExp(fx.main)}`), 'and it must resolve inside the main checkout');
   fs.rmSync(fx.root, { recursive: true, force: true });
 });
 
