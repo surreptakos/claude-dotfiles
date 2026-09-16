@@ -968,9 +968,10 @@ was the one-command fix `tracker-audit` itself printed and nobody's ticket.
 ## Triage: run 6aa9c56e discoveries, waves 4 and 5 (issue 358)
 
 Every discovery bullet the run `6aa9c56e` report writers appended for waves 4 and 5 has a disposition
-below. As with waves 2 and 3, the bullets are not on master: they were committed to the run's own
-branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `b2ce4cd` "chore: fleet discoveries from run
-6aa9c56e wave 4" (26 bullets) and `d0b97b5` "…wave 5" (39 bullets). Read them with
+below. The bullets were committed to the run's own branch `claude/affectionate-maxwell-gqp5vw`
+(PR #276) as `b2ce4cd` "chore: fleet discoveries from run 6aa9c56e wave 4" (26 bullets) and
+`d0b97b5` "…wave 5" (39 bullets). That branch has since merged (`8eed2b2`), so both shas are
+reachable from master; when this ledger was written they were not. Read them with
 `git show b2ce4cd -- FOLLOW-UPS.md` and `git show d0b97b5 -- FOLLOW-UPS.md`; the W4-nn / W5-nn
 numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
 fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
