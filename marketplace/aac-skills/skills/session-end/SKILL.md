@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: '2026-09-16T15:32:13Z'
-  previous-modified: '2026-09-16T15:08:43Z'
-  revision: '6'
-  content-sha: e9e0c4246d70
+  modified: '2026-09-16T23:12:18Z'
+  previous-modified: '2026-09-16T15:32:13Z'
+  revision: '7'
+  content-sha: 70a774c1dfe1
 ---
 
 # Finish a session
@@ -144,50 +144,43 @@ step's `gh` spelling through the substitution table in the cloud section below):
    main checkout: `git worktree remove <path>` (add `--force` only if the tree is unclean and the
    user OKs discarding) **and** file a `ready-for-human` ticket carrying that exact command, since
    a printed command the session cannot run is a step it cannot finish.
-11. **Sweep the repo's stale branches, worktrees, and PRs** — session cleanup runs beyond this
-    session's own branch, because fleet attempts, prior sessions, and abandoned scratch trees
-    accumulate silently and no built-in check surfaces them. This is the branch/worktree/PR half of
-    archive-ready above.
+11. **Sweep this session's own branch and worktree — the repo-wide sweep is a job, not a step.**
+    Fleet attempts, prior sessions and abandoned scratch trees accumulate silently, but a session is
+    the wrong place to clear them: it runs *inside* a worktree, which cannot delete its own branch
+    and makes `git branch --merged` lie, and a container's auto-mode classifier refuses
+    `git push origin --delete` and `git branch -D` mid-sweep, so the cleanup used to end up as prose
+    in a reply nobody reads. Issue 474 moved that half to the **Stale ref sweep** workflow
+    (`.github/workflows/stale-ref-sweep.yml`, script `tools/stale-ref-sweep.js`): weekly plus
+    `workflow_dispatch`, it deletes every `agent/*`, `worktree-*` and `claude/*` ref it can prove
+    landed by patch-id, closes the PRs those refs superseded, and keeps ONE open `ready-for-human`
+    issue holding whatever needs a ruling — closing that issue itself once a run finds nothing.
 
-    Do it in this order (all commands run from the main checkout — a worktree cannot delete its
-    own branch and confuses `git branch --merged`):
+    So this step is three narrow things, all about **this session**:
 
-    a. **List foreign worktrees.** `git worktree list` shows every worktree; anything except
-       `main` and the current session's tree is a candidate for removal. For each, run
-       `git -C <path> status --short` first; a clean tree is safe to `git worktree remove --force`,
-       a dirty tree gets its diff shown to the user before removal. Windows quirk: PowerShell
-       redirects can leave a `nul` file that blocks removal — `rm -rf <path>` clears it, then
-       `git worktree prune -v` cleans up the metadata.
+    a. **This session's branch.** Once its PR is merged (step 4), delete the remote branch if the
+       merge did not — `git push origin --delete <branch>` — and the local branch from the main
+       checkout with `git branch -d <branch>`. Never `-D`: `-d` refusing is the answer, not an
+       obstacle. If the classifier refuses the delete, the Stale ref sweep takes the ref on its next
+       run, so say that in one line and file nothing.
 
-    b. **Fetch --prune** — `git fetch --prune origin` deletes local remote-tracking refs whose
-       upstream is gone, so the merged-branch scan reflects reality.
+    b. **This session's worktree.** Step 10 removed it; `git worktree prune -v` from the main
+       checkout clears the leftover admin dir. Windows quirk: a PowerShell redirect can leave a
+       `nul` file that blocks removal — `rm -rf <path>` clears it, then prune.
 
-    c. **Delete merged local branches** — `git branch --merged main | grep -vE '^\*| main$' |
-       xargs -r git branch -d`. Safe: `-d` refuses if a branch has unmerged work, which is what
-       you want.
+    c. **Read the sweep's verdict instead of repeating it.** Quote its latest run and the state of
+       its issue:
+       ```bash
+       gh run list --workflow stale-ref-sweep.yml --limit 1
+       gh issue list --state open --label ready-for-human --search 'Stale ref sweep in:title'
+       ```
+       A `failure` run is a STOP like any other. If that issue names a branch **this session**
+       created or stranded, resolve it here — land the work, or delete the ref — and say which line
+       of the issue is now dead. Branches and PRs from other sessions are the owner's queue on that
+       one issue, not this step's work: do not delete them, and do not re-file them as new tickets.
 
-    d. **Audit unmerged local branches** — for each remaining non-main branch, `git log --oneline
-       main..<branch> | wc -l` says whether it has unique commits, and searching `main` for the
-       same commit messages says whether those commits were squash-landed under a different SHA
-       (common with `gh pr merge --squash`). Force-delete (`git branch -D`) any branch whose
-       commits are all present on main under different SHAs, or whose PR was closed as
-       superseded. Never force-delete a branch with genuinely stranded work: file it as a
-       `ready-for-human` ticket naming the branch, its unique commits and why they look stranded,
-       and quote that number in the reply. Handing it over in prose loses it.
-
-    e. **Prune remote branches** — `git branch -r` after the fetch. Any remote branch whose PR
-       merged or closed but that survived (auto-delete off, or a manual push after merge) gets
-       `git push origin --delete <branch>`. In a cloud container where the proxy refuses the
-       remote delete, name those branches on a `ready-for-local-agent` ticket for a desktop
-       session, the way the cloud section below describes.
-
-    f. **Audit open PRs the assistant did not open this session** — `gh pr list --state open`.
-       Any fleet-attempt PR older than the ADRs, spec revisions, or scope decisions made this
-       session should be closed with a comment naming what superseded it, then its branch
-       deleted (`gh pr close <n> --delete-branch --comment "..."`). If the assistant cannot
-       tell whether an open PR is superseded, leave it open and file a `ready-for-human` ticket
-       naming the PR, what it would collide with, and the evidence that is missing — not a line
-       in the reply.
+    **Never force-delete a branch carrying genuinely stranded work**, here or by hand. The sweep
+    never does — patch-id evidence or nothing — and neither does a session: stranded work belongs on
+    the sweep's issue, by branch name, with its unique commits.
 
 12. **Re-run the end check** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end --refresh` — and
     report the fresh result. Every STOP line must be resolved before the `Ready to archive` line
@@ -248,6 +241,7 @@ environment is the tell. Every step above still applies; only the tool changes, 
 | `gh pr list --state open` | MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
 | `sweep-closed-to-done.js --apply` (step 6) | nothing to run by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other; `PROJECT_TOKEN` missing or expired is the usual cause and the run log says so |
+| `git branch --merged`, `git branch -D`, `git push origin --delete` beyond this session's branch (step 11) | nothing to run by hand — the **Stale ref sweep** job (`.github/workflows/stale-ref-sweep.yml`, issue 474) owns the repo-wide half and puts every ref it will not delete on one `ready-for-human` issue. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/stale-ref-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. This session's own branch is still deleted here, with git, which works normally through the proxy |
 
 Quick read-only checks can also go straight to REST — `curl
 https://api.github.com/repos/<owner>/<repo>/...` — the session's egress proxy authenticates
@@ -261,6 +255,10 @@ step ends up living only in the reply:
 - **Step 6 (board sweep)** is not skipped in a container any more: the same script runs as the
   Board sweep GitHub Actions job on issue and PR close, so take the row for it in the cloud table
   below and do not file a `ready-for-local-agent` ticket for it (issue 216).
+- **Step 11 (repo-wide branch, worktree-ref and superseded-PR sweep)** is not a container's
+  problem any more either: the Stale ref sweep job owns it (issue 474). A session deletes its
+  own branch and reads the job's verdict — it does not file `ready-for-local-agent` tickets for
+  other sessions' refs.
 - **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container, which
   leaves the audit unread: re-run it through the MCP tools, or hand it on.
 - **The cloud-plugin staleness check** is skipped in containers: the container IS the downstream
