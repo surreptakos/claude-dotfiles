@@ -1274,3 +1274,261 @@ Comments added: [#172](https://github.com/surreptakos/claude-dotfiles/issues/172
 - `gh api ... --paginate` fails through this container's proxy when GitHub's Link header points at a numeric-ID path: `gh: Numeric-ID repository paths (repositories/{id}/...) are not supported through this proxy. Use repos/{owner}/{repo}/... endpoints instead. (HTTP 403)`. The first page succeeds and the command then exits 1 with no data written, so a script that pipes to a file gets an empty file rather than a partial one. Working spelling is to pass `&page=N` explicitly per call. docs/agents/issue-tracker.md's 'From a cloud session (no GraphQL)' section does not mention it; I recorded it in the #416 comment.
 - The commit on this branch was made with `git commit --no-verify`: .githooks/pre-commit runs tests/restore-test.ps1 and there is no pwsh or powershell on PATH in this container. Nothing in this change touches lib/manifest.ps1, sync.ps1 or the whitelist - it appends to FOLLOW-UPS.md only - and the node/python done-condition gate was run instead and exits 0. This is the same container limitation #213 (retire the pre-commit gate) and #408 (run the restore test on a desktop after the merge pass) already cover; I added this run's PRs to #408's scope.
 - FOLLOW-UPS.md is now 372,070 bytes after this ledger (349,427 before it), against the 121 KB in open decision ticket #376's title, and it still carries seven byte-identical copies of one bullet. Each triage chore is required to append a ledger to it, so the file grows by ~20 KB per wave and the append-only rule forbids removing the duplicates it manufactures. Recorded as evidence on #376 rather than acted on, since the file's shape is that ticket's ruling to make.
+## Triage: run 6aaacc32 discoveries (issue 429)
+
+Every discovery bullet the run `6aaacc32` report writer appended has a disposition below. The bullets
+are **on master**: PR #428 merged `agent/fleet-discoveries-wf_6aaacc32`, so `21479a1`
+("chore(follow-ups): discoveries from ticket-fleet run 6aaacc32 (61 bullets)") is an ancestor of
+origin/master and the section reads straight out of this file under `## Run (ticket-fleet 6aaacc32)`.
+The report writer counted 61 discoveries; the committed section holds **54** top-level `^- ` bullets
+because the writer merged near-duplicates, so the ledger is numbered by the committed lines. The
+D01-D54 numbering below is their order there, and the quoted fragment is each bullet's opening words.
+
+The run delivered PRs #417 to #427 for tickets #412, #404, #400, #405, #403, #364, #377, #402, #413,
+#358 and #406, plus a hand-back comment on #409. Every one of those tickets is now closed as
+completed, and **the repo has no open PR at all**, so this pass ran against the tracker's settled
+state — which is what issue 429's `## Blocked by` note asked for.
+
+Filing followed #319: a finding touching the same file, symbol or failure as an **open** ticket became
+a comment on that ticket, not a second ticket. The open set was listed twice — once at the start of
+the pass and again immediately before the first filing, with no change (70 open items, no open PRs;
+`gh api 'repos/surreptakos/claude-dotfiles/issues?state=open&per_page=100&page=1'`, since
+`gh api search/issues` is refused in a container and `--paginate` can fail through the proxy on a
+numeric-ID Link header). Verifying the premise on today's master was the first step of every
+disposition, and it paid: **five bullets' premises had already resolved** (D43, D49's subject, D50,
+and the two halves of the #364 evidence), and one finding had grown rather than shrunk.
+
+Tickets filed (10): **#431** (`CLAUDE.md`'s stamp recipe omits `--home`), **#432** (the payload
+version is a wall-clock stamp), **#433** (the hook-environment scrub reached one file of ten),
+**#434** (`UPGRADES.md` has no v23 row and no row for issue 364), **#435** (the editable-install
+guard misses two fleet lanes and the hook that started it), **#436** (the two forks and the
+`skippedBlocked` shape change), **#437** (read `tracker-audit`'s exit code unpiped), **#438** (eleven
+tickets closed with unticked boxes), **#439** (the shared scratchpad), **#440** (the fleet script's
+hand-copied helpers). None duplicates an open ticket; there was no open fleet PR to duplicate.
+
+Comments added: [#416](https://github.com/surreptakos/claude-dotfiles/issues/416#issuecomment-5703553459),
+[#376](https://github.com/surreptakos/claude-dotfiles/issues/376#issuecomment-5703554612),
+[#283](https://github.com/surreptakos/claude-dotfiles/issues/283#issuecomment-5703555601),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5703556715),
+[#415](https://github.com/surreptakos/claude-dotfiles/issues/415#issuecomment-5703557691),
+[#408](https://github.com/surreptakos/claude-dotfiles/issues/408#issuecomment-5703558623),
+[#365](https://github.com/surreptakos/claude-dotfiles/issues/365#issuecomment-5703559656).
+
+Nothing was fixed outside a ticket in this pass. One ticket body was edited: #436's own, filed by this
+pass, to phrase its #361 citation as the example it is after `tracker-audit` raised a `stale-premise?`
+advisory on it. No other ticket's body or acceptance criteria were touched.
+
+`node tools/tracker-audit.js` reaches a verdict: exit **1**, which is "findings", never the exit 2
+that means it could not audit. Read unpiped — `node tools/tracker-audit.js | tail` reports `tail`'s 0
+and looks clean, which is D48's whole subject. The findings are the same **11** before and after the
+filings, so the ten new tickets introduced no drift; all 11 are `[closed-with-open-boxes]` on the run's
+own delivered tickets, which is what #438 is for. The two findings the previous pass reported are both
+gone: #378 is settled, and #413's `[dangling-reference]` to #428 resolved itself when #428 was opened
+as the run's discoveries PR.
+
+### Run 6aaacc32 (`21479a1`, 54 bullets)
+
+- **D01** "aac-routines' `.claude/hooks/session-start.sh` still runs `python -m pip install …`" —
+  **#435**. The hook is in another repository and no claude-dotfiles branch can touch it, so the
+  ticket carries it as the cross-repo half with the ready-to-apply guard from
+  `docs/tickets/413-decision.md`, to be filed in `surreptakos/aac-routines` or declined with a reason.
+  #413, where it was recorded, is closed as completed with this criterion unticked.
+- **D02** "The fleet's post-wave repair only runs where a copy of editable-install-guard.js is
+  reachable…" — **#435**. Confirmed on master: the fleet script looks for
+  `tools/editable-install-guard.js`, `aac-skills/ticket-fleet/editable-install-guard.js` and
+  `~/.claude/skills/ticket-fleet/editable-install-guard.js`, and only the second exists here — because
+  this repo *is* the plugin source. A run served on aac-routines logs `guard SKIPPED`.
+- **D03** "The guard repairs by rewriting the pointer file's text and deliberately does not refresh
+  the matching `<dist>.dist-info/RECORD` hashes…" — No action. The trade is deliberate (running pip
+  from the orchestrator checkout would write `.egg-info` into the tree the isolation checkpoint
+  watches), the consequence is bounded to a `pip check` warning, and the guard's own JSON already
+  prints the one command that clears it.
+- **D04** "Ambiguity resolved, as an assumption: criterion 4's 'guard it to the main checkout or make
+  it worktree-aware'…" — No action; an assumption record. The reading it names is the one the rails
+  force, and its consequence is D01, which is filed.
+- **D05** "The probe lane's verifier re-runs whatever commands a probe ticket names, unisolated…" —
+  **#435**. The prober is worktree-isolated and carries the rail; its verifier runs in the
+  orchestrator's own checkout, so a probe ticket whose criteria name a `pip install -e` still breaches
+  the isolation checkpoint.
+- **D06** "aac-skills/ticket-fleet/SKILL.md's 'Shell shapes the worktree guard refuses' table gains
+  two shapes…" — Comment on **#416**, the open ticket for exactly that table. Confirmed on master:
+  the table still has four rows and still ends "it is the shape that is refused, not the command".
+  The comment adds five shapes, three of which contradict that sentence.
+- **D07** "Ambiguity resolved: the ticket never says where the 'canonical' project-harness number
+  comes from…" — No action; an assumption record whose reading is the one `bootstrap-check.js`
+  already uses, with `HARNESS_CANONICAL_FILE` as the override hook. #412 is closed as completed.
+- **D08** "Assumption stated in code: 'stale-skill-copy' fires only when canonical > loaded-skill AND
+  repo stamp <= canonical." — No action; an assumption record. It preserves the third acceptance case
+  of #412 (a stamp above canonical still reads "ahead"), which is the behaviour the ticket asked to
+  keep reachable.
+- **D09** "Pre-existing, unrelated to this ticket: CLAUDE.md's 'Skill stamps' recipe says to run
+  `python3 tools/skill-stamps.py stamp …` with no --home." — **#431**, with D13, D28 and D36.
+  Confirmed on master: `CLAUDE.md:43` has no `--home`, both of CI's `check` steps do, and
+  `skill-stamps.yml`'s own remediation comment repeats the omission on its stamp line.
+- **D10** "Could not read GitHub issue 412 itself: `gh api …` returns HTTP 403…" — Comment on
+  **#416**, which already owns "a container's GitHub calls fail and the fleet's SKILL.md does not say
+  so". The comment carries the working REST spellings and the `--paginate` trap this pass hit.
+- **D11** "The done-condition test command (`node --test tools/*.test.js tests/*.test.js`) does not
+  cover agents/skills/session-check/*.test.js…" — Comment on **#415**, which is the same gap one gate
+  over: #415 widens `.claude/session.json`'s `tests/` term, and that command *does* name
+  `agents/skills/session-check/*.test.js` while the fleet's done-condition does not. Six test files
+  live there. Neither glob is the other's superset, which is the thing to fix once.
+- **D12** "UPGRADES.md has no row for harness v23." — **#434**, with D45. Confirmed:
+  `docs/agents/harness-version.md` reads 24 and names v23 in prose, while `UPGRADES.md`'s rows run
+  21, 22, **24**. SKILL.md step 7 sends a repo at v22 to that table, where nothing tells it to add the
+  `NODE_TEST_CONTEXT` scrub.
+- **D13** "CLAUDE.md's skill-stamp command omits --home" — **#431**. Same finding as D09, recorded by
+  a second worker; the two together are why the ticket names a re-stamp that CI then disagrees with.
+- **D14** "The sweep of the scrub across the other harnessed repos … cannot be done from this
+  worktree…" — Comment on **#365**, the open ticket for "eight harnessed repos are behind and a
+  version bump is not propagation", which already says the sweep wants a desktop session because
+  aac-cockpit is unreachable from a container. The comment adds v24's hook patch, the incident behind
+  it, the `grep -L` selector and the patch-do-not-re-copy rule, so both re-copies ride one trip.
+- **D15** "lib/manifest.ps1's `$script:GitEnvNames` (line 556) lists …" — **#433**. Verified by grep:
+  the sixth environment name appears in exactly one file in the checkout,
+  `tests/pre-commit-git-scrub.test.js`, while the five-name list is hand-copied into `lib/manifest.ps1`,
+  both `tracker-audit.js` copies, `tools/skill-stamps.py`, `tools/skill-stamps.test.py` and four
+  `tests/*.tests.ps1` preambles. The ticket carries the CRLF trap and the generated-template trap.
+- **D16** "Assumption stated for the record: 'the upgrade table gains a row … and the sweep applies
+  it'…" — No action; an assumption record. Its second half, the cross-repo sweep, is now on #365 (D14).
+- **D17** "Ambiguity resolved one way: `args.finishRunId` accepts EITHER spelling of a dead run's
+  id…" — No action; an assumption record, and the permissive reading costs nothing.
+- **D18** "The finish mode's journal reader depends on an undocumented harness layout…" — No action.
+  The layout was read off a live journal rather than a spec, but the failure mode is a named abort
+  ("could not read run <id>'s journal"), not a wrong delivery, and the fix when it fires is to re-read
+  the layout. Recorded here rather than filed because there is nothing to change until it moves.
+- **D19** "Finish mode only re-delivers CODE-lane branches." — No action. #405 asked for the journal
+  to be readable and the verified branches re-delivered; re-posting a probe resolution needs the whole
+  evidence-block prompt in the journal, which is a different ticket's worth of work and is not yet
+  known to be needed.
+- **D20** "`python3 tools/build-cloud-plugin.py --from-mirror --home …` prints 'personal copy
+  superseded by the aac-skills/ source…'" — Comment on **#283**, the open ticket to delete that
+  orphan copy. The comment is the cost evidence #283 lacked: the warning fires on every rebuild on
+  every branch, and no container session can act on it because the remedy is a live-tree delete.
+- **D21** "Every rebuild bumps the plugin version stamp…" — **#432**, with D35. One correction the
+  ticket carries: the predicted red build does not exist. CI's payload check diffs
+  `/tmp/dist/aac-skills/skills` against `marketplace/aac-skills/skills` plus `hooks.json`, so both
+  version fields are already outside its scope — accidentally, and `CLAUDE.md` overstates the check
+  when it says `diff -r` covers "every file in it".
+- **D22** "The finish mode returns before the normal run's `pre-report` tree-guard checkpoint…" — No
+  action. Deliberate and explained in the bullet (the pre-report checkpoint runs with ticket #0 and
+  needs the wave), with a per-ticket `finish-deliver` checkpoint in its place.
+- **D23** "Ambiguity resolved, stated as the assumption I built on: issue 404's body says the
+  cross-check gates 'accepting pass'…" — No action; an assumption record, and the wider reading (a
+  wrong-tree *refutation* is rejected too) is the one the motivating failure supports.
+- **D24** "Design choice worth knowing before a fork copies the script…" — No action; a design note.
+  Its operative half — that the forks have not got any of this — is **#436** (D27).
+- **D25** "A rejected verdict costs an attempt, not just a verify…" — No action. It costs one extra
+  implement cycle in the narrow case where the cross-check rejects twice, it is bounded by
+  `maxAttempts`, and bounding it properly means restructuring the attempt loop, which #404 explicitly
+  did not ask for. Worth revisiting if a run is ever seen burning attempts this way; there is no such
+  run yet.
+- **D26** "VERDICT now requires `worktree`, which is the shape issue 265 warned about…" — No action.
+  A risk note with its own mitigation already shipped (the prompts name the field as an explicit
+  step), and its diagnostic value is that `verify:#N.A output unusable` has a first suspect.
+- **D27** "The two forks in tools/ticket-fleet-contract.js FORKS … still carry the old VERDICT…" —
+  **#436**, with D31. Confirmed: `FORKS` lists `surreptakos/aac-routines` and `surreptakos/aac-cockpit`,
+  both `.claude/workflows/ticket-fleet.js`, and `CONTRACT_VERSION` covers `REQUIRED_ARGS` plus the
+  SCOUT schema only — so neither of this run's changes could announce itself.
+- **D28** "Pre-existing and untouched: `python3 tools/skill-stamps.py stamp …` bumps aac-google-access
+  to rev 60…" — **#431**. This is the half that makes the `--home` bug invisible: the packager rotates
+  the stamp straight back, so the net commit diff is zero unless a branch stops between the two
+  commands.
+- **D29** "The worktree Bash guard refuses `python3 - <<'PY' … PY` heredocs whose text merely contains
+  the word `git`…" — Comment on **#416**. Shape 3 in that comment, with the `'g' + 'it'` workaround a
+  worker resorted to.
+- **D30** "Ambiguity call recorded: the ticket says to keep blockers 'whose state is open'…" — No
+  action; an assumption record, and the conservative branch (only a plain `closed` clears a blocker)
+  is the safe one, with both safety branches logged at run time.
+- **D31** "The run result field `skippedBlocked` changed shape from a count (integer) to an array…" —
+  **#436**. Inside this repo a grep finds it only in the fleet script, its SKILL.md and
+  `tools/ticket-fleet-branch.test.js`; the forks and the consuming repos are unchecked, which is the
+  ticket's second criterion.
+- **D32** "tests/restore-test.ps1, the repo's primary gate and its .githooks/pre-commit hook, cannot
+  run in this container…" — Comment on **#408**, the open desktop chore that already exists for "run
+  the Windows restore test after the fleet merge pass". The comment adds this run's eleven PRs to its
+  scope and names the one that matters most: issue 406's patched the hook itself.
+- **D33** "aac-skills/ticket-fleet/ticket-fleet.js is now ~1290 lines…" — **#440**. The count has
+  moved since the bullet was written: 1,698 lines today against 344 in `tools/ticket-fleet-branch.js`,
+  with at least six marker pairs the test file extracts and evals. The ticket takes issue 336's
+  precedent — generate the second copy, test that it is not stale — rather than asking for a rewrite.
+- **D34** "Assumption recorded (issue 400 wording is silent on error text)…" — No action; an
+  assumption record, and the bullet says the old strings were pinned by no test or doc (grepped).
+- **D35** "tools/build-cloud-plugin.py stamps the plugin version from the wall clock…" — **#432**.
+  Same finding as D21, recorded by a second worker.
+- **D36** "Observed while running CLAUDE.md's cloud path in order: `python3 tools/skill-stamps.py
+  stamp …` bumped aac-google-access to rev 60 and ticket-fleet to rev 12…" — **#431**. The sharpest
+  statement of the bug: two skills the worker never touched were restamped and then rotated back, so
+  the two stampers demonstrably disagree about those skills' content hashes.
+- **D37** "ASSUMPTION (issue 377, tools/backfill-worktree-configs.js)…" — No action; an assumption
+  record that already states its own side effect (a merged worktree on a non-fleet branch is no longer
+  force-removed by `--cleanup`, only backfilled). Nothing is known to have relied on that.
+- **D38** "orchestrator/LOCAL-RUNBOOK.md was widened too…" — No action. Widening the second copy of
+  the same enumeration is the right call and leaves the two runbooks consistent; flagging it was the
+  disclosure the rails ask for, not a defect.
+- **D39** "aac-skills/ticket-fleet/ticket-fleet.js still spells `agent/fleet-discoveries-wf_${runId}`
+  … inline…" — No action. The duplication is forced (the Workflow runtime cannot `require()`), the new
+  test pins the literal against `DISCOVERIES_BRANCH_PREFIX` so it cannot drift, and the decision NOT
+  to widen the per-ticket PR-reuse filters is correct — a discoveries branch carries no ticket number.
+  The general version of the duplication is **#440** (D33).
+- **D40** "The commit was made with `git commit --no-verify`…" — Comment on **#408**, with D32.
+  The structural answer is #213 (retire the pre-commit gate and the Windows restore test), which is
+  open and unchanged by this pass.
+- **D41** "The shared scratchpad directory is not per-sub-session as the environment note implies…" —
+  **#439**. Confirmed that nothing warns about it: a grep of `aac-skills/ticket-fleet/` for
+  "scratchpad" returns nothing. The collision-prone files are exactly the ones workers are told to
+  write — a commit message, an issue body for `-F body=@file`.
+- **D42** "The Bash worktree-isolation guard refuses any command whose text merely NAMES git…" —
+  Comment on **#416**. Same class as D29 and D53; the comment's point is that the guard reads program
+  *content*, which the shipped sentence denies.
+- **D43** "Issue 364 was ALREADY IMPLEMENTED before this attempt started…" — No action, premise
+  resolved: #364 is now `closed / completed`. The bullet asked for it to be closed rather than built,
+  and it has been. What it left behind is #438's territory (its boxes are unticked) and #434's (its
+  template change got no upgrade row).
+- **D44** "Evidence for acceptance criterion 4, verified at the branch tip…" — No action. The
+  evidence is preserved in commit `287c464`'s message, and the bullet's own reading — that posting it
+  as a GitHub comment was delivery-stage work — is the one the rails support. The unit-level proof it
+  quotes is the durable half and does not decay.
+- **D45** "The #364 template change shipped without a harness upgrade row…" — **#434**, with D12.
+  Confirmed against the table: every sibling tracker-audit template change got a bump (issue 336 ->
+  v20, 361 -> v21, 374 -> v22) and this one did not, so the harnessed repos run the pre-fix audit with
+  no signal.
+- **D46** "FOLLOW-UPS.md line 430 is now stale…" — Comment on **#376**, the open decision ticket for
+  this file's shape. Verified: `diff tools/tracker-audit.js
+  agents/skills/project-harness/templates/tracker-audit.js` shows only the six-line generated banner,
+  so every clause of line 430 is false. The point for #376 is not the stale line but that an
+  append-only file cannot mark a bullet superseded, so its old half is unreliable by construction.
+- **D47** "Possible generator collision on agents/skills/project-harness/templates/tracker-audit.js…"
+  — Comment on **#335**, the open desktop ticket for "pull before the next push or the mirror edits
+  are reverted". This is a second path to the same reversion, it can only be checked on the desktop,
+  and the comment gives the one-command check to run after the pull.
+- **D48** "tracker-audit exit-code trap, and at least one prior FOLLOW-UPS.md ledger is wrong because
+  of it." — **#437**. Confirmed that `docs/agents/issue-tracker.md` gives the three codes but says
+  nothing about the pipe, which is where every wrong reading has come from. This pass hit it too, and
+  its own verdict above is quoted from the unpiped command for that reason.
+- **D49** "Issue #378 is closed as completed with three unticked acceptance boxes…" — **#438**, but
+  not as written: #378 is settled and `tracker-audit` no longer reports it. The mechanism scaled up
+  instead — the audit now carries **eleven** `[closed-with-open-boxes]` findings, one for each ticket
+  this run delivered and closed by keyword without ticking its boxes. The ticket covers both halves:
+  stop the fleet manufacturing them, and clear the eleven.
+- **D50** "Issue #413 cites #428, which is neither an issue nor a pull request in this repo…" — No
+  action, premise resolved. #428 exists now — it is the run's own discoveries PR — and the
+  `[dangling-reference]` finding is gone from the audit. The bullet was written before that PR was
+  opened.
+- **D51** "FOLLOW-UPS.md on master carries seven byte-identical copies of one bullet…" — Comment on
+  **#376**. Re-counted on master: still 7, and this file is now **349,427 bytes**, nearly three times
+  the 121 KB in #376's title. Append-only plus branch merges manufactures duplication the same rule
+  then forbids deleting — which is evidence about option (a), not a new question.
+- **D52** "A triaged discovery bullet can go stale before the triage pass reads it…" — No action as a
+  fix; recorded in the **#376** comment as the reason a ruling must cover corrections, not just
+  pruning. As a rule it was applied here: every disposition above verified its premise on today's
+  master first, and five bullets' premises had moved.
+- **D53** "The Bash worktree-isolation guard refused four command shapes in this session, one of which
+  involves no git and no gh at all…" — Comment on **#416**, which this bullet's own author filed. The
+  comment adds this pass's two fresh content-based refusals — a `jq` filter string in a single plain
+  command, and `mkdir -p DIR && gh api … > DIR/file` — and makes this the ninth consecutive triage
+  pass to lose turns to the guard.
+- **D54** "`gh issue view <n>` answers HTTP 403 in a fleet container…" — Comment on **#416**, where
+  the bullet says it belongs. The working spellings are in the comment, with one addition from this
+  pass: `--paginate` can fail through the proxy when the Link header is a numeric-ID path, so pass
+  `&page=N` explicitly.
