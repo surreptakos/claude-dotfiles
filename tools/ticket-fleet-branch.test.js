@@ -19,7 +19,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const { generateRunId, buildBranchName, workerSuffix, pickInstrument } = require('./ticket-fleet-branch.js');
+const { generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -321,3 +321,77 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.deepEqual(result.discoveries, ['finding-A']);
   });
 }
+
+// ---- Empty-label listing ends the run (issue 298) ----
+// A scout whose label listing matched nothing used to route around the dead end and hand back
+// every open ticket it could find, so the fleet spawned pr-check and implementer agents for work
+// nobody asked for. The prompt now says an empty listing is a complete answer; confineToCandidates
+// is the mechanical half, inlined in the fleet script between the FLEET-SCOUT-GATE markers.
+
+test('confineToCandidates drops tickets the listing never returned', () => {
+  const invented = [{ number: 11 }, { number: 12 }];
+  assert.deepEqual(confineToCandidates(invented, []), [],
+    'an empty candidate listing must confine the wave to nothing');
+  assert.deepEqual(confineToCandidates(invented, [12]), [{ number: 12 }],
+    'only tickets whose number the listing returned may survive');
+  assert.deepEqual(confineToCandidates(invented, undefined), invented,
+    'with no listing reported there is nothing to confine against');
+});
+
+function extractScoutGate(src) {
+  const startTag = '// [FLEET-SCOUT-GATE-START]';
+  const endTag = '// [FLEET-SCOUT-GATE-END]';
+  const s = src.indexOf(startTag);
+  const e = src.indexOf(endTag);
+  if (s < 0 || e < 0 || e <= s) {
+    throw new Error('FLEET-SCOUT-GATE markers not found or out of order');
+  }
+  return src.slice(s + startTag.length, e);
+}
+
+async function driveScoutGate(scout, { explicitTickets = [], label = 'ready-for-agent' } = {}) {
+  const body = extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  const logs = [];
+  const wrapper = new AsyncFunction(
+    'scout', 'explicitTickets', 'cfg', 'instrument', 'log',
+    body + "\nreturn 'fell-through';"
+  );
+  const result = await wrapper(scout, explicitTickets, { label }, 'gh', (m) => logs.push(m));
+  return { result, logs };
+}
+
+test(`fleet script ${FLEET_SCRIPT_REL} ends the run when the label listing is empty`, async () => {
+  // The scout reports an empty listing but hands back open tickets anyway - the failure mode.
+  const { result } = await driveScoutGate({
+    candidateNumbers: [],
+    tickets: [{ number: 41, blockedBy: [] }, { number: 42, blockedBy: [] }],
+  });
+  assert.equal(result.ran, 0, 'an empty label listing must end the run with ran: 0');
+  assert.equal(result.note, 'scout found no open tickets with label ready-for-agent');
+  assert.deepEqual(result.results, []);
+  const kept = await driveScoutGate({
+    candidateNumbers: [42],
+    tickets: [{ number: 41, blockedBy: [] }, { number: 42, blockedBy: [] }],
+  });
+  assert.equal(kept.result, 'fell-through', 'a ticket the listing returned must still reach the wave');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} gates the lanes before any agent is spawned`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const gateEnd = src.indexOf('// [FLEET-SCOUT-GATE-END]');
+  assert.ok(gateEnd > 0, 'missing FLEET-SCOUT-GATE-END marker');
+  for (const label of ['label: `pr-check:#', 'label: `impl:#', 'label: `probe:#', 'label: `handoff:#']) {
+    const idx = src.indexOf(label);
+    assert.ok(idx > gateEnd, `${label} must be spawned only after the scout gate returns`);
+  }
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} scout prompt calls the listing the whole candidate set`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /That one listing is the WHOLE candidate set\./,
+    'the scout prompt must state that the listing is the whole candidate set');
+  assert.match(src, /zero tickets is a valid and complete answer, not a cue to go looking/,
+    'the scout prompt must state that an empty listing is a valid answer, not a cue to search');
+  assert.match(src, /candidateNumbers/,
+    'the SCOUT schema must carry candidateNumbers so the listing can be pinned');
+});

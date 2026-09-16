@@ -106,7 +106,8 @@ log(`instrument = ${instrument}`)
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
-const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
+const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
+  candidateNumbers: { type: 'array', items: { type: 'integer' }, description: 'every issue number the one listing in step 2 returned, before any filtering - [] when it returned none. The whole candidate set: no ticket outside it may appear in tickets.' },
   tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
     keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
@@ -167,6 +168,8 @@ const scout = await agent(
   `Scout this repository for tickets to run. ${rules.scoutNotes} Steps:
 1. Read CLAUDE.md and any HANDOFF/CONTEXT docs at repo root.
 2. Collect the tickets: ${scoutSource}
+   That one listing is the WHOLE candidate set. Do not widen it under any circumstances: not another label, not a sweep of open issues, not a search, not a ticket you happened to read elsewhere. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it.
+   A listing that comes back with zero tickets is a valid and complete answer, not a cue to go looking: return candidateNumbers: [] and tickets: [] and stop. The run ending with nothing to do is the correct outcome there.
 3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
@@ -178,13 +181,31 @@ const scout = await agent(
 Return structured output only.`,
   { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: 'low' }
 )
-if (!scout || !scout.tickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
+// [FLEET-SCOUT-GATE-START]
+// A scout whose listing matched nothing is prone to route around the dead end and hand back every
+// open ticket it can find; the fleet would then spawn pr-check and implementer agents for work
+// nobody asked for (issue 298). The prompt says an empty listing is a valid answer - this is the
+// mechanical half: only tickets whose number was in the candidate set (the label listing, or the
+// explicitly named numbers) survive. Pure counterpart: confineToCandidates in
+// tools/ticket-fleet-branch.js, which ticket-fleet-branch.test.js pins against this inline copy.
+function confineToCandidates(tickets, candidateNumbers) {
+  const list = Array.isArray(tickets) ? tickets : []
+  if (!Array.isArray(candidateNumbers)) return list
+  const allowed = new Set(candidateNumbers.map(n => parseInt(n, 10)).filter(n => n > 0))
+  return list.filter(t => t && allowed.has(parseInt(t.number, 10)))
+}
+const candidateSet = explicitTickets.length ? explicitTickets : (scout && scout.candidateNumbers)
+const scoutTickets = confineToCandidates(scout && scout.tickets, candidateSet)
+const offListing = ((scout && Array.isArray(scout.tickets)) ? scout.tickets.length : 0) - scoutTickets.length
+if (offListing > 0) log(`${offListing} ticket(s) dropped: not in the ${explicitTickets.length ? 'requested numbers' : 'label listing'} the scout was given.`)
+if (!scout || !scoutTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
+// [FLEET-SCOUT-GATE-END]
 
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
 // wave (its lane is the handoff), and label listing keeps today's behaviour.
-const eligible = scout.tickets.filter(t => t.blockedBy.length === 0)
+const eligible = scoutTickets.filter(t => t.blockedBy.length === 0)
 const wave = eligible.slice(0, cfg.maxTickets)
-const droppedBlocked = scout.tickets.length - eligible.length
+const droppedBlocked = scoutTickets.length - eligible.length
 const droppedCap = eligible.length - wave.length
 if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
