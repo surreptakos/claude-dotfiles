@@ -36,6 +36,9 @@ const {
   paginate,
   parseLinkHeader,
   pageFromUrl,
+  stalePremiseFindings,
+  stalePremiseIgnores,
+  isExampleCitation,
   boxPathCandidates,
   deletedPathIndex,
   matchDeletedPath,
@@ -425,4 +428,81 @@ test('boxPathCandidates reads backticked names and slashed paths, never a bare p
                          ['aac-skills/writing']);
   // "writing" here is prose, and `gh issue close 120` is a command, not a path.
   assert.deepStrictEqual(boxPathCandidates('the writing pass is done (`gh issue close 120`)'), []);
+});
+
+// ---- issue 374: the two narrowings that keep a meta-ticket from reporting as drift -------
+
+// A discovery-triage chore names a settled duplicate pair so the next agent does not refile it.
+// The citation is ABOUT #281; the chore asserts nothing #281 could have falsified. Before the
+// narrowing every chore written to the triage template tripped stale-premise?, so the template and
+// the advisory were in permanent tension (measured on this repo: 4 findings, one of them #358's
+// example, now 3).
+const CLOSED_281 = { number: 281, state: 'CLOSED', labels: [], title: 'the comments fetch swallowed a page',
+                     url: 'https://github.com/o/r/issues/281', closedByPullRequestsReferences: [] };
+const CLOSED_282 = { number: 282, state: 'CLOSED', labels: [], title: 'the packager stamped twice',
+                     url: 'https://github.com/o/r/issues/282', closedByPullRequestsReferences: [] };
+const byNumberOf = (list) => new Map(list.map((i) => [i.number, i]));
+
+test('stalePremiseFindings: a chore citing a closed issue as an example is silent, a real premise is not', () => {
+  const chore = {
+    number: 358, state: 'OPEN', labels: [], title: 'triage the wave 4/5 fleet discoveries',
+    url: 'https://github.com/o/r/issues/358',
+    body: ['## What to build', '',
+           'Dedupe first, every time: search open tickets for the same file before creating one.',
+           'This run has already produced one duplicate pair (#281 / #285).'].join('\n'),
+  };
+  const genuine = {
+    number: 359, state: 'OPEN', labels: [], title: 'the packager stamps on pull as well as push',
+    url: 'https://github.com/o/r/issues/359',
+    body: 'The packager stamps every skill on pull as well as push, which #281 changed to push only.',
+  };
+  const all = [chore, genuine, CLOSED_281];
+  const found = stalePremiseFindings(all, byNumberOf(all));
+  assert.deepStrictEqual(found.map((f) => f.issue.number), [359]);
+  assert.strictEqual(found[0].kind, 'stale-premise?');
+  assert.ok(isExampleCitation('one duplicate pair (#281 / #285)'));
+  assert.ok(!isExampleCitation('which #281 changed to push only'));
+});
+
+test('stalePremiseIgnores: the marker opts a whole body out, or one cited issue at a time', () => {
+  const bare = {
+    number: 360, state: 'OPEN', labels: [], title: 'deliberate citation',
+    url: 'https://github.com/o/r/issues/360',
+    body: '<!-- tracker-audit-ignore: stale-premise -->\nThe hook still writes what #281 changed.',
+  };
+  assert.deepStrictEqual(stalePremiseFindings([bare, CLOSED_281], byNumberOf([bare, CLOSED_281])), []);
+  const scoped = {
+    number: 362, state: 'OPEN', labels: [], title: 'one deliberate citation, one not',
+    url: 'https://github.com/o/r/issues/362',
+    body: ['<!-- tracker-audit-ignore: stale-premise #281 -->',
+           'The hook still writes what #281 changed.',
+           'The packager still stamps the way #282 changed.'].join('\n'),
+  };
+  const all = [scoped, CLOSED_281, CLOSED_282];
+  const found = stalePremiseFindings(all, byNumberOf(all));
+  assert.deepStrictEqual(found.map((f) => f.detail.slice(0, 17)), ['cites closed #282']);
+  assert.deepStrictEqual(stalePremiseIgnores('nothing here'), { all: false, numbers: new Set() });
+});
+
+test('deletedSubjectFindings: a box quoting another issue box is about that issue, not this one', () => {
+  const index = deletedPathIndex(DELETED_LISTING, LIVE_LISTING);
+  const meta = {
+    number: 361, state: 'OPEN', title: 'tracker-audit: deleted acceptance subjects',
+    url: 'https://github.com/o/r/issues/361',
+    body: ['## Acceptance criteria', '',
+           '- [ ] #120\'s `writing` box is the pinned example in `tools/tracker-audit.test.js`'].join('\n'),
+  };
+  const closed120 = Object.assign({}, ISSUE_120, { state: 'CLOSED' });
+  assert.deepStrictEqual(deletedSubjectFindings([meta, closed120], index), []);
+  // A PR number is not an issue number: #173 cites PR #168 while telling the owner to copy a path
+  // another ticket deleted, which is a claim about this issue's own work and still reports.
+  const ownerChore = {
+    number: 173, state: 'OPEN', title: 'owner steps left over from the probe session',
+    url: 'https://github.com/o/r/issues/173',
+    body: ['- [ ] **Sync the template from the PC.** PR #168 changed',
+           '`aac-skills/writing/SKILL.md`, so copy it across.'].join(' '),
+  };
+  const found = deletedSubjectFindings([ownerChore, closed120], index);
+  assert.deepStrictEqual(found.map((f) => f.issue.number), [173]);
+  assert.match(found[0].detail, /aac-skills\/writing\/SKILL\.md/);
 });

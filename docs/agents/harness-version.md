@@ -1,8 +1,8 @@
 # Harness version
 
-    harness-version: 20
+    harness-version: 21
 
-Installed/upgraded: 2026-09-16 by the `project-harness` skill (v20: tracker-audit `deleted-subject?` check from issue 361).
+Installed/upgraded: 2026-09-16 by the `project-harness` skill (v21: tracker-audit `stale-premise?` / `deleted-subject?` narrowed for meta-tickets, issue 374).
 
 This file exists so "which generation of the harness does this repo have?" is a question you can
 answer by reading, instead of by remembering. Before this marker, a new harness capability only

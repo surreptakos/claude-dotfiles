@@ -132,6 +132,53 @@ function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
   return false;
 }
 
+/** Wording that presents a cited issue as an EXAMPLE rather than as this ticket's own premise.
+ *
+ *  A discovery-triage chore names a settled duplicate pair so the next agent does not refile it
+ *  ("this run has already produced one duplicate pair (#281 / #285)"). That citation is ABOUT the
+ *  closed pair; the chore asserts nothing the closed issue could have falsified. Without this,
+ *  every chore written to the triage template tripped stale-premise?, so the template and the
+ *  advisory were in permanent tension — which is how a class trains its readers to scroll past it
+ *  (issue 374).
+ *
+ *  Kept to wordings that name the citation's ROLE — example, duplicate, precedent — rather than
+ *  anything that merely sits near one; a looser list would swallow the real finding this check
+ *  exists for. Exported for the test suite. */
+const EXAMPLE_CITATION_PATTERNS = [
+  /\bfor example\b/i,
+  /\bexamples?\b/i,
+  /\be\.g\.\b/i,
+  /\bsuch as\b/i,
+  /\bduplicat\w*\b/i,
+  /\bdedupe\b/i,
+  /\bcautionary\b/i,
+  /\bprecedent\b/i,
+  /\billustrat\w*\b/i,
+];
+
+function isExampleCitation(around) {
+  return EXAMPLE_CITATION_PATTERNS.some((rx) => rx.test(String(around || '')));
+}
+
+/** The explicit opt-out, for a body whose citation is deliberate in a wording no list will predict.
+ *
+ *  `<!-- tracker-audit-ignore: stale-premise -->` anywhere in a body silences the class for that
+ *  body; `<!-- tracker-audit-ignore: stale-premise #281 #285 -->` silences only those citations.
+ *  Same shape as the `claude-md-lint-ignore` marker this repo already uses, and it sits on the
+ *  issue, where a reader can see it and argue with it. Returns { all, numbers }. Pure. */
+function stalePremiseIgnores(body) {
+  const rx = /tracker-audit-ignore:\s*stale-premise\??([ \t]*(?:#\d+[ \t,]*)*)/gi;
+  const numbers = new Set();
+  let all = false;
+  let m;
+  while ((m = rx.exec(String(body || '')))) {
+    const nums = (m[1].match(/\d+/g) || []).map(Number);
+    if (!nums.length) all = true;
+    nums.forEach((n) => numbers.add(n));
+  }
+  return { all, numbers };
+}
+
 /** Normalize one REST /issues item into the shape the checks below already read.
  *
  *  REST returns lowercase `state`, `html_url`, `labels` as either strings or objects, `milestone`
@@ -232,7 +279,12 @@ if (require.main !== module) {
     parseGithubSlug,
     landedCommits,
     landedFindings,
+    stalePremiseFindings,
+    isExampleCitation,
+    EXAMPLE_CITATION_PATTERNS,
+    stalePremiseIgnores,
     untickedBoxes,
+    boxQuotesAnotherIssue,
     boxPathCandidates,
     deletedPathIndex,
     matchDeletedPath,
@@ -665,6 +717,31 @@ function boxPathCandidates(text) {
   return Array.from(out);
 }
 
+/** Does one acceptance-box line cite a DIFFERENT issue of this repo?
+ *
+ *  A meta-ticket's box quotes the box it is about: #361's acceptance list carries "#120's `writing`
+ *  box is the pinned example", and `writing` is the directory another ticket deleted. The deleted
+ *  subject belongs to #120 — it is the POINT of #361, not drift in it — so a box naming another
+ *  issue is read as a quotation of that issue's box rather than a claim about this one (issue 374).
+ *
+ *  `issueNumbers` is the tracker's own issue set, and passing it is what keeps the narrowing from
+ *  swallowing real findings: #173's box cites PR #168 while telling the owner to copy a path that
+ *  ticket deleted, which is a claim about THIS issue's work and still reports. A PR number is not an
+ *  issue number, so only a cited issue counts as a quotation. Omit it and any other number does.
+ *
+ *  Same `#N`-as-its-own-token rule as citedIssueNumbers, so `owner/repo#7` and `#9a690f` are not
+ *  read as this repo's issues. Pure. */
+function boxQuotesAnotherIssue(text, ownNumber, issueNumbers) {
+  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  let m;
+  while ((m = rx.exec(String(text == null ? '' : text)))) {
+    const n = Number(m[1]);
+    if (n === Number(ownNumber)) continue;
+    if (!issueNumbers || issueNumbers.has(n)) return true;
+  }
+  return false;
+}
+
 /** What the default branch HAS, and what it once had and deleted.
  *
  *  `deletedListing` is the raw output of `git log --diff-filter=D --name-only --format= <ref>`;
@@ -735,10 +812,14 @@ function matchDeletedPath(candidate, index) {
  *  filters to open itself, so "a closed issue produces no finding" is a property of this function. */
 function deletedSubjectFindings(allIssues, index) {
   const out = [];
+  // The tracker's own numbers, so a box citing a PR is not mistaken for one quoting an issue.
+  const issueNumbers = new Set((allIssues || []).map((i) => i.number));
   (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
     const boxes = untickedBoxes(i.body);
     const seen = new Set();
     boxes.hard.concat(boxes.soft).forEach((text) => {
+      // A box that cites another issue is quoting THAT issue's box (see boxQuotesAnotherIssue).
+      if (boxQuotesAnotherIssue(text, i.number, issueNumbers)) return;
       boxPathCandidates(text).forEach((c) => {
         if (seen.has(c)) return;
         const hit = matchDeletedPath(c, index);
@@ -846,6 +927,65 @@ function landedFindings(allIssues, landed, ref) {
   return out;
 }
 
+/** OPEN issues asserting something a closed issue settled, as findings.
+ *
+ *  The weakest check here, and deliberately advisory: it cannot read meaning, only proximity. It
+ *  fires when an open issue cites a CLOSED issue in prose without any nearby hedge, because the
+ *  drift that prompted this tool was #23 asserting a behaviour #25 had just disproved.
+ *
+ *  Pure — it takes all issues and the number index and filters to open itself, so each narrowing
+ *  below is testable without the network, and "a closed issue produces no finding" is a property of
+ *  this function rather than of whatever the caller passed. */
+function stalePremiseFindings(allIssues, byNumber) {
+  const out = [];
+  (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
+    // A PRD is a container: it enumerates its own sub-issues, and those closing is the PRD working,
+    // not the PRD going stale. Skipping the label entirely is right — on the first cross-repo run,
+    // ONE PRD produced all ten advisories in a repo, which is how a useful check becomes one people
+    // scroll past.
+    if ((i.labels || []).some((l) => l.name === 'prd')) return;
+    const body = String(i.body || '').replace(/\r\n/g, '\n');
+    // An explicit opt-out outranks every heuristic below, and says on the issue that it is meant.
+    const ignored = stalePremiseIgnores(body);
+    if (ignored.all) return;
+    // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
+    // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
+    const cited = citedIssueNumbers(body);
+    const citedNums = Array.from(cited.keys());
+    const citedClosed = citedNums.filter((n) => {
+      const o = byNumber.get(n);
+      return o && o.state === 'CLOSED' && n !== i.number;
+    });
+    // A follow-up ticket exists BECAUSE work shipped. If the body carries either canonical
+    // acknowledgment for ANY of its cited closed issues (see isFollowUpAcknowledgment above), the
+    // whole body reads as a follow-up context — its other closed-issue citations are background, not
+    // stale premises. The closer-PR union is the "any of these closers" set the predicate checks.
+    const closerPrsUnion = Array.from(new Set(citedClosed.flatMap((n) =>
+      (byNumber.get(n).closedByPullRequestsReferences || []).map((r) => r.number))));
+    const bodyIsFollowUp = citedClosed.some((n) => isFollowUpAcknowledgment(body, n, closerPrsUnion));
+    if (bodyIsFollowUp) return;
+    citedClosed.forEach((n) => {
+      if (ignored.numbers.has(n)) return;
+      const other = byNumber.get(n);
+      // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
+      const idx = cited.get(n);
+      // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
+      const lineStart = body.lastIndexOf('\n', idx) + 1;
+      if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
+      const around = body.slice(Math.max(0, idx - 220), idx + 220);
+      if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
+      // A citation the surrounding prose presents as an example is about that issue, not this one.
+      if (isExampleCitation(around)) return;
+      out.push({ kind: 'stale-premise?', issue: i, detail:
+        'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') with no wording that acknowledges ' +
+        'it is settled. Check this issue still describes reality. If the citation is deliberate, ' +
+        'say so in the body (`see #' + n + '`, "for example") or add ' +
+        '`<!-- tracker-audit-ignore: stale-premise #' + n + ' -->`. Advisory only.' });
+    });
+  });
+  return out;
+}
+
 const findings = [];
 function report(kind, issue, detail) {
   findings.push({ kind, number: issue.number, title: issue.title, url: issue.url, detail });
@@ -934,45 +1074,9 @@ open.forEach((i) => {
 });
 
 // ---- 5. An open issue asserting something a closed issue settled -------------------------------
-// The weakest check here, and deliberately advisory: it cannot read meaning, only proximity. It fires
-// when an open issue cites a CLOSED issue in prose without any nearby hedge, because the drift that
-// prompted this tool was #23 asserting a behaviour #25 had just disproved.
-open.forEach((i) => {
-  // A PRD is a container: it enumerates its own sub-issues, and those closing is the PRD working, not
-  // the PRD going stale. Skipping the label entirely is right — on the first cross-repo run, ONE PRD
-  // produced all ten advisories in a repo, which is how a useful check becomes one people scroll past.
-  if (i.labels.some((l) => l.name === 'prd')) return;
-  const body = String(i.body || '').replace(/\r\n/g, '\n');
-  // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
-  // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
-  const cited = citedIssueNumbers(body);
-  const citedNums = Array.from(cited.keys());
-  const citedClosed = citedNums.filter((n) => {
-    const o = byNumber.get(n);
-    return o && o.state === 'CLOSED' && n !== i.number;
-  });
-  // A follow-up ticket exists BECAUSE work shipped. If the body carries either canonical
-  // acknowledgment for ANY of its cited closed issues (see isFollowUpAcknowledgment above), the whole
-  // body reads as a follow-up context — its other closed-issue citations are background, not stale
-  // premises. The closer-PR union is the "any of these closers" set the predicate checks.
-  const closerPrsUnion = Array.from(new Set(citedClosed.flatMap((n) =>
-    (byNumber.get(n).closedByPullRequestsReferences || []).map((r) => r.number))));
-  const bodyIsFollowUp = citedClosed.some((n) => isFollowUpAcknowledgment(body, n, closerPrsUnion));
-  if (bodyIsFollowUp) return;
-  citedClosed.forEach((n) => {
-    const other = byNumber.get(n);
-    // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
-    const idx = cited.get(n);
-    // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
-    const lineStart = body.lastIndexOf('\n', idx) + 1;
-    if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
-    const around = body.slice(Math.max(0, idx - 220), idx + 220);
-    if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
-    report('stale-premise?', i,
-      'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') with no wording that acknowledges ' +
-      'it is settled. Check this issue still describes reality. Advisory only.');
-  });
-});
+// The classification lives in stalePremiseFindings above, pure, so its narrowings are pinned by the
+// test suite rather than by a live run against whatever the tracker holds today.
+stalePremiseFindings(issues, byNumber).forEach((f) => report(f.kind, f.issue, f.detail));
 
 // ---- 6. The Projects board is a THIRD record of state, and it drifts ---------------------------
 // This repo deliberately has no `done` label, because a second answer to "is this finished" always

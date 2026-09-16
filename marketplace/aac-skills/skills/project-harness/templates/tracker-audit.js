@@ -176,13 +176,84 @@ function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
   return false;
 }
 
+/** Wording that presents a cited issue as an EXAMPLE rather than as this ticket's own premise.
+ *
+ *  A discovery-triage chore names a settled duplicate pair so the next agent does not refile it
+ *  ("this run has already produced one duplicate pair (#281 / #285)"). That citation is ABOUT the
+ *  closed pair; the chore asserts nothing the closed issue could have falsified. Without this,
+ *  every chore written to the triage template tripped stale-premise?, so the template and the
+ *  advisory were in permanent tension — which is how a class trains its readers to scroll past it
+ *  (claude-dotfiles issue 374).
+ *
+ *  Kept to wordings that name the citation's ROLE — example, duplicate, precedent — rather than
+ *  anything that merely sits near one; a looser list would swallow the real finding this check
+ *  exists for. Exported for the test suite. */
+const EXAMPLE_CITATION_PATTERNS = [
+  /\bfor example\b/i,
+  /\bexamples?\b/i,
+  /\be\.g\.\b/i,
+  /\bsuch as\b/i,
+  /\bduplicat\w*\b/i,
+  /\bdedupe\b/i,
+  /\bcautionary\b/i,
+  /\bprecedent\b/i,
+  /\billustrat\w*\b/i,
+];
+
+function isExampleCitation(around) {
+  return EXAMPLE_CITATION_PATTERNS.some((rx) => rx.test(String(around || '')));
+}
+
+/** The explicit opt-out, for a body whose citation is deliberate in a wording no list will predict.
+ *
+ *  `<!-- tracker-audit-ignore: stale-premise -->` anywhere in a body silences the class for that
+ *  body; `<!-- tracker-audit-ignore: stale-premise #281 #285 -->` silences only those citations. It
+ *  sits on the issue, where a reader can see it and argue with it. Returns { all, numbers }. Pure. */
+function stalePremiseIgnores(body) {
+  const rx = /tracker-audit-ignore:\s*stale-premise\??([ \t]*(?:#\d+[ \t,]*)*)/gi;
+  const numbers = new Set();
+  let all = false;
+  let m;
+  while ((m = rx.exec(String(body || '')))) {
+    const nums = (m[1].match(/\d+/g) || []).map(Number);
+    if (!nums.length) all = true;
+    nums.forEach((n) => numbers.add(n));
+  }
+  return { all, numbers };
+}
+
+/** Does one acceptance-box line cite a DIFFERENT issue of this repo?
+ *
+ *  A meta-ticket's box quotes the box it is about: claude-dotfiles #361's acceptance list carries
+ *  "#120's `writing` box is the pinned example", and `writing` is the directory another ticket
+ *  deleted. The deleted subject belongs to #120 — it is the POINT of #361, not drift in it — so a
+ *  box naming another issue is read as a quotation of that issue's box rather than a claim about
+ *  this one (issue 374).
+ *
+ *  `issueNumbers` is the tracker's own issue set, and passing it is what keeps the narrowing from
+ *  swallowing real findings: a box citing a PR while telling the owner to copy a path that PR
+ *  deleted is a claim about THIS issue's work and still reports. Omit it and any other number
+ *  counts. `#N` has to be its own token, so `owner/repo#7` and `#9a690f` are not issues. Pure. */
+function boxQuotesAnotherIssue(text, ownNumber, issueNumbers) {
+  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  let m;
+  while ((m = rx.exec(String(text == null ? '' : text)))) {
+    const n = Number(m[1]);
+    if (n === Number(ownNumber)) continue;
+    if (!issueNumbers || issueNumbers.has(n)) return true;
+  }
+  return false;
+}
+
 // Test-only export of the pure predicates. The rest of the file is a script and only runs when this
 // module is invoked directly, so `require('./tracker-audit.js')` from a test does not shell out to
 // gh or exit the process.
 if (require.main !== module) {
   module.exports = { isFollowUpAcknowledgment, isNotPlanned, NOT_PLANNED_PATTERNS,
                      restIssueToShape, restPrToShape, parseGithubSlug, filterIssuesOnly,
-                     boxPathCandidates, deletedPathIndex, matchDeletedPath, deletedSubjectFindings };
+                     EXAMPLE_CITATION_PATTERNS, isExampleCitation, stalePremiseIgnores,
+                     boxQuotesAnotherIssue, boxPathCandidates, deletedPathIndex, matchDeletedPath,
+                     deletedSubjectFindings };
   return;
 }
 
@@ -450,10 +521,14 @@ function matchDeletedPath(candidate, index) {
  *  filters to open itself, so "a closed issue produces no finding" is a property of this function. */
 function deletedSubjectFindings(allIssues, index) {
   const out = [];
+  // The tracker's own numbers, so a box citing a PR is not mistaken for one quoting an issue.
+  const issueNumbers = new Set((allIssues || []).map((i) => i.number));
   (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
     const boxes = untickedBoxes(i.body);
     const seen = new Set();
     boxes.hard.concat(boxes.soft).forEach((text) => {
+      // A box that cites another issue is quoting THAT issue's box (see boxQuotesAnotherIssue).
+      if (boxQuotesAnotherIssue(text, i.number, issueNumbers)) return;
       boxPathCandidates(text).forEach((c) => {
         if (seen.has(c)) return;
         const hit = matchDeletedPath(c, index);
@@ -651,6 +726,9 @@ open.forEach((i) => {
   // produced all ten advisories in a repo, which is how a useful check becomes one people scroll past.
   if (i.labels.some((l) => l.name === 'prd')) return;
   const body = String(i.body || '').replace(/\r\n/g, '\n');
+  // An explicit opt-out outranks every heuristic below, and says on the issue that it is meant.
+  const ignored = stalePremiseIgnores(body);
+  if (ignored.all) return;
   const citedNums = Array.from(new Set((body.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))));
   const citedClosed = citedNums.filter((n) => {
     const o = byNumber.get(n);
@@ -665,6 +743,7 @@ open.forEach((i) => {
   const bodyIsFollowUp = citedClosed.some((n) => isFollowUpAcknowledgment(body, n, closerPrsUnion));
   if (bodyIsFollowUp) return;
   citedClosed.forEach((n) => {
+    if (ignored.numbers.has(n)) return;
     const other = byNumber.get(n);
     const idx = body.indexOf('#' + n);
     // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
@@ -672,9 +751,13 @@ open.forEach((i) => {
     if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
     const around = body.slice(Math.max(0, idx - 220), idx + 220);
     if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
+    // A citation the surrounding prose presents as an example is about that issue, not this one.
+    if (isExampleCitation(around)) return;
     report('stale-premise?', i,
       'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') with no wording that acknowledges ' +
-      'it is settled. Check this issue still describes reality. Advisory only.');
+      'it is settled. Check this issue still describes reality. If the citation is deliberate, ' +
+      'say so in the body (`see #' + n + '`, "for example") or add ' +
+      '`<!-- tracker-audit-ignore: stale-premise #' + n + ' -->`. Advisory only.');
   });
 });
 
