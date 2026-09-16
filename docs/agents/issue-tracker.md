@@ -13,6 +13,23 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## From a cloud session (no GraphQL)
+
+A claude.ai/code or Cowork container reaches this tracker through the Anthropic proxy, which
+refuses two `gh` code paths (confirmed 2026-09-15, issue 163):
+
+- **Every GraphQL call** — `gh issue list`, `gh issue view` and the other `--json` spellings above
+  — answers HTTP 403 with a message pointing at REST. Use `gh api repos/<owner>/<repo>/issues...`
+  REST paths, or the GitHub MCP tools, for those conventions. A refused spelling is never evidence
+  that the step is impossible; it is a cue to switch instrument, as `/triage` and `/to-tickets`
+  already say.
+- **Every REST call whose target repo is not attached to the session** answers HTTP 403 "not
+  enabled for this session", with `add_repo` as the remedy.
+
+`gh auth status` reports "The token in GH_TOKEN is invalid." in these containers while `gh api`
+calls against the attached repo succeed: the proxy, not `gh`'s own auth, is what gates access.
+Do not read that line as a broken credential.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
@@ -39,7 +56,7 @@ Used by `/wayfinder`. The **map** is a single issue with **child** issues as tic
 
 - **Map**: a single issue labelled `wayfinder:map`, holding the Notes / Decisions-so-far / Fog body. `gh issue create --label wayfinder:map`.
 - **Child ticket**: an issue linked to the map as a GitHub sub-issue (`gh api` on the sub-issues endpoint). Where sub-issues aren't enabled, add the child to a task list in the map body and put `Part of #<map>` at the top of the child body. Labels: `wayfinder:<type>` (`research`/`prototype`/`grilling`/`task`). Once claimed, the ticket is assigned to the driving dev.
-- **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed.
+- **Blocking**: GitHub's **native issue dependencies** — the canonical, UI-visible representation. Add an edge with `gh api --method POST repos/<owner>/<repo>/issues/<child>/dependencies/blocked_by -F issue_id=<blocker-db-id>`, where `<blocker-db-id>` is the blocker's numeric **database id** (`gh api repos/<owner>/<repo>/issues/<n> --jq .id`, _not_ the `#number` or `node_id`). GitHub reports `issue_dependencies_summary.blocked_by` (open blockers only — the live gate). Where dependencies aren't available, fall back to a `Blocked by: #<n>, #<n>` line at the top of the child body. A ticket is unblocked when every blocker is closed. **Sequencing is not blocking**: a `## Blocked by` line that reads `Merge after #N` says only that this should land after #N. It takes no native edge, the frontier query still treats the ticket as startable, and `tools/tracker-audit.js` raises no `ungated-dependency` finding for it — every other line under that heading is still read as a gate.
 - **Frontier query**: list the map's open children (`gh issue list --state open`, scoped to the map's sub-issues / task list), drop any with an open blocker (`issue_dependencies_summary.blocked_by > 0`, or an open issue in the `Blocked by` line) or an assignee; first in map order wins.
 - **Claim**: `gh issue edit <n> --add-assignee @me` — the session's first write.
 - **Resolve**: `gh issue comment <n> --body "<answer>"`, then `gh issue close <n>`, then append a context pointer (gist + link) to the map's Decisions-so-far.
@@ -92,7 +109,8 @@ One state label per open issue: `needs-triage`, `needs-info`, `ready-for-agent`,
 
 `ready-for-local-agent` marks work a cloud container cannot do but a desktop session can, with no
 person in the loop: an edit to the live `~/.claude` or `~/.codex` tree followed by
-`sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep
-that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container.
+`sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, or an
+edit the auto-mode classifier blocks in a container (a project-board sweep is no longer one: the
+Board sweep job runs it, claude-dotfiles issue 216).
 `ready-for-human` is reserved for a person's judgment, credential or sign-off. A step a local
 session can perform never carries `ready-for-human` (Dan, 2026-09-15).
