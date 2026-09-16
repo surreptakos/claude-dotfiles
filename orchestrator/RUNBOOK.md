@@ -112,6 +112,16 @@ In this order:
    in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
    fleet refuses to start without one. When the fleet returns, run the merge pass once more over
    the PRs it just opened.
+
+   **Record the wave before doing anything else with it.** The moment the Workflow returns, run
+   `node tools/fleet-run-record.js --latest` in the served repo, in THIS session's own shell —
+   never through a subagent, which would re-derive the run from its own context instead of reading
+   the journal. The harness journal the record distils is machine-local and dies with the
+   container, so a wave that is not recorded before the pass ends is unrecoverable. The fleet logs
+   the same reminder on its way out (aac-routines issue 269). Repos that gitignore `state/` keep
+   nothing on disk either: there, post the record's digest as a comment on that repo's tracking
+   issue, written `owner/repo#N`, so the run survives the container. A repo without
+   `tools/fleet-run-record.js` has nothing to run — say so in the heartbeat and move on.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
    append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
    and PR list — never a subagent self-report.

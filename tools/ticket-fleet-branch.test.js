@@ -231,15 +231,17 @@ function extractCodeLane(src) {
   return src.slice(s + startTag.length, e);
 }
 
-async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, guardSpy = null) {
   const src = fs.readFileSync(scriptPath, 'utf8');
   const body = extractCodeLane(src);
   // Wrap the marker body in an async factory that closes over stub bindings, then invoke the
   // returned runCodeLane. cfg / runId / scout / log / schemas / PR_CHECK are provided as free
   // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
+  // The lane also closes over the aac-routines ports: the isolation checkpoints (issues 192, 270)
+  // and the unusable-output helpers (issues 191, 270). Stub them so the extracted body evaluates.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules',
+    'instrument', 'rules', 'treeGuardCheck', 'assertNoBreach', 'unusableReason', 'unusableVerdict',
     body + '\nreturn runCodeLane;'
   );
   const cfg = { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' };
@@ -249,9 +251,19 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
-  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  const checkpoints = [];
+  const treeGuardCheck = async (label, ticketNumber) => {
+    checkpoints.push(`${label}#${ticketNumber}`);
+    if (guardSpy) await guardSpy(label, ticketNumber);
+  };
+  const unusableReason = (who, detail) => `${who} output unusable: ${detail}`;
+  const unusableVerdict = (detail, who) => ({ pass: false, evidence: '', failures: [unusableReason(who || 'verifier', detail)], unusable: true });
+  const runCodeLane = await wrapper(
+    agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules,
+    treeGuardCheck, () => {}, unusableReason, unusableVerdict
+  );
   const result = await runCodeLane(ticket, workerIndex);
-  return { result, logs };
+  return { result, logs, checkpoints };
 }
 
 for (const file of RESUME_GUARD_PAIR) {
@@ -313,11 +325,47 @@ for (const file of RESUME_GUARD_PAIR) {
       if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/500' };
       throw new Error('unexpected label: ' + opts.label);
     };
-    const { result } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
+    const { result, checkpoints } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
     assert.deepEqual(calls, ['pr-check:#9', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
       'when no open PR exists the pre-check must be followed by impl/verify/deliver in order');
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
     assert.deepEqual(result.discoveries, ['finding-A']);
+    // Ported from the aac-routines fork (issues 192, 270): one orchestrator-tree checkpoint after
+    // the implementer, one after the (unisolated) verifier, one after Deliver pushes.
+    assert.deepEqual(checkpoints, ['implement-attempt1#9', 'verify-attempt1#9', 'deliver#9'],
+      'the code lane must checkpoint the orchestrator tree after Implement, Verify and Deliver');
+  });
+
+  // ---- Deliver never ticks acceptance boxes (aac-routines issue 264) ----
+
+  test(`${rel} Deliver prompt forbids ticking acceptance boxes`, () => {
+    const body = extractCodeLane(fs.readFileSync(file, 'utf8'));
+    const deliverIdx = body.indexOf('`Deliver verified branch');
+    assert.ok(deliverIdx > 0, 'code lane must build a Deliver prompt');
+    const prompt = body.slice(deliverIdx, body.indexOf('label: `deliver:#', deliverIdx));
+    assert.match(prompt, /do NOT tick any acceptance box/,
+      'Deliver prompt must forbid ticking acceptance boxes: the boxes wait for the merge (aac-routines issue 264)');
+    assert.doesNotMatch(prompt, /tick-acceptance-boxes\.js/,
+      'Deliver must not run the acceptance-box ticker itself; the merge workflow owns that step');
+    assert.doesNotMatch(prompt, /tick (?:each|the|every) (?:unticked )?acceptance box/i,
+      'Deliver prompt must carry no instruction to tick a box');
+  });
+
+  // ---- every per-ticket agent() call is wrapped (aac-routines issues 191, 270) ----
+
+  test(`${rel} wraps every per-ticket agent() call so a schema failure cannot null the ticket`, () => {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    const unwrapped = [];
+    lines.forEach((line, i) => {
+      if (!/await agent\(/.test(line)) return;
+      if (/const scout = await agent\(/.test(line)) return; // runs before any ticket exists
+      let j = i - 1;
+      while (j >= 0 && lines[j].trim() === '') j--;
+      if (!/try \{$/.test(lines[j] || '')) unwrapped.push(`${i + 1}: ${line.trim()}`);
+    });
+    assert.deepEqual(unwrapped, [],
+      'each of these agent() calls must sit directly inside a try block, or a StructuredOutput '
+      + 'retry-cap throw drops its ticket out of the run report entirely (aac-routines issues 191, 270)');
   });
 }
