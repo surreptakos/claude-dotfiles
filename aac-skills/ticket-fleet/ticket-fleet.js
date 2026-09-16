@@ -155,10 +155,11 @@ const PROBE = { type: 'object', required: ['items', 'blocked', 'discoveries'], p
   discoveries: { type: 'array', items: { type: 'string' }, description: 'out-of-scope findings, each self-contained' },
 } }
 
-const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready'], properties: {
+const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 'remainingKind'], properties: {
   agentSide: { type: 'string', description: 'what an agent could do from this container: commands and their verbatim output' },
-  ownerSide: { type: 'array', items: { type: 'string' }, description: 'the remaining owner steps, precise enough to follow without re-reading the ticket' },
-  ready: { type: 'boolean', description: 'true when everything an agent can do is done and only owner steps remain' },
+  ownerSide: { type: 'array', items: { type: 'string' }, description: 'the remaining steps, precise enough to follow without re-reading the ticket' },
+  ready: { type: 'boolean', description: 'true when everything an agent can do is done and only human/local-agent steps remain' },
+  remainingKind: { type: 'string', enum: ['local-agent', 'human'], description: "local-agent when the remaining steps are things a desktop session can do without a person (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep that needs a project-scoped gh token, an edit the auto-mode classifier blocks in a container); human when the remaining steps are a person's judgment, credential or sign-off (a click in a web UI, an account or billing change, a design decision, anything needing the owner's identity)" },
 } }
 
 const VERDICT = { type: 'object', required: ['pass', 'evidence', 'failures'], properties: {
@@ -273,36 +274,42 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
   return { ticket: t.number, done, kind: 'probe', branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
 }
 
-// Human lane: the owner performs the steps. The agent verifies only what a container can, then
-// hands the rest back in one comment. It never claims an owner step was done.
+// Human lane: a desktop session or a person performs the steps. The agent verifies only what
+// a container can, then hands the rest back in one comment under a "Remaining for a local
+// session" heading - unless the remaining steps are genuinely a person's judgment, credential or
+// sign-off, in which case the heading is "Remaining for a person". It never claims a step was
+// done that it did not do.
 const runHumanLane = async (t) => {
   const handoff = await agent(
-    `Issue #${t.number}: ${t.title} is a ready-for-human ticket - the owner performs the steps, you do not (${t.kindReason}).
+    `Issue #${t.number}: ${t.title} is a human-lane ticket - either a desktop session or a person performs the remaining steps, you do not (${t.kindReason}).
 ${rules.handoffRead(t.number)}
 Criteria (verbatim):\n${t.criteria}
 Do ONLY what an agent can do from this container:
 - Run the verification commands the checklist names; record each verbatim with its REAL exit code.
 - Report a credential, token or setting as set or unset, NEVER its value; never use fake credentials.
-- Make no repository change, no commit, no push, no PR. Never perform an owner step (a click in a web UI, an account or billing change, anything needing the owner's identity) and never claim one was done.
-Return: agentSide = the commands you ran and their verbatim output; ownerSide = the remaining owner steps, precise enough to follow without re-reading the ticket (where to click, what to enter, what to check afterwards); ready = true only when everything an agent can do is done and only owner steps remain.
+- Make no repository change, no commit, no push, no PR. Never perform a step that only a desktop session or a person can do, and never claim one was done.
+Return: agentSide = the commands you ran and their verbatim output; ownerSide = the remaining steps, precise enough to follow without re-reading the ticket (where to click, what to enter, what to check afterwards); ready = true only when everything an agent can do is done and only human/local-agent steps remain; remainingKind = 'local-agent' when a desktop session could take the remaining steps (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep needing a project-scoped gh token, an edit the auto-mode classifier blocks in a container), 'human' when they are genuinely a person's judgment, credential or sign-off.
 Return structured output only.`,
     { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
   )
   let delivery = null
   if (handoff && cfg.deliver) {
-    const ownerList = handoff.ownerSide.length ? handoff.ownerSide.map(s => '- ' + s).join('\n') : '- nothing remains for the owner'
+    const remainingKind = handoff.remainingKind === 'local-agent' ? 'local-agent' : 'human'
+    const remainingHeading = remainingKind === 'local-agent' ? 'Remaining for a local session' : 'Remaining for a person'
+    const emptyLine = remainingKind === 'local-agent' ? '- nothing remains for a local session' : '- nothing remains for a person'
+    const ownerList = handoff.ownerSide.length ? handoff.ownerSide.map(s => '- ' + s).join('\n') : emptyLine
     delivery = await agent(
       `Post ONE status comment on issue #${t.number} (${t.title}).
 ${rules.commentPost()}
 Body, in this order:
 1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${handoff.agentSide}
-2. A "Remaining for the owner" section, one bullet per step, verbatim:\n${ownerList}
+2. A "${remainingHeading}" section, one bullet per step, verbatim:\n${ownerList}
 3. Exactly this footer, as the last two lines after a blank line:
 
 ---
 _Generated by [Claude Code](https://claude.ai/code)_
 
-Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, and never state that an owner step was performed. Return structured output only.`,
+Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, and never state that a step outside this container was performed. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
     )
   }
