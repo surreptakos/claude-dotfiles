@@ -176,7 +176,11 @@ esac
   return bin;
 }
 
-test('a closed issue whose card is not Done is moved to Done; nothing else is touched', () => {
+// The stub gh is a POSIX shell script found through a colon-joined PATH, so on Windows the real
+// gh runs instead and fails on the fake token. CI is Linux and runs it for real; a desktop
+// pre-commit skips it with the reason on the line.
+test('a closed issue whose card is not Done is moved to Done; nothing else is touched',
+  { skip: process.platform === 'win32' && 'POSIX shell stub gh; runs on Linux CI' }, () => {
   const dir = tmpdir('e2e');
   const repo = path.join(dir, 'repo');
   fs.mkdirSync(repo);
