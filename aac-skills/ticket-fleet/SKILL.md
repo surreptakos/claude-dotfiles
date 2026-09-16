@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T01:43:43Z"
-  previous-modified: "2026-09-15T22:39:49Z"
-  revision: "9"
-  content-sha: "5c591cb2b485"
+  modified: "2026-09-16T14:27:42Z"
+  previous-modified: "2026-09-16T14:25:25Z"
+  revision: "13"
+  content-sha: "207aeab73285"
 ---
 
 # ticket-fleet
@@ -34,9 +34,9 @@ checkout's `.claude/workflows/`. The Workflow tool resolves a bare `name:` from 
 directory, and it reads the file behind `scriptPath` byte-for-byte before showing the approval
 dialog - a CR anywhere in the payload trips "script contains control characters that would be
 hidden in the approval dialog" and the launch is refused (issue 233 - and this repo pins
-`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` is required (the
-workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the caller
-mints the id).
+`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` and
+`args.invocationId` are both required (the workflow runtime forbids `Date.now()` and
+`Math.random()` inside scripts, so the caller mints them).
 
 **Checkout-path invocation (works on desktop and in cloud sessions).** Once
 `.claude/workflows/ticket-fleet.js` exists in the cwd, either spelling launches the fleet:
@@ -44,14 +44,14 @@ mints the id).
 ```
 Workflow({
   scriptPath: '.claude/workflows/ticket-fleet.js',
-  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
+  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
 ```
 
 ```
 Workflow({
   name: 'ticket-fleet',
-  args: { runId: '<hex>', tickets: [], deliver: false }
+  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
 ```
 
@@ -73,7 +73,15 @@ On a repo's first run, always pass `deliver: false` - verify the Scout, lane and
 prompts before letting the fleet push branches and open PRs. Full args list:
 
 - `runId` (required, string): caller-minted unique token. Any short unique string; the
-  branch names embed it as `wf_<runId>-w<workerIndex>`.
+  branch names embed it as `wf_<runId>-w<workerIndex>`. A resume (`resumeFromRunId`) passes
+  the SAME `runId`, so the resumed attempts land on the branches they already own.
+- `invocationId` (required, string): a second caller-minted token, re-minted on EVERY launch
+  including every resume, and rejected if it equals `runId`. It is spliced into the open-PR
+  guard's prompt and label and nowhere else. The guard asks an agent whether this ticket
+  already has an open PR, and the runtime replays cached agent answers on resume; without a
+  key that moves per invocation the guard replays the `{found:false}` it recorded before any
+  PR existed and the ticket is implemented, verified and delivered twice (issue 291). Mint
+  both with `printf %x%x $(date +%s) $$`.
 - `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
   takes exactly those tickets regardless of label or state; otherwise it lists open tickets
   with `args.label`.
@@ -105,6 +113,13 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   session** heading; the delivery moves the label to `ready-for-local-agent` unless the
   remaining steps are genuinely a person's judgment, credential or sign-off, in which
   case the label is `ready-for-human`. It never claims an owner step was done.
+
+The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
+fleet handoff (a "Remaining for a local session" or "Remaining for a person" section and the
+Claude Code footer) with no owner comment after it. Such a ticket is parked, not run - no lane
+starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
+Together with the relabel that is what stops a second wave repeating a handoff nobody has
+answered yet (issue 266).
 
 ## Branch names
 

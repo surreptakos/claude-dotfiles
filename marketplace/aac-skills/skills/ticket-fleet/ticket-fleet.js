@@ -15,7 +15,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise)}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise)}',
   phases: [
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
@@ -41,6 +41,7 @@ const cfg = Object.assign({
   maxAttempts: 3,           // Ralph-style bounded retry, fresh context each attempt
   deliver: true,            // false = stop after verify, no push/PR
   followupsFile: 'FOLLOW-UPS.md',
+  invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves via env + PATH below
 }, args || {})
 
@@ -57,6 +58,21 @@ const cfg = Object.assign({
 // (any short unique token, e.g. the shell's `date +%s` in hex).
 if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot call Date.now()/Math.random(); pass a unique token such as `printf %x $(date +%s)`')
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+
+// ---- per-invocation freshness for the resume guard (issue 291) ----
+// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR guard in
+// runCodeLane below needs the opposite - the tracker as it is right now. It has to ask an agent
+// (a workflow script has no filesystem, shell or network of its own), and the runtime replays
+// cached agent results on resume, so under a stable cache key the guard replays the {found:false}
+// it recorded before any PR existed and the ticket is implemented, verified and delivered a
+// second time - the duplicate PR the guard exists to prevent. The freshness therefore arrives
+// through args, exactly like runId: the caller mints a NEW invocationId on EVERY launch, resume
+// included. It is spliced into the pr-check prompt and label and nowhere else, so two invocations
+// of the same runId ask that one question under different cache keys while every other stage
+// keeps its cache and the branch names stay put.
+const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+if (!invocationId) throw new Error('args.invocationId is required: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`). It busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291); keep args.runId unchanged across a resume, the branch names embed it.')
+if (invocationId === runId) throw new Error('args.invocationId must differ from args.runId: runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
 
 // ---- instrument switch (gh vs GitHub MCP) ----
 // The tracker prompts below differ in exactly one dimension: which tool set the scout, probe,
@@ -79,6 +95,11 @@ const instrument = pickInstrument(_env, undefined, cfg.instrument)
 
 // The tracker rule lines the scout and every delivery prompt embed. Same wording on both
 // instruments except for the tool spellings and the "how to detect the tracker root" note.
+// `labelSwap` is the human lane's hand-back: once the handoff comment is posted the ticket
+// belongs to whoever takes the remaining steps, so the run takes `ready-for-agent` off it and
+// puts `ready-for-local-agent` (a desktop session) or `ready-for-human` (a person) on. Without that the next label listing hands the same ticket back to the fleet and the
+// handoff comment is written again (issue 266).
+// [FLEET-TRACKER-RULES-START]
 function trackerRules(mode) {
   if (mode === 'mcp') return {
     scoutList: (label) => `mcp__github__list_issues with label "${label}", state open (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
@@ -86,6 +107,7 @@ function trackerRules(mode) {
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
     commentPost: () => `Use mcp__github__add_issue_comment.`,
+    labelSwap: (n, target = 'ready-for-human') => `Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
     prCreate: () => `mcp__github__create_pull_request`,
     prComment: () => `mcp__github__add_issue_comment on issue`,
   }
@@ -95,24 +117,66 @@ function trackerRules(mode) {
     scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
     commentPost: () => `Use \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
+    labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: () => `gh pr create`,
     prComment: () => `gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>`,
   }
 }
+// [FLEET-TRACKER-RULES-END]
 const rules = trackerRules(instrument)
 log(`instrument = ${instrument}`)
 
 // Explicit selection wins over the label: a named ticket is fetched whatever its labels or state.
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
 
+// ---- resume-stable prompt inputs (issue 271) ----
+// A resume replays every agent() call whose cache key is unchanged, and that key covers the
+// prompt text. So a prompt built out of a previous agent's structured result must render the
+// same bytes whether that result came back live from the tool call or was re-read from the
+// journal on resume. The two sides differ in exactly the ways a JSON round trip differs: key
+// order, absent vs null vs undefined members, numbers and booleans a live run held as JS
+// values, and CR bytes inside quoted output. A `deliver: false` run resumed with
+// `deliver: true` missed on `impl:#N.2` and `verify:#N.2` for that reason and re-implemented
+// tickets whose verified branches already existed. Every prior result now reaches a prompt
+// through one of these doors, and the verifier and deliver prompts name the branch this script
+// computed rather than the one the implementer reported - so the branch delivered is the branch
+// that was verified. Pure counterparts live in tools/ticket-fleet-branch.js; the block between
+// the FLEET-RESUME-STABLE markers is extracted verbatim by tools/ticket-fleet-branch.test.js
+// and compared against them, so the two copies cannot drift.
+// [FLEET-RESUME-STABLE-START]
+const stableJson = (value) => {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']'
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}'
+  }
+  if (value === undefined) return 'null'
+  return JSON.stringify(value)
+}
+const stableText = (value) => {
+  if (value === null || value === undefined) return ''
+  const raw = typeof value === 'string' ? value
+    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
+    : stableJson(value)
+  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
+}
+const stableList = (value) => {
+  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value]
+  return items.map(stableText).filter(s => s.length > 0)
+}
+const priorFindingsBlock = (verdict, howToFix) => verdict
+  ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
+  : ''
+// [FLEET-RESUME-STABLE-END]
+
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
   candidateNumbers: { type: 'array', items: { type: 'integer' }, description: 'every issue number the one listing in step 2 returned, before any filtering - [] when it returned none. The whole candidate set: no ticket outside it may appear in tickets.' },
-  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason'], properties: {
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'handoffPending'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
     keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     kind: { type: 'string', enum: ['code', 'probe', 'human'], description: 'which lane runs this ticket: code = repository change; probe = resolves by quoting command output/research/evidence in a comment, no repository change asked for; human = labelled ready-for-human or the body says the owner performs the steps' },
     kindReason: { type: 'string', description: 'one line: the words in the ticket that decided the kind' },
+    handoffPending: { type: 'boolean', description: 'true when the ticket\'s LATEST comment is a fleet handoff (a "Remaining for a local session" or "Remaining for a person" section (older handoffs say "Remaining for the owner") and the "_Generated by [Claude Code](https://claude.ai/code)_" footer) and no later comment from the owner follows it: the ticket is parked on a human, so this run must skip it rather than repeat the handoff' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -147,10 +211,16 @@ const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 
   remainingKind: { type: 'string', enum: ['local-agent', 'human'], description: "local-agent when the remaining steps are things a desktop session can do without a person (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep that needs a project-scoped gh token, an edit the auto-mode classifier blocks in a container); human when the remaining steps are a person's judgment, credential or sign-off (a click in a web UI, an account or billing change, a design decision, anything needing the owner's identity)" },
 } }
 
-const VERDICT = { type: 'object', required: ['pass', 'evidence', 'failures'], properties: {
+// `failures` is deliberately NOT required (issue 265). Requiring it made a passing verdict
+// unexpressible: on issue 241 attempt 3 the verifier returned {pass:true, evidence} five times
+// without the key and the run died on "StructuredOutput retry cap (5) exceeded ... must have
+// required property 'failures'", so a green branch got no verdict and no delivery. A pass may
+// omit the key or send []; every read of it goes through the normalisation below, which fills
+// in [] so the retry prompt's `.failures.join` can never throw on a key-less verdict.
+const VERDICT = { type: 'object', required: ['pass', 'evidence'], properties: {
   pass: { type: 'boolean' },
   evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
-  failures: { type: 'array', items: { type: 'string' } },
+  failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
 } }
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
@@ -159,6 +229,7 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
   commented: { type: 'boolean' }, commentUrl: { type: 'string' },
+  labels: { type: 'array', items: { type: 'string' }, description: 'human lane only: the ticket labels after the hand-back relabel - ready-for-local-agent or ready-for-human present, ready-for-agent gone' },
 } }
 
 // ---- Scout ----
@@ -175,6 +246,7 @@ const scout = await agent(
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
    - code: everything else.
+4b. Set handoffPending per ticket. Read the comments in posting order and look at the LAST one. It is a fleet handoff when it carries a "Remaining for a local session" or "Remaining for a person" section (older handoffs say "Remaining for the owner") and the footer "_Generated by [Claude Code](https://claude.ai/code)_". handoffPending = true when that last comment is a fleet handoff and no comment from the owner (any comment the fleet did not write - it lacks that footer) comes after it; otherwise false. A ticket with handoffPending true is already parked on the owner and this run must not hand it off again.
 5. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs - never a glob if docs forbid it).
 6. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
 7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
@@ -202,12 +274,26 @@ if (!scout || !scoutTickets.length) { log('No eligible tickets found.'); return 
 // [FLEET-SCOUT-GATE-END]
 
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
-// wave (its lane is the handoff), and label listing keeps today's behaviour.
-const eligible = scoutTickets.filter(t => t.blockedBy.length === 0)
-const wave = eligible.slice(0, cfg.maxTickets)
-const droppedBlocked = scoutTickets.length - eligible.length
-const droppedCap = eligible.length - wave.length
+// wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose latest
+// comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
+// would post the same handoff comment again on every wave (issue 266). The selection is a pure
+// function so tools/ticket-fleet-branch.test.js can drive it with fabricated scout output.
+// [FLEET-WAVE-SELECT-START]
+const selectWave = (tickets, maxTickets) => {
+  const blocked = tickets.filter(t => t.blockedBy.length > 0)
+  const eligible = tickets.filter(t => t.blockedBy.length === 0)
+  const pendingHandoff = eligible.filter(t => t.handoffPending === true)
+  const runnable = eligible.filter(t => t.handoffPending !== true)
+  return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) }
+}
+// [FLEET-WAVE-SELECT-END]
+const selection = selectWave(scoutTickets, cfg.maxTickets)
+const wave = selection.wave
+const droppedBlocked = selection.blocked.length
+const droppedCap = selection.overCap.length
+const skippedHandoff = selection.pendingHandoff.map(t => t.number)
 if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
+if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awaiting the owner after a fleet handoff comment - ${skippedHandoff.map(n => '#' + n).join(', ')}.`)
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 
@@ -220,7 +306,7 @@ log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 const runProbeLane = async (t) => {
   let lastVerdict = null, probe = null, evidenceBlocks = ''
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
-    const priorFindings = lastVerdict ? `\nPrevious attempt FAILED verification. Independent reviewer findings (fix these by actually running the commands, not by rewording):\n- ${lastVerdict.failures.join('\n- ')}` : ''
+    const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
     probe = await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
@@ -239,7 +325,7 @@ Return structured output only.`,
     )
     if (!probe || !probe.items.length) { lastVerdict = { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }; continue }
 
-    evidenceBlocks = probe.items.map(i => `ITEM: ${i.item}\nCOMMANDS:\n${i.commands}\nOUTPUT:\n${i.outputVerbatim}\nEXIT: ${i.exitCodes}`).join('\n----\n')
+    evidenceBlocks = probe.items.map(i => `ITEM: ${stableText(i.item)}\nCOMMANDS:\n${stableText(i.commands)}\nOUTPUT:\n${stableText(i.outputVerbatim)}\nEXIT: ${stableText(i.exitCodes)}`).join('\n----\n')
     lastVerdict = await agent(
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
@@ -252,13 +338,17 @@ Commands and output claimed:\n${evidenceBlocks}
 Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: instrument === 'gh' ? 'fleet-verifier' : undefined }
     )
+    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+    // later read (the retry prompt, the run report) sees an array.
+    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
     if (lastVerdict && lastVerdict.pass) break
   }
 
   const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
   let delivery = null
   if (done && cfg.deliver) {
-    const blockedList = probe.blocked.length ? probe.blocked.map(b => '- ' + b).join('\n') : ''
+    const blocked = stableList(probe.blocked)
+    const blockedList = blocked.length ? blocked.map(b => '- ' + b).join('\n') : ''
     delivery = await agent(
       `Post ONE resolution comment on issue #${t.number} (${t.title}).
 ${rules.commentPost()}
@@ -266,7 +356,7 @@ Body, in this order:
 1. One sentence: what the ticket asked for and that it is answered by the evidence below.
 2. One section per item, the item as the heading and a fenced code block holding, in order, the line \`$ <command>\`, then its verbatim output, then \`[exit N]\`. Copy from this data exactly - never re-run, re-word or tidy it:\n${evidenceBlocks}
 3. ${blockedList ? 'A section "Blocked from this container" listing each blocked item and exactly what would unblock it:\n' + blockedList : 'No "Blocked from this container" section - nothing was blocked.'}
-4. A line starting "Verifier: " quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}
+4. A line starting "Verifier: " quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(lastVerdict.evidence))}
 5. Exactly this footer, as the last two lines after a blank line:
 
 ---
@@ -283,7 +373,12 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // a container can, then hands the rest back in one comment under a "Remaining for a local
 // session" heading - unless the remaining steps are genuinely a person's judgment, credential or
 // sign-off, in which case the heading is "Remaining for a person". It never claims a step was
-// done that it did not do.
+// done that it did not do. After the comment it moves the ticket's label from ready-for-agent
+// to the hand-back state that heading implies (ready-for-local-agent or ready-for-human), so
+// the next label listing leaves it alone (issue 266). Bounded by the FLEET-HUMAN-LANE markers
+// so tools/ticket-fleet-branch.test.js can extract it verbatim and drive it with a mocked
+// `agent` under either instrument.
+// [FLEET-HUMAN-LANE-START]
 const runHumanLane = async (t) => {
   const handoff = await agent(
     `Issue #${t.number}: ${t.title} is a human-lane ticket - either a desktop session or a person performs the remaining steps, you do not (${t.kindReason}).
@@ -302,28 +397,33 @@ Return structured output only.`,
     const remainingKind = handoff.remainingKind === 'local-agent' ? 'local-agent' : 'human'
     const remainingHeading = remainingKind === 'local-agent' ? 'Remaining for a local session' : 'Remaining for a person'
     const emptyLine = remainingKind === 'local-agent' ? '- nothing remains for a local session' : '- nothing remains for a person'
-    const ownerList = handoff.ownerSide.length ? handoff.ownerSide.map(s => '- ' + s).join('\n') : emptyLine
+    const handBackLabel = remainingKind === 'local-agent' ? 'ready-for-local-agent' : 'ready-for-human'
+    const ownerSide = stableList(handoff.ownerSide)
+    const ownerList = ownerSide.length ? ownerSide.map(s => '- ' + s).join('\n') : emptyLine
     delivery = await agent(
-      `Post ONE status comment on issue #${t.number} (${t.title}).
+      `Post ONE status comment on issue #${t.number} (${t.title}), then hand the ticket back to the owner by relabelling it.
 ${rules.commentPost()}
 Body, in this order:
-1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${handoff.agentSide}
+1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${stableText(handoff.agentSide)}
 2. A "${remainingHeading}" section, one bullet per step, verbatim:\n${ownerList}
 3. Exactly this footer, as the last two lines after a blank line:
 
 ---
 _Generated by [Claude Code](https://claude.ai/code)_
 
-Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, and never state that a step outside this container was performed. Return structured output only.`,
+Then, and only after the comment is posted, relabel the ticket so the next run leaves it alone instead of repeating this handoff: ${rules.labelSwap(t.number, handBackLabel)}
+Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and "ready-for-agent" must not.
+Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that a step outside this container was performed. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
     )
   }
   return {
-    ticket: t.number, done: !!handoff, kind: 'human', branch: null,
+    ticket: t.number, done: !!handoff, kind: 'human', branch: null, labels: (delivery && delivery.labels) || null,
     verdict: handoff ? { pass: handoff.ready, evidence: handoff.agentSide, failures: handoff.ready ? [] : handoff.ownerSide } : null,
     prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: [],
   }
 }
+// [FLEET-HUMAN-LANE-END]
 
 // ---- Implement + blind Verify per ticket, no barrier between tickets ----
 // Pre-loop idempotence guard for resume (issue 150). Fetches the open-PR state from the tracker
@@ -341,13 +441,19 @@ const PR_CHECK = { type: 'object', required: ['found'], properties: {
 // invoked when the pre-loop PR check reports an open PR (issue 150 acceptance).
 // [FLEET-CODE-LANE-START]
 const runCodeLane = async (t, workerIndex) => {
-  // Idempotence guard for resume (issue 150). If the tracker already has an open PR whose head
-  // ref matches this ticket's branch shape, skip the whole ticket: no impl, verify or deliver
-  // agent is spawned. The observed failure mode (wf_911fa64d-102, run id 6aa46942): a resumed
-  // run served impl:#97.1 from cache, but verify:#97.1 and deliver:#97 ran under changed cache
-  // keys, re-verified the ticket, and opened PR 145 while PR 137 was still open. What moved
-  // those keys inside the workflow runtime is opaque here; the fix short-circuits the pipeline
-  // body with this pre-loop tracker check, before any of the drifting keys are hit.
+  // Idempotence guard for resume (issue 150), kept fresh across resumes (issue 291). If the
+  // tracker already has an open PR whose head ref matches this ticket's branch shape, skip the
+  // whole ticket: no impl, verify or deliver agent is spawned. The observed failure mode
+  // (wf_911fa64d-102, run id 6aa46942): a resumed run served impl:#97.1 from cache, but
+  // verify:#97.1 and deliver:#97 ran under changed cache keys, re-verified the ticket, and
+  // opened PR 145 while PR 137 was still open. What moved those keys inside the workflow runtime
+  // is opaque here; the fix short-circuits the pipeline body with this pre-loop tracker check,
+  // before any of the drifting keys are hit.
+  // The guard is itself an agent() call, so it needs its own cache key to move: invocationId
+  // (fresh on every launch, resume included - see the block above) is spliced into both the
+  // prompt and the label, which is what stops a resume replaying the {found:false} recorded
+  // before the PR existed. Keep it in both; a key derived from runId alone is stable across a
+  // resume and the guard becomes a cached lie.
   const prCheckSteps = instrument === 'mcp'
     ? `There is no gh CLI here: use mcp__github__list_pull_requests with state="open" and per_page=100.
 Filter the returned array to entries whose head.ref (the branch name of the PR's head) starts with agent/issue-${t.number}-.`
@@ -357,10 +463,11 @@ Filter the returned array to entries whose head.ref (the branch name of the PR's
 3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
   const openPR = await agent(
     `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
+Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
 ${prCheckSteps}
 If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
 Make no repository change, no comment, no PR. Return structured output only.`,
-    { label: `pr-check:#${t.number}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
+    { label: `pr-check:#${t.number}@${invocationId}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
   )
   if (openPR && openPR.found) {
     log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)
@@ -370,12 +477,12 @@ Make no repository change, no comment, no PR. Return structured output only.`,
       prUrl: openPR.prUrl, commentUrl: null, discoveries: [],
     }
   }
-  let lastVerdict = null, impl = null
+  let lastVerdict = null, impl = null, branch = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
     // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
-    const branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
-    const priorFindings = lastVerdict ? `\nPrevious attempt FAILED verification. Independent reviewer findings (fix these with a genuinely different approach, not a parameter tweak):\n- ${lastVerdict.failures.join('\n- ')}` : ''
+    branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
+    const priorFindings = priorFindingsBlock(lastVerdict, 'fix these with a genuinely different approach, not a parameter tweak')
     impl = await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
@@ -391,6 +498,11 @@ Return structured output only.`,
       { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: cfg.implModel, isolation: 'worktree' }
     )
     if (!impl || !impl.committed) { lastVerdict = { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }; continue }
+    // The implementer's self-reported branch never reaches a prompt: it is an agent result, so
+    // embedding it would tie the verifier's cache key to that result's serialization (issue 271),
+    // and a wrong self-report would point the verifier at a branch nobody asked for. The
+    // instructed branch is what gets verified and delivered; a mismatch is logged, loudly.
+    if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Blind verifier: gets branch + criteria ONLY - never the implementer's self-report (conformity
     // guard). Under the gh instrument the verifier runs under the fleet-verifier subagent
@@ -399,16 +511,19 @@ Return structured output only.`,
     // restraint is the container sandbox itself.
     lastVerdict = await agent(
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
-Branch under review: ${impl.branch} (do NOT trust its author; you have not seen their claims).
-In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach - branch is checked out elsewhere), then inside it:
+Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
+In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
 1. Run \`${scout.testCommand}\` yourself; record the REAL exit code.
-2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${impl.branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
+2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
-4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${impl.branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*'\`. Any hit is a hard-rail failure - mark pass=false and quote the file list in evidence.
+4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*'\`. Any hit is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: instrument === 'gh' ? 'fleet-verifier' : undefined }
     )
+    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+    // later read (the retry prompt, the run report) sees an array.
+    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
     if (lastVerdict && lastVerdict.pass) break
   }
 
@@ -427,15 +542,15 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
       ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
       : ''
     delivery = await agent(
-      `Deliver verified branch ${impl.branch} for issue #${t.number}.${prToolNote ? ' ' + prToolNote : ''}
-1. git push -u origin ${impl.branch}
-2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
+      `Deliver verified branch ${branch} for issue #${t.number}.${prToolNote ? ' ' + prToolNote : ''}
+1. git push -u origin ${branch}
+2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(lastVerdict.evidence))}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
 3. ${rules.prComment()} ${t.number} with the PR link${keepOpenNote}.
 Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )
   }
-  return { ticket: t.number, done, kind: 'code', branch: impl && impl.branch, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
+  return { ticket: t.number, done, kind: 'code', branch: impl ? branch : null, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
 }
 // [FLEET-CODE-LANE-END]
 
@@ -467,5 +582,7 @@ return {
   failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, kind: r.kind, failures: r.verdict ? r.verdict.failures : ['no verdict'] })),
   discoveries: allDiscoveries.length,
   skippedBlocked: droppedBlocked,
+  // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
+  skippedAwaitingOwner: skippedHandoff,
   skippedOverCap: droppedCap,
 }

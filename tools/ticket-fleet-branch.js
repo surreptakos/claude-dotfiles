@@ -129,4 +129,64 @@ function confineToCandidates(tickets, candidateNumbers) {
   return list.filter((t) => t && allowed.has(parseInt(t.number, 10)));
 }
 
-module.exports = { generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates };
+/**
+ * Resume-stable projections of a previous agent's structured result (issue 271).
+ *
+ * The Workflow runtime replays an agent() call from cache only while its cache
+ * key - which covers the prompt text - is unchanged. A ticket-fleet prompt built
+ * out of an earlier agent's result therefore has to render the same bytes whether
+ * that result arrived live from the tool call or was re-read from the run journal
+ * on resume. The two differ exactly as a JSON round trip differs: key order,
+ * absent vs null vs undefined members, values a live run held as numbers or
+ * booleans, and CR bytes inside quoted output. A `deliver: false` run resumed
+ * with `deliver: true` missed the cache on `impl:#N.2` and `verify:#N.2` for that
+ * reason, re-implementing tickets whose verified branches already existed.
+ *
+ * `stableText` and `stableList` are the only doors a prior result may pass
+ * through on its way into a prompt, and `priorFindingsBlock` is the one place
+ * that renders a failed verdict into the next attempt's prompt. The fleet script
+ * inlines the same three between its FLEET-RESUME-STABLE markers (the workflow
+ * runtime cannot require from tools/); ticket-fleet-branch.test.js extracts that
+ * block and compares it against these, so the two copies cannot drift.
+ */
+
+/** Deterministic JSON: object keys sorted, undefined rendered as null. */
+function stableJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map((k) => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}';
+  }
+  if (value === undefined) return 'null';
+  return JSON.stringify(value);
+}
+
+/** Any prior-result value as prompt text: absent/null collapse to '', CRLF folds to LF. */
+function stableText(value) {
+  if (value === null || value === undefined) return '';
+  const raw = typeof value === 'string' ? value
+    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
+      : stableJson(value);
+  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim();
+}
+
+/** Any prior-result list as prompt lines: non-arrays wrap, empty entries drop. */
+function stableList(value) {
+  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value];
+  return items.map(stableText).filter((s) => s.length > 0);
+}
+
+/**
+ * The block the next attempt's implementer/prober prompt carries after a failed
+ * verdict. `howToFix` is the lane's wording; everything else comes from the
+ * verdict through stableList.
+ */
+function priorFindingsBlock(verdict, howToFix) {
+  return verdict
+    ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
+    : '';
+}
+
+module.exports = {
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates,
+  stableJson, stableText, stableList, priorFindingsBlock,
+};

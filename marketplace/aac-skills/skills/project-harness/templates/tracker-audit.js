@@ -95,6 +95,74 @@ function isNotPlanned(text) {
   return NOT_PLANNED_PATTERNS.some((rx) => rx.test(text));
 }
 
+/** Blank out every code region in a body, keeping its length, so text quoted verbatim inside code is
+ *  not read as prose. Fenced blocks (``` or ~~~, three or more, closed by a fence of the same
+ *  character and at least the same length, or by end of body) go first; inline spans go second, on
+ *  what the fence pass left, so backticks inside a fenced block cannot open one. Every masked
+ *  character becomes a space and line breaks survive, so an offset into the result is still an offset
+ *  into the input — the stale-premise? check reports the wording AROUND a citation. */
+function maskCodeRegions(text) {
+  const out = text.split('');
+  const blank = (start, end) => {
+    for (let i = start; i < end && i < out.length; i++) {
+      if (out[i] !== '\n' && out[i] !== '\r') out[i] = ' ';
+    }
+  };
+  const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*/gm;
+  let open = null;
+  let m;
+  while ((m = FENCE.exec(text)) !== null) {
+    const marker = m[1];
+    if (!open) { open = { start: m.index, char: marker[0], len: marker.length }; continue; }
+    if (marker[0] === open.char && marker.length >= open.len) {
+      blank(open.start, m.index + m[0].length);
+      open = null;
+    }
+  }
+  if (open) blank(open.start, text.length);
+  // Inline spans: a run of N backticks is closed by the next run of exactly N (CommonMark). An
+  // unmatched run masks nothing, so a stray backtick in prose cannot swallow the rest of the body.
+  const runs = [];
+  const TICKS = /`+/g;
+  let t;
+  while ((t = TICKS.exec(out.join('')))) runs.push({ index: t.index, len: t[0].length });
+  let i = 0;
+  while (i < runs.length) {
+    let j = i + 1;
+    while (j < runs.length && runs[j].len !== runs[i].len) j++;
+    if (j >= runs.length) { i++; continue; }
+    blank(runs[i].index, runs[j].index + runs[j].len);
+    i = j + 1;
+  }
+  return out.join('');
+}
+
+/** Same-repo issue citations in a body: `#N` as its own token, in prose. Returns a Map of issue
+ *  number to the offset of its FIRST such citation, so a caller can look at the wording around it.
+ *
+ *  A bare `#(\d+)` scan is wrong in four ways. Three are shapes that are not this repo's issue at
+ *  all: the tail of a qualified cross-repo reference (`surreptakos/aac-contract-builder#157`) read as
+ *  #157, the leading digits of a hex colour (`#9a690f`, `#1f7a43`) read as #9 and #1 — together 16 of
+ *  29 stale-premise? advisories here on 2026-09-14 — and a fleet agent label (`impl:#205.2`,
+ *  `verify:#203.2`), whose number belongs to whichever repo that run was clearing. So: no word
+ *  character or `/` directly before the `#`, no `word:` directly before it, and no word character
+ *  directly after the digits. The fourth is context, not shape: a `#N` inside inline code or a fenced
+ *  block is quoted material — a journal line, a log, a command — and quoting is not asserting, so
+ *  code is masked out before the scan (claude-dotfiles issue 274, where a bug report quoting a
+ *  fleet journal could not be written without tripping the check). Exported for the test suite. */
+function citedIssueNumbers(body) {
+  const text = String(body || '');
+  const prose = maskCodeRegions(text);
+  const rx = /(?<![\w/])(?<!\w:)#(\d+)(?![\w])/g;
+  const first = new Map();
+  let m;
+  while ((m = rx.exec(prose))) {
+    const n = Number(m[1]);
+    if (!first.has(n)) first.set(n, m.index);
+  }
+  return first;
+}
+
 /** Is the follow-up-ticket premise already acknowledged?
  *
  *  A ticket that exists BECAUSE a closed issue shipped is a follow-up, not a stale premise. Two
@@ -180,8 +248,9 @@ function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
 // module is invoked directly, so `require('./tracker-audit.js')` from a test does not shell out to
 // gh or exit the process.
 if (require.main !== module) {
-  module.exports = { isFollowUpAcknowledgment, isNotPlanned, NOT_PLANNED_PATTERNS,
-                     restIssueToShape, restPrToShape, parseGithubSlug, filterIssuesOnly };
+  module.exports = { citedIssueNumbers, isFollowUpAcknowledgment, isNotPlanned,
+                     NOT_PLANNED_PATTERNS, restIssueToShape, restPrToShape, parseGithubSlug,
+                     filterIssuesOnly };
   return;
 }
 
@@ -535,7 +604,11 @@ open.forEach((i) => {
   // produced all ten advisories in a repo, which is how a useful check becomes one people scroll past.
   if (i.labels.some((l) => l.name === 'prd')) return;
   const body = String(i.body || '').replace(/\r\n/g, '\n');
-  const citedNums = Array.from(new Set((body.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))));
+  // Own-repo citations in prose only: `owner/repo#N`, hex colours, agent labels and anything inside
+  // code are not this repo's issues (see citedIssueNumbers). The map also gives the first
+  // citation's offset for the wording check below.
+  const cited = citedIssueNumbers(body);
+  const citedNums = Array.from(cited.keys());
   const citedClosed = citedNums.filter((n) => {
     const o = byNumber.get(n);
     return o && o.state === 'CLOSED' && n !== i.number;
@@ -550,7 +623,8 @@ open.forEach((i) => {
   if (bodyIsFollowUp) return;
   citedClosed.forEach((n) => {
     const other = byNumber.get(n);
-    const idx = body.indexOf('#' + n);
+    // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
+    const idx = cited.get(n);
     // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
     const lineStart = body.lastIndexOf('\n', idx) + 1;
     if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
