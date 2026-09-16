@@ -45,11 +45,13 @@ python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 ```
 
 The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`. `--home`
-names the owner's home on both: the stamper folds that path into the sync tokens before hashing
-(without it a Linux container hashes against its own home and re-stamps skills nobody touched —
-issue 431), and the packager puts it back where the mirror holds `__USERHOME__` tokens, so the
-payload matches one built on that machine. CI checks exactly that: a rebuild from the mirror
-must reproduce the committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
+names the owner's home on both: the stamper folds it into the sync tokens before hashing (without
+it a Linux container re-stamps skills nobody touched, issue 431), and the packager puts it back
+where the mirror holds `__USERHOME__` tokens. CI checks that a rebuild from the mirror reproduces
+the committed payload, `diff -r` over the whole of `marketplace/aac-skills`, `plugin.json`
+included: the plugin version follows the payload, not the clock, so only a moved payload takes a
+fresh UTC stamp (issue 432). `.claude-plugin/marketplace.json` repeats that version and is outside
+the check.
 
 Both commands stamp, and so does a second edit after them: run them as often as you like, the
 commit still carries one revision bump. A rotation is measured from the last *committed* stamp,

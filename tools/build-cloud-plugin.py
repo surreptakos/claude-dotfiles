@@ -57,6 +57,9 @@ _spec.loader.exec_module(skill_stamps)
 
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
 PLUGIN_NAME = "aac-skills"
+MANIFEST_REL = ".claude-plugin/plugin.json"
+# Stands in until the payload is assembled and resolve_version() can read it (issue 432).
+PLACEHOLDER_VERSION = "0.0.0"
 NL = chr(10)
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
@@ -276,9 +279,80 @@ def plugin_version(now=None):
     Always UTC: cloud CI builds in UTC and a local Windows build in America/Chicago, so with local
     time a later local build produced a LOWER version than an earlier cloud one (2026-09-11: cloud
     2026.9.111802, local 2026.9.111542). One clock keeps versions monotonic across machines.
+
+    Read this only through resolve_version(), which is what a build calls: a payload that has not
+    moved keeps the stamp it published under rather than taking a new reading here (issue 432).
     """
     now = now.astimezone(timezone.utc) if now is not None else datetime.now(timezone.utc)
     return f"{now.year}.{now.month}.{now.day}{now:%H%M}"
+
+
+def plugin_manifest(version):
+    """plugin.json's bytes.
+
+    write_bytes, not write_text: the payload must not depend on the building OS's newline.
+    """
+    return (
+        json.dumps(
+            {
+                "name": PLUGIN_NAME,
+                "version": version,
+                "author": {"name": "Dan Gatsakos"},
+                "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
+                "Company team skills from the repo's aac-skills/ tree. Built by "
+                "tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/.",
+            },
+            indent=2,
+        )
+        + "\n").encode("utf-8")
+
+
+def payload_fingerprint(root):
+    """Every byte the payload ships, keyed by path, with the version stamp neutralized.
+
+    The version is the one field a rebuild may carry over, so plugin.json is compared with that
+    key removed and every other key of it still counted: change the description and the payload
+    has moved.
+    """
+    files = {}
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(root).as_posix()
+        if rel == MANIFEST_REL:
+            try:
+                manifest = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = None
+            if isinstance(manifest, dict):
+                manifest.pop("version", None)
+            files[rel] = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
+        else:
+            files[rel] = f.read_bytes()
+    return files
+
+
+def resolve_version(payload_root, published_root, now=None):
+    """The version an assembled payload ships: the published one when nothing moved.
+
+    plugin_version() is a wall clock, so stamping it on every build made every rebuild of an
+    unchanged mirror a two-file diff - plugin.json and marketplace.json - that no content movement
+    explained (issue 432). A rebuild whose payload reproduces the published one byte for byte
+    keeps the published version; only a payload that really moved takes a fresh stamp.
+
+    Versions still never go backwards across machines, which is the whole point of the clock
+    (see plugin_version): every value returned here is either a fresh UTC reading, which outranks
+    every earlier one whatever timezone the building machine sits in, or the stamp the identical
+    payload already carries - reuse cannot invent a version older than the content it names.
+    """
+    try:
+        carried = json.loads(
+            (published_root / MANIFEST_REL).read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        carried = None
+    if carried and payload_fingerprint(payload_root) == payload_fingerprint(published_root):
+        return carried
+    return plugin_version(now)
 
 
 def main():
@@ -312,22 +386,9 @@ def main():
         shutil.rmtree(plugin_root)
     (plugin_root / ".claude-plugin").mkdir(parents=True)
 
-    version = plugin_version()
-    # write_bytes, not write_text: the payload must not depend on the building OS's newline.
-    (plugin_root / ".claude-plugin" / "plugin.json").write_bytes((
-        json.dumps(
-            {
-                "name": PLUGIN_NAME,
-                "version": version,
-                "author": {"name": "Dan Gatsakos"},
-                "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
-                "Company team skills from the repo's aac-skills/ tree. Built by "
-                "tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/.",
-            },
-            indent=2,
-        )
-        + "\n").encode("utf-8")
-    )
+    # The version is resolved once the payload is assembled, so an unchanged payload can carry the
+    # published stamp forward instead of churning on the clock (issue 432).
+    (plugin_root / MANIFEST_REL).write_bytes(plugin_manifest(PLACEHOLDER_VERSION))
 
     fallback = Path.home() / ".agents" / "skills"
     aac_names = {p.name for p in (REPO / "aac-skills").iterdir()
@@ -667,14 +728,6 @@ def main():
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )
 
-    zip_path = out / f"{PLUGIN_NAME}.zip"
-    if zip_path.exists():
-        zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in sorted(plugin_root.rglob("*")):
-            if f.is_file():
-                zf.write(f, f.relative_to(plugin_root))
-
     # ---------------------------------------------------------------- AAC team skills
     # The org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
     # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
@@ -701,6 +754,20 @@ def main():
             shutil.copytree(entry, dest, ignore=ignore_noise)
             (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
             packaged.append((entry.name, moved, retargeted))
+
+    # ------------------------------------------------------------------------ version
+    # Last, because it is a fact about the assembled payload. The zip follows it (and the team
+    # skills above), so every surface ships the same bytes under the same version.
+    version = resolve_version(plugin_root, REPO / "marketplace" / PLUGIN_NAME)
+    (plugin_root / MANIFEST_REL).write_bytes(plugin_manifest(version))
+
+    zip_path = out / f"{PLUGIN_NAME}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(plugin_root.rglob("*")):
+            if f.is_file():
+                zf.write(f, f.relative_to(plugin_root))
 
     # ------------------------------------------------------------------ repo marketplace
     # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.
