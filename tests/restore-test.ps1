@@ -498,7 +498,14 @@ $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction Silently
                              # on every pull. Runtime state, not a whitelisted restore - stays out of
                              # the file-count assertion the same way the backup and the personal
                              # profile do.
-                             $_.FullName -notlike '*\.claude\hook-state\*' })
+                             $_.FullName -notlike '*\.claude\hook-state\*' -and
+                             # Issue 199: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1
+                             # -Trust, which lands (and if absent, seeds) ~/.claude.json with the
+                             # four master-watchdog trust records. Machine-local state Claude Code
+                             # owns, deliberately outside the sync manifest, so it also stays out
+                             # of the whitelist count. Its content is asserted separately below.
+                             $_.FullName -ne (Join-Path $FakeHome '.claude.json') -and
+                             $_.FullName -notlike '*\.claude.json.bak-*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
 
@@ -582,6 +589,55 @@ if ($null -ne $settings) {
     foreach ($a in ($absent | Where-Object { $_ -like '*\plugins\cache\*' })) {
         Note ("expected-absent (rebuilds on first launch): {0}" -f $a)
     }
+
+    # Issue 199: settings.json invariants this repo owns. The mirror carries
+    # permissions.defaultMode = "bypassPermissions" (enforced by tools/settings-invariants.ps1
+    # from sync.ps1's push flow) so a fresh machine's pulled settings drops the
+    # interactive-session permission dialog on launch. Assert on the pulled copy so a
+    # regression that strips the key from the mirror or the pull surface fails here.
+    $mode = $null
+    if ($settings.PSObject.Properties.Name -contains 'permissions' -and
+        $settings.permissions.PSObject.Properties.Name -contains 'defaultMode') {
+        $mode = $settings.permissions.defaultMode
+    }
+    Check 'permissions.defaultMode carries bypassPermissions (issue 199)' ($mode -eq 'bypassPermissions') @($mode)
+}
+
+# ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
+
+# The other half of AC1: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1 with -Trust,
+# which lands hasTrustDialogAccepted=true into ~/.claude.json for the four master-watchdog clone
+# paths under the pulled home. Combined with permissions.defaultMode=bypassPermissions above, a
+# fresh claude launch in one of those clones reaches first prompt with no permission dialog and
+# no folder-trust dialog. ~/.claude.json is not in the sync manifest (holds oauthAccount and
+# other machine-only state), so this is the only automated surface that lands trust records; a
+# regression that unwires it from pull, or drops the -Trust flag, or that changes the four clone
+# paths without updating this check, fails here.
+Write-Host ''
+Write-Host '.claude.json trust records (issue 199)'
+$stateFile = Join-Path $FakeHome '.claude.json'
+Check '.claude.json exists after pull (invariant tool seeds it)' (Test-Path $stateFile)
+if (Test-Path $stateFile) {
+    $state = Get-Content $stateFile -Raw | ConvertFrom-Json
+    $expectedClones = @(
+        (Join-Path $FakeHome 'Claude\Projects\Financial\aac-bill-intake'),
+        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\contract-builder'),
+        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\aac-cockpit'),
+        (Join-Path $FakeHome 'Claude\Projects\Operations\zoho-source-of-truth')
+    )
+    # $clone would clobber the script-scope $Clone (PowerShell variables are case-insensitive),
+    # so use a distinctive loop name instead.
+    $untrusted = @()
+    $hasProjects = ($state.PSObject.Properties.Name -contains 'projects') -and ($null -ne $state.projects)
+    foreach ($clonePath in $expectedClones) {
+        if (-not $hasProjects) { $untrusted += $clonePath; continue }
+        if ($state.projects.PSObject.Properties.Name -notcontains $clonePath) { $untrusted += $clonePath; continue }
+        $entry = $state.projects.$clonePath
+        if (-not ($entry.PSObject.Properties.Name -contains 'hasTrustDialogAccepted') -or -not $entry.hasTrustDialogAccepted) {
+            $untrusted += $clonePath
+        }
+    }
+    Check 'each of the four master-watchdog clone paths carries hasTrustDialogAccepted=true' ($untrusted.Count -eq 0) $untrusted
 }
 
 # ------------------------------------------------------------------ 6a. codex config.toml is usable

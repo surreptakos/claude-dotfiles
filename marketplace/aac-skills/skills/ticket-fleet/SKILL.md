@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-15T22:44:26Z'
-  previous-modified: '2026-09-15T21:36:24Z'
-  revision: '8'
-  content-sha: 893f96a7fc69
+  modified: '2026-09-16T00:22:54Z'
+  previous-modified: '2026-09-15T22:39:49Z'
+  revision: '9'
+  content-sha: 06f70f1f8b23
 ---
 
 # ticket-fleet
@@ -93,9 +93,12 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
 - **probe** - resolves by quoting command output / research / evidence in a comment, no
   repository change asked for. Prober gathers, blind verifier re-runs the commands; the
   deliver stage posts one resolution comment.
-- **human** - labelled `ready-for-human`, or the body says the owner performs the steps. The
-  agent verifies only what the container can do and hands the rest back in one comment; it
-  never claims an owner step was done.
+- **human** - labelled `ready-for-human` or `ready-for-local-agent`, or the body says a
+  person or a desktop session performs the steps. The agent verifies only what the
+  container can do and hands the rest back in one comment under a **Remaining for a local
+  session** heading; the delivery moves the label to `ready-for-local-agent` unless the
+  remaining steps are genuinely a person's judgment, credential or sign-off, in which
+  case the label is `ready-for-human`. It never claims an owner step was done.
 
 ## Branch names
 
