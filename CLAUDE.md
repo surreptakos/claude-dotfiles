@@ -142,9 +142,10 @@ Version in `docs/agents/harness-version.md`.
   (would removing this line cause a mistake?). Findings are prompts to ask that question, not
   verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one. The restore
   suite gates this file and `claude/CLAUDE.md` (the mirror of `~/.claude/CLAUDE.md`) on
-  unsuppressed findings, with the file and line named in the failure. `size` warns only so a
-  slow creep is visible without going red; the mirror also warns on `volatile`, `code-derivable`
-  and `tutorial` because it quotes counterexamples that trip those regexes.
+  unsuppressed findings, naming the file and line. `size` warns only so a slow creep shows
+  without going red; the mirror also warns on `volatile`, `code-derivable` and `tutorial`, which
+  its counterexamples trip on purpose. The exit code follows that split (issue 337): warn-only
+  findings print and exit 0; `--warn-only a,b` replaces the per-file set.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
 ## The freshness loop
