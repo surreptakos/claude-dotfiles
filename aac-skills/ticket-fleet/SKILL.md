@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T15:11:24Z"
-  previous-modified: "2026-09-15T22:39:49Z"
-  revision: "9"
-  content-sha: "838b2d2974cc"
+  modified: "2026-09-16T15:13:01Z"
+  previous-modified: "2026-09-16T15:10:45Z"
+  revision: "12"
+  content-sha: "82db749dc630"
 ---
 
 # ticket-fleet
@@ -155,7 +155,8 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `maxAttempts` (integer, default 3): Ralph-style bounded retry, fresh context each attempt.
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
   resolution comment.
-- `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to.
+- `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to. See
+  Discoveries below for where that file is written.
 - `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` measures
   the session with the `env-probe` agent and returns `mcp` when
   `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set or `gh` is
@@ -265,6 +266,28 @@ prober brief also carries a dedupe rail - search the open issues for the same fi
 failure immediately before filing, and comment on a match instead of creating a second ticket -
 which covers a wave that holds only one chore. A caller that would rather not rely on either can
 put the chores in separate waves.
+
+## Discoveries
+
+Every lane returns out-of-scope findings. The Report phase is one writer, and it does not append
+into the session's own checkout: it cuts `agent/fleet-discoveries-wf_<runId>` from
+`origin/<defaultBranch>` in a scratch worktree, appends the bullets to `followupsFile` under a
+`## Run (ticket-fleet <runId>)` heading, commits that file alone, and — when `deliver` is true —
+pushes the branch and opens a discoveries-only PR against the default branch.
+
+Before issue 360 the writer appended in place and committed nothing, so the bullets rode whatever
+branch the session was on. Run `6aa9c56e` left 136 bullets on an unrelated PR's branch, and the
+`6aa46942` / issue-120 block still on master cites four commits that were never landed — both
+triage chores filed against those bullets found nothing on the default branch.
+
+The run's return value carries `discoveryReport` (`{ branch, sha, prUrl, bullets }`), so a triage
+chore filed for the bullets can name the commit sha and branch even before the PR merges. The
+discoveries PR carries no verifier evidence because there is no ticket behind it; the orchestrator
+merge pass has its own rule for it (`orchestrator/RUNBOOK.md`, Merge).
+
+`tools/ticket-fleet-branch.test.js` pins the mechanism: the Report block is bracketed by
+`[FLEET-REPORT-START]` / `[FLEET-REPORT-END]` markers and driven with a mocked `agent`.
+
 
 ## Pre-push merge
 
