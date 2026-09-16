@@ -105,6 +105,45 @@ log(`instrument = ${instrument}`)
 // Explicit selection wins over the label: a named ticket is fetched whatever its labels or state.
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
 
+// ---- resume-stable prompt inputs (issue 271) ----
+// A resume replays every agent() call whose cache key is unchanged, and that key covers the
+// prompt text. So a prompt built out of a previous agent's structured result must render the
+// same bytes whether that result came back live from the tool call or was re-read from the
+// journal on resume. The two sides differ in exactly the ways a JSON round trip differs: key
+// order, absent vs null vs undefined members, numbers and booleans a live run held as JS
+// values, and CR bytes inside quoted output. A `deliver: false` run resumed with
+// `deliver: true` missed on `impl:#N.2` and `verify:#N.2` for that reason and re-implemented
+// tickets whose verified branches already existed. Every prior result now reaches a prompt
+// through one of these doors, and the verifier and deliver prompts name the branch this script
+// computed rather than the one the implementer reported - so the branch delivered is the branch
+// that was verified. Pure counterparts live in tools/ticket-fleet-branch.js; the block between
+// the FLEET-RESUME-STABLE markers is extracted verbatim by tools/ticket-fleet-branch.test.js
+// and compared against them, so the two copies cannot drift.
+// [FLEET-RESUME-STABLE-START]
+const stableJson = (value) => {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']'
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}'
+  }
+  if (value === undefined) return 'null'
+  return JSON.stringify(value)
+}
+const stableText = (value) => {
+  if (value === null || value === undefined) return ''
+  const raw = typeof value === 'string' ? value
+    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
+    : stableJson(value)
+  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
+}
+const stableList = (value) => {
+  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value]
+  return items.map(stableText).filter(s => s.length > 0)
+}
+const priorFindingsBlock = (verdict, howToFix) => verdict
+  ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
+  : ''
+// [FLEET-RESUME-STABLE-END]
+
 // ---- schemas: crisp machine-checkable done-conditions ----
 const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
   tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason'], properties: {
@@ -199,7 +238,7 @@ log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 const runProbeLane = async (t) => {
   let lastVerdict = null, probe = null, evidenceBlocks = ''
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
-    const priorFindings = lastVerdict ? `\nPrevious attempt FAILED verification. Independent reviewer findings (fix these by actually running the commands, not by rewording):\n- ${lastVerdict.failures.join('\n- ')}` : ''
+    const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
     probe = await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
@@ -218,7 +257,7 @@ Return structured output only.`,
     )
     if (!probe || !probe.items.length) { lastVerdict = { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }; continue }
 
-    evidenceBlocks = probe.items.map(i => `ITEM: ${i.item}\nCOMMANDS:\n${i.commands}\nOUTPUT:\n${i.outputVerbatim}\nEXIT: ${i.exitCodes}`).join('\n----\n')
+    evidenceBlocks = probe.items.map(i => `ITEM: ${stableText(i.item)}\nCOMMANDS:\n${stableText(i.commands)}\nOUTPUT:\n${stableText(i.outputVerbatim)}\nEXIT: ${stableText(i.exitCodes)}`).join('\n----\n')
     lastVerdict = await agent(
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
@@ -237,7 +276,8 @@ Make no repository changes, no commits, no pushes. Return structured output only
   const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
   let delivery = null
   if (done && cfg.deliver) {
-    const blockedList = probe.blocked.length ? probe.blocked.map(b => '- ' + b).join('\n') : ''
+    const blocked = stableList(probe.blocked)
+    const blockedList = blocked.length ? blocked.map(b => '- ' + b).join('\n') : ''
     delivery = await agent(
       `Post ONE resolution comment on issue #${t.number} (${t.title}).
 ${rules.commentPost()}
@@ -245,7 +285,7 @@ Body, in this order:
 1. One sentence: what the ticket asked for and that it is answered by the evidence below.
 2. One section per item, the item as the heading and a fenced code block holding, in order, the line \`$ <command>\`, then its verbatim output, then \`[exit N]\`. Copy from this data exactly - never re-run, re-word or tidy it:\n${evidenceBlocks}
 3. ${blockedList ? 'A section "Blocked from this container" listing each blocked item and exactly what would unblock it:\n' + blockedList : 'No "Blocked from this container" section - nothing was blocked.'}
-4. A line starting "Verifier: " quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}
+4. A line starting "Verifier: " quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(lastVerdict.evidence))}
 5. Exactly this footer, as the last two lines after a blank line:
 
 ---
@@ -281,12 +321,13 @@ Return structured output only.`,
     const remainingKind = handoff.remainingKind === 'local-agent' ? 'local-agent' : 'human'
     const remainingHeading = remainingKind === 'local-agent' ? 'Remaining for a local session' : 'Remaining for a person'
     const emptyLine = remainingKind === 'local-agent' ? '- nothing remains for a local session' : '- nothing remains for a person'
-    const ownerList = handoff.ownerSide.length ? handoff.ownerSide.map(s => '- ' + s).join('\n') : emptyLine
+    const ownerSide = stableList(handoff.ownerSide)
+    const ownerList = ownerSide.length ? ownerSide.map(s => '- ' + s).join('\n') : emptyLine
     delivery = await agent(
       `Post ONE status comment on issue #${t.number} (${t.title}).
 ${rules.commentPost()}
 Body, in this order:
-1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${handoff.agentSide}
+1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${stableText(handoff.agentSide)}
 2. A "${remainingHeading}" section, one bullet per step, verbatim:\n${ownerList}
 3. Exactly this footer, as the last two lines after a blank line:
 
@@ -349,12 +390,12 @@ Make no repository change, no comment, no PR. Return structured output only.`,
       prUrl: openPR.prUrl, commentUrl: null, discoveries: [],
     }
   }
-  let lastVerdict = null, impl = null
+  let lastVerdict = null, impl = null, branch = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
     // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
-    const branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
-    const priorFindings = lastVerdict ? `\nPrevious attempt FAILED verification. Independent reviewer findings (fix these with a genuinely different approach, not a parameter tweak):\n- ${lastVerdict.failures.join('\n- ')}` : ''
+    branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
+    const priorFindings = priorFindingsBlock(lastVerdict, 'fix these with a genuinely different approach, not a parameter tweak')
     impl = await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
@@ -370,6 +411,11 @@ Return structured output only.`,
       { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: cfg.implModel, isolation: 'worktree' }
     )
     if (!impl || !impl.committed) { lastVerdict = { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }; continue }
+    // The implementer's self-reported branch never reaches a prompt: it is an agent result, so
+    // embedding it would tie the verifier's cache key to that result's serialization (issue 271),
+    // and a wrong self-report would point the verifier at a branch nobody asked for. The
+    // instructed branch is what gets verified and delivered; a mismatch is logged, loudly.
+    if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Blind verifier: gets branch + criteria ONLY - never the implementer's self-report (conformity
     // guard). Under the gh instrument the verifier runs under the fleet-verifier subagent
@@ -378,12 +424,12 @@ Return structured output only.`,
     // restraint is the container sandbox itself.
     lastVerdict = await agent(
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
-Branch under review: ${impl.branch} (do NOT trust its author; you have not seen their claims).
-In this repo run: git worktree add <scratch dir> --detach ${impl.branch} (detach - branch is checked out elsewhere), then inside it:
+Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
+In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
 1. Run \`${scout.testCommand}\` yourself; record the REAL exit code.
-2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${impl.branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
+2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
-4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${impl.branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*'\`. Any hit is a hard-rail failure - mark pass=false and quote the file list in evidence.
+4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*'\`. Any hit is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: instrument === 'gh' ? 'fleet-verifier' : undefined }
@@ -406,15 +452,15 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
       ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
       : ''
     delivery = await agent(
-      `Deliver verified branch ${impl.branch} for issue #${t.number}.${prToolNote ? ' ' + prToolNote : ''}
-1. git push -u origin ${impl.branch}
-2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(lastVerdict.evidence)}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
+      `Deliver verified branch ${branch} for issue #${t.number}.${prToolNote ? ' ' + prToolNote : ''}
+1. git push -u origin ${branch}
+2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(lastVerdict.evidence))}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
 3. ${rules.prComment()} ${t.number} with the PR link${keepOpenNote}.
 Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )
   }
-  return { ticket: t.number, done, kind: 'code', branch: impl && impl.branch, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
+  return { ticket: t.number, done, kind: 'code', branch: impl ? branch : null, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
 }
 // [FLEET-CODE-LANE-END]
 
