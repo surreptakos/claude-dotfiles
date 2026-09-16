@@ -50,4 +50,7 @@ jobs:
             echo "::error::marketplace/aac-skills is stale - rebuild it with tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'"
             exit 1
           fi
-          diff /tmp/dist/aac-skills/hooks/hooks.json marketplace/aac-skills/hooks/hooks.json
+          diff -r --exclude=__pycache__ /tmp/dist/aac-skills/hooks marketplace/aac-skills/hooks
+          # The global rules text the UserPromptSubmit hook injects (issue 209): a copy of the
+          # owner's CLAUDE.md section, so a stale one delivers yesterday's rules every prompt.
+          diff -r /tmp/dist/aac-skills/rules marketplace/aac-skills/rules
