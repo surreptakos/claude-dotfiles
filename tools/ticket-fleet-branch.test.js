@@ -340,7 +340,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   // test drives. runId is fixed while invocationId varies - the resume shape of issue 291.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'invocationId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock', 'verifierAgentType', 'dedupeBrief',
+    'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock', 'verifierAgentType', 'dedupeBrief', 'testCommand',
     body + '\nreturn runCodeLane;'
   );
   const cfg = Object.assign(
@@ -358,7 +358,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   const dedupeBrief = () => '';
   const runCodeLane = await wrapper(
     agentMock, (m) => logs.push(m), cfg, runId, invocationId, scout, {}, {}, {}, {}, 'gh', rules,
-    helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock, 'fleet-verifier', dedupeBrief
+    helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock, 'fleet-verifier', dedupeBrief, scout.testCommand
   );
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
@@ -544,6 +544,40 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/501');
     assert.deepEqual(result.conflictPaths, []);
+  });
+
+  // ---- Prior-implementer reuse (issue 317) ----
+  // A run whose verifiers all died leaves committed branches behind. The caller passes those
+  // implementer results back as args.priorImpl; attempt 1 must take the recorded result and
+  // start no implementer, so the wave is finished by verifiers alone.
+  test(`${rel} runCodeLane reuses a priorImpl entry instead of spawning an implementer`, async () => {
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) throw new Error(`implementer spawned despite a priorImpl entry: ${opts.label}`);
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate on the prior branch', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/501' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const prior = {
+      branch: 'agent/issue-274-attempt1-wf_dd0cf9a4091-w0',
+      committed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-B'],
+    };
+    const { result, logs } = await driveCodeLane(
+      file, agentMock, { number: 274, title: 't', criteria: '' }, 0, { priorImpl: { 274: prior } }
+    );
+    assert.deepEqual(calls, ['pr-check:#274@inv1', 'verify:#274.1', 'deliver:#274'],
+      'a ticket with a priorImpl entry must go straight from the PR check to the verifier');
+    const verifyIdx = calls.findIndex((l) => l.startsWith('verify:'));
+    const implIdx = calls.findIndex((l) => l.startsWith('impl:'));
+    assert.ok(verifyIdx >= 0, 'the verifier must still run on the reused branch');
+    assert.equal(implIdx, -1, 'no impl: agent may be spawned before the verifier when priorImpl carries the ticket');
+    assert.equal(result.branch, prior.branch, 'the reused branch must be the one delivered');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/501');
+    assert.deepEqual(result.discoveries, ['finding-B'], 'the reused result carries its discoveries forward');
+    assert.ok(logs.some((m) => /priorImpl/.test(m)), 'the reuse must be logged');
   });
 }
 

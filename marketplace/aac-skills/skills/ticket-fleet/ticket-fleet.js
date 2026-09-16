@@ -15,7 +15,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; a container caller passes it explicitly because the workflow runtime hides process.env), verifierAgent (agent type for the blind verifier; default `fleet-verifier` under gh, empty string runs it under the session default agent type)}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; a container caller passes it explicitly because the workflow runtime hides process.env), verifierAgent (agent type for the blind verifier; default `fleet-verifier` under gh, empty string runs it under the session default agent type), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober)}',
   phases: [
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
@@ -43,6 +43,9 @@ const cfg = Object.assign({
   followupsFile: 'FOLLOW-UPS.md',
   invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves via env + PATH below
+  testCommand: null,        // replaces scout.testCommand when set; see the override note below
+  priorImpl: null,          // {ticketNumber: IMPL-shaped result} - attempt 1 reuses it, no implementer
+  priorProbe: null,         // {ticketNumber: PROBE-shaped result} - attempt 1 reuses it, no prober
   // ---- pre-push merge (issue 318) ----
   // The deliver stage merges origin/<defaultBranch> into the verified branch before pushing, so
   // the PR opens mergeable instead of landing the same generated-file conflict on the session
@@ -56,6 +59,16 @@ const cfg = Object.assign({
   regenCommands: null,
   verifierAgent: null,      // null = default (`fleet-verifier` under gh, unpinned under mcp); '' = unpinned
 }, args || {})
+
+// ---- reusing a dead run's work (issue 317) ----
+// A run can lose every verifier after its implementers have already committed their branches.
+// Replaying it through the runtime's own resume does not help: the cache key of an
+// `isolation: 'worktree'` agent includes the worktree slot the runtime assigned, and a resumed
+// run assigns new slots, so the replay starts a fresh implementer inside another ticket's slot.
+// Instead the caller lifts the finished results out of the dead run's journal and passes them as
+// `priorImpl` / `priorProbe`, keyed by ticket number. Attempt 1 then takes the recorded result
+// and spawns no implementer or prober; attempt 2+ is untouched, so a reused branch that fails
+// verification is re-implemented exactly as a fresh one would be.
 
 // ---- concurrent-run safety ----
 // Two ticket-fleet invocations can pick up the same open ticket at the same time (nothing on
@@ -316,6 +329,14 @@ if (offListing > 0) log(`${offListing} ticket(s) dropped: not in the ${explicitT
 if (!scout || !scoutTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
 // [FLEET-SCOUT-GATE-END]
 
+// ---- test command override (issue 317) ----
+// The scout reports the gate this repo documents, and that gate can be unrunnable where the
+// fleet is: a PowerShell suite in a Linux container makes every implementer report exit 127 and
+// every verifier refute on its first step. A caller that knows the container names the runnable
+// gate instead; it replaces the scout's value for every lane, logged once.
+const testCommand = cfg.testCommand ? String(cfg.testCommand) : scout.testCommand
+if (cfg.testCommand) log(`testCommand overridden by args: ${testCommand} (scout read: ${scout.testCommand})`)
+
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
 // wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose latest
 // comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
@@ -350,7 +371,11 @@ const runProbeLane = async (t) => {
   let lastVerdict = null, probe = null, evidenceBlocks = ''
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
-    probe = await agent(
+    // Attempt 1 takes a recorded prober result when the caller supplied one (issue 317); the
+    // `||` short-circuits, so no prober agent is started for it. Attempt 2+ always re-probes.
+    const reuse = attempt === 1 && cfg.priorProbe ? cfg.priorProbe[t.number] : null
+    if (reuse) log(`#${t.number}: reusing prior prober result from args.priorProbe (${(reuse.items || []).length} item(s)); no probe agent started for attempt 1.`)
+    probe = reuse || await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
@@ -524,9 +549,16 @@ Make no repository change, no comment, no PR. Return structured output only.`,
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
     // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
-    branch = `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
+    // Attempt 1 takes a recorded implementer result when the caller supplied one (issue 317):
+    // the branch is already committed and only its verifier is missing. The `||` short-circuits,
+    // so no implementer agent is started for it, and the recorded branch is the one verified and
+    // delivered. Attempt 2+ always re-implements, so a reused branch the verifier refutes is
+    // retried exactly as a fresh one would be.
+    const reuse = attempt === 1 && cfg.priorImpl ? cfg.priorImpl[t.number] : null
+    if (reuse) log(`#${t.number}: reusing prior implementer result from args.priorImpl (branch ${reuse.branch}); no impl agent started for attempt 1.`)
+    branch = (reuse && reuse.branch) ? String(reuse.branch) : `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these with a genuinely different approach, not a parameter tweak')
-    impl = await agent(
+    impl = reuse || await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
 Repo map from scout:\n${scout.repoMap}
@@ -534,7 +566,7 @@ Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
 Rules: one branch named ${branch}; commit your work; NEVER push, NEVER open a PR, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - pushing the branch, opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
 Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are read-only production paths - never write to them, never leave .bak files there; a change that would need a live-tree edit to land is committed to the branch only and named as a discovery.
-Done-condition (machine-checkable, all required): branch exists with your commits; \`${scout.testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
+Done-condition (machine-checkable, all required): branch exists with your commits; \`${testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
 Scope: if, while working or testing, you find a pre-existing bug, a performance concern, or behavior the ticket doesn't mention, don't fix, optimize or extend it in this change unless the requested behavior cannot work without it; report it as a self-contained discovery string instead. Where the ticket is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in a discovery string, and don't build for the other readings as well. Verify your work however you like; scratch scripts and quick checks need not be kept. Commit tests only where the ticket asks for them or this repository already keeps tests for this kind of change, sized like the neighboring test files - roughly one focused test per stated behavior - and don't turn scratch checks into additional permanent test files. This is about extras only: implement every behavior the ticket asks for, completely.
 Edits: the number of tokens used to edit files is best minimized, all else being equal, so when it will not affect the end result, surgically edit a file rather than rewrite the entire thing.
 Return structured output only.`,
@@ -557,7 +589,7 @@ Return structured output only.`,
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
 In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
-1. Run \`${scout.testCommand}\` yourself; record the REAL exit code.
+1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*'\`. Any hit is a hard-rail failure - mark pass=false and quote the file list in evidence.
@@ -606,7 +638,7 @@ A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly 
     (b) SKILL.md STAMP BLOCK - a SKILL.md whose conflict sits entirely inside the four-key metadata stamp block (modified, previous-modified, revision, content-sha). Do NOT judge this by eye and do NOT take the default branch's whole file: run \`node tools/resolve-stamp-conflict.js <path>\`. Exit 0 means every hunk in that file was stamp-only and was resolved to the default branch's side - then \`git add -- <path>\`. A NON-ZERO exit means the file conflicts outside the stamp block; that path belongs to class (c). If this repo has no such script, class (b) does not apply here: treat the path as class (c).
     (c) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
 A4. Once every conflicted path was class (a) or (b): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Then \`git add -A\`.
-A5. Re-run \`${scout.testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
+A5. Re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${scout.defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
 
 STEP B - push and open the PR (only when STEP A ended clean or resolved):
