@@ -92,9 +92,21 @@ function findRepoRoot(from) {
 }
 const has = (rel) => fs.existsSync(path.join(REPO, rel));
 
+/** Environment for every child this checker spawns, with NODE_TEST_CONTEXT removed.
+ *  `node --test` exports that variable into the processes it spawns, and a nested `node --test`
+ *  that inherits it exits 0 even when a test throws (Node 22.22.2: `node --test boom.test.js`
+ *  exits 1, `NODE_TEST_CONTEXT=child-v8 node --test boom.test.js` exits 0 on the same file).
+ *  check.js is itself spawned from inside node tests (check.test.js) and runs the repo's suite,
+ *  so without the scrub a failing suite is reported as "tests pass" (issue 395). */
+const CHILD_ENV = (() => {
+  const e = Object.assign({}, process.env);
+  delete e.NODE_TEST_CONTEXT;
+  return e;
+})();
+
 function run(cmd, args, opts) {
   return execFileSync(cmd, args, {
-    cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: CHILD_ENV,
     timeout: (opts && opts.timeout) || 30000, shell: !!(opts && opts.shell),
   }).trim();
 }
@@ -140,6 +152,7 @@ function runReadingOutputAsync(cmd, args, opts) {
     const child = execFile(cmd, args, {
       cwd: REPO,
       encoding: 'utf8',
+      env: CHILD_ENV,
       shell: !!(opts && opts.shell),
       windowsHide: true,
       detached: process.platform !== 'win32',
