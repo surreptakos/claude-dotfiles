@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T14:29:34Z'
-  previous-modified: '2026-09-16T14:28:20Z'
-  revision: '15'
-  content-sha: 893f9327ce44
+  modified: '2026-09-16T14:30:32Z'
+  previous-modified: '2026-09-16T14:29:34Z'
+  revision: '16'
+  content-sha: e4a09f34d652
 ---
 
 # ticket-fleet
@@ -133,6 +133,10 @@ prompts before letting the fleet push branches and open PRs. Full args list:
   `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
   otherwise `gh`. **A container caller passes `mcp` or `gh` explicitly** - see below. Pass `mcp`
   explicitly on a machine where `gh` is missing.
+- `generatedPaths` (array of globs, default `['.claude-plugin/marketplace.json', 'marketplace/**']`):
+  the paths the pre-push merge may resolve by taking the default branch's side.
+- `regenCommands` (array of shell commands, default `null`): what re-stamps and rebuilds those
+  paths after such a merge. `null` tells the deliver stage to read the commands out of CLAUDE.md.
 - `verifierAgent` (string, default `null`): the agent type the blind verifier launches under.
   `null` takes the default - `fleet-verifier` under `gh`, unpinned under `mcp`. `''` clears the
   pin so the verifier runs under the session's default agent type; any other string pins that
@@ -166,7 +170,8 @@ detached scratch worktree, and the deliver stage - not the verifier - is what pu
 The scout classifies each ticket into one of three lanes; the wave runs them in parallel:
 
 - **code** - repository change. Implementer in an isolated worktree, then a blind refuting
-  verifier per attempt; the deliver stage pushes and opens a PR only on a verified pass.
+  verifier per attempt; the deliver stage merges the default branch (see **Pre-push merge**),
+  then pushes and opens a PR, only on a verified pass.
 - **probe** - resolves by quoting command output / research / evidence in a comment, no
   repository change asked for. Prober gathers, blind verifier re-runs the commands; the
   deliver stage posts one resolution comment.
@@ -183,6 +188,36 @@ Claude Code footer) with no owner comment after it. Such a ticket is parked, not
 starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
 Together with the relabel that is what stops a second wave repeating a handoff nobody has
 answered yet (issue 266).
+
+## Pre-push merge
+
+A wave's branches all fork from the same commit. By the time the last one is verified the
+default branch has moved, and every branch that touched a skill carries a rotated stamp block
+and a rebuilt marketplace payload — so the PRs open conflicted and the session hand-resolves
+the same conflict once per PR (run `wf_37f38305-f2e`, PRs #304-#314).
+
+So the deliver stage merges `origin/<defaultBranch>` into the verified branch **before** it
+pushes. A clean merge pushes as before. A conflicting merge has exactly two resolvable classes:
+
+- **Generated files** — a path matching `generatedPaths` (`.claude-plugin/marketplace.json`,
+  `marketplace/**`). Resolved with `git checkout --theirs`: the default branch's copy is what
+  is already published, and the packager rewrites it in the next step anyway.
+- **A `SKILL.md` metadata stamp block** — a conflict confined to the four keys `modified`,
+  `previous-modified`, `revision`, `content-sha`. Resolved by
+  `node tools/resolve-stamp-conflict.js <path>`, never by eye and never by taking the default
+  branch's whole file: PR #306 did that and dropped the branch's edits to the skill's prose.
+  The resolver rewrites only hunks whose every line is one of the four keys and exits non-zero
+  on any other hunk, which reclassifies that file as a real merge.
+
+After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
+the ones CLAUDE.md names), re-runs the test command, and commits the merge; the PR body says
+which paths the merge resolved.
+
+**Anything else is a real merge and stops delivery for that ticket.** The stage aborts the
+merge, pushes nothing and opens no PR; the ticket appears in the run result's `failed` list
+with `conflictPaths` naming every path still in conflict. A test command that fails after an
+otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
+branch by hand.
 
 ## Branch names
 

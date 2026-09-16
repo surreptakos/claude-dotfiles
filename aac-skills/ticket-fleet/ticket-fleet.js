@@ -20,7 +20,7 @@ export const meta = {
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
-    { title: 'Deliver', detail: 'PR on a verified code branch; one resolution/status comment otherwise' },
+    { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer appends discoveries' },
   ],
 }
@@ -43,6 +43,17 @@ const cfg = Object.assign({
   followupsFile: 'FOLLOW-UPS.md',
   invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves via env + PATH below
+  // ---- pre-push merge (issue 318) ----
+  // The deliver stage merges origin/<defaultBranch> into the verified branch before pushing, so
+  // the PR opens mergeable instead of landing the same generated-file conflict on the session
+  // once per PR. Only two conflict classes are resolvable without judgment: a path the packager
+  // generates, and a SKILL.md conflict confined to the four-key metadata stamp block. Anything
+  // else stops delivery for that ticket.
+  generatedPaths: ['.claude-plugin/marketplace.json', 'marketplace/**'],
+  // Shell commands that re-stamp and rebuild the generated files after such a merge. null means
+  // "read them out of CLAUDE.md" - this repo names both in its 'Skill stamps' section, and a
+  // fork with different tooling passes its own list instead.
+  regenCommands: null,
   verifierAgent: null,      // null = default (`fleet-verifier` under gh, unpinned under mcp); '' = unpinned
 }, args || {})
 
@@ -243,8 +254,11 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence'], properties: {
   failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
 } }
 
-const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
+const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
+  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, or the test command failed after the merge - nothing was pushed and no PR was opened' },
+  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U) plus any path the stamp resolver refused; empty otherwise' },
+  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail' },
 } }
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
@@ -562,16 +576,57 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
     const prToolNote = instrument === 'mcp'
       ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
       : ''
+    // Pre-push merge (issue 318). A wave's branches all fork from the same commit; by the time
+    // the last one is verified, master has moved and every branch that touched a skill carries a
+    // rotated stamp block and a rebuilt marketplace payload. Merging here, with the two safe
+    // conflict classes named explicitly, means the PR opens mergeable. Anything outside those
+    // classes is a real merge and stops this ticket: PR #306 showed what taking master's whole
+    // SKILL.md costs when the branch had edited its prose.
+    const generatedList = (cfg.generatedPaths || []).map(p => '`' + p + '`').join(', ') || '(none configured)'
+    const regenNote = Array.isArray(cfg.regenCommands) && cfg.regenCommands.length
+      ? 'run exactly these, in order, from the repo root:\n' + cfg.regenCommands.map(c => '   $ ' + c).join('\n')
+      : "read CLAUDE.md for the commands this repo uses to re-stamp its skills and rebuild its generated payload (in claude-dotfiles they are the two commands in the 'Skill stamps' section) and run them from the repo root"
     delivery = await agent(
       `Deliver verified branch ${branch} for issue #${t.number}.${prToolNote ? ' ' + prToolNote : ''}
-1. git push -u origin ${branch}
-2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(lastVerdict.evidence))}; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
-3. ${rules.prComment()} ${t.number} with the PR link${keepOpenNote}.
-Do NOT merge, do NOT close the issue, do NOT touch ${scout.defaultBranch}. Return structured output only.`,
+
+STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
+A1. \`git fetch origin ${scout.defaultBranch}\`, then from a checkout of ${branch}: \`git merge --no-edit origin/${scout.defaultBranch}\`.
+A2. Clean merge (exit 0, nothing conflicted): mergeStatus is "clean" - go to STEP B.
+A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly two classes may be resolved here; a path in neither is a real merge you must NOT guess at.
+    (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
+    (b) SKILL.md STAMP BLOCK - a SKILL.md whose conflict sits entirely inside the four-key metadata stamp block (modified, previous-modified, revision, content-sha). Do NOT judge this by eye and do NOT take the default branch's whole file: run \`node tools/resolve-stamp-conflict.js <path>\`. Exit 0 means every hunk in that file was stamp-only and was resolved to the default branch's side - then \`git add -- <path>\`. A NON-ZERO exit means the file conflicts outside the stamp block; that path belongs to class (c). If this repo has no such script, class (b) does not apply here: treat the path as class (c).
+    (c) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
+A4. Once every conflicted path was class (a) or (b): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Then \`git add -A\`.
+A5. Re-run \`${scout.testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
+A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${scout.defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
+
+STEP B - push and open the PR (only when STEP A ended clean or resolved):
+B1. git push -u origin ${branch}
+B2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(lastVerdict.evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
+B3. ${rules.prComment()} ${t.number} with the PR link${keepOpenNote}.
+B4. Return conflictPaths: [] and the real mergeStatus ("clean" or "resolved").
+
+Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${scout.defaultBranch} itself. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
     )
   }
-  return { ticket: t.number, done, kind: 'code', branch: impl ? branch : null, verdict: lastVerdict, prUrl: delivery && delivery.prUrl, commentUrl: null, discoveries: (impl && impl.discoveries) || [] }
+  // A blocked pre-push merge is a delivery failure, not a silent no-op: the ticket lands in the
+  // run result's `failed` list with the conflicting paths, and no PR exists to review.
+  const mergeBlocked = !!(delivery && (delivery.mergeStatus === 'blocked'
+    || (!delivery.prUrl && Array.isArray(delivery.conflictPaths) && delivery.conflictPaths.length)))
+  const conflictPaths = mergeBlocked ? (delivery.conflictPaths || []) : []
+  if (mergeBlocked) log(`#${t.number}: delivery stopped - merging origin/${scout.defaultBranch} conflicts outside the resolvable classes (${conflictPaths.join(', ') || 'paths not reported'}); no PR opened.`)
+  const mergeFailure = mergeBlocked
+    ? `pre-push merge of origin/${scout.defaultBranch} blocked: ${conflictPaths.join(', ') || 'conflicting paths not reported'}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
+    : null
+  return {
+    ticket: t.number, done: done && !mergeBlocked, kind: 'code', branch: impl ? branch : null,
+    verdict: mergeBlocked
+      ? { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([mergeFailure]) }
+      : lastVerdict,
+    prUrl: mergeBlocked ? null : (delivery && delivery.prUrl), commentUrl: null,
+    conflictPaths, discoveries: (impl && impl.discoveries) || [],
+  }
 }
 // [FLEET-CODE-LANE-END]
 
@@ -600,7 +655,9 @@ return {
   ran: clean.length,
   instrument,
   delivered: clean.filter(r => r.prUrl || r.commentUrl).map(r => ({ ticket: r.ticket, kind: r.kind, pr: r.prUrl || null, comment: r.commentUrl || null })),
-  failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, kind: r.kind, failures: r.verdict ? r.verdict.failures : ['no verdict'] })),
+  // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
+  // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
+  failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, kind: r.kind, failures: r.verdict ? r.verdict.failures : ['no verdict'], conflictPaths: r.conflictPaths || [] })),
   discoveries: allDiscoveries.length,
   skippedBlocked: droppedBlocked,
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).

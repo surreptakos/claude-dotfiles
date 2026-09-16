@@ -479,6 +479,69 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
     assert.deepEqual(result.discoveries, ['finding-A']);
   });
+
+  // ---- Pre-push merge (issue 318) ----
+  // The deliver stage merges origin/<defaultBranch> before pushing. Two conflict classes are
+  // resolvable without judgment (generated files, SKILL.md stamp blocks); anything else stops
+  // the ticket with its conflicting paths and no PR.
+
+  test(`${rel} deliver prompt merges the default branch before pushing`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    assert.match(src, /git merge --no-edit origin\/\$\{scout\.defaultBranch\}/,
+      'deliver must merge origin/<defaultBranch> into the verified branch');
+    assert.match(src, /git checkout --theirs/,
+      'deliver must take the default branch side for a generated-file conflict');
+    assert.match(src, /node tools\/resolve-stamp-conflict\.js/,
+      'deliver must classify a SKILL.md stamp conflict with the resolver script, not by eye');
+    assert.match(src, /git merge --abort/,
+      'a conflict outside the two classes must abort the merge rather than guess');
+    const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
+    const pushIdx = src.indexOf('git push -u origin ${branch}');
+    assert.ok(deliverIdx > 0 && pushIdx > deliverIdx,
+      'the merge instructions must precede the push in the deliver prompt');
+  });
+
+  test(`${rel} runCodeLane reports the conflicting paths and opens no PR when the merge is blocked`, async () => {
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-11-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [] };
+      if (opts.label.startsWith('deliver:')) {
+        return { pushed: false, prUrl: '', mergeStatus: 'blocked', conflictPaths: ['aac-skills/ticket-fleet/SKILL.md', 'README.md'], blockedReason: 'prose hunk outside the stamp block' };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 11, title: 't', criteria: '' }, 0);
+    assert.deepEqual(calls, ['pr-check:#11@inv1', 'impl:#11.1', 'verify:#11.1', 'deliver:#11']);
+    assert.equal(result.prUrl, null, 'a blocked pre-push merge must open no PR');
+    assert.equal(result.done, false, 'a blocked pre-push merge is a delivery failure');
+    assert.deepEqual(result.conflictPaths, ['aac-skills/ticket-fleet/SKILL.md', 'README.md'],
+      'the conflicting paths must reach the run result');
+    assert.match(result.verdict.failures.join('\n'), /aac-skills\/ticket-fleet\/SKILL\.md/);
+    assert.ok(logs.some((m) => /no PR opened/.test(m)), 'the block must be logged');
+  });
+
+  test(`${rel} runCodeLane still delivers when the pre-push merge resolves`, async () => {
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-12-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [] };
+      if (opts.label.startsWith('deliver:')) {
+        return { pushed: true, prUrl: 'https://github.com/x/y/pull/501', mergeStatus: 'resolved', conflictPaths: [] };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(file, agentMock, { number: 12, title: 't', criteria: '' }, 0);
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/501');
+    assert.deepEqual(result.conflictPaths, []);
+  });
 }
 
 // ---- Empty-label listing ends the run (issue 298) ----
