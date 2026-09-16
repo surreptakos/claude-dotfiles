@@ -14,17 +14,20 @@ the skill directory (SKILL.md's own stamp keys stripped, CRLF folded to LF, the 
 folded to the sync tokens so the live tree and the repo mirror hash alike). When the hash on disk
 no longer matches the recorded one, the skill was edited after its last stamp. `stamp` then
 rotates `modified` into `previous-modified`, sets `modified` from the newest file mtime, bumps the
-revision and records the new hash. `check` only reports, exit 1 on any skill that was edited
-without a re-stamp or never stamped.
+revision and records the new hash. The rotation is measured from the last COMMITTED stamp, so
+stamping the same skill several times before the commit (the documented stamp-then-package flow,
+or a second edit) still lands one revision bump with `previous-modified` naming the published
+version. `check` only reports, exit 1 on any skill that was edited without a re-stamp or never
+stamped.
 
 The packager (tools/build-cloud-plugin.py) stamps every source skill on each build, so a normal
 `sync.ps1 -Mode push` keeps the stamps current with no one remembering to. This CLI exists for the
 hand-edited aac-skills/ tree on a cloud branch, where no push runs, and for CI.
 
 Usage:
-    python3 tools/skill-stamps.py stamp aac-skills            # (re)stamp what changed
-    python3 tools/skill-stamps.py check aac-skills            # exit 1 on drift, changes nothing
-    python3 tools/skill-stamps.py check aac-skills --json     # machine-readable report
+    python3 tools/skill-stamps.py stamp aac-skills agents/skills   # (re)stamp what changed
+    python3 tools/skill-stamps.py check aac-skills                 # exit 1 on drift, changes nothing
+    python3 tools/skill-stamps.py check aac-skills --json          # machine-readable report
 
 Each positional argument is a directory of skills (each child holding a SKILL.md) or a single
 skill directory. `check` is for SOURCE trees only: the packaged copies under marketplace/ carry
@@ -304,6 +307,40 @@ def git_dirty(repo, rel_paths):
     return out is None or out.strip() != ""
 
 
+def _baseline_paths(skill_dir, repo, history_paths):
+    """Where to look for the committed copy: this very directory first, then the callers' paths.
+
+    The packager stamps the live `~/.claude/skills/<name>` (outside the repo), and names its
+    mirror in `history_paths`; the CLI stamps a directory that is itself in the repo.
+    """
+    own = [Path(skill_dir).resolve().relative_to(Path(repo).resolve()).as_posix()] if (
+        repo and _inside(skill_dir, repo)) else []
+    return own + [p for p in (history_paths or []) if p not in own]
+
+
+def published_stamp(repo, rel_paths):
+    """The stamp in the last committed SKILL.md for this skill, or {} when there is none.
+
+    HEAD is the published version, so a rotation is rebased on it: every re-stamp between two
+    commits collapses into one revision bump and `previous-modified` keeps naming the version
+    that was last published rather than an intermediate stamp minutes old (issue 363).
+    """
+    if not repo:
+        return {}
+    for rel in rel_paths or []:
+        out = _git(repo, "show", f"HEAD:{str(rel).replace(os.sep, '/')}/SKILL.md")
+        if out is None:
+            continue
+        try:
+            fm, _l, _b = read_frontmatter(out.replace("\r\n", "\n"))
+        except Exception:  # noqa: BLE001 - an unparseable committed copy is simply no baseline
+            continue
+        stamp = read_stamp(fm)
+        if all(k in stamp for k in STAMP_KEYS):
+            return stamp
+    return {}
+
+
 # ----------------------------------------------------------------------------- stamping
 def compute_stamp(skill_dir, *, home=None, repo=None, history_paths=None, mirror_dir=None, now=None):
     """Return (stamp_dict, changed). `changed` is False when the recorded hash still matches."""
@@ -316,8 +353,16 @@ def compute_stamp(skill_dir, *, home=None, repo=None, history_paths=None, mirror
         return old, False
     now = now or newest_mtime(skill_dir) or _utc(datetime.now(timezone.utc))
     if old.get("content-sha"):
-        modified, previous = now, old.get("modified", NONE)
-        revision = _next_revision(old.get("revision"))
+        # Rotate away from the last COMMITTED stamp, not from whatever the working tree holds:
+        # the documented stamp-then-package flow (and any second edit before the commit) stamps
+        # the same file twice, and rotating twice leaves `previous-modified` naming a stamp
+        # seconds old instead of the published version (issue 363).
+        base = published_stamp(repo, _baseline_paths(skill_dir, repo, history_paths))
+        if base.get("content-sha") == sha:
+            return base, base != old  # content is back at the published version: its stamp holds
+        src = base or old
+        modified, previous = now, src.get("modified", NONE)
+        revision = _next_revision(src.get("revision"))
     else:
         # First stamp: let the git history say when it really changed, unless the tree has moved
         # on since the last commit (or the mirror no longer matches the live copy).
@@ -429,7 +474,9 @@ def main(argv=None):
             print(line)
         if args.mode == "check" and bad:
             print(f"\n{bad} skill(s) edited without a re-stamp or never stamped. Run:"
-                  f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}", file=sys.stderr)
+                  f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}"
+                  f"\nA skill edited on a branch needs every tree that carries it stamped and the"
+                  f" plugin rebuilt - see CLAUDE.md, \"Skill stamps\".", file=sys.stderr)
     return 1 if bad else 0
 
 

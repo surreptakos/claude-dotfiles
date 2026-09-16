@@ -31,7 +31,8 @@
  *     "testTimeoutMs": 300000,                       // optional per-repo test timeout
  *     "ticketLabel": "ready-for-agent",
  *     "releaseGates":[ "node tools/canary.js" ],     // run at --end
- *     "checks":      [ { "name": "...", "run": "...", "when": "end" } ],
+ *     "checks":      [ { "name": "...", "run": "...", "when": "end",
+ *                        "host": "desktop" } ],                // only on that host; see HOST
  *     "note":        "anything to print every time",
  *     "harness":     false                            // silence the harness-version check on
  *                                                    // a deliberately unharnessed repo
@@ -59,6 +60,12 @@ const REPO = findRepoRoot(process.cwd());
 const IS_CLOUD = Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID
   || process.env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE);
 
+/** Which host this session runs on, for a configured check's optional `host` field. Some checks
+ *  are desktop-only by nature — a board sweep that needs the desktop's credentials exits 2 in a
+ *  container every time, and a guaranteed failure teaches people to skim past the report. A check
+ *  naming a host that is not this one is skipped and SAID to be skipped, never passed. */
+const HOST = IS_CLOUD ? 'cloud' : 'desktop';
+
 const C = process.stdout.isTTY
   ? { r: '\x1b[31m', y: '\x1b[33m', g: '\x1b[32m', b: '\x1b[1m', x: '\x1b[0m', d: '\x1b[2m' }
   : { r: '', y: '', g: '', b: '', x: '', d: '' };
@@ -69,6 +76,7 @@ const push = (icon, text, level) => { out.push(`  ${icon} ${text}`); if (level >
 const ok = (t) => push(`${C.g}ok${C.x}  `, t, 0);
 const warn = (t) => push(`${C.y}!!${C.x}  `, t, 1);
 const stop = (t) => push(`${C.r}STOP${C.x}`, t, 2);
+const skipped = (t) => push(`${C.d}--${C.x}  `, t, 0);
 const note = (t) => out.push(`      ${C.d}${t}${C.x}`);
 const head = (t) => { out.push(out.length ? '' : ''); out.push(`${C.b}${t}${C.x}`); };
 
@@ -394,6 +402,10 @@ async function workChecks() {
   for (const c of (CFG.checks || [])) {
     if (c.when === 'end' && !END) continue;
     if (c.when === 'start' && END) continue;
+    if (c.host && c.host !== HOST) {
+      skipped(`${c.name || c.run} — skipped (${c.host}-only)`);
+      continue;
+    }
     const r = await runReadingOutputAsync(c.run, [], { timeout: 120000, shell: true });
     if (r.code === 0) ok(c.name || c.run);
     else if (r.timedOut) {
