@@ -17,12 +17,14 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
+const { spawnSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates,
   stableJson, stableText, stableList, priorFindingsBlock,
+  FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
 } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
@@ -49,6 +51,44 @@ test('buildBranchName includes ticket, attempt, runId and workerIndex', () => {
   assert.match(branch, /attempt1/);
   assert.match(branch, /wf_abc123/);
   assert.match(branch, /w2$/);
+});
+
+// Issue 377: the fleet creates two branch shapes, and the discoveries branch was added
+// (issue 360) after every "the fleet's branches" enumeration had been written against
+// `agent/issue-*`. FLEET_BRANCH_PREFIXES is the one list those enumerations widen against.
+test('isFleetBranch covers both fleet branch shapes (issue 377)', () => {
+  assert.deepEqual([...FLEET_BRANCH_PREFIXES], ['agent/issue-', 'agent/fleet-discoveries-'],
+    'the fleet branch prefix list must name the discoveries prefix beside the issue prefix');
+  assert.equal(buildDiscoveriesBranchName('testrun'), 'agent/fleet-discoveries-wf_testrun');
+  assert.equal(isFleetBranch(buildDiscoveriesBranchName('testrun')), true,
+    'the discoveries branch must be recognised as a fleet branch');
+  assert.equal(isFleetBranch('refs/heads/' + buildBranchName(29, 'abc123', 0, 1)), true,
+    'a refs/heads ref (what a worktree HEAD file holds) must be accepted');
+  assert.equal(isFleetBranch('master'), false);
+  assert.equal(isFleetBranch(DISCOVERIES_BRANCH_PREFIX), false,
+    'a bare prefix with no runId is not a branch the fleet created');
+  assert.equal(isFleetBranch(null), false);
+});
+
+// Issue 377: a merge pass or a worktree cleanup that matches `agent/issue-*` alone skips the
+// discoveries PR and strands the run's bullets - the failure issue 360 exists to end. Pin the
+// prefix against each place fleet branches are enumerated.
+test('every enumeration of fleet branches names the discoveries prefix (issue 377)', () => {
+  const runbook = fs.readFileSync(path.join(REPO_ROOT, 'orchestrator', 'RUNBOOK.md'), 'utf8');
+  const fromMergePass = runbook.slice(runbook.indexOf('**Merge pass (before the fleet).**'));
+  const mergePassStep = fromMergePass.slice(0, fromMergePass.indexOf('\n4. '));
+  assert.ok(mergePassStep.includes(DISCOVERIES_BRANCH_PREFIX + '*'),
+    "RUNBOOK.md's merge pass must match agent/fleet-discoveries-* as well as agent/issue-*");
+
+  const backfill = fs.readFileSync(path.join(REPO_ROOT, 'tools', 'backfill-worktree-configs.js'), 'utf8');
+  assert.match(backfill, /require\('\.\/ticket-fleet-branch\.js'\)/,
+    'the worktree cleanup must take its fleet prefixes from this module, not spell its own');
+  assert.match(backfill, /isFleetBranch\(branch\)/,
+    'the worktree cleanup must classify a worktree branch through isFleetBranch');
+
+  const fleetScript = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(fleetScript.includes(DISCOVERIES_BRANCH_PREFIX + 'wf_${runId}'),
+    `the fleet script's discoveries branch must keep the ${DISCOVERIES_BRANCH_PREFIX} shape this list enumerates`);
 });
 
 test('two concurrent scouts against the same ticket produce distinct branch names', () => {
@@ -181,6 +221,23 @@ for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
     const bytes = fs.readFileSync(file);
     const crs = bytes.filter((b) => b === 0x0d).length;
     assert.equal(crs, 0, `${rel} holds ${crs} CR byte(s); re-encode as LF and rebuild the plugin`);
+  });
+}
+
+// The Workflow tool parses the file behind `scriptPath` before it shows the approval dialog, so a
+// script that does not parse cannot launch anywhere - and nothing else on the gate ran the parser:
+// f9bace7 shipped an unescaped apostrophe inside meta.whenToUse and every fleet launch failed with
+// "Script parse error" until it was noticed by hand. The runtime wraps the body in an async
+// function (top-level `return` and `await` are legal there) after lifting the `export const meta`
+// line, so the check does the same before handing the text to node's parser.
+for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+  test(`fleet script ${rel} parses as a workflow script (Workflow scriptPath refuses a parse error)`, () => {
+    const body = fs.readFileSync(file, 'utf8').replace(/^export /m, '');
+    const res = spawnSync(process.execPath, ['--check', '-'], {
+      input: `(async () => {\n${body}\n});\n`, encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, `${rel} does not parse:\n${res.stderr}`);
   });
 }
 
@@ -441,10 +498,22 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}) {
     assertNoBreach: () => {},
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     unusableVerdict: (detail, who) => ({ pass: false, evidence: '', failures: [`${who || 'verifier'} output unusable: ${detail}`], unusable: true }),
+    // Issue 404: the expected tip is read by its own one-command agent. Unreadable by default, so
+    // the worktree cross-check is inert unless a test supplies a tip; driveCodeLane injects the
+    // script's own worktreeMismatch, so the decision under test is the real one.
+    revParse: async () => null,
   }, stubs)));
 }
 
-async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null) {
+// The worktree cross-check the lanes reject a verdict with (issue 404), evaluated out of the
+// script so the lane bodies below resolve the real one rather than a stand-in.
+function loadWorktreeCheck(scriptPath) {
+  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-WORKTREE-CHECK');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${body}\nreturn { shaMatches, worktreeMismatch };`)();
+}
+
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null, stubOverrides = {}) {
   const body = extractCodeLane(fs.readFileSync(scriptPath, 'utf8'));
   const helpers = loadStableHelpers(scriptPath);
   const logs = [];
@@ -456,13 +525,14 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   };
   // runId is fixed while invocationId varies - the resume shape of issue 291. The resume-stable
   // helpers are the script's own (issue 271), so the prompts under test are the real ones.
-  const runCodeLane = await instantiateCodeLane(body, agentMock, logs, {
+  const runCodeLane = await instantiateCodeLane(body, agentMock, logs, Object.assign({
     cfg: Object.assign({ maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' }, cfgOverrides),
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+    worktreeMismatch: loadWorktreeCheck(scriptPath).worktreeMismatch,
     treeGuardCheck,
-  });
+  }, stubOverrides));
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs, checkpoints };
 }
@@ -515,7 +585,9 @@ for (const file of RESUME_GUARD_PAIR) {
     const preIdx = body.indexOf('label: `pr-check:#');
     const loopIdx = body.indexOf('for (let attempt');
     const implIdx = body.indexOf('label: `impl:#');
-    const verifyIdx = body.indexOf('label: `verify:#');
+    // The verifier's label is built once per pass (issue 404's single re-run), so its anchor is
+    // the label template rather than the opts key; the backtick still keeps comments out.
+    const verifyIdx = body.indexOf('`verify:#');
     const deliverIdx = body.indexOf('label: `deliver:#');
     assert.ok(preIdx >= 0, 'runCodeLane must call the pre-loop PR check with label pr-check:#N');
     assert.ok(loopIdx > preIdx, 'PR check must precede the attempt for-loop');
@@ -660,6 +732,77 @@ for (const file of RESUME_GUARD_PAIR) {
     // the implementer, one after the (unisolated) verifier, one after Deliver pushes.
     assert.deepEqual(checkpoints, ['implement-attempt1#9', 'verify-attempt1#9', 'deliver#9'],
       'the code lane must checkpoint the orchestrator tree after Implement, Verify and Deliver');
+  });
+
+  // ---- The verdict's worktree is cross-checked against the branch tip (issue 404) ----
+
+  test(`${rel} accepts a verdict whose worktree HEAD is the branch tip`, async () => {
+    const tip = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/scratch/v', head: tip } };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/404' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(file, agentMock, { number: 404, title: 't', criteria: '' }, 0, {}, 'inv1', null,
+      { revParse: async () => tip });
+    assert.deepEqual(calls, ['pr-check:#404@inv1', 'impl:#404.1', 'verify:#404.1', 'deliver:#404'],
+      'a verdict produced at the branch tip must be accepted without a re-run');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/404');
+  });
+
+  test(`${rel} rejects a verdict produced outside the branch's worktree and re-runs the verifier once`, async () => {
+    // The main checkout sitting on the session's own branch is exactly the 2026-09-16 failure:
+    // the verifier answers about a tree that predates the code under review.
+    const tip = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const mainCheckout = 'ffffeeee00001111222233334444555566667777';
+    const calls = [];
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) {
+        prompts.push([opts.label, prompt]);
+        return { pass: true, evidence: 'ran tests in /home/user/aac-routines', failures: [], worktree: { path: '/home/user/aac-routines', head: mainCheckout } };
+      }
+      throw new Error(`nothing may be delivered on a rejected verdict: ${opts.label}`);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 404, title: 't', criteria: '' }, 0, { maxAttempts: 1 }, 'inv1', null,
+      { revParse: async () => tip });
+    assert.deepEqual(calls, ['pr-check:#404@inv1', 'impl:#404.1', 'verify:#404.1', 'verify:#404.1-rerun'],
+      'a mismatched verdict must be re-run exactly once, and a second mismatch must not deliver');
+    assert.match(prompts[1][1], new RegExp(`${mainCheckout}[\\s\\S]*${tip}`),
+      're-run prompt must name the mismatch: the HEAD the verdict came from and the tip it had to be');
+    assert.match(prompts[1][1], /never .*fall back to the repository you started in|main checkout is never a test surface/,
+      're-run prompt must still carry the rule it was rejected under');
+    assert.equal(result.done, false, 'a verdict from the wrong tree is not a pass');
+    assert.equal(result.prUrl, undefined);
+    assert.equal(result.verdict.failures.length, 1, 'only the mismatch is recorded; the wrong-tree findings are not passed on');
+    assert.match(result.verdict.failures[0], new RegExp(mainCheckout));
+    assert.ok(logs.some((m) => m.includes('Re-running the verifier once')), 'the rejection and its single re-run must be logged');
+  });
+
+  test(`${rel} verifier and prober prompts say the main checkout is never a test surface (issue 404)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    const anchors = [
+      ['code-lane verifier', 'You are an independent verifier. Your job is to REFUTE'],
+      ['probe-lane verifier', 'You are an independent verifier for a probe ticket'],
+      ['prober', 'Probe GitHub issue #'],
+    ];
+    for (const [who, anchor] of anchors) {
+      const start = src.indexOf(anchor);
+      assert.ok(start > 0, `${who} prompt not found by its opening line`);
+      const prompt = src.slice(start, src.indexOf("phase: '", start));
+      assert.match(prompt, /The main checkout is never a test surface \(issue 404\)/,
+        `${who} prompt must say in one sentence that the main checkout is never a test surface`);
+      assert.match(prompt, /sits on whatever branch this session is on, which is not the code/,
+        `${who} prompt must say WHY: the main checkout is on this session's branch, not the code under test`);
+    }
   });
 
   // ---- Deliver never ticks acceptance boxes (aac-routines issue 264) ----

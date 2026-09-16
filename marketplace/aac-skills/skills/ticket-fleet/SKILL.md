@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T17:37:58Z'
-  previous-modified: '2026-09-16T15:18:31Z'
-  revision: '12'
-  content-sha: b874611f7b62
+  modified: '2026-09-16T19:02:45Z'
+  previous-modified: '2026-09-16T17:37:58Z'
+  revision: '13'
+  content-sha: 018fd75a2980
 ---
 
 # ticket-fleet
@@ -371,6 +371,20 @@ script and the drift guards in `tools/ticket-fleet-branch.test.js`). Two concurr
 against the same ticket therefore produce distinct branches; two runs of the same worker
 still add `-attempt<A>` so a re-implement after a failed verify does not overwrite its own
 predecessor.
+
+## Where a verdict is allowed to come from
+
+A verifier that skips its scratch worktree tests the orchestrator's own checkout, which sits on
+whatever branch the session is on - on 2026-09-16 that tree predated the code under review and the
+#361 probe was refuted as "fabricated" for flags `origin/main` carried and that branch did not. So
+the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
+`head` against the tip it expects: the branch under review in the code lane,
+`origin/<defaultBranch>` in the probe lane, each read by its own one-command `rev-parse` agent so
+no agent certifies itself. A mismatch re-runs the verifier ONCE with the mismatch named - "for
+where it was produced and not for what it concluded", so the re-run is not read as pressure to
+change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
+and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
+log says the cross-check was skipped: a guess is not a rejection.
 
 ## Shell shapes the worktree guard refuses
 
