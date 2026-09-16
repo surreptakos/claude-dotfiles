@@ -2,19 +2,19 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-15T22:34:53Z"
-  previous-modified: "2026-09-14T15:06:58Z"
-  revision: "3"
-  content-sha: "ccaab8167a05"
+  modified: "2026-09-16T15:08:43Z"
+  previous-modified: "2026-09-16T00:55:50Z"
+  revision: "5"
+  content-sha: "27a7d6a5c103"
 ---
 
 # Finish a session
 
-**The checks are a hook now, not a decision.** `~/.claude/hooks/session-gate.js prompt` watches for
-wrap-up wording ("wrap up", "done for now", "anything left", "handing off", `/session-end`) and runs
-the end checks before the reply is written, so the result is already in context. It also runs on
+**The checks are a hook.** `~/.claude/hooks/session-gate.js prompt` watches for wrap-up wording
+("wrap up", "done for now", "anything left", "handing off", `/session-end`) and runs the end checks
+before the reply is written, so the result is already in context — read it there. It also runs on
 `SessionEnd` and appends the outcome to `~/.claude/hook-state/session-gate/session-end.log`, so an
-abrupt exit still leaves a record. Do not re-run it and do not paste the report back.
+abrupt exit still leaves a record.
 
 To see it again, or to re-run after committing or pushing:
 
@@ -32,15 +32,15 @@ not load (claude-dotfiles#157): clone `surreptakos/claude-dotfiles` and run
 ## When the user types `/session-end`: auto-drive to archive-ready
 
 Typing `/session-end` explicitly is the user's standing OK for every land-and-clean action below.
-The final state must be: nothing uncommitted, nothing unpushed, no unmerged PR from this session,
-no orphan worktree, no stale local or remote branch whose work already landed on main, no
-open fleet PR that has been superseded, no open issue without a milestone, no open issue
-whose acceptance ledger is fully ticked — and no surfaced item uncaptured. The reply MUST end
-with the exact line `Ready to archive` (no punctuation, no bold, no extra words) so the user
-can hit archive immediately. Passive wrap-up wording ("wrap up", "handing off") is NOT a
-standing OK — confirm before landing shared-state actions in that mode.
+**Archive-ready** is the state to reach: every change committed and pushed, this session's PR
+merged, the surviving worktrees and branches all carrying live work, every superseded fleet PR
+closed, every open issue in a milestone and holding at least one unticked acceptance box, and
+every surfaced item captured on a ticket. Reaching it ends the reply with the exact line
+`Ready to archive` (bare text, no punctuation or bold) so the user can hit archive immediately.
+Passive wrap-up wording ("wrap up", "handing off") asks for confirmation before each shared-state
+action instead.
 
-Sequence, none skippable when the user typed `/session-end` (in a cloud container, take each
+Sequence, run end to end when the user typed `/session-end` (in a cloud container, take each
 step's `gh` spelling through the substitution table in the cloud section below):
 
 1. **Commit any uncommitted work** in a single commit that describes what changed and why.
@@ -50,8 +50,8 @@ step's `gh` spelling through the substitution table in the cloud section below):
    `gh pr create --base main --head <branch>`. Include a "Closes #N" line for every issue the
    commits resolve.
 4. **Merge the PR** with `gh pr merge <n> --squash --delete-branch`. If the merge fails because
-   of branch protection, pending checks, or required reviewers, say so plainly and stop — the
-   session is NOT archive-ready; do NOT emit the `Ready to archive` line.
+   of branch protection, pending checks, or required reviewers, say so plainly and stop: the
+   session stays short of archive-ready.
 5. **Verify closures** — for each `Closes #N` in the commit, confirm the issue closed; for any
    other issue touched, confirm it stayed open. Reopen with a reason if a push closed one that
    should have stayed open.
@@ -62,13 +62,13 @@ step's `gh` spelling through the substitution table in the cloud section below):
    ```
    Zero configuration: auto-discovers every open ProjectsV2 board linked to the repo's `origin`
    remote and sweeps each. No-op if no linked board has a `Status` field with a `Done` option.
-   Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. Local
-   machines only — it needs gh with project scope, and no cloud substitute exists (see the cloud
-   section below): in a container, skip it with a stated reason and file or update a
-   `ready-for-local-agent` ticket that names the skipped sweep — never a reply line.
-7. **Batch surfaced items through `/to-tickets`** (see ticket sweep below). This is required, not
-   optional. `/to-tickets` handles its own breakdown/approval/publish flow — invoke it once with
-   all NEEDS-A-TICKET items collected during the sweep. Never `gh issue create` ad hoc. In a
+   Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. In a
+   container that command has nowhere to run — but the step is not skipped there any more: the
+   same script runs as a GitHub Actions job, so take the row for it in the cloud table below.
+   Do not file a `ready-for-local-agent` ticket for a board sweep.
+7. **Batch surfaced items through `/to-tickets`** (see ticket sweep below). `/to-tickets` handles
+   its own breakdown/approval/publish flow — invoke it once with every NEEDS-A-TICKET item the
+   sweep collected, and let that one invocation be the only route by which a ticket gets created. In a
    container where the plugin did not load and `/to-tickets` is uninvocable, read
    `marketplace/aac-skills/skills/to-tickets/SKILL.md` from a clone of `surreptakos/claude-dotfiles`
    and follow it by hand; the create call is then that skill's publish step, not ad hoc.
@@ -79,18 +79,14 @@ step's `gh` spelling through the substitution table in the cloud section below):
    open while all its acceptance boxes are ticked.** Two failure modes the tracker audit does
    not catch on its own; both surface with two `gh` queries the assistant runs here.
 
-   **These checks resolve EVERY open issue that fails them, not just the ones this session
-   touched.** "These checks" means the two in THIS step and no others: un-milestoned open
-   issues, and open issues whose acceptance ledger has zero unticked boxes. The tracker
-   audit's own findings are scoped differently — see the tracker-audit entry under *Then
-   close the loop*, and read both before deciding what a given line obliges. `/session-end` is the housekeeping pass for the whole tracker — a pre-existing
-   un-milestoned or delivered-but-open issue is a blocker the assistant fixes here, not a
-   note handed back to the owner. Ruling 2026-08-31 after a `/session-end` reply routed five
-   pre-existing hits back as questions ("which milestone for each?", "close, add box, or
-   hold?"). Wrong. Read the body, pick the best-fit milestone from the open list, or convert
-   prose bullets to `- [ ]` boxes. Only escalate when the body cannot be read from the tracker
-   or the choice is genuinely between two open milestones with equal fit — and even then,
-   act (pick one, note the alternative in a comment), do not hand back.
+   **The two checks in THIS step — un-milestoned open issues, and open issues whose acceptance
+   ledger has zero unticked boxes — resolve EVERY open issue that fails them, whichever session
+   caused it.** `/session-end` is the housekeeping pass for the whole tracker, so a pre-existing
+   hit is a blocker the assistant clears here: read the body, pick the best-fit milestone from the
+   open list, or convert prose bullets to `- [ ]` boxes. Ruling 2026-08-31, after a `/session-end`
+   reply routed five pre-existing hits back as questions ("which milestone for each?", "close, add
+   box, or hold?"). Escalate only when the tracker will not yield the body, or two open milestones
+   fit equally — and then still act: pick one and name the alternative in a comment.
 
    a. **Un-milestoned open issues.** Every open issue must be assigned to a milestone — the
       milestone is what maps a ticket to a scope decision, and an un-milestoned ticket is
@@ -142,12 +138,12 @@ step's `gh` spelling through the substitution table in the cloud section below):
    (deferred; load via `ToolSearch` with `select:ExitWorktree`) to exit and remove it in one
    step. If `ExitWorktree` is unavailable, print the exact command the user should run from the
    main checkout: `git worktree remove <path>` (add `--force` only if the tree is unclean and the
-   user OKs discarding).
+   user OKs discarding) **and** file a `ready-for-human` ticket carrying that exact command, since
+   a printed command the session cannot run is a step it cannot finish.
 11. **Sweep the repo's stale branches, worktrees, and PRs** — session cleanup runs beyond this
     session's own branch, because fleet attempts, prior sessions, and abandoned scratch trees
-    accumulate silently and no built-in check surfaces them. The state to reach is: only `main`
-    plus branches with active unmerged work; only worktrees currently in use; no open PR that has
-    been superseded by later work.
+    accumulate silently and no built-in check surfaces them. This is the branch/worktree/PR half of
+    archive-ready above.
 
     Do it in this order (all commands run from the main checkout — a worktree cannot delete its
     own branch and confuses `git branch --merged`):
@@ -171,41 +167,73 @@ step's `gh` spelling through the substitution table in the cloud section below):
        same commit messages says whether those commits were squash-landed under a different SHA
        (common with `gh pr merge --squash`). Force-delete (`git branch -D`) any branch whose
        commits are all present on main under different SHAs, or whose PR was closed as
-       superseded. Never force-delete a branch with genuinely stranded work — hand it to the user.
+       superseded. Never force-delete a branch with genuinely stranded work: file it as a
+       `ready-for-human` ticket naming the branch, its unique commits and why they look stranded,
+       and quote that number in the reply. Handing it over in prose loses it.
 
     e. **Prune remote branches** — `git branch -r` after the fetch. Any remote branch whose PR
        merged or closed but that survived (auto-delete off, or a manual push after merge) gets
        `git push origin --delete <branch>`. In a cloud container where the proxy refuses the
-       remote delete, file or update a `ready-for-local-agent` ticket naming the branches for a
-       desktop session; do not leave the item in a reply.
+       remote delete, name those branches on a `ready-for-local-agent` ticket for a desktop
+       session, the way the cloud section below describes.
 
     f. **Audit open PRs the assistant did not open this session** — `gh pr list --state open`.
        Any fleet-attempt PR older than the ADRs, spec revisions, or scope decisions made this
        session should be closed with a comment naming what superseded it, then its branch
        deleted (`gh pr close <n> --delete-branch --comment "..."`). If the assistant cannot
-       tell whether an open PR is superseded, leave it and name it for the user.
+       tell whether an open PR is superseded, leave it open and file a `ready-for-human` ticket
+       naming the PR, what it would collide with, and the evidence that is missing — not a line
+       in the reply.
 
 12. **Re-run the end check** — `node ~/.claude/hooks/session-gate.js report --end --refresh` — and
     report the fresh result. Every STOP line must be resolved before the `Ready to archive` line
     is emitted.
 
 If any step in 1–11 fails or is blocked for a reason the assistant cannot resolve, name the
-blocker, list what IS done, and stop. Do NOT emit `Ready to archive` — the whole point of the
-line is that seeing it means the user can archive without checking.
+blocker, **file it as a ticket — `ready-for-agent` when another session can finish it,
+`ready-for-human` when only the owner can — or as a comment on the ticket that already owns the
+step** (rule below), list what IS done, and stop; `Ready to archive` is reserved for a state the
+user can archive without checking, and an unfiled blocker is a step nobody will ever see again.
 
-**"Blocked for a reason the assistant cannot resolve" is a narrow phrase, not a hedge.** A
-pre-existing tracker hit (un-milestoned issue, prose-bullet acceptance, delivered-but-open
-detected by the scanner) IS resolvable: read the body, pick the milestone, convert the
-bullets to boxes. Handing those back as questions defeats the whole `/session-end` skill.
-The blocker exception covers CI failures, protected-branch refusals, credentials the assistant
-cannot mint, and choices requiring an owner ruling (values / risk tolerance / priorities) —
-not tracker housekeeping that reading the body settles.
+**A blocker is a narrow thing:** a CI failure, a protected-branch refusal, a credential the
+assistant cannot mint, or a choice that needs an owner ruling (values, risk tolerance, priorities).
+Tracker housekeeping that reading the body settles — an un-milestoned issue, a prose-bullet
+acceptance, a delivered-but-open hit — is work this pass does, and step 9 says how.
+
+### Every step the session cannot finish becomes a ticket
+
+Owner ruling 2026-09-15: nothing said in a session reply is seen. A step of the sequence that
+this session cannot complete — blocked, unavailable in this environment, or refused — has
+exactly one durable landing place, chosen before the reply is written:
+
+- **A comment on the ticket that already owns the step**, when one exists — a discovery an open
+  ticket already tracks goes there, naming the repo and the date, and files no new ticket.
+- **A `ready-for-agent` ticket**, when another cloud session can finish it — a rebuild, an audit
+  re-run, a follow-up edit.
+- **A `ready-for-local-agent` ticket**, when only a desktop session can — the skipped board sweep
+  (step 6), a live-tree edit plus `sync.ps1 -Mode push`, a remote branch delete the session proxy
+  refuses, a command the container's auto-mode classifier blocks. Never `ready-for-human` for
+  these: a desktop session runs them without the owner.
+- **A `ready-for-human` ticket**, when only the owner can: stranded work to judge, a credential
+  to mint, a UI action no API covers, a superseded-or-not call the session cannot make. The
+  owner's queue is a label query, so an unlabelled ticket is invisible to it.
+
+File new tickets through `/to-tickets` in the step-7 batch (comments go through `gh issue
+comment`, or MCP `add_issue_comment` in a container), then quote every number in the wrap-up.
+"Named it for the user" and "needs a local session" are not outcomes.
+
+**A classifier-denied cleanup is one of these cases, not an exception.** In auto mode the
+destructive-action classifier can refuse `git push origin --delete <branch>`, `git branch -D
+<branch>` or `git worktree remove --force <path>` mid-sweep. Do not retry it and do not leave
+the refusal sitting in the reply: file a `ready-for-local-agent` ticket carrying the exact command,
+the branch or path, and the evidence that its work already landed (the squash SHA on `main`,
+the merged PR number), so running it is read-and-paste for the owner.
 
 ## In a cloud container: same duties, different instruments
 
 A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SESSION_ID` set in the
-environment is the tell. Every step above still applies; only the tool changes. Do not report a
-step as impossible because its `gh` spelling failed — use the equivalent:
+environment is the tell. Every step above still applies; only the tool changes, so take a failing
+`gh` spelling through this table and run the step:
 
 | The sequence says | In a container use |
 | --- | --- |
@@ -215,25 +243,32 @@ step as impossible because its `gh` spelling failed — use the equivalent:
 | `gh issue edit <n> --milestone` | MCP `issue_write` (update) |
 | `gh pr list --state open` | MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
+| `sweep-closed-to-done.js --apply` (step 6) | nothing to run by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other; `PROJECT_TOKEN` missing or expired is the usual cause and the run log says so |
 
 Quick read-only checks can also go straight to REST — `curl
 https://api.github.com/repos/<owner>/<repo>/...` — the session's egress proxy authenticates
 api.github.com, private repos included. Git itself (push, fetch, branch delete) works normally
 through the same proxy.
 
-Three genuine differences, all to be said out loud rather than skipped silently:
+Three genuine differences. Each is said out loud **and filed** — a ticket, or a comment on the
+ticket that owns the step (rule above); a container's missing instrument is the commonest way a
+step ends up living only in the reply:
 
-- **Step 6 (board sweep)** has no cloud substitute — the MCP has no ProjectsV2 tools. Skip it with
-  a stated reason and file or update a `ready-for-local-agent` ticket that names the skipped sweep;
-  never a reply line, and never `ready-for-human` — a desktop session can run it.
-- **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container. Still
-  not a pass: run the same audit through the MCP tools, or file/update a `ready-for-local-agent`
-  ticket naming the tool that needs a desktop run.
-- **The cloud-plugin staleness check** does not run in containers — the container IS the
-  downstream copy. Nothing to do there.
+- **Step 6 (board sweep)** is not skipped in a container any more: the same script runs as the
+  Board sweep GitHub Actions job on issue and PR close, so take the row for it in the cloud table
+  below and do not file a `ready-for-local-agent` ticket for it (issue 216).
+- **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container, which
+  leaves the audit unread: re-run it through the MCP tools, or hand it on.
+- **The cloud-plugin staleness check** is skipped in containers: the container IS the downstream
+  copy.
+
+**Handing on** means one thing throughout: file or update a `ready-for-local-agent` ticket that
+names the step and what is left of it. A desktop session can run all of it, so `ready-for-human`
+stays for a person's judgment — and the ticket, rather than a reply line, is what outlives the
+session.
 
 MCP write calls (merge, close, edit) may raise a permission prompt; when the user typed
-`/session-end`, that prompt is the confirmation, not a reason to skip the step.
+`/session-end`, that prompt is the confirmation — approve it and carry on.
 
 
 ## Then close the loop (report interpretation)
@@ -246,13 +281,13 @@ behind and why.
 any generated file (a dashboard, a coverage badge) is reporting stale numbers; and any commit SHA
 quoted in an issue comment points at something nobody else can reach. Push per step 2.
 
-**`STOP release gate FAILS`** — do not release. Say which gate and what it said.
+**`STOP release gate FAILS`** — hold the release, and say which gate failed and what it said.
 
 **`!! tracker audit: N drift finding(s)`** — run it and fix every finding, whatever session caused
 it (Dan, 2026-09-10, after a session left three pre-existing dangling references standing under the
 older "yours versus theirs" reading). The audit prints the fix beside each finding: qualify a bare
 cross-repo `#N` as `owner/repo#N`, tick or justify an open box on a closed issue, add the missing
-triage label. A finding that needs an owner ruling gets a `ready-for-human` ticket, not a pass.
+triage label. A finding that needs an owner ruling gets a `ready-for-human` ticket.
 
 **Scope.** Step 9's two checks and this rule together sweep the WHOLE tracker, origin irrelevant:
 `/session-end` is the housekeeping pass, and a hit left for "the session that caused it" is a hit
@@ -268,15 +303,16 @@ report names what was added, changed or removed. Fixing it is a rebuild and a re
 verifies the row, and stamps the sweep. Leaving it stale is a fine answer for a throwaway edit — say
 so rather than passing over the line in silence.
 
-A `could not check` note is not a pass; it means the sweep could not read the tree or the stamp.
+A `could not check` note means the sweep could not read the tree or the stamp, so the plugin's
+state is still unknown.
 
 ## The ticket sweep — nothing leaves the session uncaptured
 
-The checks above audit the *tree*. This step audits the *conversation*, and it is not optional:
-context dies with the session, and an item that lives only in a reply is gone the moment the
-window closes. Do this before writing the wrap-up summary, not as part of it.
+The checks above audit the *tree*; this step audits the *conversation*. Context dies with the
+session, and an item that lives only in a reply is gone the moment the window closes. Run it
+before writing the wrap-up summary.
 
-**Scour the whole conversation** — not just the last few turns — for work that was surfaced but
+**Scour the whole conversation**, first turn to last, for work that was surfaced but
 never captured. The categories that get lost, with the phrasings that mark them:
 
 1. **Deferred by the user** — "later", "not now", "after X ships", "say the word and I..."
@@ -304,14 +340,31 @@ For every item found, exactly one of three outcomes, stated explicitly:
   a local session can perform must additionally carry the `ready-for-local-agent` label (or the
   project's equivalent); only a person's judgment, credential or sign-off carries `ready-for-human`.
   Each label drives a queue, and an unlabeled ticket is invisible to both.
-- **Not worth tracking** — say so and why, in one line. Silence is not this option.
-- **Needs a ticket** — collect these and invoke **`/to-tickets`** in one batch, no confirmation
-  needed when the user typed `/session-end` (that IS the confirmation). `/to-tickets` runs its
-  own breakdown → approval → publish flow; let it handle the approval gate. Do not `gh issue
-  create` ad hoc.
+- **Not worth tracking** — say so and why, in one line, so the judgement is on the record.
+- **Needs a ticket** — collect these for the single **`/to-tickets`** batch in step 7; when the
+  user typed `/session-end`, that IS the confirmation its approval gate asks for.
 
-The wrap-up summary lists every new ticket by number (from `/to-tickets` output) so nothing is
-named as "remaining" without a number next to it.
+### The wrap-up template
+
+The reply that ends a `/session-end` pass has these parts, in this order:
+
+```
+Landed: <PR or commit, one line each>
+Filed:  #<n> <title> — ready-for-agent | ready-for-human      (one line per ticket filed this pass)
+        #<n> comment — <what was recorded on the ticket that already owns the step>
+Left:   <nothing, or one line per item, each carrying a #number from the Filed block>
+Ready to archive
+```
+
+Every ticket `/to-tickets` published this pass appears under `Filed:` by number, and so does
+every comment landed on an owning ticket. `Filed:` is never omitted when empty — write
+`Filed: none`, so a clean pass reads differently from a forgotten one.
+
+**A line saying work is left for someone else — "needs you", "needs a local session", "for the
+owner", "could not delete X", "hand this to" — is malformed unless a `#number` sits in it.** If
+you are about to write one without a number, the ticket has not been filed yet: file it, then
+write the line. `Ready to archive` is not emitted while any surfaced item exists only in the
+reply.
 
 ## Two things the script cannot check
 
@@ -325,13 +378,13 @@ run stays unticked and the issue stays open, however finished the code is.
 
 ## If the session ends in a release
 
-Order matters, and no step is skippable:
+Order matters, and every step runs:
 
 1. **Credential** — none for a self-deploying repo (`gas.json`: the script holds its own and a merge
    is the release). A repo still on clasp: `node tools/clasp-auth.js` (or the project's equivalent),
    alive *and* correctly scoped, not merely alive.
 2. **Gates** — whatever `releaseGates` names, or the project's canary.
-3. **Release** — from the main checkout only, never a worktree.
+3. **Release** — from the main checkout; releasing from a worktree publishes that tree instead.
 4. **Confirm** — read back what the deployed thing reports about itself, rather than assuming the
    push landed.
 

@@ -1,0 +1,97 @@
+name: Board sweep
+
+# Move CLOSED issues and PRs to Done on every ProjectsV2 board linked to this repo.
+#
+# WHY A WORKFLOW (issue 216, spec #207): every ProjectsV2 read and write is GraphQL, and a cloud
+# container's egress proxy refuses GraphQL outright (it also refuses `/users/...` REST — sessions
+# are bound to their configured repository). `/session-end` step 6 could therefore only ever run
+# on the owner's desktop, so the board drifted whenever a session ended in a container — which is
+# most of them. A runner has no such proxy. The job is the sweep's home now, and session-end's
+# cloud table names this job instead of listing a skipped step.
+#
+# THE SWEEP IS NOT WRITTEN HERE, AND NOT DUPLICATED IN tools/. `tools/board-sweep.js` is a runner:
+# it checks the token, spawns the session-end skill's own `sweep-closed-to-done.js`, and mirrors
+# its output to the job summary. Its behaviour — the token refusal, the GH_TOKEN precedence, the
+# board write itself against a stubbed `gh` — is under `node --test tools/board-sweep.test.js`,
+# which the first step below runs before any board is touched. Do not move logic into this file:
+# YAML bash is the one thing in this repo nothing can test.
+#
+# TOKEN: secrets.PROJECT_TOKEN (issue 215), a classic token carrying `project` and `repo`. The
+# built-in GITHUB_TOKEN cannot stand in — ProjectsV2 boards are owner-scoped and a repo-scoped job
+# token has no access to one. The runner exits 1 with an `::error::` when the secret is absent or
+# empty rather than sweeping nothing quietly, because a token-less run and a clean board produce
+# the same green check.
+#
+# THE CRON IS SAFE HERE. Unlike dashboard.yml — where every cron run committed and advanced master,
+# flipping live copies into the dotfiles state3 lockup (issue 21) — this job writes nothing to the
+# repo. The daily tick catches cards for items closed through paths that fire no event on this
+# repo: a card added to the board after its issue was already closed, a transfer, a bulk close.
+#
+# `pull_request_target`, not `pull_request`: a `pull_request` run for a fork PR is handed no
+# secrets, so every fork PR close would trip the token refusal and go red. `pull_request_target`
+# runs in the base repo with secrets, and the checkout below takes the default base ref — this job
+# never executes PR-head code.
+#
+# THE `proof` INPUT is issue 216's acceptance criterion, executed: `tools/board-sweep-proof.js`
+# opens a throwaway issue, parks its card off Done, closes it with the PAT, waits for the run that
+# close triggers, and requires the card to read Done — quoting the run URL and the sweep lines
+# from its log. Dispatch it once after this file reaches the default branch (a workflow fires from
+# the default branch only) and the run log is the evidence. It writes to the live board and the
+# live tracker, so it never runs on a schedule or a close event.
+
+on:
+  issues:
+    types: [closed]
+  pull_request_target:
+    types: [closed]
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+    inputs:
+      proof:
+        type: boolean
+        default: false
+        description: 'Run the live acceptance proof (opens, closes and sweeps a throwaway issue) instead of the sweep'
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    # A proof dispatch must not also sweep from this run: the proof waits for the run its close
+    # triggers, and that run would queue behind this one on the concurrency group below — a
+    # deadlock that ends at the 10-minute deadline with a false negative.
+    if: github.event_name != 'workflow_dispatch' || !inputs.proof
+    runs-on: ubuntu-latest
+    concurrency:
+      # Never cancel in flight: the sweep edits board items one at a time, and a cancelled run
+      # leaves half a board moved with nothing recording which half. Queue instead. Job-level, so
+      # the proof job below is not queued behind the run it is waiting for.
+      group: board-sweep
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (token refusal, GH_TOKEN precedence, stubbed-gh board write)
+        run: node --test tools/board-sweep.test.js
+      - name: Move closed issues and PRs to Done
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: node tools/board-sweep.js --apply
+
+  proof:
+    if: github.event_name == 'workflow_dispatch' && inputs.proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (the proof's own verdicts)
+        run: node --test tools/board-sweep-proof.test.js
+      - name: Close a throwaway issue and require its card to reach Done
+        env:
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: node tools/board-sweep-proof.js
