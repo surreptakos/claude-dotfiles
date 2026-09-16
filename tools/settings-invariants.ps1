@@ -42,10 +42,23 @@
     and says exactly what the old one said plus the trust records. If that verification
     fails, nothing is written.
 
+    Finding on the engines (issue 302 AC2): the -Trust path has been run end to end on pwsh 7.4.6
+    against that representative file - large integer, unicode, empty array and object, nested
+    projects, one record missing - and the result was ONE contiguous insertion, every other byte
+    of the file identical. Because the edit is an insertion, no JSON serializer runs at all, so the
+    5.1-vs-7 serialization differences that opened this ticket cannot reach the file on either
+    engine; what 5.1 still does here is parse, and it only parses to decide and to verify.
+    That first real run is also what caught the phantom-empty-key bug in the verification step
+    (Get-JsonKey below): a fresh machine's empty "projects": {} made the verifier report a lost
+    record and refuse to write, on every engine, which no port of the algorithm had shown.
+    Windows PowerShell 5.1 is Windows-only, so its run of the suite is the one the restore test
+    makes on the desktop (tests/restore-test.ps1 runs the suite from the clone).
+
 .NOTES
     Idempotent. Backs up before writing (<file>.bak-issue199-<stamp>).
     Exits 0 on success; the caller reads $LASTEXITCODE.
-    tests/settings-invariants.tests.ps1 covers the -Trust path.
+    tests/settings-invariants.tests.ps1 covers the -Trust path on either engine
+    (it re-invokes whichever PowerShell started it).
 #>
 [CmdletBinding()]
 param(
@@ -205,6 +218,25 @@ function Test-IsJsonObject {
     return ($Value.GetType().FullName -eq 'System.Management.Automation.PSCustomObject')
 }
 
+function Get-JsonKey {
+    <#
+        The member names a parsed JSON object actually holds. ConvertFrom-Json turns {} into a
+        bare PSCustomObject, and PowerShell reports ONE property on that object whose name is the
+        empty string - a placeholder, not a key the file carries. Enumerating it raw makes an
+        empty object look like it has a member called "", so an empty "projects": {} compared
+        against itself-plus-a-record reads as "project record lost: " and the verified write is
+        refused - exactly the shape a fresh machine's ~/.claude.json has before any project is
+        opened (issue 302). Blank names are dropped; this file never carries a real "" key.
+    #>
+    param($Object)
+    if ($null -eq $Object) { return @() }
+    $names = @()
+    foreach ($n in @($Object.PSObject.Properties.Name)) {
+        if (-not [string]::IsNullOrEmpty($n)) { $names += $n }
+    }
+    return $names
+}
+
 function Get-PropertyName {
     <#
         The object's own spelling of a property, matched case-insensitively (the keys here are
@@ -227,8 +259,8 @@ function Test-JsonEqual {
     $rObj = Test-IsJsonObject $Right
     if ($lObj -ne $rObj) { return $false }
     if ($lObj) {
-        $ln = @($Left.PSObject.Properties.Name)
-        $rn = @($Right.PSObject.Properties.Name)
+        $ln = @(Get-JsonKey $Left)
+        $rn = @(Get-JsonKey $Right)
         if ($ln.Count -ne $rn.Count) { return $false }
         foreach ($n in $ln) {
             if ($rn -notcontains $n) { return $false }
@@ -344,8 +376,8 @@ function Test-TrustRewrite {
     try { $after = $AfterText | ConvertFrom-Json }
     catch { return @("the rewritten text does not parse as JSON: $($_.Exception.Message)") }
 
-    $bn = @($Before.PSObject.Properties.Name)
-    $an = @($after.PSObject.Properties.Name)
+    $bn = @(Get-JsonKey $Before)
+    $an = @(Get-JsonKey $after)
     foreach ($n in $bn) {
         if ($an -notcontains $n) { $problems += "top-level key lost: $n"; continue }
         if ($n -eq 'projects') { continue }
@@ -365,8 +397,8 @@ function Test-TrustRewrite {
     $beforeProjectsName = Get-PropertyName -Object $Before -Name 'projects'
     if ($null -ne $beforeProjectsName) { $beforeProjects = $Before.$beforeProjectsName }
     $bpn = @()
-    if ($null -ne $beforeProjects) { $bpn = @($beforeProjects.PSObject.Properties.Name) }
-    $apn = @($afterProjects.PSObject.Properties.Name)
+    if ($null -ne $beforeProjects) { $bpn = @(Get-JsonKey $beforeProjects) }
+    $apn = @(Get-JsonKey $afterProjects)
 
     foreach ($n in $bpn) {
         if ($apn -notcontains $n) { $problems += "project record lost: $n"; continue }
@@ -379,12 +411,12 @@ function Test-TrustRewrite {
         # A record this tool owns: hasTrustDialogAccepted may differ, nothing else may.
         $old     = $beforeProjects.$n
         $new     = $afterProjects.$n
-        $oldKeys = @($old.PSObject.Properties.Name)
+        $oldKeys = @(Get-JsonKey $old)
         foreach ($k in $oldKeys) {
             if ($k -eq 'hasTrustDialogAccepted') { continue }
             if (-not (Test-JsonEqual $old.$k $new.$k)) { $problems += "project $n key changed: $k" }
         }
-        foreach ($k in @($new.PSObject.Properties.Name)) {
+        foreach ($k in @(Get-JsonKey $new)) {
             if (($k -ne 'hasTrustDialogAccepted') -and ($oldKeys -notcontains $k)) {
                 $problems += "project $n key invented: $k"
             }

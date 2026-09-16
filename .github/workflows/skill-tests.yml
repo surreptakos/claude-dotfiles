@@ -1,10 +1,13 @@
 name: skill tests
 
 # The session-check skill ships its own regression suite next to the engine it covers
-# (agents/skills/session-check/*.test.js). Nothing ran it: the repo test command in
-# .claude/session.json covers tools/ and tests/, and the restore test only asserts that each
-# junctioned skill carries a SKILL.md. So check.test.js sat red on master until issue 300, and the
-# five files beside it could have gone the same way unseen.
+# (agents/skills/session-check/*.test.js). Nothing ran it when this workflow was written: the repo
+# test command in .claude/session.json named tools/*.test.js and a single file out of tests/, and
+# the restore test only asserts that each junctioned skill carries a SKILL.md. So check.test.js sat
+# red on master until issue 300, and the five files beside it could have gone the same way unseen.
+# That command now names agents/skills/session-check/*.test.js as well, and tests/*.test.js as a
+# glob (issue 415) -- but it runs on Windows, from this checkout, so the second job below is still
+# the only thing that sees the bug described next.
 #
 # TWO RUNS, on purpose. These tests are written to be run from wherever the skill is installed, and
 # the bug issue 300 fixed was exactly a location assumption: "this repo" was `__dirname/../../..`,
