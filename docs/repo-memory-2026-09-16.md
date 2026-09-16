@@ -50,6 +50,18 @@ Both runs are real plugin-installed sessions: `claude -p --plugin-dir marketplac
    projects untouched; worktree slugs included), and the sync/manifest wiring is pinned there as
    text.
 
+Re-run against the delivered branch (clone of `6400c55`, injected 1891 chars), one turn, no tools:
+
+> `fable-usage-is-rationed: weekly cap; keep the pins`
+>
+> `cloud-containers-have-no-powershell: pwsh=none, prove .ps1 on the PC`
+>
+> New note goes: `docs/agents/memory/<name>.md`, plus index line in `MEMORY.md`. Commit — that's
+> whole publish.
+
+That clone also has no `memory/*claude-dotfiles*` directory: the mirror is gone because the
+generator no longer produces it, not because anyone edited the mirror by hand.
+
 ## What still needs the desktop
 
 - `tests/restore-test.ps1` has not run: this container has no PowerShell and the isolation guard
