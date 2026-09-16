@@ -13,6 +13,23 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## From a cloud session (no GraphQL)
+
+A claude.ai/code or Cowork container reaches this tracker through the Anthropic proxy, which
+refuses two `gh` code paths (confirmed 2026-09-15, issue 163):
+
+- **Every GraphQL call** — `gh issue list`, `gh issue view` and the other `--json` spellings above
+  — answers HTTP 403 with a message pointing at REST. Use `gh api repos/<owner>/<repo>/issues...`
+  REST paths, or the GitHub MCP tools, for those conventions. A refused spelling is never evidence
+  that the step is impossible; it is a cue to switch instrument, as `/triage` and `/to-tickets`
+  already say.
+- **Every REST call whose target repo is not attached to the session** answers HTTP 403 "not
+  enabled for this session", with `add_repo` as the remedy.
+
+`gh auth status` reports "The token in GH_TOKEN is invalid." in these containers while `gh api`
+calls against the attached repo succeed: the proxy, not `gh`'s own auth, is what gates access.
+Do not read that line as a broken credential.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
