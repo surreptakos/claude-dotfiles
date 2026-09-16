@@ -1139,9 +1139,11 @@ if (Test-Path $fleetVerifier) {
 }
 if (Test-Path $fleetScriptPlugin) {
     $pluginText = Get-Content $fleetScriptPlugin -Raw
-    Check 'plugin fleet script passes agentType: fleet-verifier when the instrument is gh' `
-        ($pluginText -match "agentType:\s*instrument === 'gh' \? 'fleet-verifier'") `
-        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138)')
+    Check 'plugin fleet script resolves the verifier agentType (fleet-verifier by default under gh)' `
+        (($pluginText -match 'function resolveVerifierAgent') -and
+         ($pluginText -match "mode === 'gh' \? 'fleet-verifier'") -and
+         ($pluginText -match 'agentType: verifierAgentType')) `
+        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138) through resolveVerifierAgent, which args.verifierAgent clears in a container (issue 316)')
     Check 'plugin fleet script inlines the pickInstrument switch (issue 138)' `
         (($pluginText -match 'function pickInstrument') -and
          ($pluginText -match 'CLAUDE_CODE_REMOTE_SESSION_ID')) `
@@ -1286,7 +1288,7 @@ if (Test-Path $syncWtTests) {
 # standalone suite against the CLONE so the ship pass proves both the suite and the tool
 # travelled. The pull that suite exercises targets its own sandbox home under %TEMP% - never
 # this run's fake home - so nothing here can disturb the file counts above.
-$settingsInvTests = Join-Path $Clone 'tests\settings-invariants.tests.ps1'
+$settingsInvTests = Join-Path $Clone 'tests\settings-defaultmode.tests.ps1'
 if (Test-Path $settingsInvTests) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
@@ -1294,7 +1296,26 @@ if (Test-Path $settingsInvTests) {
         $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $settingsInvTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
-    Check 'settings-invariants.tests.ps1 passes (defaultMode inserted; pull honours the exit code)' `
+    Check 'settings-defaultmode.tests.ps1 passes (defaultMode inserted; pull honours the exit code)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'settings-defaultmode.tests.ps1 shipped' $false @('tests/settings-defaultmode.tests.ps1 missing from clone')
+}
+
+# tools/settings-invariants.ps1 -Trust against a representative ~/.claude.json (issue 302). The
+# check above (6a2) proves the trust records LAND; this proves landing them costs nothing else -
+# the file is edited by insertion, so every pre-existing key survives byte-for-byte instead of
+# riding through PowerShell 5.1's JSON round-trip. Runs against the CLONE so the ship pass proves
+# both the suite and the tool made it into a fresh checkout.
+$invariantTests = Join-Path $Clone 'tests\settings-invariants.tests.ps1'
+if (Test-Path $invariantTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $invariantTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'settings-invariants.tests.ps1 passes (-Trust edits ~/.claude.json by insertion)' `
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
 } else {
     Check 'settings-invariants.tests.ps1 shipped' $false @('tests/settings-invariants.tests.ps1 missing from clone')

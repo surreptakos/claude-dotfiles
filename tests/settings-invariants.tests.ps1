@@ -1,28 +1,22 @@
 <#
 .SYNOPSIS
-    The settings.json half of the invariant enforcer, and sync.ps1 honouring its exit code
-    (issue 362).
+    Test that tools\settings-invariants.ps1 -Trust edits ~/.claude.json surgically (issue 302).
 
 .DESCRIPTION
-    Two behaviours, both of them regressions the tool shipped with:
+    ~/.claude.json is the desktop's whole per-project memory - history, MCP servers, onboarding
+    counters, oauthAccount - and -Trust runs against it on every `sync.ps1 -Mode pull`, including
+    the first pull on a fresh machine. It used to read the file with ConvertFrom-Json and write
+    the WHOLE object back with ConvertTo-Json to add one boolean, so every key in the file rode
+    through PowerShell 5.1's JSON round-trip. This suite is the proof that it no longer does.
 
-      1. tools\settings-invariants.ps1 -Path <file>, run against a settings.json whose
-         "permissions" block has other keys but no defaultMode, INSERTS the key. It used to
-         throw and tell the operator to edit by hand, which left the invariant unenforceable
-         on any machine whose settings.json carries an allow/deny list. Every other byte -
-         the sibling keys, their order, the indentation, the line endings - must survive,
-         because claude\settings.json is a byte-for-byte mirror of the live file. Asserted
-         for an LF file (the mirror) and a CRLF one (the live tree, issue 87).
+    Scenario 1 feeds a representative file - nested projects, an empty array, an empty object, an
+    integer past 2^53, literal UTF-8 text - with ONE of the four master-watchdog records missing,
+    and asserts the result is the input plus a single contiguous insertion. That is the strongest
+    statement of "every pre-existing key round-trips unchanged" available: not one byte outside
+    the inserted record moved, so no round-trip could have reflowed, re-typed or truncated it.
 
-      2. sync.ps1 -Mode pull FAILS when that tool exits non-zero. Both call sites used to
-         pipe the tool's output and walk on, so a pull whose invariant enforcement had died
-         still exited 0 and stamped a clean sync. The success case is asserted too, so the
-         new check cannot pass by failing every pull.
-
-    Cases 3 and 4 run a real (not -DryRun) pull: under -DryRun the tool returns before it can
-    fail, so a dry run cannot exercise the exit-code path at all. Everything they touch lives
-    in a sandbox under $env:TEMP - a throwaway repo (sync.ps1 + lib\ + the tool) and a
-    throwaway home.
+    Scenario 2 covers the other rewrite path - a record that exists with hasTrustDialogAccepted
+    false - and asserts the edit is confined to that one literal.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tests\settings-invariants.tests.ps1
@@ -35,6 +29,7 @@ $ErrorActionPreference = 'Stop'
 
 $TestsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $TestsRoot
+$Tool      = Join-Path $RepoRoot 'tools\settings-invariants.ps1'
 
 $script:Pass = 0
 $script:Fail = 0
@@ -51,168 +46,212 @@ function Assert {
     }
 }
 
-function Write-TextFile {
+function Write-Utf8NoBom {
     param([string]$Path, [string]$Text)
-    $parent = Split-Path $Path -Parent
-    if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-function Get-FileBase64 {
-    param([string]$Path)
-    return [System.Convert]::ToBase64String([System.IO.File]::ReadAllBytes($Path))
-}
-
-function Get-TextBase64 {
-    param([string]$Text)
-    return [System.Convert]::ToBase64String((New-Object System.Text.UTF8Encoding($false)).GetBytes($Text))
-}
-
-# Reads permissions.defaultMode without tripping Set-StrictMode, which throws on a property
-# that is not there - and "not there" is exactly what a regression looks like.
-function Get-DefaultMode {
-    param([string]$Path)
-    $parsed = $null
-    try { $parsed = Get-Content $Path -Raw | ConvertFrom-Json } catch { return '<unparseable>' }
-    if ($null -eq $parsed) { return '<empty>' }
-    if ($parsed.PSObject.Properties.Name -notcontains 'permissions') { return '<no permissions>' }
-    if ($parsed.permissions.PSObject.Properties.Name -notcontains 'defaultMode') { return '<no defaultMode>' }
-    return [string]$parsed.permissions.defaultMode
-}
-
-# Native children write their failure text to stderr, and under $ErrorActionPreference =
-# 'Stop' a single stderr line becomes a terminating NativeCommandError - the exit code would
-# never be read. 'Continue' for the duration of each call, same shape as the other suites.
-function Invoke-Child {
-    param([string[]]$PsArgs)
-    $previous = $ErrorActionPreference
+function Invoke-Trust {
+    param([string]$FakeHome)
+    $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out  = & powershell @PsArgs 2>&1 | Out-String
-        $exit = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $previous }
-    return [pscustomobject]@{ Out = $out; Exit = $exit }
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $Tool -Trust -UserHome $FakeHome 2>&1 | Out-String
+        return @{ Exit = $LASTEXITCODE; Out = $out }
+    } finally { $ErrorActionPreference = $prev }
 }
 
-function Invoke-Invariants {
-    param([string]$Target)
-    return Invoke-Child -PsArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-                                  (Join-Path $RepoRoot 'tools\settings-invariants.ps1'), '-Path', $Target)
+function Test-SingleInsertion {
+    <#
+        True when $After is $Before with exactly one contiguous run of characters inserted -
+        i.e. every byte of $Before survives, in order, untouched. Returns the inserted text in
+        the [ref] so a caller can show it.
+    #>
+    param([string]$Before, [string]$After, [ref]$Inserted)
+    $p = 0
+    while ($p -lt $Before.Length -and $p -lt $After.Length -and $Before[$p] -eq $After[$p]) { $p++ }
+    $s = 0
+    while ($s -lt ($Before.Length - $p) -and $s -lt ($After.Length - $p) -and
+           $Before[$Before.Length - 1 - $s] -eq $After[$After.Length - 1 - $s]) { $s++ }
+    $Inserted.Value = $After.Substring($p, $After.Length - $s - $p)
+    return (($p + $s) -eq $Before.Length)
 }
 
-function Invoke-Pull {
-    param([string]$Repo, [string]$UserHome)
-    return Invoke-Child -PsArgs @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-                                  (Join-Path $Repo 'sync.ps1'), '-Mode', 'pull', '-UserHome', $UserHome)
+# The four clone paths the tool owns, under the sandbox home. Kept in the same order as the tool.
+function Get-ClonePaths {
+    param([string]$FakeHome)
+    return @(
+        (Join-Path $FakeHome 'Claude\Projects\Financial\aac-bill-intake'),
+        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\contract-builder'),
+        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\aac-cockpit'),
+        (Join-Path $FakeHome 'Claude\Projects\Operations\zoho-source-of-truth')
+    )
 }
 
-# A settings.json shaped like a real customised one: a permissions block carrying an allow
-# list and a deny list, and no defaultMode.
-$withOtherKeys = @'
+# Built from code points, not typed into this file: PowerShell 5.1 reads a BOM-less source file
+# as the ANSI code page, which would mangle literal non-ASCII text before it ever reached JSON.
+$Unicode = 'un' + [char]0x00EF + 'code-caf' + [char]0x00E9 + '-' + [char]0x4E2D + [char]0x6587
+$BigInt  = '9007199254740993'   # 2^53 + 1: survives as text, not as a double
+
+$Fixture = @'
 {
-  "env": {
-    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
+  "installMethod": "native",
+  "firstStartTime": "2026-01-02T03:04:05.678Z",
+  "numStartups": __BIGINT__,
+  "userID": "__UNICODE__",
+  "emptyArray": [],
+  "emptyObject": {},
+  "projects": {
+    "__C0__": {
+      "allowedTools": [],
+      "history": [
+        {
+          "display": "__UNICODE__",
+          "pastedContents": {}
+        }
+      ],
+      "mcpServers": {},
+      "hasTrustDialogAccepted": true,
+      "projectOnboardingSeenCount": 3
+    },
+    "__C1__": {
+      "allowedTools": [],
+      "hasTrustDialogAccepted": true
+    },
+    "__C3__": {
+      "hasTrustDialogAccepted": true,
+      "lastTotalWebSearchRequests": 0
+    },
+    "__OTHER__": {
+      "hasTrustDialogAccepted": false,
+      "lastCost": 1.5
+    }
   },
-  "permissions": {
-    "allow": [
-      "Bash(git status:*)",
-      "Bash(node:*)"
-    ],
-    "deny": [],
-    "additionalDirectories": []
+  "oauthAccount": {
+    "accountUuid": "0000-1111",
+    "emailAddress": "someone@example.com"
   },
-  "skipDangerousModePermissionPrompt": true
+  "tipsHistory": {
+    "new-user-warmup": 12
+  }
 }
 '@
-# Normalised to LF so the CRLF case below is built from the same text and the two fixtures
-# differ in nothing but their line endings, whatever this file was checked out as.
-$withOtherKeys = $withOtherKeys -replace "`r`n", "`n"
-if (-not $withOtherKeys.EndsWith("`n")) { $withOtherKeys += "`n" }
 
-# The one line the tool is allowed to add, at the top of the block it found. Building the
-# expectation by pure insertion IS the byte-identical assertion: anything else the tool
-# touched shows up as a mismatch.
-$expectedLf = $withOtherKeys.Replace(
-    "`"permissions`": {`n",
-    "`"permissions`": {`n    `"defaultMode`": `"bypassPermissions`",`n")
+function New-Fixture {
+    <# The representative file, with the aac-cockpit record (clone 3 of 4) deliberately absent. #>
+    param([string]$FakeHome)
+    $clones = Get-ClonePaths -FakeHome $FakeHome
+    $esc    = { param($p) $p.Replace('\', '\\') }
+    $text   = $Fixture -replace "`r`n", "`n"
+    $text = $text.Replace('__BIGINT__',  $BigInt)
+    $text = $text.Replace('__UNICODE__', $Unicode)
+    $text = $text.Replace('__C0__',      (& $esc $clones[0]))
+    $text = $text.Replace('__C1__',      (& $esc $clones[1]))
+    $text = $text.Replace('__C3__',      (& $esc $clones[3]))
+    $text = $text.Replace('__OTHER__',   (& $esc (Join-Path $FakeHome 'Claude\Projects\Unrelated\other-clone')))
+    return $text
+}
 
-$sandbox = Join-Path $env:TEMP ('settings-inv-{0}-{1}' -f $PID, ([guid]::NewGuid().ToString('N').Substring(0, 6)))
-New-Item -ItemType Directory -Path $sandbox -Force | Out-Null
+function Test-AllTrusted {
+    param([string]$StatePath, [string[]]$Clones)
+    $state = [System.IO.File]::ReadAllText($StatePath) | ConvertFrom-Json
+    foreach ($clone in $Clones) {
+        if ($state.projects.PSObject.Properties.Name -notcontains $clone) { return $false }
+        $entry = $state.projects.$clone
+        if ($entry.PSObject.Properties.Name -notcontains 'hasTrustDialogAccepted') { return $false }
+        if ($entry.hasTrustDialogAccepted -ne $true) { return $false }
+    }
+    return $true
+}
+
+$stamp   = 'settings-inv-{0}-{1}' -f $PID, ([guid]::NewGuid().ToString('N').Substring(0, 6))
+$Sandbox = Join-Path $env:TEMP $stamp
+New-Item -ItemType Directory -Path $Sandbox -Force | Out-Null
 
 try {
-    # ---- (1) LF fixture: the key is inserted, everything else keeps its bytes -----------
+    # ---- scenario 1: one of the four records missing ---------------------------------
     Write-Host ''
-    Write-Host 'permissions block with other keys, no defaultMode (LF)'
-    $lfFile = Join-Path $sandbox 'lf\settings.json'
-    Write-TextFile -Path $lfFile -Text $withOtherKeys
-    $r = Invoke-Invariants -Target $lfFile
-    Assert 'tool exits 0 instead of refusing the block' ($r.Exit -eq 0) ("exit={0}`n{1}" -f $r.Exit, $r.Out)
-    Assert 'file still parses and carries permissions.defaultMode=bypassPermissions' `
-        ((Get-DefaultMode -Path $lfFile) -eq 'bypassPermissions') `
-        ([System.IO.File]::ReadAllText($lfFile))
-    Assert 'the rest of the file is byte-identical (one inserted line, nothing else)' `
-        ((Get-FileBase64 -Path $lfFile) -eq (Get-TextBase64 -Text $expectedLf)) `
-        ([System.IO.File]::ReadAllText($lfFile))
+    Write-Host 'representative ~/.claude.json, one trust record missing'
 
-    # ---- (2) the same file as CRLF: the insertion follows the file's line endings -------
+    $home1 = Join-Path $Sandbox 'home1'
+    New-Item -ItemType Directory -Path $home1 -Force | Out-Null
+    $state1  = Join-Path $home1 '.claude.json'
+    $before  = New-Fixture -FakeHome $home1
+    Write-Utf8NoBom -Path $state1 -Text $before
+    $clones1 = Get-ClonePaths -FakeHome $home1
+
+    $r = Invoke-Trust -FakeHome $home1
+    Assert '-Trust exits 0 on a representative file' ($r.Exit -eq 0) $r.Out
+
+    $after  = [System.IO.File]::ReadAllText($state1)
+    $parsed = $null
+    try { $parsed = $after | ConvertFrom-Json } catch { }
+    Assert 'the rewritten file still parses as JSON' ($null -ne $parsed) $r.Out
+
+    $inserted = ''
+    $single = Test-SingleInsertion -Before $before -After $after -Inserted ([ref]$inserted)
+    Assert 'the rewrite is ONE contiguous insertion - every pre-existing byte survives' $single `
+        ("inserted: {0}" -f $inserted)
+    Assert 'the inserted text is the missing trust record and nothing else' `
+        ($inserted.Contains('aac-cockpit') -and $inserted.Contains('"hasTrustDialogAccepted": true')) $inserted
+
+    Assert 'all four master-watchdog clone paths are trusted' (Test-AllTrusted -StatePath $state1 -Clones $clones1) $r.Out
+
+    # Called out one by one because these are the shapes a PowerShell 5.1 JSON round-trip
+    # damages: >2^53 integers lose their last digits, non-ASCII is re-encoded, and an empty
+    # array or object comes back reflowed.
+    # .Contains, not -like: [ and ] are character-class metacharacters in a -like pattern, so
+    # '*"emptyArray": []*' would never match the thing it is looking for.
+    $kept = @()
+    if (-not $after.Contains($BigInt))                 { $kept += 'integer past 2^53' }
+    if (-not $after.Contains($Unicode))                { $kept += 'non-ASCII text' }
+    if (-not $after.Contains('"emptyArray": []'))      { $kept += 'empty array' }
+    if (-not $after.Contains('"emptyObject": {}'))     { $kept += 'empty object' }
+    if (-not $after.Contains('"lastCost": 1.5'))       { $kept += 'fractional number' }
+    Assert 'large integer, unicode, empty array/object and float survive verbatim' ($kept.Count -eq 0) ($kept -join ', ')
+
+    $otherPath = Join-Path $home1 'Claude\Projects\Unrelated\other-clone'
+    $otherOk   = $false
+    if ($null -ne $parsed) { $otherOk = ($parsed.projects.$otherPath.hasTrustDialogAccepted -eq $false) }
+    Assert 'a project this tool does not own keeps hasTrustDialogAccepted=false' $otherOk
+
+    # Issue 199 kept a backup before every rewrite; issue 302 keeps that promise.
+    $baks = @(Get-ChildItem -Path $home1 -Filter '*.bak-issue199-*' -Force)
+    $bakOk = ($baks.Count -eq 1) -and ([System.IO.File]::ReadAllText($baks[0].FullName) -ceq $before)
+    Assert 'the pre-rewrite .bak-issue199-* backup is kept, byte-identical to the original' $bakOk `
+        ("{0} backup(s)" -f $baks.Count)
+
+    $r2 = Invoke-Trust -FakeHome $home1
+    $again = [System.IO.File]::ReadAllText($state1)
+    $baks2 = @(Get-ChildItem -Path $home1 -Filter '*.bak-issue199-*' -Force)
+    Assert 'a second run changes nothing and writes no second backup' `
+        (($r2.Exit -eq 0) -and ($again -ceq $after) -and ($baks2.Count -eq 1)) $r2.Out
+
+    # ---- scenario 2: a record present with the flag false ----------------------------
     Write-Host ''
-    Write-Host 'permissions block with other keys, no defaultMode (CRLF, the live-tree shape)'
-    $crlfFile = Join-Path $sandbox 'crlf\settings.json'
-    Write-TextFile -Path $crlfFile -Text ($withOtherKeys -replace "`n", "`r`n")
-    $r = Invoke-Invariants -Target $crlfFile
-    Assert 'CRLF file: the rest is byte-identical and the inserted line is CRLF too' `
-        (($r.Exit -eq 0) -and ((Get-FileBase64 -Path $crlfFile) -eq (Get-TextBase64 -Text ($expectedLf -replace "`n", "`r`n")))) `
-        ("exit={0}`n{1}" -f $r.Exit, [System.IO.File]::ReadAllText($crlfFile))
+    Write-Host 'a trust record present with hasTrustDialogAccepted false'
 
-    # ---- sandbox repo for the two pull cases -------------------------------------------
-    # sync.ps1 dot-sources lib\, runs tools\settings-invariants.ps1, and restores the skill
-    # junctions from claude\skill-links.json. That last file is carried because
-    # Restore-SkillLinks dies under Set-StrictMode when the manifest is absent (an empty
-    # result unrolls to $null, and $null.Count throws) - a bug of its own, not this ticket's.
-    # Its targets all resolve under the sandbox home and none of them exist, so every link is
-    # skipped.
-    $repo = Join-Path $sandbox 'repo'
-    New-Item -ItemType Directory -Path (Join-Path $repo 'tools') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $repo 'claude') -Force | Out-Null
-    Copy-Item -Path (Join-Path $RepoRoot 'sync.ps1') -Destination (Join-Path $repo 'sync.ps1') -Force
-    Copy-Item -Path (Join-Path $RepoRoot 'lib') -Destination (Join-Path $repo 'lib') -Recurse -Force
-    Copy-Item -Path (Join-Path $RepoRoot 'tools\settings-invariants.ps1') `
-              -Destination (Join-Path $repo 'tools\settings-invariants.ps1') -Force
-    Copy-Item -Path (Join-Path $RepoRoot 'claude\skill-links.json') `
-              -Destination (Join-Path $repo 'claude\skill-links.json') -Force
+    $home2 = Join-Path $Sandbox 'home2'
+    New-Item -ItemType Directory -Path $home2 -Force | Out-Null
+    $state2  = Join-Path $home2 '.claude.json'
+    $clones2 = Get-ClonePaths -FakeHome $home2
+    $before2 = (New-Fixture -FakeHome $home2).Replace(
+        "`"hasTrustDialogAccepted`": true,`n      `"lastTotalWebSearchRequests`"",
+        "`"hasTrustDialogAccepted`": false,`n      `"lastTotalWebSearchRequests`"")
+    Write-Utf8NoBom -Path $state2 -Text $before2
 
-    # ---- (3) pull reports failure when the tool exits non-zero --------------------------
-    # defaultMode present but not a plain "..." string literal: the tool refuses to guess at
-    # the value and throws, which is exit 1 out of a -File run. sync.ps1 used to print that
-    # and carry on to the stamp.
-    Write-Host ''
-    Write-Host 'sync.ps1 -Mode pull when the invariant tool fails'
-    $badHome = Join-Path $sandbox 'home-bad'
-    Write-TextFile -Path (Join-Path $badHome '.claude\settings.json') `
-                   -Text "{`n  `"permissions`": {`n    `"defaultMode`": null`n  }`n}`n"
-    $r = Invoke-Pull -Repo $repo -UserHome $badHome
-    Assert 'pull exits non-zero' ($r.Exit -ne 0) ("exit={0}`n{1}" -f $r.Exit, $r.Out)
-    Assert 'pull names the tool that failed and its exit code' `
-        ($r.Out -match 'settings-invariants\.ps1 \(live\) exited') $r.Out
-    Assert 'pull stops before stamping a clean sync' `
-        (-not (Test-Path (Join-Path $badHome '.claude\hook-state\dotfiles-sync\state.json'))) $r.Out
-
-    # ---- (4) the control: a pull whose invariants apply still exits 0 -------------------
-    # Without this, the check above would pass just as well if every pull failed. It also
-    # puts case 1's insertion on the live-tree path through sync.ps1, not only a direct call.
-    Write-Host ''
-    Write-Host 'sync.ps1 -Mode pull when the invariant tool succeeds'
-    $goodHome = Join-Path $sandbox 'home-good'
-    Write-TextFile -Path (Join-Path $goodHome '.claude\settings.json') -Text ($withOtherKeys -replace "`n", "`r`n")
-    $r = Invoke-Pull -Repo $repo -UserHome $goodHome
-    Assert 'pull exits 0' ($r.Exit -eq 0) ("exit={0}`n{1}" -f $r.Exit, $r.Out)
-    Assert 'the live settings.json gained permissions.defaultMode=bypassPermissions' `
-        ((Get-DefaultMode -Path (Join-Path $goodHome '.claude\settings.json')) -eq 'bypassPermissions') $r.Out
+    $r3 = Invoke-Trust -FakeHome $home2
+    $after2 = [System.IO.File]::ReadAllText($state2)
+    Assert 'a false flag flips to true and nothing else in the file moves' `
+        (($r3.Exit -eq 0) -and ($after2 -ceq $before2.Replace(
+            "`"hasTrustDialogAccepted`": false,`n      `"lastTotalWebSearchRequests`"",
+            "`"hasTrustDialogAccepted`": true,`n      `"lastTotalWebSearchRequests`""))) $r3.Out
+    Assert 'all four clone paths are trusted after the flip' (Test-AllTrusted -StatePath $state2 -Clones $clones2) $r3.Out
 
 } finally {
-    # Cleanup never decides the verdict: a lingering child can hold the sandbox open.
-    if (Test-Path $sandbox) {
-        try { Remove-Item -Path $sandbox -Recurse -Force -ErrorAction Stop } catch {}
+    if (Test-Path $Sandbox) {
+        # Cleanup must never decide the verdict - a lingering child can hold the sandbox open.
+        try { Remove-Item -Path $Sandbox -Recurse -Force -ErrorAction Stop } catch {}
     }
 }
 
