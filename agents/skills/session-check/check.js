@@ -553,19 +553,29 @@ function parseGithubSlug(remote) {
  *  the case that matters: their egress proxy authenticates api.github.com, so private repos
  *  answer too. Elsewhere it still works for public repos and degrades to the same
  *  "did not answer" note for private ones. curl ships on Windows 10+, macOS and the
- *  containers, so this adds no dependency. */
-function curlTicketRows(slug, label) {
+ *  containers, so this adds no dependency.
+ *
+ *  Pages through `paginateTicketPages`, the same loop the gh path uses. One `per_page=100` fetch
+ *  was a silent truncation: `renderTicketList` prints the length it is handed as the count, so a
+ *  label carrying more than 100 open tickets read as exactly `100 ticket(s)` with no error
+ *  (issue 400). `runCurl` is injected so a test can drive the loop without curl. */
+function curlTicketRows(slug, label, runCurl = runReadingOutput) {
   const url = `https://api.github.com/repos/${slug.owner}/${slug.repo}/issues`
     + `?labels=${encodeURIComponent(label)}&state=open&per_page=100`;
-  const r = runReadingOutput('curl', ['-sS', '--fail', '--max-time', '25',
-    '-H', 'Accept: application/vnd.github+json', '-H', 'User-Agent: session-check', url],
-  { timeout: 30000 });
-  if (r.code !== 0) return { error: `curl exit ${r.code === null ? 'unknown' : r.code}` };
-  try {
-    const issues = JSON.parse(r.out);
-    // The issues endpoint returns PRs too; gh issue list does not. Match gh.
-    return { list: issues.filter((i) => !i.pull_request).map((i) => `#${i.number}  ${i.title}`) };
-  } catch (e) { return { error: 'unparseable response' }; }
+  let failure = null;
+  const result = paginateTicketPages((page) => {
+    const r = runCurl('curl', ['-sS', '--fail', '--max-time', '25',
+      '-H', 'Accept: application/vnd.github+json', '-H', 'User-Agent: session-check',
+      `${url}&page=${page}`], { timeout: 30000 });
+    if (r.code !== 0) {
+      failure = `curl exit ${r.code === null ? 'unknown' : r.code} on page ${page}`;
+      return null;
+    }
+    return r.out;
+  });
+  // The PR filter and the page-by-page error live in paginateTicketPages now; only the transport
+  // failure is curl's to name.
+  return failure ? { error: failure } : result;
 }
 
 /** Walk a label's open issues page by page into one list of `#N  title` rows. `fetchPage(n)`
@@ -836,5 +846,5 @@ if (require.main === module) {
   });
 } else {
   // Required by a test: hand out the pure helpers and run nothing.
-  module.exports = { paginateTicketPages, parseGithubSlug };
+  module.exports = { curlTicketRows, paginateTicketPages, parseGithubSlug };
 }
