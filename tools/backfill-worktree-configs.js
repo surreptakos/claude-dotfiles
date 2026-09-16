@@ -17,11 +17,18 @@
  * that file is the whole fix.
  *
  * This script walks every entry under `.git/worktrees/`, writes the override
- * where none exists, and — with --cleanup — offers to remove leftover
+ * where none exists, and — with --cleanup — offers to remove leftover *fleet*
  * worktrees whose branch has been merged into a base branch AND (when the gh
  * CLI is available) whose PR is closed. Never removes without both signals,
  * never removes without --cleanup, and skips any entry whose gitdir file
  * carries `locked` so an in-flight fleet worker is safe.
+ *
+ * "Fleet" is the prefix list in tools/ticket-fleet-branch.js, which covers both
+ * shapes the fleet creates: `agent/issue-*` implementer branches and the
+ * `agent/fleet-discoveries-*` branch a run's Report phase cuts for its
+ * FOLLOW-UPS.md bullets (issues 360, 377). Sourcing the list from there is what
+ * keeps a third shape from being invisible here. A worktree on any other branch
+ * is backfilled but never removed.
  *
  * Modes:
  *   node tools/backfill-worktree-configs.js               # backfill missing files
@@ -40,6 +47,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { isFleetBranch, FLEET_BRANCH_PREFIXES } = require('./ticket-fleet-branch.js');
 
 const BODY = '[core]\n\tbare = false\n';
 
@@ -240,6 +248,7 @@ function main(argv) {
     const name = path.basename(entryDir);
     const workDir = readGitdirTarget(entryDir);
     const workDirParent = workDir ? path.dirname(workDir) : null;
+    let fleetNote = null;
 
     // Cleanup path — only when explicitly requested AND every safety signal
     // agrees. Locked worktrees never get removed.
@@ -251,23 +260,28 @@ function main(argv) {
         continue;
       }
       if (branch) {
-        const merged = isBranchMerged(commonDir, branch, opts.base);
-        const prClosed = isPullRequestClosed(branch, opts.repo, opts);
-        if (merged && prClosed === true) {
-          const rm = removeLeftover(entryDir, workDirParent, opts, (msg) => report.push({ name, note: msg }));
-          if (rm.ok) {
-            report.push({ name, action: opts.dryRun ? 'would-remove' : 'removed', branch, workDir: workDirParent });
+        fleetNote = { branch, fleet: isFleetBranch(branch) };
+        if (fleetNote.fleet) {
+          const merged = isBranchMerged(commonDir, branch, opts.base);
+          const prClosed = isPullRequestClosed(branch, opts.repo, opts);
+          if (merged && prClosed === true) {
+            const rm = removeLeftover(entryDir, workDirParent, opts, (msg) => report.push({ name, note: msg }));
+            if (rm.ok) {
+              report.push({ name, action: opts.dryRun ? 'would-remove' : 'removed', branch, fleet: true, workDir: workDirParent });
+              continue;
+            }
+            report.push({ name, action: 'remove-failed', branch, fleet: true, error: rm.err });
             continue;
           }
-          report.push({ name, action: 'remove-failed', branch, error: rm.err });
-          continue;
         }
-        // Merged but PR unknown, or unmerged: fall through to backfill. Better
-        // to have a working config.worktree than a half-cleaned tree.
+        // Not a fleet branch, merged but PR unknown, or unmerged: fall through
+        // to backfill. Better to have a working config.worktree than a
+        // half-cleaned tree - and a branch this tool did not create is never
+        // its to remove.
       }
     }
 
-    report.push(backfillEntry(entryDir, opts));
+    report.push(Object.assign(backfillEntry(entryDir, opts), fleetNote));
   }
 
   if (opts.json) {
@@ -290,9 +304,11 @@ const HELP = `Usage: node tools/backfill-worktree-configs.js [options]
 
   --repo <path>    Repo to target (default: current directory).
   --dry-run        Report only; do not touch disk.
-  --cleanup        Remove leftover worktrees whose branch has been merged into
-                   the base AND (when gh is available) whose PR is closed.
-                   Locked entries are always kept.
+  --cleanup        Remove leftover fleet worktrees (branches prefixed
+                   ${FLEET_BRANCH_PREFIXES.join(' or ')}) whose branch
+                   has been merged into the base AND (when gh is available)
+                   whose PR is closed. Locked entries, and branches the fleet
+                   did not create, are always kept.
   --base <ref>     Merge target for the cleanup check (default: master).
   --json           Machine-readable output.
   -h, --help       This message.

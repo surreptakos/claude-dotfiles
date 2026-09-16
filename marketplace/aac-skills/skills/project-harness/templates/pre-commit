@@ -4,14 +4,22 @@
 # Bypass for a genuine emergency: git commit --no-verify (CI still gates).
 # TEST_COMMAND is substituted by the harness skill at install time.
 #
-# Issue 28: git invokes this hook with GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE /
+# Issue 28: git invokes this hook with GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_PREFIX /
 # GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY exported into the child environment. Those env
 # vars OVERRIDE `git -C <path>` in every downstream tool the test suite may spawn, and
 # silently redirect their git calls to this commit's index instead of the target they were
 # told to inspect. Individual helpers (tracker-audit, freshness classifier, sync) also
 # clear them internally as a defence in depth, but strip them here so the test suite runs
 # under a clean environment from the start.
-unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
+#
+# Issue 406 - the 2026-09-16 aac-routines incident (fixed in that repo as aac-routines#278).
+# A commit made from a linked worktree, where GIT_DIR is .git/worktrees/<name>, ran this hook
+# and the suite's own `git init` / `git config` in a temp directory acted on the REAL repository
+# instead: a BLOCKED commit left the main checkout's .git/config carrying core.bare = true and a
+# test identity in [user], and every worktree answered `fatal: this operation must be run in a
+# work tree` until it was repaired by hand. GIT_PREFIX joins the list for the same reason - git
+# exports the hook's cwd-relative prefix too. Never drop this line.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 
 # Issue 395: `node --test` exports NODE_TEST_CONTEXT into everything it spawns, and a nested
 # `node --test` that inherits it exits 0 even when a test throws. A commit made from inside a
