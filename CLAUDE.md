@@ -47,7 +47,10 @@ python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`; `--home`
 puts the owner's path back where the mirror holds `__USERHOME__` tokens, so the payload matches
 one built on that machine. CI checks exactly that: a rebuild from the mirror must reproduce the
-committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
+committed payload — `diff -r` over the whole of `marketplace/aac-skills`, `plugin.json` included,
+not just each `SKILL.md`. It can, because the plugin version follows the payload and not the clock:
+an unchanged payload keeps the version it published under, and only a moved one takes a fresh UTC
+stamp (issue 432). `.claude-plugin/marketplace.json` repeats that version and is outside the check.
 
 Both commands stamp, and so does a second edit after them: run them as often as you like, the
 commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
