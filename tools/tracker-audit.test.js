@@ -31,6 +31,7 @@ const {
   issuesOnly,
   closerPrsByIssue,
   parseGithubSlug,
+  proseBlockers,
   isFollowUpAcknowledgment,
   citedIssueNumbers,
   paginate,
@@ -197,6 +198,19 @@ test('citedIssueNumbers: hex colours and longer numbers are not citations', () =
   // `#9a690f` used to read as #9, `#1f7a43` as #1, and `#730` as #73 via indexOf.
   const body = 'Contrast on `#9a690f` and `#1f7a43`; see #730 for the real one.';
   assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [730]);
+});
+
+// ---- proseBlockers: which `## Blocked by` lines are gates (issue 390) ------------
+// ---- `merge after #N` is sequencing, so it must not raise ungated-dependency. ----
+
+test('proseBlockers: a `merge after #N` line is sequencing, not a gate', () => {
+  const body = '## Blocked by\n\n- Merge after #14 (not a gate): both rewrite the same function\n';
+  assert.deepStrictEqual(proseBlockers(body), []);
+});
+
+test('proseBlockers: a section mixing a real blocker and `merge after` reports the blocker only', () => {
+  const body = '## Blocked by\n\n- #12\n- merge after #14\n\n## Done when\n\n- [ ] x\n';
+  assert.deepStrictEqual(proseBlockers(body), [12]);
 });
 
 // ---- paginate: the page loop replacing `gh api --paginate` (issue 171) -----

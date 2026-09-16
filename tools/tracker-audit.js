@@ -230,6 +230,7 @@ if (require.main !== module) {
     issuesOnly,
     closerPrsByIssue,
     parseGithubSlug,
+    proseBlockers,
     landedCommits,
     landedFindings,
     paginate,
@@ -605,7 +606,17 @@ function proseBlockers(body) {
   if (!m) return [];
   const section = m[1];
   if (/^\s*[-*]?\s*(None|N\/?A)\b/im.test(section)) return [];
-  const nums = (section.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)));
+  // `merge after #N` is the one non-gating relation this section can carry (issue 390). Before it,
+  // the heading had a single vocabulary — every `#N` under it was a gate — so a ticket that only
+  // meant "build it now, land it after #N" had two bad options: add a native edge, which stops the
+  // frontier query on work that is genuinely startable, or leave the audit reporting
+  // `ungated-dependency` on that ticket for ever, which is how a check stops being read. Matched per
+  // LINE, and on the phrase anywhere in the line, so one section can mix both kinds and a real
+  // blocker on its own line still gates.
+  const NON_GATING = /\bmerge\s+after\b/i;
+  const nums = section.split('\n')
+    .filter((line) => !NON_GATING.test(line))
+    .reduce((acc, line) => acc.concat((line.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))), []);
   return Array.from(new Set(nums));
 }
 
