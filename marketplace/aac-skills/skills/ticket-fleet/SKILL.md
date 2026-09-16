@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T19:02:45Z'
-  previous-modified: '2026-09-16T17:37:58Z'
+  modified: '2026-09-16T19:05:54Z'
+  previous-modified: '2026-09-16T17:31:55Z'
   revision: '13'
-  content-sha: 018fd75a2980
+  content-sha: 2d39d7827c44
 ---
 
 # ticket-fleet
@@ -173,6 +173,9 @@ prompts before letting the fleet push branches and open PRs. Full args list:
   once. See **Overriding the test command** below.
 - `priorImpl` / `priorProbe` (objects keyed by ticket number, optional): results from an
   earlier run's implementers and probers. See **Finishing a run whose verifiers died** below.
+- `finishRunId` (string, optional): an earlier run's id. The launch then runs **delivery only** -
+  it reads that run's journal and opens a PR for every verified-but-undelivered branch. See
+  **Finishing a run whose Deliver step died** below.
 
 ## Overriding the test command
 
@@ -198,8 +201,9 @@ agent includes the worktree slot the runtime assigned, and a resumed run assigns
 the replay starts a fresh implementer inside another ticket's slot. Hand the finished results
 back instead:
 
-- `priorImpl`: `{<ticket number>: <IMPL-shaped result>}` - `{branch, committed, testExitCode,
-  testTail, discoveries}`.
+- `priorImpl`: `{<ticket number>: <IMPL-shaped result>}` - `{branch, committed, pushed,
+  testExitCode, testTail, discoveries}`. An entry from a journal written before `pushed` existed
+  simply reads as not-pushed, and the run pushes that branch itself before verifying it.
 - `priorProbe`: `{<ticket number>: <PROBE-shaped result>}` - `{items, blocked, discoveries}`.
 
 A ticket with an entry skips its **attempt-1** implementer or prober entirely - the recorded
@@ -227,6 +231,44 @@ Pass the same `tickets` list as the dead run, a **new** `runId` (branch names fo
 that does re-implement must not collide with the dead run's), and the `testCommand` the dead
 run should have used. An entry whose `committed` is false, or a probe entry with no items, is
 treated as a failed attempt 1: attempt 2 runs the stage normally.
+
+## Finishing a run whose Deliver step died
+
+The other half of the same problem (issue 405). A verified branch used to exist nowhere but the
+container that made it: the Deliver step was the first thing to push it, so a container restart
+mid-Deliver, a deliverer that reported the branch "does not exist" without ever pushing, or an
+interrupt during Verify each ended with committed, verified work nobody could reach. Two things
+close that:
+
+- **The branch is pushed at implement time.** The implementer runs `git push -u origin <branch>`
+  as soon as the commit lands and reports `pushed`; when it did not (or could not), the run
+  starts a one-command `push:#<N>.<attempt>` agent of its own - before the verifier, so the
+  branch is on origin for every stage after it. The Deliver step still pushes, and is told to
+  fail loudly with the git output rather than conclude the branch is missing.
+- **`finishRunId` replays a dead run's journal.** The launch runs delivery only:
+
+```
+Workflow({
+  scriptPath: 'aac-skills/ticket-fleet/ticket-fleet.js',
+  args: { contractVersion: 2, runId: '<hex>', invocationId: '<fresh hex>', finishRunId: 'wf_6aaacc32-c84' }
+})
+```
+
+`finishRunId` takes either spelling of the dead run's id: the harness workflow id its journal
+directory is named for (`wf_...`), or the caller-minted `runId` its branch names embed. A
+`journal-read` agent finds `~/.claude/projects/<project>/<session>/subagents/workflows/<run>/journal.jsonl`,
+pairs each `started` label with its `result` by `agentId`, and reports per ticket whether a
+verifier passed, on which branch, and whether a `deliver:#<N>` result recorded a PR or comment
+URL. Then, per ticket: **delivered** ones are skipped naming the PR they already have,
+**unverified** ones are left alone (a finish pass never delivers what no verifier passed - re-run
+the fleet on those), and **verified-but-undelivered** ones go through the ordinary Deliver
+prompt, with one extra instruction: reuse an open PR for that branch if one exists rather than
+open a second, which makes a finish pass safe to repeat. Finally the report writer runs over the
+journal's discoveries, so a dead run's follow-ups still land.
+
+The run must happen where the dead run ran: the journal is machine-local and dies with its
+container. It starts no scout, no implementer, no prober and no verifier, so a finish pass costs
+one journal read plus one deliverer per undelivered branch.
 
 ## Contract and ripple list
 
@@ -267,9 +309,10 @@ with no marker at all is a pre-v2 fork.
 
 The scout classifies each ticket into one of three lanes; the wave runs them in parallel:
 
-- **code** - repository change. Implementer in an isolated worktree, then a blind refuting
-  verifier per attempt; the deliver stage merges the default branch (see **Pre-push merge**),
-  then pushes and opens a PR, only on a verified pass.
+- **code** - repository change. Implementer in an isolated worktree, which pushes its branch as
+  soon as it commits (issue 405), then a blind refuting verifier per attempt; the deliver stage
+  merges the default branch (see **Pre-push merge**), then pushes and opens a PR, only on a
+  verified pass.
 - **probe** - resolves by quoting command output / research / evidence in a comment, no
   repository change asked for. Prober gathers, blind verifier re-runs the commands; the
   deliver stage posts one resolution comment.
