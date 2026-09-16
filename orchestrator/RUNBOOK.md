@@ -23,10 +23,11 @@ each Routine serves its own repo independently.
 - **Session** — a fresh cloud session spawned by each Routine wake. Boots from the per-repo state
   issue, dispatches everything in-session, ends the turn on `Pass complete`. No session outlives
   one wake; continuity lives in the state issue.
-- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, invoked in-session via
-  the Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`.
-  One script for local and cloud; it picks between the `gh` CLI and the connector tools at run
-  time. Same scout / pinned implementer / blind refuting verifier / deliver shape.
+- **Fleet** — `aac-skills/ticket-fleet/ticket-fleet.js` in a `claude-dotfiles` checkout, invoked
+  in-session via the Workflow tool with a `scriptPath` **under this session's working directory**
+  (step 4 has the spelling and the evidence). One script for local and cloud; it picks between the
+  `gh` CLI and the connector tools at run time. Same scout / pinned implementer / blind refuting
+  verifier / deliver shape. Never resume a fleet run — see step 4.
 
 ## Boot
 
@@ -106,12 +107,48 @@ In this order:
 3. **Merge pass (before the fleet).** Run the merge policy below over the repo's open fleet PRs
    (`agent/issue-*` branches), in this same session.
 4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
-   labels they produce), invoke the Workflow tool with
-   `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and `args` from the
-   state issue's `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it
-   in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
-   fleet refuses to start without one. When the fleet returns, run the merge pass once more over
-   the PRs it just opened.
+   labels they produce), invoke the Workflow tool with `args` from the state issue's
+   `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it in `args`; the
+   workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the fleet refuses to
+   start without one. When the fleet returns, run the merge pass once more over the PRs it just
+   opened.
+
+   **The `scriptPath` must sit under this session's working directory.** Quoted from the
+   container run posted to issue #163 (claude.ai/code session on `claude-dotfiles`, container
+   booted 2026-09-15T18:52Z on master `84c0764`, comment of 2026-09-15T18:59:52Z):
+
+   > `Workflow({scriptPath: '${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js'})` is
+   > refused in the container: the tool only accepts a path under the working directory or one
+   > it returned. The identical copy at `aac-skills/ticket-fleet/ticket-fleet.js` in the
+   > checkout launches.
+
+   A master is rooted in the repo it serves, not in `claude-dotfiles`, so the fleet script is not
+   under its cwd until it is put there. Clone it in, then use the same relative path inside the
+   clone:
+
+   ```bash
+   git clone --depth 1 https://github.com/surreptakos/claude-dotfiles .aac-dotfiles
+   echo '.aac-dotfiles/' >> .git/info/exclude
+   ```
+
+   ```
+   Workflow({
+     scriptPath: '.aac-dotfiles/aac-skills/ticket-fleet/ticket-fleet.js',
+     args: { runId: '<hex>', ...config.fleetArgs }
+   })
+   ```
+
+   `${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` is refused here — it is a
+   desktop-session spelling only. The fleet stays cwd-relative wherever its script lives: the
+   scout's `gh api` calls, the implementer's `isolation: 'worktree'` and the verifier's
+   `git worktree add` all resolve against the served repo, not against the clone.
+
+   **Never pass `resumeFromRunId`.** A resume does not replay cached verdicts: on 2026-09-15 one
+   re-ran the implementers and verifiers over branches the first run had already built, reached a
+   different verdict on an attempt that run had failed, and opened
+   `surreptakos/claude-dotfiles#252` — a duplicate of the already-merged
+   `surreptakos/claude-dotfiles#246`, on a ticket that was closed by then. Re-run a failed ticket
+   as a fresh run with a new `runId` and an explicit `tickets` list.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
    append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
    and PR list — never a subagent self-report.

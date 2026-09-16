@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-15T22:39:49Z'
-  previous-modified: '2026-09-15T21:36:24Z'
-  revision: '8'
-  content-sha: 2085cf664ae0
+  modified: '2026-09-16T00:29:06Z'
+  previous-modified: '2026-09-15T22:39:49Z'
+  revision: '9'
+  content-sha: 3abb1b2322e1
 ---
 
 # ticket-fleet
@@ -23,45 +23,86 @@ counterpart lives at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exerci
 
 ## How to invoke
 
-Call the Workflow tool with `scriptPath` set to a copy of this file inside the current
-checkout's `.claude/workflows/`. The Workflow tool resolves a bare `name:` from that same
-directory, and it reads the file behind `scriptPath` byte-for-byte before showing the approval
-dialog - a CR anywhere in the payload trips "script contains control characters that would be
-hidden in the approval dialog" and the launch is refused (issue 233 - and this repo pins
-`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` is required (the
-workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the caller
-mints the id).
+Call the Workflow tool with `scriptPath`. The tool reads the file behind `scriptPath`
+byte-for-byte before showing the approval dialog, and it refuses the launch on two grounds:
 
-**Checkout-path invocation (works on desktop and in cloud sessions).** Once
-`.claude/workflows/ticket-fleet.js` exists in the cwd, either spelling launches the fleet:
+- **A path it does not own.** Quoted verbatim from the first real-container run of the cloud
+  bootstrap - a claude.ai/code session on this repo, container booted 2026-09-15T18:52Z on
+  master `84c0764`, posted to issue #163 in the comment of 2026-09-15T18:59:52Z:
+
+  > `Workflow({scriptPath: '${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js'})` is
+  > refused in the container: the tool only accepts a path under the working directory or one
+  > it returned. The identical copy at `aac-skills/ticket-fleet/ticket-fleet.js` in the
+  > checkout launches.
+
+- **A CR byte anywhere in the payload** - "script contains control characters that would be
+  hidden in the approval dialog" (issue 233; this repo pins `* -text`, so a CRLF blob reaches
+  every surface verbatim).
+
+`args.runId` is required: the workflow runtime forbids `Date.now()` and `Math.random()` inside
+scripts, so the caller mints the id.
+
+**From a session rooted in a `claude-dotfiles` checkout** - the spelling the container above
+recorded launching:
 
 ```
 Workflow({
-  scriptPath: '.claude/workflows/ticket-fleet.js',
+  scriptPath: 'aac-skills/ticket-fleet/ticket-fleet.js',
   args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
 })
 ```
 
+**From a session rooted on any other repo.** The quoted rule decides it: the path must sit
+under that session's working directory, and no other repo has this one's `aac-skills/` tree
+there. Put a shallow clone under the checkout and use the same relative path inside it - the
+path shape the rule accepts, differing from the spelling above only by the clone directory:
+
+```bash
+git clone --depth 1 https://github.com/surreptakos/claude-dotfiles .aac-dotfiles
+```
+
 ```
 Workflow({
-  name: 'ticket-fleet',
+  scriptPath: '.aac-dotfiles/aac-skills/ticket-fleet/ticket-fleet.js',
   args: { runId: '<hex>', tickets: [], deliver: false }
 })
 ```
 
-**Copy-into-cwd step (for any repo, including `claude-dotfiles` itself).** This plugin path
-holds the source of truth, but a bare `name:` and a checkout-relative `scriptPath` both need
-the script to live under `.claude/workflows/` in the current working directory. Copy it there
-before the first invocation:
+Leave the clone uncommitted (`.aac-dotfiles/` in the repo's `.gitignore` or in
+`.git/info/exclude`) and refresh it with a pull when the fleet bumps. The fleet itself stays
+cwd-relative whatever holds the script - the scout's `gh api` calls, the implementer's
+`isolation: 'worktree'` and the verifier's `git worktree add` all resolve against the session's
+own repo, not against the clone.
 
-```bash
-mkdir -p .claude/workflows
-cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
+`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` is a desktop-session alternative
+only, and only where it works there; a container refuses it, as quoted above. The same goes for
+a bare `name: 'ticket-fleet'`, which the Workflow tool resolves from the cwd's
+`.claude/workflows/` and which serves the permission handler's session-start snapshot rather
+than the file on disk.
+
+## Never resume a run
+
+**Never pass `resumeFromRunId` for a fleet run - not to retry a failed ticket, not to finish a
+run that was interrupted.** A resume does not replay cached verdicts. On 2026-09-15 a completed
+run was resumed that way: it re-ran the implementers and verifiers over the branches the first
+run had already built, reached a different verdict on an attempt the first run had failed, and
+delivered it as `surreptakos/claude-dotfiles#252` - a duplicate PR against a ticket that was
+already closed by the merged `surreptakos/claude-dotfiles#246`.
+
+Re-run instead: a fresh run, a new `runId`, and the failed tickets listed explicitly.
+
+```
+Workflow({
+  scriptPath: 'aac-skills/ticket-fleet/ticket-fleet.js',
+  args: { runId: '<new hex>', tickets: [241], deliver: true }
+})
 ```
 
-On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
-edited in place; on every other repo the copy stays a byte-identical mirror of the plugin
-source and is refreshed by re-running the `cp` above whenever the plugin bumps.
+That is safe because the code lane opens with a pre-loop open-PR check: a ticket that already
+carries an open `agent/issue-<N>-*` PR short-circuits to that PR instead of being implemented
+again. It is the only resume the fleet supports.
+
+## Args
 
 On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
 prompts before letting the fleet push branches and open PRs. Full args list:

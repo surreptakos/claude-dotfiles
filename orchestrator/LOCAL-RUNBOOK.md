@@ -26,8 +26,8 @@ vice versa. Record the venue on boot (`"venue": "local-pc"` in that issue's JSON
 the pass completes. Two masters on one repo is the double-run that exhausted the weekly limit on
 2026-09-01; two masters on two repos at once was ruled out on 2026-09-02 for the same usage reason.
 
-**The claude-dotfiles checkout is not a valid root for a master.** The plugin-served fleet
-(`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` in `aac-skills`) is cwd-relative
+**The claude-dotfiles checkout is not a valid root for a master.** The fleet script
+(`aac-skills/ticket-fleet/ticket-fleet.js` in a `claude-dotfiles` checkout) is cwd-relative
 throughout: its scout runs `gh api` with no `-R`, its implement stage uses
 `isolation: 'worktree'`, and its verifier runs `git worktree add` "in this repo". A Workflow
 launched from a session rooted in claude-dotfiles resolves all three against claude-dotfiles,
@@ -43,11 +43,12 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   master keeps working: it runs the merge pass over the repo's open fleet PRs (same policy as
   `RUNBOOK.md` — verifier evidence + green CI + no conflict + no human changes-requested, via
   `gh pr merge`; the CI-never-ran clause and the keep-open rule are there too) and performs the
-  takeover-guard check. The fleet (Workflow tool with
-  `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` — the plugin-served
-  copy that picks the tracker instrument at run time; `gh` exists here, so it uses REST; pass
-  `runId` in `args`, minted with `printf %x $(date +%s)`, because the workflow runtime forbids
-  `Date.now()` in scripts) is only started AFTER the repo's `/triage` and `/to-tickets`
+  takeover-guard check. The fleet (Workflow tool with a `scriptPath`
+  under the session's working directory — `aac-skills/ticket-fleet/ticket-fleet.js` inside a
+  `claude-dotfiles` clone placed there, the form `RUNBOOK.md` step 4 quotes the container
+  evidence for; the script picks the tracker instrument at run time, and `gh` exists here, so it
+  uses REST; pass `runId` in `args`, minted with `printf %x $(date +%s)`, because the workflow
+  runtime forbids `Date.now()` in scripts; never `resumeFromRunId`) is only started AFTER the repo's `/triage` and `/to-tickets`
   subagent results have arrived, because the fleet's scout reads the labels those steps produce.
   The master collects subagent results when their completion notifications arrive rather than
   polling. A master serves ONE repo and never fleets another: the other repos have their own

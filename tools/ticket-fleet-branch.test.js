@@ -172,6 +172,16 @@ test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () =>
     'fleet must route tracker prompts through the instrument-specific rules');
 });
 
+test(`fleet script ${FLEET_SCRIPT_REL} VERDICT schema does not require failures (issue 265)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const decl = /const VERDICT = \{ type: 'object', required: \[([^\]]*)\]/.exec(src);
+  assert.ok(decl, 'VERDICT schema declaration not found');
+  assert.ok(!/failures/.test(decl[1]),
+    "VERDICT must not require `failures`: a verifier returning {pass:true, evidence} without it burned the StructuredOutput retry cap on issue 241");
+  assert.match(src, /if \(lastVerdict && !Array\.isArray\(lastVerdict\.failures\)\) lastVerdict\.failures = \[\]/,
+    'each verifier call site must normalise a missing failures key to []');
+});
+
 test(`fleet script ${FLEET_SCRIPT_REL} carries the live-tree hard-rail sentence`, () => {
   const HARD_RAIL_SENTENCE =
     'Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are ' +
@@ -299,6 +309,31 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.branch, 'agent/issue-97-attempt1-wf_r1-w0');
     assert.equal(result.commentUrl, null);
     assert.deepEqual(result.discoveries, []);
+  });
+
+  // Issue 265: requiring `failures` made a passing verdict unexpressible. A verifier that
+  // returns {pass:true, evidence} with no `failures` key must be accepted - the lane delivers
+  // and the verdict it reports carries an empty failures array rather than undefined.
+  test(`${rel} runCodeLane accepts a passing verdict with no failures key`, async () => {
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-241-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      // No `failures` key at all - exactly what tripped the StructuredOutput retry cap on #241.
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran node --test; exit 0' };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/241' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(file, agentMock, { number: 241, title: 't', criteria: '' }, 0);
+    assert.deepEqual(calls, ['pr-check:#241', 'impl:#241.1', 'verify:#241.1', 'deliver:#241'],
+      'a key-less pass must be accepted on the first attempt, not retried');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/241');
+    assert.deepEqual(result.verdict.failures, [],
+      'a verdict with no failures key must be normalised to an empty array for the run report');
   });
 
   test(`${rel} runCodeLane runs the full impl/verify/deliver chain when no open PR exists`, async () => {
