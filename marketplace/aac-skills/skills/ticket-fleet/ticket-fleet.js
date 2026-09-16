@@ -1029,6 +1029,8 @@ Return structured output only.`,
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
+${PYTHON_RAIL}
+The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
 In this repo run: git fetch origin, then git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
@@ -1591,6 +1593,45 @@ const results = (grouped || []).flat()
 await treeGuardCheck('pre-report', 0)
 assertNoBreach()
 
+// [FLEET-EDITABLE-GUARD-START]
+// Every place a copy of the guard can be, in probe order, each with why it would be there. Literal
+// paths only - a $VAR in the command is refused by the Bash tool as an operand computed at run
+// time - so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's copy is reachable only once
+// somebody has copied it into the served repo. `.claude/workflows/` is the second entry because
+// that is where a served repo already copies the fleet script itself to launch it (SKILL.md,
+// "Copy-into-cwd step"): copying the guard in the same breath is the cheapest way for a fork with
+// no `tools/` convention to have one (issue 435).
+const EDITABLE_GUARD_HOMES = [
+  ['tools/editable-install-guard.js', "the served repo's own copy - the durable one, it survives every launch and every plugin update"],
+  ['.claude/workflows/editable-install-guard.js', 'beside the fleet script a served repo copies out of the plugin to launch a run - copy both files, not just ticket-fleet.js'],
+  ['aac-skills/ticket-fleet/editable-install-guard.js', 'the plugin source, present only when the served repo IS claude-dotfiles'],
+  ['~/.claude/skills/ticket-fleet/editable-install-guard.js', 'where a cloud bootstrap that installs this skill leaves it'],
+]
+
+/** The paths the post-wave probe tries, caller override first. */
+function editableGuardPaths(override) {
+  return [override].concat(EDITABLE_GUARD_HOMES.map(h => h[0])).filter(Boolean)
+}
+
+/** The one shell command that runs the first copy it finds, or exits 3 when there is none. */
+function editableGuardCommand(paths, main) {
+  return paths
+    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${main} --repair`)
+    .join('; ') + '; exit 3'
+}
+
+/**
+ * What a run says when the probe found no copy. The old message said only that it had skipped and
+ * to "copy it into the served repo's tools/", which left the reader to work out which file, from
+ * where, and under what name - so on the repo the incident happened in, nothing was ever copied
+ * (issue 435). This names each exact path, in preference order, and the command that creates one.
+ */
+function editableGuardAbsentMessage(paths, main) {
+  const homes = EDITABLE_GUARD_HOMES.map(h => `  ${h[0]}   (${h[1]})`).join('\n')
+  return `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${paths.join(' or ')} (claude-dotfiles issue 413), so if a worktree of this wave captured this container's editable install it stays captured and the next session's imports fail for no visible reason.\nCreate ONE of these, relative to the repository root this run serves (--main ${main}), first for preference:\n${homes}\nFrom a session with the aac-skills plugin loaded, the first one is:\n  mkdir -p tools && cp "$CLAUDE_PLUGIN_ROOT/skills/ticket-fleet/editable-install-guard.js" tools/editable-install-guard.js\nOr point the next run straight at a copy you already have: editableGuardScript: '<path>'.`
+}
+// [FLEET-EDITABLE-GUARD-END]
+
 // ---- editable-install guard (claude-dotfiles issue 413) ----
 // Every worktree of this wave is gone by now, so this is the moment the damage is visible: a
 // pointer file in site-packages naming a scratch checkout that no longer exists. Prompts cannot
@@ -1605,18 +1646,12 @@ if (cfg.editableGuard === false) {
   // One `;`-joined probe per candidate, never a loop: the Bash tool refuses a loop whose body
   // it cannot prove is not git (SKILL.md, "Shell shapes the worktree guard refuses"), and the
   // tree guard's `[ -f x ] || exit 3; node x ...` is the shape that is known to go through.
-  // Candidates in order: the caller's override, the served repo's own copy (the tree-guard
-  // convention), this repo's plugin source, and the copy the cloud bootstrap leaves in ~/.claude. Literal paths only - a $VAR in the
-  // command is refused by the Bash tool as an operand computed at run time.
-  const guardPaths = [
-    cfg.editableGuardScript,
-    'tools/editable-install-guard.js',
-    'aac-skills/ticket-fleet/editable-install-guard.js',
-    '~/.claude/skills/ticket-fleet/editable-install-guard.js',
-  ].filter(Boolean)
-  const editableCmd = guardPaths
-    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${cfg.orchestratorCwd} --repair`)
-    .join('; ') + '; exit 3'
+  // The candidate list and the not-here message are pure and marked, because a run served on a
+  // repo that has no copy is the case issue 435 is about: tools/editable-install-guard.test.js
+  // extracts this block verbatim, builds the command from it and runs it for real in a repo
+  // that has no guard anywhere, then in the same repo once the named path exists.
+  const guardPaths = editableGuardPaths(cfg.editableGuardScript)
+  const editableCmd = editableGuardCommand(guardPaths, cfg.orchestratorCwd)
   let res = null, resError = null
   try {
     res = await agent(guardAgentPrompt(editableCmd),
@@ -1628,7 +1663,7 @@ if (cfg.editableGuard === false) {
   try { parsed = JSON.parse(String((res && res.stdout) || '')) } catch (e) { parsed = null }
   const hard = cfg.editableGuard === true
   if (res && res.exitCode === 3) {
-    const absent = `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${guardPaths.join(' or ')} (claude-dotfiles issue 413). Copy it into the served repo's tools/ to have the wave repair its own worktree damage.`
+    const absent = editableGuardAbsentMessage(guardPaths, cfg.orchestratorCwd)
     if (hard) throw new Error(`ticket-fleet run FAILED after the wave - ${absent}`)
     log(absent)
   } else if (!res || !parsed || res.exitCode === 2) {

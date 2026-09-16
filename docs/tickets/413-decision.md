@@ -55,3 +55,8 @@ fi
 
 Until that lands, a fleet wave repairs what it caused: see "Python packages: one editable install,
 shared by every worktree" in `aac-skills/ticket-fleet/SKILL.md`.
+
+**Filed (issue 435, 2026-09-16):** [aac-routines#434](https://github.com/surreptakos/aac-routines/issues/434)
+carries the evidence above and the guard verbatim. Nothing else in this repository can close it - the
+fleet's own halves (a guard a served repo can actually have, and the probe verifier's rail) landed
+under issue 435.
