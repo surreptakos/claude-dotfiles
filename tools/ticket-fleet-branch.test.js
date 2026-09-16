@@ -23,6 +23,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   stableJson, stableText, stableList, priorFindingsBlock,
+  FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
 } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
@@ -49,6 +50,44 @@ test('buildBranchName includes ticket, attempt, runId and workerIndex', () => {
   assert.match(branch, /attempt1/);
   assert.match(branch, /wf_abc123/);
   assert.match(branch, /w2$/);
+});
+
+// Issue 377: the fleet creates two branch shapes, and the discoveries branch was added
+// (issue 360) after every "the fleet's branches" enumeration had been written against
+// `agent/issue-*`. FLEET_BRANCH_PREFIXES is the one list those enumerations widen against.
+test('isFleetBranch covers both fleet branch shapes (issue 377)', () => {
+  assert.deepEqual([...FLEET_BRANCH_PREFIXES], ['agent/issue-', 'agent/fleet-discoveries-'],
+    'the fleet branch prefix list must name the discoveries prefix beside the issue prefix');
+  assert.equal(buildDiscoveriesBranchName('testrun'), 'agent/fleet-discoveries-wf_testrun');
+  assert.equal(isFleetBranch(buildDiscoveriesBranchName('testrun')), true,
+    'the discoveries branch must be recognised as a fleet branch');
+  assert.equal(isFleetBranch('refs/heads/' + buildBranchName(29, 'abc123', 0, 1)), true,
+    'a refs/heads ref (what a worktree HEAD file holds) must be accepted');
+  assert.equal(isFleetBranch('master'), false);
+  assert.equal(isFleetBranch(DISCOVERIES_BRANCH_PREFIX), false,
+    'a bare prefix with no runId is not a branch the fleet created');
+  assert.equal(isFleetBranch(null), false);
+});
+
+// Issue 377: a merge pass or a worktree cleanup that matches `agent/issue-*` alone skips the
+// discoveries PR and strands the run's bullets - the failure issue 360 exists to end. Pin the
+// prefix against each place fleet branches are enumerated.
+test('every enumeration of fleet branches names the discoveries prefix (issue 377)', () => {
+  const runbook = fs.readFileSync(path.join(REPO_ROOT, 'orchestrator', 'RUNBOOK.md'), 'utf8');
+  const fromMergePass = runbook.slice(runbook.indexOf('**Merge pass (before the fleet).**'));
+  const mergePassStep = fromMergePass.slice(0, fromMergePass.indexOf('\n4. '));
+  assert.ok(mergePassStep.includes(DISCOVERIES_BRANCH_PREFIX + '*'),
+    "RUNBOOK.md's merge pass must match agent/fleet-discoveries-* as well as agent/issue-*");
+
+  const backfill = fs.readFileSync(path.join(REPO_ROOT, 'tools', 'backfill-worktree-configs.js'), 'utf8');
+  assert.match(backfill, /require\('\.\/ticket-fleet-branch\.js'\)/,
+    'the worktree cleanup must take its fleet prefixes from this module, not spell its own');
+  assert.match(backfill, /isFleetBranch\(branch\)/,
+    'the worktree cleanup must classify a worktree branch through isFleetBranch');
+
+  const fleetScript = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(fleetScript.includes(DISCOVERIES_BRANCH_PREFIX + 'wf_${runId}'),
+    `the fleet script's discoveries branch must keep the ${DISCOVERIES_BRANCH_PREFIX} shape this list enumerates`);
 });
 
 test('two concurrent scouts against the same ticket produce distinct branch names', () => {
