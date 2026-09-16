@@ -1,0 +1,47 @@
+name: skill tests
+
+# The session-check skill ships its own regression suite next to the engine it covers
+# (agents/skills/session-check/*.test.js). Nothing ran it: the repo test command in
+# .claude/session.json covers tools/ and tests/, and the restore test only asserts that each
+# junctioned skill carries a SKILL.md. So check.test.js sat red on master until issue 300, and the
+# five files beside it could have gone the same way unseen.
+#
+# TWO RUNS, on purpose. These tests are written to be run from wherever the skill is installed, and
+# the bug issue 300 fixed was exactly a location assumption: "this repo" was `__dirname/../../..`,
+# which is the repo root from the agents/skills mirror and the HOME DIRECTORY from the installed
+# copy at ~/.claude/skills/session-check that SKILL.md tells you to run them from. A run from the
+# checkout alone is green on that bug. The second run — the same files, copied out of the checkout,
+# with only their sibling skill for company — is the one that sees it.
+#
+# Linux only: nothing in these files is Windows-specific (they spawn process.execPath and write
+# under os.tmpdir()). The repo's Windows coverage is the restore test.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [dashboard]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  session-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: From the checkout (agents/skills mirror)
+        run: node --test agents/skills/session-check/*.test.js
+      - name: From a copy outside any checkout (where the skill is actually installed)
+        run: |
+          dest="$RUNNER_TEMP/installed-skills"
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          # project-harness travels too: the harness tests discover it as a sibling, which is how
+          # it sits in ~/.claude/skills and in the plugin payload.
+          cp -r agents/skills/session-check agents/skills/project-harness "$dest/"
+          cd "$dest/session-check"
+          node --test *.test.js
