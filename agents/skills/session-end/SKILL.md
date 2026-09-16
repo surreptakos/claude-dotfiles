@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-15T22:34:53Z"
-  previous-modified: "2026-09-14T15:06:58Z"
-  revision: "3"
-  content-sha: "ccaab8167a05"
+  modified: "2026-09-16T00:55:50Z"
+  previous-modified: "2026-09-15T22:34:53Z"
+  revision: "4"
+  content-sha: "7e1d61f32445"
 ---
 
 # Finish a session
@@ -62,10 +62,10 @@ step's `gh` spelling through the substitution table in the cloud section below):
    ```
    Zero configuration: auto-discovers every open ProjectsV2 board linked to the repo's `origin`
    remote and sweeps each. No-op if no linked board has a `Status` field with a `Done` option.
-   Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. Local
-   machines only — it needs gh with project scope, and no cloud substitute exists (see the cloud
-   section below): in a container, skip it with a stated reason and file or update a
-   `ready-for-local-agent` ticket that names the skipped sweep — never a reply line.
+   Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. In a
+   container that command has nowhere to run — but the step is not skipped there any more: the
+   same script runs as a GitHub Actions job, so take the row for it in the cloud table below.
+   Do not file a `ready-for-local-agent` ticket for a board sweep.
 7. **Batch surfaced items through `/to-tickets`** (see ticket sweep below). This is required, not
    optional. `/to-tickets` handles its own breakdown/approval/publish flow — invoke it once with
    all NEEDS-A-TICKET items collected during the sweep. Never `gh issue create` ad hoc. In a
@@ -215,17 +215,15 @@ step as impossible because its `gh` spelling failed — use the equivalent:
 | `gh issue edit <n> --milestone` | MCP `issue_write` (update) |
 | `gh pr list --state open` | MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
+| `sweep-closed-to-done.js --apply` (step 6) | nothing to run by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other; `PROJECT_TOKEN` missing or expired is the usual cause and the run log says so |
 
 Quick read-only checks can also go straight to REST — `curl
 https://api.github.com/repos/<owner>/<repo>/...` — the session's egress proxy authenticates
 api.github.com, private repos included. Git itself (push, fetch, branch delete) works normally
 through the same proxy.
 
-Three genuine differences, all to be said out loud rather than skipped silently:
+Two genuine differences, both to be said out loud rather than skipped silently:
 
-- **Step 6 (board sweep)** has no cloud substitute — the MCP has no ProjectsV2 tools. Skip it with
-  a stated reason and file or update a `ready-for-local-agent` ticket that names the skipped sweep;
-  never a reply line, and never `ready-for-human` — a desktop session can run it.
 - **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container. Still
   not a pass: run the same audit through the MCP tools, or file/update a `ready-for-local-agent`
   ticket naming the tool that needs a desktop run.

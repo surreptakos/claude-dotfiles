@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-15T22:34:24Z'
-  previous-modified: '2026-09-14T22:40:41Z'
-  revision: '3'
-  content-sha: 1c3b555ebb59
+  modified: '2026-09-16T00:59:24Z'
+  previous-modified: '2026-09-15T22:34:24Z'
+  revision: '4'
+  content-sha: 09097c386e00
 ---
 
 # Triage
@@ -38,7 +38,7 @@ Six **state** roles:
 - `needs-triage` — maintainer needs to evaluate
 - `needs-info` — waiting on reporter for more information
 - `ready-for-agent` — fully specified, ready for an AFK agent
-- `ready-for-local-agent` — fully specified, but the next step needs the desktop's live tree or a proxy-blocked capability, so a cloud container cannot do it — an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container
+- `ready-for-local-agent` — fully specified, but the next step needs the desktop's live tree or a proxy-blocked capability, so a cloud container cannot do it — an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, or an edit the auto-mode classifier blocks in a container (a project-board sweep is no longer one: the Board sweep job runs it, claude-dotfiles issue 216)
 - `ready-for-human` — reserved for a person's judgment, credential or sign-off; a step a local session can perform never carries `ready-for-human`
 - `wontfix` — will not be actioned
 
@@ -83,7 +83,7 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
 5. **Apply the outcome:**
    - `ready-for-agent` — post an agent brief comment ([AGENT-BRIEF.md](AGENT-BRIEF.md)).
-   - `ready-for-local-agent` — same structure as an agent brief, but name the live-tree edit or proxy-blocked capability that keeps a cloud container from taking it (an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep needing a project-scoped `gh` token, or an edit the auto-mode classifier blocks). A desktop session can pick it up.
+   - `ready-for-local-agent` — same structure as an agent brief, but name the live-tree edit or proxy-blocked capability that keeps a cloud container from taking it (an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, or an edit the auto-mode classifier blocks; a project-board sweep is no longer one, the Board sweep job runs it). A desktop session can pick it up.
    - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). A step a local session can perform never carries `ready-for-human`.
    - `needs-info` — post triage notes (template below).
    - `wontfix` — close, with the comment depending on *why*:
