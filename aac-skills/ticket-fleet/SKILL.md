@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T19:01:09Z"
-  previous-modified: "2026-09-16T17:30:49Z"
+  modified: "2026-09-16T19:02:45Z"
+  previous-modified: "2026-09-16T17:37:58Z"
   revision: "13"
-  content-sha: "631b38e67161"
+  content-sha: "018fd75a2980"
 ---
 
 # ticket-fleet
@@ -292,6 +292,17 @@ Claude Code footer) with no owner comment after it. Such a ticket is parked, not
 starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
 Together with the relabel that is what stops a second wave repeating a handoff nobody has
 answered yet (issue 266).
+
+## Blocker state is read, not believed
+
+The scout reports every number a ticket's "Blocked by" section names, whatever state it thinks
+those issues are in. A `blocker-state` agent then reads each distinct number through the
+instrument (`gh api repos/{owner}/{repo}/issues/N --jq .state`, or `mcp__github__issue_read`)
+and the closed ones are dropped from that ticket's `blockedBy` and logged as cleared, so a
+ticket whose blocker landed an hour ago runs without anyone editing its body. Anything that is
+not a plain `closed` - `open`, `unknown`, a number the read never came back with, a failed
+agent - keeps blocking: the gate opens only on positive evidence. The run result's
+`skippedBlocked` names each skipped ticket with the blocker numbers still open (issue 403).
 
 ## Discovery-triage chores run in a chain, not side by side
 

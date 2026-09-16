@@ -238,6 +238,48 @@ function confineToCandidates(tickets, candidateNumbers) {
 }
 
 /**
+ * Drop blockers that have already closed (issue 403).
+ *
+ * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
+ * `effort: 'low'` it never reads those issues, so a ticket whose blocker landed
+ * hours ago is skipped wave after wave until somebody rewrites the body by hand.
+ * The fleet therefore reads each named blocker's state through the tracker
+ * instrument and passes the answers here: a blocker whose state comes back
+ * `closed` is dropped from the ticket's `blockedBy`, while everything else -
+ * `open`, `unknown`, a number the reader never reported - keeps blocking,
+ * because the gate may only be opened by positive evidence that it has landed.
+ *
+ * Tickets are not mutated: one whose blockers all still hold is returned as-is,
+ * one that loses a blocker is returned as a copy with the shorter `blockedBy`.
+ *
+ * @param {Array<{number:number, blockedBy:Array<number|string>}>|null|undefined} tickets
+ * @param {Array<{number:number|string, state:string}>|null|undefined} blockers - one
+ *   entry per blocker number read, carrying the tracker's state verbatim
+ * @returns {{tickets:Array, cleared:Array<{ticket:number, blocker:number}>}} the
+ *   tickets with closed blockers removed, and the (ticket, blocker) pairs cleared
+ *   so the run can log them
+ */
+function applyBlockerStates(tickets, blockers) {
+  const states = new Map();
+  for (const b of (Array.isArray(blockers) ? blockers : [])) {
+    const n = parseInt(b && b.number, 10);
+    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase());
+  }
+  const cleared = [];
+  const resolved = (Array.isArray(tickets) ? tickets : []).map((t) => {
+    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : [];
+    const open = named.filter((n) => {
+      const num = parseInt(n, 10);
+      if (states.get(num) !== 'closed') return true;
+      cleared.push({ ticket: t.number, blocker: num });
+      return false;
+    });
+    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open });
+  });
+  return { tickets: resolved, cleared };
+}
+
+/**
  * Resume-stable projections of a previous agent's structured result (issue 271).
  *
  * The Workflow runtime replays an agent() call from cache only while its cache
@@ -297,5 +339,6 @@ function priorFindingsBlock(verdict, howToFix) {
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
   ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  applyBlockerStates,
   stableJson, stableText, stableList, priorFindingsBlock,
 };
