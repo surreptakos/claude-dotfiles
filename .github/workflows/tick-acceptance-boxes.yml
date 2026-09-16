@@ -1,0 +1,64 @@
+name: Tick acceptance boxes
+
+# Issue 438: tick the acceptance boxes of every issue a MERGED pull request closes, each box
+# naming the PR it was verified in, and record it in a comment on the issue.
+#
+# WHY A MERGE WORKFLOW AND NOT THE FLEET. Closing is this tracker's only terminal state, so
+# `tools/tracker-audit.js` reports a closed issue with unticked acceptance boxes as drift. The
+# ticket fleet closes its tickets with `Closes #N` in the PR body and deliberately does NOT tick
+# the boxes itself (aac-routines issue 264: a box ticked while the PR is still open claims the
+# work shipped when the default branch carries none of it), handing the job to "a
+# tick-acceptance-boxes merge workflow" in the served repo. This repo had none, so every
+# delivered ticket landed as a fresh `[closed-with-open-boxes]` finding — eleven of them from run
+# 6aaacc32 alone. A merge event is the earliest moment at which a tick is true.
+#
+# THE LOGIC IS NOT WRITTEN HERE. `tools/tick-acceptance-boxes.js` holds it, and the step below
+# runs its unit tests before anything is written to the tracker. YAML bash is the one thing in
+# this repo nothing can test — keep this file thin.
+#
+# `pull_request_target`, not `pull_request`: a `pull_request` run for a fork PR is handed a
+# read-only token, so the issue edit would fail on exactly the PRs a human is least watching.
+# `pull_request_target` runs in the base repo with `issues: write`, and the checkout below takes
+# the default base ref, so this job never executes PR-head code.
+#
+# The script is idempotent — an already-ticked box matches nothing, so no body is patched and no
+# comment is posted. That is what makes the `workflow_dispatch` replay safe for back-filling a PR
+# that merged before this workflow existed.
+
+on:
+  pull_request_target:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'Pull request number to tick (back-fill or replay of an already-merged PR)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  tick:
+    # Only a merge claims anything. A PR closed without merging shipped nothing.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    concurrency:
+      # Two runs editing one issue body would race and one would overwrite the other's tick.
+      group: tick-acceptance-boxes
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (closing keywords, box scope, injected-gh write path)
+        run: node --test tools/tick-acceptance-boxes.test.js
+      - name: Tick the boxes of every issue this PR closed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pr || github.event.pull_request.number }}
+        run: node tools/tick-acceptance-boxes.js --pr "$PR_NUMBER" --apply

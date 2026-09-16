@@ -99,16 +99,16 @@ $SelfPath = $MyInvocation.MyCommand.Path
 $RealHome = $env:USERPROFILE.TrimEnd('\', '/')
 
 # Issue 28: the pre-commit hook runs this suite as a child of `git commit`, which exports
-# GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY. Those env
+# GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_PREFIX / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY. Those env
 # vars OVERRIDE `git -C <path>` - git honours them first, and -C only relocates its path
 # resolution when they are unset. Without clearing them here, the bootstrap `git -C $RepoRoot
 # ls-files` a few lines below silently reads the parent commit's index (0 files instead of
 # ~586), the -From origin/local clones fail, and every helper the suite spawns later inherits
-# the same leak. Clear the five vars at file scope, BEFORE any git call and BEFORE the source
+# the same leak. Clear the six vars at file scope, BEFORE any git call and BEFORE the source
 # of lib/manifest.ps1 (which defines Clear-GitEnv - but manifest.ps1 lives in $Clone, not
 # $RepoRoot, so we can't use it before the clone exists). Done unconditionally: the suite
 # never uses those vars for itself, so there is nothing to restore before exit.
-foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
+foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
     if ($null -ne [Environment]::GetEnvironmentVariable($name)) {
         [Environment]::SetEnvironmentVariable($name, $null)
     }

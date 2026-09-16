@@ -6,7 +6,8 @@
 
 .DESCRIPTION
     A pre-commit hook that runs restore-test.ps1 leaks GIT_DIR / GIT_INDEX_FILE /
-    GIT_WORK_TREE / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY into every child process. Those env
+    GIT_WORK_TREE / GIT_PREFIX / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY into every child
+    process. Those env
     vars OVERRIDE `git -C <path>`: git honours them first, and -C only relocates a path
     resolution when they are unset. On 2026-08-25 this quietly redirected sync.ps1's commit
     block and the freshness classifier at the PARENT bare repo, and polluted its .git/config
@@ -39,7 +40,7 @@ $ErrorActionPreference = 'Stop'
 # restore at the end - the audit clause reads the PARENT's .git/config, and a leftover
 # GIT_DIR from a broken run would defeat the whole point.
 $OuterSavedGitEnv = @{}
-foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
+foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
     $val = [Environment]::GetEnvironmentVariable($name)
     if ($null -ne $val) {
         $OuterSavedGitEnv[$name] = $val

@@ -103,6 +103,30 @@ issue on no board.
 Exit 0 clean, 1 drift, **2 could not audit**. Two is not a pass — it means `gh` could not see the
 tracker, and a query returning nothing must never read as health.
 
+Read that code from the **unpiped** command. A pipeline reports its last stage's status, so piping
+the audit anywhere throws its verdict away and hands back the pager's zero:
+
+```bash
+node tools/tracker-audit.js | tail      # 0 — tail's code, whatever the audit found
+node tools/tracker-audit.js; echo $?    # 1 — the audit's own
+```
+
+Both are real runs against this repo on 2026-09-16, when the audit had six drift findings. To keep
+the output *and* the code, redirect instead of piping: `node tools/tracker-audit.js > out.txt; echo
+$?`. Reading a piped zero as a pass is how a ledger comes to record "exits 0 with 0 drift findings"
+about a tracker that had drift (issue 437).
+
+## Who ticks the acceptance boxes
+
+Not the agent that opens the PR. A ticked box claims the work shipped, and it ships at merge — so
+`.github/workflows/tick-acceptance-boxes.yml` runs `tools/tick-acceptance-boxes.js` on the
+`pull_request_target` closed+merged event, ticks every box the audit would report on each issue the
+PR's closing keywords name, appends `— verified in PR #N` to each, and comments on the issue saying
+so. Without it every fleet-delivered ticket closes as a fresh `[closed-with-open-boxes]` finding
+(issue 438: eleven in one wave). The script is idempotent and takes `--pr <n>` by hand, so a PR that
+merged before the workflow existed is back-filled by running it — `--issue <n>` forces a ticket whose
+verifying PR wrote `Refs` rather than `Closes`.
+
 ## Intake
 
 Issue forms in `.github/ISSUE_TEMPLATE/` label everything `needs-triage` on arrival. That is the

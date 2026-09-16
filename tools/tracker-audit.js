@@ -28,10 +28,10 @@
 
 const { execSync, execFileSync } = require('child_process');
 
-/** Child env with the five GIT_* overrides stripped. Issue 28.
+/** Child env with the six GIT_* overrides stripped. Issue 28; GIT_PREFIX joined the list in 433.
  *
- *  `git -C <path>` does NOT override GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_COMMON_DIR /
- *  GIT_OBJECT_DIRECTORY: git honours those env vars first, so a leaked GIT_DIR silently redirects
+ *  `git -C <path>` does NOT override GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_PREFIX /
+ *  GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY: git honours those env vars first, so a leaked GIT_DIR silently redirects
  *  every git call in this process to whatever repo the parent named — including the `gh` shells and
  *  the `git log/fetch/rev-parse` probes below. This tool is meant to audit the repo it is invoked
  *  from, and a leaked GIT_DIR would make it audit somebody else's; worse, the `git fetch` inside
@@ -43,7 +43,7 @@ const { execSync, execFileSync } = require('child_process');
  */
 const CHILD_ENV = (() => {
   const env = Object.assign({}, process.env);
-  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE',
+  for (const k of ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX',
                    'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY']) {
     delete env[k];
   }

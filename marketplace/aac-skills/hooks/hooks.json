@@ -87,6 +87,31 @@
             "statusMessage": "Checking session gate..."
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 1",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 1",
+            "timeout": 10,
+            "statusMessage": "Delivering global rules (1/3)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 2",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 2",
+            "timeout": 10,
+            "statusMessage": "Delivering global rules (2/3)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 3",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 3",
+            "timeout": 10,
+            "statusMessage": "Delivering global rules (3/3)..."
+          }
+        ]
       }
     ],
     "PreToolUse": [

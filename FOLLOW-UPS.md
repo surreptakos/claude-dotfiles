@@ -1532,3 +1532,241 @@ as the run's discoveries PR.
   the bullet says it belongs. The working spellings are in the comment, with one addition from this
   pass: `--paginate` can fail through the proxy when the Link header is a numeric-ID path, so pass
   `&page=N` explicitly.
+
+## Triage: run 6aaaea11 discoveries (issue 449)
+
+Every discovery bullet the run `6aaaea11` report writer appended has a disposition below. The bullets
+are **on master**: commit `8903990` ("discoveries from ticket-fleet run 6aaaea11") is an ancestor of
+`6e07cdf`, so the section reads straight out of this file under `## Run (ticket-fleet 6aaaea11)` and
+`git show 8903990:FOLLOW-UPS.md` reads it independently of the merge. The section holds **29**
+top-level `^- ` bullets; the D01-D29 numbering below is their order there, and the quoted fragment is
+each bullet's opening words.
+
+The run delivered PRs #442 (#416), #443 (#415), #444 (#322), #445 (#429's triage ledger, which filed
+#431 to #440) and #447 (#117), and left #302's verified branch
+`agent/issue-302-attempt1-wf_6aaaea11-w4` undelivered on a real conflict in
+`tests/settings-invariants.tests.ps1`. Every delivered ticket is closed and **the repo has no open PR
+at all**, which is the settled state issue 449's `## Blocked by` note asked this pass to run against.
+
+Filing followed #319 and issue 449's own dedupe rail: a finding touching the same file, symbol or
+failure as an **open** ticket became a comment on that ticket, not a second ticket. The open set was
+listed twice — once at the start of the pass and again immediately before the first filing, with no
+change (75 open items, no open PRs;
+`gh api 'repos/surreptakos/claude-dotfiles/issues?state=open&per_page=100&page=1'`, since
+`gh api search/issues` is refused in a container and `--paginate` can corrupt its own output through
+the proxy). The ten tickets the #429 pass filed minutes earlier, #431 to #440, were the first thing
+checked against every finding; four of them absorbed one.
+
+Verifying the premise on today's master was the first step of every disposition, and two had moved:
+**D04**'s packager over-report no longer fires (`stamps rotated in 0 skills` on a clean tree today, so
+the finding is about the orphan personal copy rather than the packager), and **D29**'s byte count has
+grown from 372,070 to 388,590.
+
+Tickets filed (4): **#451** (apply #117's trim in the six external repos, with the repository-access
+route), **#452** (decide what to do about claude-dotfiles' own `dashboard.yml`), **#453** (the
+project-harness template still ships the eight-type trigger), **#454** (the PowerShell suites hard-code
+the `powershell` binary name). None duplicates an open ticket; there was no open fleet PR to duplicate.
+All four carry an explicit `<!-- tracker-audit-ignore: stale-premise #N -->` for the closed ticket they
+descend from, which is D25's lesson applied rather than filed.
+
+Comments added: [#432](https://github.com/surreptakos/claude-dotfiles/issues/432#issuecomment-5704739925),
+[#283](https://github.com/surreptakos/claude-dotfiles/issues/283#issuecomment-5704740072),
+[#213](https://github.com/surreptakos/claude-dotfiles/issues/213#issuecomment-5704740196),
+[#440](https://github.com/surreptakos/claude-dotfiles/issues/440#issuecomment-5704740348),
+[#376](https://github.com/surreptakos/claude-dotfiles/issues/376#issuecomment-5704740488),
+[#362](https://github.com/surreptakos/claude-dotfiles/issues/362#issuecomment-5704740605),
+[#437](https://github.com/surreptakos/claude-dotfiles/issues/437#issuecomment-5704740766),
+[#438](https://github.com/surreptakos/claude-dotfiles/issues/438#issuecomment-5704740914),
+[#451](https://github.com/surreptakos/claude-dotfiles/issues/451#issuecomment-5704741084).
+
+Nothing was fixed outside a ticket in this pass and no existing ticket's body or acceptance criteria
+were edited. The packager was run once to re-check D03 and the two version-only files it dirtied were
+reverted.
+
+`node tools/tracker-audit.js` reaches a verdict: exit **1**, which is "findings", never the exit 2 that
+means it could not audit — read from the unpiped command, since `| tail` reports `tail`'s 0 (#437).
+Before the filings: 7 drift findings plus 3 advisory. After: the same 7 and the same 3, so the four new
+tickets introduced no drift and none of them raised the `stale-premise?` advisory that #436 tripped.
+All 7 drift findings are `[closed-with-open-boxes]`, which is #438's subject; **#117 is one of them**,
+and its middle unticked box is exactly the six-repo trim that #451 now carries.
+
+### Run 6aaaea11 (`8903990`, 29 bullets)
+
+- **D01** "Ticket ambiguity, resolved one way: issue 416 asks for a row covering 'a program argument
+  the guard reads as able to execute commands'…" — No action; an assumption record. Verified landed:
+  `aac-skills/ticket-fleet/SKILL.md:473` carries the `awk` row written concretely, and line 477
+  generalises in one clause ("an `awk` script, and by the same reading anything the guard cannot vouch
+  for") rather than listing programs nobody has seen refused. The row is the place to add others.
+- **D02** "Confirmed the SKILL's new claim live during this run: `git push … | tail -6; echo
+  exit=${PIPESTATUS[0]}` was refused…" — Comment on **#437**. The pipeline-plus-`echo` idiom is what an
+  agent reaches for when told to read a real exit code, and the worktree guard refuses it while the
+  bare `git push` goes through — four waves in a row have paid a turn for it. #437 is the ticket for
+  "read the exit code unpiped", so the shape that works belongs in the same two lines. Confirmed:
+  `SKILL.md`'s refused-shapes table has five rows and none is about capturing an exit code.
+- **D03** "`python3 tools/build-cloud-plugin.py --from-mirror` rewrites the minute-resolution version
+  stamp on EVERY run…" — Comment on **#432**, which is exactly this. Reproduced on a clean tree today:
+  the rebuild printed `stamps rotated in 0 skills` and still left `.claude-plugin/marketplace.json` and
+  `marketplace/aac-skills/.claude-plugin/plugin.json` modified on the version field alone
+  (`2026.9.162022` -> `2026.9.162118`). Both reverted.
+- **D04** "The packager reported 'stamps rotated in 2 skills' naming aac-google-access… but git showed
+  no change" — Comment on **#283**. Premise moved and the cause is not the packager: today's rebuild
+  reports **0** rotations, but `claude/skills/aac-google-access` and `aac-skills/aac-google-access`
+  both exist, and the personal-skills loop stamps the mirror while the `aac-skills/` loop stamps the
+  source. A reader checking only `aac-skills/aac-google-access/SKILL.md` sees a rotation against a file
+  that did not move. #283 is the open ticket to delete that orphan.
+- **D05** "Assumption taken on acceptance criterion 2 … I left the `_comment` block in
+  `.claude/session.json` untouched" — No action; an assumption record. The reading is the one AC2's
+  "one changed line" forces, and the `_comment` never named the `tests/` term, so widening the glob
+  falsified nothing in it. #415 is closed as completed.
+- **D06** "Three files still quote the pre-415 test command verbatim and are now stale" — No action
+  here, evidence on **#376**. Verified: `FOLLOW-UPS.md:382`, `FOLLOW-UPS.md:511` and
+  `docs/cloud-permission-posture-2026-09-14.md:88` all still say
+  `node --test tests/docs-claims.test.js tools/*.test.js`. Correcting them in place is precisely what
+  #376's append-only rule forbids, and the posture doc is dated in its filename; the comment on #376
+  records it as a third cost of rule (a), which option (b) fixes for free.
+- **D07** "`.githooks/pre-commit` runs only `tests/restore-test.ps1 -From worktree` and never spawns
+  the node half" — Comment on **#213**. Confirmed by reading the hook: one `powershell` line, nothing
+  else. So #415's glob widening reached `/session-start` and `/session-end` but not the commit gate,
+  which #415's own text asserts it did. #213 is the open ticket for what that gate should be.
+- **D08** "On Linux the new command's first half has no binary, but this is already handled" — No
+  action. Verified: `agents/skills/session-check/check.js:308 cloudTestFallback` splits the command on
+  `&&` and keeps only the halves whose interpreter is on PATH. Recorded because it is the non-obvious
+  reason the widening is effective in cloud containers at all.
+- **D09** "`tests/restore-test.ps1` (the Windows half of the gate) could not be executed here" —
+  **#454**, and evidence on **#213**. With D16 and D17 this stops being a container limitation and
+  becomes a four-file fix; #454 carries it and names #213 as the competing route, since one of the two
+  should close the other.
+- **D10** "Assumption implemented (issue 322, AC1 wording 'or reads a caller-supplied args.remote
+  flag')" — No action; an assumption record. `args.remote` is an optional stand-in read only when the
+  env probe returns nothing, so the probe stays primary (issue 339); precedence is explicit
+  `args.instrument` > probe facts > `args.remote` > stop with an error.
+- **D11** "resolveVerifierAgent's first parameter (instrument/mode) is now unused in every branch" —
+  Comment on **#440**. Verified in both copies (`ticket-fleet.js:215`, `ticket-fleet-branch.js:207`)
+  and the reason it was kept is #440's whole subject: `tools/ticket-fleet-branch.test.js:345` pins the
+  exact call-site text, so dropping the argument is a four-place change. Worth doing inside #440's
+  generation work, not before it.
+- **D12** "The dated Report heading only affects future runs" — Comment on **#376**. Verified: 23
+  sections are still spelled bare `## Run (ticket-fleet)` with no date and mostly no run id, so
+  ledgers can only key to them by commit sha — which is the body's own argument for option (b) over
+  (c), now with a count behind it.
+- **D13** "The issue body's prose mentions a third smaller item … the orchestrator-tree guard" — No
+  action. Verified present in `aac-skills/ticket-fleet/ticket-fleet.js`: a Setup phase that baselines
+  the orchestrator tree plus isolation checkpoints after Implement, Verify, Deliver and before Report.
+- **D14** "The existing test 'pickInstrument returns gh in a local session with gh on PATH' passes `{}`
+  as env" — No action, recorded on **#440**. The test is correct as written (`{}` is an environment
+  something read and found empty; only a null/undefined env is unknown). The hazard it names is a fork
+  that copies the old `facts.remote ? {...} : {}` line and fabricates `{}` with no measurement.
+- **D15** "Issue 302's core change … was ALREADY on origin/master from PR #342 when this worktree
+  started" — Comment on **#362**, the open successor for that file pair. The comment carries the
+  undelivered branch `agent/issue-302-attempt1-wf_6aaaea11-w4` and the two bugs only a real engine
+  exposed, so the next taker reads it before rewriting the suite.
+- **D16** "A real PowerShell IS obtainable in this Linux agent container" — **#454**, with D09 and D17.
+  This is the finding that changes what a container can be asked to do, and it comes with two gotchas
+  the run learned the hard way: extract the binary under a neutral name because the isolation guard
+  refuses commands naming it in a compound form, and `pwsh` accepts and ignores `-ExecutionPolicy` on
+  Linux so Windows-shaped argument lists work unchanged.
+- **D17** "tests/settings-defaultmode.tests.ps1, tests/restore-test.ps1, tests/git-env-leak.tests.ps1
+  and tests/dotfiles-freshness.tests.ps1 still spawn the literal string `powershell`" — **#454**.
+  Verified by grep, with line numbers, and `.githooks/pre-commit` has the same line. The one-line
+  engine resolution #302's work put in `tests/settings-invariants.tests.ps1` is the fix, copied to each
+  spawn site.
+- **D18** "sync.ps1's comment above the pull-side -Trust invocation (around line 349) is stale" —
+  Comment on **#362**. Verified: the comment still describes a two-pull dance ("launching claude once
+  creates the file, and the next pull wires it") that stopped happening when the tool started seeding a
+  minimal `~/.claude.json`. #362 is already editing that call site to read `$LASTEXITCODE`.
+- **D19** "Unverified 5.1 risk worth a ticket: the -Trust path still reads the WHOLE of
+  ~/.claude.json through ConvertFrom-Json" — Comment on **#362**, because #362 is what makes it sharp:
+  once `sync.ps1` honours the tool's exit code, a 5.1 parse failure on a multi-MB file fails the whole
+  pull instead of printing advisory noise. No 5.1 engine exists in a container to measure it, so it
+  wants a desktop run in that ticket's acceptance rather than a separate ticket nobody can start.
+- **D20** "Still true and unchanged from PR #342: if a machine's ~/.claude.json spells one of the four
+  clone paths with \uXXXX escapes…" — Comment on **#362**. Bounded (nothing is written when it throws
+  and the message names the manual fix) but it was recorded on #302, which is now closed, so it is
+  carried to the open successor rather than lost.
+- **D21** "AC2's landing step is stranded by the fleet's own rails and needs its own ticket" —
+  **#451**, and this is issue 449's second acceptance criterion. The ticket says only "apply this
+  diff in these six repos", cites `docs/tickets/117-decision.md` for the measurement so nobody
+  re-derives it a fourth time, and names the access route the bullet asked for: `add_repo` at
+  `access: "push"` from an orchestrating session (read access only serves the git proxy), or six
+  one-line edits by hand on the desktop. Confirmed still stranded: `tracker-audit` reports #117 closed
+  with that box unticked.
+- **D22** "claude-dotfiles' OWN .github/workflows/dashboard.yml is the account's largest Actions
+  consumer but is not one of issue 117's six repos" — **#452**, `ready-for-human`. Verified on master:
+  line 24 still carries the eight-type list and line 40 still reads `runs-on: windows-latest`. It is a
+  different trade from the six — issue 21 made `[labeled, unlabeled]` the replacement for a deleted
+  cron here — so it is filed as a decision with the four options, not as a trim.
+- **D23** "The project-harness template `templates/dashboard.yml` still ships `issues: types: [opened,
+  closed, reopened, …]`" — **#453**. Verified at
+  `agents/skills/project-harness/templates/dashboard.yml:24`. This is the one that can silently undo
+  #451: a re-harness after those PRs merge re-seeds the untrimmed workflow. The ticket carries the
+  version bump, the `UPGRADES.md` row and a pointer to #434, which is editing the same table.
+- **D24** "`gh api --paginate` is unusable through this container's GitHub proxy and fails in a way
+  that corrupts output rather than exiting non-zero" — Comment on **#437**, whose file
+  (`docs/agents/issue-tracker.md`) has a "From a cloud session (no GraphQL)" section naming three
+  refused code paths and not this one.
+- **D25** "Filing any discovery-triage ticket now trips tracker-audit's own stale-premise? advisory" —
+  Comment on **#438**, which is the open ticket for "the fleet manufactures `tracker-audit` findings
+  about itself"; this is the second class of them. Verified in the code: the exemption is nine
+  role-naming wordings in `EXAMPLE_CITATION_PATTERNS` (`tools/tracker-audit.js:195`) plus the explicit
+  ignore marker, and **#362** carries the advisory live today for citing closed #302. This pass applied
+  the lesson instead of waiting for the fix — all four of its tickets carry the marker and none raised
+  the advisory.
+- **D26** "CLAUDE.md's 'Skill stamps' section overstates what CI checks" — Already a criterion of
+  **#432**; no new ticket. Confirmed from both ends and recorded in the #432 comment: the sentence is
+  live at `CLAUDE.md:50`, and `.github/workflows/skill-stamps.yml` still scopes its diff to
+  `/tmp/dist/aac-skills/skills` plus a single `hooks/hooks.json` compare, which is the only reason the
+  clock stamp does not redden every build.
+- **D27** "`gh api ... --paginate` fails through this container's proxy when GitHub's Link header
+  points at a numeric-ID path" — Same finding as D24, recorded by a second worker with a different
+  failure mode (exit 1 and an empty file, rather than a 403 body appended to page 1). Both are in the
+  **#437** comment, because the pair is what makes it worth documenting: the command fails two ways and
+  neither is a clean non-zero.
+- **D28** "The commit on this branch was made with `git commit --no-verify`" — Comment on **#213**, and
+  #408 already carries the desktop restore-test run for this merge pass. The commit this ledger lands
+  in was made the same way and for the same reason; the node/python done-condition gate was run
+  instead and exits 0.
+- **D29** "FOLLOW-UPS.md is now 372,070 bytes after this ledger … and it still carries seven
+  byte-identical copies of one bullet" — Comment on **#376**, whose ruling this is. Re-measured: the
+  file is **388,590** bytes before this ledger, against the 121 KB in #376's title, across 23 bare run
+  sections and nine triage ledgers. Each triage chore is required to append one, so the file's growth
+  is structural and the append-only rule forbids removing the duplicates it manufactures.
+## Re-check: the tracker-audit "exits 0" ledgers (issue 437)
+
+2026-09-16. Issue 437 asks for the ledgers in this file that assert `node tools/tracker-audit.js`
+"exits 0" to be re-checked, and for any wrong claim to be corrected by an appended note. This file is
+append-only, so nothing above this line was edited.
+
+What was re-checked:
+
+- The four triage ledgers reading "reaches a verdict and exits 0 with 0 drift findings, plus the one
+  pre-existing `stale-premise?` advisory on #358" — waves 8/9 (`7b4675e`, authored 2026-09-16T08:58Z),
+  waves 10/11 (`ea08c3c`, 09:19Z), wave 13's **W13-05** disposition, and waves 14/15 (`d68a5c2`,
+  10:26Z).
+- Discovery bullet **D48** above, which alleges those ledgers are wrong because "the same two findings
+  that exist today (`[closed-with-open-boxes]` on #378, `[dangling-reference]` on #413) were almost
+  certainly already present".
+
+**The wrong claim is D48's, not the ledgers'.** Neither finding it names could have existed when those
+ledgers were written. `gh api repos/surreptakos/claude-dotfiles/issues/378 --jq .closed_at` is
+`2026-09-16T16:52:21Z`, so #378 was still *open* at 10:26Z and `closed-with-open-boxes` (which only
+fires on a closed issue) could not have reported it. #413's `.created_at` is `2026-09-16T16:13:12Z`,
+so the issue did not exist yet and nothing could cite #428 from it. Both findings arrived roughly six
+hours after the last of the four ledgers. An advisory-only run really does exit 0 — `tools/tracker-audit.js`
+ends `process.exit(hard.length ? 1 : blind ? 2 : 0)` and anything ending in `?`, `stale-premise?`
+included, is advisory — so "exits 0 with 0 drift findings, plus the one advisory on #358" is a
+consistent shape and no evidence found here contradicts it. The four ledgers stand as written; D48's
+second sentence does not, and the issue it generated (437) is answered by the doc change rather than
+by a correction to them.
+
+Today's run, unpiped, for the record: `node tools/tracker-audit.js` exits **1** with six
+`[closed-with-open-boxes]` drift findings (#117, #245, #322, #415, #416, #429) and three
+`[stale-premise?]` advisories (#209, #210, #362) — note the #358 advisory of those ledgers is gone,
+further evidence that the tracker moved. All six issues were closed between 20:04Z and 21:56Z today,
+after every ledger above. The same command piped, `node tools/tracker-audit.js | tail -1`, exits
+**0**: the trap the issue was filed about, now named in the "Before trusting the tracker" block of
+`docs/agents/issue-tracker.md`.
+
+Left alone as un-re-checkable: the issue-33-era claim earlier in this file that the audit "currently
+exits 0 with two remaining advisory findings on issue 44". Advisory-only is a genuine exit-0 shape, and
+the tracker state it describes is two hundred issues in the past — there is no way to re-run the audit
+against it.
