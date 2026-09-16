@@ -2,10 +2,10 @@
 name: gas-deploy
 description: Deploy, promote, run and diagnose an AAC Apps Script project without clasp, through the gas package in claude-dotfiles (a vendored SelfDeploy.js, deploy/* refs on GitHub, one time trigger). Use when a repo's clasp credential died again, when asked to "move this repo off clasp", "adopt gas", "deploy the script", "promote PROD", "run <function> on the script", or to read why a gas/deploy status is red.
 metadata:
-  modified: "2026-09-09T16:42:14Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "f25835e7a334"
+  modified: "2026-09-16T04:44:25Z"
+  previous-modified: "2026-09-09T16:42:14Z"
+  revision: "2"
+  content-sha: "f199de0fbb13"
 ---
 
 # gas-deploy
@@ -15,8 +15,8 @@ command below is `node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` 
 
 ## Which job is this? Decide first
 
-- **A repo still on clasp, or its `CLASPRC_JSON` just died** → Adopt (below). Do not re-mint the clasp
-  secret; the seven-day death is the client's, not the token's.
+- **A repo still on clasp, or its `CLASPRC_JSON` just died** → Adopt (below). Adopting retires that
+  secret instead of re-minting it: the seven-day death belongs to the client, not the token.
 - **A red `gas/deploy` or `gas/promote` status, or CI's wait timed out** → Diagnose.
 - **"Run X on the script"** → `gas run owner/repo X '[args]' --wait 10`. The result prints; the function
   ran on HEAD. Latency is the tick (five minutes).
@@ -26,8 +26,8 @@ command below is `node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` 
 ## Adopt (once per repo)
 
 1. `gas whoami`. No credential → `gas login` (in a cloud container: `gas login --paste`, hand the URL to
-   the owner, paste back the localhost URL). Never `clasp login`: that is the machine-wide credential the
-   `aac-google-access` skill guards, and it is the wrong client for anything CI-shaped.
+   the owner, paste back the localhost URL). `gas login` rather than `clasp login`: the latter mints the
+   machine-wide credential `aac-google-access` guards, and is the wrong client for anything CI-shaped.
 2. `gas init <repo> --script-id <id> --root-dir <dir>`; edit `gas.json`: `include`/`exclude` (mirror the
    repo's `.claspignore`), `prod.deploymentId` if there is a PROD, `hooks.postDeploy` if the project has
    something to check (write that function in the project: throw on a bad deploy, return a one-line
@@ -47,7 +47,7 @@ command below is `node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` 
    and the test command. Delete the clasp workflows and the `CLASPRC_JSON` secret's readers. Remove
    `tools/clasp-auth.js` and the `clasp-auth` release gate from `.claude/session.json` if present.
 9. Prove it: push a commit, then `gas status owner/repo` until `deploy/test` shows `success`. Read the
-   status description, not only the colour.
+   status description alongside the colour.
 
 Note in the repo's CLAUDE.md: the script deploys itself from `deploy/test`; `gas run` replaces `clasp run`;
 `gas logs --project <gcp>` replaces `clasp logs`.
@@ -67,9 +67,12 @@ Note in the repo's CLAUDE.md: the script deploys itself from `deploy/test`; `gas
   revocation, six months unused). `gas login` then `gas seed` again.
 - `promote refused: … of 200 versions` → the owner deletes old versions in the editor's project history.
 
-## Never
+## Hard rails
 
-- Never store a Google credential in GitHub again, of any client.
-- Never create the tick trigger from a versioned deployment's execution.
-- Never edit the vendored `SelfDeploy.js` in a repo; change `claude-dotfiles/gas/lib/SelfDeploy.js`,
-  run its tests (`node --test gas/tests/*.test.js`), bump `gas/VERSION`, then `gas vendor` in each repo.
+- **The only secret this design puts in GitHub is `GAS_PAT`.** Google credentials stay out of the
+  repo and out of Actions, whichever client minted them.
+- **The tick trigger is installed from the editor** (`gasInstall()`), so it runs HEAD. One created
+  from a versioned deployment's execution is the `bound to a versioned deployment` failure above.
+- **`SelfDeploy.js` is edited at source** — `claude-dotfiles/gas/lib/SelfDeploy.js`. Run its tests
+  (`node --test gas/tests/*.test.js`), bump `gas/VERSION`, then `gas vendor` in each repo; the copy
+  in a repo is output.

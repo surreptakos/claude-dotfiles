@@ -1,0 +1,26 @@
+name: google-rest tests
+
+# tools/google-rest.py picks the Google transport from the surface it runs on (issue 172): the
+# agent proxy in a Pro/Max cloud container, GPT_SHEETS_SA_KEY_JSON on Team, the key file on the PC.
+# Getting that order or the cloud branch's headers wrong is silent - the call succeeds as the wrong
+# principal - so the picker and the header rules are gated here. Stdlib only, no network.
+
+on:
+  push:
+    paths: ['tools/google-rest*.py', '.github/workflows/google-rest-tests.yml']
+  pull_request:
+    paths: ['tools/google-rest*.py', '.github/workflows/google-rest-tests.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 tools/google-rest.test.py
