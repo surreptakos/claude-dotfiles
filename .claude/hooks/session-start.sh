@@ -21,6 +21,21 @@
 #
 # Local sessions exit immediately: ~/.claude is authored there, not delivered.
 #
+# What this hook deliberately does NOT deliver: custom agent types (`claude/agents/` in the
+# dotfiles repo). Custom agent types are a desktop-only facility and no plugin-served script
+# may pin a dotfiles-defined `agentType` for a cloud session. The reason is timing, not
+# paths: Claude Code reads the agent registry BEFORE SessionStart hooks run, so anything this
+# hook writes into ~/.claude/agents/ is invisible to the very session that ran it. Measured in
+# a real container on 2026-09-16 (issue 339, full transcript in docs/tickets/339-decision.md):
+# a control session with the agent file already on disk resolved the type; a session whose
+# SessionStart hook wrote the identical file answered "Agent type 'exp-probe' not found.
+# Available agents: claude, claude-code-guide, Explore, general-purpose, Plan,
+# statusline-setup" although the file was on disk when the run ended; a second session over
+# that same config dir resolved it. Copying claude/agents/ here would therefore buy a
+# capability that works only from the second session onward in a container - exactly the
+# "looks available and silently is not" state issue 339 was filed against. Step 6 states the
+# limitation in the additionalContext line instead.
+#
 # Every step is idempotent. gh install is skipped when present; the skills copy is a no-op
 # when the source fingerprint has not moved; hook merge de-duplicates by _source tag; the
 # marker overwrite is the whole point.
@@ -287,10 +302,17 @@ with open(marker_file, 'w') as f:
 #    names (the issue 242 body records the owner cloud session that hit that on
 #    2026-09-15; the evidence recap is at docs/tickets/242-decision.md). Naming the
 #    working spelling here removes the coin-flip for the model on prompt 1.
+#    The agent-type clause is load-bearing too (issue 339): no custom agent type is
+#    installed here, and none could be - the agent registry is read before this hook runs,
+#    so a SessionStart write to ~/.claude/agents/ is invisible to this session. A script
+#    that pins a dotfiles-defined agentType fails with "Agent type '<name>' not found",
+#    an error that names the type and not the cause; saying so here removes the guess.
 sentence = (
     f"AAC-BOOTSTRAP MARKER: payload v{version}; skills copied={copied}; gh={gh_path};"
     f" invoke skills as /<skill> (bare name) - the plugin-namespaced /aac-skills:<skill>"
-    f" form does not resolve in a bootstrapped container (issue 242)"
+    f" form does not resolve in a bootstrapped container (issue 242);"
+    f" no custom agent types here - pinning a dotfiles-defined agentType does not work in a"
+    f" cloud session, the agent registry is read before this hook runs (issue 339)"
 )
 budget = 2000 - len(sentence) - len(' skills=[]')
 names_str = ','.join(skill_names)
