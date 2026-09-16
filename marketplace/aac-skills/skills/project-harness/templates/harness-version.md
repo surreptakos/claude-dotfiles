@@ -1,9 +1,13 @@
 # Harness version
 
 <<<<<<< HEAD
+<<<<<<< HEAD
     harness-version: 20
 =======
     harness-version: 21
+>>>>>>> origin/master
+=======
+    harness-version: 22
 >>>>>>> origin/master
 
 Installed/upgraded: YYYY-MM-DD by the `project-harness` skill.

@@ -480,6 +480,25 @@ test('lane harness resolves a module-scope binding it does not model (issue 340)
   assert.deepEqual(result, { ticket: 7, out: 'ok' });
 });
 
+// Issue 360: the Report phase must commit its discovery bullets onto a branch cut from the repo
+// default branch rather than appending them into whatever branch the session sits on. Drive the
+// marked block with a mocked `agent` so the branch choice and the returned sha are behavior,
+// not prompt-text trivia. Same proxy scope as the lanes, so an unmodelled binding is inert.
+async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
+  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-REPORT');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runReport;\n}`);
+  const runReport = await wrapper(laneScope({
+    agent: agentMock,
+    cfg: Object.assign({ deliver: true, reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' }, cfgOverrides || {}),
+    runId: 'testrun',
+    scout: { defaultBranch: 'main' },
+    rules: new Proxy({}, { get: () => () => 'gh pr create' }),
+    instrument: 'gh',
+    DISCOVERY_REPORT: {},
+  }));
+  return { result: await runReport(discoveries) };
+}
+
 for (const file of RESUME_GUARD_PAIR) {
   const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
 
@@ -526,6 +545,45 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.commentUrl, null);
     assert.deepEqual(result.discoveries, []);
   });
+
+  test(`${rel} runReport commits discoveries to their own branch off the default branch`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push([opts.label, prompt]);
+      return { branch: 'agent/fleet-discoveries-wf_testrun', sha: 'abc123def456', prUrl: 'https://github.com/x/y/pull/9', appended: 2 };
+    };
+    const { result } = await driveReport(file, agentMock, ['finding-A', 'finding-B'], { deliver: true });
+    assert.deepEqual(prompts.map((p) => p[0]), ['followups-writer'], 'exactly one report writer runs');
+    const prompt = prompts[0][1];
+    assert.match(prompt, /agent\/fleet-discoveries-wf_testrun/, 'writer must be told the discoveries branch name');
+    assert.match(prompt, /origin\/main/, 'the discoveries branch must be cut from origin/<defaultBranch>');
+    assert.ok(prompt.includes('finding-A') && prompt.includes('finding-B'), 'every bullet must reach the writer verbatim');
+    assert.match(prompt, /commit/i, 'the writer must commit the bullets, not leave them uncommitted');
+    assert.deepEqual(result, {
+      branch: 'agent/fleet-discoveries-wf_testrun',
+      sha: 'abc123def456',
+      prUrl: 'https://github.com/x/y/pull/9',
+      bullets: 2,
+    }, 'the run must return branch + sha + prUrl so a triage chore can name the discovery commit');
+  });
+
+  test(`${rel} runReport opens no discoveries PR when deliver is off`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push(prompt);
+      return { branch: 'agent/fleet-discoveries-wf_testrun', sha: 'sha1', prUrl: '', appended: 1 };
+    };
+    const { result } = await driveReport(file, agentMock, ['finding-A'], { deliver: false });
+    assert.match(prompts[0], /do NOT push and do NOT open a PR/, 'deliver:false must forbid the push/PR step');
+    assert.equal(result.prUrl, null, 'no PR url when deliver is off');
+    assert.equal(result.sha, 'sha1', 'the commit still happens so the bullets have a sha to cite');
+  });
+
+  test(`${rel} runReport starts no writer when the run found nothing`, async () => {
+    const agentMock = async () => { throw new Error('report writer must not run with zero discoveries'); };
+    const { result } = await driveReport(file, agentMock, [], { deliver: true });
+    assert.equal(result, null);
+});
 
   // Issue 265: requiring `failures` made a passing verdict unexpressible. A verifier that
   // returns {pass:true, evidence} with no `failures` key must be accepted - the lane delivers

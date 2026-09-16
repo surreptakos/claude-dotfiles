@@ -29,7 +29,7 @@ export const meta = {
     { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report (aac-routines issues 192, 270)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
-    { title: 'Report', detail: 'single writer appends discoveries' },
+    { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
   ],
 }
 
@@ -311,6 +311,13 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus',
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
   commented: { type: 'boolean' }, commentUrl: { type: 'string' },
   labels: { type: 'array', items: { type: 'string' }, description: 'human lane only: the ticket labels after the hand-back relabel - ready-for-local-agent or ready-for-human present, ready-for-agent gone' },
+} }
+
+const DISCOVERY_REPORT = { type: 'object', required: ['branch', 'sha', 'prUrl', 'appended'], properties: {
+  branch: { type: 'string', description: 'the branch the discovery commit was made on' },
+  sha: { type: 'string', description: 'full sha of the discovery commit, read back after committing' },
+  prUrl: { type: 'string', description: 'URL of the discoveries-only PR; empty string when deliver is off' },
+  appended: { type: 'integer', description: 'number of bullets appended to the follow-ups file' },
 } }
 
 // ---- unusable-output helpers (aac-routines issues 191, 270) ----
@@ -1089,6 +1096,14 @@ await treeGuardCheck('pre-report', 0)
 assertNoBreach()
 
 // ---- Report: single writer, no append races ----
+// The writer used to append the bullets to the follow-ups file in the session's own checkout and
+// commit nothing, so the bullets landed on whatever branch that session was sitting on - usually
+// an unrelated ticket's PR branch. When that branch did not merge the bullets never reached the
+// default branch and the triage chore filed for them found nothing there (issue 360; the run
+// 6aa46942 / issue-120 block in FOLLOW-UPS.md is the cautionary case). The writer now cuts a
+// branch of its own from origin/<defaultBranch>, commits the bullets there, and opens a PR for
+// the discoveries alone; the run's return value carries that branch, commit sha and PR url so
+// whatever files the triage chore can name them.
 phase('Report')
 // Reconcile against the wave rather than dropping falsy results (aac-routines issue 191): a ticket
 // whose per-ticket stage produced nothing at all still belongs in `failed` with a reason.
@@ -1099,22 +1114,43 @@ const clean = wave.map((t, i) => (results || [])[i] || {
   prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
 })
 const allDiscoveries = clean.flatMap(r => r.discoveries)
-// Wrapped (aac-routines issue 270): the writer is the last agent(...) of the run, and a throw here
-// lost the whole run report - every delivered PR included - to a harness error. It is now a named
-// report entry, and the discovery strings it failed to append come back in `discoveryList` so
-// nothing has to be reconstructed from the log.
-let followupsError = null
-if (allDiscoveries.length) {
+// [FLEET-REPORT-START]
+const runReport = async (discoveries) => {
+  if (!discoveries.length) return null
+  const branch = `agent/fleet-discoveries-wf_${runId}`
+  const deliverStep = cfg.deliver
+    ? `6. git push -u origin ${branch}, then ${rules.prCreate()}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${scout.defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
+    : `6. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
+  // Wrapped (aac-routines issue 270): a writer that blows the StructuredOutput retry cap used
+  // to lose the whole run report; it is now a named error on the discovery report instead.
+  let written = null
   try {
-    await agent(
-      `Append to ${cfg.followupsFile} at repo root (create if missing; append-only, never rewrite existing entries). Add a "## Run (ticket-fleet)" heading, then one bullet per finding, each self-contained:\n- ${allDiscoveries.join('\n- ')}\nCommit nothing. Return "appended N entries".`,
-      { label: 'followups-writer', phase: 'Report', model: cfg.reportModel, effort: 'low' }
+    written = await agent(
+    `Append this ticket-fleet run's discoveries to ${cfg.followupsFile} on a branch of their own, cut from the repo default branch - never the branch this session happens to be sitting on (issue 360).
+1. git fetch origin ${scout.defaultBranch}
+2. git worktree add -b ${branch} <a fresh scratch directory> origin/${scout.defaultBranch}, and do every step below inside that worktree; leave this session's own checkout untouched.
+3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run (ticket-fleet ${runId})" heading, then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
+4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
+5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
+${deliverStep}
+Do NOT merge, do NOT commit onto ${scout.defaultBranch}, do NOT edit any other file, do NOT touch any ticket. Return structured output only.`,
+      { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: 'low' }
     )
   } catch (err) {
-    followupsError = unusableReason('followups-writer', (err && err.message) || err)
-    log(`${followupsError} - ${allDiscoveries.length} discovery string(s) were NOT appended to ${cfg.followupsFile}; they are in this report's discoveryList.`)
+    return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', (err && err.message) || err) }
+  }
+  return {
+    branch: (written && written.branch) || branch,
+    sha: (written && written.sha) || null,
+    prUrl: (written && written.prUrl) || null,
+    bullets: discoveries.length,
   }
 }
+// [FLEET-REPORT-END]
+const discoveryReport = await runReport(allDiscoveries)
+const followupsError = (discoveryReport && discoveryReport.error) || null
+if (followupsError) log(`${followupsError} - ${allDiscoveries.length} discovery string(s) were NOT committed to ${cfg.followupsFile}; they are in this report's discoveryList.`)
+else if (discoveryReport) log(`discoveries: ${discoveryReport.bullets} bullet(s) committed as ${discoveryReport.sha || 'unknown sha'} on ${discoveryReport.branch}${discoveryReport.prUrl ? ' (' + discoveryReport.prUrl + ')' : ''}`)
 
 // ---- durable run record (aac-routines issue 269) ----
 // Everything above this line lives in the harness journal, which is machine-local and dies with
@@ -1144,6 +1180,9 @@ return {
     conflictPaths: r.conflictPaths || [],
   })),
   discoveries: allDiscoveries.length,
+  // Where the bullets actually live, so a triage chore filed for them can name the commit and
+  // the reviewer can merge the discoveries PR without hunting for it (issue 360).
+  discoveryReport,
   followupsError,
   discoveryList: followupsError ? allDiscoveries : undefined,
   skippedBlocked: droppedBlocked,
