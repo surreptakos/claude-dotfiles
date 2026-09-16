@@ -101,4 +101,29 @@ function pickInstrument(env, hasGh, override) {
   return 'gh';
 }
 
-module.exports = { generateRunId, buildBranchName, workerSuffix, pickInstrument };
+/**
+ * Decide whether the fleet may pin its `fleet-verifier` subagent type.
+ *
+ * Custom agent types are a desktop-only facility (issue 339). Claude Code reads
+ * the agent registry before SessionStart hooks run, so the cloud bootstrap hook
+ * cannot register `~/.claude/agents/fleet-verifier.md` for the session that
+ * would use it - measured in a container on 2026-09-16, transcript in
+ * docs/tickets/339-decision.md. Pinning the type there fails the launch with
+ * "Agent type 'fleet-verifier' not found", which is how issue 316 surfaced.
+ *
+ * So: never pin in a remote session, and on a desktop session pin only when the
+ * agent file was actually on disk (it is authored there, before session start,
+ * so disk presence is a sound proxy for registration). The decision is keyed on
+ * remoteness, NOT on the tracker instrument - conflating the two is what made a
+ * container that picked `gh` try to launch a type it could never have.
+ *
+ * @param {boolean} remote - true in a cloud container session
+ * @param {boolean} agentFilePresent - true when ~/.claude/agents/fleet-verifier.md exists
+ * @returns {'fleet-verifier'|null} the agentType to pin, or null for none
+ */
+function pickVerifierAgent(remote, agentFilePresent) {
+  if (remote) return null;
+  return agentFilePresent ? 'fleet-verifier' : null;
+}
+
+module.exports = { generateRunId, buildBranchName, workerSuffix, pickInstrument, pickVerifierAgent };

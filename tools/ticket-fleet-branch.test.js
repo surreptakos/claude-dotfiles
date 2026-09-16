@@ -19,7 +19,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const { generateRunId, buildBranchName, workerSuffix, pickInstrument } = require('./ticket-fleet-branch.js');
+const { generateRunId, buildBranchName, workerSuffix, pickInstrument, pickVerifierAgent } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -107,6 +107,21 @@ test('pickInstrument tolerates a missing env argument', () => {
   assert.equal(pickInstrument(null, false, undefined), 'mcp');
 });
 
+// ---- pickVerifierAgent (issue 339) ----
+// A SessionStart hook's write to ~/.claude/agents/ is not visible to that session's agent
+// registry (experiment recorded in docs/tickets/339-decision.md), so a cloud session must
+// never be handed a dotfiles-defined agentType.
+
+test('pickVerifierAgent never pins a custom agent type in a remote session (issue 339)', () => {
+  assert.equal(pickVerifierAgent(true, true), null, 'a container cannot resolve a dotfiles agent even when the file is on disk');
+  assert.equal(pickVerifierAgent(true, false), null);
+});
+
+test('pickVerifierAgent pins fleet-verifier locally only when the agent file exists', () => {
+  assert.equal(pickVerifierAgent(false, true), 'fleet-verifier');
+  assert.equal(pickVerifierAgent(false, false), null);
+});
+
 // ---- Fleet-script drift guard (issue 138) ----
 // The workflow environment cannot reliably `require` from tools/, so the same
 // naming and instrument-switch shape is inlined in the plugin-served script.
@@ -170,6 +185,29 @@ test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () =>
     'fleet must sniff CLAUDE_CODE_REMOTE_SESSION_ID for the mcp branch');
   assert.match(src, /trackerRules/,
     'fleet must route tracker prompts through the instrument-specific rules');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} measures the environment instead of reading process.env (issues 322, 339)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /label: 'env-probe'/,
+    'fleet must resolve the instrument from an env-probe agent, not from a caller-passed flag');
+  assert.doesNotMatch(src, /typeof process !== 'undefined'/,
+    'fleet must not sniff process.env: the workflow runtime does not expose it (issue 322)');
+  assert.match(src, /re-run with instrument: "gh"[\s\S]*?or instrument: "mcp"/,
+    'a failed probe on instrument:auto must stop the run and name what to pass, not default to gh');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} gates the verifier agentType on remoteness, not the instrument (issue 339)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /function pickVerifierAgent/,
+    'fleet must inline pickVerifierAgent so the workflow runtime does not need require()');
+  assert.doesNotMatch(src, /agentType: instrument ===/,
+    "the agentType pin must not be keyed on the tracker instrument (issue 316's container picked gh and had no registry)");
+  const pins = src.match(/agentType: [^,}\n]+/g) || [];
+  assert.ok(pins.length > 0, 'expected at least one agentType pin in the fleet script');
+  for (const pin of pins) {
+    assert.match(pin, /verifierAgent/, `agentType pin must come from pickVerifierAgent, found: ${pin}`);
+  }
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} carries the live-tree hard-rail sentence`, () => {
@@ -239,7 +277,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules',
+    'instrument', 'rules', 'verifierAgent',
     body + '\nreturn runCodeLane;'
   );
   const cfg = { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' };
@@ -249,7 +287,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
-  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules, 'fleet-verifier');
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
 }

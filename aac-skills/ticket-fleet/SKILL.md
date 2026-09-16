@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-15T22:39:49Z"
-  previous-modified: "2026-09-15T21:36:24Z"
-  revision: "8"
-  content-sha: "2085cf664ae0"
+  modified: "2026-09-16T05:36:44Z"
+  previous-modified: "2026-09-15T22:39:49Z"
+  revision: "9"
+  content-sha: "bac929257d99"
 ---
 
 # ticket-fleet
@@ -26,6 +26,27 @@ One script, `ticket-fleet.js` alongside this SKILL.md, that serves every session
 The switch is made by `pickInstrument(env, hasGh, override)` inside the script; the pure
 counterpart lives at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
 `tools/ticket-fleet-branch.test.js`.
+
+The script does not guess which shape it is in. The first agent of every run is a cheap
+`env-probe` that reads the remote env vars, `gh` on PATH and the verifier agent file, and the
+switch resolves from what it reports - the workflow runtime does not reliably expose
+`process.env` (issue 322), and a cloud caller who has to remember `instrument: 'mcp'` is a
+workaround, not a switch (issue 339). Pass `instrument` only to override the measurement.
+
+## Custom agent types are desktop-only
+
+**Pinning a dotfiles-defined `agentType` does not work in a cloud session.** Claude Code reads
+the agent registry before `SessionStart` hooks run, so the cloud bootstrap hook cannot install
+`claude/agents/` in time for the session that would use it; the launch fails with
+`Agent type '<name>' not found`, an error that names the type and not the cause. Measured in a
+container on 2026-09-16 - control, hook-write and second-session arms - in issue 339; the
+transcript is at `docs/tickets/339-decision.md` in `claude-dotfiles`.
+
+The fleet therefore pins its `fleet-verifier` subagent (`~/.claude/agents/fleet-verifier.md`,
+issue 86) only on a desktop session that has the file on disk; `pickVerifierAgent(remote,
+agentFilePresent)` makes that call from the env probe's facts. In a cloud session the verifier
+runs unpinned and its restraint is the container sandbox plus the detached scratch worktree. No
+plugin-served script may pin a dotfiles-defined `agentType`.
 
 ## How to invoke
 
@@ -86,9 +107,11 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
   resolution comment.
 - `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to.
-- `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` returns
-  `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
-  otherwise `gh`. Pass `mcp` explicitly on a machine where `gh` is missing.
+- `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` measures
+  the session with the `env-probe` agent and returns `mcp` when
+  `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set or `gh` is
+  missing, `gh` otherwise. A cloud session needs no argument. Pass a value only to override
+  the measurement; on `auto`, a probe that returns nothing stops the run rather than guessing.
 
 ## Lanes
 
