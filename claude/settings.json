@@ -1,8 +1,142 @@
 {
   "env": {
-    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1",
+    "ANTHROPIC_BASE_URL": "http://127.0.0.1:8787/w/claude",
+    "_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL": "1",
+    "ENABLE_TOOL_SEARCH": "auto"
   },
-  "hooks": {},
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& 'C:/nvm4w/nodejs/caveman.CMD' shrink-hook",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
+            "timeout": 30,
+            "shell": "powershell"
+          }
+        ]
+      }
+    ]
+  },
   "statusLine": {
     "type": "command",
     "command": "powershell -ExecutionPolicy Bypass -File \"__USERHOME_JSON__\\.claude\\plugins\\cache\\caveman\\caveman\\0d95a81d35a9\\src\\hooks\\caveman-statusline.ps1\""
