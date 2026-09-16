@@ -3,10 +3,10 @@ name: software-decision
 description: Decide whether to adopt a new paid software tool, with the analysis scaled to the size of the decision. Use when someone proposes buying or subscribing to software ("should we get [tool]"), wants a tool evaluated, or is comparing tools — from a low-cost utility to a multi-year platform.
 argument-hint: "<tool name, or the problem a tool would solve>"
 metadata:
-  modified: "2026-08-31T21:20:12Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "41ea2298c9d4"
+  modified: "2026-09-16T04:45:28Z"
+  previous-modified: "2026-08-31T21:20:12Z"
+  revision: "2"
+  content-sha: "8fcd7f2fc514"
 ---
 
 # Software Decision

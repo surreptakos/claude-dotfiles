@@ -2,10 +2,10 @@
 name: session-start
 description: Re-print the start-of-session checks for a git project — the remote, uncommitted work, the deploy credential, tests, tickets. Use when that report has scrolled out of context, or with --refresh to re-run it after the tree has moved.
 metadata:
-  modified: "2026-09-14T21:42:38Z"
-  previous-modified: "2026-09-09T19:15:00Z"
-  revision: "2"
-  content-sha: "2d1a4c52e138"
+  modified: "2026-09-16T04:38:45Z"
+  previous-modified: "2026-09-14T21:42:38Z"
+  revision: "3"
+  content-sha: "2873bd2d1176"
 ---
 
 # Start a session

@@ -2,10 +2,10 @@
 name: aac-contract-package
 description: Create, review, or audit an Active Alarm Company (AAC) customer contract package — the Schedule of Equipment and Services, the master agreement, and the Rider for Additional Locations. Use when a rep or Sales Admin asks for a contract, schedule or paperwork for a named job or customer (a forwarded "please create contract", or a bare job folder path, counts); when a package needs rebuilding after a fact changes (price, purchase vs. financed, designation, scope); when an existing package needs reviewing, verifying, or sweeping for defects across the jobs drive; and for questions about AAC clarifications, exclusions, RMR names and prices, SOW wording, the $5,000 deposit rule, permit responsibility, or the Schedule-to-Master mapping. Prefer this over generic document generation or contract review for anything touching an AAC package, even if the words "schedule" or "package" are not used.
 metadata:
-  modified: "2026-08-31T21:20:12Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "5a18b06933f1"
+  modified: "2026-09-16T04:46:29Z"
+  previous-modified: "2026-08-31T21:20:12Z"
+  revision: "2"
+  content-sha: "99e0eba2a11d"
 ---
 
 # AAC Contract Package
