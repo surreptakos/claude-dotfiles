@@ -17,15 +17,16 @@ function runChecker(config, extra) {
   fs.mkdirSync(path.join(repo, '.git'));
   fs.mkdirSync(path.join(repo, '.claude'));
   fs.writeFileSync(path.join(repo, '.claude', 'session.json'), JSON.stringify(config));
-  // Second arg is either { setup, env } (issue 139 tests) or a bare env map (issue 171 tests).
-  const opts = extra && (extra.env || typeof extra.setup === 'function') ? extra : { env: extra };
+  // Second arg is either { setup, env, args } (issue 139 tests) or a bare env map (issue 171 tests).
+  const opts = extra && (extra.env || extra.args || typeof extra.setup === 'function')
+    ? extra : { env: extra };
   if (typeof opts.setup === 'function') opts.setup(repo);
 
   // localEnv, not process.env: the cloud markers are set for every process inside a cloud agent
   // container, and the tests below that assert the LOCAL branch have to see them unset.
   const env = localEnv(opts.env);
   try {
-    return execFileSync(process.execPath, [CHECKER], {
+    return execFileSync(process.execPath, [CHECKER, ...(opts.args || [])], {
       cwd: repo,
       encoding: 'utf8',
       env,
@@ -52,6 +53,14 @@ function makeSkillFixture(version) {
   fs.writeFileSync(path.join(skill, 'SKILL.md'),
     `---\nname: project-harness\n---\n\n**Current version: ${version}.**\n`);
   return { root: dir, skill };
+}
+
+/** A canonical harness-version marker — what the PUBLISHED project-harness offers today. */
+function makeCanonicalFixture(version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-canonical-fixture-'));
+  const file = path.join(dir, 'harness-version.md');
+  fs.writeFileSync(file, `# Harness version\n\n    harness-version: ${version}\n\n`);
+  return { root: dir, file };
 }
 
 function writeRepoStamp(repo, version) {
@@ -212,6 +221,31 @@ test('harness state: v1-implicit (no marker, build-dashboard.js present) is behi
     assert.match(output, /STOP\s*harness v1 \(no docs\/agents\/harness-version\.md; pre-marker\) is behind v17/);
   } finally {
     fs.rmSync(fx.root, { recursive: true, force: true });
+  }
+});
+
+test('harness state: --end in a cloud session on a stale payload blames the payload, not the marker', () => {
+  // Issue 412. Repo stamped v19, the project-harness copy this container loaded is v18, and the
+  // published one is v23: the old reading accused someone of editing the marker.
+  const fx = makeSkillFixture(18);
+  const canonical = makeCanonicalFixture(23);
+  try {
+    const output = runChecker({}, {
+      args: ['--end'],
+      env: {
+        CLAUDE_CODE_REMOTE_SESSION_ID: '1',
+        HARNESS_SKILL_DIR: fx.skill,
+        HARNESS_CANONICAL_FILE: canonical.file,
+      },
+      setup: (repo) => writeRepoStamp(repo, 19),
+    });
+    assert.match(output, /harness stamp says v19 but the project-harness copy here is v18, behind the published v23/);
+    assert.match(output, /the plugin payload is stale, not the marker/);
+    assert.match(output, /update-cloud-plugin/);
+    assert.doesNotMatch(output, /someone edited the marker/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+    fs.rmSync(canonical.root, { recursive: true, force: true });
   }
 });
 
