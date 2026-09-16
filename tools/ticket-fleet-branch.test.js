@@ -21,6 +21,7 @@ const { test } = require('node:test');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  applyBlockerStates,
   stableJson, stableText, stableList, priorFindingsBlock,
 } = require('./ticket-fleet-branch.js');
 
@@ -1082,3 +1083,79 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.ok(logs.some((m) => m.includes('not the instructed')), 'a self-report mismatch must be logged');
   });
 }
+
+// ---- Closed blockers are cleared in code, not by editing the body (issue 403) ----
+// The scout reports the numbers a ticket's "Blocked by" section names; the fleet reads each of
+// those issues through the tracker instrument and drops the ones the tracker calls closed. These
+// drive the block between the FLEET-BLOCKER-STATE markers with a stubbed instrument, so the
+// state comes from the reply rather than from whatever the ticket body still says.
+
+async function driveBlockerState(tickets, blockerReply, { mode = 'gh' } = {}) {
+  const body = extractBetween(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-BLOCKER-STATE');
+  const logs = [];
+  const prompts = [];
+  const agentMock = async (prompt, opts) => { prompts.push([opts.label, prompt]); return blockerReply(prompt, opts); };
+  const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'log',
+    body + '\nreturn { resolveBlockerStates, applyBlockerStates };');
+  const fns = await wrapper(agentMock, { reportModel: 'r' }, loadTrackerRules(FLEET_SCRIPT, mode), (m) => logs.push(m));
+  const resolved = await fns.resolveBlockerStates(tickets);
+  return { resolved, logs, prompts, applyBlockerStates: fns.applyBlockerStates };
+}
+
+test(`${FLEET_SCRIPT_REL} runs a ticket whose only blocker is closed, with no body edit (issue 403)`, async () => {
+  const selectWave = selectWaveFrom(FLEET_SCRIPT);
+  const ticket = { number: 305, kind: 'code', blockedBy: [199], handoffPending: false };
+  const { resolved, logs, prompts } = await driveBlockerState(
+    [ticket], async () => ({ blockers: [{ number: 199, state: 'closed' }] })
+  );
+  assert.match(prompts[0][1], /gh api repos\/\{owner\}\/\{repo\}\/issues\/N --jq \.state/,
+    'the blocker state must be read through the instrument, not inferred from the body');
+  assert.deepEqual(resolved[0].blockedBy, [],
+    'a blocker the tracker reports closed must stop gating the ticket');
+  assert.deepEqual(selectWave(resolved, 3).wave.map((t) => t.number), [305],
+    'the ticket must be eligible without anyone rewriting its "Blocked by" section');
+  assert.ok(logs.some((m) => m.includes('#305') && m.includes('#199') && m.includes('closed')),
+    'the cleared blocker must appear in the run log, naming ticket and blocker');
+});
+
+test(`${FLEET_SCRIPT_REL} still skips a ticket whose blocker is open, naming the blocker (issue 403)`, async () => {
+  const selectWave = selectWaveFrom(FLEET_SCRIPT);
+  const ticket = { number: 305, kind: 'code', blockedBy: [199], handoffPending: false };
+  const { resolved, prompts } = await driveBlockerState(
+    [ticket], async () => ({ blockers: [{ number: 199, state: 'open' }] }), { mode: 'mcp' }
+  );
+  assert.match(prompts[0][1], /mcp__github__issue_read/,
+    'the container instrument must read the blocker through the GitHub MCP tools');
+  assert.deepEqual(resolved[0].blockedBy, [199], 'an open blocker must survive the resolution');
+  const selection = selectWave(resolved, 3);
+  assert.deepEqual(selection.wave, [], 'a ticket with an open blocker must not run');
+  assert.deepEqual(selection.blocked.map((t) => ({ ticket: t.number, blockedBy: t.blockedBy })),
+    [{ ticket: 305, blockedBy: [199] }], 'the skipped ticket must carry the open blocker numbers');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const droppedBlocked = selection\.blocked\.map\(t => \(\{ ticket: t\.number, blockedBy: t\.blockedBy \}\)\)/,
+    'the run result must build skippedBlocked as entries naming the open blockers, not a count');
+  assert.match(src, /skippedBlocked: droppedBlocked/,
+    'the run result must carry those entries');
+});
+
+test('applyBlockerStates inlined in the fleet script matches tools/ticket-fleet-branch.js', async () => {
+  const { applyBlockerStates: inlined } = await driveBlockerState([], async () => ({ blockers: [] }));
+  const tickets = [
+    { number: 30, blockedBy: [199, 206] },
+    { number: 32, blockedBy: ['207'] },
+    { number: 134, blockedBy: [] },
+    { number: 135, blockedBy: [900] },
+  ];
+  const blockers = [
+    { number: 199, state: 'closed' }, { number: 206, state: 'open' },
+    { number: 207, state: 'CLOSED ' }, { number: 305, state: 'closed' },
+  ];
+  const mine = applyBlockerStates(tickets, blockers);
+  assert.deepEqual(inlined(tickets, blockers), mine, 'the two copies of the filter have drifted');
+  assert.deepEqual(mine.tickets.map((t) => t.blockedBy), [[206], [], [], [900]],
+    'only blockers the reader reported closed may be dropped; one it never reported keeps blocking');
+  assert.deepEqual(mine.cleared, [{ ticket: 30, blocker: 199 }, { ticket: 32, blocker: 207 }],
+    'every cleared (ticket, blocker) pair is reported so the run can log it');
+  assert.deepEqual(applyBlockerStates(tickets, [{ number: 900, state: 'unknown' }]).cleared, [],
+    'an unreadable blocker keeps blocking: the gate opens only on positive evidence');
+});
