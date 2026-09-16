@@ -280,10 +280,23 @@ def main():
     )
 
     fallback = Path.home() / ".agents" / "skills"
-    packaged, failures, restamped = [], [], []
+    aac_names = {p.name for p in (REPO / "aac-skills").iterdir()
+                 if (p / "SKILL.md").is_file()} if (REPO / "aac-skills").is_dir() else set()
+    packaged, failures, restamped, superseded = [], [], [], []
     for entry in sorted(src.iterdir()):
         if not entry.is_dir():
             continue  # stray files like PROVENANCE-design-skills.md
+        if entry.name in aac_names:
+            # Migration window (issue 172): a skill's hand-edited source has moved to aac-skills/
+            # while the owner's personal copy is still in ~/.claude/skills, and so in the claude/
+            # mirror -- which is generated and which no branch may hand-edit. The team tree wins:
+            # it is the copy this repo can actually revise, so it is the one that ships, and the
+            # aac-skills loop below packages it. This used to be a hard failure ("name collides
+            # with a personal skill"), which made the move impossible to land in one commit: the
+            # branch could not delete the mirror and could not keep it either. The window closes
+            # when the owner deletes ~/.claude/skills/<name> and runs sync.ps1 -Mode push.
+            superseded.append(entry.name)
+            continue
         skill_md = entry / "SKILL.md"
         if not skill_md.is_file():
             # dead junction: the live dir reads empty but the junction target has content
@@ -441,6 +454,9 @@ def main():
             print(f"  {name}: {', '.join(moved)}")
     print(f"local paths retargeted at the plugin in {len(retargeted)} skills"
           + (f": {', '.join(retargeted)}" if retargeted else ""))
+    if superseded:
+        print("personal copy superseded by the aac-skills/ source (delete ~/.claude/skills/<name> "
+              "and push to close the window): " + ", ".join(superseded))
     print(f"stamps rotated in {len(restamped)} skills"
           + ("" if stamp_write else " (not written back: --no-stamp-write)"))
     for name, stamp in restamped:

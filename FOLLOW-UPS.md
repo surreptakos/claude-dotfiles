@@ -283,3 +283,373 @@ drift. Its `## Blocked by` says "None. Can start immediately." and the PR #372 o
 - **W11-03** "The mirror step carries `if: ${{ !cancelled() }}` so it still reports when the aac-skills step already failed…" — No action: an implementation record for #386, and a deliberate addition PR #388 describes; a both-trees-drifted branch reporting both trees in one run is strictly better than the literal wording.
 - **W11-04** "Pre-existing, not fixed: FOLLOW-UPS.md line 126 is stale…" — No action, and **verified**: `agents/skills/to-issues/SKILL.md` and `agents/skills/to-prd/SKILL.md` both carry rev 1 stamps dated `2026-09-14T13:48:41Z`, and `python3 tools/skill-stamps.py check agents/skills --home 'C:\Users\Dan'` exits 0 over all 38 mirror skills on master today. Line 126 stays as written: this file is a dated append-only log of what each agent found when it looked, not a set of live claims, and #376 is the open ticket on what to do about that.
 - **W11-05** "Committed with `git commit --no-verify`: .githooks/pre-commit runs tests/restore-test.ps1…" — No action: already #211 / #213. The same constraint applied to this commit.
+- Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
+
+## Triage: run 6aa9c56e discoveries, waves 8 and 9 (issue 385)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 8 and 9 has a disposition
+below. As with waves 2/3, 4/5 and 6/7, the bullets are not on master: they were committed to the run's
+own branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `508a77f` "chore: fleet discoveries from
+run 6aa9c56e wave 8" (6 bullets) and `abcc62b` "…wave 9" (14). Read them with
+`git show 508a77f -- FOLLOW-UPS.md` and `git show abcc62b -- FOLLOW-UPS.md`; the W8-nn / W9-nn
+numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
+fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
+symbol or failure as an open ticket became a comment on that ticket, not a second ticket, and every
+open fleet PR from #304 to #384 was checked first.
+
+**The set has all but converged.** This pass filed **one** ticket — #386 — where the waves 6/7 pass
+filed seven and the waves 4/5 pass filed three. Waves 8 and 9 were the run's tail: wave 8 is the
+waves 6/7 triage chore reporting on itself, and wave 9 is three implementers (#374, #375, #380)
+recording their own scope, so 10 of the 20 bullets are assumption or implementation records that name
+no defect, and 9 attach to a ticket that is already open with a PR against it. The next session need
+not file a fifth discovery-triage chore for run `6aa9c56e`: waves 2 through 9 are now fully
+dispositioned, and beyond its open PRs the only thing the run still owes master is #378, the rescue
+of its own discovery commits.
+
+Ticket filed: #386 (`skill-stamps.yml` checks only `aac-skills`, so an unstamped `agents/skills`
+mirror fails under a misleading name — the check-step twin of #380's comment-text fix).
+
+Comments added: [#285](https://github.com/surreptakos/claude-dotfiles/issues/285#issuecomment-5694757223),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5694749396),
+[#336](https://github.com/surreptakos/claude-dotfiles/issues/336#issuecomment-5694754301),
+[#365](https://github.com/surreptakos/claude-dotfiles/issues/365#issuecomment-5694752015),
+[#374](https://github.com/surreptakos/claude-dotfiles/issues/374#issuecomment-5694741679),
+[#375](https://github.com/surreptakos/claude-dotfiles/issues/375#issuecomment-5694732518),
+[#378](https://github.com/surreptakos/claude-dotfiles/issues/378#issuecomment-5694738758).
+
+Nothing was fixed outside a ticket in this pass; the waves 6/7 pass's one such write (#322's native
+dependency edge) is still in place and the audit still reports no `ungated-dependency` finding.
+`node tools/tracker-audit.js` reaches a verdict and exits 0 with 0 drift findings, plus the one
+pre-existing `stale-premise?` advisory on #358 — so #386 introduced no drift either. Its first draft
+did: an `## Blocked by` list naming #380 without a native edge raised an `ungated-dependency` finding,
+and since the relation is a merge-order preference rather than a real block, the body now says "None.
+Can start immediately." and carries the ordering note in "What to build" instead.
+
+### Wave 8 (`508a77f`, 6 bullets)
+
+- **W8-01** "The ticket's phrase "the last two `## Run (ticket-fleet)` headings of FOLLOW-UPS.md" does not resolve on master…" — No action: the same assumption W6-01 records, taken the same way here for waves 8/9. The defect behind it is #360 (PR #368, forward-only) and the rescue is #378.
+- **W8-02** "In this container every GraphQL-backed gh subcommand is refused with HTTP 403…" — Comment on #375 (a refused `gh` *subcommand* class belongs on the same list as the refused shell shapes; `gh issue create` stalls a cloud agent, `gh api --method POST …/issues` with `-F body=@<file>` is the spelling that works).
+- **W8-03** "The Bash worktree-isolation guard refused a `;`-joined pair of `gh api` calls…" — No action: already #375 (PR #382). The second-session confirmation is recorded on that ticket alongside W9-07's correction to it.
+- **W8-04** "Out-of-ticket tracker write made deliberately: bullets W6-02 and W7-11 both named the single `ungated-dependency` finding…" — No action: the write is already recorded on #322's waves 6/7 comment, and `tracker-audit` has reported no `ungated-dependency` finding since.
+- **W8-05** "Issue 373's convergence question, answered in the ledger…" — No action: it is the waves 6/7 ledger's own convergence note. This ledger answers the same question for waves 8 and 9 above.
+- **W8-06** "The run's own bullets are still unreachable from master: 169 of them across six commits…" — Comment on #378: the count is now 189 bullets across eight commits (`508a77f` and `abcc62b` too), plus `d56864f`, and a fourth ledger — this one — keys its dispositions to those shas.
+
+### Wave 9 (`abcc62b`, 14 bullets)
+
+- **W9-01** "Branch base: issue 374's second acceptance criterion narrows `deleted-subject?`, a check that does NOT exist on origin/master…" — Comment on #374 (PR #369 merges before PR #384, or #384 drags #361's unreviewed check in with it).
+- **W9-02** "Live-tree copies of the project-harness skill … are out of reach from a cloud session…" — Comment on #335 (a fifth row for that ticket's revert table; `templates/tracker-audit.js` would lose two ports, not one, if a push ran first).
+- **W9-03** "Harness marker bumped to v21 (docs/agents/harness-version.md, …)…" — Comment on #365: the eight harnessed repos are now pre-v21, so the re-copy should land v21 in one pass, and check 5 is the noisiest hunk to expect while diffing.
+- **W9-04** "Ambiguity resolved one way, stated here: the ticket says deleted-subject? should 'skip an acceptance box whose text quotes another issue number'…" — Comment on #374, in the same comment as W9-01: a verifier reading that criterion literally should expect `deleted-subject?` to go 3 → 2, not 3 → 1, because a PR citation is not an issue quotation and #173 still reports.
+- **W9-05** "Pre-existing, untouched: agents/skills/project-harness/templates/tracker-audit.js carries the doc comment for isFollowUpAcknowledgment twice…" — Comment on #336 (evidence for the *generated* branch of that ticket's fork: a generator cannot produce a duplicated comment block, a hand-port can).
+- **W9-06** "Pre-existing, untouched: on a live run the stale-premise? check reports nothing on this repo even before the narrowing…" — Comment on #285: the closer-PR fetch swallows failure the same way the comments fetch does, and its silent failure adds three false positives rather than hiding one finding.
+- **W9-07** "Confirmed empirically in this worktree that the guard is shape-sensitive, not command-sensitive…" — Comment on #375: three of the four shapes that ticket names ran fine in a second session, so the SKILL.md section should be framed as "shapes that may be refused, and the spelling that never is".
+- **W9-08** "`orchestrator/worker-cycle.md` is RETIRED (issue 217) and is a pointer-only file…" — No action: implementation record for #375's second criterion; it names no defect.
+- **W9-09** "`tools/build-cloud-plugin.py` derives the plugin version from wall-clock time…" — No action: already W3-24, W4-26 and FOLLOW-UPS.md:230. It is how the packager is designed, and CI diffs only the skills tree and `hooks.json`.
+- **W9-10** "tests/restore-test.ps1 (CLAUDE.md's stated gate and the .githooks/pre-commit hook) could not run…" — No action: already #211/#213.
+- **W9-11** "CI coverage gap (not fixed, out of the ticket's acceptance criteria): .github/workflows/skill-stamps.yml only runs `python3 tools/skill-stamps.py check aac-skills`…" — **#386**. Not a duplicate of #380: that ticket fixes the workflow's fix-it *comment*, this one the *check step* the comment describes. Confirmed on master that `check agents/skills` exits 0 over all 38 mirror skills, so the new step is green the day it lands.
+- **W9-12** "Ambiguity resolved (assumption stated): I read "occurrence of the fix-it commands" as every place in the repo that prints the `skill-stamps.py stamp ...` command…" — No action: implementation record for #380, and the reading its second acceptance criterion supports.
+- **W9-13** "FOLLOW-UPS.md line 121 mentions `python3 tools/skill-stamps.py stamp <mirror-path>`…" — No action: a historical follow-up record with a generic placeholder, not an instruction anyone copies; #380's criterion is about instructions to copy.
+- **W9-14** "agents/skills/session-check/check.js line 617 (and its marketplace copy) prints `rebuild the plugin: …`…" — No action: a different stamp system (`docs/agents/harness-version.md`), and it names no `skill-stamps.py stamp` command to widen.
+- Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
+
+## Triage: run 6aa9c56e discoveries, waves 6 and 7 (issue 373)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 6 and 7 has a disposition
+below. As with waves 2/3 and 4/5, the bullets are not on master: they were committed to the run's own
+branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `9e09671` "chore: fleet discoveries from run
+6aa9c56e wave 6" (7 bullets) and `989612a` "…wave 7" (26). Read them with
+`git show 9e09671 -- FOLLOW-UPS.md` and `git show 989612a -- FOLLOW-UPS.md`; the W6-nn / W7-nn
+numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
+fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
+symbol or failure as an open ticket became a comment on that ticket, not a second ticket, and every
+open fleet PR from #304 to #372 was checked first.
+
+**The set has not converged.** Issue 373 asked for a note if this pass filed fewer than three tickets;
+it filed seven. Waves 6 and 7 were the fleet's own meta-waves — the triage chore and the five
+tracker/stamp/settings tickets — so their bullets are mostly *new* ground rather than restatements,
+and three of the seven (#376, #377, #378) exist because the discovery pipeline itself is still
+mid-repair. The cycle should keep going.
+
+Tickets filed: #374 (`stale-premise?` and `deleted-subject?` fire on meta-tickets that quote another
+ticket on purpose), #375 (fleet runbooks teach shell shapes the worktree-isolation guard refuses),
+#376 (decide whether triaged `FOLLOW-UPS.md` run sections are pruned or archived), #377 (fleet
+automation filters on `agent/issue-*`, so the new `agent/fleet-discoveries-*` branch is skipped; gated
+on #360 by a native dependency edge), #378 (rescue the six stranded run `6aa9c56e` discovery commits
+onto master), #379 (`sync.ps1 -Mode pull` dies in `Restore-SkillLinks` with no
+`claude/skill-links.json`), #380 (`skill-stamps.yml`'s fix-it comment omits `agents/skills`).
+
+Comments added: [#120](https://github.com/surreptakos/claude-dotfiles/issues/120#issuecomment-5694268457),
+[#173](https://github.com/surreptakos/claude-dotfiles/issues/173#issuecomment-5694272008),
+[#322](https://github.com/surreptakos/claude-dotfiles/issues/322#issuecomment-5694274357),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5694269713),
+[#336](https://github.com/surreptakos/claude-dotfiles/issues/336#issuecomment-5694279621),
+[#345](https://github.com/surreptakos/claude-dotfiles/issues/345#issuecomment-5694273429),
+[#360](https://github.com/surreptakos/claude-dotfiles/issues/360#issuecomment-5694267200),
+[#362](https://github.com/surreptakos/claude-dotfiles/issues/362#issuecomment-5694275541),
+[#363](https://github.com/surreptakos/claude-dotfiles/issues/363#issuecomment-5694276969),
+[#364](https://github.com/surreptakos/claude-dotfiles/issues/364#issuecomment-5694278176),
+[#365](https://github.com/surreptakos/claude-dotfiles/issues/365#issuecomment-5694270623).
+
+Fixed in this pass: the `ungated-dependency` finding W6-02 and W7-11 both name — #322's prose "blocked
+by #316" now carries the native dependency edge (`POST /issues/322/dependencies/blocked_by`), which
+was the one-command fix `tracker-audit` itself printed and nobody's ticket.
+
+### Wave 6 (`9e09671`, 7 bullets)
+
+- **W6-01** "Assumption taken on the ticket's wording: 'the last two `## Run (ticket-fleet)` headings' does not resolve on master…" — No action: the ambiguity is #358's, resolved the same way here (bullets keyed by commit + position); the underlying defect is #360.
+- **W6-02** "Pre-existing tracker drift, untouched: `node tools/tracker-audit.js` exits 1 because issue #322's body says 'blocked by #316'…" — Fixed in this pass: the native dependency edge was added, and the audit no longer reports it. Noted on the #322 comment.
+- **W6-03** "The audit raises a `stale-premise?` advisory against issue #358 itself…" — #374.
+- **W6-04** "From a cloud container the ProjectsV2 GraphQL endpoint is unavailable…" — Comment on #345 (a second desktop-only check for the host predicate that ticket adds; in a container the honest predicate is "reaches a verdict", not "clean").
+- **W6-05** "gh REST through the session proxy handled every tracker write this task needed…" — Comment on #322.
+- **W6-06** "The Bash tool's worktree-isolation guard refuses several ordinary shell shapes…" — #375.
+- **W6-07** "FOLLOW-UPS.md is append-only by convention and nothing trims or indexes it…" — #376.
+
+### Wave 7 (`989612a`, 26 bullets)
+
+- **W7-01** "ASSUMPTION (issue 360 ambiguity): the ticket offers two alternative fixes and I implemented the first…" — Comment on #360 (the chore-naming half lives outside this repo and still needs that surface edited).
+- **W7-02** "The discoveries branch is named `agent/fleet-discoveries-wf_<runId>`, which deliberately does NOT match `agent/issue-*`…" — #377.
+- **W7-03** "Run 6aa9c56e's own 136 discovery bullets are still stranded…" — #378.
+- **W7-04** "The FOLLOW-UPS.md annotation is an in-place insertion into an existing block…" — Comment on #360; the general question (is append-only absolute?) is #376.
+- **W7-05** "The four commits cited by the issue-120 block are confirmed absent from this repository's object store…" — Comment on #120.
+- **W7-06** "Live-tree rail: `project-harness` has no `aac-skills/` source…" — Comment on #335 (one more mirror edit that the next `sync.ps1 -Mode push` would revert).
+- **W7-07** "Ambiguity resolved one way: the check reads only UNTICKED acceptance boxes." — No action: implementation record for #361, and the reading its own framing supports.
+- **W7-08** "The harness version marker was bumped 19 -> 20…" — Comment on #365 (the bump rides #361's PR #369 and has not merged; master still reads `harness-version: 19`, so the eight-repo sweep must wait or run twice).
+- **W7-09** "The new check found live tracker drift it was not written for: #173's acceptance box…" — Comment on #173.
+- **W7-10** "Issue #361 itself now trips the advisory…" — #374.
+- **W7-11** "Pre-existing and untouched: `node tools/tracker-audit.js` … already reported one hard `ungated-dependency` finding…" — Fixed in this pass, with W6-02.
+- **W7-12** "The `.githooks/pre-commit` restore test could not run in this container…" — No action: already #211/#213.
+- **W7-13** "Verification gap on the PowerShell half…" — Comment on #362 (what the Python port proved and what still needs one Windows run).
+- **W7-14** "Ambiguity resolved one way: 'sync.ps1 reports failure' is implemented as fail-fast…" — Comment on #362.
+- **W7-15** "Pre-existing bug, not fixed (already FOLLOW-UPS.md line 39): `Restore-SkillLinks` dies under `Set-StrictMode`…" — #379.
+- **W7-16** "`tools/settings-invariants.ps1` still throws (exit 1) for a defaultMode whose value is not a simple string literal…" — Comment on #362.
+- **W7-17** "The rewritten branch also now handles an EMPTY `"permissions": {}` block…" — Comment on #362 (verified in the Python port only, not pinned by a test).
+- **W7-18** "Issue 363's stated mechanism does not reproduce against the code at HEAD (5142654)…" — Comment on #363.
+- **W7-19** "Side effect of the HEAD-baseline rotation, deliberate but worth knowing…" — Comment on #363.
+- **W7-20** "Doc drift, not touched: `.github/workflows/skill-stamps.yml`'s header comment…" — #380.
+- **W7-21** "`tools/build-cloud-plugin.py` writes its scratch payload to `<repo>/dist` on every run…" — No action: `dist/` is covered by `.gitignore`, the packager's own contract, and `--out` is the documented way to keep the root clean; nothing breaks.
+- **W7-22** "Issue 364's cited evidence no longer reproduces on the live tracker…" — Comment on #364 (AC4 now holds vacuously; the unit-level before/after table is the evidence to read).
+- **W7-23** "Residual false positive the fix deliberately does not cover…" — Comment on #364: same symptom as that ticket, so the section-end-marker fix belongs to whoever finishes it rather than to a second ticket.
+- **W7-24** "The three copies of `tracker-audit.js` have drifted far apart…" — Comment on #336 (the drift survey, plus the two queued changes that name it as their parity dependency).
+- **W7-25** "The pre-commit gate (`.githooks/pre-commit` -> `tests/restore-test.ps1`) cannot run in this Linux container…" — No action: already #211/#213, with W7-12.
+- **W7-26** "`gh api repos/surreptakos/claude-dotfiles/...` returned HTTP 403 … on first use in this session and then worked minutes later…" — Comment on #322 (retry gh, or fall back to the MCP tools, before concluding a repo is unreachable).
+- Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
+
+## Triage: run 6aa9c56e discoveries, waves 4 and 5 (issue 358)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 4 and 5 has a disposition
+below. As with waves 2 and 3, the bullets are not on master: they were committed to the run's own
+branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `b2ce4cd` "chore: fleet discoveries from run
+6aa9c56e wave 4" (26 bullets) and `d0b97b5` "…wave 5" (39 bullets). Read them with
+`git show b2ce4cd -- FOLLOW-UPS.md` and `git show d0b97b5 -- FOLLOW-UPS.md`; the W4-nn / W5-nn
+numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
+fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
+symbol or failure as an open ticket became a comment on that ticket, not a second ticket.
+
+Tickets filed: #359 (desktop lands the six staged personal-skill rewrites from #120), #360 (fleet
+discoveries are appended to the run branch, so the triage chore finds nothing on master), #361
+(tracker-audit misses an acceptance box whose subject was deleted), #362 (settings-invariants'
+`settings.json` half throws, and `sync.ps1` ignores its exit code), #363 (skill stamps rotate twice
+under the documented two-command flow), #364 (`proseBlockers` reads a footer after `## Blocked by` as
+a blocker), #365 (harnessed repos: the v20 tracker-audit re-copy renames four exports), #366 (the
+saved Todoist Triage filter is narrower than the widened run).
+
+Comments added: [#120](https://github.com/surreptakos/claude-dotfiles/issues/120#issuecomment-5693305446),
+[#214](https://github.com/surreptakos/claude-dotfiles/issues/214#issuecomment-5693315342),
+[#291](https://github.com/surreptakos/claude-dotfiles/issues/291#issuecomment-5693311379),
+[#292](https://github.com/surreptakos/claude-dotfiles/issues/292#issuecomment-5693309144),
+[#300](https://github.com/surreptakos/claude-dotfiles/issues/300#issuecomment-5693318240),
+[#302](https://github.com/surreptakos/claude-dotfiles/issues/302#issuecomment-5693306227),
+[#317](https://github.com/surreptakos/claude-dotfiles/issues/317#issuecomment-5693307030),
+[#320](https://github.com/surreptakos/claude-dotfiles/issues/320#issuecomment-5693308376),
+[#322](https://github.com/surreptakos/claude-dotfiles/issues/322#issuecomment-5693317547),
+[#323](https://github.com/surreptakos/claude-dotfiles/issues/323#issuecomment-5693309875),
+[#333](https://github.com/surreptakos/claude-dotfiles/issues/333#issuecomment-5693310631),
+[#334](https://github.com/surreptakos/claude-dotfiles/issues/334#issuecomment-5693313892),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5693312071),
+[#336](https://github.com/surreptakos/claude-dotfiles/issues/336#issuecomment-5693314627),
+[#337](https://github.com/surreptakos/claude-dotfiles/issues/337#issuecomment-5693316127),
+[#339](https://github.com/surreptakos/claude-dotfiles/issues/339#issuecomment-5693316848),
+[#340](https://github.com/surreptakos/claude-dotfiles/issues/340#issuecomment-5693307703),
+[#345](https://github.com/surreptakos/claude-dotfiles/issues/345#issuecomment-5693318927),
+[#346](https://github.com/surreptakos/claude-dotfiles/issues/346#issuecomment-5693319740),
+[#347](https://github.com/surreptakos/claude-dotfiles/issues/347#issuecomment-5693320464).
+
+### Wave 4 (`b2ce4cd`, 26 bullets)
+
+- **W4-01** "Issue 120's `writing` acceptance box has no skill behind it…" — Comment on #120 (the box names a skill #178 deleted; only the owner can strike, retarget or close it).
+- **W4-02** "Six of the fifteen skills … are real directories in ~/.claude/skills whose only repo copy is the generated mirror…" — #359.
+- **W4-03** "ASSUMPTION: read the ticket's 'reference material that only some runs need disclosed behind a pointer'…" — No action: implementation record for #120 (the project-harness upgrade table moved to a sibling `UPGRADES.md`; `harness-version.js`'s regex target stayed in `SKILL.md`).
+- **W4-04** "tests/restore-test.ps1 cannot run in this container: no pwsh on PATH…" — No action: already #211/#213.
+- **W4-05** "The cloud-plugin sweep 'reports current after the last push' criterion is a post-push state…" — No action: the sweep stamps itself on the next desktop push; the payload in the branch is reproducible and CI's diff check passes.
+- **W4-06** "FOLLOW-UPS.md on master already carries a discovery block from an earlier issue-120 attempt claiming all 15 skills passed…" — #360.
+- **W4-07** "aac-skills/writing was deleted in 518e63a but the 'writing' box in issue 120's body was never updated…" — #361.
+- **W4-08** "Implemented the FIRST branch of AC2 (targeted insertion), not the second…" — Comment on #302.
+- **W4-09** "Nothing written in PowerShell on this branch could be EXECUTED here…" — Comment on #302 (the Python port and its 8 fixtures, so the Windows runner knows what was already proven).
+- **W4-10** "tools/settings-invariants.ps1's settings.json half (Set-SettingsInvariant) still throws…" — #362.
+- **W4-11** "Behaviour narrowing worth knowing: the -Trust path now locates an EXISTING record by text search…" — Comment on #302.
+- **W4-12** "sync.ps1 invokes tools/settings-invariants.ps1 via `& powershell @args_ | ForEach-Object …` and never reads $LASTEXITCODE…" — #362.
+- **W4-13** "Stamp lineage drifts under the documented two-command flow in CLAUDE.md…" — #363.
+- **W4-14** "Assumption taken where issue 317 is silent: `priorImpl` / `priorProbe` entries are keyed by ticket number…" — Comment on #317.
+- **W4-15** "The probe lane's delivery stage read `probe.blocked.length` unguarded…" — Comment on #317.
+- **W4-16** "`testCommand` is now a free binding referenced inside the FLEET-CODE-LANE marker block…" — Comment on #340 (this is that ticket, from the producing side).
+- **W4-17** "Issue 320's '84 bullets' is a diff-line count, not a bullet count…" — Comment on #320.
+- **W4-18** "The wave-2 and wave-3 discovery commits are NOT on master…" — #360.
+- **W4-19** "The Edit tool silently stripped the single CR byte on FOLLOW-UPS.md line 234…" — Comment on #292 (the byte-pinned-file guard ticket; same hazard as W3-16, now for the Edit tool).
+- **W4-20** "`tools/tracker-audit.js`'s `proseBlockers()` matches the `## Blocked by` section to the END of the body…" — #364.
+- **W4-21** "`gh issue view`, `gh issue list` and every other gh path that routes through GitHub GraphQL returns HTTP 403…" — Comment on #322 (corroborating W2-16; already carried on #212 too).
+- **W4-22** "Issue 323's body quotes run_ledger flags that the shipped CLI does not accept…" — Comment on #323.
+- **W4-23** "Issue 323 says the drop-in paragraphs are quoted in aac-routines docs/runbooks/run-ledger.md…" — Comment on #323.
+- **W4-24** "The skill's step 6 vocabulary rule … now sits next to shell commands and JSON field names…" — Comment on #323.
+- **W4-25** "The skill names the aac-routines checkout only as 'the `Meta/aac-routines` project'…" — Comment on #323.
+- **W4-26** "tools/build-cloud-plugin.py stamps a fresh timestamp version into .claude-plugin/marketplace.json…" — No action: already recorded at wave-3 bullet W3-24 and at FOLLOW-UPS.md:230; it is how the packager is designed, and CI diffs only the skills tree and `hooks.json`.
+
+### Wave 5 (`d0b97b5`, 39 bullets)
+
+- **W5-01** "Cross-repo work this worktree cannot do … surreptakos/aac-routines `.claude/workflows/ticket-fleet.js` is a pre-contract fork…" — Comment on #333 (the refresh itself is a commit in aac-routines, per this ticket's cross-repo rule).
+- **W5-02** "surreptakos/aac-cockpit is not reachable from this session at all…" — Comment on #333.
+- **W5-03** "The behaviors behind the two new SCOUT fields live on unmerged sibling branches…" — Comment on #346 (merge-order note for PRs #325 and #329).
+- **W5-04** "`invocationId` and its splice into the open-PR guard's prompt and label were ported verbatim from PR #312…" — Comment on #291.
+- **W5-05** "`agents/skills/project-harness/SKILL.md` is the repo mirror … the live tree still tells a session to pass `args.runId` alone." — Comment on #335.
+- **W5-06** "The generated `memory/` mirror still describes the v1 launch…" — Comment on #335.
+- **W5-07** "Assumption recorded for issue 334: the ticket names `~/.claude/projects/*/tool-results/*.txt`, but the exclusion I shipped is the whole subtree…" — Comment on #334.
+- **W5-08** "Pre-existing, not fixed (out of scope for issue 334): the verifier's live-tree sweep runs `find ~/.claude ~/.codex ~/.agents`…" — Comment on #334.
+- **W5-09** "The `duplicate-title?` advisory that issue 336's AC treats as already living in tools/tracker-audit.js was NOT on origin/master…" — Comment on #336.
+- **W5-10** "The pre-v20 harness template exported DIFFERENT names and a different return shape…" — #365.
+- **W5-11** "`agents/skills/project-harness/templates/tracker-audit.js` lives inside the generated `agents/` mirror…" — Comment on #335 (the pull half) and #336 (teaching the packager to run the generator).
+- **W5-12** "Bumping the harness marker to 20 records that older installs are behind; it does not propagate anything…" — #365.
+- **W5-13** "Hard-rail consequence … tools/claude-md-lint.js is now ahead of its generated copies…" — Comment on #335.
+- **W5-14** "The byte-identity test in tools/claude-md-lint.test.js made tools/claude-md-lint.js effectively uneditable…" — Comment on #214 (the durable fix is that ticket's mirror retirement; the `MIRROR_REVISION` escape hatch retires with it).
+- **W5-15** "tests/restore-test.ps1 still carries its own copies of the warn-only lists…" — Comment on #337.
+- **W5-16** "Ambiguity resolved: the ticket offered a flag, a per-file default or a config block…" — Comment on #337.
+- **W5-17** "Adding the new sentence to the linter bullet in the root CLAUDE.md pushed that bullet's wrapped continuation block to 124 words…" — Comment on #337.
+- **W5-18** "Issue 339's acceptance criterion 2 is disjunctive and I took route 2…" — Comment on #339.
+- **W5-19** "The container this ran in already had ~/.claude/agents/fleet-verifier.md on disk…" — Comment on #339.
+- **W5-20** "FOLLOW-UPS.md line 128 records the now-settled discovery 'The Workflow runtime's exact policy on `process` is unverified…'" — No action: this file is append-only by convention, and this line is the annotation — the entry at line 128 is superseded by #346's script, which no longer reads `process.env`.
+- **W5-21** "The env-probe adds one extra (Haiku-tier, effort:low) agent call to every fleet run…" — Comment on #322.
+- **W5-22** "Running the experiment needed a nested `claude -p` in this container…" — Comment on #334 (the session artefacts the sweep lists; `~/.claude/sessions/`, `policy-limits.json` and `remote-settings.json` sit outside the exclusion shipped there).
+- **W5-23** "`gh api --method POST .../issues/339/comments` was refused by the auto-mode classifier…" — Comment on #322.
+- **W5-24** "Implemented the ticket's preferred option (derive bindings from the body, no test edit needed…)" — Comment on #340.
+- **W5-25** "Non-obvious trap … the scope Proxy's `get` trap must return undefined for symbol keys." — Comment on #340.
+- **W5-26** "Consequence of the permissive fallback, accepted deliberately…" — Comment on #340.
+- **W5-27** "Pre-existing test failures, not caused by this change: agents/skills/session-check/check.test.js tests 5 and 17…" — Comment on #300.
+- **W5-28** "Nothing on Linux runs `agents/skills/session-check/check.test.js`…" — Comment on #300 (which already is "nothing runs it"; the env fix from W5-27 has to ride the same change or CI goes red on arrival).
+- **W5-29** "The live source of session-check is `~/.claude/skills/session-check/`…" — Comment on #335.
+- **W5-30** "Ambiguity I resolved toward the literal wording of the ticket ('skips a check whose host does not match')…" — Comment on #345.
+- **W5-31** "Fourth acceptance criterion … is in a different repository…" — No action here: cross-repo, filed from aac-routines; the consumer-side shape it needs is recorded on #345.
+- **W5-32** "Portability assumption I had to make and built for: `tools/orchestrator-tree-guard.js` ships in surreptakos/aac-routines only…" — Comment on #346.
+- **W5-33** "The other three repos served by the orchestrator Routines … have neither tool…" — Comment on #346.
+- **W5-34** "The tree-guard checkpoints ported from aac-routines cover the code lane only…" — Comment on #346.
+- **W5-35** "`aac-skills/ticket-fleet/ticket-fleet.js` now runs one extra cheap agent … on every invocation…" — Comment on #346.
+- **W5-36** "Ambiguity resolved: `config/task-capture.json` and its `inbox_project_id` key do not exist anywhere in claude-dotfiles…" — Comment on #347.
+- **W5-37** "Out of scope, left alone: the 'Filters (exist in Todoist, favorited)' section … still documents the Triage queue filter as 'both projects'…" — #366 (gated on #347 by a native dependency edge).
+- **W5-38** "Cross-repo coupling worth a check at delivery: this skill now asserts that the aac-routines router is the only thing that moves an item out of the Inbox…" — Comment on #347.
+- **W5-39** "tools/build-cloud-plugin.py writes dist/aac-skills.zip (3089 KB) as a side effect of `--from-mirror`…" — No action: gitignored and deliberate; recorded here so a disk-constrained CI runner knows the rebuild materializes a 3 MB zip.
+## Triage: run 6aa9c56e discoveries, waves 2 and 3 (issue 320)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 2 and 3 has a disposition
+below. The bullets themselves are not on master: they were committed to the run's own branch
+`claude/affectionate-maxwell-gqp5vw` (PR #276) as `5160c68` "chore: fleet discoveries from run
+6aa9c56e" (wave 2, 30 bullets) and `f0e8a5d` "…wave 3" (wave 3, 41 bullets). Read them with
+`git show 5160c68 -- FOLLOW-UPS.md` and `git show f0e8a5d -- FOLLOW-UPS.md`; the W2-nn / W3-nn
+numbering below is their order in those two commits, and the quoted fragment is each bullet's
+opening words. Filing followed #319: a finding touching the same file, symbol or failure as an open
+ticket became a comment on that ticket, not a second one.
+
+Tickets filed: #333 (fleet forks and runbooks go stale on an arg change), #334 (verifier sweep reads
+harness `tool-results` as a breach), #335 (desktop `sync.ps1 -Mode pull` before the next push), #336
+(project-harness template `tracker-audit.js` drift), #337 (`claude-md-lint` exit code on warn-only
+findings), #338 (`codex/AGENTS.md` cloud-proxy caveat), #339 (no cloud session has a custom agent
+type), #340 (`ticket-fleet-branch.test.js` free-binding list).
+
+Comments added: [#172](https://github.com/surreptakos/claude-dotfiles/issues/172#issuecomment-5691812190),
+[#177](https://github.com/surreptakos/claude-dotfiles/issues/177#issuecomment-5691812282),
+[#212](https://github.com/surreptakos/claude-dotfiles/issues/212#issuecomment-5691812080),
+[#271](https://github.com/surreptakos/claude-dotfiles/issues/271#issuecomment-5691811779),
+[#275](https://github.com/surreptakos/claude-dotfiles/issues/275#issuecomment-5691811534),
+[#284](https://github.com/surreptakos/claude-dotfiles/issues/284#issuecomment-5691812564),
+[#285](https://github.com/surreptakos/claude-dotfiles/issues/285#issuecomment-5691811440),
+[#292](https://github.com/surreptakos/claude-dotfiles/issues/292#issuecomment-5691812379),
+[#299](https://github.com/surreptakos/claude-dotfiles/issues/299#issuecomment-5691812674),
+[#300](https://github.com/surreptakos/claude-dotfiles/issues/300#issuecomment-5691812771),
+[#301](https://github.com/surreptakos/claude-dotfiles/issues/301#issuecomment-5691812474),
+[#316](https://github.com/surreptakos/claude-dotfiles/issues/316#issuecomment-5691880284),
+[#317](https://github.com/surreptakos/claude-dotfiles/issues/317#issuecomment-5691811977),
+[#318](https://github.com/surreptakos/claude-dotfiles/issues/318#issuecomment-5691812831),
+[#322](https://github.com/surreptakos/claude-dotfiles/issues/322#issuecomment-5691811649).
+
+### Wave 2 (`5160c68`, 30 bullets)
+
+- **W2-01** "Acceptance-criteria branch chosen and why: the workflow-authoring reference…" — No action: a record of the reading taken on #291 (a required `args.invocationId` rather than a tracker query the script cannot make). Nothing left to do.
+- **W2-02** "Breaking change for callers outside this repo: … throws unless args.invocationId…" — #333.
+- **W2-03** "Resume cost the ticket does not mention: the runtime's documented resume model…" — Comment on #271.
+- **W2-04** "The third acceptance criterion's evidence shape ('shown by the journal')…" — No action: the Workflow tool is not exposed to a fleet sub-agent worktree (same limitation already recorded for issue 138), and the in-repo lockstep test is the substitute that does run.
+- **W2-05** "Implementation reading taken where the ticket was open: the short-fetch exit…" — No action: implementation record for #285.
+- **W2-06** "The repo's `origin` is surreptakos/claude-dotfiles, but this session's GitHub access…" — No action: the attempt queried the `Dan-AAC/` slug, which this session has no access to; `gh` against `surreptakos/` works. Nothing to fix.
+- **W2-07** "Pre-existing, not touched: `node tools/tracker-audit.js` … 2 drift findings plus 4 advisory…" — No action here; the advisories and the container-blocked board checks are carried on #212 (see W2-30).
+- **W2-08** "Ambiguity read: the ticket says a short-fetch on /issues/comments must exit 2…" — No action: implementation record for #285.
+- **W2-09** "tools/tracker-audit.js's /issues/comments walk sits inside `if (!prsUnavailable)`…" — Comment on #285.
+- **W2-10** "tests/restore-test.ps1 is Windows PowerShell only and cannot run in this Linux container…" — No action: already #211/#213.
+- **W2-11** "Verified the two runtime acceptance criteria end to end with a scratch `gh` shim…" — Comment on #285 (the shim recipe, so the next implementer does not rebuild it).
+- **W2-12** "Assumption stated: the marker is the label `desktop-only` … riding ALONGSIDE a state label…" — Comment on #275.
+- **W2-13** "surreptakos/aac-routines had no `desktop-only` label…" — Comment on #275.
+- **W2-14** "agents/skills/session-check/check.js … knows nothing about the `desktop-only` marker…" — Comment on #275.
+- **W2-15** "The harness persists large tool outputs to /root/.claude/projects/<project>/tool-results/*.txt…" — #334.
+- **W2-16** "gh IS present and authenticated in this cloud container…" — Comment on #322.
+- **W2-17** "tests/restore-test.ps1 (the repo's stated main gate) could not be run: no PowerShell…" — No action: already #211/#213.
+- **W2-18** "The live tree copy ~/.claude/skills/project-harness/templates/tracker-audit.js is byte-identical…" — #335.
+- **W2-19** "Ambiguity in issue 274, resolved toward the acceptance criteria…" — No action: implementation record for #274; both rules were built as the criteria list them.
+- **W2-20** "The project-harness template copy of the audit never carried the 2026-09-14 citation narrowing…" — #336.
+- **W2-21** "Pre-existing and untouched: `node tools/claude-md-lint.js claude/CLAUDE.md` exits 1 with 6 findings…" — #337.
+- **W2-22** "tests/restore-test.ps1 could not be run in this container: it is a PowerShell script…" — No action: already #211/#213.
+- **W2-23** "The ticket's suspected root cause - a prior-verdict object embedded via JSON.stringify…" — Comment on #271 (the root cause is not reachable in the code as written; the remaining suspect is named there).
+- **W2-24** "Behaviour change worth knowing at review time: the verifier and deliver stages now always act on the branch the script instructed…" — No action: deliberate, and the reading the #271 criterion most directly supports.
+- **W2-25** "runCodeLane's returned `branch` is now the script-computed branch…" — No action: semantics unchanged in the null case.
+- **W2-26** "`core.hooksPath` is not configured in this worktree…" — No action: an environment fact about agent worktrees; the gate itself is #213.
+- **W2-27** "Done-condition gap: the named gate `powershell … restore-test.ps1` is unrunnable in a Linux cloud container…" — Comment on #317 (which already covers letting a container override the scout's test command).
+- **W2-28** "Ambiguity ruling taken: the ticket names three escape hatches…" — No action: implementation record for #269.
+- **W2-29** "Pre-existing and untouched: `node tools/claude-md-lint.js claude/CLAUDE.md` exits 1 with 6 findings (size x2 at 224 lines…)" — #337 (the same finding as W2-21, reported by a second attempt).
+- **W2-30** "Pre-existing tracker advisories that `/session-end` step 8 would have to resolve…" — Comment on #212 (the board-says-done and not-on-board checks need GraphQL, which the container proxy blocks, so step 8 can never be clean there).
+
+### Wave 3 (`f0e8a5d`, 41 bullets)
+
+- **W3-01** "Issue 102's second half also floated an idea the acceptance criteria did not require…" — No action: #102 is still open and its second half (`gas status` printing the last `[gas]` GAS_STATE) is exactly this. Not re-filed.
+- **W3-02** "Ambiguity I resolved one way: the ticket named '403 on create-blob'…" — No action: implementation record for #102.
+- **W3-03** "`aac-skills/gas-deploy/SKILL.md` was deliberately left untouched…" — No action: the fallback is automatic and needs no flag, so the skill text stays true.
+- **W3-04** "`gas/VERSION` (0.1.1) was not bumped…" — No action: deliberate; bumping it would tell every consuming repo to re-vendor for a CLI-only change.
+- **W3-05** "Environment note, pre-existing: `.githooks/pre-commit` runs `tests/restore-test.ps1`…" — No action: already #213.
+- **W3-06** "Packager semantics changed to unblock this ticket (tools/build-cloud-plugin.py)…" — No action: implementation record for #172, guarded by a new test in `tests/build-cloud-plugin.test.py`.
+- **W3-07** "Owner step that no container can perform: ~/.claude/skills/aac-google-access/ still exists…" — No action: already #283.
+- **W3-08** "codex/AGENTS.md still carries the 'service_account -> AuthorizedSession' line…" — #338.
+- **W3-09** "gas/cli/gas.js mints its own token from the clasp USER credential…" — Comment on #172 (the proxy replaces `Authorization` for `*.googleapis.com`, so the CLI silently runs as the service account in a container).
+- **W3-10** "Ambiguity resolved by assumption: AC1 names 'aac-google-access/SKILL.md' with no directory prefix…" — No action: the generated `claude/` mirror is not editable by any branch, so `aac-skills/` was the only reading available.
+- **W3-11** "AC3 evidence posted to the ticket: …issues/172#issuecomment-5691464098" — Already a comment on #172; no further action.
+- **W3-12** "Hard-rail conflict recorded, not resolved: issue 177 says to land the gate change in the live ~/.codex copy…" — #335 (and restated on #177).
+- **W3-13** "tests/restore-test.ps1 -From worktree could not be run…" — No action: already #211/#213.
+- **W3-14** "Ambiguity resolved one way: ticket item 3 says the off switch is 'honoured the way the caveman flag is'…" — Comment on #177 (including that nothing in this repo writes `.adhd-off`, so the switch can be read but never set).
+- **W3-15** "The ADHD checks were wired into the `lint` subcommand only…" — Comment on #177.
+- **W3-16** "codex/hooks/tests/test_ask_matt_gate.py is stored CRLF…" — Comment on #292.
+- **W3-17** "Pre-existing, unrelated to this branch: six cases in codex/hooks/tests/test_ask_matt_gate.py…" — Comment on #301.
+- **W3-18** "The container's cached clone /root/.aac-dotfiles is a depth-1 shallow clone…" — No action: already #241.
+- **W3-19** "Behavior adjacent to issue 298: the new candidate-set confinement also applies on the explicit-tickets path…" — No action: implementation record for #298; one gate covers both cases by design.
+- **W3-20** "Ambiguity resolved one way: the ticket does not say how the run should know the listing was empty…" — No action: implementation record for #298.
+- **W3-21** "The pre-commit gate (.githooks/pre-commit -> tests/restore-test.ps1) cannot run in the Linux agent container…" — No action: already #213.
+- **W3-22** "Ripple docs still tell callers to launch the fleet by the plugin path only…" — Comment on #284 (extending it to the six other files rather than filing a second doc ticket).
+- **W3-23** "The exact plugin cache path shape documented for the desktop spelling was reconstructed from in-repo evidence…" — Comment on #299.
+- **W3-24** "tools/build-cloud-plugin.py bumps marketplace … `version` to the UTC build minute on every run…" — No action: already recorded at FOLLOW-UPS.md:230; it is how the packager is designed.
+- **W3-25** "Assumption taken where the ticket was open-ended: the SKILL.md now presents three launch spellings…" — Comment on #299.
+- **W3-26** "Live-tree divergence, needs an owner action after this merges: the fix exists only in the repo mirror (agents/skills/session-check)…" — #335.
+- **W3-27** "Issue 300 names one red test; there are three…" — Comment on #300 (including the same latent `process.env` leak in `cloud-plugin-sweep.test.js`).
+- **W3-28** "tests/restore-test.ps1 already runs two of the skill's six test files from the RESTORED installed location…" — Comment on #300.
+- **W3-29** "The session-check skill stamp advanced two revisions on this branch (9 -> 10 -> 11)…" — No action: the four stamp keys are machine-written and the content-sha and dates are correct for the committed content. Collapsing a re-stamp within one branch changes what a revision means, which nobody has asked for.
+- **W3-30** "Ticket 316 is ambiguous about what an 'unknown environment' should default to…" — Comment on #322 (the residual gap is the same defect #322 describes, from the other end).
+- **W3-31** "Criterion 2 was satisfied through its SKILL.md branch … rather than by teaching the bootstrap to install ~/.claude/agents/fleet-verifier.md…" — #339, cross-linked from a comment on #316 so the two readings of that decision sit together.
+- **W3-32** ".claude/hooks/session-start.sh installs only the plugin's skills tree into ~/.claude/skills/…" — #339.
+- **W3-33** "tools/ticket-fleet-branch.test.js's driveCodeLane harness evaluates the fleet's code lane with its free bindings supplied as AsyncFunction parameters…" — #340.
+- **W3-34** "Ambiguity read, issue 318 criterion 3: 'resolves hunks whose every line is one of the four stamp keys'…" — No action: implementation record for #318; the literal reading was built and the alternative deliberately was not.
+- **W3-35** "The two regeneration commands are claude-dotfiles-specific, so the fleet's new `regenCommands` arg defaults to null…" — Comment on #318 (including the missing `claims.json` pin on the CLAUDE.md section the deliver stage reads).
+- **W3-36** "`node tools/resolve-stamp-conflict.js` is a claude-dotfiles path, but aac-skills/ticket-fleet/ticket-fleet.js is served by the plugin to every repo…" — Comment on #318.
+- **W3-37** "Behavioral note verified against real `git merge` output: when a branch changed BOTH a SKILL.md's stamp block and its prose…" — Comment on #318 (kept with the ticket because it is the exact PR #306 failure mode).
+- **W3-38** "…/agents/skills/triage/SKILL.md is the repo mirror of the live ~/.claude/skills/triage/SKILL.md…" — #335.
+- **W3-39** "agents/skills/project-harness/templates/tracker-audit.js is a second, already-divergent copy of tools/tracker-audit.js…" — #336.
+- **W3-40** "tools/ticket-fleet-branch.test.js drives the fleet's code lane by extracting the text between the [FLEET-CODE-LANE-START/END] markers…" — #340 (the same coupling as W3-33, hit twice in one run).
+- **W3-41** "Ambiguity in issue 319's second acceptance criterion (script-side chaining OR a SKILL.md instruction)…" — #333 (the fork half: callers pinning the SCOUT schema elsewhere will not have `discoveryTriage` until they re-copy the plugin source).
