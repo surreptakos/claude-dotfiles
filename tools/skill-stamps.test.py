@@ -185,6 +185,62 @@ class GitDates(unittest.TestCase):
             self.assertEqual(stamp["modified"], "2026-09-05T15:00:00Z")
             self.assertEqual(stamp["previous-modified"], "2026-09-01T15:00:00Z")
 
+    def test_stamp_then_package_matches_package_alone(self):
+        """Two rotations before the commit land where one does (issue 363).
+
+        `a` is the packager alone; `b` is the documented stamper-then-packager pair with the
+        edit the packager would see between them. Same final content, so the same revision and
+        the same `previous-modified` - the last published one, not the stamper's own.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self._git(repo, "init", "-q")
+            a = make_skill(repo / "aac-skills", "a")
+            b = make_skill(repo / "aac-skills", "b")
+            for d in (a, b):
+                ss.stamp_skill(d, repo=repo, history_paths=[f"aac-skills/{d.name}"],
+                               now="2026-09-01T00:00:00Z")
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-qm", "published", date="2026-09-01T10:00:00-05:00")
+
+            def edit(d, text):
+                (d / "ref.md").write_bytes(text.encode())
+
+            def stamp(d, now):
+                return ss.stamp_skill(d, repo=repo, history_paths=[f"aac-skills/{d.name}"],
+                                      now=now)[0]
+
+            edit(a, "final\n")
+            package_only = stamp(a, "2026-09-11T00:00:00Z")
+            edit(b, "first pass\n")
+            stamp(b, "2026-09-11T00:00:00Z")            # the stamper
+            edit(b, "final\n")
+            stamp_then_package = stamp(b, "2026-09-11T00:00:00Z")  # the packager
+
+            self.assertEqual(stamp_then_package, package_only)
+            self.assertEqual(package_only["revision"], "2")
+            self.assertEqual(package_only["previous-modified"], "2026-09-01T00:00:00Z")
+            self.assertEqual(ss.check_skill(b)[0], "ok")
+
+    def test_content_back_at_the_published_version_restores_its_stamp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self._git(repo, "init", "-q")
+            a = make_skill(repo / "aac-skills", "a", extra={"ref.md": "one\n"})
+            hist = ["aac-skills/a"]
+            published = ss.stamp_skill(a, repo=repo, history_paths=hist,
+                                       now="2026-09-01T00:00:00Z")[0]
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-qm", "published", date="2026-09-01T10:00:00-05:00")
+            (a / "ref.md").write_bytes(b"two\n")
+            ss.stamp_skill(a, repo=repo, history_paths=hist, now="2026-09-11T00:00:00Z")
+            (a / "ref.md").write_bytes(b"one\n")  # edit reverted before it was ever committed
+            stamp, changed = ss.stamp_skill(a, repo=repo, history_paths=hist,
+                                            now="2026-09-12T00:00:00Z")
+            self.assertTrue(changed)
+            self.assertEqual(stamp, published)
+            self.assertEqual(ss.check_skill(a)[0], "ok")
+
     def test_first_stamp_with_uncommitted_edits_takes_mtime_and_last_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
