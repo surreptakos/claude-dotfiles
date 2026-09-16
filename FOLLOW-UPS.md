@@ -525,6 +525,118 @@
 - Seven branches in run 6aa9c56e now land their fix only in a generated tree because the live ~/.claude is read-only from a container: the four already in issue #335's table, plus #392, #397 and #398. #397 and #398 write agents/skills/session-check, which has no aac-skills/ source at all. One desktop sync.ps1 -Mode push before a -Mode pull reverts the whole of issues 394 and 395 with nothing red to say so. Recorded as a comment on #335.
 - Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
 
+## Triage: run 6aa9c56e discoveries, wave 16 (issue 402)
+
+Every discovery bullet the run `6aa9c56e` report writer appended for wave 16 has a disposition below.
+**Unlike waves 2/3 through 14/15, these bullets are on master.** PR #410 merged the run's own branch
+`claude/affectionate-maxwell-gqp5vw`, so `12da2dc` ("chore: fleet discoveries from run 6aa9c56e wave
+16") is an ancestor of `origin/master` at `8dee19d` and the eight bullets read straight out of this
+file at lines 518-525 — no `git show <sha> -- FOLLOW-UPS.md` needed for the first time in seven
+passes. The W16-nn numbering below is their order there, and the quoted fragment is each bullet's
+opening words.
+
+**This is the eighth and last triage chore of the run**, per issue 402: no further discovery-triage
+chore is to be filed for `6aa9c56e`. The per-pass bullet counts ran 84, 65, 33, 20, 11, 10, 17 and
+then 8, and the tickets filed with them 7, 3, 1, 1, 1, 1, 1 and 2 here. The run's own PRs are all
+settled — the only open PR in the repo today is #414, on a branch that is not part of this run — so
+this pass ran against the tracker's settled state, which is what issue 402's `## Blocked by` note
+asked for.
+
+Filing followed #319: a finding touching the same file, symbol or failure as an **open** ticket became
+a comment on that ticket, not a second ticket. The open set was re-listed immediately before each
+filing (`gh api repos/surreptakos/claude-dotfiles/issues?state=open&per_page=100`, one page, 77
+issues; `gh api search/issues` is refused in a container) and every open body was grepped for the
+finding's file and symbol. The dedupe question was unusually live this pass, because five of the
+eight bullets name a ticket that has since **closed** — #300, #375 and #378 are all `closed /
+completed`. A disposition recorded on a closed ticket is not a disposition, so each of those was
+re-checked against master and either confirmed done or refiled.
+
+Tickets filed: **#415** (`.claude/session.json`'s test command names `tests/docs-claims.test.js`, so
+`tests/node-test-context.test.js` — issue 395's own regression guard, the test whose subject is that a
+green result can be a lie — is run by nothing: not the session gate, not `.githooks/pre-commit`, not
+`tests/restore-test.ps1`, not any workflow) and **#416** (`aac-skills/ticket-fleet/SKILL.md`'s
+worktree-guard section tells the reader "it is the shape that is refused, not the command", which is
+false for the content-based refusals, and says nothing about the two GitHub calls a container refuses).
+Neither duplicates an open ticket or an open PR's ticket.
+
+Comments added: [#378](https://github.com/surreptakos/claude-dotfiles/issues/378#issuecomment-5702018059),
+[#400](https://github.com/surreptakos/claude-dotfiles/issues/400#issuecomment-5702018917),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5702019426),
+[#376](https://github.com/surreptakos/claude-dotfiles/issues/376#issuecomment-5702019799).
+
+Nothing was fixed outside a ticket in this pass, and no ticket body or acceptance criterion was
+edited. `node tools/tracker-audit.js` reaches a verdict: exit **1**, which is "findings", not the
+exit 2 that means it could not audit (CLAUDE.md). The findings are the same two before and after the
+filings — `[closed-with-open-boxes]` on #378 and `[dangling-reference]` on #413, neither of them this
+pass's — so #415 and #416 introduced no drift. Read that code unpiped: `node tools/tracker-audit.js |
+tail` reports `tail`'s 0 and looks clean. Both carry `## Blocked by` as
+`- None.` with the provenance paragraph above the heading, which is the shape `proseBlockers()` reads
+cleanly.
+
+### Wave 16 (`12da2dc`, 8 bullets, this file lines 518-525)
+
+- **W16-01** "The 17 bullets issue 399 names are NOT on master…" — Comment on #378, and the premise is
+  now false: `git merge-base --is-ancestor 12da2dc origin/master` exits 0, and `git log --oneline --
+  FOLLOW-UPS.md` on master names waves 12 through 16. PR #410 merged the run branch whole, so every
+  `git show <sha>` citation in the six earlier ledgers still resolves. #378 is closed / completed; the
+  comment records that its three unticked acceptance boxes are all demonstrably true now (that is what
+  `tracker-audit`'s `[closed-with-open-boxes]` finding on it is) and that criterion 3's `W2-` … `W7-`
+  should read `W2-` … `W16-`. Not edited from here — six ledgers have declined to edit another
+  ticket's acceptance criteria and this one does too.
+- **W16-02** "Filed issue #400 (bug, ready-for-agent): curlTicketRows()…" — Comment on #400, a
+  re-verification rather than a record of a filing. Checked on master *after* PR #398 landed:
+  `check.js:557-559` still fetches one `&state=open&per_page=100` URL with no paging, `:585`'s pure
+  `paginateTicketPages` is on master but `curlTicketRows` is not one of its callers (only the `gh` path
+  at `:613-614` is), and `renderTicketList` still prints the truncated length. #400 stands, unchanged
+  in size and shape.
+- **W16-03** "PR #331 (issue 300) and PR #398 (issue 394) both rewrite the same lines of
+  runChecker()…" — No action: the predicted conflict resolved the way the bullet asked. Both PRs are
+  merged and master carries **#331's** spelling — `check.test.js:11` requires `./test-support` and
+  `:26` builds the child env through `localEnv(opts.env)` with a single `env` key. #398's inline
+  blanking is gone and the duplicate `env:` key with it. Nothing left to file.
+- **W16-04** "A FOLLOW-UPS.md discovery bullet (W15-09) claims tests/claims-audit.test.js is exercised
+  only by the fleet done-condition…" — **#415**. The half that survives is confirmed on master:
+  `grep -rn node-test-context` finds `tests/node-test-context.test.js` only in itself and in this file,
+  `.claude/session.json`'s test term names one `tests/` file, `.githooks/pre-commit` runs only the
+  restore test, `tests/restore-test.ps1:1355-1367` covers `claims-audit.test.js` and nothing else under
+  `tests/`, and no workflow names it. #300, where this was recorded, closed as completed without
+  covering it, so it needed a ticket of its own rather than a second comment on a closed one.
+  `node --test tools/*.test.js tests/*.test.js` is 317 pass / 0 fail in 4.1s, so widening the glob costs
+  nothing.
+- **W16-05** "FOLLOW-UPS.md on master is LF-terminated except for its single final line, which is
+  CRLF…" — Comment on #376, the open decision ticket that owns this file's shape. The line-ending half
+  has resolved itself by accident: `grep -c $'\r' FOLLOW-UPS.md` is 0 on master where the blob at
+  `12da2dc` had exactly 1 (on its line 234), lost in the merge pass rather than by any rule — so there
+  is nothing to fix and nothing decided. The comment adds the evidence that matters to #376's ruling
+  instead: the bullet "Only the repo-mirror wording changed; ALLOWED_FLOWS…" now appears **seven times**
+  in this file — count them with `grep -c '^- Only the repo-mirror wording' FOLLOW-UPS.md`, where the
+  `^- ` anchor matters because this entry quotes the bullet too, and no line number is cited because
+  every edit to this ledger moves them. All seven are byte-identical, one copy per triage-ledger
+  branch that was cut while it was the last line. Append-only plus branch merges manufactures
+  duplication that the same rule then forbids deleting.
+- **W16-06** "gh api search/issues is refused outright in a fleet container…" — **#416**, with W16-07.
+  Re-confirmed here (the dedupe listing had to be REST pages, not a search). #375, where this was
+  recorded, is closed / completed and shipped a four-row shell-shape table that carries neither this
+  nor W16-07. `docs/agents/issue-tracker.md` has a "From a cloud session (no GraphQL)" section covering
+  the two neighbouring 403s but not `search/*`, and `aac-skills/ticket-fleet/SKILL.md` — the file every
+  fleet implementer loads — does not point at it.
+- **W16-07** "The Bash worktree-isolation guard refused an awk program in this session with a message
+  issue #375's body does not list…" — **#416**, same ticket. The sharp part is not the missing row but
+  the summary sentence #375 shipped: "it is the shape that is refused, not the command" is false for
+  `awk '<program>'`, refused as a single plain command on what its program could do. This pass hit the
+  same class from the other side — `tail -c 20 FILE | od -c` joined with two other reads was refused
+  with "feeds `od` input assembled by the command … a program this guard does not know may run that
+  input" — so the guard reads program *content*, and an agent told only about shape retries and fails
+  again. Eighth consecutive triage pass to lose turns to this guard.
+- **W16-08** "Seven branches in run 6aa9c56e now land their fix only in a generated tree…" — Comment on
+  #335, which is open and is exactly the ticket for it. What is new is that **the precondition has
+  fired**: #335 says to pull "once the run `6aa9c56e` PRs have merged to master", and they all have —
+  the only open PR in the repo is #414, on a branch outside this run. So the next desktop
+  `sync.ps1 -Mode push` is the one that reverts, not a hypothetical future one. The comment brings the
+  four-row table to seven with the three that landed since (#331, #397, #398) and their master
+  coordinates, and restates why `agents/skills/session-check/` is the worst of them: `ls aac-skills/`
+  has no `session-check`, so the generated mirror is the only copy in the repo.
+
 ## Triage: run 6aa9c56e discoveries, waves 14 and 15 (issue 399)
 
 Every discovery bullet the run `6aa9c56e` report writers appended for waves 14 and 15 has a
