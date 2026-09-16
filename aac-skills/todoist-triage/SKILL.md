@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-15T19:42:45Z"
-  previous-modified: "2026-09-10T17:37:14Z"
-  revision: "2"
-  content-sha: "ede31c2a78fb"
+  modified: "2026-09-16T03:54:16Z"
+  previous-modified: "2026-09-15T19:42:45Z"
+  revision: "3"
+  content-sha: "febd9b2084f7"
 ---
 
 # todoist-triage
@@ -34,6 +34,8 @@ Dates carry the calendar, and Todoist's two date fields mean different things. T
 
 `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` marks a routine-created duplicate nested under its survivor after a merge — its `aac-source`/`aac-topic` stays live in the description for the routine to match against, but the task itself carries no ball and is not re-triaged; the survivor holds the ball for both.
 
+**Wontfix is a ruling, and it is Dan's to file.** A task-shaped ruling lives as the task itself sitting in the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`), not in any run record. One ruling covers both routines: this skill's queue and the `aac-forgotten-tasks` guard read Wontfix through the same matcher with the same evidence bound, so an item Dan has ruled out stays suppressed on both sides until evidence newer than the ruling arrives, and then it resurfaces. Neither routine writes to Wontfix. Never move, complete or delete a task there, and never propose a write into it — Dan puts an item in Wontfix and Dan takes it out.
+
 **Find the ball by reading the last move.** Open the source and read the most recent message. Whoever owes the next move holds the ball. A direct asking Dan three questions puts the ball on Dan (`do`), however much the topic looks like theirs. Dan's verbs (decide, approve, sign, show, answer, call counsel) put the ball on Dan. A direct's prep or scheduling around Dan's decision is a comment, not a label. `do` plus `to-NAME` together only when Dan rules and the direct then owns execution, rarely.
 
 Priority sorts within a ball, never sets it. The 10-item `do` cap in Current Work is Dan's rule; when he exceeds it, report the count.
@@ -58,7 +60,13 @@ Priority sorts within a ball, never sets it. The 10-item `do` cap in Current Wor
 
 Load the two prior run records first, then the exports, then the live tail.
 
-- **Prior run records.** Read the newest `aac-forgotten-tasks` run record and the previous `todoist-triage` run record before building the queue. Note each one's timestamp and filename; the report in step 6 names them, and states "none found" for either that is missing. Missing records are not a stop — they change what the run can rule on.
+- **Prior run records.** Read the newest `aac-forgotten-tasks` run record and the previous `todoist-triage` run record before building the queue. Run, from the `aac-routines` checkout (the `Meta/aac-routines` project — the ledger commands resolve nowhere else):
+
+  ```
+  python -m aac_routines.run_ledger prior --routine todoist-triage
+  ```
+
+  It prints one line per routine, naming the record it found under `state/run-ledger/` (one JSON file per run, `<routine>-<YYYYMMDDTHHMMSSZ>.json`) with the time that run finished, or saying `none found`. Read the newest forgotten-tasks report alongside them: `state/forgotten-tasks-reports/forgotten-tasks-<date>.md`. Note each record's timestamp and filename; both lines go into the report in step 6 verbatim, and "none found" is a stated gap, never silence. Missing records are not a stop — they change what the run can rule on.
 - **Exports (primary source of source material).** Every ruling rests on the message and thread bodies exported to Google Drive by the `aac-forgotten-tasks` routine, not on live-connector snippets. In a cloud session, pull them with `mcp__Google_Drive__search_files` (query `name contains 'aac-forgotten-tasks' and mimeType != 'application/vnd.google-apps.folder'`, `orderBy: 'modifiedTime desc'`), then `mcp__Google_Drive__read_file_content` on the newest bundle. Record its modified time — that is the tail-window start.
 - **Live tail (tail-fill only).** Fill the window "newest export stamp → now" from Gmail (`mcp__Gmail__search_threads`), Teams (`mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`), meeting notes (Granola), and Todoist history (`find-activity`). Never widen this window past the export stamp; never let the connectors stand in as the primary reader. Any connector that fails or returns no access is recorded and carried into step 6 as an unreachable surface.
 - **Todoist queue.** `find-tasks` on both projects, `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link.
@@ -70,6 +78,16 @@ Done when both run records are located or their absence recorded, the newest exp
 Queue = open tasks with no ball label and no `no-sweep` or `merged`. Alarms, listed first: any task with a deadline inside 14 days, wherever it sits; any task with a deadline and no do date; any do date already past; `do` count in Current Work over 10; `to-NAME` task with a link-only title and no "Summary for handoff" comment; likely duplicates by normalized title. Done when every open task is either in the queue, alarmed, or carries a ball label.
 
 ### 3. Propose
+
+**Build the queue through the ledger, not by hand.** Dump the surfaced items — each with `topic_key`, `title`, `observed_at` when the evidence carries a date, and `todoist_id` when the item already is a Todoist task — and a Todoist snapshot carrying the `Wontfix` project's tasks, then run from the same checkout:
+
+```
+python -m aac_routines.run_ledger queue --routine todoist-triage \
+    --surfaced <surfaced.json> --snapshot <todoist-snapshot.json> \
+    --config config/task-capture.json
+```
+
+It reads the prior records first, then filters through the forgotten-tasks dismissals file, the Wontfix project and the non-task rulings the prior records carry, in that order, and returns `queue` (what to propose from), `dismissed`, `stale_ledger_entries`, `prior_records_lines` and `coverage_gaps`. A `dismissed` item is suppressed: it is not re-proposed and not re-asked, because Dan already ruled on it — report it as already ruled, naming the ruling it rests on. **Todoist wins:** a ledger ruling can never suppress an item Todoist still shows as a live task, so that item stays in the queue and the ruling comes back in `stale_ledger_entries` for the report. Omitting `--snapshot` does not skip the Wontfix check quietly — the run states that Todoist was not read and that Dan's Wontfix rulings went unapplied that pass, and that line is an unreachable surface for step 6.
 
 **Since-task-created check, before any ruling.** For every queue and alarm item, sweep from the task's creation date to now for a resolution: mail, Teams, meeting notes, Todoist activity and comments. A resolution is found by opening the referenced thread and reading it to its last message — never by keyword search alone. A keyword search finds a topic; only the last message tells you whether the topic is still open.
 
@@ -98,7 +116,15 @@ Output contract, in this order:
 
 Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `merged`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. The prior-run-records line is the one exception: it may spell the record filenames so Dan can go find them.
 
-Done when Dan can see the board state without opening Todoist, and knows which surfaces were dark and which rulings that made unknown.
+**Then append this run's record.** After the report, from the `aac-routines` checkout:
+
+```
+python -m aac_routines.run_ledger record --input <record.json>
+```
+
+The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task Dan put in Wontfix. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
+
+Done when Dan can see the board state without opening Todoist, knows which surfaces were dark and which rulings that made unknown, and this run's record is appended.
 
 ## Cadence
 
