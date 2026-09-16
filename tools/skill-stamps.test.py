@@ -167,7 +167,8 @@ class GitDates(unittest.TestCase):
     def _git(self, repo, *args, date=None):
         env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t",
                "GIT_COMMITTER_EMAIL": "t@x"}
-        for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"):
+        for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                  "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"):
             env.pop(k, None)
         if date:
             env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date

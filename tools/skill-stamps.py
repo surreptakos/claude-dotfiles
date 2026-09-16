@@ -265,7 +265,8 @@ def newest_mtime(skill_dir):
 
 def _git(repo, *args):
     env = {k: v for k, v in os.environ.items()
-           if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"}}
+           if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                        "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"}}
     try:
         res = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
                              env=env, check=False)
