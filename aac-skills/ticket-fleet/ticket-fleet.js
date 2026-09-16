@@ -21,7 +21,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (an earlier run's id: this launch runs delivery ONLY - it reads that run's journal, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -58,7 +58,7 @@ const cfg = Object.assign({
   priorProbe: null,         // {ticketNumber: PROBE-shaped result} - attempt 1 reuses it, no prober
   // ---- finish mode (issue 405) ----
   // The id of an earlier run whose Deliver step - or whose container - died. Set it and this launch
-  // runs NOTHING but delivery: it reads that run's journal, opens a PR for every branch the journal
+  // runs NOTHING but delivery: it reads the journal of that run, opens a PR for every branch the journal
   // records as verified-but-undelivered, skips the ones already delivered, leaves the unverified
   // alone, and runs the report writer. No scout, no implementers, no verifiers. Either spelling of
   // the id works: the harness workflow id its journal directory is named for (wf_...), or the
@@ -224,6 +224,7 @@ function trackerRules(mode) {
     handoffRead: (n) => `Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
     commentPost: () => `Use mcp__github__add_issue_comment.`,
     labelSwap: (n, target = 'ready-for-human') => `Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
+    blockerState: (nums) => `Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
     prCreate: () => `mcp__github__create_pull_request`,
     prComment: () => `mcp__github__add_issue_comment on issue`,
   }
@@ -234,6 +235,7 @@ function trackerRules(mode) {
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
     commentPost: () => `Use \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
+    blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from \`git remote get-url origin\`), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: () => `gh pr create`,
     prComment: () => `gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>`,
   }
@@ -301,7 +303,7 @@ const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoM
     handoffPending: { type: 'boolean', description: 'true when the ticket\'s LATEST comment is a fleet handoff (a "Remaining for a local session" or "Remaining for a person" section (older handoffs say "Remaining for the owner") and the "_Generated by [Claude Code](https://claude.ai/code)_" footer) and no later comment from the owner follows it: the ticket is parked on a human, so this run must skip it rather than repeat the handoff' },
     discoveryTriage: { type: 'boolean', description: 'true when the ticket is a discovery-triage chore: it asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run\'s follow-ups, a review list) to be turned into tracker items - tickets filed, doc fixes landed, noise struck. Two of these in one wave file the same finding twice if they run concurrently, so the fleet chains them.' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
-    blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
+    blockedBy: { type: 'array', items: { type: 'integer' }, description: 'every blocker issue number the ticket names, whatever its state - the run resolves open vs closed itself (issue 403)' },
   } } },
   repoMap: { type: 'string', description: '15-line map: key dirs, test command, conventions, rails' },
   testCommand: { type: 'string' },
@@ -348,11 +350,50 @@ const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 
 // required property 'failures'", so a green branch got no verdict and no delivery. A pass may
 // omit the key or send []; every read of it goes through the normalisation below, which fills
 // in [] so the retry prompt's `.failures.join` can never throw on a key-less verdict.
-const VERDICT = { type: 'object', required: ['pass', 'evidence'], properties: {
+// `worktree` IS required (issue 404). Several verifiers on 2026-09-16 skipped the scratch worktree
+// ('the exact worktree path no longer exists, so I re-ran in <repo root>') and ran their commands in
+// the orchestrator's own checkout, which sat on the session's feature branch and predated the code
+// under test: the #361 probe was refuted as 'fabricated' for flags origin/main carried and that
+// branch did not. A verdict that depends on which branch the main checkout is on is not a verdict,
+// so the verifier has to say where it ran and the script cross-checks it (worktreeMismatch below).
+const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], properties: {
   pass: { type: 'boolean' },
   evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
   failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
+  worktree: { type: 'object', required: ['path', 'head'], description: 'where you actually ran: the scratch worktree you created, never the repository you started in', properties: {
+    path: { type: 'string', description: 'absolute path of the scratch worktree every command above ran inside' },
+    head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed INSIDE that worktree, copied verbatim - not abbreviated, not from memory' },
+  } },
 } }
+
+// [FLEET-WORKTREE-CHECK-START]
+// The machine-checked half of issue 404. The verifier's self-reported HEAD is compared with the
+// tip the lane expects - the branch under review (code lane) or origin/<defaultBranch> (probe
+// lane), read by its own one-command `git rev-parse` agent so no agent certifies itself.
+// `worktreeMismatch` returns null when the verdict may stand and one line naming the mismatch
+// otherwise; that line is what the single re-run prompt and the recorded failure both carry.
+const shaMatches = (a, b) => {
+  const x = String(a == null ? '' : a).trim().toLowerCase()
+  const y = String(b == null ? '' : b).trim().toLowerCase()
+  if (!/^[0-9a-f]{7,40}$/.test(x) || !/^[0-9a-f]{7,40}$/.test(y)) return false
+  const n = Math.min(x.length, y.length)
+  return x.slice(0, n) === y.slice(0, n)
+}
+const worktreeMismatch = (verdict, expectedHead, expectedLabel) => {
+  // No expected tip (the rev-parse agent could not read it) means there is nothing to check
+  // against: the lane logs that and the verdict stands rather than being rejected on a guess.
+  if (!expectedHead) return null
+  // An unusable verdict is already a failed attempt; re-running it for its worktree adds nothing.
+  if (!verdict || verdict.unusable) return null
+  const wt = (verdict.worktree && typeof verdict.worktree === 'object') ? verdict.worktree : {}
+  const head = String(wt.head == null ? '' : wt.head).trim()
+  const where = String(wt.path == null ? '' : wt.path).trim()
+  const tail = `the main checkout is never a test surface - it sits on whatever branch this session is on, which is not the code under review`
+  if (!head) return `the verdict reported no worktree HEAD, so there is no evidence it ran against ${expectedLabel} (${expectedHead}); ${tail}`
+  if (shaMatches(head, expectedHead)) return null
+  return `the verdict was produced at HEAD ${head}${where ? ` (worktree ${where})` : ''}, not ${expectedLabel} (${expectedHead}); ${tail}`
+}
+// [FLEET-WORKTREE-CHECK-END]
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
@@ -422,6 +463,38 @@ function failuresOf(verdict) {
   const list = (Array.isArray(verdict.failures) ? verdict.failures : []).map(f => String(f).trim()).filter(Boolean)
   if (list.length) return list
   return [verdict.pass ? 'verifier passed and listed no failures' : 'verifier returned pass=false with no failures listed']
+}
+
+// ---- the expected tip a verdict is cross-checked against (issue 404) ----
+// A workflow script has no shell of its own, so the tip is read by an agent that runs ONE fixed
+// command and copies its output back - the shape the tree guard already uses, for the same reason:
+// nothing is left to the agent's judgement, so a paraphrase is detectable. The prompt names only a
+// ref, so its cache key is stable across a resume and a resumed run replays the same sha.
+const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
+  exitCode: { type: 'integer', description: 'REAL exit code of the command, not the exit code of a pipe' },
+  stdout: { type: 'string', description: 'stdout VERBATIM - the full 40-character object name when the ref resolved; never abbreviate or reformat it' },
+  stderr: { type: 'string', description: 'stderr verbatim ("" if none)' },
+} }
+async function revParse(ref, label) {
+  let res = null
+  try {
+    res = await agent(
+    `Run exactly this one bash command, from the repository root, and report its result:
+
+git rev-parse ${ref}
+
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
+file. Do not interpret the output. Return the command's REAL exit code plus its stdout and stderr
+VERBATIM - stdout is one 40-character object name when the ref resolved; copy it character for
+character.`,
+    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
+    )
+  } catch (err) {
+    log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
+    return null
+  }
+  const sha = res && res.exitCode === 0 ? String(res.stdout || '').trim().split(/\s+/)[0] : ''
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
 }
 
 // ---------------------------------------------------------------------------
@@ -677,7 +750,7 @@ const scout = await agent(
 2. Collect the tickets: ${scoutSource}
    That one listing is the WHOLE candidate set. Do not widen it under any circumstances: not another label, not a sweep of open issues, not a search, not a ticket you happened to read elsewhere. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it.
    A listing that comes back with zero tickets is a valid and complete answer, not a cue to go looking: return candidateNumbers: [] and tickets: [] and stop. The run ending with nothing to do is the correct outcome there.
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
@@ -718,6 +791,74 @@ if (!scout || !scoutTickets.length) { log('No eligible tickets found.'); return 
 const testCommand = cfg.testCommand ? String(cfg.testCommand) : scout.testCommand
 if (cfg.testCommand) log(`testCommand overridden by args: ${testCommand} (scout read: ${scout.testCommand})`)
 
+// ---- blocker state resolved in code, not prose (issue 403) ----
+// The scout prompt used to say "a blocker counts only if that issue is still open", and at
+// effort 'low' the scout never checked: it lifted the numbers out of the body's `## Blocked by`
+// section and handed them back, so a ticket whose blocker closed hours earlier was skipped wave
+// after wave until someone rewrote the body by hand (measured in aac-routines across eight waves
+// on 2026-09-16: #30, #32, #134, #199, #206, #207, #305, #306, #307). Now the scout reports every
+// number it finds and one cheap agent reads each distinct blocker's state through the instrument;
+// the closed ones are dropped and logged as cleared. Anything that does not come back a plain
+// `closed` - unknown, unreadable, a failed agent - keeps blocking: the gate may only ever be
+// opened by positive evidence. Pure counterpart: applyBlockerStates in
+// tools/ticket-fleet-branch.js, pinned against this inline copy by ticket-fleet-branch.test.js.
+// [FLEET-BLOCKER-STATE-START]
+const BLOCKER_STATES = { type: 'object', required: ['blockers'], properties: {
+  blockers: { type: 'array', items: { type: 'object', required: ['number', 'state'], properties: {
+    number: { type: 'integer', description: 'the issue number that was read' },
+    state: { type: 'string', description: 'the tracker\'s state for that issue VERBATIM - "open" or "closed"; use "unknown" only when the read failed, never a guess' },
+  } } },
+} }
+function applyBlockerStates(tickets, blockers) {
+  const states = new Map()
+  for (const b of (Array.isArray(blockers) ? blockers : [])) {
+    const n = parseInt(b && b.number, 10)
+    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase())
+  }
+  const cleared = []
+  const resolved = (Array.isArray(tickets) ? tickets : []).map(t => {
+    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : []
+    const open = named.filter(n => {
+      const num = parseInt(n, 10)
+      if (states.get(num) !== 'closed') return true
+      cleared.push({ ticket: t.number, blocker: num })
+      return false
+    })
+    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open })
+  })
+  return { tickets: resolved, cleared }
+}
+async function resolveBlockerStates(tickets) {
+  const numbers = [...new Set((Array.isArray(tickets) ? tickets : [])
+    .flatMap(t => (Array.isArray(t && t.blockedBy) ? t.blockedBy : []))
+    .map(n => parseInt(n, 10)).filter(n => n > 0))]
+  if (!numbers.length) return tickets
+  let states = null
+  try {
+    states = await agent(
+      `Report the current state of each of these GitHub issues, and nothing else.
+
+${rules.blockerState(numbers)}
+
+These are blocker edges named by tickets this run is about to select from, so the answer decides whether a ticket runs. Read every number in the list - ${numbers.join(', ')} - and return one entry per number with the state the tracker reports, verbatim ("open" or "closed"). Where a read fails or the issue cannot be found, return "unknown" for it rather than guessing; a wrong "closed" starts work on a ticket whose blocker has not landed. Make no repository change, no commit, no comment, and change nothing on the tracker. Return structured output only.`,
+      { label: 'blocker-state', phase: 'Scout', schema: BLOCKER_STATES, model: cfg.reportModel, effort: 'low' }
+    )
+  } catch (err) {
+    log(`blocker-state read failed (${(err && err.message) || err}) - every named blocker keeps blocking this wave.`)
+    return tickets
+  }
+  if (!states || !Array.isArray(states.blockers)) {
+    log('blocker-state read came back with no blockers - every named blocker keeps blocking this wave.')
+    return tickets
+  }
+  const applied = applyBlockerStates(tickets, states.blockers)
+  for (const c of applied.cleared) log(`#${c.ticket}: blocker #${c.blocker} is closed - cleared, no body edit needed (issue 403).`)
+  if (!applied.cleared.length) log(`blocker-state: read ${numbers.length} blocker(s) (${numbers.map(n => '#' + n).join(', ')}); none are closed.`)
+  return applied.tickets
+}
+// [FLEET-BLOCKER-STATE-END]
+const resolvedTickets = await resolveBlockerStates(scoutTickets)
+
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
 // wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose latest
 // comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
@@ -732,12 +873,12 @@ const selectWave = (tickets, maxTickets) => {
   return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) }
 }
 // [FLEET-WAVE-SELECT-END]
-const selection = selectWave(scoutTickets, cfg.maxTickets)
+const selection = selectWave(resolvedTickets, cfg.maxTickets)
 const wave = selection.wave
-const droppedBlocked = selection.blocked.length
+const droppedBlocked = selection.blocked.map(t => ({ ticket: t.number, blockedBy: t.blockedBy }))
 const droppedCap = selection.overCap.length
 const skippedHandoff = selection.pendingHandoff.map(t => t.number)
-if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
+if (droppedBlocked.length) log(`${droppedBlocked.length} ticket(s) skipped: open blockers - ${droppedBlocked.map(b => '#' + b.ticket + ' (blocked by ' + b.blockedBy.map(n => '#' + n).join(', ') + ')').join('; ')}.`)
 if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awaiting the owner after a fleet handoff comment - ${skippedHandoff.map(n => '#' + n).join(', ')}.`)
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Scout listed ${(scout.candidateNumbers || []).length} candidate(s); ${scout.tickets.length} returned as tickets.`)
@@ -773,6 +914,7 @@ const runProbeLane = async (t) => {
       probe = reuse || await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
+The main checkout is never a test surface (issue 404): the repository at the session's root sits on whatever branch this session is on, which is not the code this ticket is about, so evidence gathered there is about the wrong tree - work inside your own isolated worktree, and where an item is about the repository as it stands, \`git fetch origin\` first and read origin/${scout.defaultBranch}.
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 Rules:
@@ -799,28 +941,50 @@ Return structured output only.`,
     }
 
     evidenceBlocks = probe.items.map(i => `ITEM: ${stableText(i.item)}\nCOMMANDS:\n${stableText(i.commands)}\nOUTPUT:\n${stableText(i.outputVerbatim)}\nEXIT: ${stableText(i.exitCodes)}`).join('\n----\n')
-    // Wrapped (aac-routines issues 191, 270).
-    try {
-      lastVerdict = await agent(
+    // Issue 404, probe lane: the code a probe is about is the default branch, so the expected tip
+    // is origin/<defaultBranch> - a verifier that re-ran the commands in the orchestrator's own
+    // checkout answered about whatever branch this session sits on. #361 was refuted as
+    // 'fabricated' exactly that way, for flags origin/main carried and that stale branch did not.
+    const expectedHead = await revParse(`origin/${scout.defaultBranch}`, `tip:#${t.number}.${attempt}`)
+    if (!expectedHead) log(`#${t.number}.${attempt}: could not read the tip of origin/${scout.defaultBranch}; this attempt's verdict is accepted without the worktree cross-check.`)
+    let mismatch = null
+    for (let pass = 1; pass <= 2; pass++) {
+      const verifyLabel = pass === 1 ? `verify:#${t.number}.${attempt}` : `verify:#${t.number}.${attempt}-rerun`
+      const rerunBlock = pass === 2
+        ? `\nYour previous verdict was REJECTED before it was read, for where it was produced and not for what it concluded: ${mismatch}. Redo the whole verification from scratch inside a worktree you create with the command above, and report that worktree's path and its \`git rev-parse HEAD\` in \`worktree\`. Reach the conclusion the evidence supports; that it was passed or failed last time is not a reason to keep or change it.`
+        : ''
+      // Wrapped (aac-routines issues 191, 270).
+      try {
+        lastVerdict = await agent(
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
+The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
+In this repo run: git fetch origin, then git worktree add <scratch dir> --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree.
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
 1. Re-run every command above that is re-runnable in this container and compare YOUR output with the claimed output. Output you cannot reproduce, or that does not match, is a failure.
 2. For a command that genuinely cannot be re-run here (needs a second fresh container, a Routine, an owner secret), say so in your evidence; do not pass a re-runnable item on a claim alone.
 3. Every criterion must be covered by an item; a criterion with no command behind it is a failure.
 4. Fabrication check: output too clean for the command, paraphrased, or missing the tool's usual noise is a failure. So is any printed secret value.
-Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.`,
-      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
-      )
-    } catch (err) {
-      lastVerdict = unusableVerdict((err && err.message) || err, `verify:#${t.number}.${attempt}`)
+5. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not the tip of origin/${scout.defaultBranch} is rejected unread.
+Clean up your scratch worktree (git worktree remove) when done. Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.${rerunBlock}`,
+        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
+        )
+      } catch (err) {
+        lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
+      }
+      if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
+      // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+      // later read (the retry prompt, the run report) sees an array.
+      if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
+      if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of origin/${scout.defaultBranch}`)
+      if (!mismatch) break
+      log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
     }
-    if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', `verify:#${t.number}.${attempt}`)
-    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
-    // later read (the retry prompt, the run report) sees an array.
-    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
-    if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+    // Only the mismatch is recorded: whatever else that verdict said was observed in the wrong
+    // tree, so passing its findings on to the next attempt would be passing on guesswork.
+    if (mismatch) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: [mismatch] }
     if (lastVerdict.pass) break
   }
 
@@ -1206,11 +1370,27 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
     // Read, Grep, Glob, Bash. A cloud session gets no agentType at all: its registry is read
     // before the bootstrap hook can write one (issue 339, docs/tickets/339-decision.md), so the
     // restraint there is the container sandbox plus the detached scratch worktree.
-    // Wrapped (aac-routines issues 191, 270).
-    try {
-      lastVerdict = await agent(
+    //
+    // Issue 404: where the verifier ran is checked, not assumed. The tip of the branch under
+    // review is read first by its own one-command agent; the verdict's self-reported worktree HEAD
+    // must be that tip, or the verdict is rejected and the verifier re-run ONCE with the mismatch
+    // named. A `null` tip (the rev-parse agent could not answer) leaves the verdict standing.
+    const expectedHead = await revParse(branch, `tip:#${t.number}.${attempt}`)
+    if (!expectedHead) log(`#${t.number}.${attempt}: could not read the tip of ${branch}; this attempt's verdict is accepted without the worktree cross-check.`)
+    let mismatch = null
+    for (let pass = 1; pass <= 2; pass++) {
+      const verifyLabel = pass === 1 ? `verify:#${t.number}.${attempt}` : `verify:#${t.number}.${attempt}-rerun`
+      // Pass 2 only. The rejection is about WHERE the verdict was produced, never about what it
+      // concluded - saying so is what stops the re-run reading as pressure to change its answer.
+      const rerunBlock = pass === 2
+        ? `\nYour previous verdict was REJECTED before it was read, for where it was produced and not for what it concluded: ${mismatch}. Redo the whole verification from scratch inside a worktree you create with the command above, and report that worktree's path and its \`git rev-parse HEAD\` in \`worktree\`. Reach the conclusion the evidence supports; that it was passed or failed last time is not a reason to keep or change it.`
+        : ''
+      // Wrapped (aac-routines issues 191, 270).
+      try {
+        lastVerdict = await agent(
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
+The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
 In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
@@ -1218,23 +1398,33 @@ In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - br
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*'\`. Those two exclusions are the harness's own scratch, not implementer output: ~/.claude/hook-state is hook bookkeeping and ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes - keep both exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
-Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.`,
-      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
-      )
-    } catch (err) {
-      lastVerdict = unusableVerdict((err && err.message) || err, `verify:#${t.number}.${attempt}`)
+6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
+Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
+        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
+        )
+      } catch (err) {
+        lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
+      }
+
+      // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
+      // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
+      // transcript forensics put the 2026-09-11 leak on.
+      await treeGuardCheck(pass === 1 ? `verify-attempt${attempt}` : `verify-attempt${attempt}-rerun`, t.number)
+
+      if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
+      // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+      // later read (the retry prompt, the run report) sees an array.
+      if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
+      if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of ${branch}`)
+      if (!mismatch) break
+      log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
     }
-
-    // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
-    // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
-    // transcript forensics put the 2026-09-11 leak on.
-    await treeGuardCheck(`verify-attempt${attempt}`, t.number)
-
-    if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', `verify:#${t.number}.${attempt}`)
-    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
-    // later read (the retry prompt, the run report) sees an array.
-    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
-    if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+    // A second mismatched verdict is not retried again: it is recorded as a failed attempt naming
+    // the mismatch, so nothing is delivered on a verdict produced against the wrong tree.
+    // Only the mismatch is recorded: whatever else that verdict said was observed in the wrong
+    // tree, so passing its findings on to the next attempt would be passing on guesswork.
+    if (mismatch) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: [mismatch] }
     if (lastVerdict.pass) break
   }
 
@@ -1421,6 +1611,9 @@ return {
   discoveryReport,
   followupsError,
   discoveryList: followupsError ? allDiscoveries : undefined,
+  // Named, not counted (issue 403): each entry carries the ticket and the blocker numbers that
+  // were still open after the run read their state, so a reader can tell a real edge from a
+  // stale body note without opening the tracker.
   skippedBlocked: droppedBlocked,
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,

@@ -106,7 +106,9 @@ In this order:
    subagents through the Agent tool with `run_in_background: true`. Do not wait; move on. Collect
    their results when the completion notifications arrive.
 3. **Merge pass (before the fleet).** Run the merge policy below over the repo's open fleet PRs
-   (`agent/issue-*` branches), in this same session.
+   (`agent/issue-*` **and** `agent/fleet-discoveries-*` branches — both shapes the fleet creates;
+   a pass that matches only `agent/issue-*` skips the discoveries PR and strands the run's
+   bullets, issue 377), in this same session.
 4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
    labels they produce), invoke the Workflow tool with
    `scriptPath = .claude/workflows/ticket-fleet.js` — copy it there first with `mkdir -p

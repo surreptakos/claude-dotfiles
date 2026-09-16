@@ -16,6 +16,10 @@
  *   'ahead'           repo stamp is newer than the skill's number (this repo is where
  *                     the skill's number is bumped from; a stamp above the template means
  *                     someone edited the marker without bumping the template)
+ *   'stale-skill-copy' repo stamp is newer than the skill's number, but the CANONICAL
+ *                     project-harness copy is newer still and the stamp does not pass it —
+ *                     the marker is fine, the skill copy this session loaded is behind the
+ *                     published one (a cloud container on a stale plugin payload, issue 412)
  *   'not-harnessed'   docs/agents/harness-version.md absent AND scripts/build-dashboard.js absent
  *   'v1-implicit'     folded into 'behind' when template > 1 — the skill's own rule,
  *                     "File absent means version 1 (pre-marker), not unharnessed"
@@ -112,9 +116,35 @@ function readRepoVersion(repoRoot) {
 }
 
 /**
+ * Where the CANONICAL project-harness version lives — the number the published plugin payload
+ * offers today, independent of the copy this session happens to have loaded. In a cloud container
+ * that is the dotfiles clone the bootstrap hook makes under `~/.aac-dotfiles` (the same clone
+ * bootstrap-check.js reads the payload version from). `HARNESS_CANONICAL_FILE` overrides it; an
+ * empty string means "no canonical copy here", which reads the same as unreadable.
+ */
+function canonicalPath(env) {
+  const e = env || process.env;
+  if (typeof e.HARNESS_CANONICAL_FILE === 'string') return e.HARNESS_CANONICAL_FILE || null;
+  return path.join(e.HOME || os.homedir(), '.aac-dotfiles', 'marketplace', 'aac-skills',
+                   'skills', 'project-harness', 'templates', 'harness-version.md');
+}
+
+/** `{ version }` when the canonical template can be read and parsed, `{ error }` otherwise. */
+function readCanonicalVersion(env) {
+  const p = canonicalPath(env);
+  if (!p) return { error: 'no canonical project-harness copy configured' };
+  let text;
+  try { text = fs.readFileSync(p, 'utf8'); }
+  catch (e) { return { error: `cannot read ${p}: ${e.message}` }; }
+  const m = text.match(TEMPLATE_RE);
+  if (!m) return { error: `no harness-version line in ${p}` };
+  return { version: Number(m[1]) };
+}
+
+/**
  * Compare a repo's harness stamp against the skill's own current version.
  */
-function harnessState(repoRoot, skillDir) {
+function harnessState(repoRoot, skillDir, env) {
   const s = readSkillVersion(skillDir);
   if (s.error === 'template and SKILL.md disagree') {
     return { state: 'stamp-mismatch', template: s.template, skill: s.skill };
@@ -130,6 +160,14 @@ function harnessState(repoRoot, skillDir) {
   const repoVersion = r.v1Implicit ? 1 : r.version;
   if (repoVersion === current) return { state: 'current', current, repo: repoVersion };
   if (repoVersion < current) return { state: 'behind', current, repo: repoVersion, v1Implicit: !!r.v1Implicit };
+  // repoVersion > current. Before blaming the marker, ask whether the skill copy this session
+  // loaded is itself behind the published one: a stale plugin payload makes every correctly
+  // stamped repo look edited (issue 412). Only the canonical number can tell the two apart, and
+  // only when it is readable — an unreadable canonical leaves the original reading in place.
+  const c = readCanonicalVersion(env);
+  if (typeof c.version === 'number' && c.version > current && repoVersion <= c.version) {
+    return { state: 'stale-skill-copy', current, repo: repoVersion, canonical: c.version };
+  }
   return { state: 'ahead', current, repo: repoVersion };
 }
 
@@ -137,5 +175,7 @@ module.exports = {
   findSkillDir,
   readSkillVersion,
   readRepoVersion,
+  readCanonicalVersion,
+  canonicalPath,
   harnessState,
 };
