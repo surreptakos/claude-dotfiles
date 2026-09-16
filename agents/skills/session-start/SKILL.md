@@ -1,6 +1,6 @@
 ---
 name: session-start
-description: Re-print the start-of-session checks for a git project — what the remote did, what is uncommitted, whether the deploy credential is alive, whether tests pass, and which tickets are open. The checks already run automatically at session start; use this to see them again, or with --refresh to re-run them mid-session.
+description: Re-print the start-of-session checks for a git project — the remote, uncommitted work, the deploy credential, tests, tickets. Use when that report has scrolled out of context, or with --refresh to re-run it after the tree has moved.
 metadata:
   modified: "2026-09-14T21:42:38Z"
   previous-modified: "2026-09-09T19:15:00Z"
@@ -10,10 +10,10 @@ metadata:
 
 # Start a session
 
-**The checks are a hook now, not a decision.** `~/.claude/hooks/session-gate.js start` runs on
-`SessionStart` and injects the result before the first reply, so it happens whether or not anyone
-remembers this skill. If the report is already in context, do not re-run it and do not paste it back
-— that is the double-posting the hook was built to avoid.
+**The checks are a hook.** `~/.claude/hooks/session-gate.js start` runs on `SessionStart` and
+injects the result before the first reply, so it happens whether or not anyone remembers this skill.
+When the report is already in context, read it there and carry on: one posting per run is what the
+hook buys.
 
 Use this skill to see it again, or to re-run it after the tree has moved:
 
@@ -30,7 +30,7 @@ Read-only: it fetches (which changes no files) and reports. Works in any git rep
 either universal, auto-detected from files already present, or read from an optional
 `.claude/session.json`. A project with none of that still gets the git checks.
 
-## Then interpret it — do not just paste the output
+## Then turn each line into a recommendation
 
 **`STOP the remote has N commits you do not have`** — say it plainly and stop. Merging someone
 else's work before writing code is easy; after is where conflicts come from. Show what landed
@@ -40,8 +40,8 @@ touching one generated file) or real work by a person, which deserves reading fi
 **`STOP you are in a git WORKTREE`** — code work is fine; releasing from one publishes that tree
 rather than main.
 
-**`!! N uncommitted files`** — left from last time. Show `git status --short` and ask whether to
-keep, commit or discard. Do not build on a tree nobody has looked at.
+**`!! N uncommitted files`** — left from last time. Show `git status --short` and get a decision —
+keep, commit or discard — before building on the tree.
 
 **`self-deploying Apps Script project`** — the repo carries `gas.json` (or the cockpit's own endpoint):
 a merge to the default branch is the deploy, the commit's `gas/deploy` status is the verdict, and no
@@ -57,22 +57,21 @@ this one keeps working.
 **`!! no tools/clasp-auth.js`** — the credential refreshes but its scopes are unchecked. Worth
 fixing before any release.
 
-**`cloud container — no clasp credential is provisioned here`** — expected, not a finding. Cloud
-containers never carry `~/.clasprc.json`; deploys stay CI or local. Do not try to re-authorize from
-the container, and do not report it as a blocker.
+**`cloud container — no clasp credential is provisioned here`** — expected, and reported as a note.
+Cloud containers carry no `~/.clasprc.json`, so deploys stay CI or local and the session carries on.
 
 **`STOP harness vN is behind vM`** — the repo's `docs/agents/harness-version.md` says vN but
 the `project-harness` skill on this machine has moved on to vM. Run `/project-harness` (upgrade
-path, step 7 — machine-wide, not per-repo). Read-only here: the check never runs the upgrade
-itself, so an out-of-date harness has to be closed before writing code, not remembered later.
+path, step 7 — machine-wide rather than per-repo). The check itself is read-only, so close an
+out-of-date harness before writing code.
 
 **`!! repo is not harnessed`** — neither `docs/agents/harness-version.md` nor
 `scripts/build-dashboard.js` is present. Run `/project-harness`. Deliberate on a scratch repo: set
 `"harness": false` in `.claude/session.json` to silence it.
 
 **`note project-harness skill not available here`** — this machine or container has no
-`project-harness` skill to compare against. A note, never a pass — the harness version cannot
-be checked.
+`project-harness` skill to compare against, so the harness version stays unchecked until one that
+has it runs.
 
 **`STOP tests FAIL`** — find out whether it was already broken before this session. `git stash` and
 re-run, or check the last commit that touched the failing area.
