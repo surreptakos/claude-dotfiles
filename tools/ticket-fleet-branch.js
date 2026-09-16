@@ -236,8 +236,8 @@ function resolveVerifierAgent(instrument, override, facts) {
  * The scout is asked for exactly one listing - the issues carrying `label`, or
  * the numbers named in `args.tickets`. When that listing comes back empty a
  * model is prone to treat it as a dead end to route around and returns every
- * open ticket it can find instead, so the fleet spawns pr-check and implementer
- * agents for work nobody asked for. The prompt now says an empty listing is a
+ * open ticket it can find instead, so the fleet spawns open-PR scans and
+ * implementer agents for work nobody asked for. The prompt now says an empty listing is a
  * valid answer; this is the mechanical half of the same guard: whatever the
  * scout reports, only tickets whose number appeared in the listing survive.
  *

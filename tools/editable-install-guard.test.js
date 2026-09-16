@@ -147,8 +147,14 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
   // which is worktree-isolated too and runs whatever commands its ticket asks for.
   for (const [prompt, tail] of [
     ['Implement GitHub issue', 'label: `impl:'],
-    ['You are an independent verifier. Your job', 'label: `verify:#${t.number}.${attempt}`, phase'],
+    // The tail must be text that really follows the prompt: a tail indexOf cannot find slices to
+    // the end of the file, and every later prompt's rail then satisfies this one vacuously.
+    ['You are an independent verifier. Your job', '{ label: verifyLabel, phase: \'Verify\''],
     ['Probe GitHub issue', 'label: `probe:'],
+    // Issue 435: the probe lane's verifier re-runs whatever commands a probe ticket named, and
+    // unlike the prober it is NOT worktree-isolated - an install it ran would land in the
+    // orchestrator's own checkout. It carries the same rail now.
+    ['You are an independent verifier for a probe ticket', 'Clean up your scratch worktree (git worktree remove) when done. Make no repository changes'],
   ]) {
     const start = src.indexOf(prompt);
     assert.ok(start > 0, `prompt "${prompt}" is gone from the fleet script`);
@@ -156,4 +162,49 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
     assert.ok(body.includes('${PYTHON_RAIL}'), `the "${prompt}" prompt must carry the rail`);
   }
   assert.match(src, /editable-install-guard\.js/, 'the fleet must run the guard once the wave has drained');
+});
+
+/** The fleet's own guard-path block, evaluated exactly as the fleet script evaluates it. */
+function fleetEditableGuardBlock() {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const startTag = '// [FLEET-EDITABLE-GUARD-START]';
+  const endTag = '// [FLEET-EDITABLE-GUARD-END]';
+  const s = src.indexOf(startTag);
+  const e = src.indexOf(endTag);
+  assert.ok(s >= 0 && e > s, 'the FLEET-EDITABLE-GUARD markers are gone from the fleet script');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${src.slice(s + startTag.length, e)}
+return { editableGuardPaths, editableGuardCommand, editableGuardAbsentMessage };`)();
+}
+
+// Issue 435: the wave repaired nothing on the repo the incident happened in, because none of the
+// candidate paths existed there and the skip message said only "copy it into the served repo's
+// tools/". Run the real probe command in a repo shaped like that one - no guard anywhere - then do
+// exactly what the new message says and run it again.
+test('a served repo with no guard copy is told the exact path to create, and the probe runs once it exists (issue 435)', () => {
+  const { editableGuardPaths, editableGuardCommand, editableGuardAbsentMessage } = fleetEditableGuardBlock();
+  const paths = editableGuardPaths(null);
+  const cmd = editableGuardCommand(paths, '.');
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'editable-guard-served-'));
+  // HOME is redirected at the scratch repo so the ~/.claude candidate cannot match either.
+  const probe = () => spawnSync('sh', ['-c', cmd], { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: repo }) });
+
+  const absent = probe();
+  assert.equal(absent.status, 3, `a repo with no copy must report "not here" (3), got ${absent.status}: ${absent.stdout}${absent.stderr}`);
+
+  const msg = editableGuardAbsentMessage(paths, '.');
+  assert.match(msg, /tools\/editable-install-guard\.js/, 'the message must name the path to create');
+  assert.match(msg, /\.claude\/workflows\/editable-install-guard\.js/, 'and the copy beside the fleet script a fork launches from');
+  assert.match(msg, /cp "\$CLAUDE_PLUGIN_ROOT\/skills\/ticket-fleet\/editable-install-guard\.js" tools\/editable-install-guard\.js/,
+    'and the command that creates it - the old message named no file, no source and no name, so nothing was ever copied');
+
+  fs.mkdirSync(path.join(repo, 'tools'));
+  fs.copyFileSync(GUARD, path.join(repo, 'tools', 'editable-install-guard.js'));
+  const found = probe();
+  assert.notEqual(found.status, 3, 'the first path the message names must be one the probe actually tries');
+  if (PY) {
+    assert.equal(found.status, 0, `a repo with no pyproject.toml is a clean no-op: ${found.stdout}${found.stderr}`);
+    assert.match(found.stdout, /nothing to guard/, 'and it reports it as JSON, not as a skip');
+  }
+  fs.rmSync(repo, { recursive: true, force: true });
 });
