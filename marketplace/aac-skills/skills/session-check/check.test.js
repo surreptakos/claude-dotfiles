@@ -300,3 +300,32 @@ test('cloud bootstrap: the whole section is silent on a local (non-cloud) sessio
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+/* --------- host predicate (issue 345): a desktop-only check must not run in a container ------- */
+
+// `run` prints a marker and exits non-zero, so a check that DID run is unmistakable in the output.
+const DESKTOP_ONLY = {
+  name: 'board sweep',
+  host: 'desktop',
+  run: `${JSON.stringify(process.execPath)} -e "console.error('host-check-ran'); process.exit(2)"`,
+};
+
+test('host: desktop is skipped in a cloud container, on one line, without running', () => {
+  const output = runChecker({ checks: [DESKTOP_ONLY] }, { env: cloudEnv() });
+  assert.equal((output.match(/skipped \(desktop-only\)/g) || []).length, 1);
+  assert.match(output, /board sweep — skipped \(desktop-only\)/);
+  assert.doesNotMatch(output, /host-check-ran/);
+});
+
+test('host: desktop runs as usual on the desktop', () => {
+  // Blank, not absent: the suite itself may run inside a cloud container, whose ambient
+  // CLAUDE_CODE_REMOTE_* would otherwise make this the same case as the test above.
+  const output = runChecker({ checks: [DESKTOP_ONLY] }, { env: {
+    HARNESS_SKILL_DIR: '',
+    CLAUDE_CODE_REMOTE_SESSION_ID: '',
+    CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE: '',
+  } });
+  assert.match(output, /host-check-ran/);
+  assert.match(output, /board sweep — exit 2/);
+  assert.doesNotMatch(output, /skipped \(desktop-only\)/);
+});
