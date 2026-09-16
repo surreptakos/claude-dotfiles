@@ -45,6 +45,12 @@ function writeRepo(dir, opts) {
   return repo;
 }
 
+function writeCanonical(dir, version) {
+  const file = path.join(dir, 'canonical-harness-version.md');
+  fs.writeFileSync(file, `# Harness version\n\n    harness-version: ${version}\n\n`);
+  return file;
+}
+
 test('readSkillVersion returns the number when template and SKILL.md agree', () => {
   const tmp = mkTmp();
   const skillDir = writeSkill(tmp, 17, 17);
@@ -119,6 +125,36 @@ test('harnessState: v1-implicit is folded into behind when the skill is past v1'
   assert.equal(r.state, 'behind');
   assert.equal(r.repo, 1);
   assert.equal(r.v1Implicit, true);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('harnessState: a stamp past a STALE skill copy is stale-skill-copy, not ahead (issue 412)', () => {
+  // The cloud case: the repo is stamped at 19, the plugin payload this session loaded carries
+  // v18, and the published project-harness is already at v23. The marker is innocent.
+  const tmp = mkTmp();
+  const skillDir = writeSkill(tmp, 18, 18);
+  const repo = writeRepo(tmp, { stampVersion: 19 });
+  const env = { HARNESS_CANONICAL_FILE: writeCanonical(tmp, 23) };
+  assert.deepEqual(harnessState(repo, skillDir, env),
+    { state: 'stale-skill-copy', current: 18, repo: 19, canonical: 23 });
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('harnessState: an unreadable canonical copy leaves the ahead reading alone', () => {
+  const tmp = mkTmp();
+  const skillDir = writeSkill(tmp, 18, 18);
+  const repo = writeRepo(tmp, { stampVersion: 19 });
+  const env = { HARNESS_CANONICAL_FILE: path.join(tmp, 'no-such-canonical.md') };
+  assert.deepEqual(harnessState(repo, skillDir, env), { state: 'ahead', current: 18, repo: 19 });
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('harnessState: a stamp past the canonical number is still ahead — the marker really did move', () => {
+  const tmp = mkTmp();
+  const skillDir = writeSkill(tmp, 18, 18);
+  const repo = writeRepo(tmp, { stampVersion: 25 });
+  const env = { HARNESS_CANONICAL_FILE: writeCanonical(tmp, 23) };
+  assert.deepEqual(harnessState(repo, skillDir, env), { state: 'ahead', current: 18, repo: 25 });
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 

@@ -17,11 +17,14 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
+const { spawnSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  applyBlockerStates,
   stableJson, stableText, stableList, priorFindingsBlock,
+  FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
 } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
@@ -48,6 +51,44 @@ test('buildBranchName includes ticket, attempt, runId and workerIndex', () => {
   assert.match(branch, /attempt1/);
   assert.match(branch, /wf_abc123/);
   assert.match(branch, /w2$/);
+});
+
+// Issue 377: the fleet creates two branch shapes, and the discoveries branch was added
+// (issue 360) after every "the fleet's branches" enumeration had been written against
+// `agent/issue-*`. FLEET_BRANCH_PREFIXES is the one list those enumerations widen against.
+test('isFleetBranch covers both fleet branch shapes (issue 377)', () => {
+  assert.deepEqual([...FLEET_BRANCH_PREFIXES], ['agent/issue-', 'agent/fleet-discoveries-'],
+    'the fleet branch prefix list must name the discoveries prefix beside the issue prefix');
+  assert.equal(buildDiscoveriesBranchName('testrun'), 'agent/fleet-discoveries-wf_testrun');
+  assert.equal(isFleetBranch(buildDiscoveriesBranchName('testrun')), true,
+    'the discoveries branch must be recognised as a fleet branch');
+  assert.equal(isFleetBranch('refs/heads/' + buildBranchName(29, 'abc123', 0, 1)), true,
+    'a refs/heads ref (what a worktree HEAD file holds) must be accepted');
+  assert.equal(isFleetBranch('master'), false);
+  assert.equal(isFleetBranch(DISCOVERIES_BRANCH_PREFIX), false,
+    'a bare prefix with no runId is not a branch the fleet created');
+  assert.equal(isFleetBranch(null), false);
+});
+
+// Issue 377: a merge pass or a worktree cleanup that matches `agent/issue-*` alone skips the
+// discoveries PR and strands the run's bullets - the failure issue 360 exists to end. Pin the
+// prefix against each place fleet branches are enumerated.
+test('every enumeration of fleet branches names the discoveries prefix (issue 377)', () => {
+  const runbook = fs.readFileSync(path.join(REPO_ROOT, 'orchestrator', 'RUNBOOK.md'), 'utf8');
+  const fromMergePass = runbook.slice(runbook.indexOf('**Merge pass (before the fleet).**'));
+  const mergePassStep = fromMergePass.slice(0, fromMergePass.indexOf('\n4. '));
+  assert.ok(mergePassStep.includes(DISCOVERIES_BRANCH_PREFIX + '*'),
+    "RUNBOOK.md's merge pass must match agent/fleet-discoveries-* as well as agent/issue-*");
+
+  const backfill = fs.readFileSync(path.join(REPO_ROOT, 'tools', 'backfill-worktree-configs.js'), 'utf8');
+  assert.match(backfill, /require\('\.\/ticket-fleet-branch\.js'\)/,
+    'the worktree cleanup must take its fleet prefixes from this module, not spell its own');
+  assert.match(backfill, /isFleetBranch\(branch\)/,
+    'the worktree cleanup must classify a worktree branch through isFleetBranch');
+
+  const fleetScript = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(fleetScript.includes(DISCOVERIES_BRANCH_PREFIX + 'wf_${runId}'),
+    `the fleet script's discoveries branch must keep the ${DISCOVERIES_BRANCH_PREFIX} shape this list enumerates`);
 });
 
 test('two concurrent scouts against the same ticket produce distinct branch names', () => {
@@ -180,6 +221,23 @@ for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
     const bytes = fs.readFileSync(file);
     const crs = bytes.filter((b) => b === 0x0d).length;
     assert.equal(crs, 0, `${rel} holds ${crs} CR byte(s); re-encode as LF and rebuild the plugin`);
+  });
+}
+
+// The Workflow tool parses the file behind `scriptPath` before it shows the approval dialog, so a
+// script that does not parse cannot launch anywhere - and nothing else on the gate ran the parser:
+// f9bace7 shipped an unescaped apostrophe inside meta.whenToUse and every fleet launch failed with
+// "Script parse error" until it was noticed by hand. The runtime wraps the body in an async
+// function (top-level `return` and `await` are legal there) after lifting the `export const meta`
+// line, so the check does the same before handing the text to node's parser.
+for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+  test(`fleet script ${rel} parses as a workflow script (Workflow scriptPath refuses a parse error)`, () => {
+    const body = fs.readFileSync(file, 'utf8').replace(/^export /m, '');
+    const res = spawnSync(process.execPath, ['--check', '-'], {
+      input: `(async () => {\n${body}\n});\n`, encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, `${rel} does not parse:\n${res.stderr}`);
   });
 }
 
@@ -418,8 +476,12 @@ function loadStableHelpers(scriptPath) {
 // rule helpers, the resume-stable helpers, the verifier agent type, the dedupe brief and the test
 // command, stubbed so the body evaluates the same way under either instrument). `stubs` overrides
 // any of them for one test.
-async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}) {
-  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runCodeLane;\n}`);
+async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scriptPath = FLEET_SCRIPT) {
+  // The Deliver prompt lives in its own marked block since issue 405 (the finish mode builds the
+  // same text), so it is evaluated into the lane's own scope: the prompt the lane sends is the
+  // real one, not a stub.
+  const deliverBody = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-DELIVER-PROMPT');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${deliverBody}\n${body}\nreturn runCodeLane;\n}`);
   return wrapper(laneScope(Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
@@ -440,10 +502,22 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}) {
     assertNoBreach: () => {},
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     unusableVerdict: (detail, who) => ({ pass: false, evidence: '', failures: [`${who || 'verifier'} output unusable: ${detail}`], unusable: true }),
+    // Issue 404: the expected tip is read by its own one-command agent. Unreadable by default, so
+    // the worktree cross-check is inert unless a test supplies a tip; driveCodeLane injects the
+    // script's own worktreeMismatch, so the decision under test is the real one.
+    revParse: async () => null,
   }, stubs)));
 }
 
-async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null) {
+// The worktree cross-check the lanes reject a verdict with (issue 404), evaluated out of the
+// script so the lane bodies below resolve the real one rather than a stand-in.
+function loadWorktreeCheck(scriptPath) {
+  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-WORKTREE-CHECK');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${body}\nreturn { shaMatches, worktreeMismatch };`)();
+}
+
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null, stubOverrides = {}) {
   const body = extractCodeLane(fs.readFileSync(scriptPath, 'utf8'));
   const helpers = loadStableHelpers(scriptPath);
   const logs = [];
@@ -455,13 +529,14 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   };
   // runId is fixed while invocationId varies - the resume shape of issue 291. The resume-stable
   // helpers are the script's own (issue 271), so the prompts under test are the real ones.
-  const runCodeLane = await instantiateCodeLane(body, agentMock, logs, {
+  const runCodeLane = await instantiateCodeLane(body, agentMock, logs, Object.assign({
     cfg: Object.assign({ maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' }, cfgOverrides),
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+    worktreeMismatch: loadWorktreeCheck(scriptPath).worktreeMismatch,
     treeGuardCheck,
-  });
+  }, stubOverrides), scriptPath);
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs, checkpoints };
 }
@@ -496,7 +571,9 @@ async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
     instrument: 'gh',
     DISCOVERY_REPORT: {},
   }));
-  return { result: await runReport(discoveries) };
+  // The writer takes the default branch as an argument since issue 405: the finish mode calls it
+  // with the branch its journal names, long before a scout would have run.
+  return { result: await runReport(discoveries, 'main') };
 }
 
 for (const file of RESUME_GUARD_PAIR) {
@@ -514,7 +591,9 @@ for (const file of RESUME_GUARD_PAIR) {
     const preIdx = body.indexOf('label: `pr-check:#');
     const loopIdx = body.indexOf('for (let attempt');
     const implIdx = body.indexOf('label: `impl:#');
-    const verifyIdx = body.indexOf('label: `verify:#');
+    // The verifier's label is built once per pass (issue 404's single re-run), so its anchor is
+    // the label template rather than the opts key; the backtick still keeps comments out.
+    const verifyIdx = body.indexOf('`verify:#');
     const deliverIdx = body.indexOf('label: `deliver:#');
     assert.ok(preIdx >= 0, 'runCodeLane must call the pre-loop PR check with label pr-check:#N');
     assert.ok(loopIdx > preIdx, 'PR check must precede the attempt for-loop');
@@ -594,7 +673,7 @@ for (const file of RESUME_GUARD_PAIR) {
       calls.push(opts.label);
       if (opts.label.startsWith('pr-check:')) return { found: false };
       if (opts.label.startsWith('impl:')) {
-        return { branch: 'agent/issue-241-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+        return { branch: 'agent/issue-241-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
       }
       // No `failures` key at all - exactly what tripped the StructuredOutput retry cap on #241.
       if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran node --test; exit 0' };
@@ -643,7 +722,7 @@ for (const file of RESUME_GUARD_PAIR) {
       calls.push(opts.label);
       if (opts.label.startsWith('pr-check:')) return { found: false };
       if (opts.label.startsWith('impl:')) {
-        return { branch: 'agent/issue-9-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-A'] };
+        return { branch: 'agent/issue-9-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-A'] };
       }
       if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [] };
       if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/500' };
@@ -661,13 +740,84 @@ for (const file of RESUME_GUARD_PAIR) {
       'the code lane must checkpoint the orchestrator tree after Implement, Verify and Deliver');
   });
 
+  // ---- The verdict's worktree is cross-checked against the branch tip (issue 404) ----
+
+  test(`${rel} accepts a verdict whose worktree HEAD is the branch tip`, async () => {
+    const tip = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/scratch/v', head: tip } };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/404' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(file, agentMock, { number: 404, title: 't', criteria: '' }, 0, {}, 'inv1', null,
+      { revParse: async () => tip });
+    assert.deepEqual(calls, ['pr-check:#404@inv1', 'impl:#404.1', 'push:#404.1', 'verify:#404.1', 'deliver:#404'],
+      'a verdict produced at the branch tip must be accepted without a re-run');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/404');
+  });
+
+  test(`${rel} rejects a verdict produced outside the branch's worktree and re-runs the verifier once`, async () => {
+    // The main checkout sitting on the session's own branch is exactly the 2026-09-16 failure:
+    // the verifier answers about a tree that predates the code under review.
+    const tip = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const mainCheckout = 'ffffeeee00001111222233334444555566667777';
+    const calls = [];
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) {
+        prompts.push([opts.label, prompt]);
+        return { pass: true, evidence: 'ran tests in /home/user/aac-routines', failures: [], worktree: { path: '/home/user/aac-routines', head: mainCheckout } };
+      }
+      throw new Error(`nothing may be delivered on a rejected verdict: ${opts.label}`);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 404, title: 't', criteria: '' }, 0, { maxAttempts: 1 }, 'inv1', null,
+      { revParse: async () => tip });
+    assert.deepEqual(calls, ['pr-check:#404@inv1', 'impl:#404.1', 'push:#404.1', 'verify:#404.1', 'verify:#404.1-rerun'],
+      'a mismatched verdict must be re-run exactly once, and a second mismatch must not deliver');
+    assert.match(prompts[1][1], new RegExp(`${mainCheckout}[\\s\\S]*${tip}`),
+      're-run prompt must name the mismatch: the HEAD the verdict came from and the tip it had to be');
+    assert.match(prompts[1][1], /never .*fall back to the repository you started in|main checkout is never a test surface/,
+      're-run prompt must still carry the rule it was rejected under');
+    assert.equal(result.done, false, 'a verdict from the wrong tree is not a pass');
+    assert.equal(result.prUrl, undefined);
+    assert.equal(result.verdict.failures.length, 1, 'only the mismatch is recorded; the wrong-tree findings are not passed on');
+    assert.match(result.verdict.failures[0], new RegExp(mainCheckout));
+    assert.ok(logs.some((m) => m.includes('Re-running the verifier once')), 'the rejection and its single re-run must be logged');
+  });
+
+  test(`${rel} verifier and prober prompts say the main checkout is never a test surface (issue 404)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    const anchors = [
+      ['code-lane verifier', 'You are an independent verifier. Your job is to REFUTE'],
+      ['probe-lane verifier', 'You are an independent verifier for a probe ticket'],
+      ['prober', 'Probe GitHub issue #'],
+    ];
+    for (const [who, anchor] of anchors) {
+      const start = src.indexOf(anchor);
+      assert.ok(start > 0, `${who} prompt not found by its opening line`);
+      const prompt = src.slice(start, src.indexOf("phase: '", start));
+      assert.match(prompt, /The main checkout is never a test surface \(issue 404\)/,
+        `${who} prompt must say in one sentence that the main checkout is never a test surface`);
+      assert.match(prompt, /sits on whatever branch this session is on, which is not the code/,
+        `${who} prompt must say WHY: the main checkout is on this session's branch, not the code under test`);
+    }
+  });
+
   // ---- Deliver never ticks acceptance boxes (aac-routines issue 264) ----
 
   test(`${rel} Deliver prompt forbids ticking acceptance boxes`, () => {
-    const body = extractCodeLane(fs.readFileSync(file, 'utf8'));
-    const deliverIdx = body.indexOf('`Deliver verified branch');
-    assert.ok(deliverIdx > 0, 'code lane must build a Deliver prompt');
-    const prompt = body.slice(deliverIdx, body.indexOf('label: `deliver:#', deliverIdx));
+    // The prompt moved into its own marked block in issue 405 - the finish mode sends the same
+    // text - so it is read from there rather than from the lane body.
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /`Deliver verified branch/, 'the deliver-prompt block must build the Deliver prompt');
     assert.match(prompt, /do NOT tick any acceptance box/,
       'Deliver prompt must forbid ticking acceptance boxes: the boxes wait for the merge (aac-routines issue 264)');
     assert.doesNotMatch(prompt, /tick-acceptance-boxes\.js/,
@@ -700,7 +850,7 @@ for (const file of RESUME_GUARD_PAIR) {
 
   test(`${rel} deliver prompt merges the default branch before pushing`, () => {
     const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /git merge --no-edit origin\/\$\{scout\.defaultBranch\}/,
+    assert.match(src, /git merge --no-edit origin\/\$\{defaultBranch\}/,
       'deliver must merge origin/<defaultBranch> into the verified branch');
     assert.match(src, /git checkout --theirs/,
       'deliver must take the default branch side for a generated-file conflict');
@@ -720,7 +870,7 @@ for (const file of RESUME_GUARD_PAIR) {
       calls.push(opts.label);
       if (opts.label.startsWith('pr-check:')) return { found: false };
       if (opts.label.startsWith('impl:')) {
-        return { branch: 'agent/issue-11-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+        return { branch: 'agent/issue-11-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
       }
       if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [] };
       if (opts.label.startsWith('deliver:')) {
@@ -742,7 +892,7 @@ for (const file of RESUME_GUARD_PAIR) {
     const agentMock = async (_prompt, opts) => {
       if (opts.label.startsWith('pr-check:')) return { found: false };
       if (opts.label.startsWith('impl:')) {
-        return { branch: 'agent/issue-12-attempt1-wf_testrun-w0', committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+        return { branch: 'agent/issue-12-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
       }
       if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [] };
       if (opts.label.startsWith('deliver:')) {
@@ -772,7 +922,7 @@ for (const file of RESUME_GUARD_PAIR) {
     };
     const prior = {
       branch: 'agent/issue-274-attempt1-wf_dd0cf9a4091-w0',
-      committed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-B'],
+      committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-B'],
     };
     const { result, logs } = await driveCodeLane(
       file, agentMock, { number: 274, title: 't', criteria: '' }, 0, { priorImpl: { 274: prior } }
@@ -788,6 +938,58 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/501');
     assert.deepEqual(result.discoveries, ['finding-B'], 'the reused result carries its discoveries forward');
     assert.ok(logs.some((m) => /priorImpl/.test(m)), 'the reuse must be logged');
+  });
+
+  // ---- The verified branch is on origin before Deliver starts (issue 405) ----
+  // A container restart mid-Deliver, a deliverer that never pushed, and an interrupt during Verify
+  // each left verified commits on a branch that existed nowhere but the dead container. The
+  // implementer is now asked to push and to report `pushed`; when it did not, the lane pushes the
+  // branch itself - before the verifier, so nothing downstream can lose it. `origin` here is the
+  // set of branches the push agent has put there, read at the moment Deliver is invoked.
+  test(`${rel} pushes the verified branch to origin before Deliver starts (issue 405)`, async () => {
+    const calls = [];
+    const origin = new Set();
+    let originAtDeliver = null;
+    const branch = 'agent/issue-405-attempt1-wf_testrun-w0';
+    const agentMock = async (prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('pr-check:')) return { found: false };
+      // The implementer did NOT push - the case the script has to cover itself.
+      if (opts.label.startsWith('impl:')) {
+        return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      if (opts.label.startsWith('push:')) {
+        assert.ok(prompt.includes(`git push -u origin ${branch}`), 'the push agent must be given the exact command');
+        origin.add(branch);
+        return { pushed: true, output: `branch '${branch}' set up to track 'origin/${branch}'` };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) {
+        originAtDeliver = [...origin];
+        return { pushed: true, prUrl: 'https://github.com/x/y/pull/405', mergeStatus: 'clean', conflictPaths: [] };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 405, title: 't', criteria: '' }, 0);
+    assert.deepEqual(calls, ['pr-check:#405@inv1', 'impl:#405.1', 'push:#405.1', 'verify:#405.1', 'deliver:#405'],
+      'the push must happen straight after the implementer, before the verifier and the deliverer');
+    assert.deepEqual(originAtDeliver, [branch],
+      'the branch Deliver is handed must already exist on origin - that is the work a dead Deliver step must not be able to lose');
+    assert.equal(result.done, true);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/405');
+    assert.ok(logs.some((m) => /is on origin before verification/.test(m)), 'the push the run performed must be logged');
+    // And when the implementer reports pushed: true, no push agent is started at all - the
+    // full-chain test above drives exactly that case and its label list carries no `push:`.
+  });
+
+  test(`${rel} deliver prompt pushes the branch and fails loudly rather than calling it missing (issue 405)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /git push -u origin \$\{branch\}/,
+      'the deliverer must be told to push the branch, by the exact command');
+    assert.match(prompt, /never conclude that the branch, or the issue, does not exist/,
+      "the deliverer must never report the branch missing: #356's deliverer did exactly that without ever pushing");
+    assert.match(prompt, /blockedReason:"push failed: <the git output of all three commands, VERBATIM>"/,
+      'a failed push must come back with the git output verbatim, not a paraphrase');
   });
 }
 
@@ -990,7 +1192,7 @@ function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
     if (opts.label === 'impl:#42.1') {
       return shape({
         branch: implBranch || 'agent/issue-42-attempt1-wf_testrun-w0',
-        committed: true, testExitCode: 1, testTail: 'not ok', discoveries: ['finding-A'],
+        committed: true, pushed: true, testExitCode: 1, testTail: 'not ok', discoveries: ['finding-A'],
       });
     }
     if (opts.label === 'verify:#42.1') {
@@ -1003,7 +1205,7 @@ function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
     if (opts.label === 'impl:#42.2') {
       return shape({
         branch: implBranch || 'agent/issue-42-attempt2-wf_testrun-w0',
-        committed: true, testExitCode: 0, testTail: 'ok', discoveries: [],
+        committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [],
       });
     }
     if (opts.label === 'verify:#42.2') {
@@ -1082,3 +1284,181 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.ok(logs.some((m) => m.includes('not the instructed')), 'a self-report mismatch must be logged');
   });
 }
+
+// ---- Closed blockers are cleared in code, not by editing the body (issue 403) ----
+// The scout reports the numbers a ticket's "Blocked by" section names; the fleet reads each of
+// those issues through the tracker instrument and drops the ones the tracker calls closed. These
+// drive the block between the FLEET-BLOCKER-STATE markers with a stubbed instrument, so the
+// state comes from the reply rather than from whatever the ticket body still says.
+
+async function driveBlockerState(tickets, blockerReply, { mode = 'gh' } = {}) {
+  const body = extractBetween(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-BLOCKER-STATE');
+  const logs = [];
+  const prompts = [];
+  const agentMock = async (prompt, opts) => { prompts.push([opts.label, prompt]); return blockerReply(prompt, opts); };
+  const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'log',
+    body + '\nreturn { resolveBlockerStates, applyBlockerStates };');
+  const fns = await wrapper(agentMock, { reportModel: 'r' }, loadTrackerRules(FLEET_SCRIPT, mode), (m) => logs.push(m));
+  const resolved = await fns.resolveBlockerStates(tickets);
+  return { resolved, logs, prompts, applyBlockerStates: fns.applyBlockerStates };
+}
+
+test(`${FLEET_SCRIPT_REL} runs a ticket whose only blocker is closed, with no body edit (issue 403)`, async () => {
+  const selectWave = selectWaveFrom(FLEET_SCRIPT);
+  const ticket = { number: 305, kind: 'code', blockedBy: [199], handoffPending: false };
+  const { resolved, logs, prompts } = await driveBlockerState(
+    [ticket], async () => ({ blockers: [{ number: 199, state: 'closed' }] })
+  );
+  assert.match(prompts[0][1], /gh api repos\/\{owner\}\/\{repo\}\/issues\/N --jq \.state/,
+    'the blocker state must be read through the instrument, not inferred from the body');
+  assert.deepEqual(resolved[0].blockedBy, [],
+    'a blocker the tracker reports closed must stop gating the ticket');
+  assert.deepEqual(selectWave(resolved, 3).wave.map((t) => t.number), [305],
+    'the ticket must be eligible without anyone rewriting its "Blocked by" section');
+  assert.ok(logs.some((m) => m.includes('#305') && m.includes('#199') && m.includes('closed')),
+    'the cleared blocker must appear in the run log, naming ticket and blocker');
+});
+
+test(`${FLEET_SCRIPT_REL} still skips a ticket whose blocker is open, naming the blocker (issue 403)`, async () => {
+  const selectWave = selectWaveFrom(FLEET_SCRIPT);
+  const ticket = { number: 305, kind: 'code', blockedBy: [199], handoffPending: false };
+  const { resolved, prompts } = await driveBlockerState(
+    [ticket], async () => ({ blockers: [{ number: 199, state: 'open' }] }), { mode: 'mcp' }
+  );
+  assert.match(prompts[0][1], /mcp__github__issue_read/,
+    'the container instrument must read the blocker through the GitHub MCP tools');
+  assert.deepEqual(resolved[0].blockedBy, [199], 'an open blocker must survive the resolution');
+  const selection = selectWave(resolved, 3);
+  assert.deepEqual(selection.wave, [], 'a ticket with an open blocker must not run');
+  assert.deepEqual(selection.blocked.map((t) => ({ ticket: t.number, blockedBy: t.blockedBy })),
+    [{ ticket: 305, blockedBy: [199] }], 'the skipped ticket must carry the open blocker numbers');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const droppedBlocked = selection\.blocked\.map\(t => \(\{ ticket: t\.number, blockedBy: t\.blockedBy \}\)\)/,
+    'the run result must build skippedBlocked as entries naming the open blockers, not a count');
+  assert.match(src, /skippedBlocked: droppedBlocked/,
+    'the run result must carry those entries');
+});
+
+test('applyBlockerStates inlined in the fleet script matches tools/ticket-fleet-branch.js', async () => {
+  const { applyBlockerStates: inlined } = await driveBlockerState([], async () => ({ blockers: [] }));
+  const tickets = [
+    { number: 30, blockedBy: [199, 206] },
+    { number: 32, blockedBy: ['207'] },
+    { number: 134, blockedBy: [] },
+    { number: 135, blockedBy: [900] },
+  ];
+  const blockers = [
+    { number: 199, state: 'closed' }, { number: 206, state: 'open' },
+    { number: 207, state: 'CLOSED ' }, { number: 305, state: 'closed' },
+  ];
+  const mine = applyBlockerStates(tickets, blockers);
+  assert.deepEqual(inlined(tickets, blockers), mine, 'the two copies of the filter have drifted');
+  assert.deepEqual(mine.tickets.map((t) => t.blockedBy), [[206], [], [], [900]],
+    'only blockers the reader reported closed may be dropped; one it never reported keeps blocking');
+  assert.deepEqual(mine.cleared, [{ ticket: 30, blocker: 199 }, { ticket: 32, blocker: 207 }],
+    'every cleared (ticket, blocker) pair is reported so the run can log it');
+  assert.deepEqual(applyBlockerStates(tickets, [{ number: 900, state: 'unknown' }]).cleared, [],
+    'an unreadable blocker keeps blocking: the gate opens only on positive evidence');
+});
+
+// ---- Finish mode: deliver what a dead run verified (issue 405) ----
+// A run whose Deliver step or container died leaves verified branches with no PR and no report
+// writer, and its journal holds every result. `args.finishRunId` replays that journal: it delivers
+// every verified-but-undelivered branch, skips the ones already delivered, leaves the unverified
+// alone, and runs the report writer over the discoveries. Driven here against a journal fixture
+// with one of each, so the skipping is behavior rather than prompt text.
+async function driveFinish(scriptPath, agentMock, journal, cfgOverrides = {}) {
+  const src = fs.readFileSync(scriptPath, 'utf8');
+  const helpers = loadStableHelpers(scriptPath);
+  const body = [
+    extractMarked(src, 'FLEET-DELIVER-PROMPT'),
+    extractMarked(src, 'FLEET-REPORT'),
+    extractMarked(src, 'FLEET-FINISH'),
+  ].join('\n');
+  const logs = [];
+  const checkpoints = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runFinish;\n}`);
+  const runFinish = await wrapper(laneScope({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    cfg: Object.assign({ deliver: true, deliverModel: 'd', reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' }, cfgOverrides),
+    runId: 'testrun',
+    instrument: 'gh',
+    rules: new Proxy({}, { get: () => () => 'gh pr create' }),
+    stableText: helpers.stableText,
+    stableList: helpers.stableList,
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+    treeGuardCheck: async (label, ticketNumber) => { checkpoints.push(`${label}#${ticketNumber}`); },
+    DELIVERED: {},
+    DISCOVERY_REPORT: {},
+  }));
+  return { result: await runFinish(journal), logs, checkpoints };
+}
+
+// One delivered ticket, one verified-but-undelivered, one that never passed a verifier.
+const DEAD_RUN_JOURNAL = {
+  journalPath: '/home/u/.claude/projects/p/s/subagents/workflows/wf_dead/journal.jsonl',
+  defaultBranch: 'main',
+  testCommand: 'node --test tools/*.test.js',
+  tickets: [
+    {
+      number: 320, title: 'already delivered', kind: 'code', branch: 'agent/issue-320-attempt1-wf_dead-w0',
+      verified: true, evidence: 'ran the gate; exit 0', keepOpen: false, criteria: '- one',
+      delivered: true, deliveryRef: 'https://github.com/x/y/pull/320',
+    },
+    {
+      number: 324, title: 'verified, never delivered', kind: 'code', branch: 'agent/issue-324-attempt1-wf_dead-w1',
+      verified: true, evidence: 'ran the gate; exit 0', keepOpen: false, criteria: '- two',
+      delivered: false, deliveryRef: '',
+    },
+    {
+      number: 356, title: 'never verified', kind: 'code', branch: 'agent/issue-356-attempt1-wf_dead-w2',
+      verified: false, evidence: '', keepOpen: false, criteria: '- three',
+      delivered: false, deliveryRef: '',
+    },
+  ],
+  discoveries: ['finding-A'],
+};
+
+test(`${FLEET_SCRIPT_REL} finish mode delivers only the verified-but-undelivered branch, then runs the report writer (issue 405)`, async () => {
+  const calls = [];
+  const prompts = {};
+  const agentMock = async (prompt, opts) => {
+    calls.push(opts.label);
+    prompts[opts.label] = prompt;
+    if (opts.label.startsWith('deliver:')) {
+      return { pushed: true, prUrl: 'https://github.com/x/y/pull/324', mergeStatus: 'clean', conflictPaths: [] };
+    }
+    if (opts.label === 'followups-writer') {
+      return { branch: 'agent/fleet-discoveries-wf_testrun', sha: 'abc123', prUrl: 'https://github.com/x/y/pull/9', appended: 1 };
+    }
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  const { result, logs, checkpoints } = await driveFinish(FLEET_SCRIPT, agentMock, DEAD_RUN_JOURNAL);
+  assert.deepEqual(calls, ['deliver:#324', 'followups-writer'],
+    'exactly one delivery (the verified, undelivered ticket) plus the report writer - no implementer, no verifier, nothing for the delivered or unverified tickets');
+  const deliver = prompts['deliver:#324'];
+  assert.ok(deliver.includes('agent/issue-324-attempt1-wf_dead-w1'), 'the deliverer must be given the branch the journal recorded');
+  assert.ok(!deliver.includes('wf_dead-w0') && !deliver.includes('wf_dead-w2'), 'no other ticket may reach the deliverer');
+  assert.match(deliver, /FINISH pass/, 'the finish delivery must tell the deliverer an existing PR for this branch is not to be duplicated');
+  assert.deepEqual(result.delivered, [{ ticket: 324, branch: 'agent/issue-324-attempt1-wf_dead-w1', pr: 'https://github.com/x/y/pull/324' }]);
+  assert.deepEqual(result.skippedDelivered, [{ ticket: 320, ref: 'https://github.com/x/y/pull/320' }],
+    'a ticket the journal records as delivered must be skipped, with the PR it already has');
+  assert.deepEqual(result.skippedUnverified, [356], 'a ticket no verifier passed must not be delivered by a finish pass');
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.discoveryReport.sha, 'abc123', "the dead run's discoveries must still reach the follow-ups file");
+  assert.deepEqual(checkpoints, ['finish-deliver#324'],
+    'the orchestrator tree is checkpointed after each finish delivery, as it is in the code lane');
+  assert.ok(logs.some((m) => /already delivered/.test(m)) && logs.some((m) => /no passing verdict/.test(m)),
+    'both skips must say why in the run log');
+});
+
+test(`${FLEET_SCRIPT_REL} finish mode is reached from args.finishRunId without a scout (issue 405)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /finishRunId: null/, 'finishRunId must be a declared arg with a default');
+  const finishIdx = src.indexOf('if (cfg.finishRunId) {');
+  const scoutIdx = src.indexOf('const scout = await agent(');
+  assert.ok(finishIdx > 0 && scoutIdx > finishIdx,
+    'the finish branch must return before the scout agent is ever started');
+  assert.match(src, /label: `journal-read:\$\{finishRunId\}`/, 'finish mode must read the dead run journal through its own agent');
+});

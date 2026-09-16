@@ -208,6 +208,32 @@ test('main: JSON output enumerates entries and their actions', () => {
   } finally { cleanup(fake); }
 });
 
+// Issue 377: the fleet's discoveries branch (`agent/fleet-discoveries-wf_<runId>`, issue 360)
+// is a fleet branch too, so --cleanup must recognise its worktree rather than walk past it -
+// while a branch the fleet never created stays out of the removal path entirely.
+test('main: --cleanup classifies the discoveries prefix as a fleet branch', () => {
+  const fake = buildFakeRepo({
+    'disc': { head: 'ref: refs/heads/agent/fleet-discoveries-wf_testrun' },
+    'mine': { head: 'ref: refs/heads/dan/scratch' },
+  });
+  try {
+    const chunks = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (c) => { chunks.push(c); return true; };
+    let code;
+    try {
+      code = main(['--repo', fake.root, '--cleanup', '--dry-run', '--json']);
+    } finally { process.stdout.write = write; }
+    assert.strictEqual(code, 0);
+    const byName = Object.fromEntries(JSON.parse(chunks.join('')).entries.map((e) => [e.name, e]));
+    assert.strictEqual(byName.disc.fleet, true, 'the discoveries branch must be seen as a fleet branch');
+    assert.strictEqual(byName.mine.fleet, false, 'a non-fleet branch must stay out of the removal path');
+    // Unmerged either way, so both keep their config.worktree backfill.
+    assert.strictEqual(byName.disc.action, 'would-write');
+    assert.strictEqual(byName.mine.action, 'would-write');
+  } finally { cleanup(fake); }
+});
+
 test('main: --dry-run does not touch disk', () => {
   const fake = buildFakeRepo({ 'a': {} });
   try {

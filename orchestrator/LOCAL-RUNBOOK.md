@@ -98,13 +98,14 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
      terminal, a headless `claude -p`, a desktop scheduled task) is a foreign runner and this
      repo is deferred until it exits. Fleet and Agent-tool agents run inside this process, so the
      master's own work never adds a PID.
-  2. `git worktree list` in this repo shows an `agent/issue-*` worktree this master did not
-     create. A fleet removes its worktrees when it finishes, so an unexpected one is a fleet
-     mid-run from another terminal, or a crashed one that needs `git worktree prune` first.
+  2. `git worktree list` in this repo shows an `agent/issue-*` or `agent/fleet-discoveries-*`
+     worktree this master did not create. A fleet removes its worktrees when it finishes, so
+     an unexpected one is a fleet mid-run from another terminal, or a crashed one that
+     needs `git worktree prune` first.
   Cloud runners leave no process here, so the 2-hour signal from RUNBOOK.md (fleet PRs or
-  `agent/issue-*` branches on origin updated within 2 hours that this master did not create) stays
-  as the third check. Same response as RUNBOOK.md on any hit: defer indefinitely, escalate to Dan
-  for an explicit handoff, never proceed on your own.
+  `agent/issue-*` / `agent/fleet-discoveries-*` branches on origin updated within 2 hours that
+  this master did not create) stays as the third check. Same response as RUNBOOK.md on any hit:
+  defer indefinitely, escalate to Dan for an explicit handoff, never proceed on your own.
 - **Kill switch.** Esc / Ctrl+C in a master's terminal stops the current pass. With no `Pass
   complete` line the watchdog treats that process as still working while it is alive, and once
   the window is closed it launches the next repo on its next slot. Disabling the task
