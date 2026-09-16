@@ -12,6 +12,8 @@ import unittest
 SCRIPT = Path(__file__).parents[1] / "ask_matt_gate.py"
 HOOKS_CONFIG = Path.home() / ".codex" / "hooks.json"
 CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
+PLUGIN_HOOKS = (Path.home() / ".claude" / "plugins" / "marketplaces" / "claude-dotfiles"
+                / "marketplace" / "aac-skills" / "hooks" / "hooks.json")
 CLAUDE_INSTRUCTIONS = Path.home() / ".claude" / "CLAUDE.md"
 CODEX_INSTRUCTIONS = Path.home() / ".codex" / "AGENTS.md"
 CLAUDE_REMINDER = Path.home() / ".claude" / "hooks" / "governance-reminder.js"
@@ -605,9 +607,12 @@ class AskMattGateTests(unittest.TestCase):
                 "deny",
             )
 
-    def test_claude_global_settings_wire_all_gate_events(self) -> None:
-        settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
-        hooks = settings["hooks"]
+    def test_plugin_manifest_wires_all_gate_events_and_settings_no_longer_do(self) -> None:
+        # Issue 208: the governance hooks ride in the aac-skills plugin payload (marketplace clone
+        # is the copy the PC's Codex manifest also points at). ~/.claude/settings.json must not
+        # carry the same entries, or every event fires twice on a PC session.
+        manifest = json.loads(PLUGIN_HOOKS.read_text(encoding="utf-8"))
+        hooks = manifest["hooks"]
         self.assertEqual(
             set(hooks),
             {"SessionStart", "SessionEnd", "PreCompact", "UserPromptSubmit", "PreToolUse",
@@ -623,6 +628,19 @@ class AskMattGateTests(unittest.TestCase):
         self.assertIn("session-gate.js\\\" start", json.dumps(hooks["SessionStart"]))
         self.assertIn("session-gate.js\\\" end", json.dumps(hooks["SessionEnd"]))
         self.assertIn("session-gate.js\\\" prompt", prompt_config)
+        # Every command resolves through the plugin root, never a home path.
+        for event_groups in hooks.values():
+            for group in event_groups:
+                for hook in group["hooks"]:
+                    for key in ("command", "commandWindows"):
+                        cmd = hook.get(key, "")
+                        if "hooks/scripts/" in cmd:
+                            self.assertIn("${CLAUDE_PLUGIN_ROOT}", cmd)
+        settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
+        live = json.dumps(settings.get("hooks", {}))
+        for name in ("session-gate.js", "state-rehydrate.js", "state-stash.js",
+                     "governance-reminder.js", "ask_matt_gate.py"):
+            self.assertNotIn(name, live, f"settings.json still dispatches {name}: double fire")
 
     def test_global_instruction_files_pin_yes_and_caveman_default_ultra(self) -> None:
         codex_text = CODEX_INSTRUCTIONS.read_text(encoding="utf-8")

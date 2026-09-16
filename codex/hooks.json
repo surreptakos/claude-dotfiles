@@ -6,8 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOME/.codex/hooks/ask_matt_gate.py\" prompt",
-            "commandWindows": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" prompt",
+            "command": "python3 \"$HOME/.claude/plugins/marketplaces/claude-dotfiles/marketplace/aac-skills/hooks/scripts/ask_matt_gate.py\" prompt",
+            "commandWindows": "py -3 \"__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles\\marketplace\\aac-skills\\hooks\\scripts\\ask_matt_gate.py\" prompt",
             "timeout": 5,
             "statusMessage": "Starting Ask Matt route gate",
             "additionalContextLimit": 1200
@@ -21,8 +21,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOME/.codex/hooks/ask_matt_gate.py\" pre-tool",
-            "commandWindows": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" pre-tool",
+            "command": "python3 \"$HOME/.claude/plugins/marketplaces/claude-dotfiles/marketplace/aac-skills/hooks/scripts/ask_matt_gate.py\" pre-tool",
+            "commandWindows": "py -3 \"__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles\\marketplace\\aac-skills\\hooks\\scripts\\ask_matt_gate.py\" pre-tool",
             "timeout": 5,
             "statusMessage": "Checking Ask Matt route"
           }
@@ -34,8 +34,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$HOME/.codex/hooks/ask_matt_gate.py\" stop",
-            "commandWindows": "py -3 \"__USERHOME_JSON__\\.codex\\hooks\\ask_matt_gate.py\" stop",
+            "command": "python3 \"$HOME/.claude/plugins/marketplaces/claude-dotfiles/marketplace/aac-skills/hooks/scripts/ask_matt_gate.py\" stop",
+            "commandWindows": "py -3 \"__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles\\marketplace\\aac-skills\\hooks\\scripts\\ask_matt_gate.py\" stop",
             "timeout": 5,
             "statusMessage": "Verifying Ask Matt route"
           }
