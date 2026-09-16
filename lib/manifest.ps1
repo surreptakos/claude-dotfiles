@@ -242,13 +242,14 @@ function Restore-SkillLinks {
 # SessionStart hook loads them from whichever checkout the session opened - so a cloud container
 # has them too. Carrying the live copy as well would mean two copies of one note, each able to
 # drift; tools/repo-memory-pointer.js (both sync modes call it) empties the live directory down
-# to a pointer file instead. Matched on the slug suffix so the rule holds for any checkout of
-# this repo, on any machine, under any parent folder.
-$script:RepoOwnedMemorySuffix = '-claude-dotfiles'
+# to a pointer file instead. Matched anywhere in the slug, not just at the end, so it holds for any
+# checkout of this repo on any machine AND for its agent worktrees, whose slug carries the checkout
+# path plus `--claude-worktrees-<id>`.
+$script:RepoOwnedMemoryMarker = '-claude-dotfiles'
 
 function Test-RepoOwnedMemory {
     param([Parameter(Mandatory = $true)][string]$Slug)
-    return ($Slug -like ('*' + $script:RepoOwnedMemorySuffix))
+    return ($Slug -like ('*' + $script:RepoOwnedMemoryMarker + '*'))
 }
 
 function Get-MemoryItems {

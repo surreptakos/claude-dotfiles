@@ -3,7 +3,7 @@
 //
 // WHY: the notes are committed now (docs/agents/memory/, index MEMORY.md) and the plugin's
 // SessionStart hook reads them from the checkout. The old copy under
-// ~/.claude/projects/<slug>-claude-dotfiles/memory is no longer carried by sync.ps1 (see
+// ~/.claude/projects/<slug carrying -claude-dotfiles>/memory is no longer carried by sync.ps1 (see
 // Get-MemoryItems in lib/manifest.ps1), so leaving notes there would create a second, invisible
 // copy of the same memory that drifts against the repo. Two copies cannot diverge if only one of
 // them exists.
@@ -20,7 +20,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const SLUG_SUFFIX = '-claude-dotfiles';
+// Anywhere in the slug, not only at the end: an agent worktree of this repo slugs as
+// `<checkout path>--claude-worktrees-<id>` and its memory is just as much a second copy.
+const SLUG_MARKER = '-claude-dotfiles';
 const POINTER_NAME = 'MEMORY.md';
 const POINTER_TEXT = `# Moved into the repo (issue 210)
 
@@ -116,7 +118,7 @@ function run(opts) {
   }
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    if (!entry.name.toLowerCase().endsWith(SLUG_SUFFIX)) continue;
+    if (!entry.name.toLowerCase().includes(SLUG_MARKER)) continue;
     const memoryDir = path.join(projects, entry.name, 'memory');
     if (!fs.existsSync(memoryDir)) continue;
     lines.push(...applyOne(memoryDir, entry.name, opts, backupRoot));
@@ -131,4 +133,4 @@ if (require.main === module) {
   process.exit(0);
 }
 
-module.exports = { run, parseArgs, POINTER_TEXT, POINTER_NAME, SLUG_SUFFIX };
+module.exports = { run, parseArgs, POINTER_TEXT, POINTER_NAME, SLUG_MARKER };

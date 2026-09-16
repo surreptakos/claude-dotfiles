@@ -27,11 +27,12 @@ const REPO = path.join(__dirname, '..');
 const { run, POINTER_TEXT } = require('./repo-memory-pointer.js');
 
 const DOTFILES_SLUG = 'C--Users-Dan-Claude-Projects-Meta-claude-dotfiles';
+const WORKTREE_SLUG = 'C--Users-Dan-Claude-Projects-Meta-claude-dotfiles--claude-worktrees-wf-1';
 const OTHER_SLUG = 'C--Users-Dan-Claude-Projects-Meta-task-management';
 
 function fakeHome(notes) {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-memory-pointer-'));
-  for (const slug of [DOTFILES_SLUG, OTHER_SLUG]) {
+  for (const slug of [DOTFILES_SLUG, WORKTREE_SLUG, OTHER_SLUG]) {
     const dir = path.join(home, '.claude', 'projects', slug, 'memory');
     fs.mkdirSync(dir, { recursive: true });
     for (const note of notes) fs.writeFileSync(path.join(dir, note), `body of ${note}\n`);
@@ -47,8 +48,10 @@ test('the notes are archived, then the directory holds only the pointer', () => 
   const home = fakeHome(['MEMORY.md', 'a-note.md', 'another-note.md']);
   const backup = path.join(home, 'backup');
   const lines = run({ home, homeExplicit: true, backup, dryRun: false });
-  assert.equal(lines.length, 2, lines.join(' | '));
+  assert.equal(lines.length, 4, lines.join(' | '));
   assert.match(lines[0], /archived 3 note\(s\)/);
+  // A worktree of this repo slugs as <checkout>--claude-worktrees-<id> and is pointed too.
+  assert.ok(lines.some((l) => l.includes(WORKTREE_SLUG)), 'worktree memory must be pointed as well');
 
   const dir = memoryDir(home, DOTFILES_SLUG);
   assert.deepEqual(fs.readdirSync(dir), ['MEMORY.md']);
@@ -97,7 +100,7 @@ test('both sync modes call the pointer, and the slug is no longer mirrored', () 
   assert.equal((sync.match(/^\s*Invoke-RepoMemoryPointer(\s|$)/gm) || []).length, 2,
     'push and pull must each call it');
   assert.match(sync, /Invoke-RepoMemoryPointer -BackupRoot \$backup/);
-  assert.match(manifest, /\$script:RepoOwnedMemorySuffix = '-claude-dotfiles'/);
+  assert.match(manifest, /\$script:RepoOwnedMemoryMarker = '-claude-dotfiles'/);
   assert.match(manifest, /-and -not \(Test-RepoOwnedMemory -Slug \$_\.Name\)/);
   // CRLF is load-bearing for these two files (CLAUDE.md, issue 87 neighbourhood).
   for (const rel of ['sync.ps1', path.join('lib', 'manifest.ps1')]) {
