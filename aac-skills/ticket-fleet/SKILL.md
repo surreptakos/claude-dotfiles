@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T15:18:31Z"
-  previous-modified: "2026-09-16T06:35:49Z"
-  revision: "11"
-  content-sha: "6ad75a5f9441"
+  modified: "2026-09-16T18:01:25Z"
+  previous-modified: "2026-09-16T15:18:31Z"
+  revision: "12"
+  content-sha: "4339fa392d18"
 ---
 
 # ticket-fleet
@@ -386,6 +386,46 @@ One rule covers all four: one plain command, no loop body, no `;`-joined pair, n
 pipeline - nothing the guard has to evaluate before it can see what actually runs. The guard is
 strictest around text that could reach `git` or `gh`, and it is the shape that is refused, not the
 command, so re-running the same work as separate single commands goes through.
+
+## Python packages: one editable install, shared by every worktree
+
+A container has one interpreter and one site-packages, so `pip install -e` from a fleet worktree
+repoints the whole container's editable install at that scratch checkout. Removing the worktree at
+the end of the wave then orphans it, and every later `python -c 'import <pkg>'` dies with
+ModuleNotFoundError while the code on disk is fine (issue 413: the 2026-09-16 aac-routines waves
+left the pointer naming a deleted `/tmp/verify-306`, and three subprocess-spawning tests read as
+broken code because of it).
+
+Two halves:
+
+- **Prevention.** The implementer, prober and verifier prompts share one rail (`PYTHON_RAIL` in
+  the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
+  script that does. The worktree's own code is what pytest reads; a test that *spawns* a
+  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment.
+- **Repair.** Once the wave has drained, the run executes `editable-install-guard.js check --main
+  . --repair` (the file alongside this SKILL.md, exercised by
+  `tools/editable-install-guard.test.js` in `claude-dotfiles`, which adds a worktree, repoints the
+  pointer, deletes the worktree and shows the import break and come back). It rewrites a pointer
+  naming a scratch checkout back to the main checkout - pointer text only, never pip, because
+  `pip install -e` writes `.egg-info` into the orchestrator tree the isolation checkpoint just
+  cleared. A repo with no `pyproject.toml` is a quiet no-op.
+
+The guard is looked for at `tools/editable-install-guard.js` in the served repo first, then at
+this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`, then at
+`~/.claude/skills/ticket-fleet/editable-install-guard.js`, where the cloud bootstrap copies this
+skill (literal paths only - a `$VAR` in the command is refused as an operand computed at run
+time). A served repo adopts the guard by copying it into its own `tools/`, or by passing the path
+as `editableGuardScript`. Where none of them exists the run logs that it skipped the repair;
+`editableGuard: true` makes that absence fail the run instead, and `editableGuard: false` turns
+the guard off.
+
+Prevention cannot cover a repo whose own hook installs before any prompt is read.
+`aac-routines` `.claude/hooks/session-start.sh` cds to `CLAUDE_PROJECT_DIR` and runs
+`python -m pip install --editable ".[dev]"` whenever its dependency check fails - and in a fleet
+sub-session that directory IS the worktree (the same hook already rewrites `core.hooksPath` for
+linked worktrees a few lines above, so it demonstrably fires there). Guarding that line to the
+main checkout is an aac-routines change, recorded with the evidence in
+`docs/tickets/413-decision.md`; until it lands, the post-wave repair is what undoes it.
 
 ## History
 
