@@ -103,6 +103,17 @@ issue on no board.
 Exit 0 clean, 1 drift, **2 could not audit**. Two is not a pass — it means `gh` could not see the
 tracker, and a query returning nothing must never read as health.
 
+## Who ticks the acceptance boxes
+
+Not the agent that opens the PR. A ticked box claims the work shipped, and it ships at merge — so
+`.github/workflows/tick-acceptance-boxes.yml` runs `tools/tick-acceptance-boxes.js` on the
+`pull_request_target` closed+merged event, ticks every box the audit would report on each issue the
+PR's closing keywords name, appends `— verified in PR #N` to each, and comments on the issue saying
+so. Without it every fleet-delivered ticket closes as a fresh `[closed-with-open-boxes]` finding
+(issue 438: eleven in one wave). The script is idempotent and takes `--pr <n>` by hand, so a PR that
+merged before the workflow existed is back-filled by running it — `--issue <n>` forces a ticket whose
+verifying PR wrote `Refs` rather than `Closes`.
+
 ## Intake
 
 Issue forms in `.github/ISSUE_TEMPLATE/` label everything `needs-triage` on arrival. That is the
