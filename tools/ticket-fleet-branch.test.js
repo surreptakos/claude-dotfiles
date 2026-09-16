@@ -17,6 +17,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
+const { spawnSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
@@ -219,6 +220,23 @@ for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
     const bytes = fs.readFileSync(file);
     const crs = bytes.filter((b) => b === 0x0d).length;
     assert.equal(crs, 0, `${rel} holds ${crs} CR byte(s); re-encode as LF and rebuild the plugin`);
+  });
+}
+
+// The Workflow tool parses the file behind `scriptPath` before it shows the approval dialog, so a
+// script that does not parse cannot launch anywhere - and nothing else on the gate ran the parser:
+// f9bace7 shipped an unescaped apostrophe inside meta.whenToUse and every fleet launch failed with
+// "Script parse error" until it was noticed by hand. The runtime wraps the body in an async
+// function (top-level `return` and `await` are legal there) after lifting the `export const meta`
+// line, so the check does the same before handing the text to node's parser.
+for (const file of [FLEET_SCRIPT, FLEET_SCRIPT_PACKAGED]) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+  test(`fleet script ${rel} parses as a workflow script (Workflow scriptPath refuses a parse error)`, () => {
+    const body = fs.readFileSync(file, 'utf8').replace(/^export /m, '');
+    const res = spawnSync(process.execPath, ['--check', '-'], {
+      input: `(async () => {\n${body}\n});\n`, encoding: 'utf8',
+    });
+    assert.equal(res.status, 0, `${rel} does not parse:\n${res.stderr}`);
   });
 }
 
