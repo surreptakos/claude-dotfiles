@@ -1284,6 +1284,24 @@ if (Test-Path $syncWtTests) {
     Check 'sync-worktree-guard.tests.ps1 shipped' $false @('tests/sync-worktree-guard.tests.ps1 missing from clone')
 }
 
+# settings.json invariants, and sync.ps1 honouring their exit code (issue 362). Runs the
+# standalone suite against the CLONE so the ship pass proves both the suite and the tool
+# travelled. The pull that suite exercises targets its own sandbox home under %TEMP% - never
+# this run's fake home - so nothing here can disturb the file counts above.
+$settingsInvTests = Join-Path $Clone 'tests\settings-defaultmode.tests.ps1'
+if (Test-Path $settingsInvTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $settingsInvTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'settings-defaultmode.tests.ps1 passes (defaultMode inserted; pull honours the exit code)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'settings-defaultmode.tests.ps1 shipped' $false @('tests/settings-defaultmode.tests.ps1 missing from clone')
+}
+
 # tools/settings-invariants.ps1 -Trust against a representative ~/.claude.json (issue 302). The
 # check above (6a2) proves the trust records LAND; this proves landing them costs nothing else -
 # the file is edited by insertion, so every pre-existing key survives byte-for-byte instead of
