@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T14:28:20Z"
-  previous-modified: "2026-09-16T14:27:42Z"
-  revision: "14"
-  content-sha: "e960d5da5e73"
+  modified: "2026-09-16T14:29:34Z"
+  previous-modified: "2026-09-16T14:28:20Z"
+  revision: "15"
+  content-sha: "893f9327ce44"
 ---
 
 # ticket-fleet
@@ -23,8 +23,9 @@ One script, `ticket-fleet.js` alongside this SKILL.md, that serves every session
 - **Local session** (has `gh`): the fleet talks to the tracker through `gh api repos/{owner}/{repo}/...` REST paths (GraphQL-backed `gh` subcommands 403 through the cloud proxy, so REST only - issue 130).
 - **Cloud container** (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH): the fleet talks to the tracker through the GitHub MCP tools (`mcp__github__list_issues`, `mcp__github__issue_read`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request`).
 
-The switch is made by `pickInstrument(env, hasGh, override)` inside the script; the pure
-counterpart lives at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
+The switch is made by `pickInstrument(env, hasGh, override)` inside the script, and the
+verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`; the pure
+counterparts live at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
 `tools/ticket-fleet-branch.test.js`.
 
 ## How to invoke
@@ -136,7 +137,35 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `followupsFile` (string, default `FOLLOW-UPS.md`): the file the report writer appends to.
 - `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` returns
   `mcp` when `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set;
-  otherwise `gh`. Pass `mcp` explicitly on a machine where `gh` is missing.
+  otherwise `gh`. **A container caller passes `mcp` or `gh` explicitly** - see below. Pass `mcp`
+  explicitly on a machine where `gh` is missing.
+- `verifierAgent` (string, default `null`): the agent type the blind verifier launches under.
+  `null` takes the default - `fleet-verifier` under `gh`, unpinned under `mcp`. `''` clears the
+  pin so the verifier runs under the session's default agent type; any other string pins that
+  agent on either instrument. Pass `''` from a cloud container running under `gh`.
+
+## Unknown environment, and the verifier's agent type
+
+The workflow runtime does not expose `process`, so `pickInstrument` usually gets **no env to
+sniff at all**: it treats a missing `process` binding as an unknown environment (not an empty
+one) and falls back to `gh`, whose REST paths work in a container as well as on the desktop.
+A container is therefore indistinguishable from a desktop session, which is why a container
+caller passes `instrument: 'mcp'` (or `'gh'`) explicitly rather than trusting the sniff.
+
+What must not be inferred from an unknown environment is the verifier's **agent type**. Agent
+types are registered once at session start from `~/.claude/agents/`; on the desktop that
+registry holds `fleet-verifier.md`, whose frontmatter caps the verifier's tools at Read, Grep,
+Glob, Bash (issue 86). A cloud container has no such entry - the bootstrap hook copies the
+dotfiles clone to `~/.aac-dotfiles/claude/agents/fleet-verifier.md`, a path the registry never
+reads, and the registry is not re-read mid-session, so copying the file in later cannot help.
+Pinning the type there fails every verifier launch with `agent type 'fleet-verifier' not
+found`, and the wave ends with every implementer committed and nothing delivered (issue 316).
+
+**Containers therefore run verifiers unpinned** - pass `instrument: 'mcp'` (unpinned by
+default) or `verifierAgent: ''` under `gh`. The restraint there is the container sandbox
+itself: the verifier's writes cannot reach the owner's machine, the branch under review is a
+detached scratch worktree, and the deliver stage - not the verifier - is what pushes. The
+`fleet-verifier` pin buys a tool-set cap on the desktop, where no sandbox exists.
 
 ## Lanes
 

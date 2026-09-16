@@ -117,7 +117,11 @@ In this order:
    `Date.now()` and `Math.random()` in scripts, so the fleet refuses to start without them.
    Resuming a run (`resumeFromRunId`) keeps the same `runId` - the branch names embed it - and
    takes a NEW `invocationId`, which is what makes the open-PR guard re-ask the tracker instead
-   of replaying the cached "no PR" it recorded before the PRs existed. When the fleet returns, run the merge pass once more over
+   of replaying the cached "no PR" it recorded before the PRs existed. Always pass
+   `verifierAgent: ''` from a cloud session: the workflow runtime hides `process.env`, so the
+   fleet cannot tell a container from the desktop and defaults to pinning its verifiers to the
+   `fleet-verifier` agent type, which this container's registry does not hold - every verifier
+   then fails to launch and the wave delivers nothing (issue 316). When the fleet returns, run the merge pass once more over
    the PRs it just opened.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
    append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
@@ -235,7 +239,7 @@ markers). The JSON block shape:
   "decisionBriefIssue": null,
   "config": {
     "maxWavesPerRepoPerDay": 6,
-    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3 }
+    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3, "verifierAgent": "" }
   }
 }
 ```
