@@ -84,20 +84,68 @@ function isNotPlanned(text) {
   return NOT_PLANNED_PATTERNS.some((rx) => rx.test(text));
 }
 
-/** Same-repo issue citations in a body: `#N` as its own token. Returns a Map of issue number to
- *  the offset of its FIRST such citation, so a caller can look at the wording around it.
+/** Blank out every code region in a body, keeping its length, so text quoted verbatim inside code is
+ *  not read as prose. Fenced blocks (``` or ~~~, three or more, closed by a fence of the same
+ *  character and at least the same length, or by end of body) go first; inline spans go second, on
+ *  what the fence pass left, so backticks inside a fenced block cannot open one. Every masked
+ *  character becomes a space and line breaks survive, so an offset into the result is still an offset
+ *  into the input — the stale-premise? check reports the wording AROUND a citation. */
+function maskCodeRegions(text) {
+  const out = text.split('');
+  const blank = (start, end) => {
+    for (let i = start; i < end && i < out.length; i++) {
+      if (out[i] !== '\n' && out[i] !== '\r') out[i] = ' ';
+    }
+  };
+  const FENCE = /^[ \t]{0,3}(`{3,}|~{3,})[^\n]*/gm;
+  let open = null;
+  let m;
+  while ((m = FENCE.exec(text)) !== null) {
+    const marker = m[1];
+    if (!open) { open = { start: m.index, char: marker[0], len: marker.length }; continue; }
+    if (marker[0] === open.char && marker.length >= open.len) {
+      blank(open.start, m.index + m[0].length);
+      open = null;
+    }
+  }
+  if (open) blank(open.start, text.length);
+  // Inline spans: a run of N backticks is closed by the next run of exactly N (CommonMark). An
+  // unmatched run masks nothing, so a stray backtick in prose cannot swallow the rest of the body.
+  const runs = [];
+  const TICKS = /`+/g;
+  let t;
+  while ((t = TICKS.exec(out.join('')))) runs.push({ index: t.index, len: t[0].length });
+  let i = 0;
+  while (i < runs.length) {
+    let j = i + 1;
+    while (j < runs.length && runs[j].len !== runs[i].len) j++;
+    if (j >= runs.length) { i++; continue; }
+    blank(runs[i].index, runs[j].index + runs[j].len);
+    i = j + 1;
+  }
+  return out.join('');
+}
+
+/** Same-repo issue citations in a body: `#N` as its own token, in prose. Returns a Map of issue
+ *  number to the offset of its FIRST such citation, so a caller can look at the wording around it.
  *
- *  A bare `#(\d+)` scan is wrong in two ways that produced 16 of 29 stale-premise? advisories on
- *  this repo (2026-09-14): it reads the tail of a qualified cross-repo reference
- *  (`surreptakos/aac-contract-builder#157`) as this repo's #157, and it reads the leading digits of
- *  a hex colour (`#9a690f`, `#1f7a43`) as #9 and #1. So: no word character or `/` directly before
- *  the `#`, and no word character directly after the digits. Exported for the test suite. */
+ *  A bare `#(\d+)` scan is wrong in four ways. Three are shapes that are not this repo's issue at
+ *  all: the tail of a qualified cross-repo reference (`surreptakos/aac-contract-builder#157`) read as
+ *  #157, the leading digits of a hex colour (`#9a690f`, `#1f7a43`) read as #9 and #1 — together 16 of
+ *  29 stale-premise? advisories here on 2026-09-14 — and a fleet agent label (`impl:#205.2`,
+ *  `verify:#203.2`), whose number belongs to whichever repo that run was clearing. So: no word
+ *  character or `/` directly before the `#`, no `word:` directly before it, and no word character
+ *  directly after the digits. The fourth is context, not shape: a `#N` inside inline code or a fenced
+ *  block is quoted material — a journal line, a log, a command — and quoting is not asserting, so
+ *  code is masked out before the scan (issue 274, where a bug report quoting a fleet journal could
+ *  not be written without tripping the check). Exported for the test suite. */
 function citedIssueNumbers(body) {
   const text = String(body || '');
-  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  const prose = maskCodeRegions(text);
+  const rx = /(?<![\w/])(?<!\w:)#(\d+)(?![\w])/g;
   const first = new Map();
   let m;
-  while ((m = rx.exec(text))) {
+  while ((m = rx.exec(prose))) {
     const n = Number(m[1]);
     if (!first.has(n)) first.set(n, m.index);
   }
@@ -130,6 +178,53 @@ function isFollowUpAcknowledgment(body, closedNumber, closerPrNumbers) {
     if (prPattern.test(text)) return true;
   }
   return false;
+}
+
+/** Wording that presents a cited issue as an EXAMPLE rather than as this ticket's own premise.
+ *
+ *  A discovery-triage chore names a settled duplicate pair so the next agent does not refile it
+ *  ("this run has already produced one duplicate pair (#281 / #285)"). That citation is ABOUT the
+ *  closed pair; the chore asserts nothing the closed issue could have falsified. Without this,
+ *  every chore written to the triage template tripped stale-premise?, so the template and the
+ *  advisory were in permanent tension — which is how a class trains its readers to scroll past it
+ *  (issue 374).
+ *
+ *  Kept to wordings that name the citation's ROLE — example, duplicate, precedent — rather than
+ *  anything that merely sits near one; a looser list would swallow the real finding this check
+ *  exists for. Exported for the test suite. */
+const EXAMPLE_CITATION_PATTERNS = [
+  /\bfor example\b/i,
+  /\bexamples?\b/i,
+  /\be\.g\.\b/i,
+  /\bsuch as\b/i,
+  /\bduplicat\w*\b/i,
+  /\bdedupe\b/i,
+  /\bcautionary\b/i,
+  /\bprecedent\b/i,
+  /\billustrat\w*\b/i,
+];
+
+function isExampleCitation(around) {
+  return EXAMPLE_CITATION_PATTERNS.some((rx) => rx.test(String(around || '')));
+}
+
+/** The explicit opt-out, for a body whose citation is deliberate in a wording no list will predict.
+ *
+ *  `<!-- tracker-audit-ignore: stale-premise -->` anywhere in a body silences the class for that
+ *  body; `<!-- tracker-audit-ignore: stale-premise #281 #285 -->` silences only those citations.
+ *  Same shape as the `claude-md-lint-ignore` marker this repo already uses, and it sits on the
+ *  issue, where a reader can see it and argue with it. Returns { all, numbers }. Pure. */
+function stalePremiseIgnores(body) {
+  const rx = /tracker-audit-ignore:\s*stale-premise\??([ \t]*(?:#\d+[ \t,]*)*)/gi;
+  const numbers = new Set();
+  let all = false;
+  let m;
+  while ((m = rx.exec(String(body || '')))) {
+    const nums = (m[1].match(/\d+/g) || []).map(Number);
+    if (!nums.length) all = true;
+    nums.forEach((n) => numbers.add(n));
+  }
+  return { all, numbers };
 }
 
 /** Normalize one REST /issues item into the shape the checks below already read.
@@ -209,11 +304,84 @@ function closerPrsByIssue(prs) {
   return out;
 }
 
+/** Group /issues/comments rows (every comment in the repo — a PR is an issue, so PR threads are
+ *  here too) by issue/PR number, each value a sorted list of created_at dates. Pure. */
+function commentDatesByNumber(rows) {
+  const out = new Map();
+  for (const c of (rows || [])) {
+    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (!out.has(n)) out.set(n, []);
+    if (c.created_at) out.get(n).push(c.created_at);
+  }
+  for (const dates of out.values()) dates.sort();
+  return out;
+}
+
+/** Run the comments fetch and group it. A comments-less repo, a 403 from a token without issue
+ *  read, or a network blip degrades to an empty map — the blocker-may-be-answered check then
+ *  stays silent for every PR, which is safer than firing on stale data.
+ *
+ *  A SHORT-FETCH is not that case, and issue 285 is that this catch swallowed it too: paginate
+ *  has partial rows while the Link header still says more pages exist, so some PRs' real comments
+ *  are simply missing and those PRs read as never-answered — a silent wrong answer dressed as a
+ *  comment-less degrade. Rethrown so the caller exits 2 with the fetched/expected counts the
+ *  short-fetch message carries. Pure apart from the injected fetcher. */
+function fetchCommentDates(fetchComments) {
+  let raw = [];
+  try {
+    raw = fetchComments();
+  } catch (e) {
+    if (/^short-fetch:/.test(String(e && e.message))) throw e;
+  }
+  return commentDatesByNumber(raw);
+}
+
 /** Extract owner/repo from a `git remote get-url origin` string. Accepts `https://…`, `git@…`,
  *  and the trailing `.git` optional. Returns null if the shape does not match. Pure. */
 function parseGithubSlug(remote) {
   const m = /github\.com[:/]+([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(String(remote || ''));
   return m ? { owner: m[1], name: m[2] } : null;
+}
+
+/** Stop words and qualifiers that do not change what a ticket is ABOUT. Two open tickets whose
+ *  titles differ only by these are the same finding filed twice — the shape issue 319 was filed
+ *  for: two discovery-triage chores ran in one fleet wave and each filed the `tools/tracker-audit.js`
+ *  short-fetch as its own ticket (#281 and #285), two minutes apart. */
+const TITLE_STOPWORDS = new Set(['a', 'an', 'the', 'still', 'again', 'also', 'yet', 'now', 'just', 'once', 'another', 'more']);
+
+/** Lowercase a title, drop punctuation, then drop the stop words above. Pure. Deliberately
+ *  conservative: it removes nothing that carries meaning, so a match is a strong signal rather
+ *  than a fuzzy one. */
+function normalizeTitle(title) {
+  return String(title || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9#]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w && !TITLE_STOPWORDS.has(w))
+    .join(' ');
+}
+
+/** Group open issues by normalized title and return one entry per later member of each group:
+ *  `{ issue, duplicateOf, normalized }`, the lowest-numbered issue of the group being the one
+ *  the others duplicate. Pure — the caller decides how loudly to report it. */
+function duplicateTitleFindings(openIssues) {
+  const groups = new Map();
+  for (const i of Array.isArray(openIssues) ? openIssues : []) {
+    const key = normalizeTitle(i && i.title);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(i);
+  }
+  const out = [];
+  for (const [normalized, members] of groups) {
+    if (members.length < 2) continue;
+    const sorted = members.slice().sort((a, b) => a.number - b.number);
+    for (const later of sorted.slice(1)) out.push({ issue: later, duplicateOf: sorted[0], normalized });
+  }
+  return out;
 }
 
 // Test-only export of the pure predicates and REST normalizers. The rest of the file is a script
@@ -229,9 +397,24 @@ if (require.main !== module) {
     normalizePr,
     issuesOnly,
     closerPrsByIssue,
+    commentDatesByNumber,
+    fetchCommentDates,
     parseGithubSlug,
+    proseBlockers,
+    normalizeTitle,
+    duplicateTitleFindings,
     landedCommits,
     landedFindings,
+    stalePremiseFindings,
+    isExampleCitation,
+    EXAMPLE_CITATION_PATTERNS,
+    stalePremiseIgnores,
+    untickedBoxes,
+    boxQuotesAnotherIssue,
+    boxPathCandidates,
+    deletedPathIndex,
+    matchDeletedPath,
+    deletedSubjectFindings,
     paginate,
     parseLinkHeader,
     pageFromUrl,
@@ -484,23 +667,18 @@ try {
 
 if (!prsUnavailable) {
   // Attach comment dates. /issues/comments returns EVERY comment across the whole repo (a PR is an
-  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort: a
-  // failed comments fetch degrades to zero comments per PR — the blocker-may-be-answered check then
-  // stays silent for that PR, which is safer than firing on stale data.
-  let commentsRaw = [];
+  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort for an
+  // unavailable endpoint (see fetchCommentDates), but a short-fetch is a partial answer, not an
+  // absent one, and exits 2 like the /pulls one above rather than degrading to zero comments.
+  let commentsByNumber = new Map();
   try {
-    commentsRaw = ghPaginate('repos/' + REPO + '/issues/comments?per_page=100');
-  } catch (e) { /* comments-less PRs are fine */ }
-  const commentsByNumber = new Map();
-  for (const c of commentsRaw) {
-    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (!commentsByNumber.has(n)) commentsByNumber.set(n, []);
-    commentsByNumber.get(n).push(c.created_at);
+    commentsByNumber = fetchCommentDates(
+      () => ghPaginate('repos/' + REPO + '/issues/comments?per_page=100'));
+  } catch (e) {
+    cannotAudit('`gh api repos/' + REPO + '/issues/comments` returned a partial page.', e.message);
   }
   prByNumber = new Map(prs.map((p) => {
-    const dates = (commentsByNumber.get(p.number) || []).filter(Boolean).sort();
+    const dates = commentsByNumber.get(p.number) || [];
     return [p.number, Object.assign({}, p, {
       commentCount: dates.length,
       lastComment: dates[dates.length - 1] || null,
@@ -598,14 +776,57 @@ function nativeBlockers(n) {
  *  which the issue template makes it on nearly every ticket. The check therefore reported nothing for
  *  the tickets it was written for, the same silent all-clear this tool's header describes. Found
  *  2026-07-31 on aac-cockpit when three issues carried prose blockers, no native edge, and a clean
- *  audit. */
+ *  audit.
+ *
+ *  The section is then bounded at its CLAIM, not at the next heading. `## Blocked by` is the last
+ *  heading the issue template writes, so whatever a filer appends below it — a provenance footer, an
+ *  attribution line, the harness's own `_Generated by Claude Code_` block — was swept into the
+ *  section and every `#N` it cited read as a blocker. Two tickets filed by one discovery triage went
+ *  red with `ungated-dependency` over nothing but their own footer (claude-dotfiles issue 364).
+ *
+ *  The claim is the section's first blank-line-separated block plus any block after it that is
+ *  itself a list; the first non-list block ends it. That keeps BOTH shapes the field actually
+ *  receives — a bullet list, and a bare sentence naming numbers ("#316, #320 need to land first.") —
+ *  and drops the paragraph that follows either. Reading the list alone would be simpler and is
+ *  wrong: the template's Blocked-by field asks for issue numbers, not bullets, so a prose answer is
+ *  a real answer and dropping it would silently lose real blockers.
+ *
+ *  Within the claim a list wins over stray lines: once any line is a list item, only list items and
+ *  their indented continuations are read, so a footer glued to the last bullet with no blank line
+ *  between them still cannot add a blocker. The `None` short-circuit is judged on the claim alone,
+ *  so a footer can neither add a blocker nor zero a real one. */
 function proseBlockers(body) {
   const text = String(body || '').replace(/\r\n/g, '\n');
   const m = /^##+\s*Blocked by\s*$([\s\S]*?)(?=^##+\s|$(?![\s\S]))/im.exec(text);
   if (!m) return [];
-  const section = m[1];
+  const LIST_LINE = /^[ \t]*(?:[-*+]|\d+[.)])\s/;
+  const CONTINUATION = /^[ \t]+\S/;
+  const strip = (b) => b.replace(/^(?:[ \t]*\n)+/, '').replace(/\s+$/, '');
+  const blocks = m[1].split(/\n[ \t]*\n/).map(strip).filter(Boolean);
+  // The claim: the first block, plus any further block that is itself a list. The first non-list
+  // block after it is the footer, and everything from there down is provenance, not a blocker.
+  const claim = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    if (i > 0 && !LIST_LINE.test(blocks[i])) break;
+    claim.push(blocks[i]);
+  }
+  let lines = claim.join('\n').split('\n');
+  if (lines.some((l) => LIST_LINE.test(l))) {
+    lines = lines.filter((l) => LIST_LINE.test(l) || CONTINUATION.test(l));
+  }
+  const section = lines.join('\n');
   if (/^\s*[-*]?\s*(None|N\/?A)\b/im.test(section)) return [];
-  const nums = (section.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)));
+  // `merge after #N` is the one non-gating relation this section can carry (issue 390). Before it,
+  // the heading had a single vocabulary — every `#N` under it was a gate — so a ticket that only
+  // meant "build it now, land it after #N" had two bad options: add a native edge, which stops the
+  // frontier query on work that is genuinely startable, or leave the audit reporting
+  // `ungated-dependency` on that ticket for ever, which is how a check stops being read. Matched per
+  // LINE, and on the phrase anywhere in the line, so one section can mix both kinds and a real
+  // blocker on its own line still gates.
+  const NON_GATING = /\bmerge\s+after\b/i;
+  const nums = section.split('\n')
+    .filter((line) => !NON_GATING.test(line))
+    .reduce((acc, line) => acc.concat((line.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))), []);
   return Array.from(new Set(nums));
 }
 
@@ -636,6 +857,150 @@ function untickedBoxes(body) {
   return scope === null
     ? { hard: [], soft: pick(text) }
     : { hard: pick(scope), soft: [] };
+}
+
+/** Path-like tokens named by one acceptance-box line.
+ *
+ *  Two shapes, and nothing else: anything holding a `/` (`aac-skills/writing/`, tools/x.js), and a
+ *  BACKTICKED bare name (`writing`), which is how this repo's skill tickets name a directory. A bare
+ *  word outside backticks stays prose — otherwise "the writing pass" reads as a path and every box
+ *  becomes a candidate. Pure. */
+function boxPathCandidates(text) {
+  const s = String(text == null ? '' : text);
+  const out = new Set();
+  const add = (raw) => {
+    const t = String(raw).trim().replace(/^\.\//, '').replace(/[.,;:)\]]+$/, '').replace(/\/+$/, '');
+    if (!t || /\s/.test(t) || !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(t)) return;
+    if (!t.includes('/') && t.length < 3) return;
+    out.add(t);
+  };
+  (s.match(/`[^`]+`/g) || []).forEach((m) => add(m.slice(1, -1)));
+  // Backticked spans are removed before the bare scan so a path inside them is added once, by the
+  // rule above, with its punctuation already trimmed.
+  (s.replace(/`[^`]*`/g, ' ').match(/[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_./-]*/g) || []).forEach(add);
+  return Array.from(out);
+}
+
+/** Does one acceptance-box line cite a DIFFERENT issue of this repo?
+ *
+ *  A meta-ticket's box quotes the box it is about: #361's acceptance list carries "#120's `writing`
+ *  box is the pinned example", and `writing` is the directory another ticket deleted. The deleted
+ *  subject belongs to #120 — it is the POINT of #361, not drift in it — so a box naming another
+ *  issue is read as a quotation of that issue's box rather than a claim about this one (issue 374).
+ *
+ *  `issueNumbers` is the tracker's own issue set, and passing it is what keeps the narrowing from
+ *  swallowing real findings: #173's box cites PR #168 while telling the owner to copy a path that
+ *  ticket deleted, which is a claim about THIS issue's work and still reports. A PR number is not an
+ *  issue number, so only a cited issue counts as a quotation. Omit it and any other number does.
+ *
+ *  Same `#N`-as-its-own-token rule as citedIssueNumbers, so `owner/repo#7` and `#9a690f` are not
+ *  read as this repo's issues. Pure. */
+function boxQuotesAnotherIssue(text, ownNumber, issueNumbers) {
+  const rx = /(?<![\w/])#(\d+)(?![\w])/g;
+  let m;
+  while ((m = rx.exec(String(text == null ? '' : text)))) {
+    const n = Number(m[1]);
+    if (n === Number(ownNumber)) continue;
+    if (!issueNumbers || issueNumbers.has(n)) return true;
+  }
+  return false;
+}
+
+/** What the default branch HAS, and what it once had and deleted.
+ *
+ *  `deletedListing` is the raw output of `git log --diff-filter=D --name-only --format= <ref>`;
+ *  `liveListing` is `git ls-tree -r --name-only <ref>`. A path that was deleted and later re-added is
+ *  live, not deleted — the live listing wins, which is what makes "deleted" mean "gone now" rather
+ *  than "gone once". Directories are inferred from the files under them, because git deletes files;
+ *  a directory the live tree still holds (one file swept, its siblings kept) is not a deleted
+ *  directory. Pure, so the classification is testable without a repository. */
+function deletedPathIndex(deletedListing, liveListing) {
+  const lines = (t) => String(t == null ? '' : t).replace(/\r\n/g, '\n')
+    .split('\n').map((s) => s.trim()).filter(Boolean);
+  const dirsOf = (p) => {
+    const parts = p.split('/');
+    const out = [];
+    for (let i = parts.length - 1; i >= 1; i--) out.push(parts.slice(0, i).join('/'));
+    return out;
+  };
+  const live = new Set(lines(liveListing));
+  const liveNames = new Set();
+  const liveDirs = new Set();
+  live.forEach((p) => {
+    p.split('/').forEach((seg) => liveNames.add(seg));
+    dirsOf(p).forEach((d) => liveDirs.add(d));
+  });
+  const deletedFiles = new Set();
+  const deletedDirs = new Set();
+  lines(deletedListing).forEach((p) => {
+    if (live.has(p)) return;
+    deletedFiles.add(p);
+    dirsOf(p).forEach((d) => { if (!liveDirs.has(d)) deletedDirs.add(d); });
+  });
+  return { live, liveNames, deletedFiles, deletedDirs };
+}
+
+/** The deleted path a candidate token names, or null. Pure.
+ *
+ *  A token carrying a `/` has to match a deleted path or deleted directory outright. A bare name is
+ *  only read as a path when the tree once held a NESTED directory by exactly that name (a top-level
+ *  name is too close to an ordinary English word to be worth the noise) or a file with an extension
+ *  and that basename — and never when the live tree still uses the name anywhere, which is what stops
+ *  `ticket-fleet.js` reading as deleted after it moved. */
+function matchDeletedPath(candidate, index) {
+  const c = String(candidate == null ? '' : candidate);
+  if (!c || index.live.has(c)) return null;
+  if (c.includes('/')) {
+    if (index.deletedFiles.has(c)) return c;
+    if (index.deletedDirs.has(c)) return c + '/';
+    return null;
+  }
+  if (index.liveNames.has(c)) return null;
+  const dir = Array.from(index.deletedDirs).sort()
+    .find((d) => d.includes('/') && d.slice(d.lastIndexOf('/') + 1) === c);
+  if (dir) return dir + '/';
+  if (!/\.[A-Za-z0-9]+$/.test(c)) return null;
+  return Array.from(index.deletedFiles).sort()
+    .find((f) => f.slice(f.lastIndexOf('/') + 1) === c) || null;
+}
+
+/** OPEN issues whose unticked acceptance boxes name something the default branch deleted.
+ *
+ *  #120's acceptance list carries a `writing` box; commit 518e63a (issue 178) deleted
+ *  `aac-skills/writing/` on the owner's instruction. The box cannot be ticked by doing the work, and
+ *  two fleet attempts spent a cycle discovering that. The neighbouring `stale-premise?` check reads
+ *  issue-to-issue citations, and #120 predates #178, so nothing linked them.
+ *
+ *  Advisory, and deliberately narrowed to paths git shows DELETED rather than merely absent: a box
+ *  naming a path the ticket will create is the normal case and must stay silent. Takes all issues and
+ *  filters to open itself, so "a closed issue produces no finding" is a property of this function. */
+function deletedSubjectFindings(allIssues, index) {
+  const out = [];
+  // The tracker's own numbers, so a box citing a PR is not mistaken for one quoting an issue.
+  const issueNumbers = new Set((allIssues || []).map((i) => i.number));
+  (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
+    const boxes = untickedBoxes(i.body);
+    const seen = new Set();
+    boxes.hard.concat(boxes.soft).forEach((text) => {
+      // A box that cites another issue is quoting THAT issue's box (see boxQuotesAnotherIssue).
+      if (boxQuotesAnotherIssue(text, i.number, issueNumbers)) return;
+      boxPathCandidates(text).forEach((c) => {
+        if (seen.has(c)) return;
+        const hit = matchDeletedPath(c, index);
+        if (!hit) return;
+        seen.add(c);
+        out.push({ kind: 'deleted-subject?', issue: i, detail:
+          'has an unticked acceptance box — "' + text.slice(0, 72) + '" — naming `' + c + '`, which ' +
+          'the default branch no longer has: git history shows ' + hit + ' deleted. A box whose ' +
+          'subject another ticket deleted cannot be ticked by doing the work, so every agent that ' +
+          'picks this ticket up spends its cycle rediscovering that. Read the deleting commit ' +
+          '(git log --diff-filter=D -- ' + hit.replace(/\/$/, '') + '), then drop the box or say on ' +
+          'the issue what replaced it. A box may legitimately name a path the work will create, so ' +
+          'this is a prompt to look. Advisory only.' });
+      });
+    });
+  });
+  return out;
 }
 
 /** One commit per record: short sha, NUL, subject, NUL, the WHOLE message, record separator. */
@@ -722,6 +1087,65 @@ function landedFindings(allIssues, landed, ref) {
       'the default branch. A partial fix and a passing reference look identical from here, which is why ' +
       'this is advisory: read the commit BEFORE starting the ticket, then close it (gh issue close ' +
       i.number + ') or say on the issue what is left. Advisory only.' });
+  });
+  return out;
+}
+
+/** OPEN issues asserting something a closed issue settled, as findings.
+ *
+ *  The weakest check here, and deliberately advisory: it cannot read meaning, only proximity. It
+ *  fires when an open issue cites a CLOSED issue in prose without any nearby hedge, because the
+ *  drift that prompted this tool was #23 asserting a behaviour #25 had just disproved.
+ *
+ *  Pure — it takes all issues and the number index and filters to open itself, so each narrowing
+ *  below is testable without the network, and "a closed issue produces no finding" is a property of
+ *  this function rather than of whatever the caller passed. */
+function stalePremiseFindings(allIssues, byNumber) {
+  const out = [];
+  (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
+    // A PRD is a container: it enumerates its own sub-issues, and those closing is the PRD working,
+    // not the PRD going stale. Skipping the label entirely is right — on the first cross-repo run,
+    // ONE PRD produced all ten advisories in a repo, which is how a useful check becomes one people
+    // scroll past.
+    if ((i.labels || []).some((l) => l.name === 'prd')) return;
+    const body = String(i.body || '').replace(/\r\n/g, '\n');
+    // An explicit opt-out outranks every heuristic below, and says on the issue that it is meant.
+    const ignored = stalePremiseIgnores(body);
+    if (ignored.all) return;
+    // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
+    // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
+    const cited = citedIssueNumbers(body);
+    const citedNums = Array.from(cited.keys());
+    const citedClosed = citedNums.filter((n) => {
+      const o = byNumber.get(n);
+      return o && o.state === 'CLOSED' && n !== i.number;
+    });
+    // A follow-up ticket exists BECAUSE work shipped. If the body carries either canonical
+    // acknowledgment for ANY of its cited closed issues (see isFollowUpAcknowledgment above), the
+    // whole body reads as a follow-up context — its other closed-issue citations are background, not
+    // stale premises. The closer-PR union is the "any of these closers" set the predicate checks.
+    const closerPrsUnion = Array.from(new Set(citedClosed.flatMap((n) =>
+      (byNumber.get(n).closedByPullRequestsReferences || []).map((r) => r.number))));
+    const bodyIsFollowUp = citedClosed.some((n) => isFollowUpAcknowledgment(body, n, closerPrsUnion));
+    if (bodyIsFollowUp) return;
+    citedClosed.forEach((n) => {
+      if (ignored.numbers.has(n)) return;
+      const other = byNumber.get(n);
+      // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
+      const idx = cited.get(n);
+      // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
+      const lineStart = body.lastIndexOf('\n', idx) + 1;
+      if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
+      const around = body.slice(Math.max(0, idx - 220), idx + 220);
+      if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
+      // A citation the surrounding prose presents as an example is about that issue, not this one.
+      if (isExampleCitation(around)) return;
+      out.push({ kind: 'stale-premise?', issue: i, detail:
+        'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') with no wording that acknowledges ' +
+        'it is settled. Check this issue still describes reality. If the citation is deliberate, ' +
+        'say so in the body (`see #' + n + '`, "for example") or add ' +
+        '`<!-- tracker-audit-ignore: stale-premise #' + n + ' -->`. Advisory only.' });
+    });
   });
   return out;
 }
@@ -814,45 +1238,9 @@ open.forEach((i) => {
 });
 
 // ---- 5. An open issue asserting something a closed issue settled -------------------------------
-// The weakest check here, and deliberately advisory: it cannot read meaning, only proximity. It fires
-// when an open issue cites a CLOSED issue in prose without any nearby hedge, because the drift that
-// prompted this tool was #23 asserting a behaviour #25 had just disproved.
-open.forEach((i) => {
-  // A PRD is a container: it enumerates its own sub-issues, and those closing is the PRD working, not
-  // the PRD going stale. Skipping the label entirely is right — on the first cross-repo run, ONE PRD
-  // produced all ten advisories in a repo, which is how a useful check becomes one people scroll past.
-  if (i.labels.some((l) => l.name === 'prd')) return;
-  const body = String(i.body || '').replace(/\r\n/g, '\n');
-  // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
-  // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
-  const cited = citedIssueNumbers(body);
-  const citedNums = Array.from(cited.keys());
-  const citedClosed = citedNums.filter((n) => {
-    const o = byNumber.get(n);
-    return o && o.state === 'CLOSED' && n !== i.number;
-  });
-  // A follow-up ticket exists BECAUSE work shipped. If the body carries either canonical
-  // acknowledgment for ANY of its cited closed issues (see isFollowUpAcknowledgment above), the whole
-  // body reads as a follow-up context — its other closed-issue citations are background, not stale
-  // premises. The closer-PR union is the "any of these closers" set the predicate checks.
-  const closerPrsUnion = Array.from(new Set(citedClosed.flatMap((n) =>
-    (byNumber.get(n).closedByPullRequestsReferences || []).map((r) => r.number))));
-  const bodyIsFollowUp = citedClosed.some((n) => isFollowUpAcknowledgment(body, n, closerPrsUnion));
-  if (bodyIsFollowUp) return;
-  citedClosed.forEach((n) => {
-    const other = byNumber.get(n);
-    // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
-    const idx = cited.get(n);
-    // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
-    const lineStart = body.lastIndexOf('\n', idx) + 1;
-    if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
-    const around = body.slice(Math.max(0, idx - 220), idx + 220);
-    if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
-    report('stale-premise?', i,
-      'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') with no wording that acknowledges ' +
-      'it is settled. Check this issue still describes reality. Advisory only.');
-  });
-});
+// The classification lives in stalePremiseFindings above, pure, so its narrowings are pinned by the
+// test suite rather than by a live run against whatever the tracker holds today.
+stalePremiseFindings(issues, byNumber).forEach((f) => report(f.kind, f.issue, f.detail));
 
 // ---- 6. The Projects board is a THIRD record of state, and it drifts ---------------------------
 // This repo deliberately has no `done` label, because a second answer to "is this finished" always
@@ -1004,6 +1392,44 @@ if (!LOG_REF) {
   }
 }
 
+// ---- 10. The same finding filed twice -----------------------------------------------------------
+// Advisory, and title-only: it cannot read two bodies and tell one finding from two. What it can see
+// is the shape issue 319 recorded — #281 and #285, filed two minutes apart by two discovery-triage
+// chores running in the same fleet wave, for one `tools/tracker-audit.js` short-fetch. A second
+// scout listed both as startable and two implementers built the same fix on two branches. Titles
+// that survive stop-word and qualifier stripping identically ("still", "again", "the") are that
+// collision, visible before the second implementer starts.
+duplicateTitleFindings(open).forEach((d) => {
+  report('duplicate-title?', d.issue,
+    'normalizes to the same title as open #' + d.duplicateOf.number + ' ("' + String(d.duplicateOf.title).slice(0, 60) +
+    '") once stop words and qualifiers (still, again, the) are stripped — both read as "' + d.normalized +
+    '". Two open tickets for one finding: read both, keep the one carrying the evidence, close the other ' +
+    'as a duplicate (gh issue close ' + d.issue.number + ' --reason "not planned"). Advisory only.');
+});
+
+// ---- 11. An acceptance box whose subject another ticket deleted ---------------------------------
+// Check 9 reads the log for work that landed. This reads the same branch for work that was UNdone:
+// a path an acceptance box still names, which a later ticket deleted. Observed on #120, whose
+// `writing` box outlived `aac-skills/writing/` by a month (deleted 2026-09-14 by issue 178) — two
+// fleet attempts started the ticket before discovering the subject was gone. The stale-premise?
+// check next door only sees issue-to-issue citations, and #120 predates #178, so nothing linked them.
+//
+// Advisory, and narrowed to DELETED rather than merely absent: an acceptance box naming a path the
+// ticket will create is the normal case, and a check that fires on it is one people scroll past.
+let deletedScanUnavailable = false;
+if (!LOG_REF) {
+  deletedScanUnavailable = true;
+} else {
+  try {
+    const index = deletedPathIndex(
+      git(['log', '--no-color', '--diff-filter=D', '--name-only', '--format=', LOG_REF]),
+      git(['ls-tree', '-r', '--name-only', LOG_REF]));
+    deletedSubjectFindings(issues, index).forEach((f) => report(f.kind, f.issue, f.detail));
+  } catch (e) {
+    deletedScanUnavailable = true;
+  }
+}
+
 // ---- Output ------------------------------------------------------------------------------------
 // Anything ending in '?' is advisory: reported, never fails the run. A check that cannot tell a
 // real problem from a shape it misreads must not be able to block anyone. (blocker-may-be-answered
@@ -1011,7 +1437,8 @@ if (!LOG_REF) {
 const ORDER = ['ungated-dependency', 'landed-but-open', 'blocker-may-be-answered',
                'closed-with-open-boxes', 'dangling-reference', 'untriaged', 'conflicting-triage',
                'board-says-done', 'not-on-board', 'unmilestoned', 'landed-but-open?',
-               'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?'];
+               'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?',
+               'duplicate-title?', 'deleted-subject?'];
 findings.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.number - b.number);
 
 console.log('Tracker audit — ' + REPO + ' (' + open.length + ' open, ' + issues.length + ' total)\n');
@@ -1035,6 +1462,11 @@ if (logUnavailable) {
   console.log('against the work that already merged. Treat as unknown, not clean.\n');
 }
 
+if (deletedScanUnavailable) {
+  console.log('NOTE: the default branch\'s deleted-path history could not be read, so no acceptance');
+  console.log('box was checked against a subject another ticket deleted. Treat as unknown, not clean.\n');
+}
+
 if (boardUnavailable) {
   console.log('NOTE: the ProjectsV2 GraphQL endpoint (which underlies `projectItems`) was not');
   console.log('available, so board-says-done and not-on-board could not run. The Claude Code');
@@ -1047,7 +1479,7 @@ if (boardUnavailable) {
  *  every cloud audit to exit 2, which is the same "could not check reported as a pass" shape
  *  this tool exists to refuse. The NOTE above says the two board checks did not run, and the
  *  audit reports on everything the REST endpoints did cover. */
-const blind = edgesUnavailable || prsUnavailable || logUnavailable;
+const blind = edgesUnavailable || prsUnavailable || logUnavailable || deletedScanUnavailable;
 
 if (!findings.length) {
   console.log('No drift found across ' + ORDER.length + ' checks.');

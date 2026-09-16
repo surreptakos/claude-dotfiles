@@ -35,7 +35,7 @@ const REQUIRED_ARGS = ['contractVersion', 'runId', 'invocationId'];
 const SCOUT_REQUIRED = ['candidateNumbers', 'tickets', 'repoMap', 'testCommand', 'defaultBranch'];
 
 /** Fields the SCOUT schema requires of every ticket it returns. */
-const TICKET_REQUIRED = ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'discoveryTriage'];
+const TICKET_REQUIRED = ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'discoveryTriage', 'handoffPending'];
 
 /**
  * Every copy of the script that is NOT refreshed by this repo's packager, and

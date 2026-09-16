@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-15T22:34:24Z'
-  previous-modified: '2026-09-14T22:40:41Z'
-  revision: '3'
-  content-sha: 1c3b555ebb59
+  modified: '2026-09-16T15:08:04Z'
+  previous-modified: '2026-09-16T00:59:24Z'
+  revision: '5'
+  content-sha: 9cb6f4c7be7a
 ---
 
 # Triage
@@ -38,7 +38,7 @@ Six **state** roles:
 - `needs-triage` — maintainer needs to evaluate
 - `needs-info` — waiting on reporter for more information
 - `ready-for-agent` — fully specified, ready for an AFK agent
-- `ready-for-local-agent` — fully specified, but the next step needs the desktop's live tree or a proxy-blocked capability, so a cloud container cannot do it — an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep that needs a project-scoped `gh` token, or an edit the auto-mode classifier blocks in a container
+- `ready-for-local-agent` — fully specified, but the next step needs the desktop's live tree or a proxy-blocked capability, so a cloud container cannot do it — an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, or an edit the auto-mode classifier blocks in a container (a project-board sweep is no longer one: the Board sweep job runs it, claude-dotfiles issue 216)
 - `ready-for-human` — reserved for a person's judgment, credential or sign-off; a step a local session can perform never carries `ready-for-human`
 - `wontfix` — will not be actioned
 
@@ -83,7 +83,7 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 
 5. **Apply the outcome:**
    - `ready-for-agent` — post an agent brief comment ([AGENT-BRIEF.md](AGENT-BRIEF.md)).
-   - `ready-for-local-agent` — same structure as an agent brief, but name the live-tree edit or proxy-blocked capability that keeps a cloud container from taking it (an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, the project-board sweep needing a project-scoped `gh` token, or an edit the auto-mode classifier blocks). A desktop session can pick it up.
+   - `ready-for-local-agent` — same structure as an agent brief, but name the live-tree edit or proxy-blocked capability that keeps a cloud container from taking it (an edit to `~/.claude` or `~/.codex` followed by `sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, or an edit the auto-mode classifier blocks; a project-board sweep is no longer one, the Board sweep job runs it). A desktop session can pick it up.
    - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). A step a local session can perform never carries `ready-for-human`.
    - `needs-info` — post triage notes (template below).
    - `wontfix` — close, with the comment depending on *why*:
@@ -91,6 +91,16 @@ Show counts and a one-line summary per item. Let the maintainer pick.
      - **Rejected (bug)** — polite explanation, then close.
      - **Rejected (enhancement)** — write to `.out-of-scope/`, link to it from a comment, then close ([OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)).
    - `needs-triage` — apply the role. Optional comment if there's partial progress.
+
+## Triaging a discovery list into tickets
+
+A discovery-triage chore hands you a list of findings — the `FOLLOW-UPS.md` entries a ticket-fleet run appended, a review list, a sweep's output — and asks for one outcome per finding: a ticket filed, a doc fix landed in the same pass, or noise struck with a one-line reason.
+
+**Before creating a ticket, search the open issues for the same file, symbol or failure** — by what the finding is about, not just its wording (`gh api "repos/{owner}/{repo}/issues?state=open&per_page=100"` and read the titles and bodies; MCP `list_issues` in a container). **On a match, comment on that ticket with the new evidence instead of creating another**, and record that comment's URL as the finding's outcome. File a new ticket only when no open ticket covers the finding.
+
+List the open issues again at the moment you are about to file, not once at the start of the pass: another discovery-triage chore may be running beside you. Two of them in one ticket-fleet wave filed the same `tools/tracker-audit.js` short-fetch as #281 and #285 two minutes apart (claude-dotfiles issue 319) — the next scout listed both as `ready-for-agent`, two implementers built the same fix on two branches, and one PR was closed unmerged.
+
+The chore ticket that asks for such a pass must carry that rule in its own brief, in the ticket body's scope or rules lines: *before creating a ticket, search the open issues for the same file, symbol or failure and, on a match, comment on that ticket with the new evidence rather than creating another.* An agent runs the brief it was handed, not this file. Where a repo has the harness, `node tools/tracker-audit.js` reports such a pair afterwards as an advisory `duplicate-title?` finding — a backstop for what slipped through, not the guard.
 
 ## Quick state override
 

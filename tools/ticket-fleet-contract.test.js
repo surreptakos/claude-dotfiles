@@ -78,7 +78,7 @@ test('the plugin-served script enforces the same contract this module describes'
   assert.match(src, /invocationId === runId/, 'the script must refuse invocationId equal to runId');
   assert.match(src, /pr-check:#\$\{t\.number\}@\$\{invocationId\}/, 'invocationId must key the open-PR guard');
   assert.match(src, /required: \['candidateNumbers', 'tickets'/, 'SCOUT must require candidateNumbers');
-  assert.match(src, /'kindReason', 'discoveryTriage'\]/, 'SCOUT tickets must require discoveryTriage');
+  assert.match(src, /'kindReason', 'discoveryTriage', 'handoffPending'\]/, 'SCOUT tickets must require discoveryTriage and handoffPending');
 });
 
 test('the SKILL.md ripple table names every fork holder, runbook and the current version', () => {
