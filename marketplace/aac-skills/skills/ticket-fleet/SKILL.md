@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T22:50:32Z'
-  previous-modified: '2026-09-16T22:12:54Z'
+  modified: '2026-09-16T22:52:54Z'
+  previous-modified: '2026-09-16T21:58:42Z'
   revision: '18'
-  content-sha: d7759d9f66f6
+  content-sha: e13f23003301
 ---
 
 # ticket-fleet
@@ -22,9 +22,13 @@ One script, `ticket-fleet.js` alongside this SKILL.md, that serves every session
 - **Cloud container** (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH): the fleet talks to the tracker through the GitHub MCP tools (`mcp__github__list_issues`, `mcp__github__issue_read`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request`).
 
 The switch is made by `pickInstrument(env, hasGh, override)` inside the script, and the
-verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`; the pure
-counterparts live at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
-`tools/ticket-fleet-branch.test.js`.
+verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`. Both live at
+`tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
+`tools/ticket-fleet-branch.test.js` — and so does every other pure helper the script needs. The
+Workflow runtime cannot `require()`, so the block between the script's `[FLEET-GENERATED-START]`
+/ `[FLEET-GENERATED-END]` markers is **generated** from that module by
+`node tools/build-fleet-inline.js`; never hand-edit it, and `tools/fleet-inline-template.test.js`
+fails while it is stale (issue 440).
 
 The script does not guess which shape it is in. The first agent of every run is a cheap
 `env-probe` that reads the remote env vars, `gh` on PATH and the verifier agent file, and the

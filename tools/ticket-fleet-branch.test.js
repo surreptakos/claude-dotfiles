@@ -525,13 +525,19 @@ function laneScope(stubs) {
 // The runCodeLane body — the const runCodeLane = async (...) => { ... }.
 function extractCodeLane(src) { return extractMarked(src, 'FLEET-CODE-LANE'); }
 
+// The block the fleet script carries generated from tools/ticket-fleet-branch.js (issue 440):
+// the instrument switch, the verifier-agent decision, the scout gate's candidate filter, the
+// blocker-state filter and the resume-stable projections. Every harness below that needs one of
+// them evaluates this block, so what the tests drive is the text the fleet script actually runs.
+function generatedBlock(scriptPath = FLEET_SCRIPT) {
+  return extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-GENERATED');
+}
+
 // The resume-stable helpers the lanes funnel every prior agent result through (issue 271).
-// Evaluated out of the script so the lane body below resolves them, and compared against
-// tools/ticket-fleet-branch.js so the inlined copy cannot drift from the pure one.
+// Evaluated out of the script's generated block so the lane body below resolves them.
 function loadStableHelpers(scriptPath) {
-  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-RESUME-STABLE');
   // eslint-disable-next-line no-new-func
-  return new Function(`${body}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
+  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
 }
 
 // Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
@@ -1123,7 +1129,9 @@ function extractScoutGate(src) {
 }
 
 async function driveScoutGate(scout, { explicitTickets = [], label = 'ready-for-agent' } = {}) {
-  const body = extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  // confineToCandidates comes from the generated block since issue 440, so the gate under test
+  // runs the filter the fleet script really holds rather than a stand-in.
+  const body = generatedBlock() + extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
   const logs = [];
   const wrapper = new AsyncFunction(
     'scout', 'explicitTickets', 'cfg', 'instrument', 'log',
@@ -1394,7 +1402,9 @@ for (const file of RESUME_GUARD_PAIR) {
 // state comes from the reply rather than from whatever the ticket body still says.
 
 async function driveBlockerState(tickets, blockerReply, { mode = 'gh' } = {}) {
-  const body = extractBetween(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-BLOCKER-STATE');
+  // applyBlockerStates comes from the generated block since issue 440; the marked block holds
+  // only the read that feeds it.
+  const body = generatedBlock() + extractBetween(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-BLOCKER-STATE');
   const logs = [];
   const prompts = [];
   const agentMock = async (prompt, opts) => { prompts.push([opts.label, prompt]); return blockerReply(prompt, opts); };
