@@ -175,6 +175,13 @@ copy, so **an edited or new skill reaches cloud sessions only after a rebuild an
 zip is a snapshot, not a live mirror. `sync.ps1 -Mode push` keeps carrying the skills between
 machines exactly as before; this section is only about the cloud copy.
 
+The caveman suite (the `caveman@caveman` plugin and the `@caveman-ai/cli` proxy the desktop runs)
+takes the same road into a cloud session of *this* repo: `.claude/hooks/caveman-bootstrap.sh`
+installs the pinned plugin checkout, its twenty skills, the CLI with its signed binaries, the
+local proxy and `caveman enable claude` at SessionStart, and `.claude/hooks/caveman-prompt.sh`
+runs the plugin's mode tracker on every prompt. What it can and cannot do in a container, with
+the probes behind each claim, is in `docs/caveman-cloud-2026-09-16.md`.
+
 ## Proving the restore, without a second machine
 
 ```powershell
