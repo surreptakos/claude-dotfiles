@@ -661,7 +661,7 @@ const harnessLib = require('./harness-version');
 function harnessChecks() {
   if (CFG.harness === false) return;
   const skillDir = harnessLib.findSkillDir(__dirname, process.env);
-  const s = harnessLib.harnessState(REPO, skillDir);
+  const s = harnessLib.harnessState(REPO, skillDir, process.env);
   head('Harness');
   if (s.state === 'stamp-mismatch') {
     warn(`the project-harness skill is inconsistent — template v${s.template}, SKILL.md v${s.skill}`);
@@ -679,6 +679,13 @@ function harnessChecks() {
   }
   if (s.state === 'current') {
     ok(`harness v${s.repo}, current`);
+    return;
+  }
+  if (s.state === 'stale-skill-copy') {
+    // Issue 412: the marker is not the suspect. The project-harness copy this session loaded is
+    // older than the published one, so every correctly stamped repo reads as edited here.
+    warn(`harness stamp says v${s.repo} but the project-harness copy here is v${s.current}, behind the published v${s.canonical} — the plugin payload is stale, not the marker`);
+    note('republish the plugin with `update-cloud-plugin`, then start a fresh session to pick it up');
     return;
   }
   if (s.state === 'ahead') {
