@@ -141,6 +141,15 @@ PR body says:
 
 A PR that fails the bar stays open and is the next pass's first work item.
 
+**The discoveries PR.** The fleet's Report phase opens one PR per run from
+`agent/fleet-discoveries-wf_<runId>`, carrying only the run's `FOLLOW-UPS.md` bullets (issue 360).
+It has no ticket and therefore no verifier evidence, so the first bullet above does not apply to
+it; merge it when CI is green (or absent), there is no conflict, and no human has requested
+changes. Merge it in the same pass that opened it — bullets stranded on an unmerged branch are the
+bug that ticket fixed. The fleet returns `discoveryReport` (`{ branch, sha, prUrl, bullets }`);
+any triage chore filed for the bullets names that sha and branch in its body, so the triage agent
+can `git show` them whether or not the PR has merged yet.
+
 **CI exists but never ran on this head.** A repo that has a CI workflow and a PR head with zero
 check runs satisfies neither "green" nor "no CI". Such a PR is NOT mergeable. Re-fire path, in
 order of preference: close and reopen the PR through the issue-write tool (a `pull_request`

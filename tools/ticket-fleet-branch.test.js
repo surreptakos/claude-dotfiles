@@ -219,16 +219,38 @@ const RESUME_GUARD_PAIR = [FLEET_SCRIPT];
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-function extractCodeLane(src) {
-  const startTag = '// [FLEET-CODE-LANE-START]';
-  const endTag = '// [FLEET-CODE-LANE-END]';
+function extractMarked(src, name) {
+  const startTag = `// [${name}-START]`;
+  const endTag = `// [${name}-END]`;
   const s = src.indexOf(startTag);
   const e = src.indexOf(endTag);
   if (s < 0 || e < 0 || e <= s) {
-    throw new Error('FLEET-CODE-LANE markers not found or out of order');
+    throw new Error(`${name} markers not found or out of order`);
   }
-  // Return everything between the markers (exclusive) — the const runCodeLane = ... = { ... }.
+  // Return everything between the markers (exclusive) — the const <fn> = async ... declaration.
   return src.slice(s + startTag.length, e);
+}
+
+function extractCodeLane(src) {
+  return extractMarked(src, 'FLEET-CODE-LANE');
+}
+
+// Issue 360: the Report phase must commit its discovery bullets onto a branch cut from the repo
+// default branch rather than appending them into whatever branch the session sits on. Drive the
+// marked block with a mocked `agent` so the branch choice and the returned sha are behavior,
+// not prompt-text trivia.
+async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
+  const src = fs.readFileSync(scriptPath, 'utf8');
+  const body = extractMarked(src, 'FLEET-REPORT');
+  const wrapper = new AsyncFunction(
+    'agent', 'cfg', 'runId', 'scout', 'rules', 'instrument', 'DISCOVERY_REPORT',
+    body + '\nreturn runReport;'
+  );
+  const cfg = Object.assign({ deliver: true, reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' }, cfgOverrides || {});
+  const scout = { defaultBranch: 'main' };
+  const rules = new Proxy({}, { get: () => () => 'gh pr create' });
+  const runReport = await wrapper(agentMock, cfg, 'testrun', scout, rules, 'gh', {});
+  return { result: await runReport(discoveries) };
 }
 
 async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
@@ -299,6 +321,45 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.branch, 'agent/issue-97-attempt1-wf_r1-w0');
     assert.equal(result.commentUrl, null);
     assert.deepEqual(result.discoveries, []);
+  });
+
+  test(`${rel} runReport commits discoveries to their own branch off the default branch`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push([opts.label, prompt]);
+      return { branch: 'agent/fleet-discoveries-wf_testrun', sha: 'abc123def456', prUrl: 'https://github.com/x/y/pull/9', appended: 2 };
+    };
+    const { result } = await driveReport(file, agentMock, ['finding-A', 'finding-B'], { deliver: true });
+    assert.deepEqual(prompts.map((p) => p[0]), ['followups-writer'], 'exactly one report writer runs');
+    const prompt = prompts[0][1];
+    assert.match(prompt, /agent\/fleet-discoveries-wf_testrun/, 'writer must be told the discoveries branch name');
+    assert.match(prompt, /origin\/main/, 'the discoveries branch must be cut from origin/<defaultBranch>');
+    assert.ok(prompt.includes('finding-A') && prompt.includes('finding-B'), 'every bullet must reach the writer verbatim');
+    assert.match(prompt, /commit/i, 'the writer must commit the bullets, not leave them uncommitted');
+    assert.deepEqual(result, {
+      branch: 'agent/fleet-discoveries-wf_testrun',
+      sha: 'abc123def456',
+      prUrl: 'https://github.com/x/y/pull/9',
+      bullets: 2,
+    }, 'the run must return branch + sha + prUrl so a triage chore can name the discovery commit');
+  });
+
+  test(`${rel} runReport opens no discoveries PR when deliver is off`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push(prompt);
+      return { branch: 'agent/fleet-discoveries-wf_testrun', sha: 'sha1', prUrl: '', appended: 1 };
+    };
+    const { result } = await driveReport(file, agentMock, ['finding-A'], { deliver: false });
+    assert.match(prompts[0], /do NOT push and do NOT open a PR/, 'deliver:false must forbid the push/PR step');
+    assert.equal(result.prUrl, null, 'no PR url when deliver is off');
+    assert.equal(result.sha, 'sha1', 'the commit still happens so the bullets have a sha to cite');
+  });
+
+  test(`${rel} runReport starts no writer when the run found nothing`, async () => {
+    const agentMock = async () => { throw new Error('report writer must not run with zero discoveries'); };
+    const { result } = await driveReport(file, agentMock, [], { deliver: true });
+    assert.equal(result, null);
   });
 
   test(`${rel} runCodeLane runs the full impl/verify/deliver chain when no open PR exists`, async () => {

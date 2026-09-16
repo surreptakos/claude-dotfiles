@@ -21,7 +21,7 @@ export const meta = {
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'PR on a verified code branch; one resolution/status comment otherwise' },
-    { title: 'Report', detail: 'single writer appends discoveries' },
+    { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
   ],
 }
 
@@ -158,6 +158,13 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
   commented: { type: 'boolean' }, commentUrl: { type: 'string' },
+} }
+
+const DISCOVERY_REPORT = { type: 'object', required: ['branch', 'sha', 'prUrl', 'appended'], properties: {
+  branch: { type: 'string', description: 'the branch the discovery commit was made on' },
+  sha: { type: 'string', description: 'full sha of the discovery commit, read back after committing' },
+  prUrl: { type: 'string', description: 'URL of the discoveries-only PR; empty string when deliver is off' },
+  appended: { type: 'integer', description: 'number of bullets appended to the follow-ups file' },
 } }
 
 // ---- Scout ----
@@ -430,21 +437,54 @@ const results = await pipeline(workers, async ({ ticket, workerIndex }) => {
 })
 
 // ---- Report: single writer, no append races ----
+// The writer used to append the bullets to the follow-ups file in the session's own checkout and
+// commit nothing, so the bullets landed on whatever branch that session was sitting on - usually
+// an unrelated ticket's PR branch. When that branch did not merge the bullets never reached the
+// default branch and the triage chore filed for them found nothing there (issue 360; the run
+// 6aa46942 / issue-120 block in FOLLOW-UPS.md is the cautionary case). The writer now cuts a
+// branch of its own from origin/<defaultBranch>, commits the bullets there, and opens a PR for
+// the discoveries alone; the run's return value carries that branch, commit sha and PR url so
+// whatever files the triage chore can name them.
 phase('Report')
 const clean = results.filter(Boolean)
 const allDiscoveries = clean.flatMap(r => r.discoveries)
-if (allDiscoveries.length) {
-  await agent(
-    `Append to ${cfg.followupsFile} at repo root (create if missing; append-only, never rewrite existing entries). Add a "## Run (ticket-fleet)" heading, then one bullet per finding, each self-contained:\n- ${allDiscoveries.join('\n- ')}\nCommit nothing. Return "appended N entries".`,
-    { label: 'followups-writer', phase: 'Report', model: cfg.reportModel, effort: 'low' }
+// [FLEET-REPORT-START]
+const runReport = async (discoveries) => {
+  if (!discoveries.length) return null
+  const branch = `agent/fleet-discoveries-wf_${runId}`
+  const deliverStep = cfg.deliver
+    ? `6. git push -u origin ${branch}, then ${rules.prCreate()}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${scout.defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
+    : `6. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
+  const written = await agent(
+    `Append this ticket-fleet run's discoveries to ${cfg.followupsFile} on a branch of their own, cut from the repo default branch - never the branch this session happens to be sitting on (issue 360).
+1. git fetch origin ${scout.defaultBranch}
+2. git worktree add -b ${branch} <a fresh scratch directory> origin/${scout.defaultBranch}, and do every step below inside that worktree; leave this session's own checkout untouched.
+3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run (ticket-fleet ${runId})" heading, then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
+4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
+5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
+${deliverStep}
+Do NOT merge, do NOT commit onto ${scout.defaultBranch}, do NOT edit any other file, do NOT touch any ticket. Return structured output only.`,
+    { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: 'low' }
   )
+  return {
+    branch: (written && written.branch) || branch,
+    sha: (written && written.sha) || null,
+    prUrl: (written && written.prUrl) || null,
+    bullets: discoveries.length,
+  }
 }
+// [FLEET-REPORT-END]
+const discoveryReport = await runReport(allDiscoveries)
+if (discoveryReport) log(`discoveries: ${discoveryReport.bullets} bullet(s) committed as ${discoveryReport.sha || 'unknown sha'} on ${discoveryReport.branch}${discoveryReport.prUrl ? ' (' + discoveryReport.prUrl + ')' : ''}`)
 return {
   ran: clean.length,
   instrument,
   delivered: clean.filter(r => r.prUrl || r.commentUrl).map(r => ({ ticket: r.ticket, kind: r.kind, pr: r.prUrl || null, comment: r.commentUrl || null })),
   failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, kind: r.kind, failures: r.verdict ? r.verdict.failures : ['no verdict'] })),
   discoveries: allDiscoveries.length,
+  // Where the bullets actually live, so a triage chore filed for them can name the commit and
+  // the reviewer can merge the discoveries PR without hunting for it (issue 360).
+  discoveryReport,
   skippedBlocked: droppedBlocked,
   skippedOverCap: droppedCap,
 }
