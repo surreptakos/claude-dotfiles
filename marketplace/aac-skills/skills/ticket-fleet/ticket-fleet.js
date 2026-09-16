@@ -210,10 +210,16 @@ const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 
   remainingKind: { type: 'string', enum: ['local-agent', 'human'], description: "local-agent when the remaining steps are things a desktop session can do without a person (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep that needs a project-scoped gh token, an edit the auto-mode classifier blocks in a container); human when the remaining steps are a person's judgment, credential or sign-off (a click in a web UI, an account or billing change, a design decision, anything needing the owner's identity)" },
 } }
 
-const VERDICT = { type: 'object', required: ['pass', 'evidence', 'failures'], properties: {
+// `failures` is deliberately NOT required (issue 265). Requiring it made a passing verdict
+// unexpressible: on issue 241 attempt 3 the verifier returned {pass:true, evidence} five times
+// without the key and the run died on "StructuredOutput retry cap (5) exceeded ... must have
+// required property 'failures'", so a green branch got no verdict and no delivery. A pass may
+// omit the key or send []; every read of it goes through the normalisation below, which fills
+// in [] so the retry prompt's `.failures.join` can never throw on a key-less verdict.
+const VERDICT = { type: 'object', required: ['pass', 'evidence'], properties: {
   pass: { type: 'boolean' },
   evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
-  failures: { type: 'array', items: { type: 'string' } },
+  failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
 } }
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
@@ -311,6 +317,9 @@ Commands and output claimed:\n${evidenceBlocks}
 Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: instrument === 'gh' ? 'fleet-verifier' : undefined }
     )
+    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+    // later read (the retry prompt, the run report) sees an array.
+    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
     if (lastVerdict && lastVerdict.pass) break
   }
 
@@ -491,6 +500,9 @@ In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - br
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: instrument === 'gh' ? 'fleet-verifier' : undefined }
     )
+    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+    // later read (the retry prompt, the run report) sees an array.
+    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
     if (lastVerdict && lastVerdict.pass) break
   }
 
