@@ -236,6 +236,22 @@ function Restore-SkillLinks {
 # Per-project memory lives under ~/.claude/projects/<slug>/memory. The slug is the
 # project's absolute path with every non-alphanumeric character replaced by "-",
 # so it embeds the username and has to be re-slugged on a machine with a different one.
+#
+# One exception, and it is deliberate (issue 210): THIS repo's own notes are not mirrored. They
+# are committed at docs/agents/memory/ with MEMORY.md as the index, and the aac-skills plugin's
+# SessionStart hook loads them from whichever checkout the session opened - so a cloud container
+# has them too. Carrying the live copy as well would mean two copies of one note, each able to
+# drift; tools/repo-memory-pointer.js (both sync modes call it) empties the live directory down
+# to a pointer file instead. Matched anywhere in the slug, not just at the end, so it holds for any
+# checkout of this repo on any machine AND for its agent worktrees, whose slug carries the checkout
+# path plus `--claude-worktrees-<id>`.
+$script:RepoOwnedMemoryMarker = '-claude-dotfiles'
+
+function Test-RepoOwnedMemory {
+    param([Parameter(Mandatory = $true)][string]$Slug)
+    return ($Slug -like ('*' + $script:RepoOwnedMemoryMarker + '*'))
+}
+
 function Get-MemoryItems {
     param(
         [Parameter(Mandatory = $true)][string]$UserHome
@@ -246,7 +262,7 @@ function Get-MemoryItems {
 
     Get-ChildItem -Path $projects -Directory | ForEach-Object {
         $memory = Join-Path $_.FullName 'memory'
-        if (Test-Path $memory) {
+        if ((Test-Path $memory) -and -not (Test-RepoOwnedMemory -Slug $_.Name)) {
             [pscustomobject]@{ Type = 'Dir'; Slug = $_.Name; Local = $memory }
         }
     }

@@ -116,6 +116,22 @@ function workerSuffix(runId, workerIndex) {
   return `wf_${runId}-w${workerIndex}`;
 }
 
+// ===========================================================================
+// Everything between the FLEET-INLINE markers below is the SOURCE of the
+// generated block inside aac-skills/ticket-fleet/ticket-fleet.js. The Workflow
+// runtime cannot `require()`, so the fleet script needs these functions in its
+// own text - but it no longer carries a hand-copy of them:
+// `node tools/build-fleet-inline.js` splices this region, verbatim under a
+// GENERATED banner, between the script's FLEET-GENERATED markers, and
+// tools/fleet-inline-template.test.js fails while that copy is stale (issue 440).
+//
+// So: edit here, re-run the generator, never edit the block in the script. The
+// region must stay self-contained - no require, no module.exports, no
+// reference to anything declared outside it - because the script evaluates it
+// with none of this module around it.
+// ===========================================================================
+// [FLEET-INLINE-START]
+
 /**
  * Pick the tracker instrument at run time. Ticket-fleet runs from two shapes of
  * session and the tracker tools differ between them:
@@ -126,9 +142,8 @@ function workerSuffix(runId, workerIndex) {
  *     CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE set, or no `gh` on PATH) -> 'mcp':
  *     the GitHub MCP tools.
  * `override` wins when it names either instrument, so a caller that already
- * knows the container shape can force it. This is the pure counterpart the
- * script inlines: same shape, same environment variables, exercised by
- * ticket-fleet-branch.test.js so the two cannot drift silently.
+ * knows the container shape can force it. This is the definition the fleet
+ * script's generated block carries, so the shape it runs is this one.
  *
  * @param {NodeJS.ProcessEnv|Record<string,string>|null|undefined} env - null or
  *   undefined means nothing read the environment at all (the workflow runtime
@@ -182,7 +197,6 @@ function pickVerifierAgent(remote, agentFilePresent) {
   return agentFilePresent ? 'fleet-verifier' : null;
 }
 
-
 /**
  * Resolve the agent type the blind verifier launches under.
  *
@@ -216,15 +230,14 @@ function resolveVerifierAgent(instrument, override, facts) {
   return name || undefined;
 }
 
-
 /**
  * Confine the scout's ticket list to the candidate set it was given (issue 298).
  *
  * The scout is asked for exactly one listing - the issues carrying `label`, or
  * the numbers named in `args.tickets`. When that listing comes back empty a
  * model is prone to treat it as a dead end to route around and returns every
- * open ticket it can find instead, so the fleet spawns pr-check and implementer
- * agents for work nobody asked for. The prompt now says an empty listing is a
+ * open ticket it can find instead, so the fleet spawns open-PR scans and
+ * implementer agents for work nobody asked for. The prompt now says an empty listing is a
  * valid answer; this is the mechanical half of the same guard: whatever the
  * scout reports, only tickets whose number appeared in the listing survive.
  *
@@ -303,9 +316,7 @@ function applyBlockerStates(tickets, blockers) {
  * `stableText` and `stableList` are the only doors a prior result may pass
  * through on its way into a prompt, and `priorFindingsBlock` is the one place
  * that renders a failed verdict into the next attempt's prompt. The fleet script
- * inlines the same three between its FLEET-RESUME-STABLE markers (the workflow
- * runtime cannot require from tools/); ticket-fleet-branch.test.js extracts that
- * block and compares it against these, so the two copies cannot drift.
+ * runs these very definitions, spliced into its generated block.
  */
 
 /** Deterministic JSON: object keys sorted, undefined rendered as null. */
@@ -343,6 +354,8 @@ function priorFindingsBlock(verdict, howToFix) {
     ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
     : '';
 }
+
+// [FLEET-INLINE-END]
 
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,

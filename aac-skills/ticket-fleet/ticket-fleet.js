@@ -158,75 +158,258 @@ if (!cfg.runId) throw contractError(' and the launcher declared v2 but passed no
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 
 // ---- per-invocation freshness for the resume guard (issue 291) ----
-// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR guard in
-// runCodeLane below needs the opposite - the tracker as it is right now. It has to ask an agent
+// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR scan in
+// the Scout phase below needs the opposite - the tracker as it is right now. It has to ask an agent
 // (a workflow script has no filesystem, shell or network of its own), and the runtime replays
 // cached agent results on resume, so under a stable cache key the guard replays the {found:false}
 // it recorded before any PR existed and the ticket is implemented, verified and delivered a
 // second time. The freshness therefore arrives through args, exactly like runId: the caller mints
-// a NEW invocationId on EVERY launch, resume included. It is spliced into the pr-check prompt and
-// label and nowhere else, so two invocations of the same runId ask that one question under
+// a NEW invocationId on EVERY launch, resume included. It is spliced into the open-pr-scan prompt
+// and label and nowhere else, so two invocations of the same runId ask that one question under
 // different cache keys while every other stage keeps its cache and the branch names stay put.
 const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
 if (!invocationId) throw contractError(' and the launcher declared v2 but passed no args.invocationId: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`), which busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291).')
 if (invocationId === runId) throw contractError(': args.invocationId must differ from args.runId. runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
 
-// ---- instrument switch (gh vs GitHub MCP) ----
-// The tracker prompts below differ in exactly one dimension: which tool set the scout, probe,
-// handoff and deliver stages call. Pure form lives in tools/ticket-fleet-branch.js so the
-// unit tests can pin it; the same shape is inlined here because the workflow runtime cannot
-// reach node_modules. A wrong pick presents itself as a stage failure, not silent drift.
+// ---- pure helpers, GENERATED from tools/ticket-fleet-branch.js (issue 440) ----
+// The instrument switch (gh vs GitHub MCP), the verifier-agent decision, the scout gate's
+// candidate filter, the blocker-state filter and the resume-stable prompt projections are pure
+// functions. The workflow runtime cannot require(), so they have to be in this file - but they
+// are no longer hand-copied here. `node tools/build-fleet-inline.js` splices them in from
+// tools/ticket-fleet-branch.js, and tools/fleet-inline-template.test.js fails while the block
+// below is stale. Never edit between the markers: edit the module, then re-run the generator.
+// [FLEET-GENERATED-START]
+// GENERATED - do not hand-edit. Built from tools/ticket-fleet-branch.js (the region between its
+// FLEET-INLINE markers) by tools/build-fleet-inline.js (claude-dotfiles issue 440). The Workflow
+// runtime cannot require(), so these pure helpers have to live in the script text; they are no
+// longer a hand-kept copy. Edit tools/ticket-fleet-branch.js and re-run the generator;
+// tools/fleet-inline-template.test.js fails while this block is stale.
+/**
+ * Pick the tracker instrument at run time. Ticket-fleet runs from two shapes of
+ * session and the tracker tools differ between them:
+ *   - Local session with `gh` on PATH -> 'gh': `gh api repos/{owner}/{repo}/...`
+ *     REST paths only (GraphQL-backed `gh` subcommands 403 through the cloud
+ *     proxy, issue 130).
+ *   - Cloud container (CLAUDE_CODE_REMOTE_SESSION_ID or
+ *     CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE set, or no `gh` on PATH) -> 'mcp':
+ *     the GitHub MCP tools.
+ * `override` wins when it names either instrument, so a caller that already
+ * knows the container shape can force it. This is the definition the fleet
+ * script's generated block carries, so the shape it runs is this one.
+ *
+ * @param {NodeJS.ProcessEnv|Record<string,string>|null|undefined} env - null or
+ *   undefined means nothing read the environment at all (the workflow runtime
+ *   hides `process`), which is an UNKNOWN session, not a desktop one.
+ * @param {boolean|undefined} hasGh - true if `gh` is on PATH; undefined lets
+ *   the caller decline to detect it.
+ * @param {'gh'|'mcp'|'auto'|null|undefined} override
+ * @returns {'gh'|'mcp'|null} null when the environment is unknown and no
+ *   override names an instrument - the caller must then ask for one.
+ */
 function pickInstrument(env, hasGh, override) {
-  if (override === 'gh' || override === 'mcp') return override
-  // Unknown environment (issues 316, 322): a null/undefined env means NOTHING read the
-  // environment, so the sniff below cannot fire and a container is indistinguishable from a
-  // desktop session. It used to fall through to gh, and that is the issue 322 failure - the gh
-  // path can neither verify (it pins an agent type the container's registry lacks) nor deliver
-  // (a GraphQL-backed PR call is HTTP 403 here) there. So an unknown environment resolves to
-  // NOTHING: the caller names `instrument`, or passes `remote` and lets the switch resolve.
-  // Only hasGh === false is positive evidence a measurement landed: no `gh`, therefore mcp.
-  if (env === undefined || env === null) return hasGh === false ? 'mcp' : null
-  if (env.CLAUDE_CODE_REMOTE_SESSION_ID || env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp'
-  if (hasGh === false) return 'mcp'
-  return 'gh'
+  if (override === 'gh' || override === 'mcp') return override;
+  // Unknown environment (issues 316, 322): a null/undefined `env` means nothing read the
+  // environment - the workflow runtime hides `process`, so the remote-session sniff below
+  // never fires and a claude.ai/code container is indistinguishable from a desktop session.
+  // It used to fall through to 'gh', and that is the issue 322 failure: under `gh` the cloud
+  // run pinned an agent type its registry did not hold and its deliver prompt reached for a
+  // GraphQL-backed `gh pr create`, so twelve verifiers died and nothing shipped. An unknown
+  // environment therefore resolves to nothing at all and the caller must name the instrument
+  // (or pass what it knows about remoteness). Only `hasGh === false` is positive evidence a
+  // measurement did reach: no `gh` on PATH means mcp whatever the env said.
+  if (env === undefined || env === null) return hasGh === false ? 'mcp' : null;
+  const e = env;
+  if (e.CLAUDE_CODE_REMOTE_SESSION_ID || e.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp';
+  if (hasGh === false) return 'mcp';
+  return 'gh';
 }
-// Whether the fleet may pin its `fleet-verifier` subagent type. Custom agent types are a
-// desktop-only facility (issue 339): Claude Code reads the agent registry BEFORE SessionStart
-// hooks run, so the cloud bootstrap hook cannot register ~/.claude/agents/fleet-verifier.md
-// for the session that would use it, and pinning it there fails the launch with "Agent type
-// 'fleet-verifier' not found" (how issue 316 surfaced). Keyed on remoteness, never on the
-// tracker instrument - conflating the two is what made a container that picked `gh` try to
-// launch a type it could never have.
-function pickVerifierAgent(remote, agentFilePresent) {
-  if (remote) return null
-  return agentFilePresent ? 'fleet-verifier' : null
-}
-// The workflow runtime does not expose `process.env` (issue 322: a container run read an empty
-// env and fell through to `gh`), so the environment is not guessed here at all - it is measured
-// by the env-probe subagent below, which has a real shell. That removes the container-specific
-// workaround the caller used to have to remember (`instrument: 'mcp'` by hand): `auto` now
-// resolves correctly from either session shape with no argument.
 
-// Which agent type the blind verifier launches under. Agent types are registered once at
-// session start from ~/.claude/agents/; the desktop registry holds fleet-verifier.md (tools
-// capped at Read, Grep, Glob, Bash - issue 86) and a cloud container's does not, where pinning
-// it fails every verifier launch with `agent type 'fleet-verifier' not found` (issue 316).
-// Pure counterpart: resolveVerifierAgent in tools/ticket-fleet-branch.js.
-function resolveVerifierAgent(mode, override, facts) {
-  if (override === undefined || override === null) {
-    // No override: the env probe decides (issue 339) - never a custom type in a cloud session,
-    // and on the desktop only when the agent file is on disk. Without probe facts nothing has
-    // said the file is there, so there is no pin at all: the instrument must never stand in for
-    // the registry (issue 322 - a container that picked `gh` lost every verifier to
-    // `agent type 'fleet-verifier' not found`), and an unpinned verifier merely runs under the
-    // session's default type.
-    if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined
-    return undefined
-  }
-  const name = String(override).trim()
-  return name || undefined
+/**
+ * Decide whether the fleet may pin its `fleet-verifier` subagent type.
+ *
+ * Custom agent types are a desktop-only facility (issue 339). Claude Code reads
+ * the agent registry before SessionStart hooks run, so the cloud bootstrap hook
+ * cannot register `~/.claude/agents/fleet-verifier.md` for the session that
+ * would use it - measured in a container on 2026-09-16, transcript in
+ * docs/tickets/339-decision.md. Pinning the type there fails the launch with
+ * "Agent type 'fleet-verifier' not found", which is how issue 316 surfaced.
+ *
+ * So: never pin in a remote session, and on a desktop session pin only when the
+ * agent file was actually on disk (it is authored there, before session start,
+ * so disk presence is a sound proxy for registration). The decision is keyed on
+ * remoteness, NOT on the tracker instrument - conflating the two is what made a
+ * container that picked `gh` try to launch a type it could never have.
+ *
+ * @param {boolean} remote - true in a cloud container session
+ * @param {boolean} agentFilePresent - true when ~/.claude/agents/fleet-verifier.md exists
+ * @returns {'fleet-verifier'|null} the agentType to pin, or null for none
+ */
+function pickVerifierAgent(remote, agentFilePresent) {
+  if (remote) return null;
+  return agentFilePresent ? 'fleet-verifier' : null;
 }
-// `verifierAgentType` is resolved right after the env probe in the Scout phase below.
+
+/**
+ * Resolve the agent type the blind verifier launches under.
+ *
+ * Agent types are registered once at session start from `~/.claude/agents/`. On the desktop
+ * that registry holds `fleet-verifier.md`, whose frontmatter caps the verifier's tools at
+ * Read, Grep, Glob, Bash (issue 86). A cloud container has no such entry - the bootstrap hook
+ * copies the definition into a clone the registry never reads, and the registry is not re-read
+ * mid-session - so pinning the type there fails every verifier launch with
+ * `agent type 'fleet-verifier' not found` (issue 316).
+ *
+ * @param {'gh'|'mcp'} instrument
+ * @param {{remote:boolean, verifierAgentFile:boolean}} [facts] - the env probe's facts;
+ *   when given they decide the default through pickVerifierAgent (issue 339).
+ * @param {string|null|undefined} override - args.verifierAgent. undefined/null takes the
+ *   default, which is a pin ONLY when `facts` prove the agent is registered: the instrument
+ *   never decides it (issue 322 - a container that picked `gh` had no registry and every
+ *   verifier launch died with `agent type 'fleet-verifier' not found`). An empty or
+ *   whitespace string clears the pin so the verifier runs under the session's default agent
+ *   type; any other string pins that agent on either instrument.
+ * @returns {string|undefined} the agentType to pass, or undefined for an unpinned verifier.
+ */
+function resolveVerifierAgent(instrument, override, facts) {
+  if (override === undefined || override === null) {
+    // The env probe's facts decide the default (issue 339). Without them nothing has said the
+    // agent file is on disk, so there is no pin: an unregistered type fails every launch, while
+    // an unpinned verifier merely runs under the session's default type (issue 322).
+    if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined;
+    return undefined;
+  }
+  const name = String(override).trim();
+  return name || undefined;
+}
+
+/**
+ * Confine the scout's ticket list to the candidate set it was given (issue 298).
+ *
+ * The scout is asked for exactly one listing - the issues carrying `label`, or
+ * the numbers named in `args.tickets`. When that listing comes back empty a
+ * model is prone to treat it as a dead end to route around and returns every
+ * open ticket it can find instead, so the fleet spawns open-PR scans and
+ * implementer agents for work nobody asked for. The prompt now says an empty listing is a
+ * valid answer; this is the mechanical half of the same guard: whatever the
+ * scout reports, only tickets whose number appeared in the listing survive.
+ *
+ * @param {Array<{number:number|string}>|null|undefined} tickets - scout output
+ * @param {Array<number|string>|null|undefined} candidateNumbers - the issue
+ *   numbers the listing returned, before any filtering. A non-array (the scout
+ *   did not report one) means there is nothing to confine against and the
+ *   tickets pass through unchanged; an empty array confines to nothing, which
+ *   is the whole point of the ticket.
+ * @returns {Array} the surviving tickets, in the scout's order
+ */
+function confineToCandidates(tickets, candidateNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (!Array.isArray(candidateNumbers)) return list;
+  const allowed = new Set(
+    candidateNumbers.map((n) => parseInt(n, 10)).filter((n) => n > 0)
+  );
+  return list.filter((t) => t && allowed.has(parseInt(t.number, 10)));
+}
+
+/**
+ * Drop blockers that have already closed (issue 403).
+ *
+ * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
+ * `effort: 'low'` it never reads those issues, so a ticket whose blocker landed
+ * hours ago is skipped wave after wave until somebody rewrites the body by hand.
+ * The fleet therefore reads each named blocker's state through the tracker
+ * instrument and passes the answers here: a blocker whose state comes back
+ * `closed` is dropped from the ticket's `blockedBy`, while everything else -
+ * `open`, `unknown`, a number the reader never reported - keeps blocking,
+ * because the gate may only be opened by positive evidence that it has landed.
+ *
+ * Tickets are not mutated: one whose blockers all still hold is returned as-is,
+ * one that loses a blocker is returned as a copy with the shorter `blockedBy`.
+ *
+ * @param {Array<{number:number, blockedBy:Array<number|string>}>|null|undefined} tickets
+ * @param {Array<{number:number|string, state:string}>|null|undefined} blockers - one
+ *   entry per blocker number read, carrying the tracker's state verbatim
+ * @returns {{tickets:Array, cleared:Array<{ticket:number, blocker:number}>}} the
+ *   tickets with closed blockers removed, and the (ticket, blocker) pairs cleared
+ *   so the run can log them
+ */
+function applyBlockerStates(tickets, blockers) {
+  const states = new Map();
+  for (const b of (Array.isArray(blockers) ? blockers : [])) {
+    const n = parseInt(b && b.number, 10);
+    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase());
+  }
+  const cleared = [];
+  const resolved = (Array.isArray(tickets) ? tickets : []).map((t) => {
+    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : [];
+    const open = named.filter((n) => {
+      const num = parseInt(n, 10);
+      if (states.get(num) !== 'closed') return true;
+      cleared.push({ ticket: t.number, blocker: num });
+      return false;
+    });
+    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open });
+  });
+  return { tickets: resolved, cleared };
+}
+
+/**
+ * Resume-stable projections of a previous agent's structured result (issue 271).
+ *
+ * The Workflow runtime replays an agent() call from cache only while its cache
+ * key - which covers the prompt text - is unchanged. A ticket-fleet prompt built
+ * out of an earlier agent's result therefore has to render the same bytes whether
+ * that result arrived live from the tool call or was re-read from the run journal
+ * on resume. The two differ exactly as a JSON round trip differs: key order,
+ * absent vs null vs undefined members, values a live run held as numbers or
+ * booleans, and CR bytes inside quoted output. A `deliver: false` run resumed
+ * with `deliver: true` missed the cache on `impl:#N.2` and `verify:#N.2` for that
+ * reason, re-implementing tickets whose verified branches already existed.
+ *
+ * `stableText` and `stableList` are the only doors a prior result may pass
+ * through on its way into a prompt, and `priorFindingsBlock` is the one place
+ * that renders a failed verdict into the next attempt's prompt. The fleet script
+ * runs these very definitions, spliced into its generated block.
+ */
+
+/** Deterministic JSON: object keys sorted, undefined rendered as null. */
+function stableJson(value) {
+  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']';
+  if (value && typeof value === 'object') {
+    return '{' + Object.keys(value).sort().map((k) => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}';
+  }
+  if (value === undefined) return 'null';
+  return JSON.stringify(value);
+}
+
+/** Any prior-result value as prompt text: absent/null collapse to '', CRLF folds to LF. */
+function stableText(value) {
+  if (value === null || value === undefined) return '';
+  const raw = typeof value === 'string' ? value
+    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
+      : stableJson(value);
+  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim();
+}
+
+/** Any prior-result list as prompt lines: non-arrays wrap, empty entries drop. */
+function stableList(value) {
+  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value];
+  return items.map(stableText).filter((s) => s.length > 0);
+}
+
+/**
+ * The block the next attempt's implementer/prober prompt carries after a failed
+ * verdict. `howToFix` is the lane's wording; everything else comes from the
+ * verdict through stableList.
+ */
+function priorFindingsBlock(verdict, howToFix) {
+  return verdict
+    ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
+    : '';
+}
+// [FLEET-GENERATED-END]
+// `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
+// workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
+// env-probe subagent measures the session and pickInstrument is fed what it measured.
 
 // The tracker rule lines the scout and every delivery prompt embed. Same wording on both
 // instruments except for the tool spellings and the "how to detect the tracker root" note.
@@ -275,35 +458,9 @@ const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n =>
 // values, and CR bytes inside quoted output. A `deliver: false` run resumed with
 // `deliver: true` missed on `impl:#N.2` and `verify:#N.2` for that reason and re-implemented
 // tickets whose verified branches already existed. Every prior result now reaches a prompt
-// through one of these doors, and the verifier and deliver prompts name the branch this script
-// computed rather than the one the implementer reported - so the branch delivered is the branch
-// that was verified. Pure counterparts live in tools/ticket-fleet-branch.js; the block between
-// the FLEET-RESUME-STABLE markers is extracted verbatim by tools/ticket-fleet-branch.test.js
-// and compared against them, so the two copies cannot drift.
-// [FLEET-RESUME-STABLE-START]
-const stableJson = (value) => {
-  if (Array.isArray(value)) return '[' + value.map(stableJson).join(',') + ']'
-  if (value && typeof value === 'object') {
-    return '{' + Object.keys(value).sort().map(k => JSON.stringify(k) + ':' + stableJson(value[k])).join(',') + '}'
-  }
-  if (value === undefined) return 'null'
-  return JSON.stringify(value)
-}
-const stableText = (value) => {
-  if (value === null || value === undefined) return ''
-  const raw = typeof value === 'string' ? value
-    : (typeof value === 'number' || typeof value === 'boolean') ? String(value)
-    : stableJson(value)
-  return raw.replace(/\r\n?/g, '\n').replace(/[ \t]+$/gm, '').trim()
-}
-const stableList = (value) => {
-  const items = Array.isArray(value) ? value : (value === null || value === undefined) ? [] : [value]
-  return items.map(stableText).filter(s => s.length > 0)
-}
-const priorFindingsBlock = (verdict, howToFix) => verdict
-  ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
-  : ''
-// [FLEET-RESUME-STABLE-END]
+// through stableText/stableList/priorFindingsBlock, and the verifier and deliver prompts name
+// the branch this script computed rather than the one the implementer reported - so the branch
+// delivered is the branch that was verified. The three live in the generated block above.
 
 // ---- schemas: crisp machine-checkable done-conditions ----
 const ENVFACTS = { type: 'object', required: ['remote', 'hasGh', 'verifierAgentFile'], properties: {
@@ -833,17 +990,10 @@ Return structured output only.`,
 )
 // [FLEET-SCOUT-GATE-START]
 // A scout whose listing matched nothing is prone to route around the dead end and hand back every
-// open ticket it can find; the fleet would then spawn pr-check and implementer agents for work
+// open ticket it can find; the fleet would then spawn open-PR scans and implementer agents for work
 // nobody asked for (issue 298). The prompt says an empty listing is a valid answer - this is the
 // mechanical half: only tickets whose number was in the candidate set (the label listing, or the
-// explicitly named numbers) survive. Pure counterpart: confineToCandidates in
-// tools/ticket-fleet-branch.js, which ticket-fleet-branch.test.js pins against this inline copy.
-function confineToCandidates(tickets, candidateNumbers) {
-  const list = Array.isArray(tickets) ? tickets : []
-  if (!Array.isArray(candidateNumbers)) return list
-  const allowed = new Set(candidateNumbers.map(n => parseInt(n, 10)).filter(n => n > 0))
-  return list.filter(t => t && allowed.has(parseInt(t.number, 10)))
-}
+// explicitly named numbers) survive, through confineToCandidates in the generated block above.
 const candidateSet = explicitTickets.length ? explicitTickets : (scout && scout.candidateNumbers)
 const scoutTickets = confineToCandidates(scout && scout.tickets, candidateSet)
 const offListing = ((scout && Array.isArray(scout.tickets)) ? scout.tickets.length : 0) - scoutTickets.length
@@ -868,8 +1018,8 @@ if (cfg.testCommand) log(`testCommand overridden by args: ${testCommand} (scout 
 // number it finds and one cheap agent reads each distinct blocker's state through the instrument;
 // the closed ones are dropped and logged as cleared. Anything that does not come back a plain
 // `closed` - unknown, unreadable, a failed agent - keeps blocking: the gate may only ever be
-// opened by positive evidence. Pure counterpart: applyBlockerStates in
-// tools/ticket-fleet-branch.js, pinned against this inline copy by ticket-fleet-branch.test.js.
+// opened by positive evidence. The filter itself is applyBlockerStates in the generated block
+// above; what is here is the read that feeds it.
 // [FLEET-BLOCKER-STATE-START]
 const BLOCKER_STATES = { type: 'object', required: ['blockers'], properties: {
   blockers: { type: 'array', items: { type: 'object', required: ['number', 'state'], properties: {
@@ -877,25 +1027,6 @@ const BLOCKER_STATES = { type: 'object', required: ['blockers'], properties: {
     state: { type: 'string', description: 'the tracker\'s state for that issue VERBATIM - "open" or "closed"; use "unknown" only when the read failed, never a guess' },
   } } },
 } }
-function applyBlockerStates(tickets, blockers) {
-  const states = new Map()
-  for (const b of (Array.isArray(blockers) ? blockers : [])) {
-    const n = parseInt(b && b.number, 10)
-    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase())
-  }
-  const cleared = []
-  const resolved = (Array.isArray(tickets) ? tickets : []).map(t => {
-    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : []
-    const open = named.filter(n => {
-      const num = parseInt(n, 10)
-      if (states.get(num) !== 'closed') return true
-      cleared.push({ ticket: t.number, blocker: num })
-      return false
-    })
-    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open })
-  })
-  return { tickets: resolved, cleared }
-}
 async function resolveBlockerStates(tickets) {
   const numbers = [...new Set((Array.isArray(tickets) ? tickets : [])
     .flatMap(t => (Array.isArray(t && t.blockedBy) ? t.blockedBy : []))
@@ -927,6 +1058,87 @@ These are blocker edges named by tickets this run is about to select from, so th
 // [FLEET-BLOCKER-STATE-END]
 const resolvedTickets = await resolveBlockerStates(scoutTickets)
 
+// ---- open-PR filter: one listing per launch, before wave selection (issue 430) ----
+// The same question the code lane used to ask per ticket, asked once for the whole candidate set.
+// Per lane it cost an agent per ticket AND a wave slot: a ticket with an open PR was selected,
+// then skipped inside its lane, so the wave ran fewer real tickets than `maxTickets` while
+// runnable candidates sat unselected, and the blocker-state and discovery-triage chaining spent
+// effort on tickets that were then skipped anyway. Here every candidate that already has an open
+// `agent/issue-<N>-` PR is dropped BEFORE selectWave, so the cap fills with tickets that will run,
+// and the dropped ones are named in the run result under `skippedOpenPR` with their PR urls.
+// The freshness rule of issue 291 is unchanged and still load-bearing: this is an agent() call and
+// the runtime replays cached agent results on resume, so `invocationId` (fresh on EVERY launch,
+// resume included) is spliced into the label and the prompt. That, and nothing else, is what makes
+// a resumed run re-ask the tracker instead of replaying the {found:false} it recorded before any
+// PR existed. Keep it in both.
+// An unusable answer (retry cap, empty output) is read as "no candidate has an open PR" for the
+// whole wave and logged once: the worst case is a duplicate PR a human closes, the same trade the
+// per-lane check made. It runs before `priorImpl`/`priorProbe` is read, so a ticket handed in from
+// a dead run that already has a PR is dropped here too.
+// [FLEET-OPEN-PR-START]
+const OPEN_PR_SET = { type: 'object', required: ['withOpenPr'], properties: {
+  withOpenPr: { type: 'array', description: 'one entry per CANDIDATE number that has an open PR whose head ref starts with agent/issue-<number>- ; [] when none does', items: { type: 'object', required: ['number', 'prUrl'], properties: {
+    number: { type: 'integer', description: 'the candidate ticket number the open PR belongs to' },
+    prUrl: { type: 'string', description: "that PR's html_url" },
+    branch: { type: 'string', description: "that PR's head ref" },
+  } } },
+} }
+function applyOpenPrs(tickets, withOpenPr) {
+  const found = new Map()
+  for (const p of (Array.isArray(withOpenPr) ? withOpenPr : [])) {
+    const n = parseInt(p && p.number, 10)
+    const url = String((p && p.prUrl) || '').trim()
+    // A number with no url is not evidence of anything: dropping a ticket on it would leave the
+    // run report unable to point anyone at the PR that stopped it. Only a named PR skips a ticket.
+    if (n > 0 && url) found.set(n, { prUrl: url, branch: String((p && p.branch) || '').trim() || null })
+  }
+  const list = Array.isArray(tickets) ? tickets : []
+  const skipped = []
+  const kept = list.filter(t => {
+    const hit = found.get(parseInt(t && t.number, 10))
+    if (!hit) return true
+    skipped.push({ ticket: parseInt(t.number, 10), prUrl: hit.prUrl, branch: hit.branch })
+    return false
+  })
+  return { tickets: kept, skipped }
+}
+async function dropTicketsWithOpenPr(tickets) {
+  const list = Array.isArray(tickets) ? tickets : []
+  const numbers = [...new Set(list.map(t => parseInt(t && t.number, 10)).filter(n => n > 0))]
+  if (!numbers.length) return { tickets: list, skipped: [] }
+  const listSteps = instrument === 'mcp'
+    ? `There is no gh CLI here: call mcp__github__list_pull_requests ONCE with state="open" and per_page=100, and read head.ref (each PR's head branch name) off the entries it returns.`
+    : `Steps:
+1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
+2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\` ONCE. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
+3. Read head.ref off each entry it returns.`
+  let found = null
+  try {
+    found = await agent(
+      `List this repository's OPEN pull requests ONCE, then report which of these candidate tickets already has one: ${numbers.map(n => '#' + n).join(', ')}.
+Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
+${listSteps}
+A candidate number N counts as having an open PR when some open PR's head ref starts with agent/issue-N- (the branch shape this fleet pushes). Return one withOpenPr entry per such candidate - {number: N, prUrl: <that PR's html_url>, branch: <that PR's head ref>}, the first match where several exist - and no entry at all for a candidate nothing matched. When no candidate matches, return withOpenPr: [].
+Report only numbers from the candidate list above. Make no repository change, no commit, no comment, no PR. Return structured output only.`,
+      { label: `open-pr-scan@${invocationId}`, phase: 'Scout', schema: OPEN_PR_SET, model: cfg.deliverModel, effort: 'low' }
+    )
+  } catch (err) {
+    log(`${unusableReason('open-pr-scan', (err && err.message) || err)} - proceeding as if no candidate has an open PR (worst case a duplicate PR a human closes, issue 430).`)
+    return { tickets: list, skipped: [] }
+  }
+  if (!found || !Array.isArray(found.withOpenPr)) {
+    log('open-pr-scan came back with no list - proceeding as if no candidate has an open PR (worst case a duplicate PR a human closes, issue 430).')
+    return { tickets: list, skipped: [] }
+  }
+  const applied = applyOpenPrs(list, found.withOpenPr)
+  for (const s of applied.skipped) log(`#${s.ticket}: open PR ${s.prUrl} already exists - dropped before wave selection, so it burns no wave slot (issue 430).`)
+  if (!applied.skipped.length) log(`open-pr-scan: none of the ${numbers.length} candidate(s) has an open agent/issue-<N>- PR.`)
+  return applied
+}
+// [FLEET-OPEN-PR-END]
+const openPrFilter = await dropTicketsWithOpenPr(resolvedTickets)
+const skippedOpenPR = openPrFilter.skipped
+
 // Open blockers gate every lane. Kind does not: a human ticket named in args.tickets stays in the
 // wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose latest
 // comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
@@ -941,7 +1153,7 @@ const selectWave = (tickets, maxTickets) => {
   return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) }
 }
 // [FLEET-WAVE-SELECT-END]
-const selection = selectWave(resolvedTickets, cfg.maxTickets)
+const selection = selectWave(openPrFilter.tickets, cfg.maxTickets)
 const wave = selection.wave
 const droppedBlocked = selection.blocked.map(t => ({ ticket: t.number, blockedBy: t.blockedBy }))
 const droppedCap = selection.overCap.length
@@ -1029,6 +1241,8 @@ Return structured output only.`,
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
+${PYTHON_RAIL}
+The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
 In this repo run: git fetch origin, then git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
@@ -1163,14 +1377,9 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // [FLEET-HUMAN-LANE-END]
 
 // ---- Implement + blind Verify per ticket, no barrier between tickets ----
-// Pre-loop idempotence guard for resume (issue 150). Fetches the open-PR state from the tracker
-// and shapes it into a small stable structured answer so the code lane can early-return before
-// spawning any impl/verify/deliver agent. See runCodeLane below.
-const PR_CHECK = { type: 'object', required: ['found'], properties: {
-  found: { type: 'boolean' },
-  prUrl: { type: 'string' },
-  branch: { type: 'string' },
-} }
+// The open-PR idempotence guard (issues 150, 291) is no longer here: it is one Scout-phase
+// listing for the whole candidate set, above, so a ticket that already has a PR never reaches
+// a lane and never occupies a wave slot (issue 430).
 
 // ---- the Deliver prompt (shared by the code lane and the finish mode, issue 405) ----
 // One text, two callers: the code lane delivers a branch it has just verified, and the finish mode
@@ -1296,55 +1505,13 @@ async function runFinish(journal) {
 // runCodeLane is bounded by the FLEET-CODE-LANE markers so the lockstep test in
 // tools/ticket-fleet-branch.test.js can extract this function verbatim and drive
 // it with a mocked `agent`, asserting that impl/verify/deliver agents are NOT
-// invoked when the pre-loop PR check reports an open PR (issue 150 acceptance).
+// invoked in the shapes the tests below pin. The open-PR guard is NOT here: it runs once in
+// the Scout phase for the whole candidate set (issue 430).
 // [FLEET-CODE-LANE-START]
 const runCodeLane = async (t, workerIndex) => {
-  // Idempotence guard for resume (issue 150), kept fresh across resumes (issue 291). If the
-  // tracker already has an open PR whose head ref matches this ticket's branch shape, skip the
-  // whole ticket: no impl, verify or deliver agent is spawned. The observed failure mode
-  // (wf_911fa64d-102, run id 6aa46942): a resumed run served impl:#97.1 from cache, but
-  // verify:#97.1 and deliver:#97 ran under changed cache keys, re-verified the ticket, and
-  // opened PR 145 while PR 137 was still open. What moved those keys inside the workflow runtime
-  // is opaque here; the fix short-circuits the pipeline body with this pre-loop tracker check,
-  // before any of the drifting keys are hit.
-  // The guard is itself an agent() call, so it needs its own cache key to move: invocationId
-  // (fresh on every launch, resume included - see the block above) is spliced into both the
-  // prompt and the label, which is what stops a resume replaying the {found:false} recorded
-  // before the PR existed. Keep it in both; a key derived from runId alone is stable across a
-  // resume and the guard becomes a cached lie.
-  const prCheckSteps = instrument === 'mcp'
-    ? `There is no gh CLI here: use mcp__github__list_pull_requests with state="open" and per_page=100.
-Filter the returned array to entries whose head.ref (the branch name of the PR's head) starts with agent/issue-${t.number}-.`
-    : `Steps:
-1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
-2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\`. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
-3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
-  // Wrapped (aac-routines issue 270): a pr-check that blows the StructuredOutput retry cap must
-  // not null the whole ticket. An unusable answer is treated as "no open PR" - the worst case is
-  // a duplicate PR, which a human can close; the alternative is a ticket that never runs and
-  // never appears in the run report.
-  let openPR = null
-  try {
-    openPR = await agent(
-    `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
-Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
-${prCheckSteps}
-If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
-Make no repository change, no comment, no PR. Return structured output only.`,
-    { label: `pr-check:#${t.number}@${invocationId}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
-    )
-  } catch (err) {
-    log(`${unusableReason(`pr-check:#${t.number}`, (err && err.message) || err)} - proceeding as if no open PR exists.`)
-    openPR = null
-  }
-  if (openPR && openPR.found) {
-    log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)
-    return {
-      ticket: t.number, done: true, kind: 'code', branch: openPR.branch || null,
-      verdict: { pass: true, evidence: 'existing open PR ' + openPR.prUrl, failures: [] },
-      prUrl: openPR.prUrl, commentUrl: null, discoveries: [],
-    }
-  }
+  // No open-PR check here (issue 430): a candidate whose `agent/issue-<N>-` PR is already open
+  // was dropped in the Scout phase, before wave selection, so this lane only ever runs tickets
+  // that have no PR. The guard's freshness rule (issue 291) moved with it.
   let lastVerdict = null, impl = null, branch = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
@@ -1591,6 +1758,45 @@ const results = (grouped || []).flat()
 await treeGuardCheck('pre-report', 0)
 assertNoBreach()
 
+// [FLEET-EDITABLE-GUARD-START]
+// Every place a copy of the guard can be, in probe order, each with why it would be there. Literal
+// paths only - a $VAR in the command is refused by the Bash tool as an operand computed at run
+// time - so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's copy is reachable only once
+// somebody has copied it into the served repo. `.claude/workflows/` is the second entry because
+// that is where a served repo already copies the fleet script itself to launch it (SKILL.md,
+// "Copy-into-cwd step"): copying the guard in the same breath is the cheapest way for a fork with
+// no `tools/` convention to have one (issue 435).
+const EDITABLE_GUARD_HOMES = [
+  ['tools/editable-install-guard.js', "the served repo's own copy - the durable one, it survives every launch and every plugin update"],
+  ['.claude/workflows/editable-install-guard.js', 'beside the fleet script a served repo copies out of the plugin to launch a run - copy both files, not just ticket-fleet.js'],
+  ['aac-skills/ticket-fleet/editable-install-guard.js', 'the plugin source, present only when the served repo IS claude-dotfiles'],
+  ['~/.claude/skills/ticket-fleet/editable-install-guard.js', 'where a cloud bootstrap that installs this skill leaves it'],
+]
+
+/** The paths the post-wave probe tries, caller override first. */
+function editableGuardPaths(override) {
+  return [override].concat(EDITABLE_GUARD_HOMES.map(h => h[0])).filter(Boolean)
+}
+
+/** The one shell command that runs the first copy it finds, or exits 3 when there is none. */
+function editableGuardCommand(paths, main) {
+  return paths
+    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${main} --repair`)
+    .join('; ') + '; exit 3'
+}
+
+/**
+ * What a run says when the probe found no copy. The old message said only that it had skipped and
+ * to "copy it into the served repo's tools/", which left the reader to work out which file, from
+ * where, and under what name - so on the repo the incident happened in, nothing was ever copied
+ * (issue 435). This names each exact path, in preference order, and the command that creates one.
+ */
+function editableGuardAbsentMessage(paths, main) {
+  const homes = EDITABLE_GUARD_HOMES.map(h => `  ${h[0]}   (${h[1]})`).join('\n')
+  return `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${paths.join(' or ')} (claude-dotfiles issue 413), so if a worktree of this wave captured this container's editable install it stays captured and the next session's imports fail for no visible reason.\nCreate ONE of these, relative to the repository root this run serves (--main ${main}), first for preference:\n${homes}\nFrom a session with the aac-skills plugin loaded, the first one is:\n  mkdir -p tools && cp "$CLAUDE_PLUGIN_ROOT/skills/ticket-fleet/editable-install-guard.js" tools/editable-install-guard.js\nOr point the next run straight at a copy you already have: editableGuardScript: '<path>'.`
+}
+// [FLEET-EDITABLE-GUARD-END]
+
 // ---- editable-install guard (claude-dotfiles issue 413) ----
 // Every worktree of this wave is gone by now, so this is the moment the damage is visible: a
 // pointer file in site-packages naming a scratch checkout that no longer exists. Prompts cannot
@@ -1605,18 +1811,12 @@ if (cfg.editableGuard === false) {
   // One `;`-joined probe per candidate, never a loop: the Bash tool refuses a loop whose body
   // it cannot prove is not git (SKILL.md, "Shell shapes the worktree guard refuses"), and the
   // tree guard's `[ -f x ] || exit 3; node x ...` is the shape that is known to go through.
-  // Candidates in order: the caller's override, the served repo's own copy (the tree-guard
-  // convention), this repo's plugin source, and the copy the cloud bootstrap leaves in ~/.claude. Literal paths only - a $VAR in the
-  // command is refused by the Bash tool as an operand computed at run time.
-  const guardPaths = [
-    cfg.editableGuardScript,
-    'tools/editable-install-guard.js',
-    'aac-skills/ticket-fleet/editable-install-guard.js',
-    '~/.claude/skills/ticket-fleet/editable-install-guard.js',
-  ].filter(Boolean)
-  const editableCmd = guardPaths
-    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${cfg.orchestratorCwd} --repair`)
-    .join('; ') + '; exit 3'
+  // The candidate list and the not-here message are pure and marked, because a run served on a
+  // repo that has no copy is the case issue 435 is about: tools/editable-install-guard.test.js
+  // extracts this block verbatim, builds the command from it and runs it for real in a repo
+  // that has no guard anywhere, then in the same repo once the named path exists.
+  const guardPaths = editableGuardPaths(cfg.editableGuardScript)
+  const editableCmd = editableGuardCommand(guardPaths, cfg.orchestratorCwd)
   let res = null, resError = null
   try {
     res = await agent(guardAgentPrompt(editableCmd),
@@ -1628,7 +1828,7 @@ if (cfg.editableGuard === false) {
   try { parsed = JSON.parse(String((res && res.stdout) || '')) } catch (e) { parsed = null }
   const hard = cfg.editableGuard === true
   if (res && res.exitCode === 3) {
-    const absent = `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${guardPaths.join(' or ')} (claude-dotfiles issue 413). Copy it into the served repo's tools/ to have the wave repair its own worktree damage.`
+    const absent = editableGuardAbsentMessage(guardPaths, cfg.orchestratorCwd)
     if (hard) throw new Error(`ticket-fleet run FAILED after the wave - ${absent}`)
     log(absent)
   } else if (!res || !parsed || res.exitCode === 2) {
@@ -1741,6 +1941,9 @@ return {
   skippedBlocked: droppedBlocked,
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,
+  // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
+  // (issue 430): they never entered the wave, so the cap ran this many real tickets more.
+  skippedOpenPR,
   skippedOverCap: droppedCap,
   recordCommand: RECORD_COMMAND,
 }

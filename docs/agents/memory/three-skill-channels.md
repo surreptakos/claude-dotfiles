@@ -41,4 +41,3 @@ The manifest does NOT distinguish org-scoped from personal — every uploaded sk
 from `~/.claude/skills` alone — list channel 3 for both orgs first. The org UUIDs come from each
 profile's `.claude.json` (`oauthAccount.organizationUuid`).
 
-Related: [[concurrent-sessions-share-one-sync-push]]

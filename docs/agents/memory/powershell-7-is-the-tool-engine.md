@@ -26,4 +26,3 @@ winget cannot deliver this: `Microsoft.PowerShell` ships an msixbundle only, whi
 `WindowsApps` and is invisible to that fixed list. The MSI from the GitHub release is the only route,
 and it needs elevation.
 
-Related: [[concurrent-sessions-share-one-sync-push]]

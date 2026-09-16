@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T21:58:00Z'
-  previous-modified: '2026-09-16T20:34:54Z'
-  revision: '17'
-  content-sha: 39c55b34efa6
+  modified: '2026-09-16T22:52:54Z'
+  previous-modified: '2026-09-16T21:58:42Z'
+  revision: '18'
+  content-sha: e13f23003301
 ---
 
 # ticket-fleet
@@ -22,9 +22,13 @@ One script, `ticket-fleet.js` alongside this SKILL.md, that serves every session
 - **Cloud container** (`CLAUDE_CODE_REMOTE_SESSION_ID` set, or no `gh` on PATH): the fleet talks to the tracker through the GitHub MCP tools (`mcp__github__list_issues`, `mcp__github__issue_read`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request`).
 
 The switch is made by `pickInstrument(env, hasGh, override)` inside the script, and the
-verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`; the pure
-counterparts live at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
-`tools/ticket-fleet-branch.test.js`.
+verifier's agent type by `resolveVerifierAgent(instrument, args.verifierAgent)`. Both live at
+`tools/ticket-fleet-branch.js` in `claude-dotfiles`, exercised by
+`tools/ticket-fleet-branch.test.js` — and so does every other pure helper the script needs. The
+Workflow runtime cannot `require()`, so the block between the script's `[FLEET-GENERATED-START]`
+/ `[FLEET-GENERATED-END]` markers is **generated** from that module by
+`node tools/build-fleet-inline.js`; never hand-edit it, and `tools/fleet-inline-template.test.js`
+fails while it is stale (issue 440).
 
 The script does not guess which shape it is in. The first agent of every run is a cheap
 `env-probe` that reads the remote env vars, `gh` on PATH and the verifier agent file, and the
@@ -124,7 +128,13 @@ working directory. Copy it there before the first invocation:
 ```bash
 mkdir -p .claude/workflows
 cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
+cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js" .claude/workflows/editable-install-guard.js
 ```
+
+Copy the guard in the same breath (issue 435): the run probes `.claude/workflows/` for it, and a
+Python repo that has no copy anywhere gets no post-wave repair of the editable install a worktree
+captured. `tools/editable-install-guard.js` is the better home if the repo has a `tools/` - it
+survives a plugin update and is not mistaken for scratch.
 
 Then either spelling launches the fleet:
 
@@ -160,8 +170,9 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `runId` (required, string): caller-minted unique token, kept the SAME across a resume. Any
   short unique string; the branch names embed it as `wf_<runId>-w<workerIndex>`.
 - `invocationId` (required, string): a DIFFERENT fresh token per launch, resume included. It is
-  spliced into the open-PR guard's prompt and label so a resumed run re-asks the tracker instead
-  of replaying a cached "no PR" answer (issue 291); the script refuses it when it equals `runId`.
+  spliced into the `open-pr-scan@<invocationId>` prompt and label so a resumed run re-asks the
+  tracker instead of replaying a cached "no PR" answer (issue 291); the script refuses it when it
+  equals `runId`.
 - `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
   takes exactly those tickets regardless of label or state; otherwise it lists open tickets
   with `args.label`.
@@ -233,8 +244,9 @@ A ticket with an entry skips its **attempt-1** implementer or prober entirely - 
 result is used as-is and the reuse is logged (`reusing prior implementer result from
 args.priorImpl (branch ...)`). Everything downstream is unchanged: the verifier still runs
 blind against the branch, and attempt 2+ re-implements or re-probes normally, so a reused
-branch the verifier refutes is retried exactly as a fresh one would be. The pre-loop open-PR
-check still runs first, so a ticket already delivered is skipped before the entry is read.
+branch the verifier refutes is retried exactly as a fresh one would be. The Scout-phase open-PR
+scan still runs first, so a ticket handed in from a dead run that already has a PR is dropped
+before the entry is read.
 
 The values come from the dead run's `journal.jsonl`, which carries one `result` line per
 agent label - `impl:#<N>.1` for the code lane, `probe:#<N>.1` for the probe lane. Take the
@@ -352,6 +364,19 @@ Claude Code footer) with no owner comment after it. Such a ticket is parked, not
 starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
 Together with the relabel that is what stops a second wave repeating a handoff nobody has
 answered yet (issue 266).
+
+## A ticket that already has a PR never enters the wave
+
+One `open-pr-scan@<invocationId>` agent runs in the **Scout** phase, after blocker state and before
+wave selection. It lists the repo's open PRs once through the instrument and reports which
+candidate numbers have one whose head ref starts with `agent/issue-<N>-`; those candidates are
+dropped, so the `maxTickets` cap fills with tickets that will actually run and the drops are named
+in the run result under `skippedOpenPR` with their PR urls. It used to be the first agent of every
+code lane instead: twelve tickets meant twelve agents asking for the same list, and the ticket with
+a PR was selected and then skipped inside its lane, burning a wave slot while a runnable candidate
+sat unselected (issue 430). An unusable answer - retry cap, empty output - is read as "no candidate
+has an open PR" for the whole wave and logged once; the worst case is a duplicate PR a human
+closes, which is the trade the per-lane check made too.
 
 ## Blocker state is read, not believed
 
@@ -527,10 +552,13 @@ broken code because of it).
 
 Two halves:
 
-- **Prevention.** The implementer, prober and verifier prompts share one rail (`PYTHON_RAIL` in
-  the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
+- **Prevention.** The implementer, prober and both verifier prompts share one rail (`PYTHON_RAIL`
+  in the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
   script that does. The worktree's own code is what pytest reads; a test that *spawns* a
-  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment.
+  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment. The probe
+  lane's verifier carries it too (issue 435) and carries more besides: it is the one agent that is
+  *not* worktree-isolated, so a probe criterion naming `pip install -e` is re-run as a read - it
+  quotes what the prober got rather than installing into the orchestrator's own checkout.
 - **Repair.** Once the wave has drained, the run executes `editable-install-guard.js check --main
   . --repair` (the file alongside this SKILL.md, exercised by
   `tools/editable-install-guard.test.js` in `claude-dotfiles`, which adds a worktree, repoints the
@@ -540,13 +568,17 @@ Two halves:
   cleared. A repo with no `pyproject.toml` is a quiet no-op.
 
 The guard is looked for at `tools/editable-install-guard.js` in the served repo first, then at
-this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`, then at
-`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js`, where the cloud bootstrap copies this
-skill (literal paths only - a `$VAR` in the command is refused as an operand computed at run
-time). A served repo adopts the guard by copying it into its own `tools/`, or by passing the path
-as `editableGuardScript`. Where none of them exists the run logs that it skipped the repair;
-`editableGuard: true` makes that absence fail the run instead, and `editableGuard: false` turns
-the guard off.
+`.claude/workflows/editable-install-guard.js` (beside the fleet script a fork copies out of the
+plugin to launch a run), then at this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`,
+then at `${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js`, where a cloud bootstrap that
+installs this skill leaves it (literal paths only - a `$VAR` in the command is refused as an
+operand computed at run time, so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's own copy
+is reachable only once somebody has copied it in). A served repo adopts the guard by copying it to
+either of the first two paths, or by passing the path as `editableGuardScript`. Where none of them
+exists the run logs the skip **naming each path and the `cp` that creates one** (issue 435: the old
+message said only "copy it into the served repo's `tools/`", and on the repo the incident happened
+in nothing was ever copied); `editableGuard: true` makes that absence fail the run instead, and
+`editableGuard: false` turns the guard off.
 
 Prevention cannot cover a repo whose own hook installs before any prompt is read.
 `aac-routines` `.claude/hooks/session-start.sh` cds to `CLAUDE_PROJECT_DIR` and runs
@@ -554,7 +586,9 @@ Prevention cannot cover a repo whose own hook installs before any prompt is read
 sub-session that directory IS the worktree (the same hook already rewrites `core.hooksPath` for
 linked worktrees a few lines above, so it demonstrably fires there). Guarding that line to the
 main checkout is an aac-routines change, recorded with the evidence in
-`docs/tickets/413-decision.md`; until it lands, the post-wave repair is what undoes it.
+`docs/tickets/413-decision.md` and filed there as
+[aac-routines#434](https://github.com/surreptakos/aac-routines/issues/434); until it lands, the
+post-wave repair is what undoes it.
 
 ## History
 

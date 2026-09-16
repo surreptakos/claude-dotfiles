@@ -628,6 +628,18 @@ def main():
         text = _insert_after_python_prelude(text, py_guard_call)
         (scripts_dir / name).write_bytes(text.encode("utf-8"))
 
+    # Repo memory loader (issue 210). Unlike the governance scripts this one has NO live-tree twin:
+    # its source is tools/repo-memory-load.js in this repo, it is not mirrored into ~/.claude, and
+    # nothing in settings.json dispatches it -- so it ships without the dedup guard and fires from
+    # the plugin on every surface. It reads the CURRENT repo's docs/agents/memory/MEMORY.md, so the
+    # notes a session sees follow the checkout it opened, not the machine it runs on.
+    MEMORY_LOADER = "repo-memory-load.js"
+    memory_loader_src = REPO / "tools" / MEMORY_LOADER
+    memory_loader_present = memory_loader_src.is_file()
+    if memory_loader_present:
+        (scripts_dir / MEMORY_LOADER).write_bytes(
+            memory_loader_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+
     def _cmd(runner_unix, runner_win, script_name, argv):
         """Two spellings of the same command: Linux (command) and Windows (commandWindows)."""
         argv_str = (" " + " ".join(argv)) if argv else ""
@@ -712,6 +724,14 @@ def main():
             ]},
         ],
     }
+
+    if memory_loader_present:
+        # Its own SessionStart group: the memory injection must not wait on (or be skipped with)
+        # the session gate's 200s group, and a repo with no index makes it a no-op.
+        governance_hooks.setdefault("SessionStart", []).append({"hooks": [
+            _hook("node", "node", MEMORY_LOADER, [], 10,
+                  "Loading this repo's memory notes..."),
+        ]})
 
     # One UserPromptSubmit entry per part of the rules text (issue 209). Separate entries, not one
     # big one: the measured cap is per hook output, so N parts under it deliver the file in full

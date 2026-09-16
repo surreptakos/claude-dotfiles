@@ -27,6 +27,17 @@
             "timeout": 5
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/repo-memory-load.js\"",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/repo-memory-load.js\"",
+            "timeout": 10,
+            "statusMessage": "Loading this repo's memory notes..."
+          }
+        ]
       }
     ],
     "PreCompact": [
