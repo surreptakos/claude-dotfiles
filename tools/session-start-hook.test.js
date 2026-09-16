@@ -62,6 +62,21 @@ test('SessionStart additionalContext names the bare /<skill> spelling and flags 
   assert.match(ctx, /issue 242/, `additionalContext missing the issue-242 back-reference:\n${ctx}`);
 });
 
+test('SessionStart additionalContext states that custom agent types do not resolve here (issue 339)', () => {
+  const { result } = runHook();
+  assert.equal(result.status, 0, `hook exited ${result.status}\nstderr:\n${result.stderr}`);
+  const ctx = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
+  // The bootstrap cannot register a dotfiles agent for the session that runs it: the agent
+  // registry is read before SessionStart hooks (experiment in docs/tickets/339-decision.md).
+  // A script that pins one fails with "Agent type '<name>' not found", an error that names the
+  // type and not the cause - so the line has to name the cause.
+  assert.match(ctx, /no custom agent types here/,
+    `additionalContext missing the agent-type clause:\n${ctx}`);
+  assert.match(ctx, /agent registry is read before this hook runs/,
+    `additionalContext missing the cause of the agent-type limitation:\n${ctx}`);
+  assert.match(ctx, /issue 339/, `additionalContext missing the issue-339 back-reference:\n${ctx}`);
+});
+
 test('SessionStart additionalContext stays under the 2 KB platform cap (probe #175)', () => {
   const { result } = runHook();
   assert.equal(result.status, 0);
