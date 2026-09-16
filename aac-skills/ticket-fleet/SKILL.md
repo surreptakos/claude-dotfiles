@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T15:18:31Z"
-  previous-modified: "2026-09-16T06:35:49Z"
-  revision: "11"
-  content-sha: "6ad75a5f9441"
+  modified: "2026-09-16T19:07:35Z"
+  previous-modified: "2026-09-16T18:01:25Z"
+  revision: "13"
+  content-sha: "5605bb4772fe"
 ---
 
 # ticket-fleet
@@ -179,6 +179,9 @@ prompts before letting the fleet push branches and open PRs. Full args list:
   once. See **Overriding the test command** below.
 - `priorImpl` / `priorProbe` (objects keyed by ticket number, optional): results from an
   earlier run's implementers and probers. See **Finishing a run whose verifiers died** below.
+- `finishRunId` (string, optional): an earlier run's id. The launch then runs **delivery only** -
+  it reads that run's journal and opens a PR for every verified-but-undelivered branch. See
+  **Finishing a run whose Deliver step died** below.
 
 ## Overriding the test command
 
@@ -204,8 +207,9 @@ agent includes the worktree slot the runtime assigned, and a resumed run assigns
 the replay starts a fresh implementer inside another ticket's slot. Hand the finished results
 back instead:
 
-- `priorImpl`: `{<ticket number>: <IMPL-shaped result>}` - `{branch, committed, testExitCode,
-  testTail, discoveries}`.
+- `priorImpl`: `{<ticket number>: <IMPL-shaped result>}` - `{branch, committed, pushed,
+  testExitCode, testTail, discoveries}`. An entry from a journal written before `pushed` existed
+  simply reads as not-pushed, and the run pushes that branch itself before verifying it.
 - `priorProbe`: `{<ticket number>: <PROBE-shaped result>}` - `{items, blocked, discoveries}`.
 
 A ticket with an entry skips its **attempt-1** implementer or prober entirely - the recorded
@@ -233,6 +237,44 @@ Pass the same `tickets` list as the dead run, a **new** `runId` (branch names fo
 that does re-implement must not collide with the dead run's), and the `testCommand` the dead
 run should have used. An entry whose `committed` is false, or a probe entry with no items, is
 treated as a failed attempt 1: attempt 2 runs the stage normally.
+
+## Finishing a run whose Deliver step died
+
+The other half of the same problem (issue 405). A verified branch used to exist nowhere but the
+container that made it: the Deliver step was the first thing to push it, so a container restart
+mid-Deliver, a deliverer that reported the branch "does not exist" without ever pushing, or an
+interrupt during Verify each ended with committed, verified work nobody could reach. Two things
+close that:
+
+- **The branch is pushed at implement time.** The implementer runs `git push -u origin <branch>`
+  as soon as the commit lands and reports `pushed`; when it did not (or could not), the run
+  starts a one-command `push:#<N>.<attempt>` agent of its own - before the verifier, so the
+  branch is on origin for every stage after it. The Deliver step still pushes, and is told to
+  fail loudly with the git output rather than conclude the branch is missing.
+- **`finishRunId` replays a dead run's journal.** The launch runs delivery only:
+
+```
+Workflow({
+  scriptPath: 'aac-skills/ticket-fleet/ticket-fleet.js',
+  args: { contractVersion: 2, runId: '<hex>', invocationId: '<fresh hex>', finishRunId: 'wf_6aaacc32-c84' }
+})
+```
+
+`finishRunId` takes either spelling of the dead run's id: the harness workflow id its journal
+directory is named for (`wf_...`), or the caller-minted `runId` its branch names embed. A
+`journal-read` agent finds `~/.claude/projects/<project>/<session>/subagents/workflows/<run>/journal.jsonl`,
+pairs each `started` label with its `result` by `agentId`, and reports per ticket whether a
+verifier passed, on which branch, and whether a `deliver:#<N>` result recorded a PR or comment
+URL. Then, per ticket: **delivered** ones are skipped naming the PR they already have,
+**unverified** ones are left alone (a finish pass never delivers what no verifier passed - re-run
+the fleet on those), and **verified-but-undelivered** ones go through the ordinary Deliver
+prompt, with one extra instruction: reuse an open PR for that branch if one exists rather than
+open a second, which makes a finish pass safe to repeat. Finally the report writer runs over the
+journal's discoveries, so a dead run's follow-ups still land.
+
+The run must happen where the dead run ran: the journal is machine-local and dies with its
+container. It starts no scout, no implementer, no prober and no verifier, so a finish pass costs
+one journal read plus one deliverer per undelivered branch.
 
 ## Contract and ripple list
 
@@ -273,9 +315,10 @@ with no marker at all is a pre-v2 fork.
 
 The scout classifies each ticket into one of three lanes; the wave runs them in parallel:
 
-- **code** - repository change. Implementer in an isolated worktree, then a blind refuting
-  verifier per attempt; the deliver stage merges the default branch (see **Pre-push merge**),
-  then pushes and opens a PR, only on a verified pass.
+- **code** - repository change. Implementer in an isolated worktree, which pushes its branch as
+  soon as it commits (issue 405), then a blind refuting verifier per attempt; the deliver stage
+  merges the default branch (see **Pre-push merge**), then pushes and opens a PR, only on a
+  verified pass.
 - **probe** - resolves by quoting command output / research / evidence in a comment, no
   repository change asked for. Prober gathers, blind verifier re-runs the commands; the
   deliver stage posts one resolution comment.
@@ -292,6 +335,17 @@ Claude Code footer) with no owner comment after it. Such a ticket is parked, not
 starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
 Together with the relabel that is what stops a second wave repeating a handoff nobody has
 answered yet (issue 266).
+
+## Blocker state is read, not believed
+
+The scout reports every number a ticket's "Blocked by" section names, whatever state it thinks
+those issues are in. A `blocker-state` agent then reads each distinct number through the
+instrument (`gh api repos/{owner}/{repo}/issues/N --jq .state`, or `mcp__github__issue_read`)
+and the closed ones are dropped from that ticket's `blockedBy` and logged as cleared, so a
+ticket whose blocker landed an hour ago runs without anyone editing its body. Anything that is
+not a plain `closed` - `open`, `unknown`, a number the read never came back with, a failed
+agent - keeps blocking: the gate opens only on positive evidence. The run result's
+`skippedBlocked` names each skipped ticket with the blocker numbers still open (issue 403).
 
 ## Discovery-triage chores run in a chain, not side by side
 
@@ -367,6 +421,20 @@ against the same ticket therefore produce distinct branches; two runs of the sam
 still add `-attempt<A>` so a re-implement after a failed verify does not overwrite its own
 predecessor.
 
+## Where a verdict is allowed to come from
+
+A verifier that skips its scratch worktree tests the orchestrator's own checkout, which sits on
+whatever branch the session is on - on 2026-09-16 that tree predated the code under review and the
+#361 probe was refuted as "fabricated" for flags `origin/main` carried and that branch did not. So
+the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
+`head` against the tip it expects: the branch under review in the code lane,
+`origin/<defaultBranch>` in the probe lane, each read by its own one-command `rev-parse` agent so
+no agent certifies itself. A mismatch re-runs the verifier ONCE with the mismatch named - "for
+where it was produced and not for what it concluded", so the re-run is not read as pressure to
+change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
+and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
+log says the cross-check was skipped: a guess is not a rejection.
+
 ## Shell shapes the worktree guard refuses
 
 An implementer or verifier works inside an isolated worktree, and there the Bash tool refuses any
@@ -386,6 +454,46 @@ One rule covers all four: one plain command, no loop body, no `;`-joined pair, n
 pipeline - nothing the guard has to evaluate before it can see what actually runs. The guard is
 strictest around text that could reach `git` or `gh`, and it is the shape that is refused, not the
 command, so re-running the same work as separate single commands goes through.
+
+## Python packages: one editable install, shared by every worktree
+
+A container has one interpreter and one site-packages, so `pip install -e` from a fleet worktree
+repoints the whole container's editable install at that scratch checkout. Removing the worktree at
+the end of the wave then orphans it, and every later `python -c 'import <pkg>'` dies with
+ModuleNotFoundError while the code on disk is fine (issue 413: the 2026-09-16 aac-routines waves
+left the pointer naming a deleted `/tmp/verify-306`, and three subprocess-spawning tests read as
+broken code because of it).
+
+Two halves:
+
+- **Prevention.** The implementer, prober and verifier prompts share one rail (`PYTHON_RAIL` in
+  the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
+  script that does. The worktree's own code is what pytest reads; a test that *spawns* a
+  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment.
+- **Repair.** Once the wave has drained, the run executes `editable-install-guard.js check --main
+  . --repair` (the file alongside this SKILL.md, exercised by
+  `tools/editable-install-guard.test.js` in `claude-dotfiles`, which adds a worktree, repoints the
+  pointer, deletes the worktree and shows the import break and come back). It rewrites a pointer
+  naming a scratch checkout back to the main checkout - pointer text only, never pip, because
+  `pip install -e` writes `.egg-info` into the orchestrator tree the isolation checkpoint just
+  cleared. A repo with no `pyproject.toml` is a quiet no-op.
+
+The guard is looked for at `tools/editable-install-guard.js` in the served repo first, then at
+this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`, then at
+`~/.claude/skills/ticket-fleet/editable-install-guard.js`, where the cloud bootstrap copies this
+skill (literal paths only - a `$VAR` in the command is refused as an operand computed at run
+time). A served repo adopts the guard by copying it into its own `tools/`, or by passing the path
+as `editableGuardScript`. Where none of them exists the run logs that it skipped the repair;
+`editableGuard: true` makes that absence fail the run instead, and `editableGuard: false` turns
+the guard off.
+
+Prevention cannot cover a repo whose own hook installs before any prompt is read.
+`aac-routines` `.claude/hooks/session-start.sh` cds to `CLAUDE_PROJECT_DIR` and runs
+`python -m pip install --editable ".[dev]"` whenever its dependency check fails - and in a fleet
+sub-session that directory IS the worktree (the same hook already rewrites `core.hooksPath` for
+linked worktrees a few lines above, so it demonstrably fires there). Guarding that line to the
+main checkout is an aac-routines change, recorded with the evidence in
+`docs/tickets/413-decision.md`; until it lands, the post-wave repair is what undoes it.
 
 ## History
 

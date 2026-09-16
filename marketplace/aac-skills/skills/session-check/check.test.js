@@ -17,15 +17,16 @@ function runChecker(config, extra) {
   fs.mkdirSync(path.join(repo, '.git'));
   fs.mkdirSync(path.join(repo, '.claude'));
   fs.writeFileSync(path.join(repo, '.claude', 'session.json'), JSON.stringify(config));
-  // Second arg is either { setup, env } (issue 139 tests) or a bare env map (issue 171 tests).
-  const opts = extra && (extra.env || typeof extra.setup === 'function') ? extra : { env: extra };
+  // Second arg is either { setup, env, args } (issue 139 tests) or a bare env map (issue 171 tests).
+  const opts = extra && (extra.env || extra.args || typeof extra.setup === 'function')
+    ? extra : { env: extra };
   if (typeof opts.setup === 'function') opts.setup(repo);
 
   // localEnv, not process.env: the cloud markers are set for every process inside a cloud agent
   // container, and the tests below that assert the LOCAL branch have to see them unset.
   const env = localEnv(opts.env);
   try {
-    return execFileSync(process.execPath, [CHECKER], {
+    return execFileSync(process.execPath, [CHECKER, ...(opts.args || [])], {
       cwd: repo,
       encoding: 'utf8',
       env,
@@ -52,6 +53,14 @@ function makeSkillFixture(version) {
   fs.writeFileSync(path.join(skill, 'SKILL.md'),
     `---\nname: project-harness\n---\n\n**Current version: ${version}.**\n`);
   return { root: dir, skill };
+}
+
+/** A canonical harness-version marker — what the PUBLISHED project-harness offers today. */
+function makeCanonicalFixture(version) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-canonical-fixture-'));
+  const file = path.join(dir, 'harness-version.md');
+  fs.writeFileSync(file, `# Harness version\n\n    harness-version: ${version}\n\n`);
+  return { root: dir, file };
 }
 
 function writeRepoStamp(repo, version) {
@@ -215,6 +224,31 @@ test('harness state: v1-implicit (no marker, build-dashboard.js present) is behi
   }
 });
 
+test('harness state: --end in a cloud session on a stale payload blames the payload, not the marker', () => {
+  // Issue 412. Repo stamped v19, the project-harness copy this container loaded is v18, and the
+  // published one is v23: the old reading accused someone of editing the marker.
+  const fx = makeSkillFixture(18);
+  const canonical = makeCanonicalFixture(23);
+  try {
+    const output = runChecker({}, {
+      args: ['--end'],
+      env: {
+        CLAUDE_CODE_REMOTE_SESSION_ID: '1',
+        HARNESS_SKILL_DIR: fx.skill,
+        HARNESS_CANONICAL_FILE: canonical.file,
+      },
+      setup: (repo) => writeRepoStamp(repo, 19),
+    });
+    assert.match(output, /harness stamp says v19 but the project-harness copy here is v18, behind the published v23/);
+    assert.match(output, /the plugin payload is stale, not the marker/);
+    assert.match(output, /update-cloud-plugin/);
+    assert.doesNotMatch(output, /someone edited the marker/);
+  } finally {
+    fs.rmSync(fx.root, { recursive: true, force: true });
+    fs.rmSync(canonical.root, { recursive: true, force: true });
+  }
+});
+
 test('harness state: .claude/session.json "harness": false silences the section', () => {
   const output = runChecker({ harness: false }, {
     env: { HARNESS_SKILL_DIR: '' },
@@ -318,7 +352,7 @@ test('cloud bootstrap: the whole section is silent on a local (non-cloud) sessio
  * outage (issue 394). The loop now asks for `...&page=N` itself; these drive it with a stub.
  */
 
-const { paginateTicketPages } = require('./check.js');
+const { curlTicketRows, paginateTicketPages } = require('./check.js');
 
 const fullPage = (from) => JSON.stringify(
   Array.from({ length: 100 }, (unused, i) => ({ number: from + i, title: `t${from + i}` })));
@@ -340,6 +374,25 @@ test('a failing second page reports the page rather than a bare unreachable GitH
   const result = paginateTicketPages((page) => (page === 1 ? fullPage(1) : null));
   assert.equal(result.list, undefined);
   assert.match(result.error, /page 2/);
+});
+
+// The no-gh fallback fetched one page and stopped, so a >100-ticket label printed as exactly
+// 100 with no error (issue 400). It runs the same loop now; the stub stands in for curl.
+test('the no-gh curl path pages too, so a two-page label arrives whole', () => {
+  const urls = [];
+  const result = curlTicketRows({ owner: 'o', repo: 'r' }, 'ready-for-agent', (cmd, args) => {
+    assert.equal(cmd, 'curl');
+    const url = args[args.length - 1];
+    urls.push(url);
+    return { out: /&page=1$/.test(url) ? fullPage(1) : JSON.stringify([{ number: 101, title: 'last' }]), code: 0 };
+  });
+  assert.equal(urls.length, 2);
+  assert.match(urls[0], /per_page=100&page=1$/);
+  assert.match(urls[1], /per_page=100&page=2$/);
+  assert.equal(result.error, undefined);
+  assert.equal(result.list.length, 101);
+  assert.equal(result.list[0], '#1  t1');
+  assert.equal(result.list[100], '#101  last');
 });
 
 /* --------- host predicate (issue 345): a desktop-only check must not run in a container ------- */

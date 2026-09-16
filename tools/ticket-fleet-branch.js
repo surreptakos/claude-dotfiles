@@ -62,6 +62,49 @@ function buildBranchName(ticketNumber, runId, workerIndex, attempt) {
 }
 
 /**
+ * Every branch prefix the fleet creates (issue 377).
+ *
+ * Two shapes exist: the per-ticket implementer branches
+ * (`agent/issue-<N>-attempt<A>-wf_<runId>-w<workerN>`) and the one discoveries
+ * branch a run's Report phase cuts for its `FOLLOW-UPS.md` bullets
+ * (`agent/fleet-discoveries-wf_<runId>`, issue 360). The second was added after
+ * the enumerations were written, so everything that lists "the fleet's
+ * branches" - the orchestrator RUNBOOK's merge pass, the worktree cleanup in
+ * tools/backfill-worktree-configs.js - has to name both or the discoveries PR
+ * goes unmerged and the bullets are stranded, which is the failure issue 360
+ * exists to end. This is the single list those enumerations widen against.
+ */
+const ISSUE_BRANCH_PREFIX = 'agent/issue-';
+const DISCOVERIES_BRANCH_PREFIX = 'agent/fleet-discoveries-';
+const FLEET_BRANCH_PREFIXES = Object.freeze([ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX]);
+
+/**
+ * The branch the Report phase commits a run's discovery bullets to. The fleet
+ * script inlines the same shape; the test asserts the two cannot drift.
+ *
+ * @param {string} runId - identifier for this ticket-fleet invocation
+ * @returns {string} branch name shaped agent/fleet-discoveries-wf_<runId>
+ */
+function buildDiscoveriesBranchName(runId) {
+  if (!runId) { throw new Error('buildDiscoveriesBranchName: runId required'); }
+  return `${DISCOVERIES_BRANCH_PREFIX}wf_${runId}`;
+}
+
+/**
+ * Is this branch one the fleet created? Accepts a plain branch name or a
+ * `refs/heads/...` ref. A bare prefix with nothing after it is not a fleet
+ * branch - the fleet always appends a ticket number or a runId.
+ *
+ * @param {string|null|undefined} name
+ * @returns {boolean}
+ */
+function isFleetBranch(name) {
+  if (!name) { return false; }
+  const branch = String(name).trim().replace(/^refs\/heads\//, '');
+  return FLEET_BRANCH_PREFIXES.some((p) => branch.startsWith(p) && branch.length > p.length);
+}
+
+/**
  * The per-worker suffix the scout template passes to each spawned agent as an
  * explicit part of the branch name. Exposed as its own function so a caller
  * that wants only the suffix (e.g. an agent label) can get it without having
@@ -195,6 +238,48 @@ function confineToCandidates(tickets, candidateNumbers) {
 }
 
 /**
+ * Drop blockers that have already closed (issue 403).
+ *
+ * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
+ * `effort: 'low'` it never reads those issues, so a ticket whose blocker landed
+ * hours ago is skipped wave after wave until somebody rewrites the body by hand.
+ * The fleet therefore reads each named blocker's state through the tracker
+ * instrument and passes the answers here: a blocker whose state comes back
+ * `closed` is dropped from the ticket's `blockedBy`, while everything else -
+ * `open`, `unknown`, a number the reader never reported - keeps blocking,
+ * because the gate may only be opened by positive evidence that it has landed.
+ *
+ * Tickets are not mutated: one whose blockers all still hold is returned as-is,
+ * one that loses a blocker is returned as a copy with the shorter `blockedBy`.
+ *
+ * @param {Array<{number:number, blockedBy:Array<number|string>}>|null|undefined} tickets
+ * @param {Array<{number:number|string, state:string}>|null|undefined} blockers - one
+ *   entry per blocker number read, carrying the tracker's state verbatim
+ * @returns {{tickets:Array, cleared:Array<{ticket:number, blocker:number}>}} the
+ *   tickets with closed blockers removed, and the (ticket, blocker) pairs cleared
+ *   so the run can log them
+ */
+function applyBlockerStates(tickets, blockers) {
+  const states = new Map();
+  for (const b of (Array.isArray(blockers) ? blockers : [])) {
+    const n = parseInt(b && b.number, 10);
+    if (n > 0) states.set(n, String((b && b.state) || '').trim().toLowerCase());
+  }
+  const cleared = [];
+  const resolved = (Array.isArray(tickets) ? tickets : []).map((t) => {
+    const named = Array.isArray(t && t.blockedBy) ? t.blockedBy : [];
+    const open = named.filter((n) => {
+      const num = parseInt(n, 10);
+      if (states.get(num) !== 'closed') return true;
+      cleared.push({ ticket: t.number, blocker: num });
+      return false;
+    });
+    return open.length === named.length ? t : Object.assign({}, t, { blockedBy: open });
+  });
+  return { tickets: resolved, cleared };
+}
+
+/**
  * Resume-stable projections of a previous agent's structured result (issue 271).
  *
  * The Workflow runtime replays an agent() call from cache only while its cache
@@ -252,6 +337,8 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 module.exports = {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument,
+  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  applyBlockerStates,
   stableJson, stableText, stableList, priorFindingsBlock,
 };
