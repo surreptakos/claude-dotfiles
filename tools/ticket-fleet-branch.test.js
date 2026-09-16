@@ -147,7 +147,8 @@ test('pickInstrument override wins over env detection', () => {
 });
 
 test('pickInstrument tolerates a missing env argument', () => {
-  assert.equal(pickInstrument(undefined, true, undefined), 'gh');
+  assert.equal(pickInstrument(undefined, true, undefined), null,
+    'gh on PATH says nothing about remoteness: a container has it too (issue 322)');
   assert.equal(pickInstrument(null, false, undefined), 'mcp');
 });
 
@@ -166,24 +167,37 @@ test('pickVerifierAgent pins fleet-verifier locally only when the agent file exi
   assert.equal(pickVerifierAgent(false, false), null);
 });
 
-// ---- unknown environment + verifier agent type (issue 316) ----
+// ---- unknown environment + verifier agent type (issues 316, 322) ----
 // The workflow runtime does not expose `process`, so the script passes `null` rather than a
-// fabricated `{}`: an absent env is an unknown environment, not an empty one. It still falls
-// back to `gh` (REST works in both shapes) - the container caller is the one who says which.
+// fabricated `{}`: an absent env is an unknown environment, not an empty one. It used to fall
+// back to `gh`, and a container run then pinned an agent type its registry did not hold and
+// reached for a GraphQL PR call (issue 322), so an unknown environment now resolves to nothing
+// and the caller has to name the instrument.
 
 test('pickInstrument treats a missing process binding as an unknown environment', () => {
-  const noProcessEnv = null; // what the script passes when `typeof process === 'undefined'`
-  assert.equal(pickInstrument(noProcessEnv, undefined, undefined), 'gh',
-    'unknown environment must fall back to gh, whose REST paths work locally and in a container');
-  assert.equal(pickInstrument(noProcessEnv, undefined, 'auto'), 'gh');
+  const noProcessEnv = null; // what the script passes when nothing measured the environment
+  assert.equal(pickInstrument(noProcessEnv, undefined, undefined), null,
+    'unknown environment must resolve to nothing, never to gh (issue 322)');
+  assert.equal(pickInstrument(noProcessEnv, undefined, 'auto'), null);
+  assert.equal(pickInstrument(noProcessEnv, true, undefined), null,
+    '`gh` on PATH is not evidence of a desktop session - a container carries it too');
   assert.equal(pickInstrument(noProcessEnv, undefined, 'mcp'), 'mcp',
     'an explicit instrument must still win when the environment is unknown');
+  assert.equal(pickInstrument(noProcessEnv, false, undefined), 'mcp',
+    'a measured absence of `gh` is positive evidence, so it still resolves');
 });
 
-test('resolveVerifierAgent defaults to fleet-verifier under gh and unpinned under mcp', () => {
-  assert.equal(resolveVerifierAgent('gh', undefined), 'fleet-verifier');
-  assert.equal(resolveVerifierAgent('gh', null), 'fleet-verifier');
+test('resolveVerifierAgent pins fleet-verifier only when the probe saw the agent file (issue 322)', () => {
+  assert.equal(resolveVerifierAgent('gh', undefined), undefined,
+    'without probe facts nothing says the agent is registered, so the gh instrument must not pin it');
+  assert.equal(resolveVerifierAgent('gh', null), undefined);
   assert.equal(resolveVerifierAgent('mcp', undefined), undefined);
+  assert.equal(resolveVerifierAgent('gh', undefined, { remote: false, verifierAgentFile: true }), 'fleet-verifier',
+    'a desktop session whose agent file is on disk pins it');
+  assert.equal(resolveVerifierAgent('gh', undefined, { remote: false, verifierAgentFile: false }), undefined,
+    'no agent file on disk, no pin');
+  assert.equal(resolveVerifierAgent('gh', undefined, { remote: true, verifierAgentFile: true }), undefined,
+    'a container never pins, whatever instrument it picked (issue 316)');
   assert.equal(resolveVerifierAgent('mcp', 'fleet-verifier'), 'fleet-verifier',
     'a named agent pins on either instrument');
 });
@@ -286,6 +300,27 @@ test(`fleet script ${FLEET_SCRIPT_REL} measures the environment instead of readi
     'fleet must not sniff process.env: the workflow runtime does not expose it (issue 322)');
   assert.match(src, /re-run with instrument: "gh"[\s\S]*?or instrument: "mcp"/,
     'a failed probe on instrument:auto must stop the run and name what to pass, not default to gh');
+  assert.match(src, /remote: null,/,
+    'fleet must expose args.remote so a caller whose probe cannot run can still resolve the switch (issue 322)');
+  assert.match(src, /if \(!instrument\) \{/,
+    'an unresolved instrument must stop the run rather than proceeding on a default (issue 322)');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} opens PRs through REST on the gh instrument (issue 322)`, () => {
+  const ghRules = loadTrackerRules(FLEET_SCRIPT, 'gh');
+  assert.match(ghRules.prCreate(), /gh api --method POST repos\/\{owner\}\/\{repo\}\/pulls/,
+    'the gh deliver prompt must open the PR with the REST pulls endpoint');
+  assert.match(ghRules.prCreate(), /NEVER `gh pr create`/,
+    'the prompt must name the GraphQL-backed spelling it forbids (HTTP 403 here - issues 130, 322)');
+  assert.match(loadTrackerRules(FLEET_SCRIPT, 'mcp').prCreate(), /mcp__github__create_pull_request/);
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} dates the Report phase heading (issue 322)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /## Run <DATE> \(ticket-fleet \$\{runId\}\)/,
+    'the FOLLOW-UPS heading must carry both the ISO date and the run id so two runs are tellable apart');
+  assert.match(src, /date -u \+%F/,
+    'the writer has a shell, so the date comes from it - workflow scripts cannot call new Date()');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} gates the verifier agentType on remoteness, not the instrument (issue 339)`, () => {
