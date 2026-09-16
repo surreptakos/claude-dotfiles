@@ -9,8 +9,10 @@ name: Skill stamps
 #     marketplace/aac-skills is diffed, plugin.json's version included: that version follows the
 #     payload, not the wall clock, so an unchanged mirror rebuilds byte for byte (issue 432).
 #     .claude-plugin/marketplace.json repeats the version and is not rebuilt here (--no-marketplace).
-# The fix for all of them is the same two commands, from the repo root (CLAUDE.md, "Skill stamps"):
-#   python3 tools/skill-stamps.py stamp aac-skills agents/skills
+# The fix for all of them is the same two commands, from the repo root (CLAUDE.md, "Skill stamps").
+# --home on BOTH is what makes them reproduce this job: without it the stamper hashes against the
+# container's own home and re-stamps skills nobody touched (issue 431).
+#   python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\Users\Dan'
 #   python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 # The dashboard branch is a force-pushed snapshot artifact and is never checked.
 
@@ -53,3 +55,7 @@ jobs:
             echo "::error::marketplace/aac-skills is stale - rebuild it with tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'"
             exit 1
           fi
+          diff -r --exclude=__pycache__ /tmp/dist/aac-skills/hooks marketplace/aac-skills/hooks
+          # The global rules text the UserPromptSubmit hook injects (issue 209): a copy of the
+          # owner's CLAUDE.md section, so a stale one delivers yesterday's rules every prompt.
+          diff -r /tmp/dist/aac-skills/rules marketplace/aac-skills/rules

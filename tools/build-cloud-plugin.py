@@ -17,6 +17,11 @@ Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and wri
 plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
 remains for the claude.ai org-Skills surface, which only takes uploads.
 
+The payload also carries the global rules text (issue 209): the `### Four standing disciplines`
+section of the owner's CLAUDE.md, copied -- never hand-duplicated -- to rules/global-rules.md and
+injected on every prompt by hooks/scripts/global-rules.js, one manifest entry per part because the
+host's additionalContext cap is per hook output. See docs/tickets/209-decision.md.
+
 Every source skill is stamped before it is packaged (tools/skill-stamps.py): four keys under
 `metadata:` - modified, previous-modified, revision, content-sha - rotate whenever the skill's
 content hash no longer matches the recorded one, and are written back into the SOURCE SKILL.md
@@ -82,6 +87,51 @@ CLOUD_NOTE = (
     "> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:\n"
     "> every run is fresh.\n"
 )
+
+
+# Global rules text (issue 209). The four standing disciplines a PC session reads in
+# ~/.claude/CLAUDE.md never reach a container, which has no live tree. The packager COPIES that
+# section into the payload -- one source, no hand duplicate -- and hooks/scripts/global-rules.js
+# injects it on every prompt. The heading is the contract between the two files; a build whose
+# source no longer carries it fails loudly rather than shipping an empty rules file.
+RULES_HEADING = "### Four standing disciplines"
+# Body bytes per part. Measured cap (2026-09-16, cloud container, headless probe): a hook's
+# additionalContext arrives whole at 10,000 bytes and is persisted with a 2KB preview at 10,240.
+# The cap is per hook output, so the file rides as one hook entry per part. Must stay in step with
+# PART_BYTES in tools/plugin-hook-guards/global-rules.js.
+RULES_PART_BYTES = 6000
+# JavaScript's split(/(?<=\n)/): lines keep their newline, nothing else counts as a break.
+# str.splitlines() would also break on \x0b, \x0c and  , which would desync the two splitters.
+LINE_RE = re.compile(r"[^\n]*\n|[^\n]+")
+
+
+def extract_global_rules(text):
+    """The `### Four standing disciplines` section of a global CLAUDE.md, verbatim.
+
+    Ends at the next heading of the same or a higher level. Returns None when the heading is
+    absent, which is how a fixture repo with no CLAUDE.md mirror produces no rules file.
+    """
+    lines = LINE_RE.findall(text.replace("\r\n", "\n"))
+    start = next((i for i, l in enumerate(lines) if l.startswith(RULES_HEADING)), None)
+    if start is None:
+        return None
+    end = next((i for i in range(start + 1, len(lines))
+                if lines[i].startswith("### ") or lines[i].startswith("## ")), len(lines))
+    return "".join(lines[start:end]).rstrip() + "\n"
+
+
+def split_rules_parts(text, limit=RULES_PART_BYTES):
+    """Greedy line packing -- the same rule global-rules.js applies when it emits part k."""
+    parts, cur = [], ""
+    for line in LINE_RE.findall(text):
+        if cur and len((cur + line).encode("utf-8")) > limit:
+            parts.append(cur)
+            cur = line
+        else:
+            cur += line
+    if cur:
+        parts.append(cur)
+    return parts
 
 
 def retarget_paths(body):
@@ -445,6 +495,38 @@ def main():
     guard_py_name = "_plugin_hook_guard.py"
     guard_js_src = guard_src_dir / guard_js_name
     guard_py_src = guard_src_dir / guard_py_name
+
+    # Global rules text (issue 209). ONE source: the owner's global CLAUDE.md. A live build reads
+    # it next to --source (~/.claude/skills -> ~/.claude/CLAUDE.md); a --from-mirror build (cloud,
+    # CI) reads this repo's generated mirror claude/CLAUDE.md, de-tokenized with --home so both
+    # routes emit the same bytes. Nothing here is hand-written into the payload.
+    rules_src = None
+    if not args.from_mirror:
+        live_md = Path(args.source).resolve().parent / "CLAUDE.md"
+        if live_md.is_file():
+            rules_src = live_md
+    if rules_src is None and (REPO / "claude" / "CLAUDE.md").is_file():
+        rules_src = REPO / "claude" / "CLAUDE.md"
+    rules_text = None
+    if rules_src is not None:
+        raw = rules_src.read_text(encoding="utf-8")
+        if "__USERHOME" in raw and home:
+            raw = skill_stamps.detokenize(raw, home)
+        rules_text = extract_global_rules(raw)
+        if rules_text is None:
+            raise RuntimeError(
+                f"{rules_src} carries no '{RULES_HEADING}' heading; the plugin can no longer copy "
+                "the global rules text (issue 209). Update RULES_HEADING in build-cloud-plugin.py "
+                "if the section was renamed.")
+    rules_parts = split_rules_parts(rules_text) if rules_text else []
+    if rules_text:
+        (plugin_root / "rules").mkdir()
+        (plugin_root / "rules" / "global-rules.md").write_bytes(rules_text.encode("utf-8"))
+        # Payload-only hook script: there is no live-tree twin to dedup against, so it carries its
+        # own no-doubling guard (it stays silent where a global CLAUDE.md already has the text).
+        (scripts_dir / "global-rules.js").write_bytes(
+            (guard_src_dir / "global-rules.js").read_text(encoding="utf-8")
+            .replace("\r\n", "\n").encode("utf-8"))
     if gov_sources_present:
         if not guard_js_src.is_file() or not guard_py_src.is_file():
             raise RuntimeError(
@@ -630,6 +712,17 @@ def main():
             ]},
         ],
     }
+
+    # One UserPromptSubmit entry per part of the rules text (issue 209). Separate entries, not one
+    # big one: the measured cap is per hook output, so N parts under it deliver the file in full
+    # every prompt. Independent of gov_sources_present -- the rules ride even where the governance
+    # scripts have no mirror to be copied from.
+    if rules_parts:
+        governance_hooks.setdefault("UserPromptSubmit", []).append({"hooks": [
+            _hook("node", "node", "global-rules.js", [str(i)], 10,
+                  f"Delivering global rules ({i}/{len(rules_parts)})...")
+            for i in range(1, len(rules_parts) + 1)
+        ]})
 
     (hooks_dir / "hooks.json").write_bytes((
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
