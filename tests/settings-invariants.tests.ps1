@@ -18,8 +18,16 @@
     Scenario 2 covers the other rewrite path - a record that exists with hasTrustDialogAccepted
     false - and asserts the edit is confined to that one literal.
 
+    Engine-agnostic on purpose: the suite re-invokes WHICHEVER PowerShell started it (5.1 on the
+    desktop, pwsh 7 anywhere else) and puts its sandbox under the platform temp directory, so the
+    same assertions can be run on both engines - which is what issue 302's acceptance criteria ask
+    for - and a Linux agent container can run the shipped .ps1 instead of a port of it.
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tests\settings-invariants.tests.ps1
+
+.EXAMPLE
+    pwsh -File tests/settings-invariants.tests.ps1
 #>
 [CmdletBinding()]
 param()
@@ -29,7 +37,12 @@ $ErrorActionPreference = 'Stop'
 
 $TestsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $TestsRoot
-$Tool      = Join-Path $RepoRoot 'tools\settings-invariants.ps1'
+$Tool      = Join-Path (Join-Path $RepoRoot 'tools') 'settings-invariants.ps1'
+# The engine running this file, by full path: powershell.exe under 5.1, pwsh under 7. Spawning
+# THIS engine (rather than the literal string 'powershell') is what lets one suite assert the
+# same behaviour on both, and it is the same child process the restore test has always run.
+$Engine    = 'powershell'
+try { $Engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
 
 $script:Pass = 0
 $script:Fail = 0
@@ -56,7 +69,7 @@ function Invoke-Trust {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $Tool -Trust -UserHome $FakeHome 2>&1 | Out-String
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $Tool -Trust -UserHome $FakeHome 2>&1 | Out-String
         return @{ Exit = $LASTEXITCODE; Out = $out }
     } finally { $ErrorActionPreference = $prev }
 }
@@ -138,8 +151,14 @@ $Fixture = @'
 '@
 
 function New-Fixture {
-    <# The representative file, with the aac-cockpit record (clone 3 of 4) deliberately absent. #>
-    param([string]$FakeHome)
+    <#
+        The representative file, with the aac-cockpit record (clone 3 of 4) deliberately absent.
+        -WithCockpit puts that record in too, so the file is already complete: scenario 2 needs a
+        fixture whose ONLY missing invariant is the false flag it is about to assert on, otherwise
+        the tool legitimately inserts the absent record as well and "nothing else moved" is a claim
+        about a run that had two jobs to do.
+    #>
+    param([string]$FakeHome, [switch]$WithCockpit)
     $clones = Get-ClonePaths -FakeHome $FakeHome
     $esc    = { param($p) $p.Replace('\', '\\') }
     $text   = $Fixture -replace "`r`n", "`n"
@@ -149,6 +168,10 @@ function New-Fixture {
     $text = $text.Replace('__C1__',      (& $esc $clones[1]))
     $text = $text.Replace('__C3__',      (& $esc $clones[3]))
     $text = $text.Replace('__OTHER__',   (& $esc (Join-Path $FakeHome 'Claude\Projects\Unrelated\other-clone')))
+    if ($WithCockpit) {
+        $record = "    `"" + (& $esc $clones[2]) + "`": {`n      `"hasTrustDialogAccepted`": true`n    },`n"
+        $text = $text.Replace("  `"projects`": {`n", "  `"projects`": {`n" + $record)
+    }
     return $text
 }
 
@@ -165,7 +188,7 @@ function Test-AllTrusted {
 }
 
 $stamp   = 'settings-inv-{0}-{1}' -f $PID, ([guid]::NewGuid().ToString('N').Substring(0, 6))
-$Sandbox = Join-Path $env:TEMP $stamp
+$Sandbox = Join-Path ([System.IO.Path]::GetTempPath()) $stamp
 New-Item -ItemType Directory -Path $Sandbox -Force | Out-Null
 
 try {
@@ -235,18 +258,41 @@ try {
     New-Item -ItemType Directory -Path $home2 -Force | Out-Null
     $state2  = Join-Path $home2 '.claude.json'
     $clones2 = Get-ClonePaths -FakeHome $home2
-    $before2 = (New-Fixture -FakeHome $home2).Replace(
+    # Start from scenario 1's post-rewrite text, which holds all four records (New-Fixture leaves
+    # aac-cockpit out on purpose, so a run from it makes an add AND a flip and "nothing else moves"
+    # cannot hold). Only the paths differ between the two homes.
+    $complete2 = $after.Replace($home1.Replace('\', '\\'), $home2.Replace('\', '\\'))
+    $before2 = $complete2.Replace(
         "`"hasTrustDialogAccepted`": true,`n      `"lastTotalWebSearchRequests`"",
         "`"hasTrustDialogAccepted`": false,`n      `"lastTotalWebSearchRequests`"")
+    Assert 'scenario 2 fixture carries exactly one false flag to flip' ($before2 -cne $complete2)
     Write-Utf8NoBom -Path $state2 -Text $before2
 
     $r3 = Invoke-Trust -FakeHome $home2
     $after2 = [System.IO.File]::ReadAllText($state2)
     Assert 'a false flag flips to true and nothing else in the file moves' `
-        (($r3.Exit -eq 0) -and ($after2 -ceq $before2.Replace(
-            "`"hasTrustDialogAccepted`": false,`n      `"lastTotalWebSearchRequests`"",
-            "`"hasTrustDialogAccepted`": true,`n      `"lastTotalWebSearchRequests`""))) $r3.Out
+        (($r3.Exit -eq 0) -and ($after2 -ceq $complete2)) $r3.Out
     Assert 'all four clone paths are trusted after the flip' (Test-AllTrusted -StatePath $state2 -Clones $clones2) $r3.Out
+
+    # ---- scenario 3: the fresh-machine shapes ----------------------------------------
+    # A file claude has written but no project has been opened in holds an EMPTY projects
+    # object, and a half-initialised one can be a bare {}. Both are objects with no members,
+    # and a parsed empty object reports one phantom property whose name is '' - so the
+    # post-edit verification read the insertion as "project record lost: " and refused to
+    # write. The fresh machine in this ticket's title is exactly that case.
+    Write-Host ''
+    Write-Host 'a fresh machine: empty projects object, and a bare {}'
+
+    $shapes = @{ 'empty projects object' = '{"projects": {}}'; 'bare {} document' = '{}' }
+    foreach ($shape in @($shapes.Keys | Sort-Object)) {
+        $h = Join-Path $Sandbox ('home-' + ($shape -replace '[^a-zA-Z]', ''))
+        New-Item -ItemType Directory -Path $h -Force | Out-Null
+        $state = Join-Path $h '.claude.json'
+        Write-Utf8NoBom -Path $state -Text $shapes[$shape]
+        $r = Invoke-Trust -FakeHome $h
+        Assert ("all four records land in a {0}" -f $shape) `
+            (($r.Exit -eq 0) -and (Test-AllTrusted -StatePath $state -Clones (Get-ClonePaths -FakeHome $h))) $r.Out
+    }
 
 } finally {
     if (Test-Path $Sandbox) {
