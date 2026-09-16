@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-16T15:08:43Z"
-  previous-modified: "2026-09-16T00:55:50Z"
-  revision: "5"
-  content-sha: "27a7d6a5c103"
+  modified: "2026-09-16T15:32:13Z"
+  previous-modified: "2026-09-16T15:08:43Z"
+  revision: "6"
+  content-sha: "e9e0c4246d70"
 ---
 
 # Finish a session
