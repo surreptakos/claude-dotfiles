@@ -1532,3 +1532,44 @@ as the run's discoveries PR.
   the bullet says it belongs. The working spellings are in the comment, with one addition from this
   pass: `--paginate` can fail through the proxy when the Link header is a numeric-ID path, so pass
   `&page=N` explicitly.
+
+## Re-check: the tracker-audit "exits 0" ledgers (issue 437)
+
+2026-09-16. Issue 437 asks for the ledgers in this file that assert `node tools/tracker-audit.js`
+"exits 0" to be re-checked, and for any wrong claim to be corrected by an appended note. This file is
+append-only, so nothing above this line was edited.
+
+What was re-checked:
+
+- The four triage ledgers reading "reaches a verdict and exits 0 with 0 drift findings, plus the one
+  pre-existing `stale-premise?` advisory on #358" — waves 8/9 (`7b4675e`, authored 2026-09-16T08:58Z),
+  waves 10/11 (`ea08c3c`, 09:19Z), wave 13's **W13-05** disposition, and waves 14/15 (`d68a5c2`,
+  10:26Z).
+- Discovery bullet **D48** above, which alleges those ledgers are wrong because "the same two findings
+  that exist today (`[closed-with-open-boxes]` on #378, `[dangling-reference]` on #413) were almost
+  certainly already present".
+
+**The wrong claim is D48's, not the ledgers'.** Neither finding it names could have existed when those
+ledgers were written. `gh api repos/surreptakos/claude-dotfiles/issues/378 --jq .closed_at` is
+`2026-09-16T16:52:21Z`, so #378 was still *open* at 10:26Z and `closed-with-open-boxes` (which only
+fires on a closed issue) could not have reported it. #413's `.created_at` is `2026-09-16T16:13:12Z`,
+so the issue did not exist yet and nothing could cite #428 from it. Both findings arrived roughly six
+hours after the last of the four ledgers. An advisory-only run really does exit 0 — `tools/tracker-audit.js`
+ends `process.exit(hard.length ? 1 : blind ? 2 : 0)` and anything ending in `?`, `stale-premise?`
+included, is advisory — so "exits 0 with 0 drift findings, plus the one advisory on #358" is a
+consistent shape and no evidence found here contradicts it. The four ledgers stand as written; D48's
+second sentence does not, and the issue it generated (437) is answered by the doc change rather than
+by a correction to them.
+
+Today's run, unpiped, for the record: `node tools/tracker-audit.js` exits **1** with six
+`[closed-with-open-boxes]` drift findings (#117, #245, #322, #415, #416, #429) and three
+`[stale-premise?]` advisories (#209, #210, #362) — note the #358 advisory of those ledgers is gone,
+further evidence that the tracker moved. All six issues were closed between 20:04Z and 21:56Z today,
+after every ledger above. The same command piped, `node tools/tracker-audit.js | tail -1`, exits
+**0**: the trap the issue was filed about, now named in the "Before trusting the tracker" block of
+`docs/agents/issue-tracker.md`.
+
+Left alone as un-re-checkable: the issue-33-era claim earlier in this file that the audit "currently
+exits 0 with two remaining advisory findings on issue 44". Advisory-only is a genuine exit-0 shape, and
+the tracker state it describes is two hundred issues in the past — there is no way to re-run the audit
+against it.
