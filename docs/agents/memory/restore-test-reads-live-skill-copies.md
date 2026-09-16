@@ -22,5 +22,4 @@ restore-test cycle before the md5 match to the worker's worktree explained it.
 **How to apply:** when only the claude-md-lint check fails, md5 the live copy against every
 worktree's `tools/claude-md-lint.js` first. A match to a fleet worktree means wait for that PR and
 the next sync push; never overwrite the live copy with tools/ from another tree. Ticket filed at
-that session's end tracks moving the comparison onto the mirror copy only. See
-[[concurrent-sessions-share-one-sync-push]].
+that session's end tracks moving the comparison onto the mirror copy only.

@@ -67,6 +67,31 @@ function Backup-LocalTargets {
     return $backup
 }
 
+# Issue 210: this repo's memory notes are committed under docs/agents/memory/ and loaded by the
+# plugin's SessionStart hook, so the live per-project memory directory keeps a pointer file only -
+# two copies of one note cannot diverge if only one of them exists. Called by BOTH modes, so the
+# emptying lands on the next sync either way. Nothing is deleted before it is archived (the script
+# copies every file it removes into a backup directory first). Best-effort, exactly like the
+# packager call below: a missing node must never block a dotfiles sync.
+function Invoke-RepoMemoryPointer {
+    param([string]$BackupRoot)
+
+    $pointerJs = Join-Path $RepoRoot 'tools\repo-memory-pointer.js'
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node -or -not (Test-Path $pointerJs)) { return }
+
+    $argv = @($pointerJs, '--home', $UserHome)
+    if ($BackupRoot) { $argv += @('--backup', (Join-Path $BackupRoot 'memory-archived')) }
+    if ($DryRun) { $argv += '--dry-run' }
+    $out = & $node.Source @argv 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        $out | ForEach-Object { Write-Host ("  " + $_) }
+    } else {
+        Write-Host '  repo-memory pointer FAILED (sync continues):' -ForegroundColor Yellow
+        $out | Select-Object -Last 3 | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
+    }
+}
+
 function Invoke-SettingsInvariants {
     <#
         Run tools\settings-invariants.ps1 and HONOUR ITS EXIT CODE. The tool exits non-zero
@@ -210,6 +235,8 @@ if ($Mode -eq 'push') {
         Write-Host ("  memory/{0}  ({1} files)" -f $slug, $n)
     }
 
+    Invoke-RepoMemoryPointer
+
     $links = Save-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  claude/skill-links.json  ({0} junctions recorded)" -f $links)
 
@@ -329,6 +356,8 @@ if ($Mode -eq 'pull') {
             Write-Host ("  {0}  ({1} files)" -f $destination, $n)
         }
     }
+
+    Invoke-RepoMemoryPointer -BackupRoot $backup
 
     # After the trees, never before: a junction to a directory that has not been restored yet
     # would be skipped as a missing target.
