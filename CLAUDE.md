@@ -49,6 +49,10 @@ puts the owner's path back where the mirror holds `__USERHOME__` tokens, so the 
 one built on that machine. CI checks exactly that: a rebuild from the mirror must reproduce the
 committed payload — `diff -r` over every file in it, not just each `SKILL.md`.
 
+Both commands stamp, and so does a second edit after them: run them as often as you like, the
+commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
+never from an intermediate one, so `previous-modified` names the published version (issue 363).
+
 ## Layout
 
 - `lib/manifest.ps1` — the whitelist of what travels, the exclusions, the path templating, the secret
