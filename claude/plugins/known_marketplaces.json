@@ -5,7 +5,7 @@
       "url": "https://github.com/sstklen/yes.md.git"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\sstklen",
-    "lastUpdated": "2026-09-14T15:27:13.926Z"
+    "lastUpdated": "2026-09-15T22:34:19.861Z"
   },
   "mattpocock": {
     "source": {
@@ -53,6 +53,6 @@
       "repo": "surreptakos/claude-dotfiles"
     },
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles",
-    "lastUpdated": "2026-09-14T14:27:00.006Z"
+    "lastUpdated": "2026-09-15T23:50:38.375Z"
   }
 }

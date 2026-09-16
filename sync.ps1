@@ -179,6 +179,21 @@ if ($Mode -eq 'push') {
     $links = Save-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  claude/skill-links.json  ({0} junctions recorded)" -f $links)
 
+    # Re-apply the settings.json invariants this repo owns (issue 199). The mirror is
+    # otherwise a byte-for-byte copy of live, so if live drifted off the invariant the
+    # push would carry the drift into the repo. Running the enforcer AFTER the copy
+    # keeps the mirror correct regardless of live's state; a subsequent pull propagates
+    # it back to live.
+    $invariants = Join-Path $RepoRoot 'tools\settings-invariants.ps1'
+    $mirrorSettings = Join-Path $RepoRoot 'claude\settings.json'
+    if ((Test-Path $invariants) -and (Test-Path $mirrorSettings)) {
+        Write-Host ''
+        Write-Host '  settings.json invariants (mirror)'
+        $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants, '-Path', $mirrorSettings)
+        if ($DryRun) { $args_ += '-DryRun' }
+        & powershell @args_ | ForEach-Object { Write-Host ("    {0}" -f $_) }
+    }
+
     Write-Host ''
     Write-Host ("{0} files staged in the repo." -f $total)
 
@@ -285,6 +300,31 @@ if ($Mode -eq 'pull') {
     # would be skipped as a missing target.
     $links = Restore-SkillLinks -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
     Write-Host ("  {0} skill junctions recreated" -f $links)
+
+    # Re-apply the settings.json invariants this repo owns (issue 199). Pull from a mirror
+    # that already carries them is enough on its own; running the enforcer against live
+    # here belt-and-braces catches an older mirror or a partial pull.
+    #
+    # Also runs -Trust: writes hasTrustDialogAccepted=true into ~/.claude.json for the four
+    # master-watchdog clone paths (bill-intake, contract-builder, sales-cockpit,
+    # zoho-source-of-truth). ~/.claude.json is deliberately outside the sync manifest (it
+    # holds oauthAccount and other machine-only state), so trust records land per-machine
+    # here on pull rather than travelling through the repo. Combined with the bypassPermissions
+    # default landed by the mirror, a fresh claude launch in one of those four clones reaches
+    # first prompt with no permission dialog and no folder-trust dialog (issue 199 AC1).
+    # The tool prints MISSING and returns cleanly if ~/.claude.json has not been created yet
+    # (claude has never launched on this machine), which is the correct behaviour for a
+    # first-ever install - launching claude once creates the file, and the next pull wires it.
+    $invariants = Join-Path $RepoRoot 'tools\settings-invariants.ps1'
+    $liveSettings = Join-Path $UserHome '.claude\settings.json'
+    if ((Test-Path $invariants) -and (Test-Path $liveSettings)) {
+        Write-Host ''
+        Write-Host '  settings.json invariants (live)'
+        $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants,
+                   '-Path', $liveSettings, '-Trust', '-UserHome', $UserHome)
+        if ($DryRun) { $args_ += '-DryRun' }
+        & powershell @args_ | ForEach-Object { Write-Host ("    {0}" -f $_) }
+    }
 
     # Last, because it reads the ~/.claude the lines above just wrote. One-way overlay onto
     # ~/.claude-personal (issue #9): skipped entirely when the profile does not exist, and

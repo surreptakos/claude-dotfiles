@@ -169,6 +169,9 @@
   },
   "outputStyle": "Concise",
   "autoUpdatesChannel": "latest",
+  "permissions": {
+    "defaultMode": "bypassPermissions"
+  },
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
   "theme": "dark",
