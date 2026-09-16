@@ -130,22 +130,27 @@ function workerSuffix(runId, workerIndex) {
  * script inlines: same shape, same environment variables, exercised by
  * ticket-fleet-branch.test.js so the two cannot drift silently.
  *
- * @param {NodeJS.ProcessEnv|Record<string,string>|undefined} env
+ * @param {NodeJS.ProcessEnv|Record<string,string>|null|undefined} env - null or
+ *   undefined means nothing read the environment at all (the workflow runtime
+ *   hides `process`), which is an UNKNOWN session, not a desktop one.
  * @param {boolean|undefined} hasGh - true if `gh` is on PATH; undefined lets
- *   the caller decline to detect it (defaults to `gh` in that case).
+ *   the caller decline to detect it.
  * @param {'gh'|'mcp'|'auto'|null|undefined} override
- * @returns {'gh'|'mcp'}
+ * @returns {'gh'|'mcp'|null} null when the environment is unknown and no
+ *   override names an instrument - the caller must then ask for one.
  */
 function pickInstrument(env, hasGh, override) {
   if (override === 'gh' || override === 'mcp') return override;
-  // Unknown environment (issue 316): a null/undefined `env` means the caller had no `process`
-  // binding to read. The workflow runtime hides `process`, so the remote-session sniff below
+  // Unknown environment (issues 316, 322): a null/undefined `env` means nothing read the
+  // environment - the workflow runtime hides `process`, so the remote-session sniff below
   // never fires and a claude.ai/code container is indistinguishable from a desktop session.
-  // The fallback stays 'gh' because its REST paths work in both; a container caller passes
-  // `instrument: 'mcp'` or `'gh'` explicitly instead of relying on a sniff that cannot run.
-  // What must NOT be inferred from an unknown environment is the verifier's agent type - the
-  // registry that backs it is session-local; see resolveVerifierAgent.
-  if (env === undefined || env === null) return hasGh === false ? 'mcp' : 'gh';
+  // It used to fall through to 'gh', and that is the issue 322 failure: under `gh` the cloud
+  // run pinned an agent type its registry did not hold and its deliver prompt reached for a
+  // GraphQL-backed `gh pr create`, so twelve verifiers died and nothing shipped. An unknown
+  // environment therefore resolves to nothing at all and the caller must name the instrument
+  // (or pass what it knows about remoteness). Only `hasGh === false` is positive evidence a
+  // measurement did reach: no `gh` on PATH means mcp whatever the env said.
+  if (env === undefined || env === null) return hasGh === false ? 'mcp' : null;
   const e = env;
   if (e.CLAUDE_CODE_REMOTE_SESSION_ID || e.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp';
   if (hasGh === false) return 'mcp';
@@ -192,17 +197,20 @@ function pickVerifierAgent(remote, agentFilePresent) {
  * @param {{remote:boolean, verifierAgentFile:boolean}} [facts] - the env probe's facts;
  *   when given they decide the default through pickVerifierAgent (issue 339).
  * @param {string|null|undefined} override - args.verifierAgent. undefined/null takes the
- *   default (`fleet-verifier` under gh, unpinned under mcp); an empty or whitespace string
- *   clears the pin so the verifier runs under the session's default agent type; any other
- *   string pins that agent on either instrument.
+ *   default, which is a pin ONLY when `facts` prove the agent is registered: the instrument
+ *   never decides it (issue 322 - a container that picked `gh` had no registry and every
+ *   verifier launch died with `agent type 'fleet-verifier' not found`). An empty or
+ *   whitespace string clears the pin so the verifier runs under the session's default agent
+ *   type; any other string pins that agent on either instrument.
  * @returns {string|undefined} the agentType to pass, or undefined for an unpinned verifier.
  */
 function resolveVerifierAgent(instrument, override, facts) {
   if (override === undefined || override === null) {
-    // The env probe's facts decide the default (issue 339); without them the
-    // instrument-keyed default stands.
+    // The env probe's facts decide the default (issue 339). Without them nothing has said the
+    // agent file is on disk, so there is no pin: an unregistered type fails every launch, while
+    // an unpinned verifier merely runs under the session's default type (issue 322).
     if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined;
-    return instrument === 'gh' ? 'fleet-verifier' : undefined;
+    return undefined;
   }
   const name = String(override).trim();
   return name || undefined;

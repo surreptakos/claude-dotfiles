@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T19:17:20Z"
-  previous-modified: "2026-09-16T19:07:35Z"
-  revision: "14"
-  content-sha: "c8cbd0e22369"
+  modified: "2026-09-16T20:22:45Z"
+  previous-modified: "2026-09-16T19:25:51Z"
+  revision: "15"
+  content-sha: "a16e9513ef52"
 ---
 
 # ticket-fleet
@@ -33,6 +33,14 @@ The script does not guess which shape it is in. The first agent of every run is 
 switch resolves from what it reports - the workflow runtime does not reliably expose
 `process.env` (issue 322), and a cloud caller who has to remember `instrument: 'mcp'` is a
 workaround, not a switch (issue 339). Pass `instrument` only to override the measurement.
+
+**The `gh` instrument is desktop-only, and an unmeasured run may not fall back to it.** Its
+verifier pin needs the desktop agent registry and its PR call needs a route that is not 403 in a
+container; a claude.ai/code run that picked `gh` on 2026-09-15 lost all twelve of its verifiers
+to `agent type 'fleet-verifier' not found` and could not have delivered a branch either (issue
+322). So when nothing measured the environment - the probe returned nothing and no `instrument`
+or `remote` was passed - the run stops with an error naming what to pass, rather than resolving
+to `gh`. The cloud path is `mcp`.
 
 ## Custom agent types are desktop-only
 
@@ -61,6 +69,13 @@ they are the contract: `contractVersion`, `runId` and `invocationId` (the workfl
 forbids `Date.now()` and `Math.random()` inside scripts, so the caller mints both ids). A launch
 that omits any of them fails with a contract-mismatch error naming the version on both sides and
 the ripple list - see **Contract and ripple list** below.
+
+**From a cloud session, pass `instrument: 'mcp'` explicitly.** The `env-probe` agent normally
+measures it, but a probe that returns nothing leaves the switch unresolved and the run stops:
+naming the instrument costs one argument and is the difference between a wave that delivers and
+one that dies at the first verifier (issue 322). `remote: true` does the same job when the caller
+would rather state the session shape than the tool set. The `gh` instrument is for desktop
+sessions only.
 
 **In a `claude-dotfiles` checkout, name the checkout copy - do not copy anything.** The
 source file is already in the tree, so point `scriptPath` straight at it (verified from a
@@ -165,8 +180,12 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `instrument` (`auto` | `gh` | `mcp`, default `auto`): tracker instrument. `auto` measures
   the session with the `env-probe` agent and returns `mcp` when
   `CLAUDE_CODE_REMOTE_SESSION_ID` or `CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE` is set or `gh` is
-  missing, `gh` otherwise. A cloud session needs no argument. Pass a value only to override
-  the measurement; on `auto`, a probe that returns nothing stops the run rather than guessing.
+  missing, `gh` otherwise. Pass `mcp` explicitly from a cloud session: the `gh` path is
+  desktop-only, and an unmeasured run stops rather than falling back to it (issue 322).
+- `remote` (boolean, default `null`): what the caller knows about the session shape, read only
+  when the probe returns nothing. `true` resolves the switch to `mcp` and leaves the verifier
+  unpinned; `false` resolves it to `gh`. With neither this nor an explicit `instrument`, an
+  unmeasured run stops and the error names both.
 - `generatedPaths` (array of globs, default `['.claude-plugin/marketplace.json', 'marketplace/**']`):
   the paths the pre-push merge may resolve by taking the default branch's side.
 - `regenCommands` (array of shell commands, default `null`): what re-stamps and rebuilds those
@@ -366,7 +385,9 @@ put the chores in separate waves.
 Every lane returns out-of-scope findings. The Report phase is one writer, and it does not append
 into the session's own checkout: it cuts `agent/fleet-discoveries-wf_<runId>` from
 `origin/<defaultBranch>` in a scratch worktree, appends the bullets to `followupsFile` under a
-`## Run (ticket-fleet <runId>)` heading, commits that file alone, and — when `deliver` is true —
+`## Run <YYYY-MM-DD> (ticket-fleet <runId>)` heading — the UTC date from `date -u +%F`, so two
+runs are tellable apart without `git log -p` (issue 322) — commits that file alone, and — when
+`deliver` is true —
 pushes the branch and opens a discoveries-only PR against the default branch.
 
 Before issue 360 the writer appended in place and committed nothing, so the bullets rode whatever

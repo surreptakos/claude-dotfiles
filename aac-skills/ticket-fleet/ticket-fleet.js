@@ -18,10 +18,14 @@
 // ~/.claude/agents/fleet-verifier.md exists. The workflow runtime does not reliably expose
 // `process.env` (issue 322), and a caller who has to remember `instrument: 'mcp'` in a
 // container is a workaround, not a switch (issue 339). Nothing here needs an argument now.
+// When the probe returns nothing the run does NOT fall back to `gh`: the gh path is
+// desktop-only (its verifier pin needs the desktop agent registry and its PR call needs a
+// route that is not 403 in a container), so an unmeasured run stops until the caller passes
+// `instrument` or `remote`.
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement, and pass `mcp` from a cloud session whose probe cannot run - the gh path is desktop-only, issue 322), remote (true|false, optional: what the caller itself knows about the session shape, read only when the probe returns nothing; without it or an explicit instrument an unmeasured run stops instead of defaulting to gh), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -53,6 +57,9 @@ const cfg = Object.assign({
   followupsFile: 'FOLLOW-UPS.md',
   invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves from the env probe below
+  remote: null,             // true|false: the caller's own word on the session shape, read only
+                            // when the env probe returns nothing (issue 322). With neither it nor
+                            // an explicit instrument, an unmeasured run stops instead of guessing.
   testCommand: null,        // replaces scout.testCommand when set; see the override note below
   priorImpl: null,          // {ticketNumber: IMPL-shaped result} - attempt 1 reuses it, no implementer
   priorProbe: null,         // {ticketNumber: PROBE-shaped result} - attempt 1 reuses it, no prober
@@ -171,10 +178,14 @@ if (invocationId === runId) throw contractError(': args.invocationId must differ
 // reach node_modules. A wrong pick presents itself as a stage failure, not silent drift.
 function pickInstrument(env, hasGh, override) {
   if (override === 'gh' || override === 'mcp') return override
-  // Unknown environment (issue 316): a null/undefined env means there was no `process` binding
-  // to read, so the sniff below cannot fire and a container is indistinguishable from a desktop
-  // session. Fall back to gh - its REST paths work in both - and let the caller say which.
-  if (env === undefined || env === null) return hasGh === false ? 'mcp' : 'gh'
+  // Unknown environment (issues 316, 322): a null/undefined env means NOTHING read the
+  // environment, so the sniff below cannot fire and a container is indistinguishable from a
+  // desktop session. It used to fall through to gh, and that is the issue 322 failure - the gh
+  // path can neither verify (it pins an agent type the container's registry lacks) nor deliver
+  // (a GraphQL-backed PR call is HTTP 403 here) there. So an unknown environment resolves to
+  // NOTHING: the caller names `instrument`, or passes `remote` and lets the switch resolve.
+  // Only hasGh === false is positive evidence a measurement landed: no `gh`, therefore mcp.
+  if (env === undefined || env === null) return hasGh === false ? 'mcp' : null
   if (env.CLAUDE_CODE_REMOTE_SESSION_ID || env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp'
   if (hasGh === false) return 'mcp'
   return 'gh'
@@ -204,10 +215,13 @@ function pickVerifierAgent(remote, agentFilePresent) {
 function resolveVerifierAgent(mode, override, facts) {
   if (override === undefined || override === null) {
     // No override: the env probe decides (issue 339) - never a custom type in a cloud session,
-    // and on the desktop only when the agent file is on disk. Without probe facts (a unit test,
-    // a caller that skipped the probe) the old instrument-keyed default stands.
+    // and on the desktop only when the agent file is on disk. Without probe facts nothing has
+    // said the file is there, so there is no pin at all: the instrument must never stand in for
+    // the registry (issue 322 - a container that picked `gh` lost every verifier to
+    // `agent type 'fleet-verifier' not found`), and an unpinned verifier merely runs under the
+    // session's default type.
     if (facts) return pickVerifierAgent(!!facts.remote, !!facts.verifierAgentFile) || undefined
-    return mode === 'gh' ? 'fleet-verifier' : undefined
+    return undefined
   }
   const name = String(override).trim()
   return name || undefined
@@ -241,7 +255,7 @@ function trackerRules(mode) {
     commentPost: () => `Use \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from \`git remote get-url origin\`), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    prCreate: () => `gh pr create`,
+    prCreate: () => `open the PR with REST - \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@<file>\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
     prComment: () => `gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>`,
   }
 }
@@ -701,17 +715,30 @@ const envFacts = await agent(
 Print no secret value: these three are paths, a version string and set/unset, nothing else. Make no repository change, no commit, no comment. Return structured output only.`,
   { label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: 'low' }
 )
-// A failed probe must not silently become `gh` - that is the issue 322 failure. With an explicit
-// instrument the run can continue on the caller's word; on `auto` it stops and says what to pass.
-if (!envFacts && (cfg.instrument !== 'gh' && cfg.instrument !== 'mcp')) {
-  throw new Error('env-probe returned nothing and instrument is "auto": re-run with instrument: "gh" (local session with the gh CLI) or instrument: "mcp" (cloud container)')
+// A failed probe must not silently become `gh` - that is the issue 322 failure: in a container
+// the gh path pins a verifier agent type the registry does not hold and reaches for a
+// GraphQL-backed PR call, so the wave neither verifies nor delivers. Two things may stand in for
+// the measurement: an explicit `instrument`, or a `remote` flag from a caller that knows which
+// shape of session it launched from. With neither, the run stops and says what to pass.
+const declaredRemote = (cfg.remote === true || cfg.remote === false) ? cfg.remote : null
+if (!envFacts && declaredRemote === null && (cfg.instrument !== 'gh' && cfg.instrument !== 'mcp')) {
+  throw new Error('env-probe returned nothing and instrument is "auto": re-run with instrument: "gh" (local session with the gh CLI) or instrument: "mcp" (cloud container - the gh path can neither verify nor deliver there, issue 322), or pass remote: true|false and let the switch resolve itself')
 }
-const facts = envFacts || { remote: false, hasGh: true, verifierAgentFile: false }
-const instrument = pickInstrument(
-  facts.remote ? { CLAUDE_CODE_REMOTE_SESSION_ID: 'probed' } : {}, facts.hasGh, cfg.instrument)
+// `measured` carries only what something actually saw. env === null means the environment is
+// unknown, which pickInstrument refuses to read as a desktop session.
+const measured = envFacts
+  ? { env: envFacts.remote ? { CLAUDE_CODE_REMOTE_SESSION_ID: 'probed' } : {}, hasGh: envFacts.hasGh }
+  : declaredRemote === null
+    ? { env: null, hasGh: undefined }
+    : { env: declaredRemote ? { CLAUDE_CODE_REMOTE_SESSION_ID: 'declared' } : {}, hasGh: !declaredRemote }
+const facts = envFacts || { remote: declaredRemote === true, hasGh: declaredRemote === false, verifierAgentFile: false }
+const instrument = pickInstrument(measured.env, measured.hasGh, cfg.instrument)
+if (!instrument) {
+  throw new Error('the session shape is unknown: nothing measured the environment and no instrument was passed. Re-run with instrument: "mcp" (cloud container) or instrument: "gh" (local session with the gh CLI), or pass remote: true|false (issue 322)')
+}
 const verifierAgentType = resolveVerifierAgent(instrument, cfg.verifierAgent, facts)
 const rules = trackerRules(instrument)
-log(`instrument = ${instrument} (remote=${facts.remote}, gh=${facts.hasGh}${envFacts ? '' : ', probe failed - using args.instrument'})`)
+log(`instrument = ${instrument} (remote=${facts.remote}, gh=${facts.hasGh}${envFacts ? '' : `, probe failed - using args.${declaredRemote === null ? 'instrument' : 'remote'}`})`)
 log(`verifier agentType = ${verifierAgentType || 'none (unpinned: custom agent types are desktop-only, issue 339)'}`)
 
 // ---- finish mode (issue 405): deliver a dead run's verified branches, nothing else ----
@@ -1630,7 +1657,7 @@ async function runReport(discoveries, defaultBranch) {
     `Append this ticket-fleet run's discoveries to ${cfg.followupsFile} on a branch of their own, cut from the repo default branch - never the branch this session happens to be sitting on (issue 360).
 1. git fetch origin ${defaultBranch}
 2. git worktree add -b ${branch} <a fresh scratch directory> origin/${defaultBranch}, and do every step below inside that worktree; leave this session's own checkout untouched.
-3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run (ticket-fleet ${runId})" heading, then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
+3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run <DATE> (ticket-fleet ${runId})" heading, where <DATE> is today's UTC date in ISO form as \`date -u +%F\` prints it - a run's section has to be tellable from every other run's at a glance (issue 322), then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
 4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
 5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
 ${deliverStep}
