@@ -257,6 +257,40 @@ function closerPrsByIssue(prs) {
   return out;
 }
 
+/** Group /issues/comments rows (every comment in the repo — a PR is an issue, so PR threads are
+ *  here too) by issue/PR number, each value a sorted list of created_at dates. Pure. */
+function commentDatesByNumber(rows) {
+  const out = new Map();
+  for (const c of (rows || [])) {
+    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (!out.has(n)) out.set(n, []);
+    if (c.created_at) out.get(n).push(c.created_at);
+  }
+  for (const dates of out.values()) dates.sort();
+  return out;
+}
+
+/** Run the comments fetch and group it. A comments-less repo, a 403 from a token without issue
+ *  read, or a network blip degrades to an empty map — the blocker-may-be-answered check then
+ *  stays silent for every PR, which is safer than firing on stale data.
+ *
+ *  A SHORT-FETCH is not that case, and issue 285 is that this catch swallowed it too: paginate
+ *  has partial rows while the Link header still says more pages exist, so some PRs' real comments
+ *  are simply missing and those PRs read as never-answered — a silent wrong answer dressed as a
+ *  comment-less degrade. Rethrown so the caller exits 2 with the fetched/expected counts the
+ *  short-fetch message carries. Pure apart from the injected fetcher. */
+function fetchCommentDates(fetchComments) {
+  let raw = [];
+  try {
+    raw = fetchComments();
+  } catch (e) {
+    if (/^short-fetch:/.test(String(e && e.message))) throw e;
+  }
+  return commentDatesByNumber(raw);
+}
+
 /** Extract owner/repo from a `git remote get-url origin` string. Accepts `https://…`, `git@…`,
  *  and the trailing `.git` optional. Returns null if the shape does not match. Pure. */
 function parseGithubSlug(remote) {
@@ -277,6 +311,8 @@ if (require.main !== module) {
     normalizePr,
     issuesOnly,
     closerPrsByIssue,
+    commentDatesByNumber,
+    fetchCommentDates,
     parseGithubSlug,
     landedCommits,
     landedFindings,
@@ -532,23 +568,18 @@ try {
 
 if (!prsUnavailable) {
   // Attach comment dates. /issues/comments returns EVERY comment across the whole repo (a PR is an
-  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort: a
-  // failed comments fetch degrades to zero comments per PR — the blocker-may-be-answered check then
-  // stays silent for that PR, which is safer than firing on stale data.
-  let commentsRaw = [];
+  // issue, so its thread is here too), which is one call regardless of PR count. Best-effort for an
+  // unavailable endpoint (see fetchCommentDates), but a short-fetch is a partial answer, not an
+  // absent one, and exits 2 like the /pulls one above rather than degrading to zero comments.
+  let commentsByNumber = new Map();
   try {
-    commentsRaw = ghPaginate('repos/' + REPO + '/issues/comments?per_page=100');
-  } catch (e) { /* comments-less PRs are fine */ }
-  const commentsByNumber = new Map();
-  for (const c of commentsRaw) {
-    const m = /\/issues\/(\d+)$/.exec(c && c.issue_url || '');
-    if (!m) continue;
-    const n = Number(m[1]);
-    if (!commentsByNumber.has(n)) commentsByNumber.set(n, []);
-    commentsByNumber.get(n).push(c.created_at);
+    commentsByNumber = fetchCommentDates(
+      () => ghPaginate('repos/' + REPO + '/issues/comments?per_page=100'));
+  } catch (e) {
+    cannotAudit('`gh api repos/' + REPO + '/issues/comments` returned a partial page.', e.message);
   }
   prByNumber = new Map(prs.map((p) => {
-    const dates = (commentsByNumber.get(p.number) || []).filter(Boolean).sort();
+    const dates = commentsByNumber.get(p.number) || [];
     return [p.number, Object.assign({}, p, {
       commentCount: dates.length,
       lastComment: dates[dates.length - 1] || null,
