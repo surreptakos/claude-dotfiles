@@ -36,6 +36,7 @@ const {
   paginate,
   parseLinkHeader,
   pageFromUrl,
+  duplicateTitleFindings,
   commentDatesByNumber,
   fetchCommentDates,
 } = require('./tracker-audit.js');
@@ -413,4 +414,22 @@ test('pageFromUrl extracts page=N from any query position; null when absent', ()
   assert.strictEqual(pageFromUrl('https://x/y?page=3&other=1'), 3);
   assert.strictEqual(pageFromUrl('https://x/y?state=all'), null);
   assert.strictEqual(pageFromUrl(null), null);
+});
+
+test('duplicateTitleFindings pairs open tickets whose titles differ only by a stop word or qualifier', () => {
+  const open = [
+    { number: 285, title: "tracker-audit's comments fetch still swallows a short page" },
+    { number: 281, title: "The tracker-audit's comments fetch swallows a short page again" },
+    { number: 290, title: 'Dashboard build drops the triage column' },
+  ];
+  const found = duplicateTitleFindings(open);
+  assert.strictEqual(found.length, 1);
+  assert.strictEqual(found[0].issue.number, 285);
+  assert.strictEqual(found[0].duplicateOf.number, 281);
+  assert.strictEqual(found[0].normalized, 'tracker audit s comments fetch swallows short page');
+  // A title that differs by a real word is a different ticket, not a duplicate.
+  assert.deepStrictEqual(duplicateTitleFindings([
+    { number: 1, title: 'Fetch swallows a short page' },
+    { number: 2, title: 'Fetch swallows a long page' },
+  ]), []);
 });

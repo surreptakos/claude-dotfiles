@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T14:30:32Z"
-  previous-modified: "2026-09-16T14:29:34Z"
-  revision: "16"
-  content-sha: "e4a09f34d652"
+  modified: "2026-09-16T14:31:48Z"
+  previous-modified: "2026-09-16T14:30:32Z"
+  revision: "17"
+  content-sha: "954418293a4b"
 ---
 
 # ticket-fleet
@@ -194,6 +194,20 @@ Claude Code footer) with no owner comment after it. Such a ticket is parked, not
 starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
 Together with the relabel that is what stops a second wave repeating a handoff nobody has
 answered yet (issue 266).
+
+## Discovery-triage chores run in a chain, not side by side
+
+The scout also sets `discoveryTriage` per ticket: true when the ticket asks for a list of findings
+(`FOLLOW-UPS.md` discoveries, a fleet run's follow-ups, a review list) to be turned into tracker
+items. Those chores write to the tracker rather than to the repository, so two of them running side
+by side cannot see each other's tickets: in run `wf_37f38305-f2e`, #261 and #264 filed the same
+`tools/tracker-audit.js` short-fetch as #285 and #281 two minutes apart (issue 319). The wave puts
+every such chore in one lane and runs them one after the other, so the second reads a tracker the
+first has already added to; everything else still runs in parallel. Each chore's implementer or
+prober brief also carries a dedupe rail - search the open issues for the same file, symbol or
+failure immediately before filing, and comment on a match instead of creating a second ticket -
+which covers a wave that holds only one chore. A caller that would rather not rely on either can
+put the chores in separate waves.
 
 ## Pre-push merge
 

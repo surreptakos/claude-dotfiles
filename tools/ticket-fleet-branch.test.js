@@ -340,7 +340,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   // test drives. runId is fixed while invocationId varies - the resume shape of issue 291.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'invocationId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock', 'verifierAgentType',
+    'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock', 'verifierAgentType', 'dedupeBrief',
     body + '\nreturn runCodeLane;'
   );
   const cfg = Object.assign(
@@ -353,9 +353,12 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
+  // The lane also embeds the discovery-triage dedupe brief (issue 319), which is empty for every
+  // ticket that is not a discovery-triage chore; stub it so the extracted body evaluates.
+  const dedupeBrief = () => '';
   const runCodeLane = await wrapper(
     agentMock, (m) => logs.push(m), cfg, runId, invocationId, scout, {}, {}, {}, {}, 'gh', rules,
-    helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock, 'fleet-verifier'
+    helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock, 'fleet-verifier', dedupeBrief
   );
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
