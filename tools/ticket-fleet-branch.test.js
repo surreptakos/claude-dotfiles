@@ -278,6 +278,23 @@ test(`fleet script ${FLEET_SCRIPT_REL} verifier prompt still runs the live-tree 
     `${FLEET_SCRIPT_REL} verifier prompt must instruct a find -newermt against the attempt's first-commit time`);
 });
 
+// Issue 334: the harness itself writes under ~/.claude/projects during every run (session
+// transcript, tool-results/*.txt, subagent and workflow logs), so an unfiltered -newermt sweep
+// reported a live-tree breach for an implementer that never left its worktree. The two
+// exclusions must be spelled out in the prompt - a verifier left to re-derive them either
+// re-reports the false breach or quietly widens the hole.
+test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state from the live-tree sweep (issue 334)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
+    `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/projects (tool-results, transcripts) as well as hook-state`);
+  assert.match(src, /~\/\.claude\/projects holds this session's transcripts, tool-results\/\*\.txt/,
+    `${FLEET_SCRIPT_REL} must state the exclusion and why in the prompt so the verifier does not re-derive it`);
+  for (const reportable of ['~/.claude/skills', '~/.claude/hooks', '~/.claude/settings.json', '~/.codex']) {
+    assert.ok(src.includes(reportable),
+      `${FLEET_SCRIPT_REL} verifier prompt must still name ${reportable} as a reportable live-tree write`);
+  }
+});
+
 // ---- Three-copies gone (issue 138) ----
 // The consolidation ticket deletes the pre-plugin copies. A regression that re-adds one
 // silently re-opens the drift the plugin move was meant to close.
