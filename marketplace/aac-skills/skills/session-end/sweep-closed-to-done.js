@@ -56,7 +56,10 @@ let repoInfo;
 try {
   repoInfo = ghJson(['repo', 'view', REPO, '--json', 'projectsV2']);
 } catch (e) {
-  console.error(`gh repo view failed: ${e.message.split('\n')[0]}`);
+  // gh's own stderr is the diagnosis (auth, scope, an unknown --json field); execFileSync keeps it
+  // off e.message, and the Board sweep job log showed only the bare command line (issue 409).
+  const detail = (e.stderr || '').toString().trim();
+  console.error(`gh repo view failed: ${e.message.split('\n')[0]}${detail ? '\n' + detail : ''}`);
   process.exit(2);
 }
 const linked = (repoInfo.projectsV2 && (repoInfo.projectsV2.Nodes || repoInfo.projectsV2.nodes)) || [];
