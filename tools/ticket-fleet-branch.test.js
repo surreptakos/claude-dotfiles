@@ -19,7 +19,10 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const { generateRunId, buildBranchName, workerSuffix, pickInstrument } = require('./ticket-fleet-branch.js');
+const {
+  generateRunId, buildBranchName, workerSuffix, pickInstrument,
+  stableJson, stableText, stableList, priorFindingsBlock,
+} = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -219,37 +222,56 @@ const RESUME_GUARD_PAIR = [FLEET_SCRIPT];
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
-function extractCodeLane(src) {
-  const startTag = '// [FLEET-CODE-LANE-START]';
-  const endTag = '// [FLEET-CODE-LANE-END]';
+function extractMarked(src, name) {
+  const startTag = `// [${name}-START]`;
+  const endTag = `// [${name}-END]`;
   const s = src.indexOf(startTag);
   const e = src.indexOf(endTag);
   if (s < 0 || e < 0 || e <= s) {
-    throw new Error('FLEET-CODE-LANE markers not found or out of order');
+    throw new Error(`${name} markers not found or out of order`);
   }
-  // Return everything between the markers (exclusive) — the const runCodeLane = ... = { ... }.
+  // Return everything between the markers (exclusive).
   return src.slice(s + startTag.length, e);
 }
 
-async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
+// The runCodeLane body — the const runCodeLane = async (...) => { ... }.
+function extractCodeLane(src) { return extractMarked(src, 'FLEET-CODE-LANE'); }
+
+// The resume-stable helpers the lanes funnel every prior agent result through (issue 271).
+// Evaluated out of the script so the lane body below resolves them, and compared against
+// tools/ticket-fleet-branch.js so the inlined copy cannot drift from the pure one.
+function loadStableHelpers(scriptPath) {
+  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-RESUME-STABLE');
+  // eslint-disable-next-line no-new-func
+  return new Function(`${body}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
+}
+
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}) {
   const src = fs.readFileSync(scriptPath, 'utf8');
   const body = extractCodeLane(src);
+  const helpers = loadStableHelpers(scriptPath);
   // Wrap the marker body in an async factory that closes over stub bindings, then invoke the
   // returned runCodeLane. cfg / runId / scout / log / schemas / PR_CHECK are provided as free
   // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules',
+    'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock',
     body + '\nreturn runCodeLane;'
   );
-  const cfg = { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' };
+  const cfg = Object.assign(
+    { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' },
+    cfgOverrides
+  );
   const runId = 'testrun';
   const scout = { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' };
   const logs = [];
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
-  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  const runCodeLane = await wrapper(
+    agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules,
+    helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock
+  );
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
 }
@@ -319,5 +341,223 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
     assert.deepEqual(result.discoveries, ['finding-A']);
+  });
+}
+
+// ---- Human-lane hand-back and the handoff skip rule (issue 266) ----
+// A human-lane ticket used to be handed back with a comment and nothing else: it kept
+// `ready-for-agent`, so the next label listing put it back in the wave and the fleet wrote the
+// same handoff comment again. Two mechanisms close that, and both are driven here rather than
+// asserted by regex: the delivery relabels the ticket (ready-for-agent off, ready-for-human on)
+// under either instrument, and the scout's wave selection parks a ticket whose latest comment is
+// still an unanswered fleet handoff.
+
+function extractBetween(src, tag) {
+  const startTag = `// [${tag}-START]`;
+  const endTag = `// [${tag}-END]`;
+  const s = src.indexOf(startTag);
+  const e = src.indexOf(endTag);
+  if (s < 0 || e < 0 || e <= s) { throw new Error(`${tag} markers not found or out of order`); }
+  return src.slice(s + startTag.length, e);
+}
+
+function loadTrackerRules(scriptPath, mode) {
+  const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-TRACKER-RULES');
+  // eslint-disable-next-line no-new-func
+  const make = new Function(body + '\nreturn trackerRules;')();
+  return make(mode);
+}
+
+async function driveHumanLane(scriptPath, agentMock, ticket, mode) {
+  const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-HUMAN-LANE');
+  const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'HANDOFF', 'COMMENTED', 'stableList', 'stableText',
+    body + '\nreturn runHumanLane;');
+  const cfg = { deliver: true, verifyModel: 'v', deliverModel: 'd' };
+  const helpers = loadStableHelpers(scriptPath);
+  const runHumanLane = await wrapper(agentMock, cfg, loadTrackerRules(scriptPath, mode), {}, {},
+    helpers.stableList, helpers.stableText);
+  return await runHumanLane(ticket);
+}
+
+function selectWaveFrom(scriptPath) {
+  const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-WAVE-SELECT');
+  // eslint-disable-next-line no-new-func
+  return new Function(body + '\nreturn selectWave;')();
+}
+
+for (const mode of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} human-lane delivery drops ready-for-agent and adds ready-for-human under ${mode}`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push([opts.label, prompt]);
+      if (opts.label.startsWith('handoff:')) {
+        return { agentSide: '$ node -v\nv22', ownerSide: ['click Save in the console'], ready: true };
+      }
+      if (opts.label.startsWith('deliver:')) {
+        return { commented: true, commentUrl: 'https://github.com/x/y/issues/266#c1', labels: ['ready-for-human'] };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const result = await driveHumanLane(FLEET_SCRIPT, agentMock, { number: 266, title: 't', criteria: 'c', kindReason: 'labelled ready-for-human' }, mode);
+    const deliver = prompts.find(([label]) => label === 'deliver:#266');
+    assert.ok(deliver, 'the human lane must run a deliver agent');
+    const text = deliver[1];
+    assert.match(text, /ready-for-agent/, `${mode} deliver prompt must name the label being removed`);
+    assert.match(text, /ready-for-human/, `${mode} deliver prompt must name the label being added`);
+    const toolCall = mode === 'mcp' ? /mcp__github__issue_write/ : /gh api --method DELETE repos\/\{owner\}\/\{repo\}\/issues\/266\/labels\/ready-for-agent/;
+    assert.match(text, toolCall, `${mode} deliver prompt must relabel through the ${mode} instrument`);
+    assert.deepEqual(result.labels, ['ready-for-human'], 'the lane must report the labels the ticket carries afterwards');
+    assert.equal(result.commentUrl, 'https://github.com/x/y/issues/266#c1');
+  });
+}
+
+test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is an unanswered fleet handoff`, () => {
+  const selectWave = selectWaveFrom(FLEET_SCRIPT);
+  const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
+  const fresh = { number: 267, kind: 'human', blockedBy: [], handoffPending: false };
+  const blocked = { number: 268, kind: 'code', blockedBy: [10], handoffPending: false };
+  const { wave, pendingHandoff, blocked: gated } = selectWave([parked, fresh, blocked], 3);
+  assert.deepEqual(wave.map((t) => t.number), [267], 'only the ticket with no pending handoff may run');
+  assert.deepEqual(pendingHandoff.map((t) => t.number), [266], 'the parked ticket must be reported as skipped by number');
+  assert.deepEqual(gated.map((t) => t.number), [268], 'open blockers must still gate independently of the handoff skip');
+});
+
+test(`${FLEET_SCRIPT_REL} a run whose only ticket already carries a handoff comment starts no agents`, async () => {
+  const selectWave = selectWaveFrom(FLEET_SCRIPT);
+  const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
+  const { wave, pendingHandoff } = selectWave([parked], 3);
+  const calls = [];
+  const agentMock = async (_prompt, opts) => { calls.push(opts.label); throw new Error('no agent may run for a parked ticket'); };
+  for (const t of wave) { await driveHumanLane(FLEET_SCRIPT, agentMock, t, 'gh'); }
+  assert.deepEqual(calls, [], 'a parked ticket must start no handoff and no deliver agent - nothing is posted');
+  assert.deepEqual(pendingHandoff.map((t) => t.number), [266],
+    'the run result must name the parked ticket as skipped');
+});
+
+test(`${FLEET_SCRIPT_REL} scout classifies handoffPending and the run result names the skipped tickets`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /'handoffPending'\]/, 'SCOUT must require handoffPending per ticket');
+  assert.match(src, /skippedAwaitingOwner: skippedHandoff/,
+    'the run result must carry the parked ticket numbers, not just a count');
+});
+// ---- Resume cache stability (issue 271) ----
+// A `deliver: false` run resumed with `deliver: true` must replay every impl/verify agent from
+// cache and start only the deliver stage. The runtime replays a call while its cache key — which
+// covers the prompt text — is unchanged, so the fix is that no impl or verify prompt may vary
+// between the two runs. Two things used to make them vary: the verdict text was rendered straight
+// off the previous agent's result object, and the verifier/deliver prompts named the branch the
+// *implementer reported* rather than the one this script instructed. These tests pin both.
+
+// JSON round trip with every object's keys reversed — the shape a cached result comes back in.
+function reorderKeys(value) {
+  if (Array.isArray(value)) return value.map(reorderKeys);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const k of Object.keys(value).reverse()) { out[k] = reorderKeys(value[k]); }
+    return out;
+  }
+  return value;
+}
+const roundTrip = (value) => JSON.parse(JSON.stringify(reorderKeys(value)));
+
+// Ticket #42 fails verification on attempt 1 and passes on attempt 2, so the run exercises the
+// attempt-2 implementer prompt (built from the attempt-1 verdict) and both verifier prompts.
+function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
+  return async (prompt, opts) => {
+    capture.push({ label: opts.label, prompt });
+    if (opts.label === 'pr-check:#42') return shape({ found: false });
+    if (opts.label === 'impl:#42.1') {
+      return shape({
+        branch: implBranch || 'agent/issue-42-attempt1-wf_testrun-w0',
+        committed: true, testExitCode: 1, testTail: 'not ok', discoveries: ['finding-A'],
+      });
+    }
+    if (opts.label === 'verify:#42.1') {
+      return shape({
+        pass: false,
+        evidence: 'ran the suite; exit 1',
+        failures: ['criterion 2 is not met', undefined, 'the suite exits 1'],
+      });
+    }
+    if (opts.label === 'impl:#42.2') {
+      return shape({
+        branch: implBranch || 'agent/issue-42-attempt2-wf_testrun-w0',
+        committed: true, testExitCode: 0, testTail: 'ok', discoveries: [],
+      });
+    }
+    if (opts.label === 'verify:#42.2') {
+      return shape({ pass: true, evidence: 'ran the suite; exit 0', failures: [] });
+    }
+    if (opts.label === 'deliver:#42') return shape({ pushed: true, prUrl: 'https://github.com/x/y/pull/9' });
+    throw new Error('unexpected label: ' + opts.label);
+  };
+}
+
+const TICKET_42 = { number: 42, title: 'a ticket', criteria: '- do the thing', keepOpen: false };
+
+test('resume-stable helpers inlined in the fleet script match tools/ticket-fleet-branch.js', () => {
+  const inlined = loadStableHelpers(FLEET_SCRIPT);
+  const verdict = { evidence: 'ran it', pass: false, failures: ['one', '  two  ', '', null, 3, { b: 1, a: 2 }] };
+  const cases = [
+    null, undefined, '', 'plain', 'crlf\r\nfolded\r', 'trailing   \nspace\t', 7, false,
+    { b: 1, a: 2 }, [1, 'two', null],
+  ];
+  for (const value of cases) {
+    assert.equal(inlined.stableText(value), stableText(value), `stableText drifted on ${JSON.stringify(value)}`);
+    assert.deepEqual(inlined.stableList(value), stableList(value), `stableList drifted on ${JSON.stringify(value)}`);
+    assert.equal(inlined.stableJson(value), stableJson(value), `stableJson drifted on ${JSON.stringify(value)}`);
+  }
+  assert.equal(inlined.priorFindingsBlock(verdict, 'fix it'), priorFindingsBlock(verdict, 'fix it'));
+  assert.equal(inlined.priorFindingsBlock(null, 'fix it'), '');
+  assert.equal(priorFindingsBlock(verdict, 'fix it'), priorFindingsBlock(roundTrip(verdict), 'fix it'),
+    'a verdict and its JSON round trip must render the same findings block');
+});
+
+for (const file of RESUME_GUARD_PAIR) {
+  const rel = path.relative(REPO_ROOT, file).replace(/\\/g, '/');
+
+  test(`${rel} builds identical attempt-2 implementer and verifier prompts from a live result and its JSON round trip`, async () => {
+    const live = [];
+    const cached = [];
+    await driveCodeLane(file, twoAttemptAgent(live), TICKET_42, 0);
+    await driveCodeLane(file, twoAttemptAgent(cached, roundTrip), TICKET_42, 0);
+    assert.deepEqual(live.map((c) => c.label), cached.map((c) => c.label));
+    assert.ok(live.some((c) => c.label === 'impl:#42.2'), 'the run must reach an attempt-2 implementer');
+    for (let i = 0; i < live.length; i++) {
+      assert.equal(cached[i].prompt, live[i].prompt,
+        `${live[i].label} prompt is not byte-identical when the prior result is round-tripped through JSON with keys reordered; its cache key would move on resume`);
+    }
+  });
+
+  test(`${rel} starts no impl or verify agent that a deliver:true resume would re-run`, async () => {
+    const first = [];
+    const resumed = [];
+    await driveCodeLane(file, twoAttemptAgent(first), TICKET_42, 0, { deliver: false });
+    await driveCodeLane(file, twoAttemptAgent(resumed), TICKET_42, 0, { deliver: true });
+    assert.deepEqual(first.map((c) => c.label), ['pr-check:#42', 'impl:#42.1', 'verify:#42.1', 'impl:#42.2', 'verify:#42.2'],
+      'a deliver:false run stops after the passing verify');
+    assert.deepEqual(resumed.map((c) => c.label), first.map((c) => c.label).concat(['deliver:#42']),
+      'the deliver:true resume must add exactly one new agent: deliver:#42');
+    for (let i = 0; i < first.length; i++) {
+      assert.equal(resumed[i].prompt, first[i].prompt,
+        `${first[i].label} prompt differs between the deliver:false run and the deliver:true resume; the resume would re-run it instead of replaying it from cache`);
+    }
+  });
+
+  test(`${rel} verifies and delivers the instructed branch, not the implementer's self-report`, async () => {
+    const calls = [];
+    const { result, logs } = await driveCodeLane(
+      file, twoAttemptAgent(calls, (x) => x, 'agent/issue-42-attempt9-somewhere-else'), TICKET_42, 0
+    );
+    const verify2 = calls.find((c) => c.label === 'verify:#42.2').prompt;
+    const deliver = calls.find((c) => c.label === 'deliver:#42').prompt;
+    const instructed = buildBranchName(42, 'testrun', 0, 2);
+    for (const [label, prompt] of [['verify:#42.2', verify2], ['deliver:#42', deliver]]) {
+      assert.ok(prompt.includes(instructed), `${label} must name the instructed branch ${instructed}`);
+      assert.ok(!prompt.includes('somewhere-else'),
+        `${label} must not carry the implementer's self-reported branch: the branch delivered is the branch that was verified`);
+    }
+    assert.equal(result.branch, instructed, 'the lane reports the branch it verified and delivered');
+    assert.ok(logs.some((m) => m.includes('not the instructed')), 'a self-report mismatch must be logged');
   });
 }
