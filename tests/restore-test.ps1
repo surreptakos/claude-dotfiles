@@ -1139,9 +1139,11 @@ if (Test-Path $fleetVerifier) {
 }
 if (Test-Path $fleetScriptPlugin) {
     $pluginText = Get-Content $fleetScriptPlugin -Raw
-    Check 'plugin fleet script passes agentType: fleet-verifier when the instrument is gh' `
-        ($pluginText -match "agentType:\s*instrument === 'gh' \? 'fleet-verifier'") `
-        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138)')
+    Check 'plugin fleet script resolves the verifier agentType (fleet-verifier by default under gh)' `
+        (($pluginText -match 'function resolveVerifierAgent') -and
+         ($pluginText -match "mode === 'gh' \? 'fleet-verifier'") -and
+         ($pluginText -match 'agentType: verifierAgentType')) `
+        @('the plugin-served fleet must wire the fleet-verifier subagent under the gh instrument (issue 138) through resolveVerifierAgent, which args.verifierAgent clears in a container (issue 316)')
     Check 'plugin fleet script inlines the pickInstrument switch (issue 138)' `
         (($pluginText -match 'function pickInstrument') -and
          ($pluginText -match 'CLAUDE_CODE_REMOTE_SESSION_ID')) `
