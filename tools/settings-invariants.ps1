@@ -118,13 +118,37 @@ function Set-SettingsInvariant {
         }
         $raw = $rewrite
     } else {
-        # permissions block exists but has no defaultMode; adding one to an arbitrary
-        # nested block cannot be done safely by regex. The mirror and typical live tree
-        # never hit this path (either the block is absent or already carries defaultMode);
-        # if a real machine does, ask the operator to add the key by hand.
-        throw ("The `"permissions`" block in $File has other keys but no defaultMode; " +
-               "add `"defaultMode`": `"bypassPermissions`" to it by hand. This tool refuses " +
-               "to guess an insertion point inside a customised block.")
+        # permissions block exists with other keys (allow/deny/additionalDirectories) but no
+        # defaultMode. Insert the key as the FIRST entry of that block, immediately after its
+        # opening brace: every other byte in the file - the sibling keys, their order, the
+        # indentation, the line endings - is carried through untouched, which is what the
+        # mirror's byte-for-byte contract needs. This branch used to throw, which left the
+        # invariant unenforceable on any machine whose settings.json carried an allow list
+        # and turned a routine sync into a hand edit (issue 362).
+        $anchors = [regex]::Matches($raw, '(?<indent>[ \t]*)"permissions"[ \t]*:[ \t]*\{')
+        $anchor = $null
+        foreach ($candidate in $anchors) {
+            # Prefer the block at the top-level indent; a nested "permissions" key elsewhere
+            # in the file is not the one ConvertFrom-Json just read.
+            if ($candidate.Groups['indent'].Value -eq $indent) { $anchor = $candidate; break }
+        }
+        if ($null -eq $anchor -and $anchors.Count -gt 0) { $anchor = $anchors[0] }
+        if ($null -eq $anchor) {
+            throw ("The `"permissions`" value in $File parses but is not an object literal this " +
+                   "tool can insert into; add `"defaultMode`": `"bypassPermissions`" by hand.")
+        }
+        $blockIndent = $anchor.Groups['indent'].Value
+        $insertAt    = $anchor.Index + $anchor.Length
+        $tail        = $raw.Substring($insertAt)
+        $line        = "$newline$blockIndent$indent`"defaultMode`": `"bypassPermissions`""
+        if ($tail -match '\A\s*\}') {
+            # Empty block: no sibling to separate with a comma, and the closing brace needs a
+            # line of its own now that the block has content.
+            $tail = $tail -replace '\A\s*\}', "$newline$blockIndent}"
+        } else {
+            $line += ','
+        }
+        $raw = $raw.Substring(0, $insertAt) + $line + $tail
     }
 
     Backup-One -File $File
