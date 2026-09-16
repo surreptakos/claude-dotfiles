@@ -24,13 +24,17 @@ The packager (tools/build-cloud-plugin.py) stamps every source skill on each bui
 `sync.ps1 -Mode push` keeps the stamps current with no one remembering to. This CLI exists for the
 hand-edited aac-skills/ tree on a cloud branch, where no push runs, and for CI.
 
-Usage:
-    python3 tools/skill-stamps.py stamp aac-skills agents/skills   # (re)stamp what changed
-    python3 tools/skill-stamps.py check aac-skills                 # exit 1 on drift, changes nothing
-    python3 tools/skill-stamps.py check aac-skills --json          # machine-readable report
+Usage (`--home` names the OWNER's home, not the container's - see below):
+    python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\\Users\\Dan'
+    python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'  # exit 1 on drift, writes nothing
+    python3 tools/skill-stamps.py check aac-skills --json                  # machine-readable report
 
 Each positional argument is a directory of skills (each child holding a SKILL.md) or a single
-skill directory. `check` is for SOURCE trees only: the packaged copies under marketplace/ carry
+skill directory. `--home` defaults to the running user's home, which is only the right answer on
+the owner's own machine: anywhere else (a cloud container, CI) every skill whose text carries the
+owner's home path hashes differently, so `stamp` rotates skills nobody touched and `check` calls
+them drifted. Off that machine, pass the owner's home - the spelling CI and CLAUDE.md use (issue
+431). `check` is for SOURCE trees only: the packaged copies under marketplace/ carry
 the source stamps verbatim but their bodies are rewritten for the cloud, so their hashes differ.
 
 The git history supplies the dates for a skill stamped for the first time: the last commit that
@@ -265,7 +269,8 @@ def newest_mtime(skill_dir):
 
 def _git(repo, *args):
     env = {k: v for k, v in os.environ.items()
-           if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"}}
+           if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                        "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"}}
     try:
         res = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True,
                              env=env, check=False)
@@ -473,8 +478,11 @@ def main(argv=None):
                 line += f" {r['error']}"
             print(line)
         if args.mode == "check" and bad:
+            # Echo back the --home this check ran with: stamping with a different one re-hashes
+            # every skill that carries the owner's home path and rotates it for nothing (431).
+            home_arg = f" --home '{args.home}'" if args.home is not None else ""
             print(f"\n{bad} skill(s) edited without a re-stamp or never stamped. Run:"
-                  f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}"
+                  f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}{home_arg}"
                   f"\nA skill edited on a branch needs every tree that carries it stamped and the"
                   f" plugin rebuilt - see CLAUDE.md, \"Skill stamps\".", file=sys.stderr)
     return 1 if bad else 0

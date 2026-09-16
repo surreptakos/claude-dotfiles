@@ -17,6 +17,11 @@ Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and wri
 plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
 remains for the claude.ai org-Skills surface, which only takes uploads.
 
+The payload also carries the global rules text (issue 209): the `### Four standing disciplines`
+section of the owner's CLAUDE.md, copied -- never hand-duplicated -- to rules/global-rules.md and
+injected on every prompt by hooks/scripts/global-rules.js, one manifest entry per part because the
+host's additionalContext cap is per hook output. See docs/tickets/209-decision.md.
+
 Every source skill is stamped before it is packaged (tools/skill-stamps.py): four keys under
 `metadata:` - modified, previous-modified, revision, content-sha - rotate whenever the skill's
 content hash no longer matches the recorded one, and are written back into the SOURCE SKILL.md
@@ -52,6 +57,9 @@ _spec.loader.exec_module(skill_stamps)
 
 ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "compatibility"}
 PLUGIN_NAME = "aac-skills"
+MANIFEST_REL = ".claude-plugin/plugin.json"
+# Stands in until the payload is assembled and resolve_version() can read it (issue 432).
+PLACEHOLDER_VERSION = "0.0.0"
 NL = chr(10)
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
@@ -79,6 +87,51 @@ CLOUD_NOTE = (
     "> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:\n"
     "> every run is fresh.\n"
 )
+
+
+# Global rules text (issue 209). The four standing disciplines a PC session reads in
+# ~/.claude/CLAUDE.md never reach a container, which has no live tree. The packager COPIES that
+# section into the payload -- one source, no hand duplicate -- and hooks/scripts/global-rules.js
+# injects it on every prompt. The heading is the contract between the two files; a build whose
+# source no longer carries it fails loudly rather than shipping an empty rules file.
+RULES_HEADING = "### Four standing disciplines"
+# Body bytes per part. Measured cap (2026-09-16, cloud container, headless probe): a hook's
+# additionalContext arrives whole at 10,000 bytes and is persisted with a 2KB preview at 10,240.
+# The cap is per hook output, so the file rides as one hook entry per part. Must stay in step with
+# PART_BYTES in tools/plugin-hook-guards/global-rules.js.
+RULES_PART_BYTES = 6000
+# JavaScript's split(/(?<=\n)/): lines keep their newline, nothing else counts as a break.
+# str.splitlines() would also break on \x0b, \x0c and  , which would desync the two splitters.
+LINE_RE = re.compile(r"[^\n]*\n|[^\n]+")
+
+
+def extract_global_rules(text):
+    """The `### Four standing disciplines` section of a global CLAUDE.md, verbatim.
+
+    Ends at the next heading of the same or a higher level. Returns None when the heading is
+    absent, which is how a fixture repo with no CLAUDE.md mirror produces no rules file.
+    """
+    lines = LINE_RE.findall(text.replace("\r\n", "\n"))
+    start = next((i for i, l in enumerate(lines) if l.startswith(RULES_HEADING)), None)
+    if start is None:
+        return None
+    end = next((i for i in range(start + 1, len(lines))
+                if lines[i].startswith("### ") or lines[i].startswith("## ")), len(lines))
+    return "".join(lines[start:end]).rstrip() + "\n"
+
+
+def split_rules_parts(text, limit=RULES_PART_BYTES):
+    """Greedy line packing -- the same rule global-rules.js applies when it emits part k."""
+    parts, cur = [], ""
+    for line in LINE_RE.findall(text):
+        if cur and len((cur + line).encode("utf-8")) > limit:
+            parts.append(cur)
+            cur = line
+        else:
+            cur += line
+    if cur:
+        parts.append(cur)
+    return parts
 
 
 def retarget_paths(body):
@@ -226,9 +279,80 @@ def plugin_version(now=None):
     Always UTC: cloud CI builds in UTC and a local Windows build in America/Chicago, so with local
     time a later local build produced a LOWER version than an earlier cloud one (2026-09-11: cloud
     2026.9.111802, local 2026.9.111542). One clock keeps versions monotonic across machines.
+
+    Read this only through resolve_version(), which is what a build calls: a payload that has not
+    moved keeps the stamp it published under rather than taking a new reading here (issue 432).
     """
     now = now.astimezone(timezone.utc) if now is not None else datetime.now(timezone.utc)
     return f"{now.year}.{now.month}.{now.day}{now:%H%M}"
+
+
+def plugin_manifest(version):
+    """plugin.json's bytes.
+
+    write_bytes, not write_text: the payload must not depend on the building OS's newline.
+    """
+    return (
+        json.dumps(
+            {
+                "name": PLUGIN_NAME,
+                "version": version,
+                "author": {"name": "Dan Gatsakos"},
+                "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
+                "Company team skills from the repo's aac-skills/ tree. Built by "
+                "tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/.",
+            },
+            indent=2,
+        )
+        + "\n").encode("utf-8")
+
+
+def payload_fingerprint(root):
+    """Every byte the payload ships, keyed by path, with the version stamp neutralized.
+
+    The version is the one field a rebuild may carry over, so plugin.json is compared with that
+    key removed and every other key of it still counted: change the description and the payload
+    has moved.
+    """
+    files = {}
+    for f in sorted(root.rglob("*")):
+        if not f.is_file():
+            continue
+        rel = f.relative_to(root).as_posix()
+        if rel == MANIFEST_REL:
+            try:
+                manifest = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                manifest = None
+            if isinstance(manifest, dict):
+                manifest.pop("version", None)
+            files[rel] = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
+        else:
+            files[rel] = f.read_bytes()
+    return files
+
+
+def resolve_version(payload_root, published_root, now=None):
+    """The version an assembled payload ships: the published one when nothing moved.
+
+    plugin_version() is a wall clock, so stamping it on every build made every rebuild of an
+    unchanged mirror a two-file diff - plugin.json and marketplace.json - that no content movement
+    explained (issue 432). A rebuild whose payload reproduces the published one byte for byte
+    keeps the published version; only a payload that really moved takes a fresh stamp.
+
+    Versions still never go backwards across machines, which is the whole point of the clock
+    (see plugin_version): every value returned here is either a fresh UTC reading, which outranks
+    every earlier one whatever timezone the building machine sits in, or the stamp the identical
+    payload already carries - reuse cannot invent a version older than the content it names.
+    """
+    try:
+        carried = json.loads(
+            (published_root / MANIFEST_REL).read_text(encoding="utf-8")).get("version")
+    except (OSError, ValueError, AttributeError):
+        carried = None
+    if carried and payload_fingerprint(payload_root) == payload_fingerprint(published_root):
+        return carried
+    return plugin_version(now)
 
 
 def main():
@@ -262,22 +386,9 @@ def main():
         shutil.rmtree(plugin_root)
     (plugin_root / ".claude-plugin").mkdir(parents=True)
 
-    version = plugin_version()
-    # write_bytes, not write_text: the payload must not depend on the building OS's newline.
-    (plugin_root / ".claude-plugin" / "plugin.json").write_bytes((
-        json.dumps(
-            {
-                "name": PLUGIN_NAME,
-                "version": version,
-                "author": {"name": "Dan Gatsakos"},
-                "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
-                "Company team skills from the repo's aac-skills/ tree. Built by "
-                "tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/.",
-            },
-            indent=2,
-        )
-        + "\n").encode("utf-8")
-    )
+    # The version is resolved once the payload is assembled, so an unchanged payload can carry the
+    # published stamp forward instead of churning on the clock (issue 432).
+    (plugin_root / MANIFEST_REL).write_bytes(plugin_manifest(PLACEHOLDER_VERSION))
 
     fallback = Path.home() / ".agents" / "skills"
     aac_names = {p.name for p in (REPO / "aac-skills").iterdir()
@@ -384,6 +495,38 @@ def main():
     guard_py_name = "_plugin_hook_guard.py"
     guard_js_src = guard_src_dir / guard_js_name
     guard_py_src = guard_src_dir / guard_py_name
+
+    # Global rules text (issue 209). ONE source: the owner's global CLAUDE.md. A live build reads
+    # it next to --source (~/.claude/skills -> ~/.claude/CLAUDE.md); a --from-mirror build (cloud,
+    # CI) reads this repo's generated mirror claude/CLAUDE.md, de-tokenized with --home so both
+    # routes emit the same bytes. Nothing here is hand-written into the payload.
+    rules_src = None
+    if not args.from_mirror:
+        live_md = Path(args.source).resolve().parent / "CLAUDE.md"
+        if live_md.is_file():
+            rules_src = live_md
+    if rules_src is None and (REPO / "claude" / "CLAUDE.md").is_file():
+        rules_src = REPO / "claude" / "CLAUDE.md"
+    rules_text = None
+    if rules_src is not None:
+        raw = rules_src.read_text(encoding="utf-8")
+        if "__USERHOME" in raw and home:
+            raw = skill_stamps.detokenize(raw, home)
+        rules_text = extract_global_rules(raw)
+        if rules_text is None:
+            raise RuntimeError(
+                f"{rules_src} carries no '{RULES_HEADING}' heading; the plugin can no longer copy "
+                "the global rules text (issue 209). Update RULES_HEADING in build-cloud-plugin.py "
+                "if the section was renamed.")
+    rules_parts = split_rules_parts(rules_text) if rules_text else []
+    if rules_text:
+        (plugin_root / "rules").mkdir()
+        (plugin_root / "rules" / "global-rules.md").write_bytes(rules_text.encode("utf-8"))
+        # Payload-only hook script: there is no live-tree twin to dedup against, so it carries its
+        # own no-doubling guard (it stays silent where a global CLAUDE.md already has the text).
+        (scripts_dir / "global-rules.js").write_bytes(
+            (guard_src_dir / "global-rules.js").read_text(encoding="utf-8")
+            .replace("\r\n", "\n").encode("utf-8"))
     if gov_sources_present:
         if not guard_js_src.is_file() or not guard_py_src.is_file():
             raise RuntimeError(
@@ -570,17 +713,20 @@ def main():
         ],
     }
 
+    # One UserPromptSubmit entry per part of the rules text (issue 209). Separate entries, not one
+    # big one: the measured cap is per hook output, so N parts under it deliver the file in full
+    # every prompt. Independent of gov_sources_present -- the rules ride even where the governance
+    # scripts have no mirror to be copied from.
+    if rules_parts:
+        governance_hooks.setdefault("UserPromptSubmit", []).append({"hooks": [
+            _hook("node", "node", "global-rules.js", [str(i)], 10,
+                  f"Delivering global rules ({i}/{len(rules_parts)})...")
+            for i in range(1, len(rules_parts) + 1)
+        ]})
+
     (hooks_dir / "hooks.json").write_bytes((
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )
-
-    zip_path = out / f"{PLUGIN_NAME}.zip"
-    if zip_path.exists():
-        zip_path.unlink()
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for f in sorted(plugin_root.rglob("*")):
-            if f.is_file():
-                zf.write(f, f.relative_to(plugin_root))
 
     # ---------------------------------------------------------------- AAC team skills
     # The org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
@@ -608,6 +754,20 @@ def main():
             shutil.copytree(entry, dest, ignore=ignore_noise)
             (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
             packaged.append((entry.name, moved, retargeted))
+
+    # ------------------------------------------------------------------------ version
+    # Last, because it is a fact about the assembled payload. The zip follows it (and the team
+    # skills above), so every surface ships the same bytes under the same version.
+    version = resolve_version(plugin_root, REPO / "marketplace" / PLUGIN_NAME)
+    (plugin_root / MANIFEST_REL).write_bytes(plugin_manifest(version))
+
+    zip_path = out / f"{PLUGIN_NAME}.zip"
+    if zip_path.exists():
+        zip_path.unlink()
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in sorted(plugin_root.rglob("*")):
+            if f.is_file():
+                zf.write(f, f.relative_to(plugin_root))
 
     # ------------------------------------------------------------------ repo marketplace
     # The tracked copy every surface installs from. dist/ is git-ignored scratch; this is not.

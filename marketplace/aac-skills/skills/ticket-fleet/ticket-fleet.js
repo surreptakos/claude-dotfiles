@@ -241,22 +241,22 @@ function trackerRules(mode) {
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
-    commentPost: () => `Use mcp__github__add_issue_comment.`,
+    commentPost: (_bodyFile) => `Use mcp__github__add_issue_comment - the body is an argument here, so no scratch file is written.`,
     labelSwap: (n, target = 'ready-for-human') => `Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
-    prCreate: () => `mcp__github__create_pull_request`,
-    prComment: () => `mcp__github__add_issue_comment on issue`,
+    prCreate: (_bodyFile) => `mcp__github__create_pull_request - the body is an argument here, so no scratch file is written.`,
+    prComment: (_bodyFile) => `mcp__github__add_issue_comment on issue`,
   }
   return {
     scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100"\`, then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number N: \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\`.`,
     scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
-    commentPost: () => `Use \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
+    commentPost: (bodyFile) => `Write the comment body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first: the scratchpad the harness names for you is shared with every other worker of this run, so a bare name there is overwritten mid-task and you post another worker's text (issue 439). Then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from \`git remote get-url origin\`), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    prCreate: () => `open the PR with REST - \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@<file>\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
-    prComment: () => `gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>`,
+    prCreate: (bodyFile) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
+    prComment: (bodyFile) => `write the comment to \`${bodyFile}\` (that exact path - issue 439), then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\``,
   }
 }
 // [FLEET-TRACKER-RULES-END]
@@ -693,6 +693,25 @@ async function treeGuardCheck(label, ticketNumber) {
 // there before any prompt of ours is read.
 const PYTHON_RAIL = `Python editable-install rail (claude-dotfiles issue 413, non-negotiable): this container has ONE interpreter and ONE editable-install pointer, shared with the main checkout - never run \`pip install -e\` / \`pip install --editable\` from your worktree, and never run a bootstrap or SessionStart script that does. It repoints that single install at your scratch path, and deleting the worktree then orphans it: every \`python -c 'import <pkg>'\` in the container fails with ModuleNotFoundError afterwards while the code on disk is fine. Your worktree's code is already what runs - pytest reads the repo's own config from it - and a test that SPAWNS a subprocess picks it up with \`PYTHONPATH=<your worktree>/src\` in that command's environment. If an import fails, set PYTHONPATH; do not install anything.`
 
+// ---------------------------------------------------------------------------
+// Scratch files: one scratchpad per run, not one per worker (claude-dotfiles issue 439)
+// ---------------------------------------------------------------------------
+// The harness tells every sub-agent its scratchpad directory is "session-specific, isolated from
+// the project". It is keyed by project and parent session, not by sub-session, so every worker of
+// one wave is handed the SAME directory. In run 6aaacc32 one worker wrote its commit message to
+// <scratchpad>/msg.txt and a concurrent worker overwrote it mid-task. Nothing errors - the reader
+// simply gets the other worker's bytes - so a swapped commit message lands in history and a
+// swapped issue body lands on the tracker, silently. The files fleet prompts ask for are exactly
+// the collision-prone ones: a commit message for `git commit -F`, an issue or PR body handed to
+// `gh api -F body=@...`, a fixture.
+//
+// So no prompt below says "a file" or "a scratch directory": each names the path itself, under this
+// run's own scratch root and with the ticket number in it, and the rail tells a worker that has a
+// private directory already - its worktree - to keep its scratch there.
+const scratchRoot = `/tmp/fleet-${runId}`
+const scratchFile = (name) => `${scratchRoot}/${name}`
+const SCRATCH_RAIL = `Scratch-file rule (claude-dotfiles issue 439, non-negotiable): the scratchpad directory the harness names for you is NOT yours alone - it is keyed by project and parent session, so every worker of this run is handed the same one, and a generic name (msg.txt, body.md, notes.md) there is silently overwritten by a concurrent worker mid-task; one worker's commit message has already been swapped for another's that way. Keep every scratch file you write - a commit message for \`git commit -F\`, an issue or PR body, a fixture - inside your own worktree, or under ${scratchRoot}/ (\`mkdir -p\` it first) under a name carrying this ticket's number. Never write, and never read back, a bare path in the shared scratchpad.`
+
 // Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
 // #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
 // stops them racing; this brief is the other half, and it travels with any discovery-triage ticket
@@ -1048,6 +1067,7 @@ The main checkout is never a test surface (issue 404): the repository at the ses
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 ${PYTHON_RAIL}
+${SCRATCH_RAIL}
 Rules:
 - NEVER fabricate, guess or reconstruct output. Quote it exactly as printed, errors and noise included.
 - Record the REAL exit code of each command, not the exit code of a pipeline.
@@ -1090,7 +1110,9 @@ Return structured output only.`,
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
-In this repo run: git fetch origin, then git worktree add <scratch dir> --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree.
+${PYTHON_RAIL}
+The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
+In this repo run: git fetch origin, then git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
 1. Re-run every command above that is re-runnable in this container and compare YOUR output with the claimed output. Output you cannot reproduce, or that does not match, is a failure.
@@ -1128,7 +1150,7 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
     try {
       delivery = await agent(
       `Post ONE resolution comment on issue #${t.number} (${t.title}).
-${rules.commentPost()}
+${rules.commentPost(scratchFile(`probe-${t.number}-comment.md`))}
 Body, in this order:
 1. One sentence: what the ticket asked for and that it is answered by the evidence below.
 2. One section per item, the item as the heading and a fenced code block holding, in order, the line \`$ <command>\`, then its verbatim output, then \`[exit N]\`. Copy from this data exactly - never re-run, re-word or tidy it:\n${evidenceBlocks}
@@ -1193,7 +1215,7 @@ Return structured output only.`,
     try {
       delivery = await agent(
       `Post ONE status comment on issue #${t.number} (${t.title}), then hand the ticket back to the owner by relabelling it.
-${rules.commentPost()}
+${rules.commentPost(scratchFile(`handoff-${t.number}-comment.md`))}
 Body, in this order:
 1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${stableText(handoff.agentSide)}
 2. A "${remainingHeading}" section, one bullet per step, verbatim:\n${ownerList}
@@ -1267,7 +1289,7 @@ function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resume
 This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier run verified this branch and pushed it to origin, and only the PR is missing. Before opening one, list the repository's OPEN pull requests and look for a head ref of ${branch}: if such a PR already exists, open no second one - return its URL as prUrl, pushed true and the real mergeStatus, and stop.` : ''}
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
-A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add <scratch dir> ${branch}\`): \`git merge --no-edit origin/${defaultBranch}\`.
+A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`.
 A2. Clean merge (exit 0, nothing conflicted): mergeStatus is "clean" - go to STEP B.
 A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly two classes may be resolved here; a path in neither is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
@@ -1279,8 +1301,8 @@ A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is i
 
 STEP B - push and open the PR (only when STEP A ended clean or resolved):
 B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run \`git ls-remote --heads origin ${branch}\` and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said.
-B2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
-B3. ${rules.prComment()} ${t.number} with the PR link${keepOpenNote}.
+B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
+B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean" or "resolved").
 
 Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${defaultBranch} itself. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`
@@ -1385,6 +1407,7 @@ const runCodeLane = async (t, workerIndex) => {
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 ${PYTHON_RAIL}
+${SCRATCH_RAIL}
 Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
@@ -1478,7 +1501,7 @@ Branch under review: ${branch} (do NOT trust its author; you have not seen their
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
 ${PYTHON_RAIL}
-In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
+In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
@@ -1604,6 +1627,45 @@ const results = (grouped || []).flat()
 await treeGuardCheck('pre-report', 0)
 assertNoBreach()
 
+// [FLEET-EDITABLE-GUARD-START]
+// Every place a copy of the guard can be, in probe order, each with why it would be there. Literal
+// paths only - a $VAR in the command is refused by the Bash tool as an operand computed at run
+// time - so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's copy is reachable only once
+// somebody has copied it into the served repo. `.claude/workflows/` is the second entry because
+// that is where a served repo already copies the fleet script itself to launch it (SKILL.md,
+// "Copy-into-cwd step"): copying the guard in the same breath is the cheapest way for a fork with
+// no `tools/` convention to have one (issue 435).
+const EDITABLE_GUARD_HOMES = [
+  ['tools/editable-install-guard.js', "the served repo's own copy - the durable one, it survives every launch and every plugin update"],
+  ['.claude/workflows/editable-install-guard.js', 'beside the fleet script a served repo copies out of the plugin to launch a run - copy both files, not just ticket-fleet.js'],
+  ['aac-skills/ticket-fleet/editable-install-guard.js', 'the plugin source, present only when the served repo IS claude-dotfiles'],
+  ['~/.claude/skills/ticket-fleet/editable-install-guard.js', 'where a cloud bootstrap that installs this skill leaves it'],
+]
+
+/** The paths the post-wave probe tries, caller override first. */
+function editableGuardPaths(override) {
+  return [override].concat(EDITABLE_GUARD_HOMES.map(h => h[0])).filter(Boolean)
+}
+
+/** The one shell command that runs the first copy it finds, or exits 3 when there is none. */
+function editableGuardCommand(paths, main) {
+  return paths
+    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${main} --repair`)
+    .join('; ') + '; exit 3'
+}
+
+/**
+ * What a run says when the probe found no copy. The old message said only that it had skipped and
+ * to "copy it into the served repo's tools/", which left the reader to work out which file, from
+ * where, and under what name - so on the repo the incident happened in, nothing was ever copied
+ * (issue 435). This names each exact path, in preference order, and the command that creates one.
+ */
+function editableGuardAbsentMessage(paths, main) {
+  const homes = EDITABLE_GUARD_HOMES.map(h => `  ${h[0]}   (${h[1]})`).join('\n')
+  return `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${paths.join(' or ')} (claude-dotfiles issue 413), so if a worktree of this wave captured this container's editable install it stays captured and the next session's imports fail for no visible reason.\nCreate ONE of these, relative to the repository root this run serves (--main ${main}), first for preference:\n${homes}\nFrom a session with the aac-skills plugin loaded, the first one is:\n  mkdir -p tools && cp "$CLAUDE_PLUGIN_ROOT/skills/ticket-fleet/editable-install-guard.js" tools/editable-install-guard.js\nOr point the next run straight at a copy you already have: editableGuardScript: '<path>'.`
+}
+// [FLEET-EDITABLE-GUARD-END]
+
 // ---- editable-install guard (claude-dotfiles issue 413) ----
 // Every worktree of this wave is gone by now, so this is the moment the damage is visible: a
 // pointer file in site-packages naming a scratch checkout that no longer exists. Prompts cannot
@@ -1618,18 +1680,12 @@ if (cfg.editableGuard === false) {
   // One `;`-joined probe per candidate, never a loop: the Bash tool refuses a loop whose body
   // it cannot prove is not git (SKILL.md, "Shell shapes the worktree guard refuses"), and the
   // tree guard's `[ -f x ] || exit 3; node x ...` is the shape that is known to go through.
-  // Candidates in order: the caller's override, the served repo's own copy (the tree-guard
-  // convention), this repo's plugin source, and the copy the cloud bootstrap leaves in ~/.claude. Literal paths only - a $VAR in the
-  // command is refused by the Bash tool as an operand computed at run time.
-  const guardPaths = [
-    cfg.editableGuardScript,
-    'tools/editable-install-guard.js',
-    'aac-skills/ticket-fleet/editable-install-guard.js',
-    '~/.claude/skills/ticket-fleet/editable-install-guard.js',
-  ].filter(Boolean)
-  const editableCmd = guardPaths
-    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${cfg.orchestratorCwd} --repair`)
-    .join('; ') + '; exit 3'
+  // The candidate list and the not-here message are pure and marked, because a run served on a
+  // repo that has no copy is the case issue 435 is about: tools/editable-install-guard.test.js
+  // extracts this block verbatim, builds the command from it and runs it for real in a repo
+  // that has no guard anywhere, then in the same repo once the named path exists.
+  const guardPaths = editableGuardPaths(cfg.editableGuardScript)
+  const editableCmd = editableGuardCommand(guardPaths, cfg.orchestratorCwd)
   let res = null, resError = null
   try {
     res = await agent(guardAgentPrompt(editableCmd),
@@ -1641,7 +1697,7 @@ if (cfg.editableGuard === false) {
   try { parsed = JSON.parse(String((res && res.stdout) || '')) } catch (e) { parsed = null }
   const hard = cfg.editableGuard === true
   if (res && res.exitCode === 3) {
-    const absent = `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${guardPaths.join(' or ')} (claude-dotfiles issue 413). Copy it into the served repo's tools/ to have the wave repair its own worktree damage.`
+    const absent = editableGuardAbsentMessage(guardPaths, cfg.orchestratorCwd)
     if (hard) throw new Error(`ticket-fleet run FAILED after the wave - ${absent}`)
     log(absent)
   } else if (!res || !parsed || res.exitCode === 2) {
@@ -1681,7 +1737,7 @@ async function runReport(discoveries, defaultBranch) {
   if (!discoveries.length) return null
   const branch = `agent/fleet-discoveries-wf_${runId}`
   const deliverStep = cfg.deliver
-    ? `6. git push -u origin ${branch}, then ${rules.prCreate()}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
+    ? `6. git push -u origin ${branch}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'))}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
     : `6. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
   // Wrapped (aac-routines issue 270): a writer that blows the StructuredOutput retry cap used
   // to lose the whole run report; it is now a named error on the discovery report instead.
@@ -1690,7 +1746,7 @@ async function runReport(discoveries, defaultBranch) {
     written = await agent(
     `Append this ticket-fleet run's discoveries to ${cfg.followupsFile} on a branch of their own, cut from the repo default branch - never the branch this session happens to be sitting on (issue 360).
 1. git fetch origin ${defaultBranch}
-2. git worktree add -b ${branch} <a fresh scratch directory> origin/${defaultBranch}, and do every step below inside that worktree; leave this session's own checkout untouched.
+2. git worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
 3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run <DATE> (ticket-fleet ${runId})" heading, where <DATE> is today's UTC date in ISO form as \`date -u +%F\` prints it - a run's section has to be tellable from every other run's at a glance (issue 322), then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
 4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
 5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.

@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T22:12:54Z'
-  previous-modified: '2026-09-16T21:11:11Z'
-  revision: '17'
-  content-sha: f85c8d9b0ef5
+  modified: '2026-09-16T22:50:32Z'
+  previous-modified: '2026-09-16T22:12:54Z'
+  revision: '18'
+  content-sha: d7759d9f66f6
 ---
 
 # ticket-fleet
@@ -124,7 +124,13 @@ working directory. Copy it there before the first invocation:
 ```bash
 mkdir -p .claude/workflows
 cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
+cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js" .claude/workflows/editable-install-guard.js
 ```
+
+Copy the guard in the same breath (issue 435): the run probes `.claude/workflows/` for it, and a
+Python repo that has no copy anywhere gets no post-wave repair of the editable install a worktree
+captured. `tools/editable-install-guard.js` is the better home if the repo has a `tools/` - it
+survives a plugin update and is not mistaken for scratch.
 
 Then either spelling launches the fleet:
 
@@ -469,6 +475,27 @@ change its answer. A second mismatch is recorded as a failed attempt carrying on
 and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
 log says the cross-check was skipped: a guess is not a rejection.
 
+## The scratchpad is one per run, not one per worker
+
+Every sub-agent is told its scratchpad directory is "session-specific, isolated from the project".
+It is keyed by project and parent session, not by sub-session, so every worker of one wave is
+handed the same path. In run `6aaacc32` one worker wrote its commit message to
+`<scratchpad>/msg.txt` and a concurrent worker overwrote it mid-task (issue 439). Nothing errors -
+the reader simply gets the other worker's bytes - so a swapped commit message lands in history and
+a swapped issue body lands on the tracker, silently. The files fleet prompts ask for are exactly
+the collision-prone ones: a commit message for `git commit -F`, a comment or PR body for
+`gh api -F body=@…`, a fixture.
+
+The working rule: **a path two workers could name the same way is a path they will overwrite.**
+Write scratch inside your own worktree where you have one - the implementer and the prober always
+do - and otherwise under `/tmp/fleet-<runId>/`, with the ticket number in the name. In the script
+that is `scratchFile(...)`, and every prompt that asks for a file names the path itself instead of
+leaving the choice to the worker: the comment and PR bodies behind `-F body=@…`, the verifier,
+deliver and discoveries worktrees. `SCRATCH_RAIL` carries the rule itself to the implementer and
+the prober, the two agents that write files nobody named for them.
+`tools/ticket-fleet-branch.test.js` fails the script if a prompt goes back to `<file>` or
+`<scratch dir>`, or if a per-ticket scratch path drops the ticket number.
+
 ## Shell shapes the worktree guard refuses
 
 An implementer or verifier works inside an isolated worktree, and there the Bash tool refuses any
@@ -521,10 +548,13 @@ broken code because of it).
 
 Two halves:
 
-- **Prevention.** The implementer, prober and verifier prompts share one rail (`PYTHON_RAIL` in
-  the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
+- **Prevention.** The implementer, prober and both verifier prompts share one rail (`PYTHON_RAIL`
+  in the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
   script that does. The worktree's own code is what pytest reads; a test that *spawns* a
-  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment.
+  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment. The probe
+  lane's verifier carries it too (issue 435) and carries more besides: it is the one agent that is
+  *not* worktree-isolated, so a probe criterion naming `pip install -e` is re-run as a read - it
+  quotes what the prober got rather than installing into the orchestrator's own checkout.
 - **Repair.** Once the wave has drained, the run executes `editable-install-guard.js check --main
   . --repair` (the file alongside this SKILL.md, exercised by
   `tools/editable-install-guard.test.js` in `claude-dotfiles`, which adds a worktree, repoints the
@@ -534,13 +564,17 @@ Two halves:
   cleared. A repo with no `pyproject.toml` is a quiet no-op.
 
 The guard is looked for at `tools/editable-install-guard.js` in the served repo first, then at
-this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`, then at
-`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js`, where the cloud bootstrap copies this
-skill (literal paths only - a `$VAR` in the command is refused as an operand computed at run
-time). A served repo adopts the guard by copying it into its own `tools/`, or by passing the path
-as `editableGuardScript`. Where none of them exists the run logs that it skipped the repair;
-`editableGuard: true` makes that absence fail the run instead, and `editableGuard: false` turns
-the guard off.
+`.claude/workflows/editable-install-guard.js` (beside the fleet script a fork copies out of the
+plugin to launch a run), then at this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`,
+then at `${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js`, where a cloud bootstrap that
+installs this skill leaves it (literal paths only - a `$VAR` in the command is refused as an
+operand computed at run time, so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's own copy
+is reachable only once somebody has copied it in). A served repo adopts the guard by copying it to
+either of the first two paths, or by passing the path as `editableGuardScript`. Where none of them
+exists the run logs the skip **naming each path and the `cp` that creates one** (issue 435: the old
+message said only "copy it into the served repo's `tools/`", and on the repo the incident happened
+in nothing was ever copied); `editableGuard: true` makes that absence fail the run instead, and
+`editableGuard: false` turns the guard off.
 
 Prevention cannot cover a repo whose own hook installs before any prompt is read.
 `aac-routines` `.claude/hooks/session-start.sh` cds to `CLAUDE_PROJECT_DIR` and runs
@@ -548,7 +582,9 @@ Prevention cannot cover a repo whose own hook installs before any prompt is read
 sub-session that directory IS the worktree (the same hook already rewrites `core.hooksPath` for
 linked worktrees a few lines above, so it demonstrably fires there). Guarding that line to the
 main checkout is an aac-routines change, recorded with the evidence in
-`docs/tickets/413-decision.md`; until it lands, the post-wave repair is what undoes it.
+`docs/tickets/413-decision.md` and filed there as
+[aac-routines#434](https://github.com/surreptakos/aac-routines/issues/434); until it lands, the
+post-wave repair is what undoes it.
 
 ## History
 
