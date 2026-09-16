@@ -206,6 +206,71 @@ class FromMirrorStampWriteBack(unittest.TestCase):
                              "second --no-stamp-write rebuild did not reproduce the payload")
 
 
+# Issue 432: plugin_version() is a wall clock, so every rebuild of an unchanged mirror moved
+# marketplace/aac-skills/.claude-plugin/plugin.json and .claude-plugin/marketplace.json and nothing
+# else - a two-file diff no content movement explained. The version now follows the payload.
+
+
+class VersionFollowsThePayload(unittest.TestCase):
+    def _make_fake_repo(self, tmp):
+        repo = Path(tmp) / "repo"
+        (repo / "agents" / "skills" / "foo").mkdir(parents=True)
+        (repo / "claude" / "skills").mkdir(parents=True)
+        (repo / "agents" / "skills" / "foo" / "SKILL.md").write_text(
+            STALE_MIRROR_SKILL, encoding="utf-8")
+        (repo / "claude" / "skill-links.json").write_text(
+            json.dumps([{"Name": "foo", "Target": "__USERHOME__\\.agents\\skills\\foo"}]),
+            encoding="utf-8")
+        return repo
+
+    def _rebuild(self, repo, out):
+        with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
+                sys, "argv", ["bcp", "--from-mirror", "--home", "C:\\Users\\Dan",
+                              "--out", str(out)]):
+            self.assertEqual(bcp.main(), 0)
+
+    def _tracked(self, repo):
+        """Everything a rebuild writes into the checkout: the payload plus marketplace.json."""
+        files = {
+            f.relative_to(repo).as_posix(): f.read_bytes()
+            for f in sorted((repo / "marketplace").rglob("*")) if f.is_file()
+        }
+        files["marketplace.json"] = (repo / ".claude-plugin" / "marketplace.json").read_bytes()
+        return files
+
+    def _version(self, repo):
+        return json.loads((repo / "marketplace" / bcp.PLUGIN_NAME / bcp.MANIFEST_REL)
+                          .read_text(encoding="utf-8"))["version"]
+
+    def test_unchanged_mirror_rebuilds_byte_identically(self):
+        # The clock moves between the two rebuilds, as it does between two branches on one day.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            self._rebuild(repo, Path(tmp) / "dist1")
+            first = self._tracked(repo)
+            with mock.patch.object(bcp, "plugin_version", lambda now=None: "2099.1.29999"):
+                self._rebuild(repo, Path(tmp) / "dist2")
+            self.assertEqual(first, self._tracked(repo),
+                             "a rebuild of an unchanged mirror moved a tracked byte")
+
+    def test_a_moved_payload_takes_a_fresh_clock_stamp(self):
+        # The reuse must not outlive the content: a payload that really moved takes the UTC clock
+        # reading, which is what keeps versions rising across machines and timezones.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            self._rebuild(repo, Path(tmp) / "dist1")
+            published = self._version(repo)
+
+            skill = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            skill.write_text(skill.read_text(encoding="utf-8") + "\nA new paragraph.\n",
+                             encoding="utf-8")
+            with mock.patch.object(bcp, "plugin_version", lambda now=None: "2099.1.10000"):
+                self._rebuild(repo, Path(tmp) / "dist2")
+            self.assertNotEqual(published, "2099.1.10000")
+            self.assertEqual(self._version(repo), "2099.1.10000",
+                             "an edited skill should have taken the fresh clock stamp")
+
+
 # Issue 172: aac-google-access started life as a personal skill, so the only copy of it in this
 # repo was the generated claude/ mirror -- which no branch may hand-edit. Moving the source into
 # the hand-edited aac-skills/ tree is the only way a cloud branch can revise such a skill, and for

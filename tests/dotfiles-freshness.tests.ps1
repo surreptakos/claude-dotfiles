@@ -31,7 +31,7 @@ $ErrorActionPreference = 'Stop'
 # would silently operate on the PARENT bare repo instead - which not only broke state1
 # detection on 2026-08-25 but also polluted the parent's config file (user.email=test@example.com
 # et al). Clear them once, up front, before any git call in this file.
-foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
+foreach ($name in 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY') {
     if ($null -ne [Environment]::GetEnvironmentVariable($name)) {
         [Environment]::SetEnvironmentVariable($name, $null)
     }

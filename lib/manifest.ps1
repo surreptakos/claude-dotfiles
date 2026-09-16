@@ -566,18 +566,18 @@ function Get-DotfilesFingerprint {
 # ("no stamp"), the freshness check stays silent - the criterion "auto-pull must
 # never run while live drift exists" then holds trivially because a missing
 # stamp cannot possibly report "unedited since last sync".
-# Names of the five GIT_* environment variables that override `git -C <path>` and would silently
+# Names of the six GIT_* environment variables that override `git -C <path>` and would silently
 # redirect any child git call to the parent process's repo. See Clear-GitEnv below for the full
 # rationale; issue 28.
-$script:GitEnvNames = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY')
+$script:GitEnvNames = @('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR', 'GIT_OBJECT_DIRECTORY')
 
 function Clear-GitEnv {
     <#
     .SYNOPSIS
-        Strip the five GIT_* env vars from the current process, returning a saved-state
+        Strip the six GIT_* env vars from the current process, returning a saved-state
         hashtable for Restore-GitEnv. Issue 28.
     .DESCRIPTION
-        `git -C <path>` does NOT override GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE /
+        `git -C <path>` does NOT override GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_PREFIX /
         GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY: git honours those env vars first, and the -C
         flag only relocates its resolution of a path when they are unset. A pre-commit hook
         that runs restore-test.ps1 (which runs the freshness suite, which runs git) leaks
