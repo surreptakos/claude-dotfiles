@@ -253,7 +253,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} keys the open-PR guard on a per-invocatio
   assert.match(body, /label: `pr-check:#\$\{t\.number\}@\$\{invocationId\}`/,
     'the pr-check agent label must carry invocationId');
   const promptEnd = body.indexOf('label: `pr-check:');
-  const prompt = body.slice(body.indexOf('const openPR = await agent('), promptEnd);
+  const prompt = body.slice(body.indexOf('openPR = await agent('), promptEnd);
   assert.match(prompt, /\$\{invocationId\}/, 'the pr-check prompt must carry invocationId');
   assert.equal((src.match(/\$\{invocationId\}/g) || []).length, 2,
     'invocationId belongs in the pr-check prompt and label only: anywhere else it would move a branch name or bust another stage cache');
@@ -402,13 +402,25 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}) {
     // discovery-triage chore.
     dedupeBrief: () => '',
     testCommand: 'echo ok',
+    // The aac-routines ports (issues 191, 192, 270): the isolation checkpoints and the
+    // unusable-output helpers. Inert here; driveCodeLane swaps in a recording checkpoint.
+    treeGuardCheck: async () => {},
+    assertNoBreach: () => {},
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+    unusableVerdict: (detail, who) => ({ pass: false, evidence: '', failures: [`${who || 'verifier'} output unusable: ${detail}`], unusable: true }),
   }, stubs)));
 }
 
-async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1') {
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null) {
   const body = extractCodeLane(fs.readFileSync(scriptPath, 'utf8'));
   const helpers = loadStableHelpers(scriptPath);
   const logs = [];
+  // Every orchestrator-tree checkpoint the lane reaches is recorded here (aac-routines issue 192).
+  const checkpoints = [];
+  const treeGuardCheck = async (label, ticketNumber) => {
+    checkpoints.push(`${label}#${ticketNumber}`);
+    if (guardSpy) await guardSpy(label, ticketNumber);
+  };
   // runId is fixed while invocationId varies - the resume shape of issue 291. The resume-stable
   // helpers are the script's own (issue 271), so the prompts under test are the real ones.
   const runCodeLane = await instantiateCodeLane(body, agentMock, logs, {
@@ -416,9 +428,10 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+    treeGuardCheck,
   });
   const result = await runCodeLane(ticket, workerIndex);
-  return { result, logs };
+  return { result, logs, checkpoints };
 }
 
 test('lane harness resolves a module-scope binding it does not model (issue 340)', async () => {
@@ -546,12 +559,48 @@ for (const file of RESUME_GUARD_PAIR) {
       if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/500' };
       throw new Error('unexpected label: ' + opts.label);
     };
-    const { result } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
+    const { result, checkpoints } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
     assert.deepEqual(calls, ['pr-check:#9@inv1', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
       'when no open PR exists the pre-check must be followed by impl/verify/deliver in order');
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
     assert.deepEqual(result.discoveries, ['finding-A']);
+    // Ported from the aac-routines fork (issues 192, 270): one orchestrator-tree checkpoint after
+    // the implementer, one after the (unisolated) verifier, one after Deliver pushes.
+    assert.deepEqual(checkpoints, ['implement-attempt1#9', 'verify-attempt1#9', 'deliver#9'],
+      'the code lane must checkpoint the orchestrator tree after Implement, Verify and Deliver');
+  });
+
+  // ---- Deliver never ticks acceptance boxes (aac-routines issue 264) ----
+
+  test(`${rel} Deliver prompt forbids ticking acceptance boxes`, () => {
+    const body = extractCodeLane(fs.readFileSync(file, 'utf8'));
+    const deliverIdx = body.indexOf('`Deliver verified branch');
+    assert.ok(deliverIdx > 0, 'code lane must build a Deliver prompt');
+    const prompt = body.slice(deliverIdx, body.indexOf('label: `deliver:#', deliverIdx));
+    assert.match(prompt, /do NOT tick any acceptance box/,
+      'Deliver prompt must forbid ticking acceptance boxes: the boxes wait for the merge (aac-routines issue 264)');
+    assert.doesNotMatch(prompt, /tick-acceptance-boxes\.js/,
+      'Deliver must not run the acceptance-box ticker itself; the merge workflow owns that step');
+    assert.doesNotMatch(prompt, /tick (?:each|the|every) (?:unticked )?acceptance box/i,
+      'Deliver prompt must carry no instruction to tick a box');
+  });
+
+  // ---- every per-ticket agent() call is wrapped (aac-routines issues 191, 270) ----
+
+  test(`${rel} wraps every per-ticket agent() call so a schema failure cannot null the ticket`, () => {
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    const unwrapped = [];
+    lines.forEach((line, i) => {
+      if (!/await agent\(/.test(line)) return;
+      if (/const scout = await agent\(/.test(line)) return; // runs before any ticket exists
+      let j = i - 1;
+      while (j >= 0 && lines[j].trim() === '') j--;
+      if (!/try \{$/.test(lines[j] || '')) unwrapped.push(`${i + 1}: ${line.trim()}`);
+    });
+    assert.deepEqual(unwrapped, [],
+      'each of these agent() calls must sit directly inside a try block, or a StructuredOutput '
+      + 'retry-cap throw drops its ticket out of the run report entirely (aac-routines issues 191, 270)');
   });
 
   // ---- Pre-push merge (issue 318) ----

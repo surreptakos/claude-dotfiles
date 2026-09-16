@@ -15,10 +15,12 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; a container caller passes it explicitly because the workflow runtime hides process.env), verifierAgent (agent type for the blind verifier; default `fleet-verifier` under gh, empty string runs it under the session default agent type), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober)}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; a container caller passes it explicitly because the workflow runtime hides process.env), verifierAgent (agent type for the blind verifier; default `fleet-verifier` under gh, empty string runs it under the session default agent type), testCommand (overrides the scout's test command), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir}',
   phases: [
+    { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report (aac-routines issues 192, 270)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer appends discoveries' },
@@ -58,6 +60,13 @@ const cfg = Object.assign({
   // fork with different tooling passes its own list instead.
   regenCommands: null,
   verifierAgent: null,      // null = default (`fleet-verifier` under gh, unpinned under mcp); '' = unpinned
+  // ---- orchestrator-tree isolation guard (aac-routines issue 192) ----
+  // 'auto' (default) turns the guard on wherever the served repo ships the guard tool and off
+  // where it does not; true makes a missing tool a hard abort; false disables the guard.
+  treeGuard: 'auto',
+  treeGuardScript: 'tools/orchestrator-tree-guard.js', // the served repo's copy of the guard tool
+  orchestratorCwd: '.',     // the orchestrator's OWN checkout, as the guard agents see it
+  treeGuardStateDir: '.git/orchestrator-tree-guard', // inside .git, so the baseline never shows in `git status`
 }, args || {})
 
 // ---- reusing a dead run's work (issue 317) ----
@@ -280,6 +289,195 @@ const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], prope
   labels: { type: 'array', items: { type: 'string' }, description: 'human lane only: the ticket labels after the hand-back relabel - ready-for-local-agent or ready-for-human present, ready-for-agent gone' },
 } }
 
+// ---- unusable-output helpers (aac-routines issues 191, 270) ----
+// A sub-agent can fail to return schema-conformant output at all: the harness retries
+// StructuredOutput up to five times and then throws out of `agent(...)`. An unwrapped throw
+// inside a per-ticket stage makes `pipeline` record that ticket as null, so the ticket vanishes
+// from BOTH `delivered` and `failed` in the run report - aac-routines run wf_348ca8c2-663
+// (2026-09-11) lost its #121 that way, leaving a green implementer branch nobody looked at.
+// Every per-ticket `agent(...)` call below is therefore wrapped, and every reason is phrased the
+// same way - `<who> output unusable: ...` with the harness's own error text in parentheses,
+// never a bare 'failed'. The Scout call is deliberately NOT wrapped: it runs before any ticket
+// exists, so a throw there ends the run with nothing to lose.
+function unusableReason(who, detail) {
+  const d = String(detail || '').trim()
+  const base = `${who} output unusable: no reply matching its schema within the StructuredOutput retry cap`
+  return d ? `${base} (${d})` : base
+}
+
+function unusableVerdict(detail, who) {
+  return { pass: false, evidence: '', failures: [unusableReason(who || 'verifier', detail)], unusable: true }
+}
+
+// Every read of a verdict's failures goes through this: a reason-less entry in the run report is
+// exactly the silence aac-routines issue 191 is about.
+function failuresOf(verdict) {
+  if (!verdict) return ['no verdict recorded for this attempt']
+  const list = (Array.isArray(verdict.failures) ? verdict.failures : []).map(f => String(f).trim()).filter(Boolean)
+  if (list.length) return list
+  return [verdict.pass ? 'verifier passed and listed no failures' : 'verifier returned pass=false with no failures listed']
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator-tree isolation guard (aac-routines issue 192, extended by 270)
+// ---------------------------------------------------------------------------
+// aac-routines run wf_348ca8c2-663 (2026-09-11) ended with nine files STAGED in the
+// orchestrator's own index, byte-identical to `agent/issue-132-attempt1`. The Implement phase is
+// not the exposed one - implementers run with `isolation: 'worktree'`. The VERIFY phase has no
+// isolation option at all: it runs in the orchestrator's own checkout by design, because it needs
+// `git worktree add` from a real repository, and a verifier that reaches for
+// `git checkout <branch> -- .` instead of a scratch worktree stages exactly that branch's files in
+// exactly this index. The Deliver phase runs unisolated for the same reason (aac-routines 270).
+//
+// So the guard is wired at four checkpoints - after Implement, after Verify, after Deliver, and
+// before Report - and each one THROWS. A throw inside a pipeline stage drops that ticket to null,
+// so its own Verify and Deliver never run; the `breaches` array then trips every other in-flight
+// ticket's next checkpoint and the Deliver gate, and the run itself fails before Report. The probe
+// and human lanes have no per-lane checkpoint of their own: they open no PR and push nothing, so
+// the pre-report checkpoint is the one that covers them.
+//
+// Concurrency: `pipeline()` interleaves tickets, so checkpoints overlap. Two design choices make
+// that safe rather than racy. (1) The guard tool never mutates shared state - the baseline is
+// written once and only read afterwards, and `check` takes no git lock. (2) Attribution is by
+// CONTENT, not by timing: each check is handed every wave branch as a `--candidate`, and a leaked
+// file is blamed on the branch whose blob it matches, so the ticket that CAUSED the leak is named
+// even when another ticket's checkpoint OBSERVED it first. The only mutable bookkeeping
+// (`attributed`, `breaches`) lives here, in the workflow's single-threaded JavaScript, where a
+// synchronous read-modify-write between awaits cannot interleave.
+//
+// Portability: this one script serves every fleeted repo, and `tools/orchestrator-tree-guard.js`
+// ships in aac-routines only. The baseline command therefore probes for the tool first and exits 3
+// when it is absent; under the default `treeGuard: 'auto'` that turns the guard off for repos that
+// do not serve it, and `treeGuard: true` makes the same absence a hard abort.
+const GUARD_CMD = `node ${cfg.treeGuardScript}`
+const breaches = []
+const attributed = new Set()
+let guardStatePath = null
+let guardCandidates = ''   // filled in once the wave is known, below
+let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
+
+// A guard agent runs ONE fixed command and hands back its exit code and stdout verbatim. Nothing
+// is left to its judgement, so a paraphrase is detectable: stdout that does not JSON.parse is
+// treated as could-not-audit, not as a pass.
+const TREE_GUARD = { type: 'object', required: ['exitCode', 'stdout', 'stderr'], properties: {
+  exitCode: { type: 'integer', description: 'REAL exit code of the guard command (0 clean, 1 leak, 2 could-not-audit, 3 guard tool not present in this repo)' },
+  stdout: { type: 'string', description: 'the command stdout VERBATIM - one line of JSON when the guard ran; do not reformat, summarise or re-key it' },
+  stderr: { type: 'string', description: 'the command stderr verbatim ("" if none)' },
+} }
+
+function guardAgentPrompt(command) {
+  return `Run exactly this one bash command, from the repository root, and report its result:
+
+${command}
+
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
+file. Do not interpret the output. Return the command's REAL exit code (0, 1, 2 or 3 - not the exit
+code of a pipe) plus its stdout and stderr VERBATIM. When the guard ran at all its stdout is a
+single line of JSON: copy it character for character; do not reformat it, summarise it, or invent
+fields.`
+}
+
+function breachMessage() {
+  return 'ticket-fleet run FAILED - orchestrator worktree isolation breached (aac-routines issue 192). '
+    + breaches.map(b => `${b.label}: ${b.who} - ${b.entries.join('; ')}`).join(' | ')
+    + '. The orchestrator\'s own checkout is dirty: reset it against the named ticket\'s branch '
+    + 'before re-running.'
+}
+
+// A breach recorded anywhere in the wave stops every other chain before it spends another
+// sub-session or - worse - reaches Deliver and pushes from a tree nobody can trust.
+function assertNoBreach() { if (breaches.length) throw new Error(breachMessage()) }
+
+phase('Setup')
+if (treeGuardOn) {
+  // Wrapped (aac-routines issue 270): a guard agent that blows the StructuredOutput retry cap
+  // throws out of agent(...), and an unwrapped throw here would abort the run with the harness's
+  // raw message instead of the one that tells the operator what it means.
+  let baseline = null, baselineError = null
+  try {
+    baseline = await agent(
+      guardAgentPrompt(`[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd ${cfg.orchestratorCwd} --state-dir ${cfg.treeGuardStateDir}`),
+      { label: 'tree-guard:baseline', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
+    )
+  } catch (err) {
+    baselineError = unusableReason('tree-guard:baseline', (err && err.message) || err)
+  }
+  let parsed = null
+  try { parsed = JSON.parse(String((baseline && baseline.stdout) || '')) } catch (e) { parsed = null }
+  if (baseline && baseline.exitCode === 3) {
+    if (cfg.treeGuard === 'auto') {
+      treeGuardOn = false
+      log(`Orchestrator-tree guard OFF: ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192 ships the guard tool there). Pass treeGuard:true to make its absence abort instead.`)
+    } else {
+      throw new Error(`ticket-fleet run ABORTED before Scout - treeGuard:true but ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192). Add the guard tool to the served repo or run with treeGuard:'auto'.`)
+    }
+  } else if (!baseline || baseline.exitCode !== 0 || !parsed || !parsed.statePath) {
+    throw new Error(
+      'ticket-fleet run ABORTED before Scout - could not baseline the orchestrator tree (aac-routines issue 192). '
+      + `exit=${baseline ? baseline.exitCode : 'null'} stderr=${baseline ? baseline.stderr : ''} error=${baselineError || 'none'}. `
+      + 'Exit 2 is never a pass: without a baseline a leak cannot be told from pre-existing dirt, '
+      + 'so the run must not start.'
+    )
+  } else {
+    guardStatePath = parsed.statePath
+    log(`Orchestrator-tree baseline taken (aac-routines issue 192): ${parsed.baselineCount} pre-existing entr${parsed.baselineCount === 1 ? 'y' : 'ies'}, state ${guardStatePath}. Dirt that pre-dates this run is the operator's and is never blamed on a ticket.`)
+  }
+} else {
+  log('Orchestrator-tree guard DISABLED by args (treeGuard:false) - isolation breaches will not fail this run (aac-routines issue 192).')
+}
+
+/**
+ * One isolation checkpoint. Throws on a breach and on could-not-audit; returns quietly when the
+ * orchestrator's tree holds nothing beyond the run baseline. `label` names the checkpoint (e.g.
+ * `implement-attempt1`), `ticketNumber` is the ticket whose chain is being checked - which is who
+ * OBSERVED a leak, not necessarily who caused it.
+ */
+async function treeGuardCheck(label, ticketNumber) {
+  if (!treeGuardOn) return
+  // A breach already recorded elsewhere in the wave fails this chain too, before it can spend
+  // another sub-session or reach Deliver.
+  assertNoBreach()
+
+  // Wrapped (aac-routines issue 270): a guard agent that cannot produce schema-conformant output
+  // throws out of agent(...) after the StructuredOutput retry cap. That throw is a
+  // could-not-audit, and could-not-audit is never a pass - so it is converted into the named
+  // throw below, carrying the harness's error text, rather than escaping unattributed.
+  let res = null, agentError = null
+  try {
+    res = await agent(
+      guardAgentPrompt(`${GUARD_CMD} check --cwd ${cfg.orchestratorCwd} --state ${guardStatePath} --label ${label} --ticket ${ticketNumber} ${guardCandidates}`),
+      { label: `tree-guard:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
+    )
+  } catch (err) {
+    agentError = unusableReason(`tree-guard:${label}#${ticketNumber}`, (err && err.message) || err)
+  }
+  let report = null
+  try { report = JSON.parse(String((res && res.stdout) || '')) } catch (e) { report = null }
+
+  if (!res || res.exitCode === 2 || !report || !Array.isArray(report.newEntries)) {
+    throw new Error(
+      `orchestrator-tree guard COULD NOT AUDIT at ${label} (ticket #${ticketNumber}) - aac-routines issue 192. `
+      + `exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''} error=${agentError || 'none'}. `
+      + 'Exit 2 is never a pass.'
+    )
+  }
+
+  // Synchronous read-modify-write: no await inside, so concurrent checkpoints cannot interleave
+  // here and one leak is blamed on one ticket, once.
+  const fresh = report.newEntries.filter(e => !attributed.has(e.path))
+  for (const e of fresh) attributed.add(e.path)
+  if (!fresh.length) return
+
+  const blamed = [...new Set(fresh.flatMap(e => e.matchedTickets || []))]
+  const who = blamed.length
+    ? `ticket ${blamed.map(n => '#' + n).join(', #')} (content-matched to ${[...new Set(fresh.flatMap(e => e.matchedBranches || []))].join(', ')})`
+    : `ticket #${ticketNumber} (observed at its checkpoint; content matched no wave branch, so this names the observer, not a proven author)`
+  const entries = fresh.map(e => `${e.status} ${e.path}`)
+  breaches.push({ label, observedBy: ticketNumber, blamed, who, entries })
+  log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}`)
+  throw new Error(breachMessage())
+}
+
 // Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
 // #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
 // stops them racing; this brief is the other half, and it travels with any discovery-triage ticket
@@ -361,6 +559,15 @@ if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awai
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 
+// Every branch this wave can possibly produce, offered to every checkpoint as a
+// content-attribution candidate (aac-routines issue 192). A branch that was never created simply
+// never matches, so predicting the names costs nothing and removes the need to know which ticket
+// is ahead of which - the point of doing this under concurrency. The shape is this script's own
+// per-worker branch name, not the fork's: ticket, attempt, runId and the wave index.
+guardCandidates = wave
+  .flatMap((t, workerIndex) => Array.from({ length: cfg.maxAttempts }, (_, i) => `--candidate ${t.number}=agent/issue-${t.number}-attempt${i + 1}-wf_${runId}-w${workerIndex}`))
+  .join(' ')
+
 // ---- Lanes ----
 // Every lane is run by subagents: the orchestrating session delegates, it never does ticket work
 // itself. Doing a lane directly is allowed only when running it through a subagent is impossible
@@ -368,14 +575,18 @@ log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
 const runProbeLane = async (t) => {
-  let lastVerdict = null, probe = null, evidenceBlocks = ''
+  let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
     // Attempt 1 takes a recorded prober result when the caller supplied one (issue 317); the
     // `||` short-circuits, so no prober agent is started for it. Attempt 2+ always re-probes.
     const reuse = attempt === 1 && cfg.priorProbe ? cfg.priorProbe[t.number] : null
     if (reuse) log(`#${t.number}: reusing prior prober result from args.priorProbe (${(reuse.items || []).length} item(s)); no probe agent started for attempt 1.`)
-    probe = reuse || await agent(
+    // Wrapped (aac-routines issue 270).
+    let probeError = null
+    probe = null
+    try {
+      probe = reuse || await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
@@ -390,11 +601,23 @@ Rules:
 You are operating autonomously; the user cannot answer questions mid-task. Do not end your turn on a plan, a question or a promise - run the commands first.
 Return structured output only.`,
       { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: cfg.implModel, isolation: 'worktree' }
-    )
-    if (!probe || !probe.items.length) { lastVerdict = { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }; continue }
+      )
+    } catch (err) {
+      probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
+      probe = null
+    }
+    if (!probe || !probe.items.length) {
+      lastVerdict = probeError
+        ? unusableVerdict(probeError, `probe:#${t.number}.${attempt}`)
+        : { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }
+      if (probeError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      continue
+    }
 
     evidenceBlocks = probe.items.map(i => `ITEM: ${stableText(i.item)}\nCOMMANDS:\n${stableText(i.commands)}\nOUTPUT:\n${stableText(i.outputVerbatim)}\nEXIT: ${stableText(i.exitCodes)}`).join('\n----\n')
-    lastVerdict = await agent(
+    // Wrapped (aac-routines issues 191, 270).
+    try {
+      lastVerdict = await agent(
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
 Criteria (verbatim):\n${t.criteria}
@@ -405,11 +628,16 @@ Commands and output claimed:\n${evidenceBlocks}
 4. Fabrication check: output too clean for the command, paraphrased, or missing the tool's usual noise is a failure. So is any printed secret value.
 Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
-    )
+      )
+    } catch (err) {
+      lastVerdict = unusableVerdict((err && err.message) || err, `verify:#${t.number}.${attempt}`)
+    }
+    if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', `verify:#${t.number}.${attempt}`)
     // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
     // later read (the retry prompt, the run report) sees an array.
     if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
-    if (lastVerdict && lastVerdict.pass) break
+    if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+    if (lastVerdict.pass) break
   }
 
   const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
@@ -417,7 +645,9 @@ Make no repository changes, no commits, no pushes. Return structured output only
   if (done && cfg.deliver) {
     const blocked = stableList(probe.blocked)
     const blockedList = blocked.length ? blocked.map(b => '- ' + b).join('\n') : ''
-    delivery = await agent(
+    // Wrapped (aac-routines issue 270).
+    try {
+      delivery = await agent(
       `Post ONE resolution comment on issue #${t.number} (${t.title}).
 ${rules.commentPost()}
 Body, in this order:
@@ -432,9 +662,14 @@ _Generated by [Claude Code](https://claude.ai/code)_
 
 Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
-    )
+      )
+    } catch (err) {
+      deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
+      delivery = null
+      log(deliveryFailure)
+    }
   }
-  return { ticket: t.number, done, kind: 'probe', branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
+  return { ticket: t.number, done, kind: 'probe', deliveryFailure, branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
 }
 
 // Human lane: a desktop session or a person performs the steps. The agent verifies only what
@@ -448,7 +683,10 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // `agent` under either instrument.
 // [FLEET-HUMAN-LANE-START]
 const runHumanLane = async (t) => {
-  const handoff = await agent(
+  // Wrapped (aac-routines issue 270).
+  let handoff = null, handoffError = null, deliveryFailure = null
+  try {
+    handoff = await agent(
     `Issue #${t.number}: ${t.title} is a human-lane ticket - either a desktop session or a person performs the remaining steps, you do not (${t.kindReason}).
 ${rules.handoffRead(t.number)}
 Criteria (verbatim):\n${t.criteria}
@@ -459,7 +697,12 @@ Do ONLY what an agent can do from this container:
 Return: agentSide = the commands you ran and their verbatim output; ownerSide = the remaining steps, precise enough to follow without re-reading the ticket (where to click, what to enter, what to check afterwards); ready = true only when everything an agent can do is done and only human/local-agent steps remain; remainingKind = 'local-agent' when a desktop session could take the remaining steps (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep needing a project-scoped gh token, an edit the auto-mode classifier blocks in a container), 'human' when they are genuinely a person's judgment, credential or sign-off.
 Return structured output only.`,
     { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
-  )
+    )
+  } catch (err) {
+    handoffError = unusableReason(`handoff:#${t.number}`, (err && err.message) || err)
+    handoff = null
+    log(handoffError)
+  }
   let delivery = null
   if (handoff && cfg.deliver) {
     const remainingKind = handoff.remainingKind === 'local-agent' ? 'local-agent' : 'human'
@@ -468,7 +711,8 @@ Return structured output only.`,
     const handBackLabel = remainingKind === 'local-agent' ? 'ready-for-local-agent' : 'ready-for-human'
     const ownerSide = stableList(handoff.ownerSide)
     const ownerList = ownerSide.length ? ownerSide.map(s => '- ' + s).join('\n') : emptyLine
-    delivery = await agent(
+    try {
+      delivery = await agent(
       `Post ONE status comment on issue #${t.number} (${t.title}), then hand the ticket back to the owner by relabelling it.
 ${rules.commentPost()}
 Body, in this order:
@@ -483,11 +727,18 @@ Then, and only after the comment is posted, relabel the ticket so the next run l
 Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and "ready-for-agent" must not.
 Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that a step outside this container was performed. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
-    )
+      )
+    } catch (err) {
+      deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
+      delivery = null
+      log(deliveryFailure)
+    }
   }
   return {
-    ticket: t.number, done: !!handoff, kind: 'human', branch: null, labels: (delivery && delivery.labels) || null,
-    verdict: handoff ? { pass: handoff.ready, evidence: handoff.agentSide, failures: handoff.ready ? [] : handoff.ownerSide } : null,
+    ticket: t.number, done: !!handoff, kind: 'human', branch: null, deliveryFailure, labels: (delivery && delivery.labels) || null,
+    verdict: handoff
+      ? { pass: handoff.ready, evidence: handoff.agentSide, failures: handoff.ready ? [] : handoff.ownerSide }
+      : unusableVerdict(handoffError, `handoff:#${t.number}`),
     prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: [],
   }
 }
@@ -529,14 +780,24 @@ Filter the returned array to entries whose head.ref (the branch name of the PR's
 1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
 2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\`. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
 3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
-  const openPR = await agent(
+  // Wrapped (aac-routines issue 270): a pr-check that blows the StructuredOutput retry cap must
+  // not null the whole ticket. An unusable answer is treated as "no open PR" - the worst case is
+  // a duplicate PR, which a human can close; the alternative is a ticket that never runs and
+  // never appears in the run report.
+  let openPR = null
+  try {
+    openPR = await agent(
     `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
 Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
 ${prCheckSteps}
 If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
 Make no repository change, no comment, no PR. Return structured output only.`,
     { label: `pr-check:#${t.number}@${invocationId}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
-  )
+    )
+  } catch (err) {
+    log(`${unusableReason(`pr-check:#${t.number}`, (err && err.message) || err)} - proceeding as if no open PR exists.`)
+    openPR = null
+  }
   if (openPR && openPR.found) {
     log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)
     return {
@@ -558,9 +819,18 @@ Make no repository change, no comment, no PR. Return structured output only.`,
     if (reuse) log(`#${t.number}: reusing prior implementer result from args.priorImpl (branch ${reuse.branch}); no impl agent started for attempt 1.`)
     branch = (reuse && reuse.branch) ? String(reuse.branch) : `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these with a genuinely different approach, not a parameter tweak')
-    impl = reuse || await agent(
+    // Wrapped (aac-routines issue 270): an implementer that blows the StructuredOutput retry cap
+    // used to throw straight out of this stage, so `pipeline` nulled the ticket and it vanished
+    // from both `delivered` and `failed`. It is now a failed attempt carrying the error text,
+    // which the next attempt's prior-findings repeats and the run report prints. The checkpoint
+    // below still runs: an implementer that died mid-run can still have left dirt behind.
+    let implError = null
+    impl = null
+    try {
+      impl = reuse || await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
+Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
@@ -571,8 +841,24 @@ Scope: if, while working or testing, you find a pre-existing bug, a performance 
 Edits: the number of tokens used to edit files is best minimized, all else being equal, so when it will not affect the end result, surgically edit a file rather than rewrite the entire thing.
 Return structured output only.`,
       { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: cfg.implModel, isolation: 'worktree' }
-    )
-    if (!impl || !impl.committed) { lastVerdict = { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }; continue }
+      )
+    } catch (err) {
+      implError = unusableReason(`impl:#${t.number}.${attempt}`, (err && err.message) || err)
+      impl = null
+    }
+
+    // Checkpoint 1 of 4 (aac-routines issue 192): the orchestrator's own tree, right after this
+    // ticket's implementer returned. A throw here drops the ticket out of the pipeline, so its
+    // Verify and Deliver stages never run.
+    await treeGuardCheck(`implement-attempt${attempt}`, t.number)
+
+    if (!impl || !impl.committed) {
+      lastVerdict = implError
+        ? unusableVerdict(implError, `impl:#${t.number}.${attempt}`)
+        : { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }
+      if (implError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      continue
+    }
     // The implementer's self-reported branch never reaches a prompt: it is an agent result, so
     // embedding it would tie the verifier's cache key to that result's serialization (issue 271),
     // and a wrong self-report would point the verifier at a branch nobody asked for. The
@@ -585,9 +871,12 @@ Return structured output only.`,
     // Read, Grep, Glob, Bash. A cloud container has no such registry entry, so a run there
     // passes `verifierAgent: ''` (or `instrument: 'mcp'`) and the verifier launches under the
     // session default agent type; the restraint there is the container sandbox itself.
-    lastVerdict = await agent(
+    // Wrapped (aac-routines issues 191, 270).
+    try {
+      lastVerdict = await agent(
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
+Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
 In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
@@ -596,16 +885,31 @@ In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - br
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.`,
       { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
-    )
+      )
+    } catch (err) {
+      lastVerdict = unusableVerdict((err && err.message) || err, `verify:#${t.number}.${attempt}`)
+    }
+
+    // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
+    // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
+    // transcript forensics put the 2026-09-11 leak on.
+    await treeGuardCheck(`verify-attempt${attempt}`, t.number)
+
+    if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', `verify:#${t.number}.${attempt}`)
     // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
     // later read (the retry prompt, the run report) sees an array.
     if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
-    if (lastVerdict && lastVerdict.pass) break
+    if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+    if (lastVerdict.pass) break
   }
 
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
   let delivery = null
+  let deliveryFailure = null
   if (done && cfg.deliver) {
+    // Nothing gets pushed once any ticket in the wave has breached isolation (aac-routines issue
+    // 192): the tree the verifier judged from is no longer trustworthy.
+    assertNoBreach()
     // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
     // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
     // commit messages say.
@@ -617,6 +921,15 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
     const prToolNote = instrument === 'mcp'
       ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
       : ''
+    // Deliver DOES NOT TICK ACCEPTANCE BOXES (aac-routines issue 264). It used to, straight after
+    // the PR was created, which meant every fleet issue read `- verified in PR #N` while #N was
+    // open and the default branch carried none of the change. A ticked box is a claim that the
+    // work shipped, so it waits for the merge: where the served repo has a tick-acceptance-boxes
+    // merge workflow, that workflow ticks the boxes on the `pull_request` closed+merged event.
+    // Wrapped (aac-routines issue 270): a Deliver sub-agent that blows the StructuredOutput retry
+    // cap used to throw out of this stage, nulling a ticket whose branch had already passed
+    // verification - quite possibly after the push and the PR had already happened. The ticket now
+    // carries a named deliveryFailure into the run report instead of disappearing from it.
     // Pre-push merge (issue 318). A wave's branches all fork from the same commit; by the time
     // the last one is verified, master has moved and every branch that touched a skill carries a
     // rotated stamp block and a rebuilt marketplace payload. Merging here, with the two safe
@@ -627,7 +940,8 @@ Clean up your scratch worktree (git worktree remove) when done. Return structure
     const regenNote = Array.isArray(cfg.regenCommands) && cfg.regenCommands.length
       ? 'run exactly these, in order, from the repo root:\n' + cfg.regenCommands.map(c => '   $ ' + c).join('\n')
       : "read CLAUDE.md for the commands this repo uses to re-stamp its skills and rebuild its generated payload (in claude-dotfiles they are the two commands in the 'Skill stamps' section) and run them from the repo root"
-    delivery = await agent(
+    try {
+      delivery = await agent(
       `Deliver verified branch ${branch} for issue #${t.number}.${prToolNote ? ' ' + prToolNote : ''}
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
@@ -647,9 +961,26 @@ B2. ${rules.prCreate()} - title "fix: ${t.title} (#${t.number})"; body covering:
 B3. ${rules.prComment()} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean" or "resolved").
 
-Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${scout.defaultBranch} itself. Return structured output only.`,
+Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${scout.defaultBranch} itself. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
-    )
+      )
+    } catch (err) {
+      deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
+      delivery = null
+    }
+    if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
+      deliveryFailure = `deliver:#${t.number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${impl.branch} is verified but has no PR.`
+    }
+    // Log before the checkpoint below: a Deliver-phase breach throws out of this stage, and the PR
+    // URL (or the delivery failure) must not be lost with it.
+    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}`)
+
+    // Checkpoint 3 of 4 (aac-routines issue 270): the Deliver step pushes and opens the PR from
+    // the parent's context - unisolated, like the verifier - so it can dirty the orchestrator's
+    // tree itself. Before issue 270 the only checkpoint that could see that was `pre-report`,
+    // which runs after every ticket association has been dropped, so the breach was attributed to
+    // ticket #0. Checking here, while this ticket is still the one being delivered, names it.
+    await treeGuardCheck('deliver', t.number)
   }
   // A blocked pre-push merge is a delivery failure, not a silent no-op: the ticket lands in the
   // run result's `failed` list with the conflicting paths, and no PR exists to review.
@@ -665,7 +996,7 @@ Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${sc
     verdict: mergeBlocked
       ? { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([mergeFailure]) }
       : lastVerdict,
-    prUrl: mergeBlocked ? null : (delivery && delivery.prUrl), commentUrl: null,
+    prUrl: mergeBlocked ? null : (delivery && delivery.prUrl), commentUrl: null, deliveryFailure,
     conflictPaths, discoveries: (impl && impl.discoveries) || [],
   }
 }
@@ -697,26 +1028,77 @@ const grouped = await pipeline(lanes, async (lane) => {
 })
 const results = (grouped || []).flat()
 
+// Checkpoint 4 of 4 (aac-routines issue 192): the whole wave has drained. This is the one that
+// catches a leak no per-ticket checkpoint was still running to see - one from the last ticket
+// after its final check, from the probe or human lanes, or anything the parent context did
+// between the wave and here. It runs with ticket #0, so whatever it finds is attributed by
+// CONTENT or not at all; that is why the Deliver checkpoint above exists rather than leaving
+// Deliver-phase dirt to this one (aac-routines issue 270). It throws before Report, so a breached
+// run never finishes quietly.
+await treeGuardCheck('pre-report', 0)
+assertNoBreach()
+
 // ---- Report: single writer, no append races ----
 phase('Report')
-const clean = results.filter(Boolean)
+// Reconcile against the wave rather than dropping falsy results (aac-routines issue 191): a ticket
+// whose per-ticket stage produced nothing at all still belongs in `failed` with a reason.
+// `pipeline` returns one slot per input, in order, and nulls the slot when the stage threw.
+const clean = wave.map((t, i) => (results || [])[i] || {
+  ticket: t.number, done: false, kind: t.kind, branch: null,
+  verdict: { pass: false, evidence: '', failures: ['per-ticket stage produced no result; see the run log for the error that ended it'] },
+  prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
+})
 const allDiscoveries = clean.flatMap(r => r.discoveries)
+// Wrapped (aac-routines issue 270): the writer is the last agent(...) of the run, and a throw here
+// lost the whole run report - every delivered PR included - to a harness error. It is now a named
+// report entry, and the discovery strings it failed to append come back in `discoveryList` so
+// nothing has to be reconstructed from the log.
+let followupsError = null
 if (allDiscoveries.length) {
-  await agent(
-    `Append to ${cfg.followupsFile} at repo root (create if missing; append-only, never rewrite existing entries). Add a "## Run (ticket-fleet)" heading, then one bullet per finding, each self-contained:\n- ${allDiscoveries.join('\n- ')}\nCommit nothing. Return "appended N entries".`,
-    { label: 'followups-writer', phase: 'Report', model: cfg.reportModel, effort: 'low' }
-  )
+  try {
+    await agent(
+      `Append to ${cfg.followupsFile} at repo root (create if missing; append-only, never rewrite existing entries). Add a "## Run (ticket-fleet)" heading, then one bullet per finding, each self-contained:\n- ${allDiscoveries.join('\n- ')}\nCommit nothing. Return "appended N entries".`,
+      { label: 'followups-writer', phase: 'Report', model: cfg.reportModel, effort: 'low' }
+    )
+  } catch (err) {
+    followupsError = unusableReason('followups-writer', (err && err.message) || err)
+    log(`${followupsError} - ${allDiscoveries.length} discovery string(s) were NOT appended to ${cfg.followupsFile}; they are in this report's discoveryList.`)
+  }
 }
+
+// ---- durable run record (aac-routines issue 269) ----
+// Everything above this line lives in the harness journal, which is machine-local and dies with
+// the container: aac-routines run wf_348ca8c2-663 was unrecoverable four days later, so issue
+// 192's mechanism had to be re-derived by reasoning instead of read off the transcript. The record
+// that fixes that is written by the ORCHESTRATING SESSION - the session that invoked this workflow
+// - running RECORD_COMMAND in its own shell the moment this returns. Deliberately not a sub-agent:
+// a sub-session composing the record would be re-deriving the run's history from its own context,
+// which is the hallucination surface the record exists to remove. A Workflow script has no
+// filesystem of its own, so this phase names the command rather than running it.
+const RECORD_COMMAND = 'node tools/fleet-run-record.js --latest'
+log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the served repo from THIS session - not via a sub-agent - before the container is gone. It distils this run's journal into state/fleet-runs/<runId>.json. Where the served repo gitignores state/, post the record's digest as a comment on that repo's tracking issue: an ignored file dies with the container.`)
+
+// A ticket that verified but did not deliver is neither `delivered` (no PR or comment URL) nor,
+// before aac-routines issue 270, `failed` (done was true) - the issue 191 silence one phase later.
+// It is now listed in `failed` with the delivery error text.
 return {
   ran: clean.length,
   instrument,
   delivered: clean.filter(r => r.prUrl || r.commentUrl).map(r => ({ ticket: r.ticket, kind: r.kind, pr: r.prUrl || null, comment: r.commentUrl || null })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
-  failed: clean.filter(r => !r.done).map(r => ({ ticket: r.ticket, kind: r.kind, failures: r.verdict ? r.verdict.failures : ['no verdict'], conflictPaths: r.conflictPaths || [] })),
+  failed: clean.filter(r => !r.done || r.deliveryFailure).map(r => ({
+    ticket: r.ticket,
+    kind: r.kind,
+    failures: (r.done ? [] : failuresOf(r.verdict)).concat(r.deliveryFailure ? [r.deliveryFailure] : []),
+    conflictPaths: r.conflictPaths || [],
+  })),
   discoveries: allDiscoveries.length,
+  followupsError,
+  discoveryList: followupsError ? allDiscoveries : undefined,
   skippedBlocked: droppedBlocked,
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,
   skippedOverCap: droppedCap,
+  recordCommand: RECORD_COMMAND,
 }
