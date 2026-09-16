@@ -47,4 +47,27 @@ function parseVersion(v) {
   return nums.length ? nums : null;
 }
 
-module.exports = { compareVersions };
+/**
+ * Decide what the Plugins section should say about one installed plugin, given both the
+ * version compare and the git commits behind it.
+ *
+ * `installedSha` is installed_plugins.json's gitCommitSha (the marketplace commit the install
+ * was cut from); `cloneSha` is the marketplace clone's current HEAD. When the two are equal the
+ * clone IS the commit that was installed, so a version disagreement cannot be staleness on
+ * either side — it is the marketplace repo's own marketplace.json lagging its plugin.json at
+ * that commit. Seen 2026-09-15 on sstklen: plugin.json 1.1.0, marketplace.json 1.0.0, same
+ * commit 4752148, and `claude plugin marketplace update` changed nothing. Reported as
+ * 'manifest-lag' so the caller can stay silent instead of prescribing a refresh that is a no-op.
+ *
+ * Returns 'behind' | 'ahead' | 'equal' | 'manifest-lag' | null (see compareVersions).
+ */
+function classifyInstall({ installed, offered, installedSha, cloneSha } = {}) {
+  const cmp = compareVersions(installed, offered);
+  if (cmp === 'equal' || cmp === null) return cmp;
+  if (installedSha && cloneSha && String(installedSha).trim() === String(cloneSha).trim()) {
+    return 'manifest-lag';
+  }
+  return cmp;
+}
+
+module.exports = { compareVersions, classifyInstall };

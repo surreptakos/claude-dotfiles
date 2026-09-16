@@ -1,4 +1,12 @@
-# Cloud session permission posture — ruling (2026-09-14)
+# Cloud session permission posture — ruling (2026-09-14) — SUPERSEDED
+
+**SUPERSEDED by `docs/cloud-permission-posture-2026-09-15.md`** (Dan ruling
+2026-09-15, issue 245): the acceptEdits posture recorded here was flipped back
+to auto with two narrow prose rules on the same day it was recorded, and the
+2026-09-15 ruling then widened `autoMode.allow` to every action an unattended
+session takes, destructive and irreversible included. Read this file only for
+history — the final ruling under #170 (auto + two narrow rules) and its
+successor under #245 live in the newer doc.
 
 Recorded for issue 170.
 
