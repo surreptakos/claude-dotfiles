@@ -13,6 +13,11 @@
 # test suite runs under a clean environment from the start.
 unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_COMMON_DIR GIT_OBJECT_DIRECTORY
 
+# Issue 395: `node --test` exports NODE_TEST_CONTEXT into everything it spawns, and a nested
+# `node --test` that inherits it exits 0 even when a test throws. A commit made from inside a
+# node test would run this gate with the variable set and the suite could never fail it.
+unset NODE_TEST_CONTEXT
+
 echo "pre-commit: restore test (~13s)"
 powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree || {
   echo ""

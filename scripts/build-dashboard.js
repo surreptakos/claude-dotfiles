@@ -25,7 +25,13 @@ const CONFIG = {
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'DASHBOARD.md');
 
-function sh(cmd) { return execSync(cmd, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, cwd: ROOT }); }
+// Children run without NODE_TEST_CONTEXT. `node --test` exports that variable into everything it
+// spawns, and a nested `node --test` that inherits it exits 0 even when a test throws (Node 22.22.2:
+// `node --test boom.test.js` exits 1, `NODE_TEST_CONTEXT=child-v8 node --test boom.test.js` exits 0
+// on the same file). This script runs CONFIG.testCommand, and it is spawned from inside node tests,
+// so without the scrub the dashboard reports a failing suite as passing (claude-dotfiles issue 395).
+const CHILD_ENV = (() => { const e = Object.assign({}, process.env); delete e.NODE_TEST_CONTEXT; return e; })();
+function sh(cmd) { return execSync(cmd, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, cwd: ROOT, env: CHILD_ENV }); }
 function ghJson(cmd) { try { return JSON.parse(sh(cmd)); } catch (e) { return null; } }
 function esc(s) { return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' '); }
 // Render timestamps as YYYY-MM-DD from the ISO string, NOT as "N days ago" relative to Date.now().
