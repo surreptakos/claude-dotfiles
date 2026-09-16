@@ -3,8 +3,10 @@
 
 import importlib.util
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -249,6 +251,251 @@ class AacSkillsSupersedesMirroredPersonalCopy(unittest.TestCase):
             self.assertIn("# Foo (team)", body,
                           "the hand-edited aac-skills/ source must be the copy that ships")
             self.assertNotIn("# Foo (personal)", body)
+
+
+# Regression guard for issue 208: the plugin's hooks manifest must not name a script that isn't
+# in the payload. The eight governance hooks ride inside the plugin so a container that installs
+# it is gated the same way as a PC session; if a manifest entry points at a missing script the
+# hook fails silently and the gate does not fire.
+MARKETPLACE_HOOKS = REPO / "marketplace" / "aac-skills" / "hooks"
+_SCRIPT_PATH_RE = re.compile(
+    r'"\$\{CLAUDE_PLUGIN_ROOT\}/hooks/scripts/([A-Za-z0-9_.\-]+)"')
+
+
+def _iter_hook_commands(manifest):
+    for event_entries in (manifest.get("hooks") or {}).values():
+        for group in event_entries:
+            for hook in group.get("hooks", []):
+                for key in ("command", "commandWindows"):
+                    cmd = hook.get(key)
+                    if cmd:
+                        yield cmd
+
+
+class PluginHooksManifest(unittest.TestCase):
+    def setUp(self):
+        text = (MARKETPLACE_HOOKS / "hooks.json").read_text(encoding="utf-8")
+        self.manifest = json.loads(text)
+        self.scripts_dir = MARKETPLACE_HOOKS / "scripts"
+
+    def test_manifest_names_only_scripts_that_exist_in_the_payload(self):
+        referenced = set()
+        for cmd in _iter_hook_commands(self.manifest):
+            for m in _SCRIPT_PATH_RE.finditer(cmd):
+                referenced.add(m.group(1))
+        self.assertTrue(referenced,
+                        "manifest names no plugin-root scripts; expected the governance hooks")
+        missing = sorted(n for n in referenced if not (self.scripts_dir / n).is_file())
+        self.assertEqual(missing, [],
+                         f"hooks.json names scripts not shipped in the payload: {missing}")
+
+    def test_eight_governance_hook_entries_are_present(self):
+        # Session gate (start + end), state rehydrate, state stash (SessionEnd + PreCompact both
+        # invoke the same script), governance reminder, ask-matt gate on prompt / pre-tool /
+        # post-tool / stop. Nine hook entries in total -- state-stash rides two events -- across
+        # the six lifecycle events the PC settings.json wires today.
+        counts = {}
+        for event, entries in (self.manifest.get("hooks") or {}).items():
+            for group in entries:
+                for hook in group.get("hooks", []):
+                    cmd = hook.get("command", "")
+                    for m in _SCRIPT_PATH_RE.finditer(cmd):
+                        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+        # State-stash rides both PreCompact and SessionEnd (two entries).
+        self.assertEqual(counts.get("session-gate.js"), 3,
+                         "session-gate.js should fire on SessionStart, SessionEnd and UserPromptSubmit")
+        self.assertEqual(counts.get("state-rehydrate.js"), 1)
+        self.assertEqual(counts.get("state-stash.js"), 2,
+                         "state-stash.js rides both PreCompact and SessionEnd")
+        self.assertEqual(counts.get("governance-reminder.js"), 1)
+        self.assertEqual(counts.get("ask_matt_gate.py"), 4,
+                         "ask_matt_gate.py should fire on prompt, pre-tool, post-tool and stop")
+
+    def test_no_pwsh_only_invocation_in_the_hook_commands(self):
+        # Acceptance criterion 3: every script runs on python3 and node only. A pwsh-only branch
+        # would need to be guarded and skipped with a printed reason; there is no such branch here,
+        # and this guard makes sure a later edit does not slip one in without a paired guard. The
+        # marker hook's probe reports `command -v pwsh` -- a which-check that prints `none` when
+        # pwsh is absent, not an invocation -- so it is exempt.
+        for cmd in _iter_hook_commands(self.manifest):
+            if "hooks/scripts/" not in cmd:
+                continue
+            self.assertNotRegex(cmd, r"\bpwsh\b",
+                                f"pwsh-only invocation in hook command: {cmd!r}")
+
+    def test_scripts_reference_plugin_root_not_a_home_path(self):
+        for cmd in _iter_hook_commands(self.manifest):
+            if "hooks/scripts/" not in cmd:
+                continue  # the marker sh-c echo does not name a shipped script
+            self.assertNotRegex(cmd, r"(?:~|\$HOME|%USERPROFILE%|__USERHOME__)",
+                                f"hook command reaches through a home path: {cmd!r}")
+
+
+# Regression guard for issue 208 criterion 4 (deduplication of governance hooks between the
+# plugin payload and the PC's live-tree ~/.claude/settings.json). Until the settings entries come
+# out, the plugin must not make the hooks fire twice on a PC session -- so each plugin-shipped
+# governance script self-guards: running as the plugin copy while settings.json still dispatches
+# the same script by name, it exits silently and leaves the user-settings entry to fire once.
+# The guard keys on the settings ENTRY, not on the live file: the live-tree files stay after the
+# entries are gone (the packager builds this payload from their mirror, and the restore test
+# executes them), so a presence check would skip forever and the hook would fire zero times.
+class PluginHookDedupGuard(unittest.TestCase):
+    scripts_dir = REPO / "marketplace" / "aac-skills" / "hooks" / "scripts"
+
+    JS_FAKE = (
+        "#!/usr/bin/env node\n"
+        "try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}\n"
+        "process.stdout.write('SENTINEL_WROTE');\n"
+    )
+    PY_FAKE = (
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "sys.path.insert(0, str(Path(__file__).resolve().parent))\n"
+        "try:\n"
+        "    from _plugin_hook_guard import skip_if_live_tree_will_fire\n"
+        "    skip_if_live_tree_will_fire(Path(__file__).resolve())\n"
+        "except Exception:\n"
+        "    pass\n"
+        "sys.stdout.write('SENTINEL_WROTE')\n"
+    )
+
+    def _plugin(self, root, guard, script_name, body):
+        plugin_root = root / "plugin"
+        scripts = plugin_root / "hooks" / "scripts"
+        scripts.mkdir(parents=True)
+        shutil.copy2(self.scripts_dir / guard, scripts / guard)
+        script = scripts / script_name
+        script.write_text(body, encoding="utf-8")
+        return plugin_root, script
+
+    @staticmethod
+    def _home(root, *, settings_names=(), live_files=()):
+        """A fake home. settings_names: script basenames settings.json dispatches from the live
+        tree. live_files: basenames present under ~/.claude/hooks regardless of settings."""
+        home = root / "home"
+        claude = home / ".claude"
+        (claude / "hooks").mkdir(parents=True)
+        for name in live_files:
+            (claude / "hooks" / name).write_text("// live twin\n", encoding="utf-8")
+        if settings_names:
+            entries = [{"hooks": [{"type": "command",
+                                   "command": f'node "{claude / "hooks" / n}" start'}]}
+                       for n in settings_names]
+            (claude / "settings.json").write_text(
+                json.dumps({"hooks": {"SessionStart": entries}}), encoding="utf-8")
+        return home
+
+    @staticmethod
+    def _run(argv, plugin_root, home):
+        env = {
+            **os.environ,
+            "CLAUDE_PLUGIN_ROOT": str(plugin_root),
+            "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "PLUGIN_HOOK_GUARD_DISABLE": "",
+        }
+        return subprocess.run(argv, capture_output=True, text=True, env=env, timeout=15)
+
+    def test_guard_helper_files_ship_in_the_payload(self):
+        for name in ("_plugin_hook_guard.js", "_plugin_hook_guard.py"):
+            self.assertTrue((self.scripts_dir / name).is_file(),
+                            f"plugin dedup guard missing: {name}")
+
+    def test_every_governance_script_invokes_the_guard(self):
+        js_scripts = ("session-gate.js", "state-rehydrate.js", "state-stash.js",
+                      "governance-reminder.js")
+        py_scripts = ("ask_matt_gate.py",)
+        for name in js_scripts:
+            body = (self.scripts_dir / name).read_text(encoding="utf-8")
+            self.assertIn("_plugin_hook_guard.js", body,
+                          f"{name}: missing the plugin/live-tree dedup guard require()")
+            self.assertIn("skipIfLiveTreeWillFire", body,
+                          f"{name}: guard require() is present but never invoked")
+        for name in py_scripts:
+            body = (self.scripts_dir / name).read_text(encoding="utf-8")
+            self.assertIn("_plugin_hook_guard", body,
+                          f"{name}: missing the plugin/live-tree dedup guard import")
+            self.assertIn("skip_if_live_tree_will_fire", body,
+                          f"{name}: guard import present but never invoked")
+
+    def test_js_guard_skips_when_settings_still_dispatch_the_script(self):
+        # PC before the paired edit: settings.json names fake-gate.js, so the plugin copy yields.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root, script = self._plugin(root, "_plugin_hook_guard.js", "fake-gate.js",
+                                               self.JS_FAKE)
+            home = self._home(root, settings_names=("fake-gate.js",), live_files=("fake-gate.js",))
+            proc = self._run(["node", str(script)], plugin_root, home)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "",
+                             "plugin script should have been skipped by the guard, but ran")
+
+    def test_js_guard_runs_when_no_live_tree_exists(self):
+        # Container: no settings.json at all. The guard must NOT skip.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root, script = self._plugin(root, "_plugin_hook_guard.js", "fake-gate.js",
+                                               self.JS_FAKE)
+            home = root / "home"
+            home.mkdir()
+            proc = self._run(["node", str(script)], plugin_root, home)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "SENTINEL_WROTE",
+                             "container has no live tree; plugin script should have run")
+
+    def test_js_guard_runs_when_live_file_exists_but_settings_no_longer_name_it(self):
+        # PC after the paired edit: the live file is still on disk (packager source, restore-test
+        # subject) but settings.json no longer dispatches it. The plugin copy is now the only
+        # copy, so it must run -- a presence check here would make the hook fire zero times.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root, script = self._plugin(root, "_plugin_hook_guard.js", "fake-gate.js",
+                                               self.JS_FAKE)
+            home = self._home(root, settings_names=("some-other-hook.js",),
+                              live_files=("fake-gate.js",))
+            proc = self._run(["node", str(script)], plugin_root, home)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "SENTINEL_WROTE",
+                             "settings no longer name the script; plugin copy must run")
+
+    def test_py_guard_skips_when_settings_still_dispatch_the_script(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root, script = self._plugin(root, "_plugin_hook_guard.py", "fake_gate.py",
+                                               self.PY_FAKE)
+            home = self._home(root, settings_names=("fake_gate.py",))
+            proc = self._run([sys.executable, str(script)], plugin_root, home)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "",
+                             "plugin script should have been skipped by the guard, but ran")
+
+    def test_py_guard_runs_when_live_file_exists_but_settings_no_longer_name_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root, script = self._plugin(root, "_plugin_hook_guard.py", "fake_gate.py",
+                                               self.PY_FAKE)
+            home = self._home(root, settings_names=("some-other-hook.js",),
+                              live_files=("fake_gate.py",))
+            proc = self._run([sys.executable, str(script)], plugin_root, home)
+            self.assertEqual(proc.returncode, 0, msg=f"stderr: {proc.stderr!r}")
+            self.assertEqual(proc.stdout, "SENTINEL_WROTE",
+                             "settings no longer name the script; plugin copy must run")
+
+    def test_guard_is_inert_outside_a_plugin_invocation(self):
+        # No CLAUDE_PLUGIN_ROOT: the live-tree copy itself, or a bare run. Never skips.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin_root, script = self._plugin(root, "_plugin_hook_guard.js", "fake-gate.js",
+                                               self.JS_FAKE)
+            home = self._home(root, settings_names=("fake-gate.js",))
+            env = {**os.environ, "CLAUDE_CONFIG_DIR": str(home / ".claude"),
+                   "HOME": str(home), "USERPROFILE": str(home)}
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+            proc = subprocess.run(["node", str(script)], capture_output=True, text=True,
+                                  env=env, timeout=15)
+            self.assertEqual(proc.stdout, "SENTINEL_WROTE")
 
 
 if __name__ == "__main__":
