@@ -18,7 +18,13 @@ function runChecker(config, extra) {
   const opts = extra && (extra.env || typeof extra.setup === 'function') ? extra : { env: extra };
   if (typeof opts.setup === 'function') opts.setup(repo);
 
-  const env = Object.assign({}, process.env, opts.env || {});
+  // A case that means to be a desktop session must say so, not inherit it: when this suite runs
+  // inside a cloud container the real CLAUDE_CODE_REMOTE_* vars leak in and the cloud-only
+  // branches fire. Blank them first; cloudEnv() puts them back for the cases that want cloud.
+  const env = Object.assign({},
+    process.env,
+    { CLAUDE_CODE_REMOTE_SESSION_ID: '', CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE: '' },
+    opts.env || {});
   try {
     return execFileSync(process.execPath, [CHECKER], {
       cwd: repo,
@@ -299,4 +305,34 @@ test('cloud bootstrap: the whole section is silent on a local (non-cloud) sessio
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+/* -------------------------------------------------------------- ticket pagination ------------
+ * `gh api --paginate` follows GitHub's Link header, whose next URL is the numeric-ID form the
+ * cloud egress proxy 403s, so a label with more than 100 open tickets used to read as a GitHub
+ * outage (issue 394). The loop now asks for `...&page=N` itself; these drive it with a stub.
+ */
+
+const { paginateTicketPages } = require('./check.js');
+
+const fullPage = (from) => JSON.stringify(
+  Array.from({ length: 100 }, (unused, i) => ({ number: from + i, title: `t${from + i}` })));
+
+test('a two-page label listing returns every row from both pages', () => {
+  const asked = [];
+  const result = paginateTicketPages((page) => {
+    asked.push(page);
+    return page === 1 ? fullPage(1) : JSON.stringify([{ number: 101, title: 'last' }]);
+  });
+  assert.deepEqual(asked, [1, 2]);
+  assert.equal(result.error, undefined);
+  assert.equal(result.list.length, 101);
+  assert.equal(result.list[0], '#1  t1');
+  assert.equal(result.list[100], '#101  last');
+});
+
+test('a failing second page reports the page rather than a bare unreachable GitHub', () => {
+  const result = paginateTicketPages((page) => (page === 1 ? fullPage(1) : null));
+  assert.equal(result.list, undefined);
+  assert.match(result.error, /page 2/);
 });

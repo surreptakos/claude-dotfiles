@@ -543,6 +543,39 @@ function curlTicketRows(slug, label) {
   } catch (e) { return { error: 'unparseable response' }; }
 }
 
+/** Walk a label's open issues page by page into one list of `#N  title` rows. `fetchPage(n)`
+ *  returns the raw JSON text of page n, or null when that request failed.
+ *
+ *  This replaces `gh api --paginate`, which follows the `Link: rel="next"` URL GitHub sends
+ *  back. That URL is the numeric-ID form, `/repositories/{id}/issues?page=2`, and the
+ *  Claude-Code cloud egress proxy refuses it with a 403 — so on any label carrying more than
+ *  100 open tickets page one arrived, page two 403'd, and the whole listing came out as
+ *  "could not reach GitHub": a big queue reading as a GitHub outage (issue 394; the tracker
+ *  audit had the same bug, issue 171). Paging by hand keeps every request on the
+ *  `repos/{owner}/{repo}` path, and a failure names the page it happened on.
+ *
+ *  Pure — no gh, no network — so a test can drive the loop with a stub. The 20-page cap bounds
+ *  the loop, not the queue: 2,000 open tickets on one label is far past the point where this
+ *  listing (8 rows and a count) is what anyone is reading. */
+function paginateTicketPages(fetchPage) {
+  const items = [];
+  for (let page = 1; page <= 20; page++) {
+    const raw = fetchPage(page);
+    if (raw === null) {
+      return { error: `could not reach GitHub for the ticket list (page ${page})` };
+    }
+    let rows;
+    try { rows = JSON.parse(raw); } catch (e) {
+      return { error: `GitHub returned unparseable JSON for the ticket list (page ${page})` };
+    }
+    if (!Array.isArray(rows)) rows = [];
+    for (const r of rows) items.push(r);
+    if (rows.length < 100) break;
+  }
+  // /issues returns PRs too, so filter them out to match the old `gh issue list` behaviour.
+  return { list: items.filter((i) => i && !i.pull_request).map((i) => `#${i.number}  ${i.title}`) };
+}
+
 /** Fetch open non-PR issues carrying a single label from the repo's origin. Returns
  *  { list, error }; the caller decides how to render each shape. Extracted so a second listing
  *  (ready-for-local-agent, desktop only) can reuse the same gh/curl path. */
@@ -550,18 +583,11 @@ function fetchTicketList(slug, label) {
   if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
     // `gh api` REST (not `gh issue list`, which is GraphQL under the hood). Cloud containers
     // only route REST through their egress proxy — GraphQL 403s there — so the audit and this
-    // check both live on `gh api ...` (issue 130). /issues returns PRs too, so filter them out
-    // to match the old `gh issue list` behaviour.
+    // check both live on `gh api ...` (issue 130).
     const path = 'repos/' + slug.owner + '/' + slug.repo
       + '/issues?labels=' + encodeURIComponent(label) + '&state=open&per_page=100';
-    const raw = tryRun('gh', ['api', '--paginate', path], { timeout: 25000 });
-    if (raw === null) return { error: 'could not reach GitHub for the ticket list' };
-    let items;
-    try { items = JSON.parse(raw); } catch (e) {
-      return { error: 'GitHub returned unparseable JSON for the ticket list' };
-    }
-    if (!Array.isArray(items)) items = [];
-    return { list: items.filter((i) => i && !i.pull_request).map((i) => `#${i.number}  ${i.title}`) };
+    return paginateTicketPages((page) =>
+      tryRun('gh', ['api', path + '&page=' + page], { timeout: 25000 }));
   }
   const r = curlTicketRows(slug, label);
   if (r.error) return { error: `no gh, and the GitHub API did not answer — ${r.error}` };
@@ -771,7 +797,12 @@ async function main() {
   process.exitCode = worst === 2 ? 1 : 0;
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error);
+    process.exitCode = 1;
+  });
+} else {
+  // Required by a test: hand out the pure helpers and run nothing.
+  module.exports = { paginateTicketPages, parseGithubSlug };
+}
