@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T14:20:27Z'
-  previous-modified: '2026-09-16T00:22:54Z'
-  revision: '10'
-  content-sha: aa11060e3fb4
+  modified: '2026-09-16T14:23:25Z'
+  previous-modified: '2026-09-16T14:20:27Z'
+  revision: '11'
+  content-sha: add6a4679f37
 ---
 
 # ticket-fleet
@@ -28,9 +28,9 @@ checkout's `.claude/workflows/`. The Workflow tool resolves a bare `name:` from 
 directory, and it reads the file behind `scriptPath` byte-for-byte before showing the approval
 dialog - a CR anywhere in the payload trips "script contains control characters that would be
 hidden in the approval dialog" and the launch is refused (issue 233 - and this repo pins
-`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` is required (the
-workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the caller
-mints the id).
+`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` and
+`args.invocationId` are both required (the workflow runtime forbids `Date.now()` and
+`Math.random()` inside scripts, so the caller mints them).
 
 **Checkout-path invocation (works on desktop and in cloud sessions).** Once
 `.claude/workflows/ticket-fleet.js` exists in the cwd, either spelling launches the fleet:
@@ -38,14 +38,14 @@ mints the id).
 ```
 Workflow({
   scriptPath: '.claude/workflows/ticket-fleet.js',
-  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
+  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
 ```
 
 ```
 Workflow({
   name: 'ticket-fleet',
-  args: { runId: '<hex>', tickets: [], deliver: false }
+  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
 ```
 
@@ -67,7 +67,15 @@ On a repo's first run, always pass `deliver: false` - verify the Scout, lane and
 prompts before letting the fleet push branches and open PRs. Full args list:
 
 - `runId` (required, string): caller-minted unique token. Any short unique string; the
-  branch names embed it as `wf_<runId>-w<workerIndex>`.
+  branch names embed it as `wf_<runId>-w<workerIndex>`. A resume (`resumeFromRunId`) passes
+  the SAME `runId`, so the resumed attempts land on the branches they already own.
+- `invocationId` (required, string): a second caller-minted token, re-minted on EVERY launch
+  including every resume, and rejected if it equals `runId`. It is spliced into the open-PR
+  guard's prompt and label and nowhere else. The guard asks an agent whether this ticket
+  already has an open PR, and the runtime replays cached agent answers on resume; without a
+  key that moves per invocation the guard replays the `{found:false}` it recorded before any
+  PR existed and the ticket is implemented, verified and delivered twice (issue 291). Mint
+  both with `printf %x%x $(date +%s) $$`.
 - `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
   takes exactly those tickets regardless of label or state; otherwise it lists open tickets
   with `args.label`.

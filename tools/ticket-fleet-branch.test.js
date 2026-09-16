@@ -175,6 +175,30 @@ test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () =>
     'fleet must route tracker prompts through the instrument-specific rules');
 });
 
+// ---- Open-PR guard freshness (issue 291) ----
+// The guard is an agent() call and the runtime replays cached agent results on resume, so the
+// guard is only honest while its cache key moves between invocations. `runId` cannot supply that:
+// it is deliberately fixed across a resume because the branch names embed it. `invocationId` is
+// the caller-minted per-launch token, and it must appear in the pr-check prompt and label - and
+// nowhere else, so no other stage loses its cache and no branch name moves.
+test(`fleet script ${FLEET_SCRIPT_REL} keys the open-PR guard on a per-invocation token (issue 291)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const invocationId = String\(cfg\.invocationId/,
+    'invocationId must come from args - a value derived from runId is stable across a resume');
+  assert.match(src, /if \(!invocationId\) throw new Error/,
+    'the fleet must refuse to run without a per-invocation token rather than guard on a stale cache');
+  assert.match(src, /if \(invocationId === runId\) throw new Error/,
+    'invocationId must be rejected when it merely repeats runId');
+  const body = extractCodeLane(src);
+  assert.match(body, /label: `pr-check:#\$\{t\.number\}@\$\{invocationId\}`/,
+    'the pr-check agent label must carry invocationId');
+  const promptEnd = body.indexOf('label: `pr-check:');
+  const prompt = body.slice(body.indexOf('const openPR = await agent('), promptEnd);
+  assert.match(prompt, /\$\{invocationId\}/, 'the pr-check prompt must carry invocationId');
+  assert.equal((src.match(/\$\{invocationId\}/g) || []).length, 2,
+    'invocationId belongs in the pr-check prompt and label only: anywhere else it would move a branch name or bust another stage cache');
+});
+
 test(`fleet script ${FLEET_SCRIPT_REL} carries the live-tree hard-rail sentence`, () => {
   const HARD_RAIL_SENTENCE =
     'Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are ' +
@@ -246,15 +270,16 @@ function loadStableHelpers(scriptPath) {
   return new Function(`${body}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
 }
 
-async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}) {
+async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1') {
   const src = fs.readFileSync(scriptPath, 'utf8');
   const body = extractCodeLane(src);
   const helpers = loadStableHelpers(scriptPath);
   // Wrap the marker body in an async factory that closes over stub bindings, then invoke the
-  // returned runCodeLane. cfg / runId / scout / log / schemas / PR_CHECK are provided as free
-  // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
+  // returned runCodeLane. cfg / runId / invocationId / scout / log / schemas / PR_CHECK are
+  // provided as free parameters so the body's references resolve. The stub `agent` is a spy the
+  // test drives. runId is fixed while invocationId varies - the resume shape of issue 291.
   const wrapper = new AsyncFunction(
-    'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
+    'agent', 'log', 'cfg', 'runId', 'invocationId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
     'instrument', 'rules', 'stableJson', 'stableText', 'stableList', 'priorFindingsBlock',
     body + '\nreturn runCodeLane;'
   );
@@ -269,7 +294,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
   const runCodeLane = await wrapper(
-    agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules,
+    agentMock, (m) => logs.push(m), cfg, runId, invocationId, scout, {}, {}, {}, {}, 'gh', rules,
     helpers.stableJson, helpers.stableText, helpers.stableList, helpers.priorFindingsBlock
   );
   const result = await runCodeLane(ticket, workerIndex);
@@ -315,12 +340,39 @@ for (const file of RESUME_GUARD_PAIR) {
       throw new Error(`unexpected agent call after PR-found short-circuit: ${opts.label}`);
     };
     const { result } = await driveCodeLane(file, agentMock, { number: 97, title: 'x', criteria: '' }, 0);
-    assert.deepEqual(calls, ['pr-check:#97'], 'only the pr-check agent may be started when an open PR exists');
+    assert.deepEqual(calls, ['pr-check:#97@inv1'], 'only the pr-check agent may be started when an open PR exists');
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/137');
     assert.equal(result.branch, 'agent/issue-97-attempt1-wf_r1-w0');
     assert.equal(result.commentUrl, null);
     assert.deepEqual(result.discoveries, []);
+  });
+
+  test(`${rel} pr-check cache key differs between two invocations of one runId (issue 291)`, async () => {
+    // A resume keeps runId (branch names embed it) and re-mints invocationId. Capture the agent
+    // cache key the runtime would see - label plus prompt - on two such invocations and assert it
+    // moved, which is what makes the guard re-ask the tracker instead of replaying {found:false}.
+    const keys = [];
+    const agentMock = async (prompt, opts) => {
+      if (!opts.label.startsWith('pr-check:')) {
+        throw new Error(`unexpected agent call after PR-found short-circuit: ${opts.label}`);
+      }
+      keys.push(`${opts.label}\n${prompt}`);
+      return { found: true, prUrl: 'https://github.com/x/y/pull/137', branch: 'agent/issue-97-attempt1-wf_testrun-w0' };
+    };
+    const ticket = { number: 97, title: 'x', criteria: '' };
+    const first = await driveCodeLane(file, agentMock, ticket, 0, {}, 'invA');
+    const second = await driveCodeLane(file, agentMock, ticket, 0, {}, 'invB');
+    assert.equal(keys.length, 2, 'both invocations must reach the pr-check');
+    assert.notEqual(keys[0], keys[1],
+      'two invocations of the same runId must ask the pr-check under different cache keys');
+    // Same invocation token, same key - the difference tracks invocationId, nothing incidental.
+    await driveCodeLane(file, agentMock, ticket, 0, {}, 'invA');
+    assert.equal(keys[2], keys[0], 'the key must be a function of invocationId, not of call order');
+    for (const r of [first, second]) {
+      assert.equal(r.result.done, true);
+      assert.equal(r.result.prUrl, 'https://github.com/x/y/pull/137');
+    }
   });
 
   test(`${rel} runCodeLane runs the full impl/verify/deliver chain when no open PR exists`, async () => {
@@ -336,7 +388,7 @@ for (const file of RESUME_GUARD_PAIR) {
       throw new Error('unexpected label: ' + opts.label);
     };
     const { result } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
-    assert.deepEqual(calls, ['pr-check:#9', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
+    assert.deepEqual(calls, ['pr-check:#9@inv1', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
       'when no open PR exists the pre-check must be followed by impl/verify/deliver in order');
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
@@ -465,7 +517,7 @@ const roundTrip = (value) => JSON.parse(JSON.stringify(reorderKeys(value)));
 function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
   return async (prompt, opts) => {
     capture.push({ label: opts.label, prompt });
-    if (opts.label === 'pr-check:#42') return shape({ found: false });
+    if (opts.label === 'pr-check:#42@inv1') return shape({ found: false });
     if (opts.label === 'impl:#42.1') {
       return shape({
         branch: implBranch || 'agent/issue-42-attempt1-wf_testrun-w0',
@@ -534,7 +586,7 @@ for (const file of RESUME_GUARD_PAIR) {
     const resumed = [];
     await driveCodeLane(file, twoAttemptAgent(first), TICKET_42, 0, { deliver: false });
     await driveCodeLane(file, twoAttemptAgent(resumed), TICKET_42, 0, { deliver: true });
-    assert.deepEqual(first.map((c) => c.label), ['pr-check:#42', 'impl:#42.1', 'verify:#42.1', 'impl:#42.2', 'verify:#42.2'],
+    assert.deepEqual(first.map((c) => c.label), ['pr-check:#42@inv1', 'impl:#42.1', 'verify:#42.1', 'impl:#42.2', 'verify:#42.2'],
       'a deliver:false run stops after the passing verify');
     assert.deepEqual(resumed.map((c) => c.label), first.map((c) => c.label).concat(['deliver:#42']),
       'the deliver:true resume must add exactly one new agent: deliver:#42');
