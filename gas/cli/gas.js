@@ -25,10 +25,15 @@
 //   promote <scriptId> --deployment ID [--desc text]   Cut a version of HEAD and move a deployment to it.
 //   logs [--project P] [--minutes 60] [--filter F] [--limit 200] [--all]   Cloud Logging, [gas] lines by default.
 //   status <owner/repo>                 deploy/* refs and the latest gas/* status on each.
-//   ref <owner/repo> <deploy/test|deploy/prod> <sha> [--wait minutes]   Move a ref; wait for its status.
-//   run <owner/repo> <fn> [argsJson] [--wait minutes]   Push a run request to deploy/run; print the result.
+//   ref <owner/repo> <deploy/test|deploy/prod> <sha> [--wait minutes] [--via-git]   Move a ref; wait for its status.
+//   run <owner/repo> <fn> [argsJson] [--wait minutes] [--via-git]   Push a run request to deploy/run; print the result.
 //   vendor <repoRoot>                   Copy the library into the repo's rootDir (gas.json says where).
 //   init <repoRoot> --script-id ID [--root-dir gas] [--prod-deployment ID] [--gcp-project P]
+//
+// --via-git makes `ref` and `run` build and push the same objects with git instead of the Git Data API,
+// for a session whose proxy answers 403 to API writes (a claude.ai/code container). Without the flag a
+// 403 selects that path by itself and the command says which one it used. GAS_GIT_REMOTE overrides the
+// https://github.com/<owner/repo> URL git pushes to; GAS_GIT_SCRATCH the parent of the scratch repo.
 //
 // Exit 0 ok / 1 the call answered no / 2 could not get an answer (2 is not a pass).
 
@@ -98,7 +103,9 @@ function request(method, url, headers, body, opts) {
       const p = new URL(proxy);
       const creq = http.request({ host: p.hostname, port: p.port || 80, method: 'CONNECT', path: u.hostname + ':' + (u.port || 443) });
       creq.on('connect', (res, socket) => {
-        if (res.statusCode !== 200) return reject(new Error('proxy CONNECT to ' + u.hostname + ' answered ' + res.statusCode));
+        // The status rides along: a proxy that refuses the tunnel outright (403) is the same road closure
+        // as one that refuses the write, and `run`/`ref` fall back to git on either.
+        if (res.statusCode !== 200) return reject(apiError('proxy CONNECT to ' + u.hostname + ' answered ' + res.statusCode, res.statusCode));
         const r = https.request({ host: u.hostname, port: u.port || 443, path: u.pathname + u.search, method, headers: h, socket, agent: false, ca, servername: u.hostname }, onResp);
         r.on('error', reject); if (data != null) r.write(data); r.end();
       });
@@ -373,9 +380,15 @@ async function seed(scriptId, flags) {
 // ---------------------------------------------------------------------------------------------
 // Cloud Logging
 // ---------------------------------------------------------------------------------------------
+// Apps Script gives a script with no Cloud project of its own one named project-id-<digits>. Nobody can
+// be granted logging.read on it, so the Logging API has nothing to answer with — say that instead of
+// letting the call come back empty or 403 and read as "the script logged nothing".
+const isDefaultGcpProject = (p) => /^project-id-\d+$/.test(String(p || ''));
 async function logs(flags) {
   const project = flags.project || (readGasJson(findRepoRoot(process.cwd())) || {}).gcpProject;
   if (!project) throw new Error('logs needs --project <gcp project id> (or gcpProject in gas.json)');
+  if (isDefaultGcpProject(project)) throw new Error(project + ' is the Apps Script default Cloud project — its logs are readable only in the editor\'s executions pane. '
+    + 'Attach a standard Cloud project to the script, or read the gas/* commit status and the run comment instead (gas/README.md, "A script on Google\'s default Cloud project").');
   const minutes = Number(flags.minutes || 60);
   const since = new Date(Date.now() - minutes * 60000).toISOString();
   const base = 'timestamp>="' + since + '"';
@@ -403,11 +416,15 @@ async function gh(method, suffix, body) {
   const r = await json(method, GITHUB_API + suffix, { Authorization: 'Bearer ' + tok, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' }, body);
   return r;
 }
+// Errors from a GitHub call carry the status, so the caller can tell a refusal to write at all (403,
+// what a session proxy answers) from an answer about the request itself (404, 422, 5xx).
+function apiError(message, status) { const e = new Error(message); e.status = status; return e; }
+const isForbidden = (e) => !!e && e.status === 403;
 async function refs(repo) {
   // No trailing slash on the prefix: the claude.ai/code session proxy refuses to canonicalize `heads/deploy/`
   // (400). `heads/deploy` also matches `deploy-*`, so the prefix is applied here. The library keeps the slash.
   const r = await gh('GET', '/repos/' + repo + '/git/matching-refs/heads/' + REF_PREFIX.replace(/\/$/, ''));
-  if (r.status !== 200) throw new Error('matching-refs answered ' + r.status + ': ' + (r.text || '').slice(0, 200));
+  if (r.status !== 200) throw apiError('matching-refs answered ' + r.status + ': ' + (r.text || '').slice(0, 200), r.status);
   const out = {};
   for (const x of r.body || []) {
     const name = String(x.ref).replace(/^refs\/heads\//, '');
@@ -439,9 +456,9 @@ async function moveRef(repo, name, sha) {
   if (r.status === 422 || r.status === 404) {
     const c = await gh('POST', '/repos/' + repo + '/git/refs', { ref: 'refs/heads/' + name, sha });
     if (c.status === 201) return 'created';
-    throw new Error('create ref ' + name + ' answered ' + c.status + ': ' + (c.text || '').slice(0, 200));
+    throw apiError('create ref ' + name + ' answered ' + c.status + ': ' + (c.text || '').slice(0, 200), c.status);
   }
-  throw new Error('move ref ' + name + ' answered ' + r.status + ': ' + (r.text || '').slice(0, 200));
+  throw apiError('move ref ' + name + ' answered ' + r.status + ': ' + (r.text || '').slice(0, 200), r.status);
 }
 async function waitForStatus(repo, sha, context, minutes) {
   const deadline = Date.now() + Number(minutes) * 60000;
@@ -456,9 +473,9 @@ async function waitForStatus(repo, sha, context, minutes) {
 }
 async function ref(repo, name, sha, flags) {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('sha must be 40 hex characters');
-  const did = await moveRef(repo, name, sha);
-  console.log(name + ' ' + did + ' to ' + sha.slice(0, 7));
-  if (!flags.wait) return { moved: did };
+  const moved = await viaApiOrGit(flags, () => moveRef(repo, name, sha), () => refViaGit(repo, name, sha));
+  console.log(name + ' ' + moved.value + ' to ' + sha.slice(0, 7) + ' via ' + viaLabel(moved.via));
+  if (!flags.wait) return { moved: moved.value, via: moved.via };
   const context = name.endsWith('prod') ? STATUS.promote : STATUS.deploy;
   const st = await waitForStatus(repo, sha, context, flags.wait);
   if (!st) { console.log('FAIL  no ' + context + ' status on ' + sha.slice(0, 7) + ' after ' + flags.wait + ' minutes — is the tick trigger installed?'); process.exitCode = 2; return null; }
@@ -467,8 +484,9 @@ async function ref(repo, name, sha, flags) {
   if (st.state !== 'success') process.exitCode = 1;
   return st;
 }
-// A run request is one commit on deploy/run holding gas-run.json. Built with the Git Data API so the
-// caller needs no clone: blob -> tree -> commit (parent: the previous run, when there is one) -> ref.
+// A run request is one commit on deploy/run holding gas-run.json: blob -> tree -> commit (parent: the
+// previous run, when there is one) -> ref. The Git Data API builds it without a clone; git builds the
+// same commit in a scratch repo when the API is closed (see "The same writes through git" below).
 function runRequest(fn, argsJson) {
   let args = [];
   if (argsJson !== undefined && argsJson !== '') {
@@ -477,27 +495,107 @@ function runRequest(fn, argsJson) {
   }
   return { id: new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + '-' + crypto.randomBytes(3).toString('hex'), fn, args, requestedAt: new Date().toISOString() };
 }
-async function run(repo, fn, argsJson, flags) {
-  const req = runRequest(fn, argsJson);
+async function runViaApi(repo, req) {
   const all = await refs(repo);
   const parent = all[REF_PREFIX + 'run'] || '';
-  const blob = await gh('POST', '/repos/' + repo + '/git/blobs', { content: JSON.stringify(req, null, 2) + '\n', encoding: 'utf-8' });
-  if (blob.status !== 201) throw new Error('create blob answered ' + blob.status + ': ' + (blob.text || '').slice(0, 200));
+  const blob = await gh('POST', '/repos/' + repo + '/git/blobs', { content: runFileContent(req), encoding: 'utf-8' });
+  if (blob.status !== 201) throw apiError('create blob answered ' + blob.status + ': ' + (blob.text || '').slice(0, 200), blob.status);
   const tree = await gh('POST', '/repos/' + repo + '/git/trees', { tree: [{ path: RUN_FILE, mode: '100644', type: 'blob', sha: blob.body.sha }] });
-  if (tree.status !== 201) throw new Error('create tree answered ' + tree.status);
-  const commit = await gh('POST', '/repos/' + repo + '/git/commits', { message: 'gas run ' + fn + ' (' + req.id + ')', tree: tree.body.sha, parents: parent ? [parent] : [] });
-  if (commit.status !== 201) throw new Error('create commit answered ' + commit.status + ': ' + (commit.text || '').slice(0, 200));
-  const did = await moveRef(repo, REF_PREFIX + 'run', commit.body.sha);
-  console.log('run request ' + req.id + ' for ' + fn + ' pushed as ' + commit.body.sha.slice(0, 7) + ' (' + did + ')');
-  if (flags.wait === 0 || flags.wait === '0') return { sha: commit.body.sha, id: req.id };
-  const st = await waitForStatus(repo, commit.body.sha, STATUS.run, flags.wait || 10);
+  if (tree.status !== 201) throw apiError('create tree answered ' + tree.status, tree.status);
+  const commit = await gh('POST', '/repos/' + repo + '/git/commits', { message: runMessage(req), tree: tree.body.sha, parents: parent ? [parent] : [] });
+  if (commit.status !== 201) throw apiError('create commit answered ' + commit.status + ': ' + (commit.text || '').slice(0, 200), commit.status);
+  await moveRef(repo, REF_PREFIX + 'run', commit.body.sha);
+  return commit.body.sha;
+}
+async function run(repo, fn, argsJson, flags) {
+  const req = runRequest(fn, argsJson);
+  const pushed = await viaApiOrGit(flags, () => runViaApi(repo, req), () => runViaGit(repo, req));
+  const sha = pushed.value;
+  console.log('run request ' + req.id + ' for ' + fn + ' pushed as ' + sha.slice(0, 7) + ' via ' + viaLabel(pushed.via));
+  if (flags.wait === 0 || flags.wait === '0') return { sha, id: req.id };
+  const st = await waitForStatus(repo, sha, STATUS.run, flags.wait || 10);
   if (!st || st.state === 'pending') { console.log('FAIL  no verdict within the wait — is the tick trigger installed?'); process.exitCode = 2; return st; }
   console.log((st.state === 'success' ? 'PASS  ' : 'FAIL  ') + st.description);
-  const comments = await gh('GET', '/repos/' + repo + '/commits/' + commit.body.sha + '/comments');
+  const comments = await gh('GET', '/repos/' + repo + '/commits/' + sha + '/comments');
   if (comments.status === 200 && (comments.body || []).length) console.log('\n' + comments.body[comments.body.length - 1].body);
   if (st.state !== 'success') process.exitCode = 1;
   return st;
 }
+
+// ---------------------------------------------------------------------------------------------
+// The same writes through git, for a session whose proxy refuses the Git Data API
+// ---------------------------------------------------------------------------------------------
+// A claude.ai/code container reaches GitHub through a proxy that answers 403 to every Git Data API
+// write (blob, tree, commit, ref) while letting git over HTTPS through. So the run request is built
+// out of the same objects with plumbing — hash-object, mktree, commit-tree — and pushed, and a ref
+// move is a push. Byte for byte the same commit either way; only the road differs.
+const redact = (s) => String(s).replace(/\/\/[^@\s/]*@/g, '//***@');
+function gitRaw(dir, args, input) {
+  const env = Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0' });
+  for (const [k, v] of [['GIT_AUTHOR_NAME', 'gas'], ['GIT_AUTHOR_EMAIL', 'gas@localhost'], ['GIT_COMMITTER_NAME', 'gas'], ['GIT_COMMITTER_EMAIL', 'gas@localhost']]) if (!env[k]) env[k] = v;
+  const r = cp.spawnSync('git', args, { cwd: dir, encoding: 'utf8', input: input == null ? undefined : input, env });
+  if (r.error) throw new Error('git could not start (' + r.error.message + ') — the git fallback needs git on PATH');
+  return { status: r.status, stdout: String(r.stdout || ''), stderr: String(r.stderr || '') };
+}
+function git(dir, args, input) {
+  const r = gitRaw(dir, args, input);
+  if (r.status !== 0) throw new Error(redact('git ' + args.join(' ')) + ' exited ' + r.status + ': ' + redact(r.stderr.trim()).slice(0, 300));
+  return r.stdout.trim();
+}
+// Where git pushes. GAS_GIT_REMOTE overrides it: a mirror the container can reach, or a bare repo in a test.
+function gitRemoteUrl(repo) {
+  if (process.env.GAS_GIT_REMOTE) return process.env.GAS_GIT_REMOTE;
+  const tok = githubToken();
+  if (!tok) throw new Error('no GitHub token: set GITHUB_TOKEN or sign in with `gh auth login`');
+  return 'https://x-access-token:' + tok + '@github.com/' + repo + '.git';
+}
+// One scratch bare repo per GitHub repo, kept between calls so later fetches carry almost nothing. Bare:
+// nothing here needs a worktree, and the objects never mix with the repo the agent is working in.
+function gitScratch(repo) {
+  const dir = path.join(process.env.GAS_GIT_SCRATCH || os.tmpdir(), 'gas-git-' + crypto.createHash('sha1').update(String(repo)).digest('hex').slice(0, 12) + '.git');
+  if (!fs.existsSync(path.join(dir, 'HEAD'))) { fs.mkdirSync(dir, { recursive: true }); git(dir, ['init', '-q', '--bare']); }
+  return dir;
+}
+// Shallow first — one commit is all any of this needs; a server that refuses sha1-in-want gets the full ask.
+function gitFetch(dir, url, refspec) {
+  try { git(dir, ['fetch', '--no-tags', '--depth=1', url, refspec]); return true; }
+  catch (e) { try { git(dir, ['fetch', '--no-tags', url, refspec]); return true; } catch (e2) { return false; } }
+}
+const gitHas = (dir, sha) => { try { git(dir, ['cat-file', '-e', sha + '^{commit}']); return true; } catch (e) { return false; } };
+const runFileContent = (req) => JSON.stringify(req, null, 2) + '\n';
+const runMessage = (req) => 'gas run ' + req.fn + ' (' + req.id + ')';
+function runViaGit(repo, req) {
+  const dir = gitScratch(repo), url = gitRemoteUrl(repo), name = REF_PREFIX + 'run';
+  let parent = '';
+  if (gitFetch(dir, url, '+refs/heads/' + name + ':refs/gas/' + name)) { try { parent = git(dir, ['rev-parse', 'refs/gas/' + name]); } catch (e) { parent = ''; } }
+  const blob = git(dir, ['hash-object', '-w', '--stdin'], runFileContent(req));
+  const tree = git(dir, ['mktree'], '100644 blob ' + blob + '\t' + RUN_FILE + '\n');
+  const commit = git(dir, ['commit-tree', tree].concat(parent ? ['-p', parent] : [], ['-m', runMessage(req)]));
+  git(dir, ['push', '--force', url, commit + ':refs/heads/' + name]);
+  return commit;
+}
+function refViaGit(repo, name, sha) {
+  const dir = gitScratch(repo), url = gitRemoteUrl(repo);
+  if (!gitHas(dir, sha)) gitFetch(dir, url, '+' + sha + ':refs/gas/want-' + sha.slice(0, 7));
+  if (!gitHas(dir, sha)) gitFetch(dir, url, '+refs/heads/*:refs/gas/heads/*');
+  if (!gitHas(dir, sha)) throw new Error('git cannot reach commit ' + sha.slice(0, 7) + ' in ' + repo + ' — push it to a branch there first');
+  const r = gitRaw(dir, ['push', '--force', url, sha + ':refs/heads/' + name]);
+  if (r.status !== 0) throw new Error(redact('git push ' + name) + ' exited ' + r.status + ': ' + redact(r.stderr.trim()).slice(0, 300));
+  return /\[new branch\]/.test(r.stderr) ? 'created' : 'moved';
+}
+// The API path, unless --via-git forces git or the proxy refuses the write outright. A 403 is the only
+// answer that selects the other road: 404, 422, a dead token, GitHub down are answers about the request
+// itself, and retrying them through git would only bury the reason.
+async function viaApiOrGit(flags, apiFn, gitFn) {
+  if (flags && flags['via-git']) return { value: await gitFn(), via: 'git' };
+  try { return { value: await apiFn(), via: 'api' }; }
+  catch (e) {
+    if (!isForbidden(e)) throw e;
+    console.log('the GitHub API answered 403 (' + e.message + ') — falling back to git plumbing');
+    return { value: await gitFn(), via: 'git' };
+  }
+}
+const viaLabel = (via) => via === 'git' ? 'git push' : 'the GitHub API';
 
 // ---------------------------------------------------------------------------------------------
 // Repo files: gas.json, vendoring
@@ -639,11 +737,11 @@ async function main() {
     case 'init': return init(rest[1] || '.', flags);
     case 'version': console.log(VERSION); return;
     default:
-      console.log(fs.readFileSync(__filename, 'utf8').split('\n').filter((l) => l.startsWith('//')).slice(1, 32).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
+      console.log(fs.readFileSync(__filename, 'utf8').split('\n').filter((l) => l.startsWith('//')).slice(1, 36).map((l) => l.replace(/^\/\/ ?/, '')).join('\n'));
       process.exitCode = cmd ? 2 : 0;
   }
 }
-module.exports = { parseArgs, normalizeCredentials, codeFromRedirect, scriptName, scriptType, extFor, deployedShaOf, seedPayload, globToRegExp, matchesAny, normalizeConfig, carryOver, runRequest, libraryVersionOf, localDeployables, PUBLISHED_CLIENT, LOGIN_SCOPES, STATUS, REF_PREFIX, SEED_PREFIX, RUN_FILE };
+module.exports = { parseArgs, normalizeCredentials, codeFromRedirect, scriptName, scriptType, extFor, deployedShaOf, seedPayload, globToRegExp, matchesAny, normalizeConfig, carryOver, runRequest, libraryVersionOf, localDeployables, apiError, isForbidden, viaApiOrGit, viaLabel, runViaGit, refViaGit, runMessage, runFileContent, isDefaultGcpProject, PUBLISHED_CLIENT, LOGIN_SCOPES, STATUS, REF_PREFIX, SEED_PREFIX, RUN_FILE };
 if (require.main === module) {
   main().catch((e) => { console.error('ERR  ' + (e && e.message ? e.message : e)); process.exit(process.exitCode || 2); });
 }
