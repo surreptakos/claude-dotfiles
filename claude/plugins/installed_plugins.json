@@ -44,11 +44,11 @@
     "aac-skills@claude-dotfiles": [
       {
         "scope": "user",
-        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.152240",
-        "version": "2026.9.152240",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.160015",
+        "version": "2026.9.160015",
         "installedAt": "2026-09-02T20:47:25.994Z",
-        "lastUpdated": "2026-09-15T23:50:39.552Z",
-        "gitCommitSha": "d532a0cd803e8005210eaf2f3b2de37efa41ad91"
+        "lastUpdated": "2026-09-16T00:19:19.081Z",
+        "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd"
       },
       {
         "scope": "project",
@@ -238,6 +238,24 @@
         "installedAt": "2026-09-14T21:55:59.349Z",
         "lastUpdated": "2026-09-14T21:55:59.349Z",
         "gitCommitSha": "2ee864673781e19fd771ac52fa03fbe4a9387bca"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\mirror-edits-sync-pull-a2b092",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.160015",
+        "version": "2026.9.160015",
+        "installedAt": "2026-09-16T19:21:41.334Z",
+        "lastUpdated": "2026-09-16T19:21:41.334Z",
+        "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.160015",
+        "version": "2026.9.160015",
+        "installedAt": "2026-09-16T19:29:31.304Z",
+        "lastUpdated": "2026-09-16T19:29:31.304Z",
+        "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\208-push-to-main-9367cd"
       }
     ],
     "yes@sstklen": [
