@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-15T22:54:11Z"
-  previous-modified: "2026-09-15T21:36:24Z"
-  revision: "8"
-  content-sha: "903350a9de28"
+  modified: "2026-09-16T00:27:39Z"
+  previous-modified: "2026-09-15T22:39:49Z"
+  revision: "9"
+  content-sha: "9268495bccb9"
 ---
 
 # ticket-fleet
@@ -99,16 +99,19 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
 - **probe** - resolves by quoting command output / research / evidence in a comment, no
   repository change asked for. Prober gathers, blind verifier re-runs the commands; the
   deliver stage posts one resolution comment.
-- **human** - labelled `ready-for-human`, or the body says the owner performs the steps. The
-  agent verifies only what the container can do and hands the rest back in one comment; it
-  never claims an owner step was done. The delivery then relabels the ticket - `ready-for-agent`
-  off, `ready-for-human` on - so the next label listing leaves it to the owner.
+- **human** - labelled `ready-for-human` or `ready-for-local-agent`, or the body says a
+  person or a desktop session performs the steps. The agent verifies only what the
+  container can do and hands the rest back in one comment under a **Remaining for a local
+  session** heading; the delivery moves the label to `ready-for-local-agent` unless the
+  remaining steps are genuinely a person's judgment, credential or sign-off, in which
+  case the label is `ready-for-human`. It never claims an owner step was done.
 
 The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
-fleet handoff (a "Remaining for the owner" section and the Claude Code footer) with no owner
-comment after it. Such a ticket is parked, not run - no lane starts for it and nothing is
-posted - and the run result names it under `skippedAwaitingOwner`. Together with the relabel
-that is what stops a second wave repeating a handoff the owner has not answered yet (issue 266).
+fleet handoff (a "Remaining for a local session" or "Remaining for a person" section and the
+Claude Code footer) with no owner comment after it. Such a ticket is parked, not run - no lane
+starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
+Together with the relabel that is what stops a second wave repeating a handoff nobody has
+answered yet (issue 266).
 
 ## Branch names
 

@@ -80,8 +80,8 @@ const instrument = pickInstrument(_env, undefined, cfg.instrument)
 // The tracker rule lines the scout and every delivery prompt embed. Same wording on both
 // instruments except for the tool spellings and the "how to detect the tracker root" note.
 // `labelSwap` is the human lane's hand-back: once the handoff comment is posted the ticket
-// belongs to the owner, so the run takes `ready-for-agent` off it and puts `ready-for-human`
-// on. Without that the next label listing hands the same ticket back to the fleet and the
+// belongs to whoever takes the remaining steps, so the run takes `ready-for-agent` off it and
+// puts `ready-for-local-agent` (a desktop session) or `ready-for-human` (a person) on. Without that the next label listing hands the same ticket back to the fleet and the
 // handoff comment is written again (issue 266).
 // [FLEET-TRACKER-RULES-START]
 function trackerRules(mode) {
@@ -91,7 +91,7 @@ function trackerRules(mode) {
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
     commentPost: () => `Use mcp__github__add_issue_comment.`,
-    labelSwap: (n) => `Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "ready-for-human" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "ready-for-human" ends up on the ticket.`,
+    labelSwap: (n, target = 'ready-for-human') => `Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
     prCreate: () => `mcp__github__create_pull_request`,
     prComment: () => `mcp__github__add_issue_comment on issue`,
   }
@@ -101,7 +101,7 @@ function trackerRules(mode) {
     scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
     commentPost: () => `Use \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    labelSwap: (n) => `Remove \`ready-for-agent\` and add \`ready-for-human\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=ready-for-human"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
+    labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: () => `gh pr create`,
     prComment: () => `gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@<file>`,
   }
@@ -120,7 +120,7 @@ const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 
     keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     kind: { type: 'string', enum: ['code', 'probe', 'human'], description: 'which lane runs this ticket: code = repository change; probe = resolves by quoting command output/research/evidence in a comment, no repository change asked for; human = labelled ready-for-human or the body says the owner performs the steps' },
     kindReason: { type: 'string', description: 'one line: the words in the ticket that decided the kind' },
-    handoffPending: { type: 'boolean', description: 'true when the ticket\'s LATEST comment is a fleet handoff (a "Remaining for the owner" section and the "_Generated by [Claude Code](https://claude.ai/code)_" footer) and no later comment from the owner follows it: the ticket is parked on a human, so this run must skip it rather than repeat the handoff' },
+    handoffPending: { type: 'boolean', description: 'true when the ticket\'s LATEST comment is a fleet handoff (a "Remaining for a local session" or "Remaining for a person" section (older handoffs say "Remaining for the owner") and the "_Generated by [Claude Code](https://claude.ai/code)_" footer) and no later comment from the owner follows it: the ticket is parked on a human, so this run must skip it rather than repeat the handoff' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -148,10 +148,11 @@ const PROBE = { type: 'object', required: ['items', 'blocked', 'discoveries'], p
   discoveries: { type: 'array', items: { type: 'string' }, description: 'out-of-scope findings, each self-contained' },
 } }
 
-const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready'], properties: {
+const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 'remainingKind'], properties: {
   agentSide: { type: 'string', description: 'what an agent could do from this container: commands and their verbatim output' },
-  ownerSide: { type: 'array', items: { type: 'string' }, description: 'the remaining owner steps, precise enough to follow without re-reading the ticket' },
-  ready: { type: 'boolean', description: 'true when everything an agent can do is done and only owner steps remain' },
+  ownerSide: { type: 'array', items: { type: 'string' }, description: 'the remaining steps, precise enough to follow without re-reading the ticket' },
+  ready: { type: 'boolean', description: 'true when everything an agent can do is done and only human/local-agent steps remain' },
+  remainingKind: { type: 'string', enum: ['local-agent', 'human'], description: "local-agent when the remaining steps are things a desktop session can do without a person (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep that needs a project-scoped gh token, an edit the auto-mode classifier blocks in a container); human when the remaining steps are a person's judgment, credential or sign-off (a click in a web UI, an account or billing change, a design decision, anything needing the owner's identity)" },
 } }
 
 const VERDICT = { type: 'object', required: ['pass', 'evidence', 'failures'], properties: {
@@ -166,7 +167,7 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl'], properties: {
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
   commented: { type: 'boolean' }, commentUrl: { type: 'string' },
-  labels: { type: 'array', items: { type: 'string' }, description: 'human lane only: the ticket labels after the hand-back relabel - ready-for-human present, ready-for-agent gone' },
+  labels: { type: 'array', items: { type: 'string' }, description: 'human lane only: the ticket labels after the hand-back relabel - ready-for-local-agent or ready-for-human present, ready-for-agent gone' },
 } }
 
 // ---- Scout ----
@@ -181,7 +182,7 @@ const scout = await agent(
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
    - code: everything else.
-4b. Set handoffPending per ticket. Read the comments in posting order and look at the LAST one. It is a fleet handoff when it carries a "Remaining for the owner" section and the footer "_Generated by [Claude Code](https://claude.ai/code)_". handoffPending = true when that last comment is a fleet handoff and no comment from the owner (any comment the fleet did not write - it lacks that footer) comes after it; otherwise false. A ticket with handoffPending true is already parked on the owner and this run must not hand it off again.
+4b. Set handoffPending per ticket. Read the comments in posting order and look at the LAST one. It is a fleet handoff when it carries a "Remaining for a local session" or "Remaining for a person" section (older handoffs say "Remaining for the owner") and the footer "_Generated by [Claude Code](https://claude.ai/code)_". handoffPending = true when that last comment is a fleet handoff and no comment from the owner (any comment the fleet did not write - it lacks that footer) comes after it; otherwise false. A ticket with handoffPending true is already parked on the owner and this run must not hand it off again.
 5. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs - never a glob if docs forbid it).
 6. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
 7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
@@ -282,42 +283,50 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
   return { ticket: t.number, done, kind: 'probe', branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
 }
 
-// Human lane: the owner performs the steps. The agent verifies only what a container can, then
-// hands the rest back in one comment and moves the ticket's label from ready-for-agent to
-// ready-for-human, so the next label listing leaves it alone (issue 266). Bounded by the
-// FLEET-HUMAN-LANE markers so tools/ticket-fleet-branch.test.js can extract it verbatim and
-// drive it with a mocked `agent` under either instrument.
+// Human lane: a desktop session or a person performs the steps. The agent verifies only what
+// a container can, then hands the rest back in one comment under a "Remaining for a local
+// session" heading - unless the remaining steps are genuinely a person's judgment, credential or
+// sign-off, in which case the heading is "Remaining for a person". It never claims a step was
+// done that it did not do. After the comment it moves the ticket's label from ready-for-agent
+// to the hand-back state that heading implies (ready-for-local-agent or ready-for-human), so
+// the next label listing leaves it alone (issue 266). Bounded by the FLEET-HUMAN-LANE markers
+// so tools/ticket-fleet-branch.test.js can extract it verbatim and drive it with a mocked
+// `agent` under either instrument.
 // [FLEET-HUMAN-LANE-START]
 const runHumanLane = async (t) => {
   const handoff = await agent(
-    `Issue #${t.number}: ${t.title} is a ready-for-human ticket - the owner performs the steps, you do not (${t.kindReason}).
+    `Issue #${t.number}: ${t.title} is a human-lane ticket - either a desktop session or a person performs the remaining steps, you do not (${t.kindReason}).
 ${rules.handoffRead(t.number)}
 Criteria (verbatim):\n${t.criteria}
 Do ONLY what an agent can do from this container:
 - Run the verification commands the checklist names; record each verbatim with its REAL exit code.
 - Report a credential, token or setting as set or unset, NEVER its value; never use fake credentials.
-- Make no repository change, no commit, no push, no PR. Never perform an owner step (a click in a web UI, an account or billing change, anything needing the owner's identity) and never claim one was done.
-Return: agentSide = the commands you ran and their verbatim output; ownerSide = the remaining owner steps, precise enough to follow without re-reading the ticket (where to click, what to enter, what to check afterwards); ready = true only when everything an agent can do is done and only owner steps remain.
+- Make no repository change, no commit, no push, no PR. Never perform a step that only a desktop session or a person can do, and never claim one was done.
+Return: agentSide = the commands you ran and their verbatim output; ownerSide = the remaining steps, precise enough to follow without re-reading the ticket (where to click, what to enter, what to check afterwards); ready = true only when everything an agent can do is done and only human/local-agent steps remain; remainingKind = 'local-agent' when a desktop session could take the remaining steps (a live-tree edit to ~/.claude or ~/.codex plus sync.ps1 -Mode push, a remote branch delete the session proxy refuses, a project-board sweep needing a project-scoped gh token, an edit the auto-mode classifier blocks in a container), 'human' when they are genuinely a person's judgment, credential or sign-off.
 Return structured output only.`,
     { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
   )
   let delivery = null
   if (handoff && cfg.deliver) {
-    const ownerList = handoff.ownerSide.length ? handoff.ownerSide.map(s => '- ' + s).join('\n') : '- nothing remains for the owner'
+    const remainingKind = handoff.remainingKind === 'local-agent' ? 'local-agent' : 'human'
+    const remainingHeading = remainingKind === 'local-agent' ? 'Remaining for a local session' : 'Remaining for a person'
+    const emptyLine = remainingKind === 'local-agent' ? '- nothing remains for a local session' : '- nothing remains for a person'
+    const handBackLabel = remainingKind === 'local-agent' ? 'ready-for-local-agent' : 'ready-for-human'
+    const ownerList = handoff.ownerSide.length ? handoff.ownerSide.map(s => '- ' + s).join('\n') : emptyLine
     delivery = await agent(
       `Post ONE status comment on issue #${t.number} (${t.title}), then hand the ticket back to the owner by relabelling it.
 ${rules.commentPost()}
 Body, in this order:
 1. A "Verified from this container" section: a fenced code block with the commands and their verbatim output, copied exactly from this data - never re-run, re-word or tidy it:\n${handoff.agentSide}
-2. A "Remaining for the owner" section, one bullet per step, verbatim:\n${ownerList}
+2. A "${remainingHeading}" section, one bullet per step, verbatim:\n${ownerList}
 3. Exactly this footer, as the last two lines after a blank line:
 
 ---
 _Generated by [Claude Code](https://claude.ai/code)_
 
-Then, and only after the comment is posted, relabel the ticket so the next run leaves it to the owner instead of repeating this handoff: ${rules.labelSwap(t.number)}
-Return the ticket's labels after the update in \`labels\`; "ready-for-human" must be among them and "ready-for-agent" must not.
-Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that an owner step was performed. Return structured output only.`,
+Then, and only after the comment is posted, relabel the ticket so the next run leaves it alone instead of repeating this handoff: ${rules.labelSwap(t.number, handBackLabel)}
+Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and "ready-for-agent" must not.
+Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that a step outside this container was performed. Return structured output only.`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
     )
   }
