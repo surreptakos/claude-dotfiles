@@ -76,11 +76,11 @@ function Backup-LocalTargets {
 function Invoke-RepoMemoryPointer {
     param([string]$BackupRoot)
 
-    $script = Join-Path $RepoRoot 'tools\repo-memory-pointer.js'
+    $pointerJs = Join-Path $RepoRoot 'tools\repo-memory-pointer.js'
     $node = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $node -or -not (Test-Path $script)) { return }
+    if (-not $node -or -not (Test-Path $pointerJs)) { return }
 
-    $argv = @($script, '--home', $UserHome)
+    $argv = @($pointerJs, '--home', $UserHome)
     if ($BackupRoot) { $argv += @('--backup', (Join-Path $BackupRoot 'memory-archived')) }
     if ($DryRun) { $argv += '--dry-run' }
     $out = & $node.Source @argv 2>&1
