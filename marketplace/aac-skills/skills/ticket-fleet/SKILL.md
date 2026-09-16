@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T19:07:35Z'
-  previous-modified: '2026-09-16T18:01:25Z'
-  revision: '13'
-  content-sha: 5605bb4772fe
+  modified: '2026-09-16T19:17:20Z'
+  previous-modified: '2026-09-16T19:07:35Z'
+  revision: '14'
+  content-sha: c8cbd0e22369
 ---
 
 # ticket-fleet
@@ -438,8 +438,8 @@ log says the cross-check was skipped: a guess is not a rejection.
 An implementer or verifier works inside an isolated worktree, and there the Bash tool refuses any
 command whose text it cannot prove is not git: "... inside a construct too complex to verify, so
 what it runs cannot be shown not to be git. Refusing to run it". Each refusal costs a turn, so
-reach for the working spelling first. Observed in the waves 4/5 triage (issue 358) and again in
-waves 6/7 (issue 373):
+reach for the working spelling first. Observed in the waves 4/5 triage (issue 358), again in
+waves 6/7 (issue 373), and again in the wave 16 triage (issue 402):
 
 | Refused shape | Working spelling |
 | --- | --- |
@@ -447,11 +447,32 @@ waves 6/7 (issue 373):
 | `gh api '…/issues?page=1'; gh api '…/issues?page=2'` - two calls joined with `;`, URL text interpolated | one command per page, each its own Bash call |
 | `cat > notes.md <<'EOF' … EOF` - a heredoc writing a scratch file | the Write tool |
 | `tail -c 60 file \| od -c` - a pipeline for byte-level work | `python3 -c "print(open('file','rb').read()[-60:])"` |
+| `awk '/^- /{n++} END{print n}' FOLLOW-UPS.md` - one plain command, no pipeline, one local file: refused because it "runs `awk` with a program that can execute commands" | `grep -c '^- ' FOLLOW-UPS.md`, or `sed` for the same read, or `python3 -c "print(sum(1 for l in open('FOLLOW-UPS.md') if l.startswith('- ')))"` |
 
-One rule covers all four: one plain command, no loop body, no `;`-joined pair, no heredoc, no
-pipeline - nothing the guard has to evaluate before it can see what actually runs. The guard is
-strictest around text that could reach `git` or `gh`, and it is the shape that is refused, not the
-command, so re-running the same work as separate single commands goes through.
+Two rules, not one. **Shape:** one plain command, no loop body, no `;`-joined pair, no heredoc, no
+pipeline - nothing the guard has to evaluate before it can see what actually runs. **Content:** an
+argument that is itself a *program* - an `awk` script, and by the same reading anything the guard
+cannot vouch for - is refused even in the simplest shape, because the guard reads it as able to
+execute commands. So do not re-run a refused `awk` as a single command and expect it through:
+change the instrument, not the shape. Row 4 is both at once - the message there names the content
+half ("a program this guard does not know may run that input"), not the shape. Where only the
+shape was the problem, re-running the same work as separate single commands does go through.
+
+## GitHub calls a container refuses
+
+Two shapes are refused by the session's GitHub proxy, not by the Bash guard, so no re-spelling of
+the shell helps:
+
+- **Every GraphQL spelling** - `gh issue view`, `gh pr view`, `gh issue list` and the other
+  `--json` forms - answers HTTP 403 pointing at REST. Use `gh api repos/<owner>/<repo>/...` or the
+  GitHub MCP tools.
+- **`gh api search/issues`** (and `search/*` generally) answers HTTP 403 "sessions are bound to
+  their configured repositories". Dedupe by paging
+  `repos/<owner>/<repo>/issues?state=open&per_page=100&page=N` one page per Bash call and grepping
+  the result locally.
+
+`docs/agents/issue-tracker.md` ("From a cloud session (no GraphQL)") carries the rest, including
+why `gh auth status` reports an invalid token in a container that `gh api` works in.
 
 ## Python packages: one editable install, shared by every worktree
 
