@@ -326,11 +326,50 @@ const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 
 // required property 'failures'", so a green branch got no verdict and no delivery. A pass may
 // omit the key or send []; every read of it goes through the normalisation below, which fills
 // in [] so the retry prompt's `.failures.join` can never throw on a key-less verdict.
-const VERDICT = { type: 'object', required: ['pass', 'evidence'], properties: {
+// `worktree` IS required (issue 404). Several verifiers on 2026-09-16 skipped the scratch worktree
+// ('the exact worktree path no longer exists, so I re-ran in <repo root>') and ran their commands in
+// the orchestrator's own checkout, which sat on the session's feature branch and predated the code
+// under test: the #361 probe was refuted as 'fabricated' for flags origin/main carried and that
+// branch did not. A verdict that depends on which branch the main checkout is on is not a verdict,
+// so the verifier has to say where it ran and the script cross-checks it (worktreeMismatch below).
+const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], properties: {
   pass: { type: 'boolean' },
   evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
   failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
+  worktree: { type: 'object', required: ['path', 'head'], description: 'where you actually ran: the scratch worktree you created, never the repository you started in', properties: {
+    path: { type: 'string', description: 'absolute path of the scratch worktree every command above ran inside' },
+    head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed INSIDE that worktree, copied verbatim - not abbreviated, not from memory' },
+  } },
 } }
+
+// [FLEET-WORKTREE-CHECK-START]
+// The machine-checked half of issue 404. The verifier's self-reported HEAD is compared with the
+// tip the lane expects - the branch under review (code lane) or origin/<defaultBranch> (probe
+// lane), read by its own one-command `git rev-parse` agent so no agent certifies itself.
+// `worktreeMismatch` returns null when the verdict may stand and one line naming the mismatch
+// otherwise; that line is what the single re-run prompt and the recorded failure both carry.
+const shaMatches = (a, b) => {
+  const x = String(a == null ? '' : a).trim().toLowerCase()
+  const y = String(b == null ? '' : b).trim().toLowerCase()
+  if (!/^[0-9a-f]{7,40}$/.test(x) || !/^[0-9a-f]{7,40}$/.test(y)) return false
+  const n = Math.min(x.length, y.length)
+  return x.slice(0, n) === y.slice(0, n)
+}
+const worktreeMismatch = (verdict, expectedHead, expectedLabel) => {
+  // No expected tip (the rev-parse agent could not read it) means there is nothing to check
+  // against: the lane logs that and the verdict stands rather than being rejected on a guess.
+  if (!expectedHead) return null
+  // An unusable verdict is already a failed attempt; re-running it for its worktree adds nothing.
+  if (!verdict || verdict.unusable) return null
+  const wt = (verdict.worktree && typeof verdict.worktree === 'object') ? verdict.worktree : {}
+  const head = String(wt.head == null ? '' : wt.head).trim()
+  const where = String(wt.path == null ? '' : wt.path).trim()
+  const tail = `the main checkout is never a test surface - it sits on whatever branch this session is on, which is not the code under review`
+  if (!head) return `the verdict reported no worktree HEAD, so there is no evidence it ran against ${expectedLabel} (${expectedHead}); ${tail}`
+  if (shaMatches(head, expectedHead)) return null
+  return `the verdict was produced at HEAD ${head}${where ? ` (worktree ${where})` : ''}, not ${expectedLabel} (${expectedHead}); ${tail}`
+}
+// [FLEET-WORKTREE-CHECK-END]
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
@@ -378,6 +417,38 @@ function failuresOf(verdict) {
   const list = (Array.isArray(verdict.failures) ? verdict.failures : []).map(f => String(f).trim()).filter(Boolean)
   if (list.length) return list
   return [verdict.pass ? 'verifier passed and listed no failures' : 'verifier returned pass=false with no failures listed']
+}
+
+// ---- the expected tip a verdict is cross-checked against (issue 404) ----
+// A workflow script has no shell of its own, so the tip is read by an agent that runs ONE fixed
+// command and copies its output back - the shape the tree guard already uses, for the same reason:
+// nothing is left to the agent's judgement, so a paraphrase is detectable. The prompt names only a
+// ref, so its cache key is stable across a resume and a resumed run replays the same sha.
+const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
+  exitCode: { type: 'integer', description: 'REAL exit code of the command, not the exit code of a pipe' },
+  stdout: { type: 'string', description: 'stdout VERBATIM - the full 40-character object name when the ref resolved; never abbreviate or reformat it' },
+  stderr: { type: 'string', description: 'stderr verbatim ("" if none)' },
+} }
+async function revParse(ref, label) {
+  let res = null
+  try {
+    res = await agent(
+    `Run exactly this one bash command, from the repository root, and report its result:
+
+git rev-parse ${ref}
+
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
+file. Do not interpret the output. Return the command's REAL exit code plus its stdout and stderr
+VERBATIM - stdout is one 40-character object name when the ref resolved; copy it character for
+character.`,
+    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
+    )
+  } catch (err) {
+    log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
+    return null
+  }
+  const sha = res && res.exitCode === 0 ? String(res.stdout || '').trim().split(/\s+/)[0] : ''
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
 }
 
 // ---------------------------------------------------------------------------
@@ -678,6 +749,7 @@ const runProbeLane = async (t) => {
       probe = reuse || await agent(
       `Probe GitHub issue #${t.number}: ${t.title}
 This ticket resolves by evidence, not by changing the repository (${t.kindReason}).
+The main checkout is never a test surface (issue 404): the repository at the session's root sits on whatever branch this session is on, which is not the code this ticket is about, so evidence gathered there is about the wrong tree - work inside your own isolated worktree, and where an item is about the repository as it stands, \`git fetch origin\` first and read origin/${scout.defaultBranch}.
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 Rules:
@@ -704,28 +776,50 @@ Return structured output only.`,
     }
 
     evidenceBlocks = probe.items.map(i => `ITEM: ${stableText(i.item)}\nCOMMANDS:\n${stableText(i.commands)}\nOUTPUT:\n${stableText(i.outputVerbatim)}\nEXIT: ${stableText(i.exitCodes)}`).join('\n----\n')
-    // Wrapped (aac-routines issues 191, 270).
-    try {
-      lastVerdict = await agent(
+    // Issue 404, probe lane: the code a probe is about is the default branch, so the expected tip
+    // is origin/<defaultBranch> - a verifier that re-ran the commands in the orchestrator's own
+    // checkout answered about whatever branch this session sits on. #361 was refuted as
+    // 'fabricated' exactly that way, for flags origin/main carried and that stale branch did not.
+    const expectedHead = await revParse(`origin/${scout.defaultBranch}`, `tip:#${t.number}.${attempt}`)
+    if (!expectedHead) log(`#${t.number}.${attempt}: could not read the tip of origin/${scout.defaultBranch}; this attempt's verdict is accepted without the worktree cross-check.`)
+    let mismatch = null
+    for (let pass = 1; pass <= 2; pass++) {
+      const verifyLabel = pass === 1 ? `verify:#${t.number}.${attempt}` : `verify:#${t.number}.${attempt}-rerun`
+      const rerunBlock = pass === 2
+        ? `\nYour previous verdict was REJECTED before it was read, for where it was produced and not for what it concluded: ${mismatch}. Redo the whole verification from scratch inside a worktree you create with the command above, and report that worktree's path and its \`git rev-parse HEAD\` in \`worktree\`. Reach the conclusion the evidence supports; that it was passed or failed last time is not a reason to keep or change it.`
+        : ''
+      // Wrapped (aac-routines issues 191, 270).
+      try {
+        lastVerdict = await agent(
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
+The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
+In this repo run: git fetch origin, then git worktree add <scratch dir> --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree.
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
 1. Re-run every command above that is re-runnable in this container and compare YOUR output with the claimed output. Output you cannot reproduce, or that does not match, is a failure.
 2. For a command that genuinely cannot be re-run here (needs a second fresh container, a Routine, an owner secret), say so in your evidence; do not pass a re-runnable item on a claim alone.
 3. Every criterion must be covered by an item; a criterion with no command behind it is a failure.
 4. Fabrication check: output too clean for the command, paraphrased, or missing the tool's usual noise is a failure. So is any printed secret value.
-Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.`,
-      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
-      )
-    } catch (err) {
-      lastVerdict = unusableVerdict((err && err.message) || err, `verify:#${t.number}.${attempt}`)
+5. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not the tip of origin/${scout.defaultBranch} is rejected unread.
+Clean up your scratch worktree (git worktree remove) when done. Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.${rerunBlock}`,
+        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
+        )
+      } catch (err) {
+        lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
+      }
+      if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
+      // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+      // later read (the retry prompt, the run report) sees an array.
+      if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
+      if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of origin/${scout.defaultBranch}`)
+      if (!mismatch) break
+      log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
     }
-    if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', `verify:#${t.number}.${attempt}`)
-    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
-    // later read (the retry prompt, the run report) sees an array.
-    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
-    if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+    // Only the mismatch is recorded: whatever else that verdict said was observed in the wrong
+    // tree, so passing its findings on to the next attempt would be passing on guesswork.
+    if (mismatch) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: [mismatch] }
     if (lastVerdict.pass) break
   }
 
@@ -960,11 +1054,27 @@ Return structured output only.`,
     // Read, Grep, Glob, Bash. A cloud session gets no agentType at all: its registry is read
     // before the bootstrap hook can write one (issue 339, docs/tickets/339-decision.md), so the
     // restraint there is the container sandbox plus the detached scratch worktree.
-    // Wrapped (aac-routines issues 191, 270).
-    try {
-      lastVerdict = await agent(
+    //
+    // Issue 404: where the verifier ran is checked, not assumed. The tip of the branch under
+    // review is read first by its own one-command agent; the verdict's self-reported worktree HEAD
+    // must be that tip, or the verdict is rejected and the verifier re-run ONCE with the mismatch
+    // named. A `null` tip (the rev-parse agent could not answer) leaves the verdict standing.
+    const expectedHead = await revParse(branch, `tip:#${t.number}.${attempt}`)
+    if (!expectedHead) log(`#${t.number}.${attempt}: could not read the tip of ${branch}; this attempt's verdict is accepted without the worktree cross-check.`)
+    let mismatch = null
+    for (let pass = 1; pass <= 2; pass++) {
+      const verifyLabel = pass === 1 ? `verify:#${t.number}.${attempt}` : `verify:#${t.number}.${attempt}-rerun`
+      // Pass 2 only. The rejection is about WHERE the verdict was produced, never about what it
+      // concluded - saying so is what stops the re-run reading as pressure to change its answer.
+      const rerunBlock = pass === 2
+        ? `\nYour previous verdict was REJECTED before it was read, for where it was produced and not for what it concluded: ${mismatch}. Redo the whole verification from scratch inside a worktree you create with the command above, and report that worktree's path and its \`git rev-parse HEAD\` in \`worktree\`. Reach the conclusion the evidence supports; that it was passed or failed last time is not a reason to keep or change it.`
+        : ''
+      // Wrapped (aac-routines issues 191, 270).
+      try {
+        lastVerdict = await agent(
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
+The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
 In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - branch is checked out elsewhere), then inside it:
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
@@ -972,23 +1082,33 @@ In this repo run: git worktree add <scratch dir> --detach ${branch} (detach - br
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*'\`. Those two exclusions are the harness's own scratch, not implementer output: ~/.claude/hook-state is hook bookkeeping and ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes - keep both exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
-Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.`,
-      { label: `verify:#${t.number}.${attempt}`, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
-      )
-    } catch (err) {
-      lastVerdict = unusableVerdict((err && err.message) || err, `verify:#${t.number}.${attempt}`)
+6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
+Clean up your scratch worktree (git worktree remove) when done. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
+        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
+        )
+      } catch (err) {
+        lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
+      }
+
+      // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
+      // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
+      // transcript forensics put the 2026-09-11 leak on.
+      await treeGuardCheck(pass === 1 ? `verify-attempt${attempt}` : `verify-attempt${attempt}-rerun`, t.number)
+
+      if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
+      // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
+      // later read (the retry prompt, the run report) sees an array.
+      if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
+      if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of ${branch}`)
+      if (!mismatch) break
+      log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
     }
-
-    // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
-    // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
-    // transcript forensics put the 2026-09-11 leak on.
-    await treeGuardCheck(`verify-attempt${attempt}`, t.number)
-
-    if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', `verify:#${t.number}.${attempt}`)
-    // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
-    // later read (the retry prompt, the run report) sees an array.
-    if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
-    if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+    // A second mismatched verdict is not retried again: it is recorded as a failed attempt naming
+    // the mismatch, so nothing is delivered on a verdict produced against the wrong tree.
+    // Only the mismatch is recorded: whatever else that verdict said was observed in the wrong
+    // tree, so passing its findings on to the next attempt would be passing on guesswork.
+    if (mismatch) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: [mismatch] }
     if (lastVerdict.pass) break
   }
 
