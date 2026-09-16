@@ -23,8 +23,10 @@ each Routine serves its own repo independently.
 - **Session** — a fresh cloud session spawned by each Routine wake. Boots from the per-repo state
   issue, dispatches everything in-session, ends the turn on `Pass complete`. No session outlives
   one wake; continuity lives in the state issue.
-- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, invoked in-session via
-  the Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`.
+- **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, copied into the repo as
+  `.claude/workflows/ticket-fleet.js` and invoked in-session via the Workflow tool with
+  `scriptPath = .claude/workflows/ticket-fleet.js`. A `${CLAUDE_PLUGIN_ROOT}` path is refused in a
+  cloud container — the Workflow tool reads only a path under the working directory (issue 233).
   One script for local and cloud; it picks between the `gh` CLI and the connector tools at run
   time. Same scout / pinned implementer / blind refuting verifier / deliver shape.
 
@@ -107,11 +109,30 @@ In this order:
    (`agent/issue-*` branches), in this same session.
 4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
    labels they produce), invoke the Workflow tool with
-   `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and `args` from the
-   state issue's `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it
-   in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
-   fleet refuses to start without one. When the fleet returns, run the merge pass once more over
+   `scriptPath = .claude/workflows/ticket-fleet.js` — copy it there first with `mkdir -p
+   .claude/workflows && cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js"
+   .claude/workflows/ticket-fleet.js` — and `args` from the
+   state issue's `config.fleetArgs`. Mint a `runId` and a separate `invocationId` inline
+   (`printf %x%x $(date +%s) $$` each) and pass both in `args`; the workflow runtime forbids
+   `Date.now()` and `Math.random()` in scripts, so the fleet refuses to start without them.
+   Resuming a run (`resumeFromRunId`) keeps the same `runId` - the branch names embed it - and
+   takes a NEW `invocationId`, which is what makes the open-PR guard re-ask the tracker instead
+   of replaying the cached "no PR" it recorded before the PRs existed. Always pass
+   `verifierAgent: ''` from a cloud session: the workflow runtime hides `process.env`, so the
+   fleet cannot tell a container from the desktop and defaults to pinning its verifiers to the
+   `fleet-verifier` agent type, which this container's registry does not hold - every verifier
+   then fails to launch and the wave delivers nothing (issue 316). When the fleet returns, run the merge pass once more over
    the PRs it just opened.
+
+   **Record the wave before doing anything else with it.** The moment the Workflow returns, run
+   `node tools/fleet-run-record.js --latest` in the served repo, in THIS session's own shell —
+   never through a subagent, which would re-derive the run from its own context instead of reading
+   the journal. The harness journal the record distils is machine-local and dies with the
+   container, so a wave that is not recorded before the pass ends is unrecoverable. The fleet logs
+   the same reminder on its way out (aac-routines issue 269). Repos that gitignore `state/` keep
+   nothing on disk either: there, post the record's digest as a comment on that repo's tracking
+   issue, written `owner/repo#N`, so the run survives the container. A repo without
+   `tools/fleet-run-record.js` has nothing to run — say so in the heartbeat and move on.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
    append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
    and PR list — never a subagent self-report.
@@ -228,7 +249,7 @@ markers). The JSON block shape:
   "decisionBriefIssue": null,
   "config": {
     "maxWavesPerRepoPerDay": 6,
-    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3 }
+    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3, "verifierAgent": "" }
   }
 }
 ```
@@ -263,6 +284,17 @@ from it.
 > the empty-pass skip before dispatching anything. When the pass is done, clear the venue, write
 > `**Pass complete — YYYY-MM-DD HH:MM UTC**` at the top of your state issue's heartbeat section,
 > say `pass complete`, and end the turn. My comments on the state issue override everything here.
+
+## Naming tools in a prompt
+
+MCP tool names are not stable within a session. On a fresh cloud session's **first turn** every MCP
+server is mounted under a UUID prefix — `mcp__<uuid>__create_session`, and the connectors likewise;
+the product-named prefixes (`mcp__Claude_Code_Remote__*`, `mcp__Microsoft_365__*`) only appear on
+later turns. `mcp__github__*` is the exception and is stable throughout (issue 166, container C,
+item 10). A prompt that names a tool by its product prefix therefore works when a human tries it
+interactively and fails on the first turn of the session it was written for — which is every wake
+this runbook dispatches. Name tools by suffix or by capability ("the session-create tool", "the
+issue-write tool") in every boot prompt, dispatch brief and skill this runbook writes.
 
 ## Rails
 
