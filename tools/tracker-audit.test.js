@@ -36,6 +36,10 @@ const {
   paginate,
   parseLinkHeader,
   pageFromUrl,
+  boxPathCandidates,
+  deletedPathIndex,
+  matchDeletedPath,
+  deletedSubjectFindings,
 } = require('./tracker-audit.js');
 
 // ---- issuesOnly: the PR-vs-issue filter -----------------------------------
@@ -347,4 +351,78 @@ test('pageFromUrl extracts page=N from any query position; null when absent', ()
   assert.strictEqual(pageFromUrl('https://x/y?page=3&other=1'), 3);
   assert.strictEqual(pageFromUrl('https://x/y?state=all'), null);
   assert.strictEqual(pageFromUrl(null), null);
+});
+
+// ---- deleted-subject?: an acceptance box whose subject another ticket deleted ------------
+
+// The pinned case is claude-dotfiles #120 (issue 361). Its acceptance list carries a `writing`
+// box; commit 518e63a (issue 178, 2026-09-14) deleted `aac-skills/writing/` and its packaged
+// copies on the owner's instruction. #120 predates #178 and neither cites the other, so the
+// stale-premise? check could never link them and two fleet attempts spent a cycle discovering
+// the box could not be ticked by doing the work.
+const DELETED_LISTING = [
+  'aac-skills/writing/SKILL.md',
+  'aac-skills/writing/references/audience.md',
+  'aac-skills/writing/scripts/refresh_vercel.js',
+  'marketplace/aac-skills/skills/writing/SKILL.md',
+  'agents/skills/project-harness/templates/ticket-fleet.js',
+  'docs/adr/0003-old-note.md',
+].join('\n');
+const LIVE_LISTING = [
+  'aac-skills/writing-great-skills/SKILL.md',
+  'aac-skills/ticket-fleet/ticket-fleet.js',
+  'agents/skills/project-harness/SKILL.md',
+  'docs/adr/0004-kept.md',
+  'tools/tracker-audit.js',
+].join('\n');
+const ISSUE_120 = {
+  number: 120, state: 'OPEN', title: 'writing-great-skills pass over every Dan-authored skill (15)',
+  url: 'https://github.com/o/r/issues/120',
+  body: [
+    '## Acceptance criteria', '',
+    '- [ ] `project-harness`',
+    '- [ ] `aac-sop`',
+    '- [ ] `writing`',
+    '- [ ] Each box above is ticked with the commit hash of that skill\'s rewrite',
+  ].join('\n'),
+};
+
+test('deletedSubjectFindings pins #120: the `writing` box names a directory another ticket deleted', () => {
+  const index = deletedPathIndex(DELETED_LISTING, LIVE_LISTING);
+  const found = deletedSubjectFindings([ISSUE_120], index);
+  assert.strictEqual(found.length, 1);
+  assert.strictEqual(found[0].kind, 'deleted-subject?');
+  assert.strictEqual(found[0].issue.number, 120);
+  assert.match(found[0].detail, /`writing`/);
+  assert.match(found[0].detail, /aac-skills\/writing\//);
+  // The surviving boxes name live skills, and `ticket-fleet.js` moved rather than vanished — a
+  // name the live tree still uses anywhere is never read as deleted.
+  assert.strictEqual(matchDeletedPath('project-harness', index), null);
+  assert.strictEqual(matchDeletedPath('ticket-fleet.js', index), null);
+  // A CLOSED issue carrying the same body is the tracker doing its job, not drift.
+  assert.deepStrictEqual(
+    deletedSubjectFindings([Object.assign({}, ISSUE_120, { state: 'CLOSED' })], index), []);
+});
+
+test('deletedSubjectFindings stays silent on a box naming a path the ticket will create', () => {
+  const index = deletedPathIndex(DELETED_LISTING, LIVE_LISTING);
+  const willCreate = {
+    number: 361, state: 'OPEN', title: 'tracker-audit: deleted acceptance subjects',
+    url: 'https://github.com/o/r/issues/361',
+    body: ['## Acceptance criteria', '',
+           '- [ ] `tools/deleted-subject.js` reports the advisory',
+           '- [ ] a new `docs/adr/0009-deleted-subjects.md` records the ruling'].join('\n'),
+  };
+  assert.deepStrictEqual(deletedSubjectFindings([willCreate], index), []);
+  // Absent from the tree is not the same as deleted from it: only history makes the finding.
+  assert.strictEqual(matchDeletedPath('tools/deleted-subject.js', index), null);
+  assert.strictEqual(matchDeletedPath('aac-skills/writing/SKILL.md', index), 'aac-skills/writing/SKILL.md');
+});
+
+test('boxPathCandidates reads backticked names and slashed paths, never a bare prose word', () => {
+  assert.deepStrictEqual(boxPathCandidates('- `writing`'), ['writing']);
+  assert.deepStrictEqual(boxPathCandidates('Delete aac-skills/writing/ from the tree.'),
+                         ['aac-skills/writing']);
+  // "writing" here is prose, and `gh issue close 120` is a command, not a path.
+  assert.deepStrictEqual(boxPathCandidates('the writing pass is done (`gh issue close 120`)'), []);
 });
