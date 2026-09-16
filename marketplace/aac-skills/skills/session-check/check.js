@@ -453,7 +453,7 @@ function readJson(file) {
  *  itself be stale, so installed > offered means the marketplace clone needs refreshing, not
  *  that the plugin needs updating (an update would reinstall the same version from the same
  *  stale clone). Machine-wide, silent when no marketplace is configured. */
-const { compareVersions } = require('./plugin-version');
+const { classifyInstall } = require('./plugin-version');
 function installedPluginChecks() {
   if (IS_CLOUD) return;
   const root = path.join(os.homedir(), '.claude', 'plugins');
@@ -476,7 +476,15 @@ function installedPluginChecks() {
     if (!manifest || !Array.isArray(manifest.plugins)) continue;
     const offered = manifest.plugins.find((p) => p && p.name === name);
     if (!offered || !offered.version) continue;
-    const cmp = compareVersions(entry.version, offered.version);
+    // The clone's HEAD against the commit the install was cut from: equal means the clone is
+    // exactly what is installed, and any version disagreement is upstream's marketplace.json
+    // lagging its own plugin.json (sstklen, 2026-09-15). classifyInstall reports that as
+    // 'manifest-lag', which is nothing this machine can refresh, so it stays silent here.
+    const cloneSha = tryRun('git', ['-C', loc, 'rev-parse', 'HEAD'], { timeout: 10000 });
+    const cmp = classifyInstall({
+      installed: entry.version, offered: offered.version,
+      installedSha: entry.gitCommitSha, cloneSha,
+    });
     if (cmp === 'behind') behindRows.push({ name, market, have: entry.version, offered: offered.version });
     else if (cmp === 'ahead') aheadRows.push({ name, market, have: entry.version, offered: offered.version });
   }

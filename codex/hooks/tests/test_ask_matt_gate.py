@@ -126,6 +126,11 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("YES GOVERNANCE: ENFORCED", context)
             self.assertIn("CAVEMAN ULTRA: ENFORCED", context)
             self.assertIn('declare "turn-1" <flow>', context)
+            # issue 151: to-spec and to-tickets must appear in the routing hint,
+            # and the new-feature/multi-session route reads distinct from implement.
+            self.assertIn("to-spec", context)
+            self.assertIn("to-tickets", context)
+            self.assertIn("multi-session", context)
             state = json.loads(
                 (state_dir / "session-1--turn-1.json").read_text(encoding="utf-8")
             )
@@ -382,6 +387,11 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("CAVEMAN ULTRA: ENFORCED", context)
             self.assertIn("PRE-SEND LINT REQUIRED", context)
             self.assertIn('declare-claude "claude-session-1"', context)
+            # issue 151: Claude prompt handler carries the same to-spec/to-tickets
+            # route line as the Codex handler, and reads distinct from implement.
+            self.assertIn("to-spec", context)
+            self.assertIn("to-tickets", context)
+            self.assertIn("multi-session", context)
             state = json.loads(
                 (state_dir / "claude--claude-session-1.json").read_text(
                     encoding="utf-8"
