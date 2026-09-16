@@ -6,8 +6,10 @@ name: Skill stamps
 #     (its content hash moved) - one named step per tree, so the failure says which one, or
 #   - the committed plugin payload no longer matches what the packager builds from the mirror,
 #     i.e. someone changed a skill and did not republish the plugin.
-# The fix for all of them is the same two commands, from the repo root (CLAUDE.md, "Skill stamps"):
-#   python3 tools/skill-stamps.py stamp aac-skills agents/skills
+# The fix for all of them is the same two commands, from the repo root (CLAUDE.md, "Skill stamps").
+# --home on BOTH is what makes them reproduce this job: without it the stamper hashes against the
+# container's own home and re-stamps skills nobody touched (issue 431).
+#   python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\Users\Dan'
 #   python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 # The dashboard branch is a force-pushed snapshot artifact and is never checked.
 
