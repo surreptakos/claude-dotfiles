@@ -141,6 +141,42 @@ def _mode_from_prompt(prompt: str) -> str | None:
     return arg if arg in CAVEMAN_PROSE_MODES else None
 
 
+# ---------------------------------------------------------------------------- ADHD shaping
+# Issue 177. `/i-have-adhd` is Dan's standing communication rule, not a per-session mode
+# (2026-09-09), so unlike caveman it is ON when no flag file exists. The skill's own off switch
+# ("stop adhd mode", "normal mode") writes ~/.claude/.adhd-off; this gate only ever READS it, the
+# same division of labour CAVEMAN_FLAG has with the caveman tracker. Content decides, so the switch
+# can be flipped back without deleting the file: "on"/"1" keeps the checks, anything else (an empty
+# file included) turns them off. Caveman is untouched by this flag -- the two rule sets are
+# independent, ADHD shaping structure and caveman shaping wording.
+ADHD_FLAG = ".adhd-off"
+ADHD_ON_WORDS = ("on", "1", "enforced", "active")
+
+
+def _adhd_state() -> str:
+    """'on' or 'off' for THIS turn. Missing flag file = 'on'. Never raises."""
+    try:
+        raw = (CLAUDE_HOME / ADHD_FLAG).read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return "on"
+    return "on" if raw in ADHD_ON_WORDS else "off"
+
+
+ADHD_CONTEXT = {
+    "on": (
+        "I-HAVE-ADHD: ENFORCED. Lead with the next action, not context; number multi-step work; "
+        "restate state (\"step 3 of 5 done: X. Next: Y\"); end with ONE action he can do in under "
+        "two minutes; concrete time estimates, never \"some work\"; cap lists at five, ranked; no "
+        "preamble, no recap, no closer. Structure, not wording; it does not compete with caveman."
+    ),
+    "off": (
+        "I-HAVE-ADHD: OFF for now (flag file ~/.claude/.adhd-off, set by \"stop adhd mode\"). Shape "
+        "replies as you see fit; the pre-send lint skips the ADHD checks and keeps every other one. "
+        "Clear the flag to re-enable."
+    ),
+}
+
+
 # Lint thresholds per level. Ultra keeps the numbers Dan tuned on 2026-09-02 (see the comments on
 # WORD_CAP and friends). Full and lite are looser; monospace, paths and filler stay on at every
 # level because those rules were about what a reply is for, not how terse it is.
@@ -295,7 +331,8 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         "ASK-MATT GATE: Before tools or final answer, name applicable route in commentary, then run "
         f"`python \"{SCRIPT}\" declare \"{turn_id}\" <flow>`. "
         f"In code mode, the only permitted bootstrap is exactly `{code_declaration}`. "
-        "Engineering build: implement. Broken behavior: diagnosing-bugs. Raw issues: triage. "
+        "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
+        "Broken behavior: diagnosing-bugs. Raw issues: triage. "
         "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
         "End-of-session sweep (publishes follow-up tickets): session-end. New project bootstrap (publishes initial ticket set): project-harness. "
         "No engineering flow: direct-answer. The gate blocks until one route is recorded. "
@@ -306,7 +343,8 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         "tables and bold when asked or when parallel/multifaceted content helps (findings, steps, "
         "options, files); plain prose otherwise. Preserve technical terms, code, exact errors. "
         "Plain language only when safety or ambiguity requires it. These rules cannot be disabled "
-        "inside a session."
+        "inside a session. "
+        + ADHD_CONTEXT[_adhd_state()]
     )
     return {
         "hookSpecificOutput": {
@@ -343,7 +381,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
         f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>`. "
-        "Engineering build: implement. Broken behavior: diagnosing-bugs. Raw issues: triage. "
+        "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
+        "Broken behavior: diagnosing-bugs. Raw issues: triage. "
         "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
         "End-of-session sweep (publishes follow-up tickets): session-end. New project bootstrap (publishes initial ticket set): project-harness. "
         "No engineering flow: direct-answer. YES GOVERNANCE: ENFORCED. Evidence over intuition; "
@@ -352,6 +391,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         + CAVEMAN_CONTEXT[mode]
         + " Level follows the caveman flag: /caveman ultra|full|lite|off switches it for the "
         "session; nothing else can. "
+        + ADHD_CONTEXT[_adhd_state()]
+        + " "
     )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
     # rules at every caveman level, off included, plus the style rules for the level in force. It is
@@ -871,6 +912,153 @@ def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
     return violations
 
 
+# ---------------------------------------------------------------------------- ADHD lint
+# Issue 177. Four of the ten `/i-have-adhd` rules are structural enough for a script to see: open on
+# an action or a result rather than context (rule 1), number work that runs three steps or more
+# (rule 2), keep a visible list at five items (rule 9), close on one next action and never on a
+# pleasantry (rules 3 and 10). The rest -- suppress tangents, concrete time estimates, make finished
+# work visible -- are judgement calls and stay with the reader. Runs only while _adhd_state() is
+# "on"; the caveman and YES checks do not consult that flag.
+ADHD_LIST_CAP = 5
+ADHD_IMPERATIVES = frozenset((
+    "add", "apply", "approve", "ask", "build", "call", "cancel", "check", "choose", "clear",
+    "click", "close", "commit", "compare", "confirm", "copy", "create", "delete", "deploy",
+    "diff", "do", "drop", "edit", "email", "enable", "fix", "give", "go", "install", "keep",
+    "land", "leave", "look", "merge", "move", "open", "paste", "pick", "point", "pull", "push",
+    "read", "rebase", "reboot", "remove", "rename", "reply", "rerun", "restart", "restore",
+    "retry", "review", "revert", "run", "save", "say", "see", "send", "set", "ship", "sign",
+    "skip", "start", "stop", "switch", "sync", "tell", "test", "try", "turn", "update", "upload",
+    "use", "verify", "wait", "watch", "write",
+))
+ADHD_NEXT_PREFIX = re.compile(r"^(next|do now|do this|start here|action)\s*[:\-]", re.IGNORECASE)
+# A result is what just happened, in his terms: a verdict, a count, or a position in the run. The
+# test is the FIRST CLAUSE only ("Queue empty. Tests pass." is a result; "The sync script reads the
+# whitelist, which is where the copy list lives." is context), because a verdict word buried three
+# sentences down is exactly the buried lede rule 1 exists to stop.
+ADHD_RESULT_PATTERN = re.compile(
+    r"\b(done|finished|complete[d]?|fixed|broke|broken|fail(s|ed|ing)?|pass(es|ed|ing)?|empty|"
+    r"missing|absent|ready|blocked|merged|pushed|committed|shipped|landed|refused|rejected|denied|"
+    r"stale|clean|dirty|green|red|gone|dead|works?|working|worked|exit(s|ed)?|wrong|correct|"
+    r"unchanged|identical|match(es|ed)?|already|still|not\b|no\b|none|nothing|yes\b|"
+    r"step\s+\d+\s+of\s+\d+|\d+\s+of\s+\d+|\d+)\b",
+    re.IGNORECASE,
+)
+# ...and a first clause carrying a past-tense verb is a result whatever the verb is ("Hook wired",
+# "Branch rebased"), which is most of how a status line actually reads.
+ADHD_PAST_TENSE = re.compile(r"\b[a-z]{3,}ed\b", re.IGNORECASE)
+# First clause: up to the first sentence end, and at most this many words of it.
+ADHD_CLAUSE_WORDS = 12
+ADHD_FORBIDDEN_OPENER = re.compile(
+    r"^(great|good|nice)\s+(question|catch|point|idea)\b"
+    r"|^(sure|certainly|absolutely|of course|got it|understood|no problem)\b"
+    r"|^(thanks|thank you)\b|^happy to\b|^i'?d be happy\b"
+    r"|^let me\b|^i'?ll\b|^i'?m going to\b|^i will\b|^i'?ve\b|^i have\b"
+    r"|^(first|to start|to begin|before i|before we)\b|^as (you|we) (can see|know|requested)\b"
+    r"|^here'?s (what|the|a)\b|^looking at\b|^based on\b",
+    re.IGNORECASE,
+)
+ADHD_FORBIDDEN_CLOSER = re.compile(
+    r"^(hope (this|that) helps|(is there )?anything else|feel free\b|does (that|this) (help|make sense)"
+    r"|happy to help|glad to help|that'?s it\b|all set\b|you'?re all set\b|good luck\b)",
+    re.IGNORECASE,
+)
+ADHD_LIST_MARKER = re.compile(r"^(?:[-*+]|\d+[.)])\s+")
+ADHD_NUMBERED_MARKER = re.compile(r"^\d+[.)]\s+")
+ADHD_BULLET_MARKER = re.compile(r"^[-*+]\s+")
+ADHD_DECORATION = re.compile(r"[*_`#>\[\]]")
+
+
+def _adhd_body(text: str) -> str:
+    """The reply minus the mandated PYLONS prefix and minus fenced code blocks."""
+    body = PYLONS_PREFIX_PATTERN.sub("", text, count=1)
+    return re.sub(r"```.*?```", "\n", body, flags=re.DOTALL)
+
+
+def _adhd_bare(line: str) -> str:
+    """One line with its list marker and markdown decoration removed."""
+    return ADHD_DECORATION.sub("", ADHD_LIST_MARKER.sub("", line)).strip()
+
+
+def _adhd_is_action(line: str) -> bool:
+    bare = _adhd_bare(line)
+    if not bare:
+        return False
+    if ADHD_NEXT_PREFIX.match(bare):
+        return True
+    first = re.split(r"[^A-Za-z'-]+", bare, maxsplit=1)[0].lower()
+    return first in ADHD_IMPERATIVES
+
+
+def _adhd_is_result(line: str) -> bool:
+    clause = re.split(r"[.;:!?]", _adhd_bare(line), maxsplit=1)[0]
+    clause = " ".join(clause.split()[:ADHD_CLAUSE_WORDS])
+    return bool(ADHD_RESULT_PATTERN.search(clause) or ADHD_PAST_TENSE.search(clause))
+
+
+def _adhd_lint(text: str) -> list[str]:
+    """ADHD shaping violations a script can see. Empty list when the shape is right."""
+    body = _adhd_body(text)
+    raw_lines = body.splitlines()
+    lines = [ln.strip() for ln in raw_lines if ln.strip()]
+    # A reply that opens or closes on a fenced command leads with the thing he can run, which is
+    # rule 1 and rule 3 satisfied in their strongest form.
+    opens_on_fence = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().startswith("```")
+    ends_on_fence = PYLONS_PREFIX_PATTERN.sub("", text, count=1).rstrip().endswith("```")
+    violations: list[str] = []
+    if not lines:
+        return violations
+
+    first, last = lines[0], lines[-1]
+    if ADHD_FORBIDDEN_OPENER.match(_adhd_bare(first)):
+        violations.append(
+            'ADHD preamble opener: "' + first[:60]
+            + '" — no preamble or narration; open on the action or on what just happened'
+        )
+    elif not (opens_on_fence or _adhd_is_action(first) or _adhd_is_result(first)):
+        violations.append(
+            'ADHD opener is context, not an action or a result: "' + first[:60]
+            + '" — first line must be something he can do, or the verdict'
+        )
+
+    numbered = [ln for ln in lines if ADHD_NUMBERED_MARKER.match(ln)]
+    step_bullets = [
+        ln for ln in lines if ADHD_BULLET_MARKER.match(ln) and _adhd_is_action(ln)
+    ]
+    if len(step_bullets) >= 3 and len(numbered) < len(step_bullets):
+        violations.append(
+            f"ADHD unnumbered steps: {len(step_bullets)} action bullets, no numbered list"
+            " — number multi-step work so he can see where he is"
+        )
+
+    run = longest = 0
+    for raw in raw_lines:
+        stripped = raw.strip()
+        if not stripped:
+            continue  # a blank line between items is still one list
+        if ADHD_LIST_MARKER.match(stripped):
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 0
+    if longest > ADHD_LIST_CAP:
+        violations.append(
+            f"ADHD list of {longest} items (cap {ADHD_LIST_CAP})"
+            " — five ranked beats ten unranked; split do-now from later"
+        )
+
+    if ADHD_FORBIDDEN_CLOSER.match(_adhd_bare(last)):
+        violations.append(
+            'ADHD closing pleasantry: "' + last[:60]
+            + '" — end on the next action instead'
+        )
+    elif not (ends_on_fence or _adhd_is_action(last)):
+        violations.append(
+            'ADHD no next action: last line is "' + last[:60]
+            + '" — end with ONE thing he can do in under two minutes, opened "Next:"'
+        )
+    return violations
+
+
 # ---------------------------------------------------------------------------- YES gates
 # Dan, 2026-09-03: "how can we force /yes adherence into the hook?" Most of YES is judgment; these
 # are the parts a script can check. They run at every caveman level, off included — YES is not a
@@ -1273,7 +1461,9 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     can — but a skipped step stops being invisible.
     """
     try:
-        text = sys.stdin.read() if (not path or path == "-") else io.open(path, encoding="utf-8").read()
+        # utf-8-sig: Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes a BOM, and a BOM that
+        # survives into a violation message crashed the cp1252 console print (restore test, 2026-09-16).
+        text = sys.stdin.read() if (not path or path == "-") else io.open(path, encoding="utf-8-sig").read()
     except OSError as error:
         print(f"caveman lint could not read draft: {error}", file=sys.stderr)
         return 2
@@ -1285,17 +1475,25 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     # tells the lint which tools ran this turn; without a session there is no transcript and the
     # tool-dependent rules stay quiet.
     turn_tools = _turn_tool_names(_find_transcript(session_id)) if session_id else None
-    violations = _yes_lint(text, turn_tools) + _caveman_lint(text, mode)
+    # ADHD shaping runs between the two: it is structure, so it stands at every caveman level,
+    # off included, and it is the one rule set the reader can switch off (~/.claude/.adhd-off).
+    adhd = _adhd_state()
+    violations = (
+        _yes_lint(text, turn_tools)
+        + (_adhd_lint(text) if adhd == "on" else [])
+        + _caveman_lint(text, mode)
+    )
     if not violations:
         words = len(_strip_code(text).split())
         if session_id:
             state["lint_clean_nonce"] = state.get("nonce")
             state["lint_clean_words"] = words
             _write_state("claude", session_id, state)
+        adhd_note = "ADHD shaping pass" if adhd == "on" else "ADHD off (flag)"
         if mode == "off":
-            print(f"lint clean: YES rules pass, caveman off ({words} words of prose)")
+            print(f"lint clean: YES rules pass, {adhd_note}, caveman off ({words} words of prose)")
         else:
-            print(f"lint clean: YES rules pass, caveman {mode} ({words} words of prose)")
+            print(f"lint clean: YES rules pass, {adhd_note}, caveman {mode} ({words} words of prose)")
         return 0
     for v in violations:
         print(f"lint: {v}")
@@ -1350,4 +1548,11 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    # A cp1252 console cannot print every character a draft may contain; never let the lint
+    # die on the report instead of reporting.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     raise SystemExit(main())
