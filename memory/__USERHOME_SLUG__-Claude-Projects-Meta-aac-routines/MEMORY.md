@@ -11,3 +11,5 @@
 - [PR body quoted Closes keyword](pr-body-quoted-closes-keyword.md) — any 'Closes #N' text in a PR body closes N on merge, even inside a quote; grep before opening
 - [O3 agenda is the full shareable copy](o3-agenda-is-full-shareable-copy.md) — Dan reversed the short agenda 2026-09-15; verbatim prep minus red; Assignment merged into Follow-ups
 - [Granola O3 notes lookup](granola-o3-notes-lookup.md) — O3 notes titled by bare date; match participant email + date; get_meetings returns private_notes
+- [PowerShell gh --jq output is an array](powershell-gh-jq-output-is-array.md) — join before editing or edit in Python; flattened issue #216 body 2026-09-15
+- [Pause shared-state cleanup when sessions run concurrently](pause-shared-state-when-sessions-concurrent.md) — Dan halted session-end sweeps 2026-09-16; check for live fleet PRs and branches first

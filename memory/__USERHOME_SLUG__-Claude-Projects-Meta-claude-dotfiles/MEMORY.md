@@ -27,3 +27,4 @@
 - [Fleet implementers edit the live tree](fleet-implementers-edit-the-live-tree.md) — worktree isolation does not cover ~/.claude, ~/.codex, ~/.agents; sweep and diff after every run, restore failed branches from their .bak-issueN
 - [Agent remote isolation runs locally](agent-remote-isolation-runs-locally.md) — "remote" agents executed on the desktop with the live home on 2026-09-14; cloud-only probes need a real claude.ai/code session
 - [Cloud-only criteria stall the desktop fleet](cloud-only-criteria-stall-the-desktop-fleet.md) — land the code with an honest proof doc, keep the issue open, prove from the cloud session (#163, 2026-09-15)
+- [Install mirror PRs to live before sync push](install-mirror-prs-to-live-before-sync-push.md) — a merged cloud PR that edited agents/skills or claude/ is reverted by the next push unless its files are copied into the live tree first; live-tree tickets are the desktop session's own work, not the fleet's

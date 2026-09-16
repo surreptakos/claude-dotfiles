@@ -352,26 +352,226 @@ def main():
         '{\\"hookSpecificOutput\\":{\\"hookEventName\\":\\"SessionStart\\",'
         '\\"additionalContext\\":\\"' + marker_text + '\\"}}'
     )
+    # Governance hooks (issue 208): the eight hook entries a PC session runs today ship inside the
+    # plugin payload, so a container that installs the plugin is gated the same way. Scripts are
+    # copied from the repo mirror (claude/hooks/, codex/hooks/) into hooks/scripts/ and each hook
+    # command names its script through ${CLAUDE_PLUGIN_ROOT}, never through a home path. Every
+    # script runs on `node` or `python3` (Linux/cloud container) with a `commandWindows` counterpart
+    # that uses `py -3`; nothing here requires pwsh, and no pwsh-only invocation is emitted -- a
+    # branch that wanted one would print a reason and skip. The caveman hook is delivered by the
+    # separate caveman@caveman plugin (already declared in the mirror's settings.json under
+    # enabledPlugins) and its statusLine is not re-vendored here. session-gate.js needs to find the
+    # session-check engine, which ships in this same payload under skills/session-check/; a small
+    # substitution in the copied script rewires its default CHECK path to the plugin root when
+    # CLAUDE_PLUGIN_ROOT is set, so no environment plumbing is needed in the manifest.
+    scripts_dir = hooks_dir / "scripts"
+    scripts_dir.mkdir()
+    GOV_JS = ("governance-reminder.js", "session-gate.js",
+              "state-rehydrate.js", "state-stash.js")
+    GOV_PY = ("ask_matt_gate.py",)
+    # If any source is missing (e.g. a fake-repo test fixture with no hooks mirror), emit only the
+    # marker hook, matching the pre-issue-208 behaviour. Every-or-nothing avoids a half-populated
+    # manifest that names a script the payload does not carry.
+    gov_sources_present = (
+        all((REPO / "claude" / "hooks" / n).is_file() for n in GOV_JS)
+        and all((REPO / "codex" / "hooks" / n).is_file() for n in GOV_PY))
+    # Ship the plugin/live-tree dedup guard (issue 208 criterion 4) alongside the governance
+    # scripts. Sources live under tools/plugin-hook-guards/ so they are trackable and not
+    # mistaken for generated mirror content; the packager copies them in and prepends a one-line
+    # invocation to each governance script during copy. See tools/plugin-hook-guards/README.
+    guard_src_dir = REPO / "tools" / "plugin-hook-guards"
+    guard_js_name = "_plugin_hook_guard.js"
+    guard_py_name = "_plugin_hook_guard.py"
+    guard_js_src = guard_src_dir / guard_js_name
+    guard_py_src = guard_src_dir / guard_py_name
+    if gov_sources_present:
+        if not guard_js_src.is_file() or not guard_py_src.is_file():
+            raise RuntimeError(
+                "plugin hook guard sources missing under tools/plugin-hook-guards/; "
+                "issue 208 dedup requires _plugin_hook_guard.js and _plugin_hook_guard.py there.")
+        (scripts_dir / guard_js_name).write_bytes(
+            guard_js_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+        (scripts_dir / guard_py_name).write_bytes(
+            guard_py_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+
+    js_guard_call = (
+        "// issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.js.\n"
+        "try { require('./_plugin_hook_guard.js').skipIfLiveTreeWillFire(); } catch (_) {}\n")
+    py_guard_call = (
+        "# issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.py.\n"
+        "try:\n"
+        "    import sys as _pp_sys\n"
+        "    from pathlib import Path as _pp_Path\n"
+        "    _pp_sys.path.insert(0, str(_pp_Path(__file__).resolve().parent))\n"
+        "    from _plugin_hook_guard import skip_if_live_tree_will_fire as _pp_dedup\n"
+        "    _pp_dedup(_pp_Path(__file__).resolve())\n"
+        "except Exception:\n"
+        "    pass\n")
+
+    def _insert_after_shebang_js(text, block):
+        # Keep the shebang on line 1 (the OS interpreter dispatch depends on it) and insert the
+        # guard right after. Node accepts a bare statement block anywhere at the top.
+        if text.startswith("#!"):
+            newline = text.find("\n")
+            if newline < 0:
+                return text + "\n" + block
+            return text[: newline + 1] + block + text[newline + 1 :]
+        return block + text
+
+    def _insert_after_python_prelude(text, block):
+        # Python is strict: `from __future__` imports must come before every non-comment,
+        # non-string statement. The insertion has to land AFTER the shebang, an optional module
+        # docstring, and every `from __future__` line, so a guard we splice in above them does
+        # not turn the docstring into an expression that pushes __future__ into a syntax error.
+        import ast, tokenize, io
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            # Cannot analyse: fall back to shebang-only insertion (may not be safe, but the
+            # packager catches broken payloads at load time so a bad script will show up loud).
+            return _insert_after_shebang_js(text, block)
+        # Find the line after the last __future__ import, or after the docstring, or after the
+        # shebang, in that priority.
+        last_prelude_end = 0
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                last_prelude_end = max(last_prelude_end, node.end_lineno)
+                continue
+            if (last_prelude_end == 0 and isinstance(node, ast.Expr)
+                    and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)):
+                # Module docstring only counts as prelude when it is the very first statement.
+                last_prelude_end = max(last_prelude_end, node.end_lineno)
+                continue
+            break
+        lines = text.splitlines(keepends=True)
+        insert_at = last_prelude_end  # 1-based line number of the last prelude line
+        if insert_at == 0 and text.startswith("#!"):
+            insert_at = 1
+        # Splice `block` between line `insert_at` and the next. Add a leading blank if the
+        # following line is not already blank, for readability.
+        prefix = "".join(lines[:insert_at])
+        suffix = "".join(lines[insert_at:])
+        sep = "" if prefix.endswith("\n\n") or suffix.startswith("\n") else "\n"
+        return prefix + sep + block + suffix
+
+    for name in GOV_JS:
+        src_file = REPO / "claude" / "hooks" / name
+        if not gov_sources_present:
+            break
+        text = src_file.read_text(encoding="utf-8")
+        if name == "session-gate.js":
+            # Point the default CHECK path at the plugin's own session-check when the hook is
+            # running under a plugin (CLAUDE_PLUGIN_ROOT is set by Claude Code for plugin hooks).
+            marker_line = ("const CHECK = process.env.SESSION_GATE_CHECK\n"
+                           "  || path.join(CONFIG_DIR, 'skills', 'session-check', 'check.js');")
+            plugin_line = (
+                "const CHECK = process.env.SESSION_GATE_CHECK\n"
+                "  || (process.env.CLAUDE_PLUGIN_ROOT\n"
+                "      && path.join(process.env.CLAUDE_PLUGIN_ROOT, 'skills', 'session-check', 'check.js'))\n"
+                "  || path.join(CONFIG_DIR, 'skills', 'session-check', 'check.js');")
+            if marker_line not in text:
+                raise RuntimeError(
+                    "session-gate.js CHECK default block has drifted; the plugin packager can no "
+                    "longer rewire it to CLAUDE_PLUGIN_ROOT. Update the marker in build-cloud-plugin.py.")
+            text = text.replace(marker_line, plugin_line)
+        text = _insert_after_shebang_js(text.replace("\r\n", "\n"), js_guard_call)
+        # write_bytes with a fixed newline: the payload must not depend on the building OS's newline.
+        (scripts_dir / name).write_bytes(text.encode("utf-8"))
+    for name in GOV_PY:
+        src_file = REPO / "codex" / "hooks" / name
+        if not gov_sources_present:
+            break
+        text = src_file.read_text(encoding="utf-8").replace("\r\n", "\n")
+        text = _insert_after_python_prelude(text, py_guard_call)
+        (scripts_dir / name).write_bytes(text.encode("utf-8"))
+
+    def _cmd(runner_unix, runner_win, script_name, argv):
+        """Two spellings of the same command: Linux (command) and Windows (commandWindows)."""
+        argv_str = (" " + " ".join(argv)) if argv else ""
+        base = "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/" + script_name + "\""
+        return (runner_unix + " " + base + argv_str,
+                runner_win + " " + base + argv_str)
+
+    def _hook(runner_unix, runner_win, script, argv, timeout, status, extra=None):
+        cmd_unix, cmd_win = _cmd(runner_unix, runner_win, script, argv)
+        entry = {
+            "type": "command",
+            "command": cmd_unix,
+            "commandWindows": cmd_win,
+            "timeout": timeout,
+            "statusMessage": status,
+        }
+        if extra:
+            entry.update(extra)
+        return entry
+
+    marker_hook = {
+        "type": "command",
+        "command": "sh -c 'echo \"" + marker_json + "\"'",
+        "timeout": 5,
+    }
+
+    if not gov_sources_present:
+        # Pre-issue-208 shape: marker only. Emitted so a fake-repo test fixture without a hooks
+        # mirror still produces a valid manifest; a real build always populates the mirror.
+        governance_hooks = {"SessionStart": [{"hooks": [marker_hook]}]}
+    else:
+     governance_hooks = {
+        "SessionStart": [
+            {"hooks": [
+                _hook("node", "node", "session-gate.js", ["start"], 200,
+                      "Running session-start checks..."),
+                _hook("node", "node", "state-rehydrate.js", [], 15,
+                      "Rehydrating stashed state..."),
+            ]},
+            {"hooks": [marker_hook]},
+        ],
+        "PreCompact": [
+            {"hooks": [
+                _hook("node", "node", "state-stash.js", [], 30,
+                      "Stashing durable state before compaction..."),
+            ]},
+        ],
+        "SessionEnd": [
+            {"hooks": [
+                _hook("node", "node", "session-gate.js", ["end"], 200,
+                      "Recording session-end checks..."),
+                _hook("node", "node", "state-stash.js", [], 120,
+                      "Stashing durable state at session end..."),
+            ]},
+        ],
+        "UserPromptSubmit": [
+            {"hooks": [
+                _hook("node", "node", "governance-reminder.js", [], 5,
+                      "Asserting governance..."),
+                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-prompt"], 5,
+                      "Locking Ask Matt, Yes, and caveman ultra..."),
+                _hook("node", "node", "session-gate.js", ["prompt"], 200,
+                      "Checking session gate..."),
+            ]},
+        ],
+        "PreToolUse": [
+            {"hooks": [
+                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-pre-tool"], 5,
+                      "Checking governance gate..."),
+            ]},
+        ],
+        "PostToolUse": [
+            {"matcher": "Bash|PowerShell", "hooks": [
+                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-post-tool"], 5,
+                      "Counting failures for the YES escalation ladder..."),
+            ]},
+        ],
+        "Stop": [
+            {"hooks": [
+                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-stop"], 5,
+                      "Verifying governance gate..."),
+            ]},
+        ],
+    }
+
     (hooks_dir / "hooks.json").write_bytes((
-        json.dumps(
-            {
-                "hooks": {
-                    "SessionStart": [
-                        {
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": "sh -c 'echo \"" + marker_json + "\"'",
-                                    "timeout": 5,
-                                },
-                            ]
-                        }
-                    ]
-                }
-            },
-            indent=2,
-        )
-        + "\n").encode("utf-8")
+        json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )
 
     zip_path = out / f"{PLUGIN_NAME}.zip"
