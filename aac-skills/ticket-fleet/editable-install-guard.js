@@ -87,6 +87,12 @@ function extractPaths(text) {
   for (const m of String(text).matchAll(/(?<![:\w\/])\/[^\s'"`,;)\]}]*\/[^\s'"`,;)\]}]*/g)) {
     found.add(m[0].replace(/[.,;)]+$/, ''));
   }
+  // The Windows spelling pip writes on a PC (C:\Users\...\src): without it the guard saw no
+  // targets there at all and reported a healthy-looking empty audit (found 2026-09-16, when the
+  // repo's own test command ran this on the desktop).
+  for (const m of String(text).matchAll(/(?<![\w\\\/])[A-Za-z]:[\\\/][^\s'"`,;)\]}]*/g)) {
+    found.add(m[0].replace(/[.,;)]+$/, ''));
+  }
   return [...found];
 }
 
