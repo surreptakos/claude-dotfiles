@@ -1,8 +1,8 @@
 # Harness version
 
-    harness-version: 20
+    harness-version: 21
 
-Installed/upgraded: 2026-09-16 by the `project-harness` skill (v20: the harness `tracker-audit.js` is now generated from this repo's own `tools/tracker-audit.js`, which is the v20 file — issue 336).
+Installed/upgraded: 2026-09-16 by the `project-harness` skill (v21: tracker-audit `deleted-subject?` check from issue 361; v20 made the harness `tracker-audit.js` a generated copy of this repo's own, issue 336).
 
 This file exists so "which generation of the harness does this repo have?" is a question you can
 answer by reading, instead of by remembering. Before this marker, a new harness capability only

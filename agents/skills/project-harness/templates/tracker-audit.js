@@ -364,6 +364,11 @@ if (require.main !== module) {
     duplicateTitleFindings,
     landedCommits,
     landedFindings,
+    untickedBoxes,
+    boxPathCandidates,
+    deletedPathIndex,
+    matchDeletedPath,
+    deletedSubjectFindings,
     paginate,
     parseLinkHeader,
     pageFromUrl,
@@ -798,6 +803,121 @@ function untickedBoxes(body) {
     : { hard: pick(scope), soft: [] };
 }
 
+/** Path-like tokens named by one acceptance-box line.
+ *
+ *  Two shapes, and nothing else: anything holding a `/` (`aac-skills/writing/`, tools/x.js), and a
+ *  BACKTICKED bare name (`writing`), which is how this repo's skill tickets name a directory. A bare
+ *  word outside backticks stays prose — otherwise "the writing pass" reads as a path and every box
+ *  becomes a candidate. Pure. */
+function boxPathCandidates(text) {
+  const s = String(text == null ? '' : text);
+  const out = new Set();
+  const add = (raw) => {
+    const t = String(raw).trim().replace(/^\.\//, '').replace(/[.,;:)\]]+$/, '').replace(/\/+$/, '');
+    if (!t || /\s/.test(t) || !/^[A-Za-z0-9_][A-Za-z0-9_./-]*$/.test(t)) return;
+    if (!t.includes('/') && t.length < 3) return;
+    out.add(t);
+  };
+  (s.match(/`[^`]+`/g) || []).forEach((m) => add(m.slice(1, -1)));
+  // Backticked spans are removed before the bare scan so a path inside them is added once, by the
+  // rule above, with its punctuation already trimmed.
+  (s.replace(/`[^`]*`/g, ' ').match(/[A-Za-z0-9_][A-Za-z0-9_.-]*\/[A-Za-z0-9_./-]*/g) || []).forEach(add);
+  return Array.from(out);
+}
+
+/** What the default branch HAS, and what it once had and deleted.
+ *
+ *  `deletedListing` is the raw output of `git log --diff-filter=D --name-only --format= <ref>`;
+ *  `liveListing` is `git ls-tree -r --name-only <ref>`. A path that was deleted and later re-added is
+ *  live, not deleted — the live listing wins, which is what makes "deleted" mean "gone now" rather
+ *  than "gone once". Directories are inferred from the files under them, because git deletes files;
+ *  a directory the live tree still holds (one file swept, its siblings kept) is not a deleted
+ *  directory. Pure, so the classification is testable without a repository. */
+function deletedPathIndex(deletedListing, liveListing) {
+  const lines = (t) => String(t == null ? '' : t).replace(/\r\n/g, '\n')
+    .split('\n').map((s) => s.trim()).filter(Boolean);
+  const dirsOf = (p) => {
+    const parts = p.split('/');
+    const out = [];
+    for (let i = parts.length - 1; i >= 1; i--) out.push(parts.slice(0, i).join('/'));
+    return out;
+  };
+  const live = new Set(lines(liveListing));
+  const liveNames = new Set();
+  const liveDirs = new Set();
+  live.forEach((p) => {
+    p.split('/').forEach((seg) => liveNames.add(seg));
+    dirsOf(p).forEach((d) => liveDirs.add(d));
+  });
+  const deletedFiles = new Set();
+  const deletedDirs = new Set();
+  lines(deletedListing).forEach((p) => {
+    if (live.has(p)) return;
+    deletedFiles.add(p);
+    dirsOf(p).forEach((d) => { if (!liveDirs.has(d)) deletedDirs.add(d); });
+  });
+  return { live, liveNames, deletedFiles, deletedDirs };
+}
+
+/** The deleted path a candidate token names, or null. Pure.
+ *
+ *  A token carrying a `/` has to match a deleted path or deleted directory outright. A bare name is
+ *  only read as a path when the tree once held a NESTED directory by exactly that name (a top-level
+ *  name is too close to an ordinary English word to be worth the noise) or a file with an extension
+ *  and that basename — and never when the live tree still uses the name anywhere, which is what stops
+ *  `ticket-fleet.js` reading as deleted after it moved. */
+function matchDeletedPath(candidate, index) {
+  const c = String(candidate == null ? '' : candidate);
+  if (!c || index.live.has(c)) return null;
+  if (c.includes('/')) {
+    if (index.deletedFiles.has(c)) return c;
+    if (index.deletedDirs.has(c)) return c + '/';
+    return null;
+  }
+  if (index.liveNames.has(c)) return null;
+  const dir = Array.from(index.deletedDirs).sort()
+    .find((d) => d.includes('/') && d.slice(d.lastIndexOf('/') + 1) === c);
+  if (dir) return dir + '/';
+  if (!/\.[A-Za-z0-9]+$/.test(c)) return null;
+  return Array.from(index.deletedFiles).sort()
+    .find((f) => f.slice(f.lastIndexOf('/') + 1) === c) || null;
+}
+
+/** OPEN issues whose unticked acceptance boxes name something the default branch deleted.
+ *
+ *  #120's acceptance list carries a `writing` box; commit 518e63a (issue 178) deleted
+ *  `aac-skills/writing/` on the owner's instruction. The box cannot be ticked by doing the work, and
+ *  two fleet attempts spent a cycle discovering that. The neighbouring `stale-premise?` check reads
+ *  issue-to-issue citations, and #120 predates #178, so nothing linked them.
+ *
+ *  Advisory, and deliberately narrowed to paths git shows DELETED rather than merely absent: a box
+ *  naming a path the ticket will create is the normal case and must stay silent. Takes all issues and
+ *  filters to open itself, so "a closed issue produces no finding" is a property of this function. */
+function deletedSubjectFindings(allIssues, index) {
+  const out = [];
+  (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
+    const boxes = untickedBoxes(i.body);
+    const seen = new Set();
+    boxes.hard.concat(boxes.soft).forEach((text) => {
+      boxPathCandidates(text).forEach((c) => {
+        if (seen.has(c)) return;
+        const hit = matchDeletedPath(c, index);
+        if (!hit) return;
+        seen.add(c);
+        out.push({ kind: 'deleted-subject?', issue: i, detail:
+          'has an unticked acceptance box — "' + text.slice(0, 72) + '" — naming `' + c + '`, which ' +
+          'the default branch no longer has: git history shows ' + hit + ' deleted. A box whose ' +
+          'subject another ticket deleted cannot be ticked by doing the work, so every agent that ' +
+          'picks this ticket up spends its cycle rediscovering that. Read the deleting commit ' +
+          '(git log --diff-filter=D -- ' + hit.replace(/\/$/, '') + '), then drop the box or say on ' +
+          'the issue what replaced it. A box may legitimately name a path the work will create, so ' +
+          'this is a prompt to look. Advisory only.' });
+      });
+    });
+  });
+  return out;
+}
+
 /** One commit per record: short sha, NUL, subject, NUL, the WHOLE message, record separator. */
 const LOG_FORMAT = '%h%x00%s%x00%B%x1e';
 
@@ -1179,6 +1299,29 @@ duplicateTitleFindings(open).forEach((d) => {
     'as a duplicate (gh issue close ' + d.issue.number + ' --reason "not planned"). Advisory only.');
 });
 
+// ---- 11. An acceptance box whose subject another ticket deleted ---------------------------------
+// Check 9 reads the log for work that landed. This reads the same branch for work that was UNdone:
+// a path an acceptance box still names, which a later ticket deleted. Observed on #120, whose
+// `writing` box outlived `aac-skills/writing/` by a month (deleted 2026-09-14 by issue 178) — two
+// fleet attempts started the ticket before discovering the subject was gone. The stale-premise?
+// check next door only sees issue-to-issue citations, and #120 predates #178, so nothing linked them.
+//
+// Advisory, and narrowed to DELETED rather than merely absent: an acceptance box naming a path the
+// ticket will create is the normal case, and a check that fires on it is one people scroll past.
+let deletedScanUnavailable = false;
+if (!LOG_REF) {
+  deletedScanUnavailable = true;
+} else {
+  try {
+    const index = deletedPathIndex(
+      git(['log', '--no-color', '--diff-filter=D', '--name-only', '--format=', LOG_REF]),
+      git(['ls-tree', '-r', '--name-only', LOG_REF]));
+    deletedSubjectFindings(issues, index).forEach((f) => report(f.kind, f.issue, f.detail));
+  } catch (e) {
+    deletedScanUnavailable = true;
+  }
+}
+
 // ---- Output ------------------------------------------------------------------------------------
 // Anything ending in '?' is advisory: reported, never fails the run. A check that cannot tell a
 // real problem from a shape it misreads must not be able to block anyone. (blocker-may-be-answered
@@ -1187,7 +1330,7 @@ const ORDER = ['ungated-dependency', 'landed-but-open', 'blocker-may-be-answered
                'closed-with-open-boxes', 'dangling-reference', 'untriaged', 'conflicting-triage',
                'board-says-done', 'not-on-board', 'unmilestoned', 'landed-but-open?',
                'closed-with-open-boxes?', 'dangling-reference?', 'stale-premise?',
-               'duplicate-title?'];
+               'duplicate-title?', 'deleted-subject?'];
 findings.sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.number - b.number);
 
 console.log('Tracker audit — ' + REPO + ' (' + open.length + ' open, ' + issues.length + ' total)\n');
@@ -1211,6 +1354,11 @@ if (logUnavailable) {
   console.log('against the work that already merged. Treat as unknown, not clean.\n');
 }
 
+if (deletedScanUnavailable) {
+  console.log('NOTE: the default branch\'s deleted-path history could not be read, so no acceptance');
+  console.log('box was checked against a subject another ticket deleted. Treat as unknown, not clean.\n');
+}
+
 if (boardUnavailable) {
   console.log('NOTE: the ProjectsV2 GraphQL endpoint (which underlies `projectItems`) was not');
   console.log('available, so board-says-done and not-on-board could not run. The Claude Code');
@@ -1223,7 +1371,7 @@ if (boardUnavailable) {
  *  every cloud audit to exit 2, which is the same "could not check reported as a pass" shape
  *  this tool exists to refuse. The NOTE above says the two board checks did not run, and the
  *  audit reports on everything the REST endpoints did cover. */
-const blind = edgesUnavailable || prsUnavailable || logUnavailable;
+const blind = edgesUnavailable || prsUnavailable || logUnavailable || deletedScanUnavailable;
 
 if (!findings.length) {
   console.log('No drift found across ' + ORDER.length + ' checks.');
