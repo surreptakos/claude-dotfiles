@@ -12,6 +12,7 @@ const {
   readRepoVersion,
   harnessState,
 } = require('./harness-version');
+const { findHarnessedRepoRoot } = require('./test-support');
 
 const CHECK_DIR = __dirname;
 
@@ -149,10 +150,26 @@ test('the shipped project-harness skill: template and SKILL.md agree', () => {
   assert.equal(typeof r.version, 'number');
 });
 
-test('the shipped project-harness skill: this repo reads current against it', () => {
+test('the shipped project-harness skill: the repo this copy lives in reads current against it', () => {
+  // Issue 300, same fixture bug check.test.js carried: `path.resolve(CHECK_DIR, '..', '..', '..')`
+  // is the repo root only from the agents/skills mirror. From the installed copy at
+  // `~/.claude/skills/session-check` — the directory SKILL.md sends you to — it named the home
+  // directory, harnessState said not-harnessed, and this test was red for anyone running the
+  // skill's own documented command. The fixture now searches for the enclosing harnessed
+  // checkout. Where there is one, the drift guard is unchanged: its stamp must equal the skill's
+  // number. Installed outside a checkout there is no "this repo" to drift, so the reachable half
+  // is asserted instead — a repo stamped at the skill's own number reads current.
   const skillDir = findSkillDir(CHECK_DIR);
-  const repoRoot = path.resolve(CHECK_DIR, '..', '..', '..');
-  const r = harnessState(repoRoot, skillDir);
-  assert.equal(r.state, 'current',
-    `expected this repo to read current; got ${JSON.stringify(r)}`);
+  const repoRoot = findHarnessedRepoRoot(CHECK_DIR);
+  if (repoRoot) {
+    const r = harnessState(repoRoot, skillDir);
+    assert.equal(r.state, 'current',
+      `expected ${repoRoot} to read current; got ${JSON.stringify(r)}`);
+    return;
+  }
+  const version = readSkillVersion(skillDir).version;
+  const tmp = mkTmp();
+  const repo = writeRepo(tmp, { stampVersion: version });
+  assert.deepEqual(harnessState(repo, skillDir), { state: 'current', current: version, repo: version });
+  fs.rmSync(tmp, { recursive: true, force: true });
 });
