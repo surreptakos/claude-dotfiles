@@ -22,9 +22,9 @@ The packager (tools/build-cloud-plugin.py) stamps every source skill on each bui
 hand-edited aac-skills/ tree on a cloud branch, where no push runs, and for CI.
 
 Usage:
-    python3 tools/skill-stamps.py stamp aac-skills            # (re)stamp what changed
-    python3 tools/skill-stamps.py check aac-skills            # exit 1 on drift, changes nothing
-    python3 tools/skill-stamps.py check aac-skills --json     # machine-readable report
+    python3 tools/skill-stamps.py stamp aac-skills agents/skills   # (re)stamp what changed
+    python3 tools/skill-stamps.py check aac-skills                 # exit 1 on drift, changes nothing
+    python3 tools/skill-stamps.py check aac-skills --json          # machine-readable report
 
 Each positional argument is a directory of skills (each child holding a SKILL.md) or a single
 skill directory. `check` is for SOURCE trees only: the packaged copies under marketplace/ carry
@@ -429,7 +429,9 @@ def main(argv=None):
             print(line)
         if args.mode == "check" and bad:
             print(f"\n{bad} skill(s) edited without a re-stamp or never stamped. Run:"
-                  f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}", file=sys.stderr)
+                  f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}"
+                  f"\nA skill edited on a branch needs every tree that carries it stamped and the"
+                  f" plugin rebuilt - see CLAUDE.md, \"Skill stamps\".", file=sys.stderr)
     return 1 if bad else 0
 
 
