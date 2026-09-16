@@ -207,6 +207,19 @@ test('citedIssueNumbers: hex colours and longer numbers are not citations', () =
   assert.deepStrictEqual(Array.from(citedIssueNumbers(body).keys()), [730]);
 });
 
+// ---- proseBlockers: which `## Blocked by` lines are gates (issue 390) ------------
+// ---- `merge after #N` is sequencing, so it must not raise ungated-dependency. ----
+
+test('proseBlockers: a `merge after #N` line is sequencing, not a gate', () => {
+  const body = '## Blocked by\n\n- Merge after #14 (not a gate): both rewrite the same function\n';
+  assert.deepStrictEqual(proseBlockers(body), []);
+});
+
+test('proseBlockers: a section mixing a real blocker and `merge after` reports the blocker only', () => {
+  const body = '## Blocked by\n\n- #12\n- merge after #14\n\n## Done when\n\n- [ ] x\n';
+  assert.deepStrictEqual(proseBlockers(body), [12]);
+});
+
 // ---- proseBlockers: where the `## Blocked by` section ENDS (issue 364) ----------
 // ---- The heading is the last one the issue template writes, so a provenance -----
 // ---- footer below it used to be read as part of the section. -------------------

@@ -13,7 +13,7 @@ body:
     id: blocked
     attributes:
       label: Blocked by
-      description: Issue numbers this depends on (also add native GitHub dependencies if enabled).
+      description: Issue numbers this depends on (also add native GitHub dependencies if enabled). A line reading "Merge after #N" is sequencing, not a gate: it needs no dependency edge and the tracker audit ignores it.
   - type: textarea
     id: done
     attributes:
