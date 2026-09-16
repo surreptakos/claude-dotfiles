@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T14:54:46Z"
+  modified: "2026-09-16T14:56:48Z"
   previous-modified: "2026-09-16T14:54:46Z"
-  revision: "45"
-  content-sha: "df2088db7719"
+  revision: "46"
+  content-sha: "b08132967ec6"
 ---
 
 # ticket-fleet
@@ -303,6 +303,26 @@ script and the drift guards in `tools/ticket-fleet-branch.test.js`). Two concurr
 against the same ticket therefore produce distinct branches; two runs of the same worker
 still add `-attempt<A>` so a re-implement after a failed verify does not overwrite its own
 predecessor.
+
+## Shell shapes the worktree guard refuses
+
+An implementer or verifier works inside an isolated worktree, and there the Bash tool refuses any
+command whose text it cannot prove is not git: "... inside a construct too complex to verify, so
+what it runs cannot be shown not to be git. Refusing to run it". Each refusal costs a turn, so
+reach for the working spelling first. Observed in the waves 4/5 triage (issue 358) and again in
+waves 6/7 (issue 373):
+
+| Refused shape | Working spelling |
+| --- | --- |
+| `for n in 12 34; do gh api repos/O/R/issues/$n; done` - a loop calling `gh` with a loop variable | one plain command per item, each number written out |
+| `gh api '…/issues?page=1'; gh api '…/issues?page=2'` - two calls joined with `;`, URL text interpolated | one command per page, each its own Bash call |
+| `cat > notes.md <<'EOF' … EOF` - a heredoc writing a scratch file | the Write tool |
+| `tail -c 60 file \| od -c` - a pipeline for byte-level work | `python3 -c "print(open('file','rb').read()[-60:])"` |
+
+One rule covers all four: one plain command, no loop body, no `;`-joined pair, no heredoc, no
+pipeline - nothing the guard has to evaluate before it can see what actually runs. The guard is
+strictest around text that could reach `git` or `gh`, and it is the shape that is refused, not the
+command, so re-running the same work as separate single commands goes through.
 
 ## History
 
