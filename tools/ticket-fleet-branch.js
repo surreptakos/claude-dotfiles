@@ -95,10 +95,43 @@ function workerSuffix(runId, workerIndex) {
  */
 function pickInstrument(env, hasGh, override) {
   if (override === 'gh' || override === 'mcp') return override;
-  const e = env || {};
+  // Unknown environment (issue 316): a null/undefined `env` means the caller had no `process`
+  // binding to read. The workflow runtime hides `process`, so the remote-session sniff below
+  // never fires and a claude.ai/code container is indistinguishable from a desktop session.
+  // The fallback stays 'gh' because its REST paths work in both; a container caller passes
+  // `instrument: 'mcp'` or `'gh'` explicitly instead of relying on a sniff that cannot run.
+  // What must NOT be inferred from an unknown environment is the verifier's agent type - the
+  // registry that backs it is session-local; see resolveVerifierAgent.
+  if (env === undefined || env === null) return hasGh === false ? 'mcp' : 'gh';
+  const e = env;
   if (e.CLAUDE_CODE_REMOTE_SESSION_ID || e.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE) return 'mcp';
   if (hasGh === false) return 'mcp';
   return 'gh';
 }
 
-module.exports = { generateRunId, buildBranchName, workerSuffix, pickInstrument };
+/**
+ * Resolve the agent type the blind verifier launches under.
+ *
+ * Agent types are registered once at session start from `~/.claude/agents/`. On the desktop
+ * that registry holds `fleet-verifier.md`, whose frontmatter caps the verifier's tools at
+ * Read, Grep, Glob, Bash (issue 86). A cloud container has no such entry - the bootstrap hook
+ * copies the definition into a clone the registry never reads, and the registry is not re-read
+ * mid-session - so pinning the type there fails every verifier launch with
+ * `agent type 'fleet-verifier' not found` (issue 316).
+ *
+ * @param {'gh'|'mcp'} instrument
+ * @param {string|null|undefined} override - args.verifierAgent. undefined/null takes the
+ *   default (`fleet-verifier` under gh, unpinned under mcp); an empty or whitespace string
+ *   clears the pin so the verifier runs under the session's default agent type; any other
+ *   string pins that agent on either instrument.
+ * @returns {string|undefined} the agentType to pass, or undefined for an unpinned verifier.
+ */
+function resolveVerifierAgent(instrument, override) {
+  if (override === undefined || override === null) {
+    return instrument === 'gh' ? 'fleet-verifier' : undefined;
+  }
+  const name = String(override).trim();
+  return name || undefined;
+}
+
+module.exports = { generateRunId, buildBranchName, workerSuffix, pickInstrument, resolveVerifierAgent };

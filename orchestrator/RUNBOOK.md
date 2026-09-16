@@ -110,7 +110,11 @@ In this order:
    `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and `args` from the
    state issue's `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it
    in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
-   fleet refuses to start without one. When the fleet returns, run the merge pass once more over
+   fleet refuses to start without one. Always pass `verifierAgent: ''` from a cloud session: the
+   workflow runtime hides `process.env`, so the fleet cannot tell a container from the desktop
+   and defaults to pinning its verifiers to the `fleet-verifier` agent type, which this
+   container's registry does not hold - every verifier then fails to launch and the wave
+   delivers nothing (issue 316). When the fleet returns, run the merge pass once more over
    the PRs it just opened.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
    append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
@@ -228,7 +232,7 @@ markers). The JSON block shape:
   "decisionBriefIssue": null,
   "config": {
     "maxWavesPerRepoPerDay": 6,
-    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3 }
+    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3, "verifierAgent": "" }
   }
 }
 ```

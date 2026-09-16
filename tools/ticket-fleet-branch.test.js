@@ -19,7 +19,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const { generateRunId, buildBranchName, workerSuffix, pickInstrument } = require('./ticket-fleet-branch.js');
+const { generateRunId, buildBranchName, workerSuffix, pickInstrument, resolveVerifierAgent } = require('./ticket-fleet-branch.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -107,6 +107,36 @@ test('pickInstrument tolerates a missing env argument', () => {
   assert.equal(pickInstrument(null, false, undefined), 'mcp');
 });
 
+// ---- unknown environment + verifier agent type (issue 316) ----
+// The workflow runtime does not expose `process`, so the script passes `null` rather than a
+// fabricated `{}`: an absent env is an unknown environment, not an empty one. It still falls
+// back to `gh` (REST works in both shapes) - the container caller is the one who says which.
+
+test('pickInstrument treats a missing process binding as an unknown environment', () => {
+  const noProcessEnv = null; // what the script passes when `typeof process === 'undefined'`
+  assert.equal(pickInstrument(noProcessEnv, undefined, undefined), 'gh',
+    'unknown environment must fall back to gh, whose REST paths work locally and in a container');
+  assert.equal(pickInstrument(noProcessEnv, undefined, 'auto'), 'gh');
+  assert.equal(pickInstrument(noProcessEnv, undefined, 'mcp'), 'mcp',
+    'an explicit instrument must still win when the environment is unknown');
+});
+
+test('resolveVerifierAgent defaults to fleet-verifier under gh and unpinned under mcp', () => {
+  assert.equal(resolveVerifierAgent('gh', undefined), 'fleet-verifier');
+  assert.equal(resolveVerifierAgent('gh', null), 'fleet-verifier');
+  assert.equal(resolveVerifierAgent('mcp', undefined), undefined);
+  assert.equal(resolveVerifierAgent('mcp', 'fleet-verifier'), 'fleet-verifier',
+    'a named agent pins on either instrument');
+});
+
+test('verifier agentType is unset when verifierAgent is empty', () => {
+  // A cloud container has no ~/.claude/agents entry, so the pin must be clearable: an empty
+  // verifierAgent means the verifier launches under the session's default agent type.
+  assert.equal(resolveVerifierAgent('gh', ''), undefined);
+  assert.equal(resolveVerifierAgent('gh', '   '), undefined);
+  assert.equal(resolveVerifierAgent('mcp', ''), undefined);
+});
+
 // ---- Fleet-script drift guard (issue 138) ----
 // The workflow environment cannot reliably `require` from tools/, so the same
 // naming and instrument-switch shape is inlined in the plugin-served script.
@@ -170,6 +200,26 @@ test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () =>
     'fleet must sniff CLAUDE_CODE_REMOTE_SESSION_ID for the mcp branch');
   assert.match(src, /trackerRules/,
     'fleet must route tracker prompts through the instrument-specific rules');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} resolves the verifier agentType from args.verifierAgent`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /verifierAgent: null/,
+    'fleet must expose verifierAgent in cfg so a container can clear the pin (issue 316)');
+  assert.match(src, /function resolveVerifierAgent/,
+    'fleet must inline resolveVerifierAgent so the workflow runtime does not need require()');
+  assert.match(src, /const verifierAgentType = resolveVerifierAgent\(instrument, cfg\.verifierAgent\)/,
+    'fleet must resolve the verifier agentType once from the instrument and cfg.verifierAgent');
+  assert.equal((src.match(/agentType: verifierAgentType/g) || []).length, 2,
+    'both verify stages (probe lane and code lane) must pass the resolved agentType');
+  assert.ok(!/agentType: instrument === 'gh'/.test(src),
+    'the hard-coded fleet-verifier pin must be gone - it fails every launch in a container (issue 316)');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} passes a null env when process is missing`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const _env = \(typeof process !== 'undefined' && process && process\.env\) \? process\.env : null/,
+    'a missing process binding must reach pickInstrument as null (unknown environment), not as {} (issue 316)');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} carries the live-tree hard-rail sentence`, () => {
@@ -239,7 +289,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
   const wrapper = new AsyncFunction(
     'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
-    'instrument', 'rules',
+    'instrument', 'rules', 'verifierAgentType',
     body + '\nreturn runCodeLane;'
   );
   const cfg = { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' };
@@ -249,7 +299,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
-  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules, 'fleet-verifier');
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
 }
