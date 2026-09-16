@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-16T20:22:45Z"
-  previous-modified: "2026-09-16T19:25:51Z"
-  revision: "15"
-  content-sha: "a16e9513ef52"
+  modified: "2026-09-16T22:07:46Z"
+  previous-modified: "2026-09-16T20:22:45Z"
+  revision: "16"
+  content-sha: "2a2f3c967919"
 ---
 
 # ticket-fleet
