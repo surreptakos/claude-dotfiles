@@ -7,6 +7,9 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
+const { findSkillDir, readSkillVersion } = require('./harness-version');
+const { localEnv } = require('./test-support');
+
 const CHECKER = path.join(__dirname, 'check.js');
 
 function runChecker(config, extra) {
@@ -18,14 +21,15 @@ function runChecker(config, extra) {
   const opts = extra && (extra.env || typeof extra.setup === 'function') ? extra : { env: extra };
   if (typeof opts.setup === 'function') opts.setup(repo);
 
-  const env = Object.assign({}, process.env, opts.env || {});
+  // localEnv, not process.env: the cloud markers are set for every process inside a cloud agent
+  // container, and the tests below that assert the LOCAL branch have to see them unset.
+  const env = localEnv(opts.env);
   try {
     return execFileSync(process.execPath, [CHECKER], {
       cwd: repo,
       encoding: 'utf8',
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: Object.assign({}, process.env, env || {}),
     });
   } catch (error) {
     return String(error.stdout || '') + String(error.stderr || '');
@@ -171,21 +175,28 @@ test('harness state: skill not installed reports a note, never a pass', () => {
   assert.doesNotMatch(output, /STOP\s*harness/);
 });
 
-test('harness state: this repo (v17) reads current against the shipped skill', () => {
-  // The ticket's third acceptance line: running the check IN THIS REPO says current.
-  const repoRoot = path.resolve(__dirname, '..', '..', '..');
-  let output;
-  try {
-    output = execFileSync(process.execPath, [CHECKER], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch (error) {
-    output = String(error.stdout || '') + String(error.stderr || '');
-  }
+test('harness state: the shipped skill, found as a sibling, reads a repo stamped at its version as current', () => {
+  // Issue 300, and the choice this test makes: the FIXTURE moved, not the assertion. It used to
+  // run the checker in `path.resolve(__dirname, '..', '..', '..')` — the repo root from the
+  // agents/skills mirror, the home directory from the installed copy at
+  // `~/.claude/skills/session-check`, where the check correctly reported "not harnessed" and this
+  // test was red. What it was actually worth testing is the one thing the fixture-driven tests
+  // above skip: discovery of the REAL shipped skill (no HARNESS_SKILL_DIR override) and its own
+  // two version spellings, end to end through check.js. So the repo is a scratch one stamped at
+  // whatever the sibling skill says today, which reads the same from either location. The
+  // separate question — does THIS repo's stamp still match the skill? — is a drift guard that
+  // needs no subprocess, and lives in harness-version.test.js.
+  const skillDir = findSkillDir(__dirname);
+  assert.ok(skillDir, 'sibling project-harness skill should be findable from this copy of the skill');
+  const shipped = readSkillVersion(skillDir);
+  assert.equal(shipped.error, undefined,
+    `shipped skill version unreadable: ${shipped.error} (template=${shipped.template} skill=${shipped.skill})`);
+  const output = runChecker({}, {
+    setup: (repo) => writeRepoStamp(repo, shipped.version),
+  });
   assert.match(output, /Harness/);
-  assert.match(output, /ok\s*harness v\d+, current/);
+  assert.match(output, new RegExp(`ok\\s*harness v${shipped.version}, current`));
+  assert.doesNotMatch(output, /STOP\s*harness/);
 });
 
 test('harness state: v1-implicit (no marker, build-dashboard.js present) is behind on a modern skill', () => {
