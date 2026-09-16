@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-16T14:38:10Z"
-  previous-modified: "2026-09-16T02:50:41Z"
-  revision: "12"
-  content-sha: "bfaaf6459e3f"
+  modified: "2026-09-16T14:51:31Z"
+  previous-modified: "2026-09-16T14:38:10Z"
+  revision: "13"
+  content-sha: "0138a256c966"
 ---
 
 # Session check (engine)
@@ -25,6 +25,10 @@ node ~/.claude/skills/session-check/check.js --end    # adds release gates
 Everything is universal (git), auto-detected, or read from an optional `.claude/session.json`
 (`test`, `testTimeoutMs`, `ticketLabel`, `releaseGates`, `checks`, `note`). Exit 1 reports
 STOP-level findings from a run that completed.
+
+A `checks` entry may carry `"host": "desktop"` (or `"cloud"`). A check whose host is not this one
+is reported as `skipped (<host>-only)` and not run — a desktop-only sweep that can only exit 2 in a
+container is noise, and noise is what gets the whole report skimmed past.
 
 The **Account** section (`identity.js`) reads `~/.claude/accounts.json` — which Claude account
 owns which repo and desktop routine — and compares it with the account the session runs under
