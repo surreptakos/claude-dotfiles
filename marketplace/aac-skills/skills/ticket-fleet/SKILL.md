@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T01:51:05Z'
-  previous-modified: '2026-09-15T22:39:49Z'
-  revision: '9'
-  content-sha: 3a14e43a07ab
+  modified: '2026-09-16T14:29:34Z'
+  previous-modified: '2026-09-16T14:28:20Z'
+  revision: '15'
+  content-sha: 893f9327ce44
 ---
 
 # ticket-fleet
@@ -24,40 +24,80 @@ counterparts live at `tools/ticket-fleet-branch.js` in `claude-dotfiles`, exerci
 
 ## How to invoke
 
-Call the Workflow tool with `scriptPath` set to a copy of this file inside the current
-checkout's `.claude/workflows/`. The Workflow tool resolves a bare `name:` from that same
-directory, and it reads the file behind `scriptPath` byte-for-byte before showing the approval
-dialog - a CR anywhere in the payload trips "script contains control characters that would be
-hidden in the approval dialog" and the launch is refused (issue 233 - and this repo pins
-`* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` is required (the
-workflow runtime forbids `Date.now()` and `Math.random()` inside scripts, so the caller
-mints the id).
+Call the Workflow tool with `scriptPath` set to a copy of the script the current working
+directory can reach; the Workflow tool also resolves a bare `name:` from the cwd's
+`.claude/workflows/`. It reads the file behind `scriptPath` byte-for-byte before showing the
+approval dialog - a CR anywhere in the payload trips "script contains control characters that
+would be hidden in the approval dialog" and the launch is refused (issue 233 - and this repo
+pins `* -text`, so a CRLF blob reaches every surface verbatim). `args.runId` and
+`args.invocationId` are both required (the workflow runtime forbids `Date.now()` and
+`Math.random()` inside scripts, so the caller mints them).
 
-**Checkout-path invocation (works on desktop and in cloud sessions).** Once
-`.claude/workflows/ticket-fleet.js` exists in the cwd, either spelling launches the fleet:
+**In a `claude-dotfiles` checkout, name the checkout copy - do not copy anything.** The
+source file is already in the tree, so point `scriptPath` straight at it (verified from a
+cloud session in this repo, run `6aa99cb8`):
+
+```
+Workflow({
+  scriptPath: 'aac-skills/ticket-fleet/ticket-fleet.js',
+  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
+})
+```
+
+The reason is a test: `tools/ticket-fleet-branch.test.js` asserts `.claude/workflows/ticket-fleet.js`
+does not exist ("superseded by aac-skills/ticket-fleet/ticket-fleet.js in issue 138 and must
+not come back"), so copying the script into `.claude/workflows/` here turns the repo's own
+gate red - seen twice on 2026-09-15, and the reason for issue 299. `name: 'ticket-fleet'`
+does not resolve in this repo either, for the same missing-copy reason.
+
+**Second desktop spelling: the installed plugin's own copy.** On the desktop the cache file
+is launchable from any cwd, including inside `claude-dotfiles` (verified, run `wf_61834c04-e11`):
+
+```
+Workflow({
+  scriptPath: 'C:\\Users\\<you>\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\<version>\\skills\\ticket-fleet\\ticket-fleet.js',
+  args: { runId: '<hex>', tickets: [], deliver: false }
+})
+```
+
+The cache path shape is `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/ticket-fleet/ticket-fleet.js`
+- marketplace `claude-dotfiles`, plugin `aac-skills`, `<version>` the `2026.9.<ddhhmm>` stamp in
+`marketplace/aac-skills/.claude-plugin/plugin.json`. Inside a session that has the plugin
+loaded, `${CLAUDE_PLUGIN_ROOT}` expands to that `<version>` directory. Prerequisite: refresh
+the cache first -
+
+```bash
+claude plugin marketplace update claude-dotfiles && claude plugin update aac-skills
+```
+
+A cache older than the relayout that gave the fleet its own skill folder has no
+`skills/ticket-fleet/` at all, and the launch fails on a missing file rather than on anything
+the fleet did.
+
+**Copy-into-cwd step (every repo except `claude-dotfiles`).** Elsewhere the plugin path holds
+the source of truth but the repo has no copy of it, and both a bare `name:` and a
+checkout-relative `scriptPath` need the script under `.claude/workflows/` in the current
+working directory. Copy it there before the first invocation:
+
+```bash
+mkdir -p .claude/workflows
+cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
+```
+
+Then either spelling launches the fleet:
 
 ```
 Workflow({
   scriptPath: '.claude/workflows/ticket-fleet.js',
-  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
+  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
 ```
 
 ```
 Workflow({
   name: 'ticket-fleet',
-  args: { runId: '<hex>', tickets: [], deliver: false }
+  args: { runId: '<hex>', invocationId: '<fresh hex>', tickets: [], deliver: false }
 })
-```
-
-**Copy-into-cwd step (for any repo, including `claude-dotfiles` itself).** This plugin path
-holds the source of truth, but a bare `name:` and a checkout-relative `scriptPath` both need
-the script to live under `.claude/workflows/` in the current working directory. Copy it there
-before the first invocation:
-
-```bash
-mkdir -p .claude/workflows
-cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
 ```
 
 On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
@@ -68,7 +108,15 @@ On a repo's first run, always pass `deliver: false` - verify the Scout, lane and
 prompts before letting the fleet push branches and open PRs. Full args list:
 
 - `runId` (required, string): caller-minted unique token. Any short unique string; the
-  branch names embed it as `wf_<runId>-w<workerIndex>`.
+  branch names embed it as `wf_<runId>-w<workerIndex>`. A resume (`resumeFromRunId`) passes
+  the SAME `runId`, so the resumed attempts land on the branches they already own.
+- `invocationId` (required, string): a second caller-minted token, re-minted on EVERY launch
+  including every resume, and rejected if it equals `runId`. It is spliced into the open-PR
+  guard's prompt and label and nowhere else. The guard asks an agent whether this ticket
+  already has an open PR, and the runtime replays cached agent answers on resume; without a
+  key that moves per invocation the guard replays the `{found:false}` it recorded before any
+  PR existed and the ticket is implemented, verified and delivered twice (issue 291). Mint
+  both with `printf %x%x $(date +%s) $$`.
 - `tickets` (array of integers, optional): explicit issue numbers. When given, the scout
   takes exactly those tickets regardless of label or state; otherwise it lists open tickets
   with `args.label`.
@@ -128,6 +176,13 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   session** heading; the delivery moves the label to `ready-for-local-agent` unless the
   remaining steps are genuinely a person's judgment, credential or sign-off, in which
   case the label is `ready-for-human`. It never claims an owner step was done.
+
+The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
+fleet handoff (a "Remaining for a local session" or "Remaining for a person" section and the
+Claude Code footer) with no owner comment after it. Such a ticket is parked, not run - no lane
+starts for it and nothing is posted - and the run result names it under `skippedAwaitingOwner`.
+Together with the relabel that is what stops a second wave repeating a handoff nobody has
+answered yet (issue 266).
 
 ## Branch names
 
