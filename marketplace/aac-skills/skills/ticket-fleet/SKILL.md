@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-16T20:22:45Z'
-  previous-modified: '2026-09-16T19:25:51Z'
-  revision: '15'
-  content-sha: a16e9513ef52
+  modified: '2026-09-16T20:50:03Z'
+  previous-modified: '2026-09-16T20:22:45Z'
+  revision: '16'
+  content-sha: eb49c17c57db
 ---
 
 # ticket-fleet
@@ -124,7 +124,13 @@ working directory. Copy it there before the first invocation:
 ```bash
 mkdir -p .claude/workflows
 cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js" .claude/workflows/ticket-fleet.js
+cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js" .claude/workflows/editable-install-guard.js
 ```
+
+Copy the guard in the same breath (issue 435): the run probes `.claude/workflows/` for it, and a
+Python repo that has no copy anywhere gets no post-wave repair of the editable install a worktree
+captured. `tools/editable-install-guard.js` is the better home if the repo has a `tools/` - it
+survives a plugin update and is not mistaken for scratch.
 
 Then either spelling launches the fleet:
 
@@ -506,10 +512,13 @@ broken code because of it).
 
 Two halves:
 
-- **Prevention.** The implementer, prober and verifier prompts share one rail (`PYTHON_RAIL` in
-  the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
+- **Prevention.** The implementer, prober and both verifier prompts share one rail (`PYTHON_RAIL`
+  in the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
   script that does. The worktree's own code is what pytest reads; a test that *spawns* a
-  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment.
+  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment. The probe
+  lane's verifier carries it too (issue 435) and carries more besides: it is the one agent that is
+  *not* worktree-isolated, so a probe criterion naming `pip install -e` is re-run as a read - it
+  quotes what the prober got rather than installing into the orchestrator's own checkout.
 - **Repair.** Once the wave has drained, the run executes `editable-install-guard.js check --main
   . --repair` (the file alongside this SKILL.md, exercised by
   `tools/editable-install-guard.test.js` in `claude-dotfiles`, which adds a worktree, repoints the
@@ -519,13 +528,17 @@ Two halves:
   cleared. A repo with no `pyproject.toml` is a quiet no-op.
 
 The guard is looked for at `tools/editable-install-guard.js` in the served repo first, then at
-this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`, then at
-`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js`, where the cloud bootstrap copies this
-skill (literal paths only - a `$VAR` in the command is refused as an operand computed at run
-time). A served repo adopts the guard by copying it into its own `tools/`, or by passing the path
-as `editableGuardScript`. Where none of them exists the run logs that it skipped the repair;
-`editableGuard: true` makes that absence fail the run instead, and `editableGuard: false` turns
-the guard off.
+`.claude/workflows/editable-install-guard.js` (beside the fleet script a fork copies out of the
+plugin to launch a run), then at this repo's own `aac-skills/ticket-fleet/editable-install-guard.js`,
+then at `${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js`, where a cloud bootstrap that
+installs this skill leaves it (literal paths only - a `$VAR` in the command is refused as an
+operand computed at run time, so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's own copy
+is reachable only once somebody has copied it in). A served repo adopts the guard by copying it to
+either of the first two paths, or by passing the path as `editableGuardScript`. Where none of them
+exists the run logs the skip **naming each path and the `cp` that creates one** (issue 435: the old
+message said only "copy it into the served repo's `tools/`", and on the repo the incident happened
+in nothing was ever copied); `editableGuard: true` makes that absence fail the run instead, and
+`editableGuard: false` turns the guard off.
 
 Prevention cannot cover a repo whose own hook installs before any prompt is read.
 `aac-routines` `.claude/hooks/session-start.sh` cds to `CLAUDE_PROJECT_DIR` and runs
@@ -533,7 +546,9 @@ Prevention cannot cover a repo whose own hook installs before any prompt is read
 sub-session that directory IS the worktree (the same hook already rewrites `core.hooksPath` for
 linked worktrees a few lines above, so it demonstrably fires there). Guarding that line to the
 main checkout is an aac-routines change, recorded with the evidence in
-`docs/tickets/413-decision.md`; until it lands, the post-wave repair is what undoes it.
+`docs/tickets/413-decision.md` and filed there as
+[aac-routines#434](https://github.com/surreptakos/aac-routines/issues/434); until it lands, the
+post-wave repair is what undoes it.
 
 ## History
 
