@@ -238,7 +238,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // returned runCodeLane. cfg / runId / scout / log / schemas / PR_CHECK are provided as free
   // parameters so the body's references resolve. The stub `agent` is a spy the test drives.
   const wrapper = new AsyncFunction(
-    'agent', 'log', 'cfg', 'runId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
+    'agent', 'log', 'cfg', 'runId', 'invocationId', 'scout', 'PR_CHECK', 'IMPL', 'VERDICT', 'DELIVERED',
     'instrument', 'rules',
     body + '\nreturn runCodeLane;'
   );
@@ -249,7 +249,9 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0) {
   // The unified script's lane also reads the instrument switch and the tracker rule helpers;
   // stub them so the extracted body evaluates the same way under either instrument.
   const rules = new Proxy({}, { get: () => () => '' });
-  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, scout, {}, {}, {}, {}, 'gh', rules);
+  // invocationId is a free binding of the lane body too (it keys the open-PR guard, issue 291);
+  // a binding the body reads and this list omits surfaces as a ReferenceError inside the harness.
+  const runCodeLane = await wrapper(agentMock, (m) => logs.push(m), cfg, runId, 'testinv', scout, {}, {}, {}, {}, 'gh', rules);
   const result = await runCodeLane(ticket, workerIndex);
   return { result, logs };
 }
@@ -293,7 +295,7 @@ for (const file of RESUME_GUARD_PAIR) {
       throw new Error(`unexpected agent call after PR-found short-circuit: ${opts.label}`);
     };
     const { result } = await driveCodeLane(file, agentMock, { number: 97, title: 'x', criteria: '' }, 0);
-    assert.deepEqual(calls, ['pr-check:#97'], 'only the pr-check agent may be started when an open PR exists');
+    assert.deepEqual(calls, ['pr-check:#97@testinv'], 'only the pr-check agent may be started when an open PR exists');
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/137');
     assert.equal(result.branch, 'agent/issue-97-attempt1-wf_r1-w0');
@@ -314,7 +316,7 @@ for (const file of RESUME_GUARD_PAIR) {
       throw new Error('unexpected label: ' + opts.label);
     };
     const { result } = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0);
-    assert.deepEqual(calls, ['pr-check:#9', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
+    assert.deepEqual(calls, ['pr-check:#9@testinv', 'impl:#9.1', 'verify:#9.1', 'deliver:#9'],
       'when no open PR exists the pre-check must be followed by impl/verify/deliver in order');
     assert.equal(result.done, true);
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');

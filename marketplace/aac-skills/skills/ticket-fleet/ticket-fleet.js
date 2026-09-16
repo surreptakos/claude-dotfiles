@@ -15,7 +15,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {runId (required, caller-minted unique token), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise)}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise)}',
   phases: [
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
@@ -27,7 +27,9 @@ export const meta = {
 
 // ---- config (all overridable via args) ----
 const cfg = Object.assign({
+  contractVersion: null,    // REQUIRED from the caller; must equal CONTRACT_VERSION below
   runId: null,              // REQUIRED from the caller; see concurrent-run safety below
+  invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   tickets: null,            // explicit issue numbers; overrides label listing (any label, any state)
   label: 'ready-for-agent',
   maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
@@ -44,6 +46,36 @@ const cfg = Object.assign({
   instrument: 'auto',       // 'auto' | 'gh' | 'mcp'; 'auto' resolves via env + PATH below
 }, args || {})
 
+// ---- launch contract (issue 333) ----
+// [FLEET-CONTRACT-VERSION 2]
+// This script is served by the aac-skills plugin, but two repos keep an edited fork of it under
+// .claude/workflows/ticket-fleet.js and three runbooks spell out the launch args. Whenever the
+// arg list moved, those copies failed on a bare "args.X is required" and the message gave no clue
+// that the copy - not the call - was out of date. So the contract carries a version: the caller
+// declares the version it was written for, and any mismatch fails naming both sides and the
+// ripple list. Pure counterpart (plus the fork auditor) in tools/ticket-fleet-contract.js;
+// tools/ticket-fleet-contract.test.js pins the two together, so a bump here that misses the
+// module or the SKILL.md ripple table turns the suite red.
+const CONTRACT_VERSION = 2
+const CONTRACT_REQUIRED_ARGS = ['contractVersion', 'runId', 'invocationId']
+const CONTRACT_COPIES = [
+  'surreptakos/aac-routines .claude/workflows/ticket-fleet.js',
+  'surreptakos/aac-cockpit .claude/workflows/ticket-fleet.js',
+  'claude-dotfiles orchestrator/RUNBOOK.md',
+  'claude-dotfiles orchestrator/LOCAL-RUNBOOK.md',
+  'claude-dotfiles aac-skills/ticket-fleet/SKILL.md',
+  'claude-dotfiles agents/skills/project-harness/SKILL.md',
+]
+function contractError(detail) {
+  return new Error(`ticket-fleet contract mismatch: this script implements contract v${CONTRACT_VERSION}${detail} Contract v${CONTRACT_VERSION} requires args {${CONTRACT_REQUIRED_ARGS.join(', ')}}; its scout must return {candidateNumbers, tickets, repoMap, testCommand, defaultBranch} with per-ticket {number, title, criteria, blockedBy, keepOpen, kind, kindReason, discoveryTriage}. Forks and runbooks that must move with the contract: ${CONTRACT_COPIES.join(', ')}. Refresh a fork by re-copying the plugin script over it (keeping that fork's own edits) - see the ripple table in aac-skills/ticket-fleet/SKILL.md.`)
+}
+if (cfg.contractVersion === null || cfg.contractVersion === undefined || cfg.contractVersion === '') {
+  throw contractError(' and the launcher declared no args.contractVersion, so it was written for an older contract (v1 passed runId alone). Pass contractVersion: 2.')
+}
+if (parseInt(cfg.contractVersion, 10) !== CONTRACT_VERSION) {
+  throw contractError(`, but the launcher declared contractVersion ${cfg.contractVersion}. One of the two is stale: refresh the fork copy of the script, or the runbook that launches it, whichever is older.`)
+}
+
 // ---- concurrent-run safety ----
 // Two ticket-fleet invocations can pick up the same open ticket at the same time (nothing on
 // the tracker side prevents it). Without a per-run identifier both runners would spawn
@@ -55,8 +87,22 @@ const cfg = Object.assign({
 // The workflow runtime throws on Date.now(), new Date() and Math.random() inside scripts (they
 // would break resume), so the id cannot be minted here: the caller passes it as args.runId
 // (any short unique token, e.g. the shell's `date +%s` in hex).
-if (!cfg.runId) throw new Error('args.runId is required: workflow scripts cannot call Date.now()/Math.random(); pass a unique token such as `printf %x $(date +%s)`')
+if (!cfg.runId) throw contractError(' and the launcher declared v2 but passed no args.runId: workflow scripts cannot call Date.now()/Math.random(), so the caller mints it (`printf %x $(date +%s)`).')
 const runId = String(cfg.runId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+
+// ---- per-invocation freshness for the resume guard (issue 291) ----
+// `runId` is deliberately STABLE across a resume: the branch names embed it. The open-PR guard in
+// runCodeLane below needs the opposite - the tracker as it is right now. It has to ask an agent
+// (a workflow script has no filesystem, shell or network of its own), and the runtime replays
+// cached agent results on resume, so under a stable cache key the guard replays the {found:false}
+// it recorded before any PR existed and the ticket is implemented, verified and delivered a
+// second time. The freshness therefore arrives through args, exactly like runId: the caller mints
+// a NEW invocationId on EVERY launch, resume included. It is spliced into the pr-check prompt and
+// label and nowhere else, so two invocations of the same runId ask that one question under
+// different cache keys while every other stage keeps its cache and the branch names stay put.
+const invocationId = String(cfg.invocationId || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 16)
+if (!invocationId) throw contractError(' and the launcher declared v2 but passed no args.invocationId: mint a FRESH token on every launch INCLUDING every resume (e.g. `printf %x%x $(date +%s) $$`), which busts the open-PR guard\'s agent cache so a resume re-asks the tracker instead of replaying a stale "no PR" answer (issue 291).')
+if (invocationId === runId) throw contractError(': args.invocationId must differ from args.runId. runId stays fixed across a resume (branch names embed it) while invocationId changes on every launch, which is what makes the open-PR guard re-ask the tracker (issue 291).')
 
 // ---- instrument switch (gh vs GitHub MCP) ----
 // The tracker prompts below differ in exactly one dimension: which tool set the scout, probe,
@@ -106,12 +152,14 @@ log(`instrument = ${instrument}`)
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
 
 // ---- schemas: crisp machine-checkable done-conditions ----
-const SCOUT = { type: 'object', required: ['tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
-  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason'], properties: {
+const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoMap', 'testCommand', 'defaultBranch'], properties: {
+  candidateNumbers: { type: 'array', items: { type: 'integer' }, description: 'every issue number the one listing in step 2 returned, before any filtering - [] when it returned none. The whole candidate set: no ticket outside it may appear in tickets.' },
+  tickets: { type: 'array', items: { type: 'object', required: ['number', 'title', 'criteria', 'blockedBy', 'keepOpen', 'kind', 'kindReason', 'discoveryTriage'], properties: {
     number: { type: 'integer' }, title: { type: 'string' },
     keepOpen: { type: 'boolean', description: 'true only when the ticket body, its comments or its labels say the issue must stay open after its PR merges (leave open / keep open / ratification); decides Refs vs Closes in the PR body' },
     kind: { type: 'string', enum: ['code', 'probe', 'human'], description: 'which lane runs this ticket: code = repository change; probe = resolves by quoting command output/research/evidence in a comment, no repository change asked for; human = labelled ready-for-human or the body says the owner performs the steps' },
     kindReason: { type: 'string', description: 'one line: the words in the ticket that decided the kind' },
+    discoveryTriage: { type: 'boolean', description: 'true when the ticket is a discovery-triage chore: it asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run\'s follow-ups, a review list) to be turned into tracker items - tickets filed, doc fixes landed, noise struck. Two of these in one wave file the same finding twice if they run concurrently.' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'open blocker issue numbers' },
   } } },
@@ -167,11 +215,13 @@ const scout = await agent(
   `Scout this repository for tickets to run. ${rules.scoutNotes} Steps:
 1. Read CLAUDE.md and any HANDOFF/CONTEXT docs at repo root.
 2. Collect the tickets: ${scoutSource}
+   That one listing is the WHOLE candidate set. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it; a listing that comes back with zero tickets is a valid and complete answer (candidateNumbers: [], tickets: []).
 3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges; a blocker counts only if that issue is still open. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
    - code: everything else.
+   Also set discoveryTriage: true when the ticket asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run's follow-ups, a review list) to be triaged into tracker items - tickets filed, doc fixes landed, noise struck - and false otherwise. Say in kindReason which words decided it.
 5. Identify the exact test command this repo uses (from CLAUDE.md / package.json / docs - never a glob if docs forbid it).
 6. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
 7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
@@ -188,6 +238,7 @@ const droppedBlocked = scout.tickets.length - eligible.length
 const droppedCap = eligible.length - wave.length
 if (droppedBlocked) log(`${droppedBlocked} ticket(s) skipped: open blockers.`)
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
+log(`Scout listed ${(scout.candidateNumbers || []).length} candidate(s); ${scout.tickets.length} returned as tickets.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 
 // ---- Lanes ----
@@ -327,6 +378,9 @@ const runCodeLane = async (t, workerIndex) => {
   // keys, re-verified the ticket, and opened PR 145 while PR 137 was still open. What moved
   // those keys inside the workflow runtime is opaque here; the fix short-circuits the pipeline
   // body with this pre-loop tracker check, before any of the drifting keys are hit.
+  // The guard is itself an agent() call, so it needs its own cache key to move: invocationId
+  // (fresh on every launch, resume included) is spliced into both the prompt and the label, which
+  // is what stops a resume replaying the {found:false} recorded before the PR existed (issue 291).
   const prCheckSteps = instrument === 'mcp'
     ? `There is no gh CLI here: use mcp__github__list_pull_requests with state="open" and per_page=100.
 Filter the returned array to entries whose head.ref (the branch name of the PR's head) starts with agent/issue-${t.number}-.`
@@ -336,10 +390,11 @@ Filter the returned array to entries whose head.ref (the branch name of the PR's
 3. Filter the returned array to entries whose head.ref starts with agent/issue-${t.number}-.`
   const openPR = await agent(
     `Check whether the tracker already has an OPEN pull request whose head ref matches this ticket's branch shape agent/issue-${t.number}-.
+Answer from the tracker as it stands right now, in this invocation (${invocationId}): run the query yourself, never report a remembered or previously given answer.
 ${prCheckSteps}
 If any match exists, return {found:true, prUrl:<first match's html_url>, branch:<first match's head ref>}. If none, return {found:false}.
 Make no repository change, no comment, no PR. Return structured output only.`,
-    { label: `pr-check:#${t.number}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
+    { label: `pr-check:#${t.number}@${invocationId}`, phase: 'Implement', schema: PR_CHECK, model: cfg.deliverModel, effort: 'low' }
   )
   if (openPR && openPR.found) {
     log(`#${t.number}: open PR ${openPR.prUrl} already exists, skipping (no impl/verify/deliver agents started).`)

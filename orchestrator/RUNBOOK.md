@@ -108,10 +108,13 @@ In this order:
 4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
    labels they produce), invoke the Workflow tool with
    `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and `args` from the
-   state issue's `config.fleetArgs`. Mint a `runId` inline (`printf %x $(date +%s)`) and pass it
-   in `args`; the workflow runtime forbids `Date.now()` and `Math.random()` in scripts, so the
-   fleet refuses to start without one. When the fleet returns, run the merge pass once more over
-   the PRs it just opened.
+   state issue's `config.fleetArgs`, plus the three contract args: `contractVersion: 2`, a `runId`
+   minted inline (`printf %x $(date +%s)`) and an `invocationId` minted fresh on every launch,
+   resume included (`printf %x%x $(date +%s) $$`), never equal to the `runId`. The workflow runtime
+   forbids `Date.now()` and `Math.random()` in scripts, so the caller mints both ids; a launch that
+   omits any of the three is refused with a contract-mismatch error naming the version on both
+   sides (the ripple table is in the ticket-fleet SKILL.md). When the fleet returns, run the merge
+   pass once more over the PRs it just opened.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
    append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
    and PR list — never a subagent self-report.
