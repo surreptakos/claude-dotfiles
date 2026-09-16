@@ -235,17 +235,20 @@ try {
     New-Item -ItemType Directory -Path $home2 -Force | Out-Null
     $state2  = Join-Path $home2 '.claude.json'
     $clones2 = Get-ClonePaths -FakeHome $home2
-    $before2 = (New-Fixture -FakeHome $home2).Replace(
+    # Start from scenario 1's post-rewrite text, which holds all four records (New-Fixture leaves
+    # aac-cockpit out on purpose, so a run from it makes an add AND a flip and "nothing else moves"
+    # cannot hold). Only the paths differ between the two homes.
+    $complete2 = $after.Replace($home1.Replace('\', '\\'), $home2.Replace('\', '\\'))
+    $before2 = $complete2.Replace(
         "`"hasTrustDialogAccepted`": true,`n      `"lastTotalWebSearchRequests`"",
         "`"hasTrustDialogAccepted`": false,`n      `"lastTotalWebSearchRequests`"")
+    Assert 'scenario 2 fixture carries exactly one false flag to flip' ($before2 -cne $complete2)
     Write-Utf8NoBom -Path $state2 -Text $before2
 
     $r3 = Invoke-Trust -FakeHome $home2
     $after2 = [System.IO.File]::ReadAllText($state2)
     Assert 'a false flag flips to true and nothing else in the file moves' `
-        (($r3.Exit -eq 0) -and ($after2 -ceq $before2.Replace(
-            "`"hasTrustDialogAccepted`": false,`n      `"lastTotalWebSearchRequests`"",
-            "`"hasTrustDialogAccepted`": true,`n      `"lastTotalWebSearchRequests`""))) $r3.Out
+        (($r3.Exit -eq 0) -and ($after2 -ceq $complete2)) $r3.Out
     Assert 'all four clone paths are trusted after the flip' (Test-AllTrusted -StatePath $state2 -Clones $clones2) $r3.Out
 
 } finally {

@@ -2,6 +2,15 @@
 """Global Codex hook that requires an Ask Matt route on every turn."""
 
 from __future__ import annotations
+# issue 208: plugin/live-tree dedup -- see _plugin_hook_guard.py.
+try:
+    import sys as _pp_sys
+    from pathlib import Path as _pp_Path
+    _pp_sys.path.insert(0, str(_pp_Path(__file__).resolve().parent))
+    from _plugin_hook_guard import skip_if_live_tree_will_fire as _pp_dedup
+    _pp_dedup(_pp_Path(__file__).resolve())
+except Exception:
+    pass
 
 from datetime import datetime, timezone
 import io

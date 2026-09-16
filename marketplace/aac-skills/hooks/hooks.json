@@ -5,8 +5,126 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-gate.js\" start",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-gate.js\" start",
+            "timeout": 200,
+            "statusMessage": "Running session-start checks..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-rehydrate.js\"",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-rehydrate.js\"",
+            "timeout": 15,
+            "statusMessage": "Rehydrating stashed state..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
             "command": "sh -c 'echo \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"AAC-SKILLS HOOK MARKER: plugin hooks execute on this surface. Quote this sentence verbatim if asked whether the marker is present. RUNTIME PROBE: os=$(uname -s 2>/dev/null || echo unknown) python3=$(command -v python3 || echo none) node=$(command -v node || echo none) pwsh=$(command -v pwsh || echo none) home=$HOME host=$(hostname 2>/dev/null || echo unknown) at=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)\\\"}}\"'",
             "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-stash.js\"",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-stash.js\"",
+            "timeout": 30,
+            "statusMessage": "Stashing durable state before compaction..."
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-gate.js\" end",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-gate.js\" end",
+            "timeout": 200,
+            "statusMessage": "Recording session-end checks..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-stash.js\"",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/state-stash.js\"",
+            "timeout": 120,
+            "statusMessage": "Stashing durable state at session end..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/governance-reminder.js\"",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/governance-reminder.js\"",
+            "timeout": 5,
+            "statusMessage": "Asserting governance..."
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-prompt",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-prompt",
+            "timeout": 5,
+            "statusMessage": "Locking Ask Matt, Yes, and caveman ultra..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-gate.js\" prompt",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/session-gate.js\" prompt",
+            "timeout": 200,
+            "statusMessage": "Checking session gate..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-pre-tool",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-pre-tool",
+            "timeout": 5,
+            "statusMessage": "Checking governance gate..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-post-tool",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-post-tool",
+            "timeout": 5,
+            "statusMessage": "Counting failures for the YES escalation ladder..."
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-stop",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-stop",
+            "timeout": 5,
+            "statusMessage": "Verifying governance gate..."
           }
         ]
       }
