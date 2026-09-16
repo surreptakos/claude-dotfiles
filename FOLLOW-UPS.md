@@ -233,6 +233,76 @@
 - Live-tree edit deferred to delivery/owner machine: the ~/.codex/hooks/ask_matt_gate.py source must be updated to match the committed codex/hooks/ask_matt_gate.py mirror. Hard rail forbids this worktree from writing to ~/.codex, so the branch carries only the repo mirror change. Owner path after merge to master: pull the repo on the owner machine, then run sync.ps1 -Mode pull (repo -> live) to propagate the new route line into ~/.codex/hooks/ask_matt_gate.py. The alternate direction (sync.ps1 -Mode push from a hand-edited live file) is the same content but originates from the owner's live edit. Either way, the delivery-stage AC 'live file and repo mirror match after sync push' and 'verified by starting a session and confirming the injected context names the spec route' can only be executed on the owner's desktop, not in this isolated worktree.
 - Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
 
+## Triage: run 6aa9c56e discoveries, waves 14 and 15 (issue 399)
+
+Every discovery bullet the run `6aa9c56e` report writers appended for waves 14 and 15 has a
+disposition below. As with waves 2/3 through 12/13, the bullets are not on master: they were
+committed to the run's own branch `claude/affectionate-maxwell-gqp5vw` (PR #276) as `1e5c839` "chore:
+fleet discoveries from run 6aa9c56e wave 14" (5 bullets) and `dca6956` "…wave 15" (12). Read them
+with `git show 1e5c839 -- FOLLOW-UPS.md` and `git show dca6956 -- FOLLOW-UPS.md`; the W14-nn / W15-nn
+numbering below is their order in those two commits (`^- ` lines, not diff lines), and the quoted
+fragment is each bullet's opening words. Filing followed #319: a finding touching the same file,
+symbol or failure as an open ticket became a comment on that ticket, not a second ticket, and every
+open fleet PR from #304 to #398 was checked first.
+
+**This is the seventh triage chore of the run, and `dca6956` is the branch tip, so these are the last
+two discovery commits it has.** Measured today: `git log --oneline origin/master..dca6956 | grep -c
+"fleet discoveries"` is 14 and `git show dca6956:FOLLOW-UPS.md | grep -c '^- '` is 440 against
+master's 213, so the run appended 14 sections and 227 bullets, triaged by seven ledgers (#320, #358,
+#373, #385, #389, #393, #399). The per-pass bullet count fell 84, 65, 33, 20, 11, 10 and then rose to
+17, and the tickets filed with it ran 7, 3, 1, 1, 1, 1 and 1 here — the cycle is asymptotic, not
+self-terminating, which is #378's and #376's ground and not something another bullet can settle.
+Fifteen of these seventeen bullets are the two implementers' own scope, assumption, merge-order and
+container-limit records; two carried something live, and one of those was already fixed by an open PR
+before this pass read it.
+
+Ticket filed: **#400** (`curlTicketRows()` in `agents/skills/session-check/check.js` — the no-`gh`
+curl fallback behind the `/session-start` ticket listing — fetches a single `per_page=100` page, and
+`renderTicketList` prints `${list.length} ticket(s)`, so a label with more than 100 open tickets
+renders as exactly "100 ticket(s)" with no error and nothing to say the list was cut). Not a
+duplicate of #394: that is the same file but a different function and the opposite symptom (a false
+"could not reach GitHub"), and PR #398 records `curlTicketRows` as deliberately out of its scope while
+leaving behind the pure `paginateTicketPages(fetchPage)` loop this ticket reuses. No open ticket and
+no open fleet PR names `curlTicketRows` or the no-`gh` listing path — checked by dumping every open
+issue body (two `per_page=100` pages, since `gh api search/issues` is refused in a container) and
+grepping it.
+
+Comments added: [#378](https://github.com/surreptakos/claude-dotfiles/issues/378#issuecomment-5695929755),
+[#375](https://github.com/surreptakos/claude-dotfiles/issues/375#issuecomment-5695930524),
+[#335](https://github.com/surreptakos/claude-dotfiles/issues/335#issuecomment-5695931431),
+[#365](https://github.com/surreptakos/claude-dotfiles/issues/365#issuecomment-5695932282),
+[#300](https://github.com/surreptakos/claude-dotfiles/issues/300#issuecomment-5695933248).
+
+Nothing was fixed outside a ticket in this pass, and no ticket body was edited. `node
+tools/tracker-audit.js` reaches a verdict and exits 0 with 0 drift findings, plus the one pre-existing
+`stale-premise?` advisory on #358 — identical before and after #400 was filed, so the new ticket
+introduced no drift. #400's `## Blocked by` says none as a gate, with the "start after #398 merges or
+expect to rebase onto it" note in prose, which is the shape #390 exists to replace.
+
+### Wave 14 (`1e5c839`, 5 bullets)
+
+- **W14-01** "Wave 12's bullet W12-03 claimed run 6aa9c56e's triage cycle was closed at wave 11…" — Comment on #378, updating the count PR #396 left there: the branch carries 14 discovery commits and 227 bullets, not twelve and 210, and acceptance criterion 3 should read `W2-` … `W15-`. The asymptotic-cycle half names no defect and is already #376's and #360's subject.
+- **W14-02** "New ticket 394 filed from bullet W12-05…" — No action: a record of the previous pass's own filing, and #394 is open with PR #398 written. Re-verified only far enough to file #400 against the function #398 leaves untouched.
+- **W14-03** "The Bash worktree-isolation guard refused two more shapes in this session…" — Comment on #375, with one correction: the heredoc shape **is** already in #375's body (its second bullet, answered by "the Write tool for scratch files"), so that half of the claim is false. The `awk` shape is new and carries a different refusal message ("runs awk with a program that can execute commands"). This pass is the sixth consecutive one to hit the guard — a `for … gh api … done` loop here, the first shape #375 already lists.
+- **W14-04** "ASSUMPTION stated for an ambiguity issue 393 leaves open…" — No action: an assumption record that names no defect. This pass took the same reading for the same reason — the ledger is appended to master's FOLLOW-UPS.md on a branch based on origin/master (`5142654`), and the bullets are cited by sha and opening words rather than copied in, because basing on the run branch would drag fourteen unrelated discovery commits into this PR's diff. #378 owns rescuing them.
+- **W14-05** "Issue 335's pull-before-push table lists four branches; PR 392 (issue 390) is a fifth…" — Comment on #335, folded together with W15-02 and W15-08: PRs #397 and #398 are the sixth and seventh branches of this run whose only landing place is a generated tree, and both write the session-check subtree, which has no `aac-skills/` source at all.
+
+### Wave 15 (`dca6956`, 12 bullets)
+
+- **W15-01** "Implementation landed in …/agents/skills/session-check/check.js: new pure `paginateTicketPages(fetchPage)`…" — No action: an implementation record for #394, carried by PR #398. Read closely enough to confirm the helper's shape, which is what makes #400 a one-arrow-function change rather than a second loop.
+- **W15-02** "session-check has no source copy under aac-skills/ — it exists only in the generated agents/skills/ mirror…" — Comment on #335: exactly the ticket that exists for this, and the sharpest instance of it, because a `-Mode push` before a `-Mode pull` would revert the whole of issue 394 with nothing red to say so.
+- **W15-03** "Pre-existing, fixed only because an acceptance criterion requires the file to exit 0: two cases in …check.test.js…" — Comment on #300: PR #331 (that ticket's own open PR) already fixes the cloud-marker leak via `localEnv()` in the new `test-support.js`, and #398 fixes it again inline in the same `runChecker()` lines. Whichever merges second conflicts; #331's spelling is the one to keep.
+- **W15-04** "Not fixed (out of scope for issue 394, same class of bug): the no-gh fallback `curlTicketRows`…" — **#400**. Verified against master's `check.js`: one `per_page=100` fetch, no paging, and `renderTicketList` prints the truncated length as a count. The only bullet in either wave naming a wrong answer a reader would act on.
+- **W15-05** "Assumption where the ticket is ambiguous: the loop ends on a short page and has a plain 20-page safety cap…" — No action: an assumption record for #394, stated in the code comment PR #398 ships. The divergence it names from `tools/tracker-audit.js` (no `Link: rel="next"` reading, so a cursor-paginated short page would under-count) is real but hypothetical on this endpoint; if it ever bites, it bites in the loop #400 will already be reusing.
+- **W15-06** "Acceptance criterion 3 (restore test passes) could not be verified in this container…" — No action: already #211 / #213, the same disposition the waves 10/11 ledger gave W11-05. Neither `powershell` nor `pwsh` exists on this image and the isolation guard refuses `pwsh` anyway; this pass touches no PowerShell and needed no such gate.
+- **W15-07** "The sweep of the sibling AAC repos named in the issue … is not possible from this session…" — Comment on #365: that ticket is the same desktop-session errand against the same repo list, already labelled `ready-for-local-agent`. Re-verified here that even `gh api search/issues` is refused in a fleet container ("sessions are bound to their configured repositories"), so cross-repo work of any shape is closed to these agents.
+- **W15-08** "The ticket names `~/.claude/skills/session-check/check.js`, which is a read-only live-tree path…" — Comment on #335, same paragraph as W14-05 and W15-02. The CLAUDE.md cloud path (stamp, then `build-cloud-plugin.py --from-mirror`) was followed correctly by that implementer; the residue is the pull the owner still owes.
+- **W15-09** "`.claude/session.json`'s test command names `tests/docs-claims.test.js` explicitly rather than `tests/*.test.js`…" — Comment on #300, with half the premise corrected: `tests/claims-audit.test.js` **is** run, by `tests/restore-test.ps1:1316-1326` inside the restored clone, which is the first half of that very test command and of `.githooks/pre-commit`. What survives is `tests/node-test-context.test.js`, added by PR #397, which nothing names — and PR #331 rewrites that same line for #300's acceptance criterion 3 without widening the `tests/` term. Flagged there rather than filed, because a second ticket would edit the one line an open PR already edits.
+- **W15-10** "Pre-existing, unrelated to this change: `node --test agents/skills/session-check/check.test.js` fails two of its 17 tests inside a cloud container…" — No action beyond the #300 comment: the same two cases as W15-03, seen from the other side (pre-existing on master, fixed on the branch). Already fixed by open PR #331.
+- **W15-11** "Pre-existing defect in …check.test.js `runChecker()`: the execFileSync options object sets `env:` twice…" — No action beyond the #300 comment: confirmed on master at `check.test.js:26` and `:28`, and already deleted by PR #331. #398 leaves it in place, which is the second half of the merge-order note left on #300.
+- **W15-12** "Ambiguity resolved as follows: the criterion says 'every spawn of node --test … in agents/skills/project-harness/templates/', but that directory contains no test files…" — No action: a scope record for #395 that names no defect. The reading it took (sweep every spawn site in the harness templates plus the session-check engine) is the one the issue body supports, and PR #397's file list matches it.
+- Only the repo-mirror wording changed; ALLOWED_FLOWS, publish gate (PUBLISHING_FLOWS), state shape, nonce handling, lint counters and every other gate behaviour are byte-identical to origin/master. Confirmed by full 33-test suite pass and by scoping the edits to the two additionalContext string literals in _prompt and _claude_prompt.
+
 ## Triage: run 6aa9c56e discoveries, waves 12 and 13 (issue 393)
 
 Every discovery bullet the run `6aa9c56e` report writers appended for waves 12 and 13 has a
