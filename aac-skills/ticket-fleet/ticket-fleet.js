@@ -1476,8 +1476,9 @@ function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resume
   // merge workflow, that workflow ticks the boxes on the `pull_request` closed+merged event.
   // Pre-push merge (issue 318). A wave's branches all fork from the same commit; by the time
   // the last one is verified, master has moved and every branch that touched a skill carries a
-  // rotated stamp block and a rebuilt marketplace payload. Merging here, with the two safe
-  // conflict classes named explicitly, means the PR opens mergeable. Anything outside those
+  // rotated stamp block and a rebuilt marketplace payload. Merging here, with the three safe
+  // conflict classes named explicitly, means the PR opens mergeable. The third is the harness
+  // upgrade row two bumps in one wave both claim (issue 515). Anything outside those
   // classes is a real merge and stops this ticket: PR #306 showed what taking master's whole
   // SKILL.md costs when the branch had edited its prose.
   const generatedList = (cfg.generatedPaths || []).map(p => '`' + p + '`').join(', ') || '(none configured)'
@@ -1489,12 +1490,13 @@ This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
 A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`.
-A2. Clean merge (exit 0, nothing conflicted): mergeStatus is "clean" - go to STEP B.
-A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly two classes may be resolved here; a path in neither is a real merge you must NOT guess at.
+A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`agents/skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - go to STEP B.
+A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly three classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
     (b) SKILL.md STAMP BLOCK - a SKILL.md whose conflict sits entirely inside the four-key metadata stamp block (modified, previous-modified, revision, content-sha). Do NOT judge this by eye and do NOT take the default branch's whole file: run \`node tools/resolve-stamp-conflict.js <path>\`. Exit 0 means every hunk in that file was stamp-only and was resolved to the default branch's side - then \`git add -- <path>\`. A NON-ZERO exit means the file conflicts outside the stamp block; that path belongs to class (c). If this repo has no such script, class (b) does not apply here: treat the path as class (c).
-    (c) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
-A4. Once every conflicted path was class (a) or (b): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Then \`git add -A\`.
+    (c) HARNESS UPGRADE ROW - the path is \`agents/skills/project-harness/UPGRADES.md\`. Two tickets in one wave that both bump the harness version both write the NEXT \`| N |\` row, so the conflict is a numbering collision, not a disagreement (issue 515). Do NOT pick a side and do NOT renumber by hand: run \`node tools/renumber-harness-upgrade.js\`. Exit 0 means the branch's row took the next free number, every other place the branch wrote that number moved with it, and the generated bootstrap template was rebuilt - then \`git add -A\`. A NON-ZERO exit means the branch changed that file by more than adding rows; that path belongs to class (d). If this repo has no such script, class (c) does not apply here. If the script names a file that is still conflicted, resolve that file by these same classes and re-run it before A4.
+    (d) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
+A4. Once every conflicted path was class (a), (b) or (c): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Then \`git add -A\`.
 A5. Re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
 

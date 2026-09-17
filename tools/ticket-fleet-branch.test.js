@@ -871,6 +871,8 @@ for (const file of RESUME_GUARD_PAIR) {
       'deliver must take the default branch side for a generated-file conflict');
     assert.match(src, /node tools\/resolve-stamp-conflict\.js/,
       'deliver must classify a SKILL.md stamp conflict with the resolver script, not by eye');
+    assert.match(src, /node tools\/renumber-harness-upgrade\.js/,
+      'deliver must renumber a colliding harness upgrade row with the script, not by hand (issue 515)');
     assert.match(src, /git merge --abort/,
       'a conflict outside the two classes must abort the merge rather than guess');
     const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
