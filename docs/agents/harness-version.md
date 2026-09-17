@@ -1,8 +1,11 @@
 # Harness version
 
-    harness-version: 28
+    harness-version: 29
 
-Installed/upgraded: 2026-09-17 by the `project-harness` skill (v28: the bootstrap hook writes a FAILED marker and a STOP line on a clone or payload failure, gh installs before the clone, issue 483; v27: step 16 delivers the cloud
+Installed/upgraded: 2026-09-17 by the `project-harness` skill (v29: the auto-mode rule covers
+attended cloud sessions and names every classifier category seen since the 245 ruling, and
+`add-cloud-plugin.js` reads that rule out of `templates/claude-settings.json` instead of repeating
+it, issue 543; v28: the bootstrap hook writes a FAILED marker and a STOP line on a clone or payload failure, gh installs before the clone, issue 483; v27: step 16 delivers the cloud
 bootstrap hook (`.claude/hooks/session-start.sh` + its `SessionStart` entry) and the auto-mode
 posture to any repo, issue 218; v26: `templates/dashboard.yml`'s `issues.types` trimmed to `[opened, closed]` per the 2026-09-16 Actions-quota ruling, issue 453; v25: `tracker-audit.js`'s `## Blocked by` section ends at its claim, not at end-of-body, issue 364 — backfilled with the missing v23 row by issue 434; v24: the pre-commit gate unsets `GIT_PREFIX` alongside the rest of git’s hook environment, issue 406; v23: no test-suite spawn inherits `NODE_TEST_CONTEXT`, issue 395; v22 narrowed two tracker-audit advisories for meta-tickets, issue 374; v21 added `deleted-subject?`, issue 361; v20 made the harness `tracker-audit.js` a generated copy of this repo's own, issue 336).
 
