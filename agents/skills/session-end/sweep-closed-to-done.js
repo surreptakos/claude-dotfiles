@@ -9,10 +9,16 @@
  * are linked to it, and sweeps each. No `.claude/session.json` block required.
  *
  * A board is included when it has a single-select field named "Status" with an option named
- * "Done" (case-insensitive). Boards without that shape are skipped with a one-line reason.
+ * "Done" (case-insensitive).
  *
- * Exit 0: nothing to do or all writes ok. Exit 1: at least one write failed. Exit 2: hard
- * failure (not a git repo, no GitHub remote, gh missing).
+ * A board GitHub reports as linked to this repo that this script cannot sweep — wrong shape, or
+ * a `gh` call against it that failed — is a FAILURE, not a skip (issue 409). A rate-limited or
+ * under-scoped token makes every board unsweepable, and a run that reports that as a skip goes
+ * green having moved nothing, which is exactly what a clean board looks like. Every such line
+ * carries gh's full stderr, because the first line of `e.message` is only the command line.
+ *
+ * Exit 0: nothing to do or all writes ok. Exit 1: at least one write failed, or a linked board
+ * could not be swept. Exit 2: hard failure (not a git repo, no GitHub remote, gh missing).
  *
  * Uses `gh`. Requires project scope: `gh auth refresh -s project,read:project`.
  */
@@ -30,6 +36,16 @@ function run(cmd, args, opts = {}) {
 }
 function gh(args) { return run('gh', args); }
 function ghJson(args) { return JSON.parse(gh(args)); }
+
+// gh's own stderr is the diagnosis (auth, scope, a GraphQL rate limit, an unknown --json field);
+// execFileSync keeps it off e.message, whose first line is only the command that was run, so a
+// catch that prints just that line reports a failure it has already thrown the cause of away
+// (issue 409).
+function ghDetail(e) {
+  const first = String(e && e.message || e).split('\n')[0];
+  const detail = (e && e.stderr || '').toString().trim();
+  return detail ? `${first}\n${detail}` : first;
+}
 
 function findRepoRoot(start) {
   let dir = path.resolve(start);
@@ -56,10 +72,7 @@ let repoInfo;
 try {
   repoInfo = ghJson(['repo', 'view', REPO, '--json', 'projectsV2']);
 } catch (e) {
-  // gh's own stderr is the diagnosis (auth, scope, an unknown --json field); execFileSync keeps it
-  // off e.message, and the Board sweep job log showed only the bare command line (issue 409).
-  const detail = (e.stderr || '').toString().trim();
-  console.error(`gh repo view failed: ${e.message.split('\n')[0]}${detail ? '\n' + detail : ''}`);
+  console.error(`gh repo view failed: ${ghDetail(e)}`);
   process.exit(2);
 }
 const linked = (repoInfo.projectsV2 && (repoInfo.projectsV2.Nodes || repoInfo.projectsV2.nodes)) || [];
@@ -72,10 +85,18 @@ const closedNums = new Set([...closedIssues, ...closedPrs].map(r => r.number));
 
 let totalFails = 0;
 let totalMoved = 0;
+let boardFails = 0;
+
+// Every board here came back from `gh repo view --json projectsV2`, so it IS linked to this repo.
+// Not sweeping one is a failure of this run, and the reason carries gh's stderr (issue 409).
+function boardUnswept(label, reason) {
+  boardFails++;
+  console.log(`FAIL ${label}: ${reason}`);
+}
 
 for (const board of openBoards) {
   const pathMatch = (board.resourcePath || '').match(/^\/(users|orgs)\/([^/]+)\/projects\/(\d+)$/);
-  if (!pathMatch) { console.log(`skip ${board.title}: cannot parse ${board.resourcePath}`); continue; }
+  if (!pathMatch) { boardUnswept(board.title, `cannot parse ${board.resourcePath}`); continue; }
   const ownerType = pathMatch[1] === 'orgs' ? 'organization' : 'user';
   const OWNER = pathMatch[2];
   const NUMBER = Number(pathMatch[3]);
@@ -89,19 +110,19 @@ for (const board of openBoards) {
     const res = JSON.parse(gh(['api', 'graphql', '-f', `query=${fieldQuery}`, '-f', `o=${OWNER}`, '-F', `n=${NUMBER}`]));
     projRoot = res.data[ownerType === 'organization' ? 'organization' : 'user'].projectV2;
   } catch (e) {
-    console.log(`skip ${label}: ${e.message.split('\n')[0]}`);
+    boardUnswept(label, `field query failed: ${ghDetail(e)}`);
     continue;
   }
   const statusField = projRoot.fields.nodes.find(f => f.name === 'Status' && f.__typename === 'ProjectV2SingleSelectField');
-  if (!statusField) { console.log(`skip ${label}: no Status single-select`); continue; }
+  if (!statusField) { boardUnswept(label, 'no Status single-select'); continue; }
   const doneOpt = statusField.options.find(o => o.name.toLowerCase() === 'done');
-  if (!doneOpt) { console.log(`skip ${label}: no "Done" option`); continue; }
+  if (!doneOpt) { boardUnswept(label, 'no "Done" option'); continue; }
 
   let items;
   try {
     items = ghJson(['project', 'item-list', String(NUMBER), '--owner', OWNER, '--format', 'json', '--limit', '500']).items || [];
   } catch (e) {
-    console.log(`skip ${label}: item-list failed: ${e.message.split('\n')[0]}`);
+    boardUnswept(label, `item-list failed: ${ghDetail(e)}`);
     continue;
   }
 
@@ -136,4 +157,7 @@ for (const board of openBoards) {
 
 if (!APPLY) console.log('re-run with --apply to move them');
 else console.log(`total moved ${totalMoved}, fails ${totalFails}`);
-process.exit(totalFails ? 1 : 0);
+if (boardFails) {
+  console.error(`${boardFails} of ${openBoards.length} board(s) linked to ${REPO} could not be swept — see the FAIL lines above.`);
+}
+process.exit(totalFails || boardFails ? 1 : 0);
