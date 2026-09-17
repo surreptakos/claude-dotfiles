@@ -94,6 +94,16 @@ text-mode writer's re-serialization (Claude Code at session start, VS Code defau
 5.1 `Get-Content` + `Set-Content`) is byte-identical to the blob and `git status` stays clean. Do
 not "normalize" them to LF: an LF blob reopens the phantom ` M` on a fresh worktree.
 
+## The bootstrap gate
+
+`.github/workflows/bootstrap-test.yml` is the **bootstrap gate**: the one end-to-end check on what
+a cloud container gets. `tests/bootstrap-test.sh` runs `.claude/hooks/session-start.sh` into an
+empty home and asserts the payload's skills, the governance hook entries merged into user settings,
+the rules text, gh on the PATH the hook exported, and session-check exit 0 with its payload-version
+line. Any change to the bootstrap hook, the plugin payload or session-check adds an assertion there.
+`tests/bootstrap-test.sh --fault missing-hook-entry` must exit non-zero — CI runs that too, because
+a gate never seen to fail is not known to work.
+
 ## Testing a change to the scripts
 
 Run the restore test. It is the only thing here that checks the *pull* half end to end:
