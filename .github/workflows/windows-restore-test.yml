@@ -13,8 +13,8 @@ name: Windows restore test
 #
 # Two runs, because they cover different halves and both are cheap once the runner is up:
 #
-#   -From worktree   what the pre-commit hook runs: the suite and the child suites it spawns come
-#                    from THIS branch, so a change to any of them is what is under test.
+#   -From worktree   no network, and the suite and the child suites it spawns come from THIS
+#                    branch, so a change to any of them is what is under test.
 #   (no -From)       the desktop's default: the parent is this branch's copy, the tree it installs
 #                    is a fresh clone of origin's default branch. That is the mode the acceptance
 #                    box names, and the one that proves nothing in the change broke the shape of
@@ -26,11 +26,25 @@ name: Windows restore test
 # where any git in this job will find it. That is the whole reason the suite's own header says
 # "CI cannot clone a private remote from inside the runner".
 #
+# This is the gate on the PULL half of the sync - the half CLAUDE.md sends you to before a change
+# to the scripts - now that `.githooks/pre-commit` has retired with the freshness loop (issue 213)
+# and nothing runs the suite on the desktop before a commit. It runs on pull requests as well as
+# pushes for that reason: a PR that touches a PowerShell file is gated here, the way a container
+# change is gated by the Linux bootstrap job.
+#
 # Paths, not every push: a Windows runner bills at 2x and nothing outside these files can change
 # what 5.1 does. workflow_dispatch is for re-running it by hand after a merge.
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'tests/**.ps1'
+      - 'tools/**.ps1'
+      - 'lib/**.ps1'
+      - 'sync.ps1'
+      - 'install.ps1'
+      - '.github/workflows/windows-restore-test.yml'
   push:
     branches-ignore: [dashboard]
     paths:
@@ -39,7 +53,6 @@ on:
       - 'lib/**.ps1'
       - 'sync.ps1'
       - 'install.ps1'
-      - '.githooks/pre-commit'
       - '.github/workflows/windows-restore-test.yml'
 
 permissions:

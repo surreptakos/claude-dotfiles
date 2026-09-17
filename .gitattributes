@@ -10,8 +10,8 @@
 # One total rule rather than per-tree rules on purpose: a new mirrored tree added to the
 # manifest is then pinned by default instead of silently converted until someone notices.
 # Repo-native files (*.ps1, *.md, tooling) are authored on Windows and their working-copy
-# bytes are canonical too; the one eol-sensitive file, .githooks/pre-commit (sh), is
-# already LF on disk and -text keeps it that way.
+# bytes are canonical too; the eol-sensitive ones, the `.sh` hooks under .claude/hooks/, are
+# already LF on disk and -text keeps them that way.
 * -text
 
 # Issue 87: these three project files under .claude/ are read (and, on Windows,

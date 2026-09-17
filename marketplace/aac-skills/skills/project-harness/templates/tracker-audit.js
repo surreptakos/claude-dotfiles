@@ -44,8 +44,8 @@ const { execSync, execFileSync } = require('child_process');
  *  check 9 would fetch into the parent's repo instead. Precomputed once and reused, rather than
  *  cleared-and-restored per call, because this script never uses those env vars for itself.
  *
- *  The same guard already lives in tools/dotfiles-freshness.ps1's Invoke-Git and now in sync.ps1's
- *  -Commit path (via lib/manifest.ps1's Clear-GitEnv). Keep the three in step.
+ *  The same guard lives in sync.ps1's -Commit path (via lib/manifest.ps1's Clear-GitEnv), and
+ *  tests/git-env-scrub-names.test.js keeps every copy naming all six. Keep them in step.
  */
 const CHILD_ENV = (() => {
   const env = Object.assign({}, process.env);

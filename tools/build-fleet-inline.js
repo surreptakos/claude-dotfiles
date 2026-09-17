@@ -7,10 +7,9 @@
  *   node tools/build-fleet-inline.js --check    # exit 1 if that block is stale
  *
  * WHAT INVOKES IT (issue 487): nothing writes for you - you run it after editing the source. What
- * runs `--check` is `.githooks/pre-commit`, before every commit in a clone with
- * `core.hooksPath .githooks`, and `.github/workflows/generated-code.yml`, on every push and pull
- * request (the half that catches --no-verify and a clone with no hook). Third net:
- * `tools/fleet-inline-template.test.js` fails in any run of the repo test command.
+ * runs `--check` is `.github/workflows/generated-code.yml`, on every push and pull request (the
+ * commit-time half was `.githooks/pre-commit`, retired with the freshness loop in issue 213).
+ * Second net: `tools/fleet-inline-template.test.js` fails in any run of the repo test command.
  *
  * Why generate rather than keep a second copy: the Workflow runtime cannot `require()`, so every
  * pure helper the fleet script needs existed twice - once in the script, once in

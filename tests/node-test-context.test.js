@@ -69,8 +69,8 @@ test('every swept spawn site strips NODE_TEST_CONTEXT from the child environment
     assert.match(read(rel), /delete\s+\w+\.NODE_TEST_CONTEXT/, rel);
     assert.match(read(rel), /env:\s*CHILD_ENV/, `${rel} must pass the scrubbed env to its children`);
   }
-  for (const rel of ['.githooks/pre-commit',
-                     'agents/skills/project-harness/templates/pre-commit']) {
-    assert.match(read(rel), /^unset NODE_TEST_CONTEXT$/m, rel);
-  }
+  // This repo's own pre-commit gate retired with the freshness loop (issue 213); the
+  // harness template still ships the scrub to the repos that install it.
+  assert.match(read('agents/skills/project-harness/templates/pre-commit'),
+    /^unset NODE_TEST_CONTEXT$/m, 'agents/skills/project-harness/templates/pre-commit');
 });

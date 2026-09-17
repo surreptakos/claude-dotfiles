@@ -106,7 +106,10 @@ a gate never seen to fail is not known to work.
 
 ## Testing a change to the scripts
 
-Run the restore test. It is the only thing here that checks the *pull* half end to end:
+The restore test is the gate on the *pull* half, the way the bootstrap test is the gate on what a
+container gets. `windows-restore-test.yml` runs it on every pull request and push that touches a
+PowerShell file — on a real Windows PowerShell 5.1, in both `-From worktree` and default mode — so
+a branch is gated whether or not anyone runs it by hand. On the desktop that is:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
@@ -122,7 +125,7 @@ Three sources, and the difference matters:
 - `-From origin` (default) clones the remote. The only one that answers "would a new machine work?"
 - `-From local` clones this checkout's committed state, so **commit first** or your change is absent.
 - `-From worktree` copies what `git ls-files` sees — staged changes included, no network. This is
-  what the pre-commit hook runs.
+  the mode the CI job runs first, so a change to the suite itself is what gets tested.
 
 Rules the suite depends on (each has a `-Fault` that proves it): tidy-up never decides the verdict
 (`locked-scratch`); the scratch root carries a per-run id (`collision`); `RESTORE_TEST_ACTIVE` stops
@@ -146,10 +149,8 @@ Version in `docs/agents/harness-version.md`.
 
 - `DASHBOARD.md` is **generated**. Never hand-edit it; edit `scripts/build-dashboard.js`. CI owns the
   artifact — run the script locally to check output, then discard it.
-- `.githooks/pre-commit` runs the restore test and both code generators' `--check` before every
-  commit. Activate in a fresh clone with `git config core.hooksPath .githooks`. The generators
-  (`tools/build-fleet-inline.js`, `tools/build-harness-tracker-audit.js`) are also checked by
-  `generated-code.yml`, which sees the commits that hook does not (issue 487).
+- The two code generators (`tools/build-fleet-inline.js`, `tools/build-harness-tracker-audit.js`)
+  are gated by `generated-code.yml` alone: edit a source, run the generator, commit both (issue 487).
 - Tracker conventions: `docs/agents/issue-tracker.md`. The audit is a job — `tracker-audit.yml`
   runs it on every issue event and push, and the session report reads that run; exit 2 means it
   could not audit, which is not a pass.
@@ -162,25 +163,6 @@ Version in `docs/agents/harness-version.md`.
   its counterexamples trip on purpose. The exit code follows that split (issue 337): warn-only
   findings print and exit 0; `--warn-only a,b` replaces the per-file set.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
-
-## The freshness loop
-
-Sessions here must never run against stale or divergent governance copies. Every sync push and pull
-stamps `~/.claude/hook-state/dotfiles-sync/state.json`; `tools/dotfiles-freshness.ps1` reads the
-stamp, fetches origin and classifies (states and resolution commands are documented in that file).
-Origin ahead auto-installs; live edited auto-captures and pushes (`DOTFILES_AUTO_PUSH=0` makes it
-advisory); both diverged is a hard block — the `UserPromptSubmit` hook exits 2 with the resolution
-order on stderr: push live first, `git pull --rebase`, `git push`, then `sync.ps1 -Mode pull`.
-
-Two things about it are deliberate:
-
-- The hook entries live in **`.claude/settings.json`** (project-level, hand-written), not in the
-  generated `claude/` mirror. Hooks placed inside the mirror without live `~/.claude` counterparts
-  are wiped by the next push.
-- Auto-pull and auto-push both re-classify before acting, and auto-push (`push-state2`) refuses
-  unless live has drifted, origin is not ahead, nothing is unpushed, **and the checkout is not a
-  worktree**. This repo runs many concurrent agent worktrees on feature branches; a SessionStart hook
-  inside one must never auto-commit dotfiles-sync work onto a ticket's branch.
 
 ## Related
 

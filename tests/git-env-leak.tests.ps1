@@ -1,31 +1,30 @@
 <#
 .SYNOPSIS
-    Prove that a leaked GIT_DIR does not redirect any of the three git-invoking helpers
-    (sync.ps1, tools/dotfiles-freshness.ps1, tools/tracker-audit.js) away from the path they
+    Prove that a leaked GIT_DIR does not redirect any of the git-invoking helpers
+    (sync.ps1, tools/tracker-audit.js, restore-test.ps1) away from the path they
     were told to operate on. Issue 28.
 
 .DESCRIPTION
-    A pre-commit hook that runs restore-test.ps1 leaks GIT_DIR / GIT_INDEX_FILE /
+    A git hook that runs restore-test.ps1 leaks GIT_DIR / GIT_INDEX_FILE /
     GIT_WORK_TREE / GIT_PREFIX / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY into every child
     process. Those env
     vars OVERRIDE `git -C <path>`: git honours them first, and -C only relocates a path
     resolution when they are unset. On 2026-08-25 this quietly redirected sync.ps1's commit
-    block and the freshness classifier at the PARENT bare repo, and polluted its .git/config
-    with test user.email entries.
+    block and the dotfiles freshness classifier at the PARENT bare repo, and polluted its
+    .git/config with test user.email entries.
 
-    Every helper now clears the five vars for the duration of its git calls. This suite
+    Every helper now clears the six vars for the duration of its git calls. This suite
     proves each one:
 
       1  sync.ps1               operates on the target under GIT_DIR=/unrelated/repo/.git
-      2  dotfiles-freshness.ps1 classifies against the target under GIT_DIR leak
-      3  tools/tracker-audit.js reads the target's git log under GIT_DIR leak
-      4  a full run of the two existing PowerShell test files leaves the PARENT bare repo's
-         .git/config byte-identical - no stale user.email / user.name / remote entry
+      2  tools/tracker-audit.js reads the target's git log under GIT_DIR leak
+      3  restore-test.ps1       bootstraps the target under GIT_DIR leak
 
-    Check 4 is the audit clause: even if every helper now clears its env, a `git init` or
-    `git config` call inside a test that doesn't clear its own env would still write to the
-    leaked repo. Comparing the parent's config before and after is the machine-checkable
-    proof that no test file has that shape.
+    Two checks retired with the freshness loop in issue 213: the classifier's own check, and
+    the audit clause that ran tests/dotfiles-freshness.tests.ps1 under a leak and compared the
+    parent bare repo's config before and after. That clause proved no test file ran `git init`
+    or `git config` without clearing its own env first; the freshness suite was the only file
+    here with that shape, and it is gone.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tests\git-env-leak.tests.ps1
@@ -192,90 +191,13 @@ try {
 }
 
 # --------------------------------------------------------------------------------------- 2
-# tools/dotfiles-freshness.ps1 under a leaked GIT_DIR
-
-Write-Host ''
-Write-Host 'tools/dotfiles-freshness.ps1: classify reads target repo under GIT_DIR leak'
-$sandbox2 = New-Sandbox
-try {
-    $leakBare = New-LeakBareRepo -Root $sandbox2
-    $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
-
-    # Bare remote + local clone: the classifier needs an upstream to measure ahead/behind.
-    $remote  = Join-Path $sandbox2 'remote.git'
-    $local   = Join-Path $sandbox2 'local'
-    & git init --quiet --bare $remote | Out-Null
-    New-Item -ItemType Directory -Path $local -Force | Out-Null
-    & git -C $local init --quiet --initial-branch=master | Out-Null
-    & git -C $local config user.email 'local@example.com' | Out-Null
-    & git -C $local config user.name  'Local' | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $local 'tools') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $local 'lib') -Force | Out-Null
-    Copy-Item -Path (Join-Path $RepoRoot 'tools\dotfiles-freshness.ps1') -Destination (Join-Path $local 'tools\dotfiles-freshness.ps1')
-    Copy-Item -Path (Join-Path $RepoRoot 'lib\manifest.ps1')             -Destination (Join-Path $local 'lib\manifest.ps1')
-    & git -C $local add -A | Out-Null
-    & git -C $local commit --quiet -m 'seed local' | Out-Null
-    & git -C $local remote add origin $remote | Out-Null
-    & git -C $local push --quiet -u origin master | Out-Null
-
-    # Fake home + stamp so the classifier can compare fingerprints.
-    $fakeHome = Join-Path $sandbox2 'home'
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.claude') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.claude\skills') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.claude\hooks') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex') -Force | Out-Null
-    Set-Content -Path (Join-Path $fakeHome '.claude\CLAUDE.md') -Value '# fake' -Encoding utf8
-    Write-DotfilesStamp -RepoRoot $local -UserHome $fakeHome -Kind 'pull' | Out-Null
-
-    # The leak. Classifier must classify $local, not $leakBare.
-    $env:GIT_DIR = Join-Path $leakBare ''
-
-    $tool = Join-Path $local 'tools\dotfiles-freshness.ps1'
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $tool `
-                        -Mode classify -RepoRoot $local -UserHome $fakeHome -SkipFetch 2>&1 | Out-String
-    $classifyExit = $LASTEXITCODE
-    $ErrorActionPreference = $prev
-    Remove-Item Env:\GIT_DIR -ErrorAction SilentlyContinue
-
-    $report = $null
-    try { $report = ($out.Trim() | ConvertFrom-Json) } catch { $report = $null }
-    if ($null -eq $report) {
-        $m = [regex]::Match($out.Trim(), '\{[\s\S]*\}\s*$')
-        if ($m.Success) { try { $report = ($m.Value | ConvertFrom-Json) } catch { $report = $null } }
-    }
-
-    Assert 'dotfiles-freshness.ps1 exits 0 under GIT_DIR leak' ($classifyExit -eq 0) `
-        (($out -split "`n") | Select-Object -Last 8 | Out-String)
-    Assert 'dotfiles-freshness.ps1 returned JSON' ($null -ne $report) $out
-    if ($null -ne $report) {
-        # If the leak went through, the tool would classify the empty bare repo (unknown / no
-        # upstream) instead of $local (synced). "synced" or "state1"/"state2"/"state3" all mean
-        # the classifier saw a real repo state; "unknown" means it fell off the tracks.
-        Assert ('dotfiles-freshness.ps1 classified the TARGET repo (state={0}, not unknown)' -f [string]$report.state) `
-            ([string]$report.state -ne 'unknown') $out
-        # Belt: repoRoot in the report should be the target, not the leaked path.
-        Assert 'dotfiles-freshness.ps1 report.repoRoot matches the target' `
-            ([string]$report.repoRoot -eq $local) ("expected={0}, got={1}" -f $local, [string]$report.repoRoot)
-    }
-
-    $leakConfigAfter = Read-BareConfig -BareRoot $leakBare
-    Assert 'dotfiles-freshness.ps1 did NOT write into the leaked bare repo config' `
-        ($leakConfigAfter -eq $leakConfigBefore) `
-        ("before={0}`nafter ={1}" -f $leakConfigBefore, $leakConfigAfter)
-} finally {
-    Remove-Item -Path $sandbox2 -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# --------------------------------------------------------------------------------------- 3
 # tools/tracker-audit.js under a leaked GIT_DIR
 
 Write-Host ''
 Write-Host 'tools/tracker-audit.js: reads target under GIT_DIR leak (git subprocess isolation)'
-$sandbox3 = New-Sandbox
+$sandbox2 = New-Sandbox
 try {
-    $leakBare = New-LeakBareRepo -Root $sandbox3
+    $leakBare = New-LeakBareRepo -Root $sandbox2
     $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
 
     # The earlier version of this block asserted only that the leaked bare stayed byte-identical
@@ -293,7 +215,7 @@ try {
     #
     # tracker-audit reads owner/repo from `git remote get-url origin` (REST port, issue 130), so
     # the target repo gets a fake `origin` matching the shim's chosen slug.
-    $target = Join-Path $sandbox3 'target-repo'
+    $target = Join-Path $sandbox2 'target-repo'
     New-Item -ItemType Directory -Path $target -Force | Out-Null
     & git -C $target init --quiet --initial-branch=master | Out-Null
     & git -C $target config user.email 'audit@example.com' | Out-Null
@@ -309,7 +231,7 @@ try {
     # plus `gh api graphql` (projectItems supplemental — allowed to degrade) and
     # `gh api ... /dependencies/blocked_by`. All get a canned answer here; one short page ends
     # each walk.
-    $shimDir = Join-Path $sandbox3 'gh-shim'
+    $shimDir = Join-Path $sandbox2 'gh-shim'
     New-Item -ItemType Directory -Path $shimDir -Force | Out-Null
     $shimRepoName = 'tracker-audit-probe/target-{0}' -f ([guid]::NewGuid().ToString('N').Substring(0, 8))
     # Give the target an `origin` remote pointing at the shim's chosen slug; parseGithubSlug
@@ -413,54 +335,15 @@ out('{}');
     Assert 'tracker-audit.js did NOT populate refs in the leaked bare repo' ($leakRefs.Count -eq 0) `
         (($leakRefs | ForEach-Object { $_.FullName }) -join "`n")
 } finally {
-    Remove-Item -Path $sandbox3 -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $sandbox2 -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# --------------------------------------------------------------------------------------- 4
-# Audit: every test in tests/ that runs `git init` / `git config` must not pollute a parent
-# repo when GIT_DIR leaks from the pre-commit hook. Load the existing PS test files, run
-# them with a leaked GIT_DIR pointed at a bare probe, and confirm the probe is untouched.
-
-Write-Host ''
-Write-Host 'Audit: no test in tests/ pollutes a leaked bare repo config'
-$sandbox4 = New-Sandbox
-try {
-    $leakBare = New-LeakBareRepo -Root $sandbox4
-    $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
-
-    $env:GIT_DIR = Join-Path $leakBare ''
-
-    # dotfiles-freshness.tests.ps1 is the file that motivated this guard: it does many
-    # `git init` / `git config` calls on sandbox repos, and pre-2026-08-25 those calls
-    # were writing into the parent repo instead. It clears the env at file scope (line 34
-    # of that file), so a successful run here is the check.
-    $freshTest = Join-Path $TestsRoot 'dotfiles-freshness.tests.ps1'
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $freshTest 2>&1 | Out-String
-    $freshExit = $LASTEXITCODE
-    $ErrorActionPreference = $prev
-
-    Remove-Item Env:\GIT_DIR -ErrorAction SilentlyContinue
-
-    $leakConfigAfter = Read-BareConfig -BareRoot $leakBare
-    Assert 'dotfiles-freshness.tests.ps1 leaves the leaked bare repo config UNTOUCHED' `
-        ($leakConfigAfter -eq $leakConfigBefore) `
-        ("exit={0}`nbefore={1}`nafter ={2}" -f $freshExit, $leakConfigBefore, $leakConfigAfter)
-    # Same ref-population belt as before.
-    $leakRefs = @(Get-ChildItem -Path (Join-Path $leakBare 'refs') -Recurse -File -ErrorAction SilentlyContinue)
-    Assert 'dotfiles-freshness.tests.ps1 populated no refs in the leaked bare repo' ($leakRefs.Count -eq 0) `
-        (($leakRefs | ForEach-Object { $_.FullName }) -join "`n")
-} finally {
-    Remove-Item -Path $sandbox4 -Recurse -Force -ErrorAction SilentlyContinue
-}
-
-# --------------------------------------------------------------------------------------- 5
+# --------------------------------------------------------------------------------------- 3
 # restore-test.ps1 -BootstrapOnly under a leaked GIT_DIR. This is the exact regression the
 # reviewer flagged: restore-test.ps1 runs `git -C $RepoRoot ls-files` (and, in the non-worktree
 # modes, `git clone` / `git remote get-url origin` / `git log`) at file scope BEFORE it sources
 # lib/manifest.ps1, so a fix that lives only inside manifest.ps1 does nothing for those calls.
-# The pre-commit hook exports GIT_DIR into this child; under that leak, `git -C <worktree>
+# A git hook exports GIT_DIR into this child; under that leak, `git -C <worktree>
 # ls-files` returns 0 files instead of the real ~586 and the outer suite crashes on 'The
 # property Count cannot be found on this object' before it ever reaches check 9c.
 #
@@ -483,15 +366,15 @@ Write-Host 'restore-test.ps1 -BootstrapOnly clones the target under GIT_DIR leak
 $repoHasGit = Test-Path (Join-Path $RepoRoot '.git')
 if (-not $repoHasGit -or $env:RESTORE_TEST_ACTIVE) {
     Write-Host '  skip  restore-test.ps1 -BootstrapOnly (no .git at $RepoRoot; runs when the leak suite is invoked standalone)' -ForegroundColor DarkGray
-    $sandbox5 = $null
-} else { $sandbox5 = New-Sandbox }
-if ($null -ne $sandbox5) {
+    $sandbox3 = $null
+} else { $sandbox3 = New-Sandbox }
+if ($null -ne $sandbox3) {
 try {
-    $leakBare = New-LeakBareRepo -Root $sandbox5
+    $leakBare = New-LeakBareRepo -Root $sandbox3
     $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
 
     # Fresh fake home outside real profile - restore-test.ps1 refuses -FakeHome under $HOME.
-    $fakeHome = Join-Path $sandbox5 'home\Restored'
+    $fakeHome = Join-Path $sandbox3 'home\Restored'
     New-Item -ItemType Directory -Path (Split-Path -Parent $fakeHome) -Force | Out-Null
 
     # THE LEAK.
@@ -502,7 +385,7 @@ try {
     $ErrorActionPreference = 'Continue'
     # RESTORE_TEST_ACTIVE stops the nested-suite recursion in the outer test's flow, but this
     # check is a first-level invocation, so it must NOT inherit that guard - clear it in the
-    # child. -From worktree is the mode the pre-commit hook uses and the one that broke.
+    # child. -From worktree is the mode the automation runs and the one that broke.
     $childCmd = ('$env:RESTORE_TEST_ACTIVE = $null; ' +
                  '& "' + $script + '" -From worktree -BootstrapOnly')
     $out = & $Engine -NoProfile -ExecutionPolicy Bypass -Command $childCmd 2>&1 | Out-String
@@ -526,7 +409,7 @@ try {
         ($leakConfigAfter -eq $leakConfigBefore) `
         ("before={0}`nafter ={1}" -f $leakConfigBefore, $leakConfigAfter)
 } finally {
-    Remove-Item -Path $sandbox5 -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path $sandbox3 -Recurse -Force -ErrorAction SilentlyContinue
 }
 }
 
