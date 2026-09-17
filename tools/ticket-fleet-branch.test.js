@@ -26,6 +26,9 @@ const {
   stableJson, stableText, stableList, priorFindingsBlock,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
 } = require('./ticket-fleet-branch.js');
+// Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
+// fails the assertion that depends on it instead of silently slicing to end-of-file.
+const { sliceBetween, sliceBetweenTags } = require('./source-slice.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -75,8 +78,8 @@ test('isFleetBranch covers both fleet branch shapes (issue 377)', () => {
 // prefix against each place fleet branches are enumerated.
 test('every enumeration of fleet branches names the discoveries prefix (issue 377)', () => {
   const runbook = fs.readFileSync(path.join(REPO_ROOT, 'orchestrator', 'RUNBOOK.md'), 'utf8');
-  const fromMergePass = runbook.slice(runbook.indexOf('**Merge pass (before the fleet).**'));
-  const mergePassStep = fromMergePass.slice(0, fromMergePass.indexOf('\n4. '));
+  const mergePassStep = sliceBetween(runbook, '**Merge pass (before the fleet).**', '\n4. ',
+    "RUNBOOK.md's merge pass step");
   assert.ok(mergePassStep.includes(DISCOVERIES_BRANCH_PREFIX + '*'),
     "RUNBOOK.md's merge pass must match agent/fleet-discoveries-* as well as agent/issue-*");
 
@@ -405,8 +408,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} keys the open-PR guard on a per-invocatio
   const body = extractMarked(src, 'FLEET-OPEN-PR');
   assert.match(body, /label: `open-pr-scan@\$\{invocationId\}`/,
     'the open-PR scan agent label must carry invocationId');
-  const promptEnd = body.indexOf('label: `open-pr-scan@');
-  const prompt = body.slice(body.indexOf('found = await agent('), promptEnd);
+  const prompt = sliceBetween(body, 'found = await agent(', 'label: `open-pr-scan@', 'the open-PR scan prompt');
   assert.match(prompt, /\$\{invocationId\}/, 'the open-PR scan prompt must carry invocationId');
   assert.equal((src.match(/\$\{invocationId\}/g) || []).length, 2,
     'invocationId belongs in the open-PR scan prompt and label only: anywhere else it would move a branch name or bust another stage cache');
@@ -448,6 +450,18 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state fr
   }
 });
 
+// Issue 489: ~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten
+// by the PARENT session, so it is always newer than the implementer's first commit - without this
+// exclusion no attempt can pass the rail, and a rail that always fires teaches the next verifier
+// to wave it through.
+test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from the live-tree sweep (issue 489)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
+    `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/sessions alongside hook-state and projects`);
+  assert.match(src, /~\/\.claude\/sessions\/<pid>\.json is the CLI's own process registry, heartbeat-rewritten/,
+    `${FLEET_SCRIPT_REL} must state why ~/.claude/sessions is excluded so the verifier does not re-derive it`);
+});
+
 // ---- Three-copies gone (issue 138) ----
 // The consolidation ticket deletes the pre-plugin copies. A regression that re-adds one
 // silently re-opens the drift the plugin move was meant to close.
@@ -477,15 +491,8 @@ const RESUME_GUARD_PAIR = [FLEET_SCRIPT];
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 function extractMarked(src, name) {
-  const startTag = `// [${name}-START]`;
-  const endTag = `// [${name}-END]`;
-  const s = src.indexOf(startTag);
-  const e = src.indexOf(endTag);
-  if (s < 0 || e < 0 || e <= s) {
-    throw new Error(`${name} markers not found or out of order`);
-  }
-  // Return everything between the markers (exclusive).
-  return src.slice(s + startTag.length, e);
+  // Everything between the markers (exclusive); a marker that moved is a named failure (issue 488).
+  return sliceBetweenTags(src, `// [${name}-START]`, `// [${name}-END]`, `the ${name} block`);
 }
 
 // A stand-in for any module-scope binding the lane references that this harness does not model:
@@ -811,9 +818,7 @@ for (const file of RESUME_GUARD_PAIR) {
       ['prober', 'Probe GitHub issue #'],
     ];
     for (const [who, anchor] of anchors) {
-      const start = src.indexOf(anchor);
-      assert.ok(start > 0, `${who} prompt not found by its opening line`);
-      const prompt = src.slice(start, src.indexOf("phase: '", start));
+      const prompt = sliceBetween(src, anchor, "phase: '", `the ${who} prompt`);
       assert.match(prompt, /The main checkout is never a test surface \(issue 404\)/,
         `${who} prompt must say in one sentence that the main checkout is never a test surface`);
       assert.match(prompt, /sits on whatever branch this session is on, which is not the code/,
@@ -1172,14 +1177,7 @@ test('confineToCandidates drops tickets the listing never returned', () => {
 });
 
 function extractScoutGate(src) {
-  const startTag = '// [FLEET-SCOUT-GATE-START]';
-  const endTag = '// [FLEET-SCOUT-GATE-END]';
-  const s = src.indexOf(startTag);
-  const e = src.indexOf(endTag);
-  if (s < 0 || e < 0 || e <= s) {
-    throw new Error('FLEET-SCOUT-GATE markers not found or out of order');
-  }
-  return src.slice(s + startTag.length, e);
+  return extractMarked(src, 'FLEET-SCOUT-GATE');
 }
 
 async function driveScoutGate(scout, { explicitTickets = [], label = 'ready-for-agent' } = {}) {
@@ -1239,14 +1237,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} scout prompt calls the listing the whole 
 // under either instrument, and the scout's wave selection parks a ticket whose latest comment is
 // still an unanswered fleet handoff.
 
-function extractBetween(src, tag) {
-  const startTag = `// [${tag}-START]`;
-  const endTag = `// [${tag}-END]`;
-  const s = src.indexOf(startTag);
-  const e = src.indexOf(endTag);
-  if (s < 0 || e < 0 || e <= s) { throw new Error(`${tag} markers not found or out of order`); }
-  return src.slice(s + startTag.length, e);
-}
+const extractBetween = extractMarked;
 
 function loadTrackerRules(scriptPath, mode) {
   const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-TRACKER-RULES');
@@ -1257,13 +1248,22 @@ function loadTrackerRules(scriptPath, mode) {
 
 async function driveHumanLane(scriptPath, agentMock, ticket, mode) {
   const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-HUMAN-LANE');
-  const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'HANDOFF', 'COMMENTED', 'stableList', 'stableText',
-    'scratchFile', body + '\nreturn runHumanLane;');
-  const cfg = { deliver: true, verifyModel: 'v', deliverModel: 'd' };
+  // Issue 488: `with (laneScope(...))`, as the code lane and the marker blocks already do, rather
+  // than a hand-kept parameter list - a new module-scope binding referenced from the lane used to
+  // throw a bare ReferenceError here and needed a hand edit (issue 439 added scratchFile that way).
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runHumanLane;\n}`);
   const helpers = loadStableHelpers(scriptPath);
-  // The lane names its own comment-body path (issue 439); the run's scratch root is module scope.
-  const runHumanLane = await wrapper(agentMock, cfg, loadTrackerRules(scriptPath, mode), {}, {},
-    helpers.stableList, helpers.stableText, (name) => `/tmp/fleet-testrun/${name}`);
+  const runHumanLane = await wrapper(laneScope({
+    agent: agentMock,
+    cfg: { deliver: true, verifyModel: 'v', deliverModel: 'd' },
+    rules: loadTrackerRules(scriptPath, mode),
+    HANDOFF: {},
+    COMMENTED: {},
+    stableList: helpers.stableList,
+    stableText: helpers.stableText,
+    // The lane names its own comment-body path (issue 439); the run's scratch root is module scope.
+    scratchFile: (name) => `/tmp/fleet-testrun/${name}`,
+  }));
   return await runHumanLane(ticket);
 }
 

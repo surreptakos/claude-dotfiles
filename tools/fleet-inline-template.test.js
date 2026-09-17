@@ -17,6 +17,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const { renderScript, SOURCE, TARGET, TARGET_START, TARGET_END } = require('./build-fleet-inline.js');
+const { sliceBetweenTags } = require('./source-slice.js');
 const module_ = require('./ticket-fleet-branch.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
@@ -26,10 +27,7 @@ const PACKAGED = path.join(REPO_ROOT, 'marketplace', 'aac-skills', 'skills', 'ti
 /** The text between the fleet script's FLEET-GENERATED markers. */
 function generatedBlock(file) {
   const text = fs.readFileSync(file, 'utf8');
-  const s = text.indexOf(TARGET_START);
-  const e = text.indexOf(TARGET_END);
-  assert.ok(s >= 0 && e > s, `${file} is missing its FLEET-GENERATED markers`);
-  return text.slice(s + TARGET_START.length, e);
+  return sliceBetweenTags(text, TARGET_START, TARGET_END, `${file}'s FLEET-GENERATED block`);
 }
 
 test('the fleet script holds the generated copy of tools/ticket-fleet-branch.js, byte for byte', () => {
