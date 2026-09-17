@@ -11,6 +11,9 @@
  *   2. a fresh repo not getting the hook, the SessionStart entry or the posture;
  *   3. a second run changing something — an acceptance criterion of the ticket, and the reason a
  *      repo that already carries an untagged entry (claude-dotfiles) must gain no duplicate.
+ *
+ * Harness v29 (issue 543) adds a fourth: the rewrite re-emitting a CRLF settings file as LF. The
+ * one repo this script runs against itself pins that file as a CRLF blob (issue 87).
  */
 'use strict';
 
@@ -71,7 +74,7 @@ test('a fresh repo gets the bootstrap hook, its SessionStart entry and the postu
                      '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh');
   assert.strictEqual(s.permissions.defaultMode, 'auto');
   assert.deepStrictEqual(s.permissions.allow, ['Bash(*)', 'Edit', 'Write', 'mcp__github__*']);
-  assert.match(s.autoMode.allow[0], /issue 245/);
+  assert.match(s.autoMode.allow[0], /issue 543/);
   assert.strictEqual(s.enabledPlugins['aac-skills@claude-dotfiles'], true);
 });
 
@@ -82,6 +85,19 @@ test('a second run changes nothing and says so', () => {
   const stdout = deliver(root);
   assert.match(stdout, /already delivered/);
   assert.deepStrictEqual(snapshot(root), before);
+});
+
+test('a repo whose settings file is a CRLF blob keeps its line endings (issue 87)', () => {
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  const file = path.join(root, '.claude', 'settings.json');
+  fs.writeFileSync(file, '{\r\n  "permissions": {\r\n    "defaultMode": "auto"\r\n  }\r\n}\r\n');
+  deliver(root);
+  const text = fs.readFileSync(file, 'utf8');
+  assert.ok(!/(^|[^\r])\n/.test(text),
+    'the rewrite emitted a bare LF into a CRLF blob — on claude-dotfiles that reopens the ' +
+    'phantom " M" the .gitattributes -text pin exists to close');
+  assert.match(JSON.parse(text).autoMode.allow[0], /issue 543/);
 });
 
 test('a repo that already wired the hook untagged keeps its entry, its mode and its other hooks', () => {
