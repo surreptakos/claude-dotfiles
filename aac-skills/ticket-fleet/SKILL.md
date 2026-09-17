@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-17T21:04:50Z"
-  previous-modified: "2026-09-17T20:57:11Z"
-  revision: "24"
-  content-sha: "4a2b45335a4c"
+  modified: "2026-09-17T21:08:36Z"
+  previous-modified: "2026-09-17T21:04:50Z"
+  revision: "25"
+  content-sha: "4c218858c23c"
 ---
 
 # ticket-fleet
@@ -437,7 +437,7 @@ and a rebuilt marketplace payload — so the PRs open conflicted and the session
 the same conflict once per PR (run `wf_37f38305-f2e`, PRs #304-#314).
 
 So the deliver stage merges `origin/<defaultBranch>` into the verified branch **before** it
-pushes. A clean merge pushes as before. A conflicting merge has exactly two resolvable classes:
+pushes. A clean merge pushes as before. A conflicting merge has exactly three resolvable classes:
 
 - **Generated files** — a path matching `generatedPaths` (`.claude-plugin/marketplace.json`,
   `marketplace/**`). Resolved with `git checkout --theirs`: the default branch's copy is what
@@ -448,6 +448,14 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly two reso
   branch's whole file: PR #306 did that and dropped the branch's edits to the skill's prose.
   The resolver rewrites only hunks whose every line is one of the four keys and exits non-zero
   on any other hunk, which reclassifies that file as a real merge.
+- **A harness upgrade row** — `agents/skills/project-harness/UPGRADES.md`, where two tickets in
+  one wave that both bump the harness version both wrote the next `| N |` row (run `6aab1eac`:
+  #453 and #218 both took v26, and the number was moved by hand in nine places). Resolved by
+  `node tools/renumber-harness-upgrade.js`: the branch's row keeps its text and takes the next
+  free number, every other place the branch wrote that number moves with it, and the generated
+  bootstrap template is rebuilt. It exits non-zero when the branch changed that file by more
+  than adding rows, which reclassifies it as a real merge. The same script runs after a CLEAN
+  merge too — two rows appended far enough apart merge silently and still collide.
 
 After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
 the ones CLAUDE.md names), re-runs the test command, and commits the merge; the PR body says
@@ -458,21 +466,6 @@ merge, pushes nothing and opens no PR; the ticket appears in the run result's `f
 with `conflictPaths` naming every path still in conflict. A test command that fails after an
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
-
-**No push before a marker scan.** On every path through the merge, a clean one included, the
-stage runs `git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD` over the merge result before
-`git push`. A hit means a resolution staged the conflict markers instead of removing them: a
-generated-file or stamp-block path is resolved again and the merge commit amended, and
-anything else resets the merge and blocks the ticket with those paths in `conflictPaths`.
-Run `6aab1eac` had no such scan - its deliverer committed a `SKILL.md` with the markers
-intact, pushed it, and asked the session for a force push (issue 514).
-
-**A bad commit that already reached origin is repaired forward, never force-pushed.** The
-stage checks out the pushed head, sets index and worktree to the corrected merge with
-`git read-tree -u --reset <corrected-commit>`, commits that tree as a follow-up whose parent
-is the bad commit, and pushes a plain fast-forward - the pattern the session used by hand to
-repair `966a36f` (repair commit `b00db2e`). `git push --force`, `--force-with-lease` and
-deleting the remote branch are out of bounds: that branch may already be a PR head.
 
 ## Branch names
 
