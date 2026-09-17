@@ -15,3 +15,4 @@
 - [Pause shared-state cleanup when sessions run concurrently](pause-shared-state-when-sessions-concurrent.md) — Dan halted session-end sweeps 2026-09-16; check for live fleet PRs and branches first
 - [WRH = William Ryan Homes](wrh-william-ryan-homes.md) — Dan's home builder; WRH tasks are personal, left in the Inbox untouched
 - [aacx record corrections](aacx-record-corrections.md) — 53 projects were deliberate; 08-05 stop decision has no transcript; old todoist_sync.py is prior art for Sync tickets
+- [Cloud routine facts 2026-09-17](cloud-routine-facts-2026-09-17.md) — routines take no env vars; Drive read/write via proxy works; no gate in cloud; Todoist REST needs a token path; triage routine trig_01WgTYXvzFQQUFGFZgKQAa5m exists
