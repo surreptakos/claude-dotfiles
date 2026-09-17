@@ -256,6 +256,24 @@
         "installedAt": "2026-09-16T19:29:31.304Z",
         "lastUpdated": "2026-09-16T19:29:31.304Z",
         "gitCommitSha": "51426546216f6b0bf4d4f4bf4d7874843590b3fd"
+      },
+      {
+        "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\brazil-flights-travel-hacking-a4d0a4",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
+        "version": "2026.9.161952",
+        "installedAt": "2026-09-17T03:49:46.521Z",
+        "lastUpdated": "2026-09-17T03:49:46.521Z",
+        "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
+        "version": "2026.9.161952",
+        "installedAt": "2026-09-17T03:52:19.945Z",
+        "lastUpdated": "2026-09-17T03:52:19.945Z",
+        "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\sweet-jang-0350be"
       }
     ],
     "yes@sstklen": [
@@ -266,6 +284,16 @@
         "installedAt": "2026-09-03T21:22:01.060Z",
         "lastUpdated": "2026-09-03T21:22:01.060Z",
         "gitCommitSha": "47521489a4fc0537b633339372dcd7514032acfb"
+      }
+    ],
+    "travel-hacker@borski": [
+      {
+        "scope": "user",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\borski\\travel-hacker\\1.1.0",
+        "version": "1.1.0",
+        "installedAt": "2026-09-17T03:45:41.313Z",
+        "lastUpdated": "2026-09-17T03:45:41.313Z",
+        "gitCommitSha": "901675d0170dab5ba037191f7de5d2b292fd541b"
       }
     ]
   }

@@ -13,3 +13,4 @@
 - [Granola O3 notes lookup](granola-o3-notes-lookup.md) — O3 notes titled by bare date; match participant email + date; get_meetings returns private_notes
 - [PowerShell gh --jq output is an array](powershell-gh-jq-output-is-array.md) — join before editing or edit in Python; flattened issue #216 body 2026-09-15
 - [Pause shared-state cleanup when sessions run concurrently](pause-shared-state-when-sessions-concurrent.md) — Dan halted session-end sweeps 2026-09-16; check for live fleet PRs and branches first
+- [WRH = William Ryan Homes](wrh-william-ryan-homes.md) — Dan's home builder; WRH tasks are personal, left in the Inbox untouched
