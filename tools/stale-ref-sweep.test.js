@@ -29,6 +29,7 @@ const {
   staleRefSweep, classifyBranch, plan, renderBody, hasFindings, sweepableKind, assertNoForce,
   normalizeSubject, resolveDefaultBranch, DELETABLE, MARKER, ISSUE_TITLE, ISSUE_LABEL, MISSING_TOKEN,
 } = require('./stale-ref-sweep.js');
+const { sliceBetween, sliceFrom } = require('./source-slice.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'stale-ref-sweep.yml');
@@ -395,8 +396,7 @@ test('stale-ref-sweep.yml ticks weekly, applies on dispatch, and runs the tests 
 
 test('session-end step 11 is scoped to the session, and hands the repo-wide sweep to the job', () => {
   const skill = fs.readFileSync(SKILL, 'utf8');
-  const step11 = skill.slice(skill.indexOf('\n11. '), skill.indexOf('\n12. '));
-  assert.ok(step11.length > 200, 'step 11 not found in the skill');
+  const step11 = sliceBetween(skill, '\n11. ', '\n12. ', "session-end's step 11");
   assert.match(step11, /this session's own branch and worktree/);
   assert.match(step11, /stale-ref-sweep\.yml/);
   assert.match(step11, /do not delete them/, 'other sessions\' refs are the job\'s, not the step\'s');
@@ -408,8 +408,7 @@ test('session-end step 11 is scoped to the session, and hands the repo-wide swee
   // And the cloud section must name the job rather than a skipped step. Issue 212 narrowed the
   // substitution table to GraphQL-backed spellings only, and a git ref delete is not one, so the
   // fact lives in the quirks list beneath the table instead of in a row of it.
-  const cloud = skill.slice(skill.indexOf('## In a cloud container'));
-  assert.ok(cloud.length > 500, 'cloud section not found in the skill');
+  const cloud = sliceFrom(skill, '## In a cloud container', "session-end's cloud section");
   assert.match(cloud, /stale-ref-sweep\.yml/,
     'the cloud section names the job that owns the repo-wide sweep');
   assert.equal(/^\|.*stale-ref-sweep\.yml/m.test(cloud), false,
