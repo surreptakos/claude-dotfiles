@@ -22,7 +22,7 @@ const { spawnSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates,
+  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
 } = require('./ticket-fleet-branch.js');
@@ -573,17 +573,10 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     unusableVerdict: (detail, who) => ({ pass: false, evidence: '', failures: [`${who || 'verifier'} output unusable: ${detail}`], unusable: true }),
     // Issue 404: the expected tip is read by its own one-command agent. Unreadable by default, so
     // the worktree cross-check is inert unless a test supplies a tip; driveCodeLane injects the
-    // script's own worktreeMismatch, so the decision under test is the real one.
+    // module's worktreeMismatch - the very function the generated block carries (issue 486) - so
+    // the decision under test is the real one.
     revParse: async () => null,
   }, stubs)));
-}
-
-// The worktree cross-check the lanes reject a verdict with (issue 404), evaluated out of the
-// script so the lane bodies below resolve the real one rather than a stand-in.
-function loadWorktreeCheck(scriptPath) {
-  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-WORKTREE-CHECK');
-  // eslint-disable-next-line no-new-func
-  return new Function(`${body}\nreturn { shaMatches, worktreeMismatch };`)();
 }
 
 async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null, stubOverrides = {}) {
@@ -603,7 +596,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
-    worktreeMismatch: loadWorktreeCheck(scriptPath).worktreeMismatch,
+    worktreeMismatch,
     treeGuardCheck,
   }, stubOverrides), scriptPath);
   const result = await runCodeLane(ticket, workerIndex);
@@ -1014,7 +1007,10 @@ for (const file of RESUME_GUARD_PAIR) {
 // before selectWave. Driven with a stubbed instrument rather than asserted by regex: what matters
 // is which agents run and which tickets survive.
 async function driveOpenPrFilter(scriptPath, agentMock, tickets, { invocationId = 'inv1', instrument = 'gh' } = {}) {
-  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-OPEN-PR');
+  // applyOpenPrs comes from the generated block since issue 486; the marked block holds only
+  // the read that feeds it.
+  const body = generatedBlock(scriptPath)
+    + extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-OPEN-PR');
   const logs = [];
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn dropTicketsWithOpenPr;\n}`);
   const drop = await wrapper(laneScope({
@@ -1035,7 +1031,6 @@ const OPEN_PR_CANDIDATES = [
 ];
 
 test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before wave selection, so the cap runs maxTickets real tickets (issue 430)`, async () => {
-  const selectWave = selectWaveFrom(FLEET_SCRIPT);
   const calls = [];
   const agentMock = async (prompt, opts) => {
     calls.push({ label: opts.label, phase: opts.phase, prompt });
@@ -1099,6 +1094,65 @@ test(`fleet script ${FLEET_SCRIPT_REL} files the open-PR check under Scout and n
     'wave selection must read the filtered candidate list');
   assert.match(src, /\n  skippedOpenPR,/,
     'the run result must name the dropped tickets under skippedOpenPR');
+});
+
+// ---- The pure helpers the fleet script inlines (issue 486) ----
+// shaMatches/worktreeMismatch (issue 404), applyOpenPrs (issue 430) and selectWave were the last
+// three helpers written only in the fleet script and reachable only by eval-ing their marker block.
+// They live here now and travel into the script through tools/build-fleet-inline.js, so these are
+// ordinary unit tests on the module.
+
+test('shaMatches compares object names on their common prefix, and rejects non-shas (issue 404)', () => {
+  const full = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+  assert.ok(shaMatches(full, full.slice(0, 7)), 'an abbreviated HEAD still names the same commit');
+  assert.ok(shaMatches(' A1B2C3D4E5F ', full), 'case and surrounding whitespace are not a mismatch');
+  assert.ok(!shaMatches(full, 'b1b2c3d4e5f60718293a4b5c6d7e8f9012345678'), 'a different commit must not match');
+  assert.ok(!shaMatches(full, 'HEAD'), 'a word that is not an object name is not evidence of anything');
+  assert.ok(!shaMatches(full, 'a1b2c3'), 'six characters is below the 7-40 hex window');
+  assert.ok(!shaMatches(null, undefined), 'a missing sha never matches a missing sha');
+});
+
+test('worktreeMismatch rejects a verdict produced somewhere other than the expected tip (issue 404)', () => {
+  const head = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+  const at = (h, p) => ({ pass: true, worktree: { head: h, path: p } });
+  assert.equal(worktreeMismatch(at(head, '/wt'), head, 'the tip of agent/issue-1'), null,
+    'a verdict produced at the expected tip stands');
+  assert.equal(worktreeMismatch(at(head, '/wt'), '', 'the tip of agent/issue-1'), null,
+    'no readable expected tip means there is nothing to check against - the verdict stands');
+  assert.equal(worktreeMismatch({ unusable: true }, head, 'the tip of agent/issue-1'), null,
+    'an unusable verdict is already a failed attempt; re-running it for its worktree adds nothing');
+  const missing = worktreeMismatch({ pass: true }, head, 'the tip of agent/issue-1');
+  assert.match(missing, /reported no worktree HEAD/, 'a verdict with no HEAD is not evidence it ran anywhere');
+  const elsewhere = worktreeMismatch(at('0000000000000000000000000000000000000000', '/repo'), head, 'the tip of agent/issue-1');
+  assert.match(elsewhere, /^the verdict was produced at HEAD 0000000/, 'the line names the HEAD it actually ran at');
+  assert.match(elsewhere, /\(worktree \/repo\)/, 'and where, so the re-run prompt can quote it');
+  assert.match(elsewhere, /the tip of agent\/issue-1 \(a1b2c3d/, 'and the tip it should have been');
+});
+
+test('applyOpenPrs drops only candidates with a NAMED open PR (issue 430)', () => {
+  const tickets = [{ number: 101 }, { number: '102' }, { number: 103 }];
+  const applied = applyOpenPrs(tickets, [
+    { number: 101, prUrl: 'https://github.com/x/y/pull/7', branch: 'agent/issue-101-attempt1-wf_r1-w0' },
+    { number: 102, prUrl: '   ' },
+    { number: 0, prUrl: 'https://github.com/x/y/pull/9' },
+  ]);
+  assert.deepEqual(applied.tickets.map((t) => t.number), ['102', 103],
+    'a number with no url is not evidence of anything: only a named PR skips a ticket');
+  assert.deepEqual(applied.skipped,
+    [{ ticket: 101, prUrl: 'https://github.com/x/y/pull/7', branch: 'agent/issue-101-attempt1-wf_r1-w0' }],
+    'the dropped ticket carries the PR that stopped it, for skippedOpenPR');
+  assert.deepEqual(applyOpenPrs(null, null), { tickets: [], skipped: [] },
+    'a listing nothing reported drops nothing');
+});
+
+test('selectWave splits the candidates into the wave and the three reasons the rest do not run', () => {
+  const t = (number, blockedBy, handoffPending) => ({ number, blockedBy, handoffPending });
+  const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])], 2);
+  assert.deepEqual(out.wave.map((x) => x.number), [1, 4], 'the cap fills with runnable tickets only');
+  assert.deepEqual(out.blocked.map((x) => x.number), [2], 'an open blocker gates the ticket');
+  assert.deepEqual(out.pendingHandoff.map((x) => x.number), [3],
+    'a ticket awaiting the owner after a handoff is parked, not re-run (issue 266)');
+  assert.deepEqual(out.overCap.map((x) => x.number), [5], 'the rest are reported over cap, not lost');
 });
 
 // ---- Empty-label listing ends the run (issue 298) ----
@@ -1213,12 +1267,6 @@ async function driveHumanLane(scriptPath, agentMock, ticket, mode) {
   return await runHumanLane(ticket);
 }
 
-function selectWaveFrom(scriptPath) {
-  const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-WAVE-SELECT');
-  // eslint-disable-next-line no-new-func
-  return new Function(body + '\nreturn selectWave;')();
-}
-
 for (const mode of ['gh', 'mcp']) {
   test(`${FLEET_SCRIPT_REL} human-lane delivery drops ready-for-agent and adds ready-for-human under ${mode}`, async () => {
     const prompts = [];
@@ -1246,7 +1294,6 @@ for (const mode of ['gh', 'mcp']) {
 }
 
 test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is an unanswered fleet handoff`, () => {
-  const selectWave = selectWaveFrom(FLEET_SCRIPT);
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
   const fresh = { number: 267, kind: 'human', blockedBy: [], handoffPending: false };
   const blocked = { number: 268, kind: 'code', blockedBy: [10], handoffPending: false };
@@ -1257,7 +1304,6 @@ test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is 
 });
 
 test(`${FLEET_SCRIPT_REL} a run whose only ticket already carries a handoff comment starts no agents`, async () => {
-  const selectWave = selectWaveFrom(FLEET_SCRIPT);
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
   const { wave, pendingHandoff } = selectWave([parked], 3);
   const calls = [];
@@ -1416,7 +1462,6 @@ async function driveBlockerState(tickets, blockerReply, { mode = 'gh' } = {}) {
 }
 
 test(`${FLEET_SCRIPT_REL} runs a ticket whose only blocker is closed, with no body edit (issue 403)`, async () => {
-  const selectWave = selectWaveFrom(FLEET_SCRIPT);
   const ticket = { number: 305, kind: 'code', blockedBy: [199], handoffPending: false };
   const { resolved, logs, prompts } = await driveBlockerState(
     [ticket], async () => ({ blockers: [{ number: 199, state: 'closed' }] })
@@ -1432,7 +1477,6 @@ test(`${FLEET_SCRIPT_REL} runs a ticket whose only blocker is closed, with no bo
 });
 
 test(`${FLEET_SCRIPT_REL} still skips a ticket whose blocker is open, naming the blocker (issue 403)`, async () => {
-  const selectWave = selectWaveFrom(FLEET_SCRIPT);
   const ticket = { number: 305, kind: 'code', blockedBy: [199], handoffPending: false };
   const { resolved, prompts } = await driveBlockerState(
     [ticket], async () => ({ blockers: [{ number: 199, state: 'open' }] }), { mode: 'mcp' }
