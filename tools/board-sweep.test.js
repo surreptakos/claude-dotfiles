@@ -149,8 +149,11 @@ const BOARD = {
   }),
 };
 
-function stubGh(dir, callsFile) {
+function stubGh(dir, callsFile, opts = {}) {
   const bin = path.join(dir, 'gh');
+  const itemList = opts.itemListStderr
+    ? `printf '%s\\n' '${opts.itemListStderr}' >&2; exit 1`
+    : `cat <<'J'\n${BOARD.items}\nJ`;
   fs.writeFileSync(bin, `#!/usr/bin/env bash
 set -eu
 printf '%s\\n' "$*" >> "${callsFile}"
@@ -165,9 +168,7 @@ J
 ${BOARD.fields}
 J
   ;;
-  "project item-list") cat <<'J'
-${BOARD.items}
-J
+  "project item-list") ${itemList}
   ;;
   "project item-edit") exit 0 ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 9 ;;
@@ -207,6 +208,38 @@ test('a closed issue whose card is not Done is moved to Done; nothing else is to
   assert.equal(/ITEM_done_pr|ITEM_open_issue/.test(edits[0]), false);
   assert.match(r.output, /#900\s+In Progress/);
   assert.match(r.output, /total moved 1, fails 0/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// ---- an unsweepable linked board is a failure, not a green skip (issue 409) -------------------
+
+// The Board sweep job read `success` for weeks while moving nothing: the only `gh` call that
+// failed was the per-board item-list, and the sweep logged it as a one-line "skip" with gh's
+// stderr — the rate limit that actually caused it — discarded, then exited 0.
+test('a linked board whose item-list fails: exits non-zero and prints gh\'s full stderr',
+  { skip: process.platform === 'win32' && 'POSIX shell stub gh; runs on Linux CI' }, () => {
+  const dir = tmpdir('unswept');
+  const repo = path.join(dir, 'repo');
+  fs.mkdirSync(repo);
+  execFileSync('git', ['init', '-q'], { cwd: repo });
+  execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/surreptakos/claude-dotfiles'], { cwd: repo });
+  const callsFile = path.join(dir, 'gh-calls.txt');
+  fs.writeFileSync(callsFile, '');
+  stubGh(dir, callsFile, { itemListStderr: 'GraphQL: API rate limit already exceeded for user ID 12160797.' });
+
+  const r = boardSweep({
+    env: { PROJECT_TOKEN: 'tok-215', PATH: `${dir}:${process.env.PATH}`, HOME: dir },
+    argv: ['--apply'],
+    cwd: repo,
+    log: quiet,
+  });
+
+  assert.notEqual(r.code, 0, `an unswept linked board must fail the run:\n${r.output}`);
+  assert.match(r.output, /FAIL surreptakos\/#3 "AAC": item-list failed/);
+  assert.match(r.output, /API rate limit already exceeded for user ID 12160797/);
+  assert.match(r.output, /could not be swept/);
+  assert.equal(/^skip /m.test(r.output), false, 'a linked board must never read as a skip');
+  assert.match(r.output, /::error::board sweep exited 1/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

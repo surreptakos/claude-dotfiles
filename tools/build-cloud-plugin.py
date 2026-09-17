@@ -10,7 +10,10 @@ claude.ai -> Customize -> Plugins -> Add -> Upload plugin.
 Disallowed keys (disable-model-invocation, argument-hint, hidden, ...) are not
 dropped: they move under metadata as strings, the same shape writing-dan used to
 pass the validator on 2026-08-27. Claude Code ignores unknown metadata, so the
-plugin still loads locally via --plugin-dir for testing.
+plugin still loads locally via --plugin-dir for testing -- and so a source gated
+with disable-model-invocation is NOT gated in the payload. The payload's own gate
+is to leave the skill out: see DEAD_LOAD_DROPPED / DEAD_LOAD_KEPT (issue 530),
+which carry a per-skill decision for the skills nobody invokes.
 
 Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and writes
 <repo>/.claude-plugin/marketplace.json, which makes the repo itself an installable Claude
@@ -64,6 +67,47 @@ PLACEHOLDER_VERSION = "0.0.0"
 # What the rotation report prints as the "from" revision of a skill that had none.
 NONE_REVISION = "none"
 NL = chr(10)
+
+# ------------------------------------------------------------- dead-load decisions (issue 530)
+# A skill in the payload costs its description on EVERY turn of every session that installs the
+# plugin, invoked or not. caveman learn (30-day window, 3594 sessions, 2026-09-16) found no
+# invocation of the nine skills named below - about 536 tokens a turn under the sink
+# `dead_load:skills`. The live copies under ~/.claude/skills were gated with
+# `disable-model-invocation: true` the same day and a desktop session honours that; the payload
+# cannot, because transform_skill_md moves the key under `metadata` to pass the claude.ai upload
+# validator, so every plugin consumer went on loading all nine descriptions. The only gate the
+# payload can enforce is not shipping the skill at all.
+#
+# So the decision is per skill and it lives HERE, in the code that acts on it - a decision
+# recorded only in a ticket is one no rebuild can honour. A name in DEAD_LOAD_DROPPED is left out
+# of the payload, in either source tree, zip and marketplace alike, and its reason says why
+# nothing needs it there; a name in DEAD_LOAD_KEPT ships despite the reading, and its reason is
+# what buys the description back. Re-deciding one is a move between the two tables plus a rebuild;
+# the skill itself stays where it is, so nothing is lost by dropping it from the payload.
+DEAD_LOAD_DROPPED = {
+    "accessibility-review": "WCAG audit prompt, no files but its own; no payload skill, hook or "
+                            "test references it and the live copy is gated.",
+    "canvas-design": "poster/art prompt carrying 5.6 MB of bundled fonts - the single largest "
+                     "thing in the payload, for a skill nothing invoked.",
+    "design-critique": "design-feedback prompt, no files but its own; nothing in the payload "
+                       "calls it.",
+    "design-handoff": "handoff-spec prompt, no files but its own; nothing in the payload calls "
+                      "it.",
+    "design-system": "design-system audit prompt, no files but its own; the only payload matches "
+                     "for the name are prose in vercel-react-native-skills and a keyword row in "
+                     "find-skills, neither an invocation.",
+    "research-synthesis": "research-synthesis prompt, no files but its own; nothing in the "
+                          "payload calls it.",
+    "user-research": "research-planning prompt, no files but its own; nothing in the payload "
+                     "calls it.",
+    "ux-copy": "microcopy prompt, no files but its own; nothing in the payload calls it.",
+}
+DEAD_LOAD_KEPT = {
+    "claude-md-lint": "the skill dir carries claude-md-lint.js, and the packaged copy is how a "
+                      "cloud session in ANOTHER repo runs the linter - tools/claude-md-lint.js "
+                      "and its mirror only reach this one. Dropping it would take the tool off "
+                      "every other checkout, which no token saving is worth.",
+}
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
 # the same rule, so a .bak file dropped next to a SKILL.md does not read as a stale cloud plugin.
@@ -483,9 +527,16 @@ def main():
     aac_names = {p.name for p in (REPO / "aac-skills").iterdir()
                  if (p / "SKILL.md").is_file()} if (REPO / "aac-skills").is_dir() else set()
     packaged, failures, restamped, superseded = [], [], [], []
+    dropped = []
     for entry in sorted(src.iterdir()):
         if not entry.is_dir():
             continue  # stray files like PROVENANCE-design-skills.md
+        if entry.name in DEAD_LOAD_DROPPED:
+            # Decided out of the payload (issue 530); the reason is in the table. Skipped before
+            # stamping too: a skill the payload does not carry has no packaged copy to keep in
+            # step, and `skill-stamps.py stamp claude/skills` still rotates the source.
+            dropped.append(entry.name)
+            continue
         if entry.name in aac_names:
             # Migration window (issue 172): a skill's hand-edited source has moved to aac-skills/
             # while the owner's personal copy is still in ~/.claude/skills, and so in the claude/
@@ -851,6 +902,9 @@ def main():
         for entry in sorted(aac_src.iterdir()):
             if not entry.is_dir() or not (entry / "SKILL.md").is_file():
                 continue
+            if entry.name in DEAD_LOAD_DROPPED:
+                dropped.append(entry.name)
+                continue
             dest = plugin_root / "skills" / entry.name
             if dest.exists():
                 failures.append(f"aac/{entry.name}: name collides with a personal skill")
@@ -925,6 +979,13 @@ def main():
     for name, moved, _r in packaged:
         if moved:
             print(f"  {name}: {', '.join(moved)}")
+    # The gate the payload can actually enforce (issue 530): say what it left out, every build.
+    packaged_names = {n for n, _m, _r in packaged}
+    dropped = sorted(set(dropped))  # a name present in both source trees is one dropped skill
+    print(f"dead-load skills left out of the payload: {len(dropped)}"
+          + (": " + ", ".join(dropped) if dropped else ""))
+    for name in sorted(n for n in DEAD_LOAD_KEPT if n in packaged_names):
+        print(f"  kept anyway: {name} - {DEAD_LOAD_KEPT[name]}")
     print(f"local paths retargeted at the plugin in {len(retargeted)} skills"
           + (f": {', '.join(retargeted)}" if retargeted else ""))
     if superseded:
