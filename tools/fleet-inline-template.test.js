@@ -50,7 +50,8 @@ test('the generated block runs the module\'s helpers, not a copy that has drifte
   // eslint-disable-next-line no-new-func
   const inlined = new Function(`${generatedBlock(TARGET)}
     return { pickInstrument, pickVerifierAgent, resolveVerifierAgent, confineToCandidates,
-             applyBlockerStates, stableJson, stableText, stableList, priorFindingsBlock };`)();
+             applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
+             stableJson, stableText, stableList, priorFindingsBlock };`)();
 
   assert.strictEqual(inlined.pickInstrument(null, undefined, undefined),
     module_.pickInstrument(null, undefined, undefined));
@@ -66,6 +67,18 @@ test('the generated block runs the module\'s helpers, not a copy that has drifte
   const blockers = [{ number: 199, state: 'closed' }, { number: 206, state: 'open' }];
   assert.deepStrictEqual(inlined.applyBlockerStates(tickets, blockers),
     module_.applyBlockerStates(tickets, blockers));
+
+  // The three helpers issue 486 moved out of their own marker pairs in the script.
+  const head = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+  assert.strictEqual(inlined.shaMatches(head, head.slice(0, 7)), module_.shaMatches(head, head.slice(0, 7)));
+  const ranElsewhere = { pass: true, worktree: { head: '0'.repeat(40), path: '/repo' } };
+  assert.strictEqual(inlined.worktreeMismatch(ranElsewhere, head, 'the tip of agent/issue-1'),
+    module_.worktreeMismatch(ranElsewhere, head, 'the tip of agent/issue-1'));
+  const withOpenPr = [{ number: 101, prUrl: 'https://github.com/x/y/pull/7', branch: 'agent/issue-101-a' }];
+  assert.deepStrictEqual(inlined.applyOpenPrs([{ number: 101 }, { number: 102 }], withOpenPr),
+    module_.applyOpenPrs([{ number: 101 }, { number: 102 }], withOpenPr));
+  const wave = [{ number: 1, blockedBy: [] }, { number: 2, blockedBy: [9] }, { number: 3, blockedBy: [], handoffPending: true }];
+  assert.deepStrictEqual(inlined.selectWave(wave, 1), module_.selectWave(wave, 1));
 
   const verdict = { failures: ['a\r\nb ', null, 42] };
   assert.strictEqual(inlined.priorFindingsBlock(verdict, 'fix it'),
