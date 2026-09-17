@@ -61,6 +61,8 @@ PLUGIN_NAME = "aac-skills"
 MANIFEST_REL = ".claude-plugin/plugin.json"
 # Stands in until the payload is assembled and resolve_version() can read it (issue 432).
 PLACEHOLDER_VERSION = "0.0.0"
+# What the rotation report prints as the "from" revision of a skill that had none.
+NONE_REVISION = "none"
 NL = chr(10)
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
@@ -270,9 +272,38 @@ def transform_skill_md(path, stamp=None):
 
 
 def stamp_source(entry, history_paths, mirror_dir, home, write):
-    """Refresh the modified/previous-modified stamp of one source skill. Returns (stamp, changed)."""
-    return skill_stamps.stamp_skill(entry, write=write, home=home, repo=REPO,
-                                    history_paths=history_paths, mirror_dir=mirror_dir)
+    """Refresh the stamp of one source skill. Returns (stamp, changed, report).
+
+    `changed` is compute_stamp's verdict: the packaged copy carries a fresh stamp. `report` is
+    what the rotation line may say about the SOURCE, and it is measured, not inferred: None when
+    the bytes of `entry`/SKILL.md are the same after this call as before (nothing written, or
+    --no-stamp-write), otherwise a dict naming the path written, the revision it held and holds,
+    and whether the write put the published stamp back rather than rotating past it (content
+    that returned to HEAD's version, see skill_stamps.compute_stamp). A line that named a file
+    the packager did not write made the real rotations harder to trust (issue 484).
+    """
+    path = Path(entry) / "SKILL.md"
+    before = path.read_bytes()
+    try:
+        old = skill_stamps.read_stamp(
+            skill_stamps.read_frontmatter(before.decode("utf-8").replace("\r\n", "\n"))[0])
+    except Exception:  # noqa: BLE001 - an unreadable old stamp only blanks the "from" revision
+        old = {}
+    stamp, changed = skill_stamps.stamp_skill(entry, write=write, home=home, repo=REPO,
+                                              history_paths=history_paths, mirror_dir=mirror_dir)
+    if not write or not changed or path.read_bytes() == before:
+        return stamp, changed, None
+    try:
+        rel = [path.parent.resolve().relative_to(REPO.resolve()).as_posix()]
+    except ValueError:
+        rel = []
+    published = skill_stamps.published_stamp(
+        REPO, rel + [p for p in (history_paths or []) if p not in rel])
+    return stamp, changed, {
+        "path": rel[0] + "/SKILL.md" if rel else str(path),
+        "from": old.get("revision", NONE_REVISION),
+        "restored": bool(published) and stamp == published,
+    }
 
 
 def source_from_mirror(repo, home, tmp):
@@ -363,10 +394,18 @@ def payload_fingerprint(root):
     The version is the one field a rebuild may carry over, so plugin.json is compared with that
     key removed and every other key of it still counted: change the description and the payload
     has moved.
+
+    Files a hook run drops into the published tree at runtime are not payload: running the
+    plugin's Python hook leaves hooks/scripts/__pycache__/ behind, git-ignored so the tree still
+    reads clean, and counting it made every rebuild on such a tree take a fresh version for a
+    payload that had not moved (issue 484). One rule, the packager's own noise list, and CI's
+    diff excludes the same directories.
     """
     files = {}
     for f in sorted(root.rglob("*")):
         if not f.is_file():
+            continue
+        if any(skill_stamps.is_noise(part) for part in f.relative_to(root).parts):
             continue
         rel = f.relative_to(root).as_posix()
         if rel == MANIFEST_REL:
@@ -475,7 +514,7 @@ def main():
         # agents/skills) instead, matching how the aac-skills loop stamps aac-skills/<name>.
         stamp_target = mirror if args.from_mirror and mirror is not None else entry
         try:
-            stamp, changed = stamp_source(
+            stamp, changed, report = stamp_source(
                 stamp_target, [f"claude/skills/{entry.name}", f"agents/skills/{entry.name}"],
                 mirror, home, stamp_write)
             new_text, moved, retargeted = transform_skill_md(skill_md, stamp)
@@ -483,7 +522,7 @@ def main():
             failures.append(f"{entry.name}: {exc}")
             continue
         if changed:
-            restamped.append((entry.name, stamp))
+            restamped.append((entry.name, stamp, report))
         shutil.copytree(entry, dest, ignore=ignore_noise)
         (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
         packaged.append((entry.name, moved, retargeted))
@@ -817,14 +856,14 @@ def main():
                 failures.append(f"aac/{entry.name}: name collides with a personal skill")
                 continue
             try:
-                stamp, changed = stamp_source(
+                stamp, changed, report = stamp_source(
                     entry, [f"aac-skills/{entry.name}"], None, home, stamp_write)
                 new_text, moved, retargeted = transform_skill_md(entry / "SKILL.md", stamp)
             except Exception as exc:  # noqa: BLE001
                 failures.append(f"aac/{entry.name}: {exc}")
                 continue
             if changed:
-                restamped.append((entry.name, stamp))
+                restamped.append((entry.name, stamp, report))
             shutil.copytree(entry, dest, ignore=ignore_noise)
             (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
             packaged.append((entry.name, moved, retargeted))
@@ -891,11 +930,21 @@ def main():
     if superseded:
         print("personal copy superseded by the aac-skills/ source (delete ~/.claude/skills/<name> "
               "and push to close the window): " + ", ".join(superseded))
-    print(f"stamps rotated in {len(restamped)} skills"
-          + ("" if stamp_write else " (not written back: --no-stamp-write)"))
-    for name, stamp in restamped:
-        print(f"  {name}: rev {stamp['revision']}, modified {stamp['modified']}, "
-              f"previous {stamp['previous-modified']}")
+    # The rotation report names exactly the source files this run wrote with a changed stamp
+    # (issue 484). With --no-stamp-write only the packaged copies moved, and the line says so.
+    if stamp_write:
+        written = [(n, s, r) for n, s, r in restamped if r]
+        print(f"stamps rotated in {len(written)} skills")
+        for name, stamp, report in written:
+            print(f"  {name} ({report['path']}): rev {report['from']} -> {stamp['revision']}, "
+                  f"modified {stamp['modified']}, previous {stamp['previous-modified']}"
+                  + (" (back to the published stamp)" if report["restored"] else ""))
+    else:
+        print(f"stamps rotated in the packaged copies of {len(restamped)} skills "
+              "(sources untouched: --no-stamp-write)")
+        for name, stamp, _r in restamped:
+            print(f"  {name}: rev {stamp['revision']}, modified {stamp['modified']}, "
+                  f"previous {stamp['previous-modified']}")
     if tmp:
         tmp.cleanup()
     if failures:

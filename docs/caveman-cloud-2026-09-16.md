@@ -39,12 +39,14 @@ binary release `bin-v1.1.7` (fetched by `caveman setup --install`, signature and
 - **Big rock, in-session.** Shrink hook, native lifecycle hooks and recovery MCP are live from
   prompt 1 because `~/.claude/settings.json` hooks hot-load. `caveman shrink`, `retrieve`,
   `stats`, `learn`, `browse`, `mem` and `trial` are on PATH (`~/.local/bin`).
-- **Big rock, routing.** Not possible from repo config: the process environment wins. To route a
-  cloud session, set both variables in the claude.ai environment's variables
-  (`ANTHROPIC_BASE_URL=http://127.0.0.1:8787/w/claude`, `_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1`).
-  The hook starts the proxy before the first model call, but it never sets the variable itself: a
-  route with no proxy behind it is a dead session, and a hook that can fail on the network must
-  not hold that switch. `CAVEMAN_CLOUD_PROXY=0` skips proxy and `enable` (skills and CLI only).
+- **Big rock, routing.** Not possible from repo config: the process environment wins. Setting the
+  two variables at the claude.ai environment level was tried and **must not be repeated**: with
+  `ANTHROPIC_BASE_URL` pointing at the local proxy the platform stops injecting the github.com
+  credential, so every container loses `gh`, the dotfiles clone and the governance hooks (issues
+  483, 519; memory note `caveman-base-url-stays-with-the-proxy`). No verified route for a cloud
+  session exists as of 2026-09-17. The hook still starts the proxy for subagents and nested
+  `claude -p` calls that set the variable themselves, and never sets it for the session.
+  `CAVEMAN_CLOUD_PROXY=0` skips proxy and `enable` (skills and CLI only).
 - **Not delivered.** The cavecrew subagents (`cavecrew-investigator|builder|reviewer`): the agent
   registry is read before SessionStart hooks run (issue 339), so a copy into `~/.claude/agents/`
   would resolve only from the second session on. The `cavecrew` skill is installed and names them;
