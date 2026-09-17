@@ -29,16 +29,18 @@ SOURCE_TAG = 'aac-bootstrap-plugin-hook'
 
 # The governance hook set spec #207 names — the eight entries (session gate start and end, state
 # rehydrate, state stash, governance reminder, ask-matt gate on prompt, pre-tool, post-tool and
-# stop) plus the prompt gate, the per-prompt rules delivery (issue 209) and the memory loader.
-# Hard-coded on purpose: see the header of tests/bootstrap-test.sh.
+# stop) plus the prompt gate, the memory loader, and the two halves of the rules delivery: the
+# full text at SessionStart and the per-prompt digest (issue 533, splitting issue 209's
+# every-prompt delivery). Hard-coded on purpose: see the header of tests/bootstrap-test.sh.
 REQUIRED_HOOKS = [
     ('SessionStart', r'session-gate\.js"?\s+start', 'session gate (start)'),
     ('SessionStart', r'state-rehydrate\.js', 'state rehydrate'),
     ('SessionStart', r'repo-memory-load\.js', 'repo memory loader'),
+    ('SessionStart', r'global-rules\.js"?\s+start\s+1', 'global rules full text (session start)'),
     ('UserPromptSubmit', r'governance-reminder\.js', 'governance reminder'),
     ('UserPromptSubmit', r'ask_matt_gate\.py"?\s+claude-prompt', 'ask-matt gate (prompt)'),
     ('UserPromptSubmit', r'session-gate\.js"?\s+prompt', 'session gate (prompt)'),
-    ('UserPromptSubmit', r'global-rules\.js', 'global rules delivery'),
+    ('UserPromptSubmit', r'global-rules\.js"?\s+digest', 'global rules digest (per prompt)'),
     ('PreToolUse', r'ask_matt_gate\.py"?\s+claude-pre-tool', 'ask-matt gate (pre-tool)'),
     ('PostToolUse', r'ask_matt_gate\.py"?\s+claude-post-tool', 'ask-matt gate (post-tool)'),
     ('Stop', r'ask_matt_gate\.py"?\s+claude-stop', 'ask-matt gate (stop)'),
@@ -165,11 +167,21 @@ if settings is not None:
 
 # ------------------------------------------------------------------ 4. the rules text ----------
 rules = os.path.join(PAYLOAD, 'rules', 'global-rules.md')
+digest = os.path.join(PAYLOAD, 'rules', 'global-rules-digest.md')
+DIGEST_MAX_BYTES = 1500   # the packager's budget; a container pays it on every prompt
 if not os.path.isfile(rules) or os.path.getsize(rules) == 0:
     fail(f'no global rules text in the payload at {rules}')
 else:
     first = open(rules, encoding='utf-8').readline().strip()
     pass_(f'rules text present ({os.path.getsize(rules)} bytes), first line: {first!r}')
+if not os.path.isfile(digest) or os.path.getsize(digest) == 0:
+    fail(f'no per-prompt rules digest in the payload at {digest} (issue 533)')
+elif os.path.getsize(digest) > DIGEST_MAX_BYTES:
+    fail(f'the per-prompt digest is {os.path.getsize(digest)} bytes, over {DIGEST_MAX_BYTES}')
+else:
+    pass_(f'per-prompt digest present ({os.path.getsize(digest)} bytes, '
+          f'budget {DIGEST_MAX_BYTES}), against {os.path.getsize(rules)} bytes of full text '
+          'delivered once at session start')
 
 # ------------------------------------------------------------------ 5. gh -----------------------
 gh = os.path.join(HOME, '.local', 'bin', 'gh')

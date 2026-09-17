@@ -15,7 +15,8 @@
 #   2  the payload's skills are on disk under <home>/.claude/skills
 #   3  every governance hook entry the spec names is merged into <home>/.claude/settings.json,
 #      tagged, and points at a script the payload actually carries
-#   4  the global rules text file is in the payload and a UserPromptSubmit entry delivers it
+#   4  the global rules text file and its derived per-prompt digest are in the payload,
+#      SessionStart entries deliver the full text and one UserPromptSubmit entry the digest
 #   5  gh is installed and reachable through the PATH the hook exported via $CLAUDE_ENV_FILE
 #   6  session-check — the copy the bootstrap installed — exits 0 and prints its payload-version
 #      line, which this script quotes
@@ -23,8 +24,9 @@
 # WHY THE EXPECTATION IN CHECK 3 IS HARD-CODED HERE and not read out of the payload's
 # hooks.json: a gate that compares the merged settings against the manifest they were merged
 # from passes on any manifest, including one with a governance hook deleted. The list below is
-# the spec's list (the eight governance entries plus the prompt gate, the rules delivery of
-# issue 209 and the memory loader), so deleting an entry from the payload turns this red. That
+# the spec's list (the eight governance entries plus the prompt gate, both halves of the rules
+# delivery of issues 209/533 and the memory loader), so deleting an entry from the payload
+# turns this red. That
 # is acceptance criterion 2 of issue 211, and `--fault missing-hook-entry` reproduces it.
 #
 # USAGE

@@ -23,10 +23,20 @@ const os = require('os');
 
 // Packaged copy (issue 495): a container has no ~/.claude/CLAUDE.md. The rules this reminder
 // summarises ship in the plugin at rules/global-rules.md, two levels up from hooks/scripts/,
-// and global-rules.js injects them every prompt -- so the pointers below name that file.
+// and global-rules.js injects them at session start -- so the pointers below name that file.
 const RULES_FILE = process.env.CLAUDE_PLUGIN_ROOT
   ? path.join(process.env.CLAUDE_PLUGIN_ROOT, 'rules', 'global-rules.md')
   : path.resolve(__dirname, '..', '..', 'rules', 'global-rules.md');
+
+// Dedup (issue 533): global-rules.js also fires on every prompt, with a digest whose closing
+// sentence already points at the full rules. Where that digest ships, this hook drops its own
+// copy of the pointer rather than telling the model the same thing twice in one prompt. The
+// phrase below is the packager's DIGEST_POINTER_PHRASE, so the two cannot drift apart.
+const DIGEST_FILE = RULES_FILE.replace(/global-rules\.md$/, 'global-rules-digest.md');
+let DIGEST_TEXT = '';
+try { DIGEST_TEXT = fs.readFileSync(DIGEST_FILE, 'utf8'); } catch (_) { DIGEST_TEXT = ''; }
+const RULES_POINTER = DIGEST_TEXT.includes('already in this context')
+  ? '' : ', from ' + RULES_FILE;
 
 function cavemanMode() {
   const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -70,8 +80,8 @@ const CAVEMAN_LINES = {
 };
 
 const LINES = [
-  'GOVERNANCE (always on — full rules already in this context as GLOBAL RULES, from '
-    + RULES_FILE + '):',
+  'GOVERNANCE (always on — full rules already in this context as GLOBAL RULES'
+    + RULES_POINTER + '):',
   ...CAVEMAN_LINES[cavemanMode()],
   '2. YES: evidence over intuition (no "probably"/"should be" without a check). Investigate before',
   '   asking. Verify every change yourself and show the output — never "you can test it now".',
@@ -80,7 +90,7 @@ const LINES = [
   '   2 failures switch approach, 3 five-step audit, 4 minimal repro, 5+ structured handoff.',
   '   Check real exit codes, not piped output.',
   '3. ASK-MATT: name which flow applies before starting work (see the map in the GLOBAL RULES'
-    + ' already in this context, from ' + RULES_FILE + ').',
+    + ' already in this context' + RULES_POINTER + ').',
   '4. I-HAVE-ADHD: shape every reply so Dan can act. Lead with the next action; number multi-step',
   '   work; restate where we are ("step 3 of 5 done: X. Next: Y"); end with ONE thing he can do in',
   '   under two minutes. Concrete time estimates, never "some work". Show what now works. Errors as',

@@ -1,12 +1,17 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook — delivers the global rules text in full, every prompt (issue 209).
+// Global rules delivery hook — the full text once at SessionStart, a short digest every prompt.
 //
 // WHY: a cloud container has no live ~/.claude, so the four standing disciplines that a PC
 // session gets from ~/.claude/CLAUDE.md never reach it. The packager copies that section into
-// the payload at rules/global-rules.md (one source — the PC file — no hand duplicate) and this
-// hook injects it as additionalContext on every prompt, so prompt 1 and prompt 2 both carry the
-// rules with no file read. governance-reminder.js stays: it is the short per-turn reminder, this
-// is the text it summarises.
+// the payload at rules/global-rules.md (one source — the PC file — no hand duplicate) and derives
+// rules/global-rules-digest.md from the lines that section marks with `<!-- digest -->`.
+//
+// TWO MODES (issue 533; issue 209 shipped the full text on every prompt, ~12 KB a turn):
+//   `start <n>`  SessionStart — part n of the full text. Registered with no matcher, so it fires
+//                on every SessionStart source; `compact` and `resume` are what put the rules back
+//                after a compaction or a reconnect has dropped them out of the context.
+//   `digest`     UserPromptSubmit — ONE part, the derived digest, under 1,500 bytes. It is the
+//                per-prompt floor-raiser; the full text is already in the context from the start.
 //
 // WHY CHUNKED: measured in this container on 2026-09-16 (Claude Code binary at
 // /opt/claude-code/bin/claude, headless `claude -p` with a probe hook in a scratch
@@ -18,12 +23,12 @@
 // manifest entry per part.
 //
 // NO DOUBLING ON A PC (issue 209 criterion 4): where a global CLAUDE.md already carries this text
-// the session has it once already, so the hook exits silently rather than injecting a second copy.
-// The test is the rules file's own first line, so it cannot drift from the text being delivered.
-// GLOBAL_RULES_HOOK_FORCE=1 runs anyway (local end-to-end testing).
+// the session has it once already, so the hook exits silently — in either mode — rather than
+// injecting a second copy. The test is the rules file's own first line, so it cannot drift from
+// the text being delivered. GLOBAL_RULES_HOOK_FORCE=1 runs anyway (local end-to-end testing).
 //
-// Reads the hook JSON on stdin (ignored) and emits additionalContext. Runs on every prompt —
-// keep it fast and dependency-free.
+// Reads the hook JSON on stdin (ignored) and emits additionalContext. The digest mode runs on
+// every prompt — keep it fast and dependency-free.
 'use strict';
 
 const fs = require('fs');
@@ -41,6 +46,10 @@ function rulesFile() {
   // Not running as a plugin (a direct invocation, e.g. a test): the payload layout is
   // <root>/hooks/scripts/this-file, so the rules sit two levels up.
   return path.resolve(__dirname, '..', '..', 'rules', 'global-rules.md');
+}
+
+function digestFile() {
+  return rulesFile().replace(/global-rules\.md$/, 'global-rules-digest.md');
 }
 
 // Greedy line packing. The packager counts parts with the same rule, so part k here is part k
@@ -70,25 +79,50 @@ function liveCopyPresent(firstLine) {
   }
 }
 
-function contextFor(index) {
-  let text;
+function read(file) {
   try {
-    text = fs.readFileSync(rulesFile(), 'utf8');
+    return fs.readFileSync(file, 'utf8');
   } catch (_) {
-    return null; // no rules in the payload: nothing to say, and nothing to fail
+    return null; // nothing in the payload: nothing to say, and nothing to fail
   }
-  const firstLine = text.split('\n', 1)[0].trim();
-  if (process.env.GLOBAL_RULES_HOOK_FORCE !== '1' && liveCopyPresent(firstLine)) return null;
+}
+
+// True when this session already has the rules from a live global CLAUDE.md. Both modes check it:
+// a PC session that has the text in full needs neither a second copy nor a digest of it.
+function alreadyGoverned(rulesText) {
+  if (process.env.GLOBAL_RULES_HOOK_FORCE === '1') return false;
+  return liveCopyPresent(rulesText.split('\n', 1)[0].trim());
+}
+
+function startContext(index) {
+  const text = read(rulesFile());
+  if (text === null || alreadyGoverned(text)) return null;
   const parts = splitParts(text, PART_BYTES);
   if (index < 1 || index > parts.length) return null;
   const header = `GLOBAL RULES (part ${index} of ${parts.length} — the standing disciplines from `
     + 'the owner\'s global CLAUDE.md, delivered from the plugin payload because a container has no '
-    + 'live tree. They apply to this session in full):';
+    + 'live tree. They apply to this session in full, for the whole session):';
   return header + '\n' + parts[index - 1];
 }
 
-const index = Number.parseInt(process.argv[2] || '1', 10) || 1;
-const additionalContext = contextFor(index);
+function digestContext() {
+  const rules = read(rulesFile());
+  if (rules === null || alreadyGoverned(rules)) return null;
+  return read(digestFile());
+}
+
+const mode = process.argv[2] || 'digest';
+let event = 'UserPromptSubmit';
+let additionalContext = null;
+if (mode === 'start') {
+  event = 'SessionStart';
+  additionalContext = startContext(Number.parseInt(process.argv[3] || '1', 10) || 1);
+} else if (mode === 'digest') {
+  additionalContext = digestContext();
+} else {
+  // An unknown mode is a wiring bug, not a reason to break the turn: stay silent and exit 0.
+  additionalContext = null;
+}
 
 let buf = '';
 process.stdin.on('data', (c) => { buf += c; });
@@ -96,7 +130,7 @@ process.stdin.on('end', () => {
   if (additionalContext === null) return; // silent no-op: a 0-exit hook with no stdout
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
+      hookEventName: event,
       additionalContext,
     },
     suppressOutput: true,

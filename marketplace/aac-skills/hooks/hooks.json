@@ -38,6 +38,24 @@
             "statusMessage": "Loading this repo's memory notes..."
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" start 1",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" start 1",
+            "timeout": 10,
+            "statusMessage": "Delivering global rules (1/2)..."
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" start 2",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" start 2",
+            "timeout": 10,
+            "statusMessage": "Delivering global rules (2/2)..."
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -103,17 +121,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 1",
-            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 1",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" digest",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" digest",
             "timeout": 10,
-            "statusMessage": "Delivering global rules (1/2)..."
-          },
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 2",
-            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/global-rules.js\" 2",
-            "timeout": 10,
-            "statusMessage": "Delivering global rules (2/2)..."
+            "statusMessage": "Reasserting the global rules digest..."
           }
         ]
       }

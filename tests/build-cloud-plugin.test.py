@@ -562,6 +562,39 @@ class PluginHooksManifest(unittest.TestCase):
                          "the memory loader must not share a group with another hook")
         self.assertTrue((self.scripts_dir / "repo-memory-load.js").is_file())
 
+    def test_global_rules_ride_sessionstart_in_parts_and_every_source(self):
+        # Issue 533: the full text costs its ~12 KB once, at session start -- one entry per part,
+        # because the measured pass-through cap is per hook output -- and the group carries no
+        # matcher, so compact and resume put the rules back after they drop out of the context.
+        groups = (self.manifest.get("hooks") or {}).get("SessionStart") or []
+        rules_groups = [g for g in groups
+                        if any("global-rules.js" in h.get("command", "")
+                               for h in g.get("hooks", []))]
+        self.assertEqual(len(rules_groups), 1,
+                         "expected exactly one SessionStart group for global-rules.js")
+        self.assertNotIn("matcher", rules_groups[0],
+                         "a matcher would keep the rules from some SessionStart sources")
+        commands = [h["command"] for h in rules_groups[0]["hooks"]]
+        rules = (MARKETPLACE_HOOKS.parent / "rules" / "global-rules.md").read_text(encoding="utf-8")
+        parts = bcp.split_rules_parts(rules)
+        self.assertEqual(len(commands), len(parts),
+                         f"{len(parts)} parts of the rules text but {len(commands)} hook entries")
+        for i, cmd in enumerate(commands, start=1):
+            self.assertTrue(cmd.endswith(f'global-rules.js" start {i}'), cmd)
+
+    def test_exactly_one_per_prompt_global_rules_entry_and_it_is_the_digest(self):
+        prompt = (self.manifest.get("hooks") or {}).get("UserPromptSubmit") or []
+        commands = [h["command"] for g in prompt for h in g.get("hooks", [])
+                    if "global-rules.js" in h.get("command", "")]
+        self.assertEqual(len(commands), 1,
+                         f"{len(commands)} per-prompt global-rules entries; issue 533 allows one")
+        self.assertTrue(commands[0].endswith('global-rules.js" digest'), commands[0])
+        digest = (MARKETPLACE_HOOKS.parent / "rules" / "global-rules-digest.md")
+        self.assertTrue(digest.is_file(), "the payload carries no per-prompt digest")
+        size = len(digest.read_bytes())
+        self.assertLessEqual(size, bcp.DIGEST_MAX_BYTES,
+                             f"the per-prompt digest is {size} bytes, over the budget")
+
     def test_no_pwsh_only_invocation_in_the_hook_commands(self):
         # Acceptance criterion 3: every script runs on python3 and node only. A pwsh-only branch
         # would need to be guarded and skipped with a printed reason; there is no such branch here,
@@ -776,23 +809,37 @@ class GovernanceReminderRetarget(unittest.TestCase):
         assert proc.returncode == 0, f"stderr: {proc.stderr!r}"
         return json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
 
-    def test_payload_copy_names_the_plugin_rules_file_not_the_home_path(self):
+    def test_payload_copy_drops_the_pointer_the_digest_already_carries(self):
+        # Issue 533 criterion 3: global-rules.js now fires every prompt with a digest whose closing
+        # sentence points at the full rules. Saying it again here would be the same pointer twice
+        # in one prompt, so where the digest ships the reminder drops its copy of the path.
         ctx = self._context(self.PAYLOAD_SCRIPT, self.PLUGIN_ROOT)
         self.assertNotIn(self.HOME_POINTER, ctx,
                          "payload reminder still points a container at ~/.claude/CLAUDE.md")
         rules = self.PLUGIN_ROOT / "rules" / "global-rules.md"
+        digest = self.PLUGIN_ROOT / "rules" / "global-rules-digest.md"
         self.assertTrue(rules.is_file(), "payload lost rules/global-rules.md (issue 209)")
-        self.assertEqual(ctx.count(str(rules)), 2,
-                         "both pointers (header and ASK-MATT line) should name the payload rules file")
+        self.assertTrue(digest.is_file(), "payload lost rules/global-rules-digest.md (issue 533)")
+        self.assertIn(bcp.DIGEST_POINTER_PHRASE, digest.read_text(encoding="utf-8"))
+        self.assertEqual(ctx.count(str(rules)), 0,
+                         "the reminder repeats a pointer the per-prompt digest already carries")
         self.assertIn("GLOBAL RULES", ctx,
                       "reminder should say the rules are already in context (global-rules.js)")
 
-    def test_payload_copy_resolves_the_rules_file_without_plugin_root(self):
-        # A bare run of the payload script (no CLAUDE_PLUGIN_ROOT) still names a real file: the
-        # rules sit two levels up from hooks/scripts/, the same fallback global-rules.js uses.
-        ctx = self._context(self.PAYLOAD_SCRIPT)
-        self.assertNotIn(self.HOME_POINTER, ctx)
-        self.assertIn(str(self.PLUGIN_ROOT / "rules" / "global-rules.md"), ctx)
+    def test_payload_copy_names_the_rules_file_where_no_digest_ships(self):
+        # Without the digest beside them the two pointers are the only thing telling a container
+        # where the rules are, so they name the file -- and they find it two levels up from
+        # hooks/scripts/ with no CLAUDE_PLUGIN_ROOT set, the same fallback global-rules.js uses.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "payload"
+            (root / "hooks" / "scripts").mkdir(parents=True)
+            (root / "rules").mkdir()
+            shutil.copy(self.PAYLOAD_SCRIPT, root / "hooks" / "scripts" / "governance-reminder.js")
+            (root / "rules" / "global-rules.md").write_text("### rules\n", encoding="utf-8")
+            ctx = self._context(root / "hooks" / "scripts" / "governance-reminder.js")
+            self.assertNotIn(self.HOME_POINTER, ctx)
+            self.assertEqual(ctx.count(str(root / "rules" / "global-rules.md")), 2,
+                             "both pointers should name the rules file when nothing else does")
 
     def test_mirror_copy_still_names_the_home_path(self):
         # On the PC ~/.claude/CLAUDE.md is real and is where the rules live; the retarget is
@@ -816,6 +863,58 @@ class GovernanceReminderRetarget(unittest.TestCase):
         self.assertNotIn("see the map in " + self.HOME_POINTER, out)
         self.assertIn("WHY: ~/.claude/CLAUDE.md carries the full rules", out)
         self.assertIn("RULES_FILE", out)
+
+
+# Issue 533: the per-prompt digest is DERIVED from the same one source as the full text -- the
+# `<!-- digest -->` lines of the standing-disciplines section -- so it cannot be hand-kept and
+# cannot drift from the rules it summarises.
+class PerPromptDigest(unittest.TestCase):
+    SECTION = """### Four standing disciplines
+
+#### 1. CAVEMAN ULTRA \u2014 output style, every response
+
+- **Never drop:** technical terms, <!-- digest -->
+  code and API names.
+- **Drop:** filler.
+
+#### 2. YES \u2014 process discipline
+
+1. **Evidence over intuition.** No guessing. <!-- digest -->
+2. **Investigate before asking.** Not marked.
+"""
+
+    def test_marked_lines_ride_with_their_wrapped_continuation(self):
+        digest = bcp.extract_digest(self.SECTION)
+        self.assertIn("- **Never drop:** technical terms, code and API names.", digest)
+        self.assertIn("1. **Evidence over intuition.** No guessing.", digest)
+
+    def test_unmarked_lines_and_the_marker_itself_stay_out(self):
+        digest = bcp.extract_digest(self.SECTION)
+        self.assertNotIn("**Drop:** filler", digest)
+        self.assertNotIn("Investigate before asking", digest)
+        self.assertNotIn(bcp.DIGEST_MARKER, digest)
+
+    def test_each_discipline_heading_is_emitted_once_above_its_marked_lines(self):
+        lines = bcp.extract_digest(self.SECTION).splitlines()
+        self.assertEqual(lines.count("1. CAVEMAN ULTRA"), 1)
+        self.assertEqual(lines.count("2. YES"), 1)
+        self.assertLess(lines.index("1. CAVEMAN ULTRA"), lines.index("2. YES"))
+
+    def test_the_pointer_sentence_closes_it(self):
+        digest = bcp.extract_digest(self.SECTION)
+        self.assertTrue(digest.endswith(bcp.DIGEST_POINTER + "\n"))
+        self.assertIn(bcp.DIGEST_POINTER_PHRASE, bcp.DIGEST_POINTER)
+
+    def test_an_unmarked_section_yields_nothing(self):
+        # Which is what makes the packager raise instead of shipping an empty digest.
+        self.assertIsNone(bcp.extract_digest("### Four standing disciplines\n\nno markers\n"))
+
+    def test_the_shipped_digest_is_what_the_shipped_rules_derive(self):
+        root = REPO / "marketplace" / "aac-skills" / "rules"
+        derived = bcp.extract_digest((root / "global-rules.md").read_text(encoding="utf-8"))
+        self.assertEqual(derived, (root / "global-rules-digest.md").read_text(encoding="utf-8"),
+                         "the payload digest is not what its own rules file derives -- rerun the "
+                         "packager")
 
 
 if __name__ == "__main__":

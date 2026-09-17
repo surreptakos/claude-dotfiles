@@ -43,16 +43,30 @@ during copy. Never invoke the guard from the live-tree hook scripts
 (`~/.claude/hooks/*`, `~/.codex/hooks/*`) — those are the copy that should
 always run when user settings dispatches them.
 
-## global-rules.js (issue 209)
+## global-rules.js (issues 209, 533)
 
 A third file the packager copies into `hooks/scripts/`, and the only one with
-**no live-tree twin**: the payload is where it lives. It is a
-`UserPromptSubmit` hook that injects `rules/global-rules.md` — the
-`### Four standing disciplines` section the packager copies out of the owner's
-global `CLAUDE.md` — so a container, which has no `~/.claude`, carries the
-rules in full on every prompt.
+**no live-tree twin**: the payload is where it lives. It injects
+`rules/global-rules.md` — the `### Four standing disciplines` section the
+packager copies out of the owner's global `CLAUDE.md` — so a container, which
+has no `~/.claude`, carries the rules in full.
 
-It ships in parts. Measured in a cloud container on 2026-09-16 (headless
+Two modes, because ~12 KB on every prompt was most of a small context window
+(issue 533):
+
+- `start <n>` is a **`SessionStart`** hook carrying part *n* of the full text.
+  Its manifest group has no `matcher`, so every source fires it — `compact` and
+  `resume` included, which is what puts the rules back after a compaction has
+  dropped them.
+- `digest` is a **`UserPromptSubmit`** hook, exactly one entry, carrying
+  `rules/global-rules-digest.md`: under 1,500 bytes, derived by the packager
+  from the lines the source section marks with `<!-- digest -->` (see
+  `extract_digest` in `tools/build-cloud-plugin.py`). Never hand-kept — a
+  section with no markers fails the build, and so does a digest over budget.
+  The packaged `governance-reminder.js` drops its own pointer line where this
+  digest carries it, so the model is not told the same thing twice in a prompt.
+
+The full text ships in parts. Measured in a cloud container on 2026-09-16 (headless
 `claude -p` with a probe hook in a scratch `CLAUDE_CONFIG_DIR`): a hook's
 `additionalContext` reaches the model whole at 10,000 bytes, and at 10,240 the
 host replaces it with `Output too large (...). Full output saved to: ...
@@ -64,7 +78,7 @@ part and the script emits part *k* of a greedy line-packed split under
 Its own doubling guard, not `_plugin_hook_guard.js`: the question is not "do
 user settings dispatch this script" (nothing does — there is no live copy) but
 "does the session already have this text". Where a global `CLAUDE.md` carries
-the rules file's first line, the hook exits silently, so a PC session sees the
-rules once. `GLOBAL_RULES_HOOK_FORCE=1` runs it anyway;
+the rules file's first line, the hook exits silently in BOTH modes, so a PC
+session sees the rules once. `GLOBAL_RULES_HOOK_FORCE=1` runs it anyway;
 `GLOBAL_RULES_FILE` points it at another file. Pinned by
 `tools/global-rules-hook.test.js`.
