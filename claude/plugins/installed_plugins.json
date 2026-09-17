@@ -304,12 +304,21 @@
       },
       {
         "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\fervent-torvalds-a93eb6",
         "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
         "version": "2026.9.161952",
         "installedAt": "2026-09-17T19:14:26.128Z",
         "lastUpdated": "2026-09-17T19:14:26.128Z",
+        "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
+        "version": "2026.9.161952",
+        "installedAt": "2026-09-17T19:26:42.648Z",
+        "lastUpdated": "2026-09-17T19:26:42.648Z",
         "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5",
-        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\fervent-torvalds-a93eb6"
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\vigilant-tharp-2c8a66"
       }
     ],
     "yes@sstklen": [

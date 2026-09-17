@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-17T19:14:13Z"
-  previous-modified: "2026-09-17T02:24:38Z"
-  revision: "12"
-  content-sha: "70c718d12812"
+  modified: "2026-09-17T02:24:38Z"
+  previous-modified: "2026-09-17T02:05:05Z"
+  revision: "11"
+  content-sha: "155344995ea8"
 ---
 
 # Finish a session
@@ -245,17 +245,13 @@ and `gh repo view --json` all go through gh's GraphQL client, so each exits 1, w
 | `gh issue edit <n> --milestone` | MCP `issue_write` (update), or REST `gh api --method PATCH repos/<owner>/<repo>/issues/<n> -F milestone=<number>` |
 | `gh pr list --state open` | REST `gh api "repos/<owner>/<repo>/pulls?state=open&per_page=30"`, or MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment` |
-| `git push -u origin <branch>` when it fails with `fatal: could not read Username for 'https://github.com'` (issue 483: the container has no credential injection, so git, curl and `gh api` are all unauthenticated while the GitHub MCP tools still work) | MCP `push_files` (branch, message, every changed file with its full content — it makes ONE commit on the remote branch). Then prove fidelity: for each file, `gh api "repos/<owner>/<repo>/contents/<path>?ref=<branch>" --jq .sha` must equal `git hash-object <path>` locally (the blob SHA is content-derived, so a mismatch is a truncated or stale upload); `gh api` needs a token here, so use MCP `get_file_contents` for the sha when it has none. Then `git fetch origin <branch> && git reset --hard origin/<branch>` so the local duplicate commit stops reading as unpushed. Before any of it, `env \| grep ANTHROPIC_BASE_URL`: a caveman proxy URL at environment level is what stripped injection on 2026-09-17 (issue 519), and removing it is the fix, not the fallback |
 | `sweep-closed-to-done.js --apply` (step 6) | ProjectsV2 is GraphQL-only, so nothing runs by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `gh api "repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1"` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other, and the run log says which of three causes it is: `PROJECT_TOKEN` missing or expired; a board with no `Status`/`Done` option; or `GraphQL: API rate limit already exceeded for user ID <id>`, the PAT's own hourly bucket drained by a concurrent fleet wave — that one is transient, so re-dispatch the job (`workflow_dispatch`, `proof` false) once the bucket resets and read THAT run rather than passing over a red one |
 
 Everything else answers through `gh api repos/<owner>/<repo>/…`; the session's egress proxy
 authenticates api.github.com (a plain `curl` to it is authenticated too), private repos included,
 so no token of your own is needed. `gh run list` and `gh api …/actions/…` are REST and work, which
 is how every job row the sequence reads — Closure guard, Issue metadata audit, Tracker audit, Stale
-ref sweep, Board sweep — is quoted. Git itself (push, fetch) works normally through the same proxy
-— when the proxy is injecting. The tell that it is not: `AAC-BOOTSTRAP STOP: clone failed` in the
-SessionStart context and `STOP aac-bootstrap clone failed` from session-check (issue 483). Then
-every REST and git row above is unauthenticated too, and the `git push` row is the route.
+ref sweep, Board sweep — is quoted. Git itself (push, fetch) works normally through the same proxy.
 
 **Steps 8, 9, 11 and the audits are NOT in the table**, because they are not substitutions: each is
 a GitHub Actions job now for the desktop as much as for a container — Tracker audit

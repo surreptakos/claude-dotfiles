@@ -7,9 +7,6 @@
  * skills it installed. This module asks:
  *
  *   - is the marker present at all? (STOP: hook never ran)
- *   - does the marker record a failed stage? (STOP naming the stage and cause: the hook ran and
- *     could not clone dotfiles or find the payload — issue 483; before this the hook died under
- *     set -e with nothing written and the only signal was "marker absent")
  *   - does the marker name a skills directory that actually still holds those skills? (STOP:
  *     the skills tree was wiped or never copied)
  *   - is the payload version the marker records the same as what dotfiles master offers today?
@@ -26,8 +23,7 @@
  *                              override lets a test pin it)
  *
  * Exports:
- *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable' | 'failed', marker?, path,
- *                                      reason?, stage? }
+ *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable', marker?, path, reason? }
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
  *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker? }
  */
@@ -51,15 +47,6 @@ function readMarker(env) {
   if (!fs.existsSync(p)) return { state: 'missing', path: p };
   try {
     const marker = JSON.parse(fs.readFileSync(p, 'utf8'));
-    if (marker && typeof marker === 'object' && marker.failed === true) {
-      return {
-        state: 'failed',
-        marker,
-        path: p,
-        stage: String(marker.stage || 'unknown stage'),
-        reason: String(marker.reason || 'no reason recorded'),
-      };
-    }
     if (!marker || typeof marker !== 'object' || !Array.isArray(marker.skills)) {
       return { state: 'unreadable', path: p, reason: 'marker JSON has no `skills` array' };
     }
