@@ -2,6 +2,12 @@
 
 Recorded for issue 245. Supersedes `docs/cloud-permission-posture-2026-09-14.md`.
 
+**Superseded by `docs/cloud-permission-posture-2026-09-17.md`** (issue 543): the
+rule text below sanctioned only an *unattended* session and enumerated seven
+categories, and an attended cloud session was refused five times under it. Read
+the 2026-09-17 doc for the posture in force; this one stays for the reasoning
+behind the 2026-09-15 widening and for the ceiling recorded at its end.
+
 ## Ruling
 
 > Ruling (Dan, 2026-09-15, issue 245): `autoMode.allow` is widened to every action
