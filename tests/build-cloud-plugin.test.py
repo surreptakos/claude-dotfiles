@@ -818,5 +818,59 @@ class GovernanceReminderRetarget(unittest.TestCase):
         self.assertIn("RULES_FILE", out)
 
 
+# Issue 530: caveman learn (30-day window, 3594 sessions) found nine skills nobody invoked, whose
+# descriptions cost ~536 tokens on every turn. Their live copies were gated with
+# `disable-model-invocation: true`, but the packager moves that key under `metadata` to pass the
+# claude.ai validator, so the payload went on loading all nine. The payload's gate is to leave the
+# skill out, and the decision per skill lives in the packager's two tables.
+DEAD_LOAD_NAMED_IN_530 = (
+    "accessibility-review", "canvas-design", "claude-md-lint", "design-critique", "design-handoff",
+    "design-system", "research-synthesis", "user-research", "ux-copy",
+)
+
+DROPPED_SKILL = """---
+name: ux-copy
+disable-model-invocation: true
+description: A fixture standing in for a skill decided out of the payload.
+---
+
+# ux-copy
+"""
+
+
+class DeadLoadSkillDecisions(unittest.TestCase):
+    def test_every_skill_the_ticket_named_carries_exactly_one_decision_with_a_reason(self):
+        for name in DEAD_LOAD_NAMED_IN_530:
+            decisions = [t for t in (bcp.DEAD_LOAD_DROPPED, bcp.DEAD_LOAD_KEPT) if name in t]
+            self.assertEqual(len(decisions), 1,
+                             f"{name}: needs exactly one drop/keep decision in the packager")
+            self.assertTrue(decisions[0][name].strip(),
+                            f"{name}: the decision must record a reason, not an empty string")
+
+    def test_a_dropped_skill_is_not_packaged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            (repo / "claude" / "skills" / "ux-copy").mkdir(parents=True)
+            (repo / "claude" / "skills" / "ux-copy" / "SKILL.md").write_text(
+                DROPPED_SKILL, encoding="utf-8")
+            out = Path(tmp) / "dist"
+            with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
+                    sys, "argv", ["bcp", "--from-mirror", "--home", "C:\\Users\\Dan",
+                                  "--out", str(out), "--no-marketplace"]):
+                rc = bcp.main()
+            self.assertEqual(rc, 0)
+            self.assertFalse((out / bcp.PLUGIN_NAME / "skills" / "ux-copy").exists(),
+                             "a skill in DEAD_LOAD_DROPPED must not reach the payload")
+
+    def test_the_committed_payload_matches_the_decisions(self):
+        for name in bcp.DEAD_LOAD_DROPPED:
+            self.assertFalse((MARKETPLACE_SKILLS / name).exists(),
+                             f"{name}: decided out of the payload but still committed under "
+                             "marketplace/ - rebuild the plugin")
+        for name in bcp.DEAD_LOAD_KEPT:
+            self.assertTrue((MARKETPLACE_SKILLS / name / "SKILL.md").is_file(),
+                            f"{name}: decided to keep but missing from the committed payload")
+
+
 if __name__ == "__main__":
     unittest.main()
