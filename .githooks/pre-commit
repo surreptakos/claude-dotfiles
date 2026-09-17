@@ -26,9 +26,30 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_
 # node test would run this gate with the variable set and the suite could never fail it.
 unset NODE_TEST_CONTEXT
 
-echo "pre-commit: restore test (~13s)"
-powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree || {
-  echo ""
-  echo "pre-commit: test suite failed — commit blocked."
-  exit 1
-}
+# Issue 454: the suite spawns whichever engine started it, so name the one that exists here -
+# Windows PowerShell on the desktop, pwsh 7 in a Linux container. `pwsh` accepts and ignores
+# -ExecutionPolicy off Windows, so one argument list serves both.
+#
+# `powershell` FIRST, not pwsh: the desktop has both (pwsh 7.6.5 since 2026-08-31), and 5.1
+# is the engine this suite has always run on. ConvertTo-Json alone indents 4 spaces there and
+# 2 under 7, so preferring pwsh where it exists would change what the gate measures on the one
+# machine the gate was written for. A container has no `powershell` at all, so it still gets
+# pwsh. Neither on PATH is a loud SKIP, never a block: a missing interpreter is not a failing
+# test.
+PS_ENGINE=
+if command -v powershell >/dev/null 2>&1; then
+  PS_ENGINE=powershell
+elif command -v pwsh >/dev/null 2>&1; then
+  PS_ENGINE=pwsh
+fi
+
+if [ -z "$PS_ENGINE" ]; then
+  echo "pre-commit: NOTE - no pwsh or powershell on PATH; restore test SKIPPED (not run, not passed)."
+else
+  echo "pre-commit: restore test (~13s)"
+  "$PS_ENGINE" -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree || {
+    echo ""
+    echo "pre-commit: test suite failed — commit blocked."
+    exit 1
+  }
+fi

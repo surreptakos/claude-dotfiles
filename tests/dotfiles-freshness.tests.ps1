@@ -53,6 +53,14 @@ $TestsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $TestsRoot
 . (Join-Path $RepoRoot 'lib\manifest.ps1')
 
+# Issue 454: spawn WHICHEVER PowerShell is running this file - powershell.exe under 5.1 on the
+# desktop, pwsh under 7 in a Linux container - rather than the literal 'powershell', which exists
+# only on Windows. The fallback IS that literal, so the Windows path is unchanged. $env:TEMP is
+# Windows-only for the same reason; GetTempPath() returns %TEMP% when it is set.
+$Engine   = 'powershell'
+try { $Engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
+$TempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+
 $script:Pass = 0
 $script:Fail = 0
 $script:Detail = @()
@@ -71,7 +79,7 @@ function Assert {
 
 function New-Sandbox {
     $stamp = 'df-fresh-{0}-{1}' -f $PID, ([guid]::NewGuid().ToString('N').Substring(0, 6))
-    $root  = Join-Path $env:TEMP $stamp
+    $root  = Join-Path $TempRoot $stamp
     New-Item -ItemType Directory -Path $root -Force | Out-Null
     return $root
 }
@@ -138,7 +146,7 @@ function Invoke-Tool {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell @psArgs 2>&1 | Out-String
+        $out = & $Engine @psArgs 2>&1 | Out-String
         return @{ Exit = $LASTEXITCODE; Out = $out.Trim() }
     } finally {
         $ErrorActionPreference = $prev

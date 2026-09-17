@@ -52,6 +52,14 @@ $TestsRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Split-Path -Parent $TestsRoot
 . (Join-Path $RepoRoot 'lib\manifest.ps1')
 
+# Issue 454: spawn WHICHEVER PowerShell is running this file - powershell.exe under 5.1 on the
+# desktop, pwsh under 7 in a Linux container - rather than the literal 'powershell', which exists
+# only on Windows. The fallback IS that literal, so the Windows path is unchanged. $env:TEMP is
+# Windows-only for the same reason; GetTempPath() returns %TEMP% when it is set.
+$Engine   = 'powershell'
+try { $Engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
+$TempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+
 $script:Pass = 0
 $script:Fail = 0
 
@@ -69,7 +77,7 @@ function Assert {
 
 function New-Sandbox {
     $stamp = 'git-env-{0}-{1}' -f $PID, ([guid]::NewGuid().ToString('N').Substring(0, 6))
-    $root  = Join-Path $env:TEMP $stamp
+    $root  = Join-Path $TempRoot $stamp
     New-Item -ItemType Directory -Path $root -Force | Out-Null
     return $root
 }
@@ -156,7 +164,7 @@ try {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     $syncPath = Join-Path $target 'sync.ps1'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $syncPath `
+    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $syncPath `
                         -Mode push -Commit 'leak test: sync commit' -UserHome $fakeHome 2>&1 | Out-String
     $syncExit = $LASTEXITCODE
     $ErrorActionPreference = $prev
@@ -225,7 +233,7 @@ try {
     $tool = Join-Path $local 'tools\dotfiles-freshness.ps1'
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $tool `
+    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $tool `
                         -Mode classify -RepoRoot $local -UserHome $fakeHome -SkipFetch 2>&1 | Out-String
     $classifyExit = $LASTEXITCODE
     $ErrorActionPreference = $prev
@@ -429,7 +437,7 @@ try {
     $freshTest = Join-Path $TestsRoot 'dotfiles-freshness.tests.ps1'
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshTest 2>&1 | Out-String
+    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $freshTest 2>&1 | Out-String
     $freshExit = $LASTEXITCODE
     $ErrorActionPreference = $prev
 
@@ -497,7 +505,7 @@ try {
     # child. -From worktree is the mode the pre-commit hook uses and the one that broke.
     $childCmd = ('$env:RESTORE_TEST_ACTIVE = $null; ' +
                  '& "' + $script + '" -From worktree -BootstrapOnly')
-    $out = & powershell -NoProfile -ExecutionPolicy Bypass -Command $childCmd 2>&1 | Out-String
+    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -Command $childCmd 2>&1 | Out-String
     $bootstrapExit = $LASTEXITCODE
     $ErrorActionPreference = $prev
 

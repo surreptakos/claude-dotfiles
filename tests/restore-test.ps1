@@ -98,6 +98,14 @@ $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $SelfPath = $MyInvocation.MyCommand.Path
 $RealHome = $env:USERPROFILE.TrimEnd('\', '/')
 
+# Issue 454: spawn WHICHEVER PowerShell is running this file - powershell.exe under 5.1 on the
+# desktop, pwsh under 7 in a Linux container - rather than the literal 'powershell', which exists
+# only on Windows. The fallback IS that literal, so the Windows path is unchanged. $env:TEMP is
+# Windows-only for the same reason; GetTempPath() returns %TEMP% when it is set.
+$Engine   = 'powershell'
+try { $Engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
+$TempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
+
 # Issue 28: the pre-commit hook runs this suite as a child of `git commit`, which exports
 # GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_PREFIX / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY. Those env
 # vars OVERRIDE `git -C <path>` - git honours them first, and -C only relocates its path
@@ -417,7 +425,7 @@ if ($null -ne $seedSourceDir) {
 # ------------------------------------------------------------------ 1. run the installer
 
 $log = Join-Path $FakeRoot 'install.log'
-& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Clone 'install.ps1') `
+& $Engine -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Clone 'install.ps1') `
     -UserHome $FakeHome *> $log
 $installExit = $LASTEXITCODE
 
@@ -1241,7 +1249,7 @@ if (Test-Path $freshnessTool) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshnessTool `
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $freshnessTool `
                             -Mode classify -RepoRoot $Clone -UserHome $FakeHome -SkipFetch 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
@@ -1265,7 +1273,7 @@ if (Test-Path $freshnessPsTests) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $freshnessPsTests 2>&1 | Out-String
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $freshnessPsTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
     Check 'dotfiles-freshness.tests.ps1 passes (stamp round-trip + 4 states)' `
@@ -1280,7 +1288,7 @@ if (Test-Path $syncWtTests) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $syncWtTests 2>&1 | Out-String
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $syncWtTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
     Check 'sync-worktree-guard.tests.ps1 passes (push refuses from worktree; -FromWorktree bypasses)' `
@@ -1298,7 +1306,7 @@ if (Test-Path $settingsInvTests) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $settingsInvTests 2>&1 | Out-String
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $settingsInvTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
     Check 'settings-defaultmode.tests.ps1 passes (defaultMode inserted; pull honours the exit code)' `
@@ -1317,7 +1325,7 @@ if (Test-Path $invariantTests) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $invariantTests 2>&1 | Out-String
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $invariantTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
     Check 'settings-invariants.tests.ps1 passes (-Trust edits ~/.claude.json by insertion)' `
@@ -1338,7 +1346,7 @@ if (Test-Path $leakTests) {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $out = & powershell -NoProfile -ExecutionPolicy Bypass -File $leakTests 2>&1 | Out-String
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $leakTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
     Check 'git-env-leak.tests.ps1 passes (sync + freshness + tracker + audit)' `
@@ -1485,9 +1493,10 @@ if ($Fault -eq 'collision') {
 # Start-Process without -Wait comes back with an empty ExitCode, so a crashed child read as a pass.
 # Inside a job, $LASTEXITCODE is the child's own, and both jobs still run as separate processes.
 $jobs = @(1, 2 | ForEach-Object {
-    Start-Job -ArgumentList (, $probeArgs) -ScriptBlock {
-        param($childArgs)
-        $out = & powershell @childArgs 2>&1
+    Start-Job -ArgumentList (, ($Engine, $probeArgs)) -ScriptBlock {
+        param($pair)
+        $engine, $childArgs = $pair[0], $pair[1]
+        $out = & $engine @childArgs 2>&1
         [pscustomobject]@{ Exit = $LASTEXITCODE; Out = ($out | Out-String) }
     }
 })
@@ -1528,7 +1537,7 @@ if ($script:Failures -eq 0) {
     # A hook that swallows stdout leaves a failure with no evidence behind it, and an intermittent
     # one then cannot be diagnosed after the fact - which is exactly the position a run at
     # 2026-08-13 16:44 UTC left this repo in. The log outlives the run.
-    $logDir = Join-Path $env:TEMP 'restore-test-failures'
+    $logDir = Join-Path $TempRoot 'restore-test-failures'
     if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
     $stamp   = (Get-Date).ToString('yyyyMMdd-HHmmss')
     $logPath = Join-Path $logDir ("{0}-{1}.log" -f $stamp, $PID)
