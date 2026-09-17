@@ -29,16 +29,18 @@ SOURCE_TAG = 'aac-bootstrap-plugin-hook'
 
 # The governance hook set spec #207 names — the eight entries (session gate start and end, state
 # rehydrate, state stash, governance reminder, ask-matt gate on prompt, pre-tool, post-tool and
-# stop) plus the prompt gate, the per-prompt rules delivery (issue 209) and the memory loader.
+# stop) plus the prompt gate, the memory loader, and the rules delivery: the full text at
+# SessionStart and the digest per prompt (issues 209, 533).
 # Hard-coded on purpose: see the header of tests/bootstrap-test.sh.
 REQUIRED_HOOKS = [
     ('SessionStart', r'session-gate\.js"?\s+start', 'session gate (start)'),
     ('SessionStart', r'state-rehydrate\.js', 'state rehydrate'),
     ('SessionStart', r'repo-memory-load\.js', 'repo memory loader'),
+    ('SessionStart', r'global-rules\.js"?\s+start\s+1', 'global rules, full text (part 1)'),
     ('UserPromptSubmit', r'governance-reminder\.js', 'governance reminder'),
     ('UserPromptSubmit', r'ask_matt_gate\.py"?\s+claude-prompt', 'ask-matt gate (prompt)'),
     ('UserPromptSubmit', r'session-gate\.js"?\s+prompt', 'session gate (prompt)'),
-    ('UserPromptSubmit', r'global-rules\.js', 'global rules delivery'),
+    ('UserPromptSubmit', r'global-rules\.js"?\s+digest', 'global rules digest (per prompt)'),
     ('PreToolUse', r'ask_matt_gate\.py"?\s+claude-pre-tool', 'ask-matt gate (pre-tool)'),
     ('PostToolUse', r'ask_matt_gate\.py"?\s+claude-post-tool', 'ask-matt gate (post-tool)'),
     ('Stop', r'ask_matt_gate\.py"?\s+claude-stop', 'ask-matt gate (stop)'),
@@ -170,6 +172,17 @@ if not os.path.isfile(rules) or os.path.getsize(rules) == 0:
 else:
     first = open(rules, encoding='utf-8').readline().strip()
     pass_(f'rules text present ({os.path.getsize(rules)} bytes), first line: {first!r}')
+
+# The per-prompt digest (issue 533). Without it every prompt would go back to carrying the whole
+# rulebook, or -- worse -- carry nothing, since the UserPromptSubmit entry now asks for the digest.
+DIGEST_CAP = 1500
+digest = os.path.join(PAYLOAD, 'rules', 'global-rules-digest.md')
+if not os.path.isfile(digest):
+    fail(f'no per-prompt rules digest in the payload at {digest}')
+elif os.path.getsize(digest) > DIGEST_CAP:
+    fail(f'the per-prompt rules digest is {os.path.getsize(digest)} bytes, over {DIGEST_CAP}')
+else:
+    pass_(f'per-prompt rules digest present ({os.path.getsize(digest)} bytes, cap {DIGEST_CAP})')
 
 # ------------------------------------------------------------------ 5. gh -----------------------
 gh = os.path.join(HOME, '.local', 'bin', 'gh')

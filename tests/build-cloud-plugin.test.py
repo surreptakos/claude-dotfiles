@@ -776,23 +776,51 @@ class GovernanceReminderRetarget(unittest.TestCase):
         assert proc.returncode == 0, f"stderr: {proc.stderr!r}"
         return json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
 
-    def test_payload_copy_names_the_plugin_rules_file_not_the_home_path(self):
-        ctx = self._context(self.PAYLOAD_SCRIPT, self.PLUGIN_ROOT)
+    @staticmethod
+    def _payload_without_digest(dest):
+        """A copy of the payload's hook scripts and rules with the digest file removed.
+
+        An older build -- or any payload that does not carry the per-prompt digest -- must keep
+        the issue 495 pointers, because then nothing else tells a container where the rules are.
+        """
+        shutil.copytree(GovernanceReminderRetarget.PLUGIN_ROOT / "hooks", dest / "hooks")
+        shutil.copytree(GovernanceReminderRetarget.PLUGIN_ROOT / "rules", dest / "rules")
+        (dest / "rules" / bcp.DIGEST_FILENAME).unlink()
+        return dest
+
+    def test_payload_copy_names_the_plugin_rules_file_where_nothing_else_does(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._payload_without_digest(Path(tmp) / "payload")
+            ctx = self._context(root / "hooks" / "scripts" / "governance-reminder.js", root)
         self.assertNotIn(self.HOME_POINTER, ctx,
                          "payload reminder still points a container at ~/.claude/CLAUDE.md")
-        rules = self.PLUGIN_ROOT / "rules" / "global-rules.md"
-        self.assertTrue(rules.is_file(), "payload lost rules/global-rules.md (issue 209)")
-        self.assertEqual(ctx.count(str(rules)), 2,
+        self.assertEqual(ctx.count(str(root / "rules" / "global-rules.md")), 2,
                          "both pointers (header and ASK-MATT line) should name the payload rules file")
         self.assertIn("GLOBAL RULES", ctx,
                       "reminder should say the rules are already in context (global-rules.js)")
 
+    def test_payload_copy_drops_the_pointer_the_digest_already_carries(self):
+        # Issue 533 criterion 3. The digest opens every prompt with "full text already in this
+        # context, from <path>"; the reminder saying it twice more is the same sentence three
+        # times a turn. With the digest in the payload, the reminder carries none of it.
+        digest = (self.PLUGIN_ROOT / "rules" / bcp.DIGEST_FILENAME)
+        self.assertTrue(digest.is_file(), "payload lost the per-prompt digest (issue 533)")
+        self.assertIn(bcp.DIGEST_POINTER_MARKER, digest.read_text(encoding="utf-8"))
+        ctx = self._context(self.PAYLOAD_SCRIPT, self.PLUGIN_ROOT)
+        self.assertNotIn(self.HOME_POINTER, ctx)
+        self.assertEqual(ctx.count(str(self.PLUGIN_ROOT / "rules" / "global-rules.md")), 0,
+                         "the reminder repeats a pointer the digest already carries every prompt")
+        self.assertIn("GOVERNANCE (always on):", ctx)
+        self.assertIn("3. ASK-MATT: name which flow applies before starting work.", ctx)
+
     def test_payload_copy_resolves_the_rules_file_without_plugin_root(self):
         # A bare run of the payload script (no CLAUDE_PLUGIN_ROOT) still names a real file: the
         # rules sit two levels up from hooks/scripts/, the same fallback global-rules.js uses.
-        ctx = self._context(self.PAYLOAD_SCRIPT)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._payload_without_digest(Path(tmp) / "payload")
+            ctx = self._context(root / "hooks" / "scripts" / "governance-reminder.js")
         self.assertNotIn(self.HOME_POINTER, ctx)
-        self.assertIn(str(self.PLUGIN_ROOT / "rules" / "global-rules.md"), ctx)
+        self.assertIn(str(root / "rules" / "global-rules.md"), ctx)
 
     def test_mirror_copy_still_names_the_home_path(self):
         # On the PC ~/.claude/CLAUDE.md is real and is where the rules live; the retarget is
@@ -816,6 +844,60 @@ class GovernanceReminderRetarget(unittest.TestCase):
         self.assertNotIn("see the map in " + self.HOME_POINTER, out)
         self.assertIn("WHY: ~/.claude/CLAUDE.md carries the full rules", out)
         self.assertIn("RULES_FILE", out)
+
+
+# Issue 533: the rulebook rides SessionStart; every PROMPT carries a digest of it instead. The
+# digest is GENERATED from marks the rules section already carries -- bold run-in labels, numbered
+# rules, the ask-matt paragraph's opening line -- because the source is claude/CLAUDE.md, a mirror
+# of the owner's live file that must never be hand-edited. Nothing was added to it to make this
+# work, and nothing here is a hand-kept copy of the rules: the shipped file has to be exactly what
+# a rebuild produces from the shipped rules text.
+class RulesDigest(unittest.TestCase):
+    PLUGIN_ROOT = REPO / "marketplace" / "aac-skills"
+    RULES = PLUGIN_ROOT / "rules" / "global-rules.md"
+    # Acceptance criterion 2's list: caveman level + never-drop, the ADHD reply shape, the
+    # ask-matt gate sentence, the yes-skill trigger sentence, and the pointer at the full text.
+    REQUIRED = [
+        "**Ultra:** minimum words",
+        "**Never drop:**",
+        "**Lead with the next action.**",
+        "No preamble, no recap, no closing pleasantries.",
+        "`/ask-matt` is user-invocable only",
+        "Deliver correct, safe, *verified* results",
+    ]
+
+    def digest(self):
+        return (self.PLUGIN_ROOT / "rules" / bcp.DIGEST_FILENAME).read_text(encoding="utf-8")
+
+    def test_the_shipped_digest_is_what_a_rebuild_generates_from_the_shipped_rules(self):
+        rules = self.RULES.read_text(encoding="utf-8")
+        self.assertEqual(self.digest(), bcp.build_rules_digest(rules),
+                         "rules/global-rules-digest.md is not what the packager generates from "
+                         "rules/global-rules.md -- a hand-kept digest, or a stale payload")
+
+    def test_the_digest_carries_the_required_content_verbatim_from_the_rules(self):
+        digest, rules = self.digest(), " ".join(self.RULES.read_text(encoding="utf-8").split())
+        self.assertIn(bcp.DIGEST_POINTER_MARKER, digest, "no pointer at the full rules")
+        self.assertIn(bcp.DIGEST_RULES_TOKEN, digest,
+                      "the pointer must carry the token global-rules.js resolves to a real path")
+        for required in self.REQUIRED:
+            self.assertIn(required, digest, f"the digest dropped: {required}")
+            self.assertIn(required, rules, f"not verbatim from the rules text: {required}")
+
+    def test_a_digest_over_the_cap_fails_the_build(self):
+        # The cap is the point: a prompt carries a digest, not the rulebook. Raising it silently
+        # would undo the change, so the packager refuses instead.
+        with self.assertRaises(RuntimeError) as caught:
+            bcp.build_rules_digest(self.RULES.read_text(encoding="utf-8"), cap=200)
+        self.assertIn("over the 200-byte cap", str(caught.exception))
+
+    def test_a_reworded_source_fails_the_build_rather_than_shipping_a_gap(self):
+        # Same contract as RULES_HEADING: the marks are the source's own prose, so a rewording
+        # must break the build loudly rather than quietly drop a discipline from every prompt.
+        rules = self.RULES.read_text(encoding="utf-8").replace("**Never drop:**", "**Keep:**")
+        with self.assertRaises(RuntimeError) as caught:
+            bcp.build_rules_digest(rules)
+        self.assertIn("Never drop", str(caught.exception))
 
 
 # Issue 530: caveman learn (30-day window, 3594 sessions) found nine skills nobody invoked, whose

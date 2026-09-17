@@ -23,10 +23,24 @@ const os = require('os');
 
 // Packaged copy (issue 495): a container has no ~/.claude/CLAUDE.md. The rules this reminder
 // summarises ship in the plugin at rules/global-rules.md, two levels up from hooks/scripts/,
-// and global-rules.js injects them every prompt -- so the pointers below name that file.
+// and global-rules.js injects them at session start -- so the pointers below name that file.
 const RULES_FILE = process.env.CLAUDE_PLUGIN_ROOT
   ? path.join(process.env.CLAUDE_PLUGIN_ROOT, 'rules', 'global-rules.md')
   : path.resolve(__dirname, '..', '..', 'rules', 'global-rules.md');
+
+// Digest dedupe (issue 533): where the payload carries the per-prompt digest, that digest
+// already opens with this reminder's pointer -- the full rules are in context, and where the
+// file is. Repeating it here would put the same sentence in every prompt twice, so the
+// pointer drops out of both lines below and the digest is the one that carries it. A payload
+// without the digest (an older build) keeps the pointers.
+const DIGEST_FILE = path.join(path.dirname(RULES_FILE), 'global-rules-digest.md');
+const DIGEST_CARRIES_POINTER = (() => {
+  try {
+    return fs.readFileSync(DIGEST_FILE, 'utf8').includes('already in this context');
+  } catch (_) {
+    return false;
+  }
+})();
 
 function cavemanMode() {
   const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -70,8 +84,8 @@ const CAVEMAN_LINES = {
 };
 
 const LINES = [
-  'GOVERNANCE (always on — full rules already in this context as GLOBAL RULES, from '
-    + RULES_FILE + '):',
+  'GOVERNANCE (always on' + (DIGEST_CARRIES_POINTER ? '' :
+    ' — full rules already in this context as GLOBAL RULES, from ' + RULES_FILE) + '):',
   ...CAVEMAN_LINES[cavemanMode()],
   '2. YES: evidence over intuition (no "probably"/"should be" without a check). Investigate before',
   '   asking. Verify every change yourself and show the output — never "you can test it now".',
@@ -79,8 +93,8 @@ const LINES = [
   '   conclusion integrity before a root-cause claim; ripple check before saying done.',
   '   2 failures switch approach, 3 five-step audit, 4 minimal repro, 5+ structured handoff.',
   '   Check real exit codes, not piped output.',
-  '3. ASK-MATT: name which flow applies before starting work (see the map in the GLOBAL RULES'
-    + ' already in this context, from ' + RULES_FILE + ').',
+  '3. ASK-MATT: name which flow applies before starting work' + (DIGEST_CARRIES_POINTER ? '.' :
+    ' (see the map in the GLOBAL RULES already in this context, from ' + RULES_FILE + ').'),
   '4. I-HAVE-ADHD: shape every reply so Dan can act. Lead with the next action; number multi-step',
   '   work; restate where we are ("step 3 of 5 done: X. Next: Y"); end with ONE thing he can do in',
   '   under two minutes. Concrete time estimates, never "some work". Show what now works. Errors as',

@@ -22,8 +22,10 @@ remains for the claude.ai org-Skills surface, which only takes uploads.
 
 The payload also carries the global rules text (issue 209): the `### Four standing disciplines`
 section of the owner's CLAUDE.md, copied -- never hand-duplicated -- to rules/global-rules.md and
-injected on every prompt by hooks/scripts/global-rules.js, one manifest entry per part because the
-host's additionalContext cap is per hook output. See docs/tickets/209-decision.md.
+injected by hooks/scripts/global-rules.js: in full at SessionStart, one manifest entry per part
+because the host's additionalContext cap is per hook output, and as a generated digest
+(rules/global-rules-digest.md, under 1,500 bytes) on every prompt. See docs/tickets/209-decision.md
+and docs/tickets/533-decision.md.
 
 Every source skill is stamped before it is packaged (tools/skill-stamps.py): four keys under
 `metadata:` - modified, previous-modified, revision, content-sha - rotate whenever the skill's
@@ -181,6 +183,78 @@ def split_rules_parts(text, limit=RULES_PART_BYTES):
     return parts
 
 
+# Per-prompt digest (issue 533). The full text rides SessionStart; what every prompt carries is
+# this digest -- about 1.2 KB instead of about 12 KB. It is GENERATED, never hand-kept: each entry
+# below names a mark the source section already carries (a bold run-in label, a numbered rule, the
+# ask-matt paragraph's opening) and the digest is the verbatim span that mark opens. Nothing is
+# added to the source to make this work -- claude/CLAUDE.md is a generated mirror of the owner's
+# live file and must not be hand-edited -- so the marks are the ones the prose already has. A
+# source that loses a mark fails the build loudly, the way RULES_HEADING does.
+DIGEST_CAP_BYTES = 1500
+DIGEST_FILENAME = "global-rules-digest.md"
+# The reminder hook dedupes its own pointer against this phrase (issue 533 criterion 3).
+DIGEST_POINTER_MARKER = "already in this context"
+# global-rules.js substitutes the resolved absolute path for this token when it emits the digest,
+# so the one pointer a prompt carries names a file the model can actually open.
+DIGEST_RULES_TOKEN = "__RULES_FILE__"
+DIGEST_HEADER = (
+    "GLOBAL RULES DIGEST — the four standing disciplines in brief. Full text "
+    + DIGEST_POINTER_MARKER
+    + ": delivered whole at session start as GLOBAL RULES, from "
+    + DIGEST_RULES_TOKEN
+    + "; re-read it there rather than guessing."
+)
+# (label, marks). Each mark is matched as a line prefix and must occur exactly once.
+DIGEST_SECTIONS = [
+    # caveman level + the never-drop list
+    ("CAVEMAN", ["- **Ultra:**", "- **Never drop:**"]),
+    # the yes-skill trigger sentence + the evidence rule that carries the banned hedges
+    ("YES", ["Deliver correct, safe, *verified* results", "1. **Evidence over intuition.**"]),
+    # the ask-matt gate sentence
+    ("ASK-MATT", ["`/ask-matt` is user-invocable only"]),
+    # the ADHD reply shape: open, close, and the no-preamble rule
+    ("I-HAVE-ADHD", ["1. **Lead with the next action.**",
+                     "3. **End with ONE concrete next action**",
+                     "10. **No preamble, no recap, no closing pleasantries.**"]),
+]
+# A line that opens a new block (heading or list item) at column 0 ends the span before it; so
+# does a blank line. Indented lines are the source's own wrapping and fold into the span.
+DIGEST_BLOCK_RE = re.compile(r"(?:#{1,6} |[-*+] |\d+\. )")
+DIGEST_LEAD_RE = re.compile(r"^(?:[-*+] |\d+\. )")
+
+
+def _digest_span(lines, mark):
+    """The verbatim span the given mark opens, unwrapped to one line."""
+    hits = [i for i, l in enumerate(lines) if l.startswith(mark)]
+    if len(hits) != 1:
+        raise RuntimeError(
+            f"the global rules text carries {len(hits)} lines starting {mark!r}; the per-prompt "
+            "digest (issue 533) is generated from that mark, so the build cannot guess. Update "
+            "DIGEST_SECTIONS in build-cloud-plugin.py if the rules were reworded.")
+    start = hits[0]
+    span = [lines[start].rstrip()]
+    for line in lines[start + 1:]:
+        if not line.strip() or DIGEST_BLOCK_RE.match(line):
+            break
+        span.append(line.strip())
+    return DIGEST_LEAD_RE.sub("", " ".join(span))
+
+
+def build_rules_digest(rules_text, cap=DIGEST_CAP_BYTES):
+    """The per-prompt digest, generated from the marks the rules text already carries."""
+    lines = rules_text.replace("\r\n", "\n").split("\n")
+    body = [f"{label}: " + " ".join(_digest_span(lines, m) for m in marks)
+            for label, marks in DIGEST_SECTIONS]
+    digest = "\n".join([DIGEST_HEADER] + body) + "\n"
+    size = len(digest.encode("utf-8"))
+    if size > cap:
+        raise RuntimeError(
+            f"the generated per-prompt rules digest is {size} bytes, over the {cap}-byte cap "
+            "(issue 533). Trim DIGEST_SECTIONS in build-cloud-plugin.py -- do not raise the cap: "
+            "the point is that every prompt carries a digest, not the rulebook.")
+    return digest
+
+
 def retarget_paths(body):
     """Point commands at the plugin's copy of the scripts. Returns (new_body, changed)."""
     new = body
@@ -210,17 +284,31 @@ GOV_REMINDER_RULES_FILE = (
     "\n"
     "// Packaged copy (issue 495): a container has no ~/.claude/CLAUDE.md. The rules this reminder\n"
     "// summarises ship in the plugin at rules/global-rules.md, two levels up from hooks/scripts/,\n"
-    "// and global-rules.js injects them every prompt -- so the pointers below name that file.\n"
+    "// and global-rules.js injects them at session start -- so the pointers below name that file.\n"
     "const RULES_FILE = process.env.CLAUDE_PLUGIN_ROOT\n"
     "  ? path.join(process.env.CLAUDE_PLUGIN_ROOT, 'rules', 'global-rules.md')\n"
-    "  : path.resolve(__dirname, '..', '..', 'rules', 'global-rules.md');\n")
+    "  : path.resolve(__dirname, '..', '..', 'rules', 'global-rules.md');\n"
+    "\n"
+    "// Digest dedupe (issue 533): where the payload carries the per-prompt digest, that digest\n"
+    "// already opens with this reminder's pointer -- the full rules are in context, and where the\n"
+    "// file is. Repeating it here would put the same sentence in every prompt twice, so the\n"
+    "// pointer drops out of both lines below and the digest is the one that carries it. A payload\n"
+    "// without the digest (an older build) keeps the pointers.\n"
+    "const DIGEST_FILE = path.join(path.dirname(RULES_FILE), '" + DIGEST_FILENAME + "');\n"
+    "const DIGEST_CARRIES_POINTER = (() => {\n"
+    "  try {\n"
+    "    return fs.readFileSync(DIGEST_FILE, 'utf8').includes('" + DIGEST_POINTER_MARKER + "');\n"
+    "  } catch (_) {\n"
+    "    return false;\n"
+    "  }\n"
+    "})();\n")
 GOV_REMINDER_REWRITES = [
     ("  'GOVERNANCE (always on — full rules in ~/.claude/CLAUDE.md):',\n",
-     "  'GOVERNANCE (always on — full rules already in this context as GLOBAL RULES, from '\n"
-     "    + RULES_FILE + '):',\n"),
+     "  'GOVERNANCE (always on' + (DIGEST_CARRIES_POINTER ? '' :\n"
+     "    ' — full rules already in this context as GLOBAL RULES, from ' + RULES_FILE) + '):',\n"),
     ("  '3. ASK-MATT: name which flow applies before starting work (see the map in ~/.claude/CLAUDE.md).',\n",
-     "  '3. ASK-MATT: name which flow applies before starting work (see the map in the GLOBAL RULES'\n"
-     "    + ' already in this context, from ' + RULES_FILE + ').',\n"),
+     "  '3. ASK-MATT: name which flow applies before starting work' + (DIGEST_CARRIES_POINTER ? '.' :\n"
+     "    ' (see the map in the GLOBAL RULES already in this context, from ' + RULES_FILE + ').'),\n"),
 ]
 
 
@@ -662,6 +750,9 @@ def main():
     if rules_text:
         (plugin_root / "rules").mkdir()
         (plugin_root / "rules" / "global-rules.md").write_bytes(rules_text.encode("utf-8"))
+        # The per-prompt digest (issue 533), generated from the marks the section already carries.
+        (plugin_root / "rules" / DIGEST_FILENAME).write_bytes(
+            build_rules_digest(rules_text).encode("utf-8"))
         # Payload-only hook script: there is no live-tree twin to dedup against, so it carries its
         # own no-doubling guard (it stays silent where a global CLAUDE.md already has the text).
         (scripts_dir / "global-rules.js").write_bytes(
@@ -877,15 +968,22 @@ def main():
                   "Loading this repo's memory notes..."),
         ]})
 
-    # One UserPromptSubmit entry per part of the rules text (issue 209). Separate entries, not one
-    # big one: the measured cap is per hook output, so N parts under it deliver the file in full
-    # every prompt. Independent of gov_sources_present -- the rules ride even where the governance
-    # scripts have no mirror to be copied from.
+    # The rules text rides SessionStart in full, one entry per part (issue 533; the split is
+    # issue 209's, and the measured cap is per hook output, so N parts under it deliver the file
+    # whole). NO MATCHER on the group: every SessionStart source -- startup, resume, clear and
+    # compact -- gets it, so a compacted session has the rulebook back rather than a summary of it.
+    # Every PROMPT carries the digest instead: one entry, about a tenth of the bytes, for text the
+    # session already has. Independent of gov_sources_present -- the rules ride even where the
+    # governance scripts have no mirror to be copied from.
     if rules_parts:
-        governance_hooks.setdefault("UserPromptSubmit", []).append({"hooks": [
-            _hook("node", "node", "global-rules.js", [str(i)], 10,
+        governance_hooks.setdefault("SessionStart", []).append({"hooks": [
+            _hook("node", "node", "global-rules.js", ["start", str(i)], 10,
                   f"Delivering global rules ({i}/{len(rules_parts)})...")
             for i in range(1, len(rules_parts) + 1)
+        ]})
+        governance_hooks.setdefault("UserPromptSubmit", []).append({"hooks": [
+            _hook("node", "node", "global-rules.js", ["digest"], 10,
+                  "Recalling the global rules digest..."),
         ]})
 
     (hooks_dir / "hooks.json").write_bytes((
