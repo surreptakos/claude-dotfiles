@@ -1,0 +1,42 @@
+name: Generated code
+
+# Issue 487. Two artifacts here are written by a generator, from a source file that lives beside
+# it, and until this job existed nothing invoked either generator:
+#   tools/build-fleet-inline.js            <- tools/ticket-fleet-branch.js
+#     -> the [FLEET-GENERATED] region of aac-skills/ticket-fleet/ticket-fleet.js (issue 440)
+#   tools/build-harness-tracker-audit.js   <- tools/tracker-audit.js
+#     -> agents/skills/project-harness/templates/tracker-audit.js (issue 336)
+# So the ordinary sequence - edit the source, commit, forget the generator - put a stale artifact
+# on master and surfaced only in the next unrelated test run. `.githooks/pre-commit` runs the same
+# two --check calls before every commit; this job is what catches a commit made with --no-verify,
+# from a clone that never ran `git config core.hooksPath .githooks`, or by a cloud session whose
+# container has no hook installed at all.
+#
+# The fix for either failure is the command the generator itself prints: run it without --check,
+# which rewrites the artifact, then commit the result.
+# The dashboard branch is a force-pushed snapshot artifact and is never checked.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [dashboard]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Fleet script block matches tools/ticket-fleet-branch.js
+        run: node tools/build-fleet-inline.js --check
+      - name: project-harness template matches tools/tracker-audit.js
+        # Runs even after the fleet check failed: a branch that moved both sources should name
+        # both, rather than send you back for a second round.
+        if: ${{ !cancelled() }}
+        run: node tools/build-harness-tracker-audit.js --check

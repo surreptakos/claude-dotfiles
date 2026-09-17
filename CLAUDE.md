@@ -146,8 +146,10 @@ Version in `docs/agents/harness-version.md`.
 
 - `DASHBOARD.md` is **generated**. Never hand-edit it; edit `scripts/build-dashboard.js`. CI owns the
   artifact — run the script locally to check output, then discard it.
-- `.githooks/pre-commit` runs the restore test before every commit. Activate in a fresh clone with
-  `git config core.hooksPath .githooks`.
+- `.githooks/pre-commit` runs the restore test and both code generators' `--check` before every
+  commit. Activate in a fresh clone with `git config core.hooksPath .githooks`. The generators
+  (`tools/build-fleet-inline.js`, `tools/build-harness-tracker-audit.js`) are also checked by
+  `generated-code.yml`, which sees the commits that hook does not (issue 487).
 - Tracker conventions: `docs/agents/issue-tracker.md`. The audit is a job — `tracker-audit.yml`
   runs it on every issue event and push, and the session report reads that run; exit 2 means it
   could not audit, which is not a pass.
