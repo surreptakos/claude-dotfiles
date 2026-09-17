@@ -3,10 +3,12 @@
  * node --test tools/skill-stamp-recipe.test.js
  *
  * Issue 431: the stamp recipe a human or agent copies must reproduce what CI checks.
- * `tools/skill-stamps.py` hashes each skill with the owner's home folded into the sync tokens,
- * and defaults that home to the running user's. CI passes `--home 'C:\Users\Dan'`; a recipe that
- * omits it re-stamps, in any Linux container, every skill whose text carries the owner's path
- * (aac-google-access, ticket-fleet) - a revision bump for a skill nobody touched.
+ * `tools/skill-stamps.py` hashes each skill with the owner's home folded into the sync tokens.
+ * It used to default that home to the running user's, so a recipe without `--home` re-stamped,
+ * in any Linux container, every skill whose text carries the owner's path (aac-google-access,
+ * ticket-fleet) - a revision bump for a skill nobody touched. Since issue 492 the default is the
+ * owner's home itself (OWNER_HOME, pinned to the workflow by tools/skill-stamps.test.py); the
+ * flag stays in the recipe so it reads like the job.
  *
  * So: the documented `--home` must be the one CI checks with, and the workflow's remediation
  * comment must teach CLAUDE.md's spelling verbatim rather than a second, drifting one.

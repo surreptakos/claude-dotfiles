@@ -33,7 +33,8 @@ Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR] [--no-marke
 --from-mirror builds from this repo's generated mirror (claude/skills, agents/skills via
 claude/skill-links.json, plus the previous build's dead-junction skills) instead of ~/.claude/skills,
 so a cloud session with no live tree can still republish. --home de-tokenizes __USERHOME__ back to
-the owner's path so the package matches one built on that machine.
+the owner's path so the package matches one built on that machine; it defaults to the owner's home
+(skill-stamps.py OWNER_HOME), the same default the stamper uses, never the running user's (492).
 Exit 0 on success, 1 on any skill that could not be packaged.
 """
 
@@ -413,20 +414,20 @@ def main():
     ap.add_argument("--from-mirror", action="store_true",
                     help="build from this repo's generated mirror instead of --source")
     ap.add_argument("--home", default=None,
-                    help="the owner's home path (C:\\Users\\Dan): de-tokenizes the mirror with "
-                         "--from-mirror and is folded out of every content hash. Default: this user's home")
+                    help="the owner's home path: de-tokenizes the mirror with --from-mirror and is "
+                         f"folded out of every content hash. Default: {skill_stamps.OWNER_HOME} "
+                         "(skill-stamps.py OWNER_HOME, the spelling CI checks with - never the "
+                         "running user's home, issue 492)")
     ap.add_argument("--no-stamp-write", action="store_true",
                     help="stamp the packaged copies only; leave every source SKILL.md untouched")
     args = ap.parse_args()
 
-    home = args.home if args.home is not None else str(Path.home())
+    home = skill_stamps.cli_home(args.home)
     stamp_write = not args.no_stamp_write
     tmp = None
     if args.from_mirror:
         tmp = tempfile.TemporaryDirectory()
-        src = source_from_mirror(REPO, args.home, tmp.name)
-        if not args.home:
-            print("--from-mirror without --home: packaged copies keep the __USERHOME__ tokens")
+        src = source_from_mirror(REPO, home, tmp.name)
     else:
         src = Path(args.source)
     out = Path(args.out)
