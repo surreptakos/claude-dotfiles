@@ -3,6 +3,12 @@
 One row per harness version: what it added, and which step of `SKILL.md` installs it. Read the
 rows above the repo's marker number and re-run only those steps.
 
+**Two branches that both took the same number:** the branch that merges second keeps its row
+text and takes the next free number — run `node tools/renumber-harness-upgrade.js` in
+claude-dotfiles, which moves the number in every other place the branch wrote it and rebuilds
+the generated bootstrap template. The fleet's deliver stage runs it for you (issue 515); never
+renumber by hand, and never drop a row to avoid the collision.
+
 | Version | Date | What it added | Re-run |
 |---|---|---|---|
 | 1 | 2026-07-28 | Triage labels, issue forms, `scripts/build-dashboard.js` + `dashboard.yml`, pre-commit test gate, ADR status lines, `docs/agents/` tracker + triage docs, Projects board | steps 1–7 |

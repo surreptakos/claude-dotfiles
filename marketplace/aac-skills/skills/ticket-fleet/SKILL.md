@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-17T20:12:40Z'
-  previous-modified: '2026-09-17T20:06:29Z'
-  revision: '22'
-  content-sha: 77b44ba29b6a
+  modified: '2026-09-17T21:02:09Z'
+  previous-modified: '2026-09-17T20:32:52Z'
+  revision: '25'
+  content-sha: 7d5a4d55ece7
 ---
 
 # ticket-fleet
@@ -435,7 +435,7 @@ and a rebuilt marketplace payload — so the PRs open conflicted and the session
 the same conflict once per PR (run `wf_37f38305-f2e`, PRs #304-#314).
 
 So the deliver stage merges `origin/<defaultBranch>` into the verified branch **before** it
-pushes. A clean merge pushes as before. A conflicting merge has exactly two resolvable classes:
+pushes. A clean merge pushes as before. A conflicting merge has exactly three resolvable classes:
 
 - **Generated files** — a path matching `generatedPaths` (`.claude-plugin/marketplace.json`,
   `marketplace/**`). Resolved with `git checkout --theirs`: the default branch's copy is what
@@ -446,6 +446,14 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly two reso
   branch's whole file: PR #306 did that and dropped the branch's edits to the skill's prose.
   The resolver rewrites only hunks whose every line is one of the four keys and exits non-zero
   on any other hunk, which reclassifies that file as a real merge.
+- **A harness upgrade row** — `agents/skills/project-harness/UPGRADES.md`, where two tickets in
+  one wave that both bump the harness version both wrote the next `| N |` row (run `6aab1eac`:
+  #453 and #218 both took v26, and the number was moved by hand in nine places). Resolved by
+  `node tools/renumber-harness-upgrade.js`: the branch's row keeps its text and takes the next
+  free number, every other place the branch wrote that number moves with it, and the generated
+  bootstrap template is rebuilt. It exits non-zero when the branch changed that file by more
+  than adding rows, which reclassifies it as a real merge. The same script runs after a CLEAN
+  merge too — two rows appended far enough apart merge silently and still collide.
 
 After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
 the ones CLAUDE.md names), re-runs the test command, and commits the merge; the PR body says
