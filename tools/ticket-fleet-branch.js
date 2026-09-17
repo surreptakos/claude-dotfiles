@@ -301,6 +301,108 @@ function applyBlockerStates(tickets, blockers) {
 }
 
 /**
+ * Do two git object names name the same commit? (issue 404)
+ *
+ * The blind verifier reports the HEAD of the worktree it actually ran in, and the lane compares
+ * that with the tip it expects. Either side may be abbreviated - an agent copying the output of
+ * `git rev-parse --short` is still telling the truth - so the comparison is a common-prefix one
+ * over the shorter length. Anything that is not 7-40 hex characters is not an object name and is
+ * not evidence of anything, so it never matches.
+ */
+function shaMatches(a, b) {
+  const x = String(a == null ? '' : a).trim().toLowerCase();
+  const y = String(b == null ? '' : b).trim().toLowerCase();
+  if (!/^[0-9a-f]{7,40}$/.test(x) || !/^[0-9a-f]{7,40}$/.test(y)) return false;
+  const n = Math.min(x.length, y.length);
+  return x.slice(0, n) === y.slice(0, n);
+}
+
+/**
+ * The machine-checked half of issue 404. Verifiers have reported "the exact worktree path no
+ * longer exists, so I re-ran in <repo root>" and then run their commands in the orchestrator's own
+ * checkout, which sits on whatever branch the session is on and predates the code under test: the
+ * #361 probe was refuted as 'fabricated' for flags origin/main carried and that branch did not. A
+ * verdict that depends on which branch the main checkout is on is not a verdict, so the verifier
+ * says where it ran and the lane cross-checks it against the tip that lane expects - the branch
+ * under review (code lane) or origin/<defaultBranch> (probe lane), read by its own one-command
+ * `git rev-parse` agent so no agent certifies itself.
+ *
+ * @param {{unusable?:boolean, worktree?:{path?:string, head?:string}}|null|undefined} verdict
+ * @param {string|null|undefined} expectedHead - the tip the lane expects, '' when unreadable
+ * @param {string} expectedLabel - how to name that tip in the message
+ * @returns {string|null} null when the verdict may stand; otherwise one line naming the mismatch,
+ *   which is what the single re-run prompt and the recorded failure both carry.
+ */
+function worktreeMismatch(verdict, expectedHead, expectedLabel) {
+  // No expected tip (the rev-parse agent could not read it) means there is nothing to check
+  // against: the lane logs that and the verdict stands rather than being rejected on a guess.
+  if (!expectedHead) return null;
+  // An unusable verdict is already a failed attempt; re-running it for its worktree adds nothing.
+  if (!verdict || verdict.unusable) return null;
+  const wt = (verdict.worktree && typeof verdict.worktree === 'object') ? verdict.worktree : {};
+  const head = String(wt.head == null ? '' : wt.head).trim();
+  const where = String(wt.path == null ? '' : wt.path).trim();
+  const tail = `the main checkout is never a test surface - it sits on whatever branch this session is on, which is not the code under review`;
+  if (!head) return `the verdict reported no worktree HEAD, so there is no evidence it ran against ${expectedLabel} (${expectedHead}); ${tail}`;
+  if (shaMatches(head, expectedHead)) return null;
+  return `the verdict was produced at HEAD ${head}${where ? ` (worktree ${where})` : ''}, not ${expectedLabel} (${expectedHead}); ${tail}`;
+}
+
+/**
+ * Drop every candidate that already has an open fleet PR (issue 430).
+ *
+ * The fleet asks the tracker ONCE per launch which candidates already carry an open
+ * `agent/issue-<N>-` PR, and the answer is applied here - before wave selection, so a ticket that
+ * would only be skipped inside its lane never occupies a slot the cap could have given to a
+ * ticket that will run. Only a named PR skips a ticket: a number with no url is not evidence of
+ * anything, and dropping a ticket on it would leave the run report unable to point anyone at the
+ * PR that stopped it.
+ *
+ * @param {Array<{number:number|string}>|null|undefined} tickets
+ * @param {Array<{number:number|string, prUrl:string, branch?:string}>|null|undefined} withOpenPr
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, prUrl:string, branch:string|null}>}}
+ *   the surviving tickets in order, and the dropped ones with the PR that stopped each, for the
+ *   run result's `skippedOpenPR`
+ */
+function applyOpenPrs(tickets, withOpenPr) {
+  const found = new Map();
+  for (const p of (Array.isArray(withOpenPr) ? withOpenPr : [])) {
+    const n = parseInt(p && p.number, 10);
+    const url = String((p && p.prUrl) || '').trim();
+    if (n > 0 && url) found.set(n, { prUrl: url, branch: String((p && p.branch) || '').trim() || null });
+  }
+  const list = Array.isArray(tickets) ? tickets : [];
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const hit = found.get(parseInt(t && t.number, 10));
+    if (!hit) return true;
+    skipped.push({ ticket: parseInt(t.number, 10), prUrl: hit.prUrl, branch: hit.branch });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
+ * Split the candidate tickets into the wave that runs and the three reasons the rest do not.
+ *
+ * Open blockers gate every lane. Kind does not: a human ticket named in `args.tickets` stays in
+ * the wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose
+ * latest comment is a fleet handoff still waiting on the owner is parked, not run: re-running its
+ * lane would post the same handoff comment again on every wave (issue 266).
+ *
+ * @param {Array<{number:number, blockedBy:Array, handoffPending?:boolean}>} tickets
+ * @param {number} maxTickets - the run's cap on concurrently implemented tickets
+ * @returns {{wave:Array, blocked:Array, pendingHandoff:Array, overCap:Array}}
+ */
+function selectWave(tickets, maxTickets) {
+  const blocked = tickets.filter((t) => t.blockedBy.length > 0);
+  const eligible = tickets.filter((t) => t.blockedBy.length === 0);
+  const pendingHandoff = eligible.filter((t) => t.handoffPending === true);
+  const runnable = eligible.filter((t) => t.handoffPending !== true);
+  return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) };
+}
+
+/**
  * Resume-stable projections of a previous agent's structured result (issue 271).
  *
  * The Workflow runtime replays an agent() call from cache only while its cache
@@ -360,6 +462,6 @@ function priorFindingsBlock(verdict, howToFix) {
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
   ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates,
+  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock,
 };
