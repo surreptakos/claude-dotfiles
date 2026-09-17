@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: '2026-09-17T01:24:21Z'
-  previous-modified: '2026-09-17T01:19:38Z'
-  revision: '9'
-  content-sha: 8edd09d3f486
+  modified: '2026-09-17T01:28:10Z'
+  previous-modified: '2026-09-16T23:27:00Z'
+  revision: '8'
+  content-sha: f7e247b752c2
 ---
 
 # Finish a session
@@ -89,9 +89,14 @@ step's `gh` spelling through the substitution table in the cloud section below):
    container where the plugin did not load and `/to-tickets` is uninvocable, read
    `marketplace/aac-skills/skills/to-tickets/SKILL.md` from a clone of `surreptakos/claude-dotfiles`
    and follow it by hand; the create call is then that skill's publish step, not ad hoc.
-8. **Refresh tracker audit** — `node tools/tracker-audit.js` (or the project's equivalent). If the
-   audit flags acceptance boxes on issues touched this session, tick them or record N/A with a
-   justification before finishing.
+8. **Read the tracker audit's latest run** — the audit is a job now
+   (`.github/workflows/tracker-audit.yml`, issue 473): it runs on every issue event and every push
+   to the default branch, and the session report prints its verdict for the current head
+   (`tracker audit clean`, `tracker audit: drift — <url>`, or `tracker audit: no run for this
+   head`). Open the run when it is red — its summary names every finding. If they include
+   acceptance boxes on issues touched this session, tick them or record N/A with a justification
+   before finishing. `node tools/tracker-audit.js` still reads the findings locally on a machine
+   with `gh`; nothing spawns it per session any more.
 9. **Audit issue metadata — every issue must live in a milestone, and no issue should sit
    open while all its acceptance boxes are ticked.** Two failure modes the tracker audit does
    not catch on its own; both surface with two `gh` queries the assistant runs here.
@@ -258,6 +263,7 @@ environment is the tell. Every step above still applies; only the tool changes, 
 | `gh pr list --state open` | MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
 | `sweep-closed-to-done.js --apply` (step 6) | nothing to run by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other; `PROJECT_TOKEN` missing or expired is the usual cause and the run log says so |
+| `node tools/tracker-audit.js` (step 8) | nothing to run by hand — the **Tracker audit** job (`.github/workflows/tracker-audit.yml`, issue 473) runs the audit on every issue event and every push to the default branch, and the session report already prints its verdict for the current head. Confirm and quote the run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/tracker-audit.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. Exit 1 is drift, exit 2 an audit that went blind — neither is a pass |
 | `git branch --merged`, `git branch -D`, `git push origin --delete` beyond this session's branch (step 11) | nothing to run by hand — the **Stale ref sweep** job (`.github/workflows/stale-ref-sweep.yml`, issue 474) owns the repo-wide half and puts every ref it will not delete on one `ready-for-human` issue. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/stale-ref-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. This session's own branch is still deleted here, with git, which works normally through the proxy |
 
 Quick read-only checks can also go straight to REST — `curl
