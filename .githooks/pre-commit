@@ -26,6 +26,36 @@ unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_
 # node test would run this gate with the variable set and the suite could never fail it.
 unset NODE_TEST_CONTEXT
 
+# Issue 487: two artifacts here are written by a generator that nothing else invokes -
+# tools/build-fleet-inline.js writes the [FLEET-GENERATED] region of
+# aac-skills/ticket-fleet/ticket-fleet.js from tools/ticket-fleet-branch.js, and
+# tools/build-harness-tracker-audit.js writes
+# agents/skills/project-harness/templates/tracker-audit.js from tools/tracker-audit.js. Editing a
+# source and committing without regenerating landed a stale artifact and only surfaced in some
+# later, unrelated test run. This is the commit-time half of the gate;
+# .github/workflows/generated-code.yml is the other half, for a commit made with --no-verify or
+# from a clone that never ran `git config core.hooksPath .githooks`.
+#
+# --check only reports; it never writes, so this can never slip an unstaged file into your commit.
+# Both generators run even after the first fails, so a commit that moved both sources is told
+# about both rather than sent back for a second round. No node on PATH is a loud SKIP, never a
+# block - the same rule the restore test follows below.
+if command -v node >/dev/null 2>&1; then
+  echo "pre-commit: generated code current"
+  gen_stale=0
+  for gen in tools/build-fleet-inline.js tools/build-harness-tracker-audit.js; do
+    node "$gen" --check || gen_stale=1
+  done
+  if [ "$gen_stale" -ne 0 ]; then
+    echo ""
+    echo "pre-commit: a generated artifact is stale - commit blocked."
+    echo "pre-commit: run the regenerate command printed above, stage the result, commit again."
+    exit 1
+  fi
+else
+  echo "pre-commit: NOTE - no node on PATH; generator checks SKIPPED (not run, not passed)."
+fi
+
 # Issue 454: the suite spawns whichever engine started it, so name the one that exists here -
 # Windows PowerShell on the desktop, pwsh 7 in a Linux container. `pwsh` accepts and ignores
 # -ExecutionPolicy off Windows, so one argument list serves both.
