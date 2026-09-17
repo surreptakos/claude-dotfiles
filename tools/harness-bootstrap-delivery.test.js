@@ -2,7 +2,7 @@
 /**
  * node --test tools/harness-bootstrap-delivery.test.js
  *
- * Harness v26 (issue 218): the project-harness skill delivers the cloud bootstrap hook and the
+ * Harness v27 (issue 218): the project-harness skill delivers the cloud bootstrap hook and the
  * auto-mode posture to any repo, through `templates/add-cloud-plugin.js`. Three things can break
  * that delivery silently, so each gets one case:
  *
@@ -27,7 +27,7 @@ const DELIVER = path.join(SKILL_TEMPLATES, 'add-cloud-plugin.js');
 const { renderTemplate, SOURCE, TARGET } = require('./build-harness-bootstrap-hook.js');
 
 function scratchRepo() {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'harness-v26-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'harness-v27-'));
 }
 
 function deliver(root) {

@@ -1,10 +1,10 @@
 # Harness version
 
-    harness-version: 26
+    harness-version: 27
 
-Installed/upgraded: 2026-09-17 by the `project-harness` skill (v26: step 16 delivers the cloud
+Installed/upgraded: 2026-09-17 by the `project-harness` skill (v27: step 16 delivers the cloud
 bootstrap hook (`.claude/hooks/session-start.sh` + its `SessionStart` entry) and the auto-mode
-posture to any repo, issue 218; v25: `tracker-audit.js`'s `## Blocked by` section ends at its claim, not at end-of-body, issue 364 — backfilled with the missing v23 row by issue 434; v24: the pre-commit gate unsets `GIT_PREFIX` alongside the rest of git’s hook environment, issue 406; v23: no test-suite spawn inherits `NODE_TEST_CONTEXT`, issue 395; v22 narrowed two tracker-audit advisories for meta-tickets, issue 374; v21 added `deleted-subject?`, issue 361; v20 made the harness `tracker-audit.js` a generated copy of this repo's own, issue 336).
+posture to any repo, issue 218; v26: `templates/dashboard.yml`'s `issues.types` trimmed to `[opened, closed]` per the 2026-09-16 Actions-quota ruling, issue 453; v25: `tracker-audit.js`'s `## Blocked by` section ends at its claim, not at end-of-body, issue 364 — backfilled with the missing v23 row by issue 434; v24: the pre-commit gate unsets `GIT_PREFIX` alongside the rest of git’s hook environment, issue 406; v23: no test-suite spawn inherits `NODE_TEST_CONTEXT`, issue 395; v22 narrowed two tracker-audit advisories for meta-tickets, issue 374; v21 added `deleted-subject?`, issue 361; v20 made the harness `tracker-audit.js` a generated copy of this repo's own, issue 336).
 
 This file exists so "which generation of the harness does this repo have?" is a question you can
 answer by reading, instead of by remembering. Before this marker, a new harness capability only

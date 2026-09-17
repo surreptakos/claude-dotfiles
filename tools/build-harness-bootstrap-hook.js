@@ -2,7 +2,7 @@
 /**
  * Generate `agents/skills/project-harness/templates/session-start.sh` from this repo's own
  * `.claude/hooks/session-start.sh` — the cloud bootstrap hook the harness delivers to every
- * AAC repo (harness v26, issue 218).
+ * AAC repo (harness v27, issue 218).
  *
  *   node tools/build-harness-bootstrap-hook.js            # write the template
  *   node tools/build-harness-bootstrap-hook.js --check    # exit 1 if it is stale

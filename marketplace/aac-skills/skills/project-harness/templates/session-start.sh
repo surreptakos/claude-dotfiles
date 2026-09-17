@@ -2,7 +2,7 @@
 # Cloud-container bootstrap (SessionStart) for every AAC repo (issue 163, spec #207).
 #
 # CANONICAL COPY. The project-harness skill delivers this exact file to every harnessed repo
-# as `.claude/hooks/session-start.sh` (SKILL.md step 16, harness v26, issue 218); the skill's
+# as `.claude/hooks/session-start.sh` (SKILL.md step 16, harness v27, issue 218); the skill's
 # `templates/session-start.sh` is generated from here, byte for byte, by this repo's
 # `tools/build-harness-bootstrap-hook.js`. Fix the hook HERE and re-run that generator; a
 # delivered copy edited in place is overwritten by the next harness upgrade.

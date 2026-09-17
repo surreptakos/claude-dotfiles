@@ -45,6 +45,12 @@ const { untickedBoxes, parseGithubSlug } = require('./tracker-audit.js');
 /** The acceptance heading, and the scope under it, exactly as tools/tracker-audit.js reads them. */
 const ACCEPT_HEADING = /^##+\s*(Done when|Acceptance criteria|Acceptance)\s*$/im;
 const BOX_PREFIX = /^(\s*[-*]\s*)\[ \](\s+)(.*)$/;
+/**
+ * A wrapped box's continuation line: indented, non-blank, and not a nested list item of its own.
+ * The ticket templates wrap acceptance criteria at ~100 columns, so most long criteria are two
+ * lines, and `untickedBoxes` only ever sees the first of them (issue 438).
+ */
+const BOX_CONTINUATION = /^\s+(?![-*+]\s|\d+[.)]\s)\S/;
 
 /**
  * Issue numbers a PR body/title closes through GitHub's own closing keywords. Bare `#N` only:
@@ -83,14 +89,19 @@ function tickAcceptanceBoxes(body, evidence) {
   const scopeEnd = nextHeading === -1 ? text.length : scopeStart + nextHeading;
   const suffix = String(evidence == null ? '' : evidence).trim();
   const ticked = [];
-  const lines = text.slice(scopeStart, scopeEnd).split('\n').map((line) => {
-    const b = BOX_PREFIX.exec(line);
-    if (!b) return line;
-    const label = b[3].trim();
-    if (!hard.has(label)) return line;
-    ticked.push(label);
-    return b[1] + '[x]' + b[2] + b[3] + (suffix ? ' — ' + suffix : '');
-  });
+  const scope = text.slice(scopeStart, scopeEnd).split('\n');
+  const lines = [];
+  for (let i = 0; i < scope.length; i++) {
+    const b = BOX_PREFIX.exec(scope[i]);
+    if (!b || !hard.has(b[3].trim())) { lines.push(scope[i]); continue; }
+    ticked.push(b[3].trim());
+    lines.push(b[1] + '[x]' + b[2] + b[3]);
+    // A wrapped criterion continues on the indented lines below it, and the evidence belongs
+    // after its last word. Appending to the first line instead splits the sentence in half —
+    // which is what #415's two long criteria carried until this was fixed.
+    while (i + 1 < scope.length && BOX_CONTINUATION.test(scope[i + 1])) lines.push(scope[++i]);
+    if (suffix) lines[lines.length - 1] += ' — ' + suffix;
+  }
   if (ticked.length === 0) return { body: src, ticked: [] };
   const out = text.slice(0, scopeStart) + lines.join('\n') + text.slice(scopeEnd);
   return { body: crlf ? out.replace(/\n/g, '\r\n') : out, ticked };

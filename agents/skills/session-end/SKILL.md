@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-16T22:14:27Z"
-  previous-modified: "2026-09-16T15:32:13Z"
-  revision: "7"
-  content-sha: "dd7576543e09"
+  modified: "2026-09-17T01:31:22Z"
+  previous-modified: "2026-09-17T01:24:42Z"
+  revision: "9"
+  content-sha: "fec794f8e8f2"
 ---
 
 # Finish a session
@@ -52,9 +52,22 @@ step's `gh` spelling through the substitution table in the cloud section below):
 4. **Merge the PR** with `gh pr merge <n> --squash --delete-branch`. If the merge fails because
    of branch protection, pending checks, or required reviewers, say so plainly and stop: the
    session stays short of archive-ready.
-5. **Verify closures** — for each `Closes #N` in the commit, confirm the issue closed; for any
-   other issue touched, confirm it stayed open. Reopen with a reason if a push closed one that
-   should have stayed open.
+5. **Verify closures — read the Closure guard's latest run, do not re-check by hand.** The
+   **Closure guard** job (`.github/workflows/closure-guard.yml`, issue 475) runs on every
+   `issues: closed` event: an issue that a commit or a PR merge closed while an acceptance box was
+   still unticked is reopened with a comment naming the box and the closing PR, so a `Fixes #N`
+   that closed a ticket held open for a deploy or an owner ruling has already been undone by the
+   time this step runs. Confirm and quote its latest run:
+   ```bash
+   curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/closure-guard.yml/runs?per_page=1
+   ```
+   and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any
+   other. A reopened issue is the guard working, not a fault: tick the box where it was verified
+   and close again, or say on the ticket what it is waiting for. Two things the guard does not
+   cover, so they stay here: it reads a close made by a *person* as a decision and leaves it
+   alone, and it never fires for an issue a workflow's own `GITHUB_TOKEN` closed. So for each
+   `Closes #N` in the commit confirm the issue closed, and for any other issue touched confirm it
+   stayed open — reopening with a reason if a push closed one that should have stayed open.
 6. **Move CLOSED items to Done on the project board** — issues/PRs closed off-board leave stale
    Todo/In-Progress cards that clog the board. Run:
    ```bash
@@ -72,66 +85,52 @@ step's `gh` spelling through the substitution table in the cloud section below):
    container where the plugin did not load and `/to-tickets` is uninvocable, read
    `marketplace/aac-skills/skills/to-tickets/SKILL.md` from a clone of `surreptakos/claude-dotfiles`
    and follow it by hand; the create call is then that skill's publish step, not ad hoc.
-8. **Refresh tracker audit** — `node tools/tracker-audit.js` (or the project's equivalent). If the
-   audit flags acceptance boxes on issues touched this session, tick them or record N/A with a
-   justification before finishing.
-9. **Audit issue metadata — every issue must live in a milestone, and no issue should sit
-   open while all its acceptance boxes are ticked.** Two failure modes the tracker audit does
-   not catch on its own; both surface with two `gh` queries the assistant runs here.
+8. **Read the tracker audit's latest run** — the audit is a job now
+   (`.github/workflows/tracker-audit.yml`, issue 473): it runs on every issue event and every push
+   to the default branch, and the session report prints its verdict for the current head
+   (`tracker audit clean`, `tracker audit: drift — <url>`, or `tracker audit: no run for this
+   head`). Open the run when it is red — its summary names every finding. If they include
+   acceptance boxes on issues touched this session, tick them or record N/A with a justification
+   before finishing. `node tools/tracker-audit.js` still reads the findings locally on a machine
+   with `gh`; nothing spawns it per session any more.
+9. **Read the Issue metadata audit job — do not re-run its queries.** Two failure modes the
+   tracker audit does not catch on its own (an open issue with no milestone, and an open issue
+   whose acceptance ledger has zero unticked boxes) used to be two whole-tracker `gh` queries run
+   here, on every session, for housekeeping that has nothing to do with the session's own branch.
+   They are now the **Issue metadata audit** job (`.github/workflows/issue-metadata-audit.yml`,
+   issue 472), which runs `tools/issue-metadata-audit.js` on every `issues` event plus a daily
+   tick: it assigns the single open milestone when the repo has exactly one, converts a
+   prose-bullet acceptance section to `- [ ]` boxes in place (leaving `## Non-goals` /
+   `## Evidence` / `## References` alone), and comments once — closing nothing — on a fully-ticked
+   open ledger. Confirm and quote its latest run:
+   ```bash
+   curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/issue-metadata-audit.yml/runs?per_page=1
+   ```
+   Read `.workflow_runs[0].conclusion` and `.html_url`; the run's job summary lists every issue it
+   changed. A `failure` is a STOP like any other and means the sweep did NOT happen rather than
+   that the tracker is dirty — the script exits 1 when it cannot read the tracker, so a token-less
+   run never looks clean. Re-run it (`gh workflow run issue-metadata-audit.yml`, or MCP
+   `actions_run_trigger` in a container) and read the result. Do not re-run the two queries by
+   hand: that cost is what this job removed.
 
-   **The two checks in THIS step — un-milestoned open issues, and open issues whose acceptance
-   ledger has zero unticked boxes — resolve EVERY open issue that fails them, whichever session
-   caused it.** `/session-end` is the housekeeping pass for the whole tracker, so a pre-existing
-   hit is a blocker the assistant clears here: read the body, pick the best-fit milestone from the
-   open list, or convert prose bullets to `- [ ]` boxes. Ruling 2026-08-31, after a `/session-end`
-   reply routed five pre-existing hits back as questions ("which milestone for each?", "close, add
-   box, or hold?"). Escalate only when the tracker will not yield the body, or two open milestones
-   fit equally — and then still act: pick one and name the alternative in a comment.
+   **What the job deliberately leaves for a reader is work THIS pass does, for every open issue
+   carrying one, whichever session caused it.** Two comments to answer, both findable with
+   `gh search issues --repo <owner>/<repo> --state open 'issue-metadata-audit'`:
+   - a comment naming several open milestones — the job assigns nothing when more than one is
+     open. Pick the one whose title's scope decision most directly names the issue's subject and
+     run `gh issue edit <n> --milestone "<Milestone N — Title>"`, leaving a one-line comment on the
+     ticket if the second choice is close.
+   - a close-or-add-box comment on a fully-ticked open ledger. **Close** it with a comment naming
+     what proved each box, if the work genuinely landed; or **add the missing box** if a live run,
+     deploy or owner sign-off is still required. A ticked ledger with no real acceptance box is
+     dishonest — that pattern closed real issues prematurely before the tracker audit was written.
+     **Leave open and say why** in one line only when the hold-open reason is genuine and not yet
+     captured on the issue.
 
-   a. **Un-milestoned open issues.** Every open issue must be assigned to a milestone — the
-      milestone is what maps a ticket to a scope decision, and an un-milestoned ticket is
-      invisible to the milestone view the owner works from. Run:
-      ```bash
-      gh issue list --state open --limit 1000 --json number,title,milestone \
-        --jq '[.[] | select(.milestone == null) | {n: .number, t: .title}]'
-      ```
-      For each result: list open milestones with
-      `gh api repos/OWNER/REPO/milestones --jq '.[] | select(.state == "open") | {n: .number, t: .title}'`,
-      read the issue body, and assign the best-fit milestone with
-      `gh issue edit <n> --milestone "<Milestone N — Title>"`. Ambiguity between two open
-      milestones is resolved by picking the one whose title's scope decision most directly
-      names the issue's subject; leave a one-line comment on the ticket if the second choice
-      is close. Skip this check for repos that deliberately do not use milestones (state so
-      out loud the first time it comes up in a session).
-
-   b. **Delivered-but-open issues.** An open issue whose `## Done when` / `## Acceptance` /
-      `## Acceptance criteria` section has zero unticked boxes is either finished-and-forgotten
-      or held open on a signal that is not written down. Run this expression against `gh issue
-      list --json number,title,body --jq <expr>` (jq strings need `\\[` for a literal `[`, and
-      `scan()` must be wrapped in `[...]` before `length` because it streams matches by default):
-      ```jq
-      .[]
-      | select(.body != null and (.body | test("(?m)^##+ (Done when|Acceptance criteria|Acceptance)$")))
-      | select((.body | [scan("(?m)^[- \t*]*\\[ \\][ \t]")] | length) == 0)
-      | {n: .number, t: .title}
-      ```
-      For each hit, do one of exactly three things — no fourth. **The frequent case is a
-      prose-bullet acceptance (`- foo` instead of `- [ ] foo`), which reads as "zero unticked
-      boxes" to the scanner even though the work has not started.** That is not a real
-      delivered-but-open — convert the prose bullets to unchecked boxes in the SAME `/session-end`
-      pass. `gh issue view N --json body --jq .body > body.md`, rewrite the Acceptance section's
-      `- ` bullets to `- [ ] ` (leave `## Non-goals` / `## Evidence` / `## References` sections
-      alone — those are prose lists, not acceptance), then `gh issue edit N --body-file body.md`.
-      Re-run the scan to confirm zero hits before `Ready to archive`.
-      - **Close** with a comment naming what proved each box, if the work genuinely landed
-        this session or earlier.
-      - **Add the missing box** to the body if a live-run, deploy, or owner sign-off is still
-        required, OR if the Acceptance section is prose bullets that need converting to `- [ ]`
-        boxes (see paragraph above; the two cases share a fix). A ticked ledger without a
-        real acceptance box is dishonest — that pattern closed real issues prematurely before
-        the tracker audit was written.
-      - **Leave open and say why** in one line to the user, if the hold-open reason is
-        genuine but not captured on the issue AND the box conversion above does not apply.
+   Neither is a blocker: reading the body settles both, and routing them back as questions is what
+   the 2026-08-31 ruling forbids (a `/session-end` reply asked "which milestone for each?" and
+   "close, add box, or hold?" about five pre-existing hits). Escalate only when the tracker will
+   not yield the body — and then still act: pick one and name the alternative in a comment.
 
 10. **Clean up the worktree** — if the session ran in a git worktree and the branch has landed:
    `git worktree remove` refuses to remove the current worktree, so use the `ExitWorktree` tool
@@ -140,50 +139,43 @@ step's `gh` spelling through the substitution table in the cloud section below):
    main checkout: `git worktree remove <path>` (add `--force` only if the tree is unclean and the
    user OKs discarding) **and** file a `ready-for-human` ticket carrying that exact command, since
    a printed command the session cannot run is a step it cannot finish.
-11. **Sweep the repo's stale branches, worktrees, and PRs** — session cleanup runs beyond this
-    session's own branch, because fleet attempts, prior sessions, and abandoned scratch trees
-    accumulate silently and no built-in check surfaces them. This is the branch/worktree/PR half of
-    archive-ready above.
+11. **Sweep this session's own branch and worktree — the repo-wide sweep is a job, not a step.**
+    Fleet attempts, prior sessions and abandoned scratch trees accumulate silently, but a session is
+    the wrong place to clear them: it runs *inside* a worktree, which cannot delete its own branch
+    and makes `git branch --merged` lie, and a container's auto-mode classifier refuses
+    `git push origin --delete` and `git branch -D` mid-sweep, so the cleanup used to end up as prose
+    in a reply nobody reads. Issue 474 moved that half to the **Stale ref sweep** workflow
+    (`.github/workflows/stale-ref-sweep.yml`, script `tools/stale-ref-sweep.js`): weekly plus
+    `workflow_dispatch`, it deletes every `agent/*`, `worktree-*` and `claude/*` ref it can prove
+    landed by patch-id, closes the PRs those refs superseded, and keeps ONE open `ready-for-human`
+    issue holding whatever needs a ruling — closing that issue itself once a run finds nothing.
 
-    Do it in this order (all commands run from the main checkout — a worktree cannot delete its
-    own branch and confuses `git branch --merged`):
+    So this step is three narrow things, all about **this session**:
 
-    a. **List foreign worktrees.** `git worktree list` shows every worktree; anything except
-       `main` and the current session's tree is a candidate for removal. For each, run
-       `git -C <path> status --short` first; a clean tree is safe to `git worktree remove --force`,
-       a dirty tree gets its diff shown to the user before removal. Windows quirk: PowerShell
-       redirects can leave a `nul` file that blocks removal — `rm -rf <path>` clears it, then
-       `git worktree prune -v` cleans up the metadata.
+    a. **This session's branch.** Once its PR is merged (step 4), delete the remote branch if the
+       merge did not — `git push origin --delete <branch>` — and the local branch from the main
+       checkout with `git branch -d <branch>`. Never `-D`: `-d` refusing is the answer, not an
+       obstacle. If the classifier refuses the delete, the Stale ref sweep takes the ref on its next
+       run, so say that in one line and file nothing.
 
-    b. **Fetch --prune** — `git fetch --prune origin` deletes local remote-tracking refs whose
-       upstream is gone, so the merged-branch scan reflects reality.
+    b. **This session's worktree.** Step 10 removed it; `git worktree prune -v` from the main
+       checkout clears the leftover admin dir. Windows quirk: a PowerShell redirect can leave a
+       `nul` file that blocks removal — `rm -rf <path>` clears it, then prune.
 
-    c. **Delete merged local branches** — `git branch --merged main | grep -vE '^\*| main$' |
-       xargs -r git branch -d`. Safe: `-d` refuses if a branch has unmerged work, which is what
-       you want.
+    c. **Read the sweep's verdict instead of repeating it.** Quote its latest run and the state of
+       its issue:
+       ```bash
+       gh run list --workflow stale-ref-sweep.yml --limit 1
+       gh issue list --state open --label ready-for-human --search 'Stale ref sweep in:title'
+       ```
+       A `failure` run is a STOP like any other. If that issue names a branch **this session**
+       created or stranded, resolve it here — land the work, or delete the ref — and say which line
+       of the issue is now dead. Branches and PRs from other sessions are the owner's queue on that
+       one issue, not this step's work: do not delete them, and do not re-file them as new tickets.
 
-    d. **Audit unmerged local branches** — for each remaining non-main branch, `git log --oneline
-       main..<branch> | wc -l` says whether it has unique commits, and searching `main` for the
-       same commit messages says whether those commits were squash-landed under a different SHA
-       (common with `gh pr merge --squash`). Force-delete (`git branch -D`) any branch whose
-       commits are all present on main under different SHAs, or whose PR was closed as
-       superseded. Never force-delete a branch with genuinely stranded work: file it as a
-       `ready-for-human` ticket naming the branch, its unique commits and why they look stranded,
-       and quote that number in the reply. Handing it over in prose loses it.
-
-    e. **Prune remote branches** — `git branch -r` after the fetch. Any remote branch whose PR
-       merged or closed but that survived (auto-delete off, or a manual push after merge) gets
-       `git push origin --delete <branch>`. In a cloud container where the proxy refuses the
-       remote delete, name those branches on a `ready-for-local-agent` ticket for a desktop
-       session, the way the cloud section below describes.
-
-    f. **Audit open PRs the assistant did not open this session** — `gh pr list --state open`.
-       Any fleet-attempt PR older than the ADRs, spec revisions, or scope decisions made this
-       session should be closed with a comment naming what superseded it, then its branch
-       deleted (`gh pr close <n> --delete-branch --comment "..."`). If the assistant cannot
-       tell whether an open PR is superseded, leave it open and file a `ready-for-human` ticket
-       naming the PR, what it would collide with, and the evidence that is missing — not a line
-       in the reply.
+    **Never force-delete a branch carrying genuinely stranded work**, here or by hand. The sweep
+    never does — patch-id evidence or nothing — and neither does a session: stranded work belongs on
+    the sweep's issue, by branch name, with its unique commits.
 
 12. **Re-run the end check** — `node ~/.claude/hooks/session-gate.js report --end` — and report
     the result. Add `--refresh` only when steps 1–11 committed, pushed, or otherwise moved the
@@ -243,11 +235,14 @@ environment is the tell. Every step above still applies; only the tool changes, 
 | --- | --- |
 | `gh pr create` | GitHub MCP `create_pull_request` |
 | `gh pr merge --squash --delete-branch` | MCP `merge_pull_request` (method squash), then `git push origin --delete <branch>` |
-| `gh issue list --json … --jq …` | MCP `search_issues` (returns milestone) or REST `curl .../issues?state=open&milestone=none&per_page=100`; `list_issues` returned no milestone field in a cloud session on 2026-09-14 (claude-dotfiles#154 evidence), so it cannot drive step 9a |
+| `gh issue list --json … --jq …` | MCP `search_issues` (returns milestone) or REST `curl .../issues?state=open&milestone=none&per_page=100`; `list_issues` returned no milestone field in a cloud session on 2026-09-14 (claude-dotfiles#154 evidence), so it cannot answer a milestone question |
 | `gh issue edit <n> --milestone` | MCP `issue_write` (update) |
+| the two tracker queries of step 9 | nothing to run by hand — the **Issue metadata audit** job (`.github/workflows/issue-metadata-audit.yml`, issue 472) runs `tools/issue-metadata-audit.js` on every `issues` event plus a daily tick. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/issue-metadata-audit.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` is a STOP: the job exits 1 when it cannot read the tracker, so red means no sweep happened. Answering the comments it leaves (ambiguous milestone, close-or-add-box) is still this session's job |
 | `gh pr list --state open` | MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment`, then delete the branch with git |
 | `sweep-closed-to-done.js --apply` (step 6) | nothing to run by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other; `PROJECT_TOKEN` missing or expired is the usual cause and the run log says so |
+| `node tools/tracker-audit.js` (step 8) | nothing to run by hand — the **Tracker audit** job (`.github/workflows/tracker-audit.yml`, issue 473) runs the audit on every issue event and every push to the default branch, and the session report already prints its verdict for the current head. Confirm and quote the run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/tracker-audit.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. Exit 1 is drift, exit 2 an audit that went blind — neither is a pass |
+| `git branch --merged`, `git branch -D`, `git push origin --delete` beyond this session's branch (step 11) | nothing to run by hand — the **Stale ref sweep** job (`.github/workflows/stale-ref-sweep.yml`, issue 474) owns the repo-wide half and puts every ref it will not delete on one `ready-for-human` issue. Confirm and quote its latest run: `curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/stale-ref-sweep.yml/runs?per_page=1` and read `.workflow_runs[0].conclusion` and `.html_url`. This session's own branch is still deleted here, with git, which works normally through the proxy |
 
 Quick read-only checks can also go straight to REST — `curl
 https://api.github.com/repos/<owner>/<repo>/...` — the session's egress proxy authenticates
@@ -261,6 +256,10 @@ step ends up living only in the reply:
 - **Step 6 (board sweep)** is not skipped in a container any more: the same script runs as the
   Board sweep GitHub Actions job on issue and PR close, so take the row for it in the cloud table
   below and do not file a `ready-for-local-agent` ticket for it (issue 216).
+- **Step 11 (repo-wide branch, worktree-ref and superseded-PR sweep)** is not a container's
+  problem any more either: the Stale ref sweep job owns it (issue 474). A session deletes its
+  own branch and reads the job's verdict — it does not file `ready-for-local-agent` tickets for
+  other sessions' refs.
 - **A repo tool that shells out to gh** (a tracker audit, typically) exits 2 in a container, which
   leaves the audit unread: re-run it through the MCP tools, or hand it on.
 - **The cloud-plugin staleness check** is skipped in containers: the container IS the downstream
@@ -293,7 +292,8 @@ older "yours versus theirs" reading). The audit prints the fix beside each findi
 cross-repo `#N` as `owner/repo#N`, tick or justify an open box on a closed issue, add the missing
 triage label. A finding that needs an owner ruling gets a `ready-for-human` ticket.
 
-**Scope.** Step 9's two checks and this rule together sweep the WHOLE tracker, origin irrelevant:
+**Scope.** The Issue metadata audit job (step 9) and this rule together sweep the WHOLE tracker,
+origin irrelevant:
 `/session-end` is the housekeeping pass, and a hit left for "the session that caused it" is a hit
 the next session re-investigates from scratch. Advisories count too: a `landed-but-open?` line is
 resolved by reading the named commit, then closing the issue or commenting on what is left (ruling
@@ -374,8 +374,10 @@ reply.
 
 **Did the push close an issue that should have stayed open?** A commit message containing `Fixes #N`
 closes that issue the moment it reaches the default branch — including issues deliberately left open
-because a box still needs a deploy or an owner's ruling. Verify the state of every issue the session
-touched, and reopen with a reason. This has happened more than once.
+because a box still needs a deploy or an owner's ruling. This has happened more than once, which is
+why the Closure guard job now reopens those closures on the close event (step 5); what it cannot
+judge — a close made by a person, or one made by a workflow's own token — is still verified here, by
+reading the state of every issue the session touched.
 
 **Are the acceptance boxes honest?** In a repo where closing means *verified*, a box needing a live
 run stays unticked and the issue stays open, however finished the code is.

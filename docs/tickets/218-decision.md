@@ -1,6 +1,6 @@
 # Issue 218: the harness delivers the bootstrap hook and the auto-mode posture to any repo
 
-**Status:** built at harness **v26**. One command — project-harness step 16,
+**Status:** built at harness **v27**. One command — project-harness step 16,
 `node templates/add-cloud-plugin.js <repo-root>` — now installs the cloud bootstrap hook, wires its
 `SessionStart` entry, declares the plugin and merges the auto-mode posture. Idempotent.
 
@@ -11,7 +11,7 @@
 | Hook body, delivered to every repo | `agents/skills/project-harness/templates/session-start.sh` (new) |
 | Generator that keeps it honest | `tools/build-harness-bootstrap-hook.js` (new) |
 | Delivery | `agents/skills/project-harness/templates/add-cloud-plugin.js` (hook copy + `hooks.SessionStart` merge) |
-| Version | `templates/harness-version.md` 25 → 26, upgrade row 26 in `UPGRADES.md`, this repo's marker |
+| Version | `templates/harness-version.md` 26 → 27, upgrade row 27 in `UPGRADES.md`, this repo's marker |
 | Tests | `tools/harness-bootstrap-delivery.test.js` (4 cases) |
 
 **The template is a byte-identical copy of `.claude/hooks/session-start.sh`, not a copy with a
@@ -31,12 +31,12 @@ doubled the bootstrap (the issue 166 shape).
 `surreptakos/aac-message-board`, shallow-cloned 2026-09-17, marker at v17, no `.claude/hooks/`,
 `.claude/settings.json` holding only `extraKnownMarketplaces` + `enabledPlugins`.
 
-Before, session-check against the v26 skill (criterion 3 — the repo has no bootstrap hook and the
+Before, session-check against the v27 skill (criterion 3 — the repo has no bootstrap hook and the
 `#139` line is what says so):
 
 ```
 Harness
-  STOP harness v17 is behind v26 — run `/project-harness` (upgrade path, step 7)
+  STOP harness v17 is behind v27 — run `/project-harness` (upgrade path, step 7)
       the upgrade table lives in project-harness/SKILL.md ("Upgrading an existing install")
 ```
 
@@ -73,7 +73,7 @@ declared aac-skills@claude-dotfiles + posture (issue 245) + the SessionStart boo
 --- a/docs/agents/harness-version.md
 +++ b/docs/agents/harness-version.md
 -    harness-version: 17
-+    harness-version: 26
++    harness-version: 27
 ```
 
 Plus the untracked `.claude/hooks/session-start.sh`, mode `0755`, SHA-256
@@ -90,7 +90,7 @@ Both files' hashes unchanged, `git status --short` unchanged. And session-check 
 
 ```
 Harness
-  ok   harness v26, current
+  ok   harness v27, current
 ```
 
 The delivered copy run as a container would run it (`CLAUDE_CODE_REMOTE=true`, a fake `HOME`,
