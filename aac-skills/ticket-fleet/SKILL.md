@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-17T20:12:40Z"
-  previous-modified: "2026-09-17T20:06:29Z"
-  revision: "22"
-  content-sha: "77b44ba29b6a"
+  modified: "2026-09-17T20:57:11Z"
+  previous-modified: "2026-09-17T20:12:40Z"
+  revision: "23"
+  content-sha: "4da44d916e22"
 ---
 
 # ticket-fleet
@@ -458,6 +458,21 @@ merge, pushes nothing and opens no PR; the ticket appears in the run result's `f
 with `conflictPaths` naming every path still in conflict. A test command that fails after an
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
+
+**No push before a marker scan.** On every path through the merge, a clean one included, the
+stage runs `git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD` over the merge result before
+`git push`. A hit means a resolution staged the conflict markers instead of removing them: a
+generated-file or stamp-block path is resolved again and the merge commit amended, and
+anything else resets the merge and blocks the ticket with those paths in `conflictPaths`.
+Run `6aab1eac` had no such scan - its deliverer committed a `SKILL.md` with the markers
+intact, pushed it, and asked the session for a force push (issue 514).
+
+**A bad commit that already reached origin is repaired forward, never force-pushed.** The
+stage checks out the pushed head, sets index and worktree to the corrected merge with
+`git read-tree -u --reset <corrected-commit>`, commits that tree as a follow-up whose parent
+is the bad commit, and pushes a plain fast-forward - the pattern the session used by hand to
+repair `966a36f` (repair commit `b00db2e`). `git push --force`, `--force-with-lease` and
+deleting the remote branch are out of bounds: that branch may already be a PR head.
 
 ## Branch names
 
