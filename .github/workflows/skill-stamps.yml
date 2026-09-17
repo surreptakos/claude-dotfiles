@@ -10,8 +10,9 @@ name: Skill stamps
 #     payload, not the wall clock, so an unchanged mirror rebuilds byte for byte (issue 432).
 #     .claude-plugin/marketplace.json repeats the version and is not rebuilt here (--no-marketplace).
 # The fix for all of them is the same two commands, from the repo root (CLAUDE.md, "Skill stamps").
-# --home on BOTH is what makes them reproduce this job: without it the stamper hashes against the
-# container's own home and re-stamps skills nobody touched (issue 431).
+# --home names the owner's home, the one every tree here is spelled against; both tools default
+# to that same value (OWNER_HOME in tools/skill-stamps.py, never the container's own home, issues
+# 431 and 492), and the flag is spelled out so the recipe and this job's check steps read alike.
 #   python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\Users\Dan'
 #   python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
 # The dashboard branch is a force-pushed snapshot artifact and is never checked.
