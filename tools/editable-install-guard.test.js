@@ -31,6 +31,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const GUARD = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'editable-install-guard.js');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
 const guard = require(GUARD);
+const { sliceBetween, sliceBetweenTags } = require('./source-slice.js');
 
 const PY = ['python3', 'python'].find((exe) => spawnSync(exe, ['-c', 'print(1)'], { encoding: 'utf8' }).status === 0);
 
@@ -147,8 +148,9 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
   // which is worktree-isolated too and runs whatever commands its ticket asks for.
   for (const [prompt, tail] of [
     ['Implement GitHub issue', 'label: `impl:'],
-    // The tail must be text that really follows the prompt: a tail indexOf cannot find slices to
-    // the end of the file, and every later prompt's rail then satisfies this one vacuously.
+    // The tail must be text that really follows the prompt: a tail indexOf cannot find used to
+    // slice to the end of the file, and every later prompt's rail then satisfied this one
+    // vacuously. sliceBetween throws on the missing anchor now (issue 488).
     ['You are an independent verifier. Your job', '{ label: verifyLabel, phase: \'Verify\''],
     ['Probe GitHub issue', 'label: `probe:'],
     // Issue 435: the probe lane's verifier re-runs whatever commands a probe ticket named, and
@@ -156,9 +158,7 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
     // orchestrator's own checkout. It carries the same rail now.
     ['You are an independent verifier for a probe ticket', 'Clean up your scratch worktree (git worktree remove) when done. Make no repository changes'],
   ]) {
-    const start = src.indexOf(prompt);
-    assert.ok(start > 0, `prompt "${prompt}" is gone from the fleet script`);
-    const body = src.slice(start, src.indexOf(tail, start));
+    const body = sliceBetween(src, prompt, tail, `the "${prompt}" prompt in the fleet script`);
     assert.ok(body.includes('${PYTHON_RAIL}'), `the "${prompt}" prompt must carry the rail`);
   }
   assert.match(src, /editable-install-guard\.js/, 'the fleet must run the guard once the wave has drained');
@@ -167,13 +167,10 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
 /** The fleet's own guard-path block, evaluated exactly as the fleet script evaluates it. */
 function fleetEditableGuardBlock() {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  const startTag = '// [FLEET-EDITABLE-GUARD-START]';
-  const endTag = '// [FLEET-EDITABLE-GUARD-END]';
-  const s = src.indexOf(startTag);
-  const e = src.indexOf(endTag);
-  assert.ok(s >= 0 && e > s, 'the FLEET-EDITABLE-GUARD markers are gone from the fleet script');
+  const block = sliceBetweenTags(src, '// [FLEET-EDITABLE-GUARD-START]', '// [FLEET-EDITABLE-GUARD-END]',
+    "the fleet script's editable-guard block");
   // eslint-disable-next-line no-new-func
-  return new Function(`${src.slice(s + startTag.length, e)}
+  return new Function(`${block}
 return { editableGuardPaths, editableGuardCommand, editableGuardAbsentMessage };`)();
 }
 

@@ -14,14 +14,17 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 
+const { sliceFrom } = require('./source-slice.js');
+
 const SKILL = path.join(__dirname, '..', 'aac-skills', 'ticket-fleet', 'SKILL.md');
 const HEADING = '## Shell shapes the worktree guard refuses';
 
 function refusedShapesSection() {
   const text = fs.readFileSync(SKILL, 'utf8');
-  const start = text.indexOf(HEADING);
-  assert.notEqual(start, -1, `SKILL.md must carry the "${HEADING}" section`);
-  const rest = text.slice(start + HEADING.length);
+  // The section may be the file's last, so the tail is genuinely optional here: sliceFrom pins the
+  // heading (a missing one would otherwise slice the file's last character) and the next heading,
+  // when there is one, ends the section.
+  const rest = sliceFrom(text, HEADING, `SKILL.md's "${HEADING}" section`).slice(HEADING.length);
   const next = rest.indexOf('\n## ');
   return next === -1 ? rest : rest.slice(0, next);
 }
