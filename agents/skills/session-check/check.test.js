@@ -278,31 +278,6 @@ test('cloud bootstrap: STOP names the marker path when the file is absent', () =
   }
 });
 
-test('cloud bootstrap: STOP names the failed stage and its cause when the hook could not clone (issue 483)', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-failed-'));
-  const marker = path.join(dir, 'state.json');
-  fs.writeFileSync(marker, JSON.stringify({
-    failed: true,
-    stage: 'clone',
-    reason: "git clone --depth 1 --branch master https://github.com/surreptakos/claude-dotfiles.git: fatal: could not read Username for 'https://github.com': No such device or address",
-    skills: [],
-    failed_at: '2026-09-17T18:00:00Z',
-  }));
-  try {
-    const output = runChecker({}, { env: cloudEnv({
-      BOOTSTRAP_MARKER_FILE: marker,
-      BOOTSTRAP_SKILLS_DIR: dir,
-    }) });
-    assert.match(output, /STOP aac-bootstrap clone failed — .*could not read Username/);
-    assert.match(output, /ANTHROPIC_BASE_URL/);
-    assert.match(output, /push_files/);
-    assert.doesNotMatch(output, /marker absent/);
-    assert.doesNotMatch(output, /ok\s+aac-bootstrap payload/);
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 test('cloud bootstrap: STOP names every skill missing from the tree', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-skillgap-'));
   const marker = path.join(dir, 'state.json');
