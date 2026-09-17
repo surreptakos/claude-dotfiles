@@ -51,11 +51,13 @@ jobs:
         run: |
           python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan' \
             --out /tmp/dist --no-marketplace --no-stamp-write
-          if ! diff -r /tmp/dist/aac-skills marketplace/aac-skills; then
+          # One diff over the whole tree: plugin.json's version (issue 432), the hook scripts
+          # (issue 208) and the rules text the UserPromptSubmit hook injects (issue 209, a copy of
+          # the owner's CLAUDE.md section, so a stale one delivers yesterday's rules every prompt)
+          # are all checked by this line. Files a hook run drops into the payload at runtime
+          # (hooks/scripts/__pycache__ from ask_matt_gate.py) are not payload: excluded here and
+          # skipped by the packager's own fingerprint, one rule for both (issue 484).
+          if ! diff -r --exclude=__pycache__ --exclude=.pytest_cache /tmp/dist/aac-skills marketplace/aac-skills; then
             echo "::error::marketplace/aac-skills is stale - rebuild it with tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'"
             exit 1
           fi
-          diff -r --exclude=__pycache__ /tmp/dist/aac-skills/hooks marketplace/aac-skills/hooks
-          # The global rules text the UserPromptSubmit hook injects (issue 209): a copy of the
-          # owner's CLAUDE.md section, so a stale one delivers yesterday's rules every prompt.
-          diff -r /tmp/dist/aac-skills/rules marketplace/aac-skills/rules

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Tests for tools/build-cloud-plugin.py. Run:  python3 tests/build-cloud-plugin.test.py"""
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -24,8 +26,12 @@ _spec.loader.exec_module(bcp)
 CHICAGO = timezone(timedelta(hours=-5))  # CDT, the local offset on 2026-09-11
 
 
+# plugin_version() is the reading a MOVED payload takes (resolve_version); an unchanged payload
+# carries the version it was published under, so nothing below says a rebuild changes the version.
+# That contract is VersionFollowsThePayload (issues 432, 484); this class pins only the format and
+# the UTC rule of the fresh reading.
 class PluginVersion(unittest.TestCase):
-    def test_utc_instant_formats_year_month_day_hhmm(self):
+    def test_fresh_stamp_for_a_moved_payload_formats_year_month_day_hhmm(self):
         now = datetime(2026, 9, 11, 18, 2, tzinfo=timezone.utc)
         self.assertEqual(bcp.plugin_version(now), "2026.9.111802")
 
@@ -269,6 +275,172 @@ class VersionFollowsThePayload(unittest.TestCase):
             self.assertNotEqual(published, "2099.1.10000")
             self.assertEqual(self._version(repo), "2099.1.10000",
                              "an edited skill should have taken the fresh clock stamp")
+
+    # Issue 484: running the plugin's Python hook leaves hooks/scripts/__pycache__/ inside the
+    # published tree. It is git-ignored, so the tree reads clean, yet a fingerprint that counted
+    # it took a fresh version on every rebuild - the churn issue 432 fixed, back on any tree that
+    # had run the hook. Runtime droppings are not payload.
+    def test_runtime_pycache_in_the_published_payload_does_not_move_the_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            self._rebuild(repo, Path(tmp) / "dist1")
+            first = self._tracked(repo)
+            cache = repo / "marketplace" / bcp.PLUGIN_NAME / "hooks" / "scripts" / "__pycache__"
+            cache.mkdir(parents=True, exist_ok=True)
+            (cache / "ask_matt_gate.cpython-312.pyc").write_bytes(b"\x00runtime")
+            with mock.patch.object(bcp, "plugin_version", lambda now=None: "2099.1.29999"):
+                self._rebuild(repo, Path(tmp) / "dist2")
+            self.assertEqual(first, self._tracked(repo),
+                             "a runtime __pycache__ in the published payload moved the version")
+
+    def test_payload_fingerprint_skips_runtime_droppings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "payload"
+            (root / "hooks" / "scripts").mkdir(parents=True)
+            (root / "hooks" / "scripts" / "hook.py").write_bytes(b"print(1)\n")
+            clean = bcp.payload_fingerprint(root)
+            (root / "hooks" / "scripts" / "__pycache__").mkdir()
+            (root / "hooks" / "scripts" / "__pycache__" / "hook.cpython-312.pyc").write_bytes(b"\x00")
+            (root / ".pytest_cache").mkdir()
+            (root / ".pytest_cache" / "v").write_bytes(b"x")
+            (root / "hooks" / "scripts" / "hook.py.bak").write_bytes(b"old\n")
+            self.assertEqual(clean, bcp.payload_fingerprint(root))
+            self.assertEqual(sorted(clean), ["hooks/scripts/hook.py"])
+
+
+# Issue 484: the packager's rotation line named skills whose SKILL.md it had not changed - once
+# because it reported compute_stamp's verdict rather than a write, once because a restore of the
+# published stamp (a junk content-sha from a stamper run against the wrong home) printed as a
+# rotation with nothing to say the revision went back. The line must name exactly the files this
+# run wrote with a changed stamp, say where they are, and mark a restore as one.
+CURRENT_SKILL = """---
+name: bar
+description: A skill whose recorded content-sha is already current.
+metadata:
+  modified: "2026-02-02T00:00:00Z"
+  previous-modified: "none"
+  revision: "3"
+  content-sha: "{sha}"
+---
+
+# Bar
+
+Nothing here has moved since it was stamped.
+"""
+
+
+class RotationReport(unittest.TestCase):
+    HOME = "C:\\Users\\Dan"
+
+    def _make_fake_repo(self, tmp):
+        repo = Path(tmp) / "repo"
+        (repo / "claude" / "skills").mkdir(parents=True)
+        for name in ("foo", "bar"):
+            (repo / "agents" / "skills" / name).mkdir(parents=True)
+        (repo / "agents" / "skills" / "foo" / "SKILL.md").write_text(
+            STALE_MIRROR_SKILL, encoding="utf-8")
+        bar = repo / "agents" / "skills" / "bar" / "SKILL.md"
+        bar.write_text(CURRENT_SKILL.format(sha="000000000000"), encoding="utf-8")
+        bar.write_text(CURRENT_SKILL.format(
+            sha=bcp.skill_stamps.content_sha(bar.parent, self.HOME)), encoding="utf-8")
+        (repo / "claude" / "skill-links.json").write_text(json.dumps([
+            {"Name": n, "Target": f"__USERHOME__\\.agents\\skills\\{n}"} for n in ("foo", "bar")
+        ]), encoding="utf-8")
+        return repo
+
+    def _run(self, repo, out, *extra):
+        buf = io.StringIO()
+        with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
+                sys, "argv", ["bcp", "--from-mirror", "--home", self.HOME, "--out", str(out),
+                              "--no-marketplace", *extra]), contextlib.redirect_stdout(buf):
+            rc = bcp.main()
+        self.assertEqual(rc, 0, buf.getvalue())
+        return buf.getvalue().splitlines()
+
+    @staticmethod
+    def _report(lines):
+        """The rotation headline and the indented lines under it."""
+        start = next(i for i, l in enumerate(lines) if l.startswith("stamps rotated"))
+        named = []
+        for line in lines[start + 1:]:
+            if not line.startswith("  "):
+                break
+            named.append(line.strip())
+        return lines[start], named
+
+    def _git(self, repo, *args):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x"}
+        for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                  "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"):
+            env.pop(k, None)
+        return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                              capture_output=True, env=env).stdout
+
+    def test_names_exactly_the_skill_whose_bytes_changed_and_where(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            foo = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            bar = repo / "agents" / "skills" / "bar" / "SKILL.md"
+            foo_before, bar_before = foo.read_bytes(), bar.read_bytes()
+
+            headline, named = self._report(self._run(repo, Path(tmp) / "dist1"))
+            self.assertEqual(headline, "stamps rotated in 1 skills")
+            self.assertEqual(len(named), 1, named)
+            self.assertTrue(named[0].startswith("foo (agents/skills/foo/SKILL.md): rev 1 -> 2, "),
+                            named[0])
+            self.assertNotIn("published", named[0])
+            self.assertNotEqual(foo.read_bytes(), foo_before, "foo was reported but not written")
+            self.assertEqual(bar.read_bytes(), bar_before, "bar was written though it was current")
+
+    def test_a_no_change_rebuild_reports_zero_and_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            self._run(repo, Path(tmp) / "dist1")
+            sources = {p: p.read_bytes() for p in (repo / "agents" / "skills").rglob("SKILL.md")}
+
+            headline, named = self._report(self._run(repo, Path(tmp) / "dist2"))
+            self.assertEqual(headline, "stamps rotated in 0 skills")
+            self.assertEqual(named, [])
+            self.assertEqual(sources, {p: p.read_bytes() for p in sources})
+
+    def test_no_stamp_write_says_the_sources_were_left_alone(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            foo = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            before = foo.read_bytes()
+            headline, named = self._report(
+                self._run(repo, Path(tmp) / "dist1", "--no-stamp-write"))
+            self.assertEqual(before, foo.read_bytes())
+            self.assertEqual(headline, "stamps rotated in the packaged copies of 1 skills "
+                                       "(sources untouched: --no-stamp-write)")
+            self.assertEqual(len(named), 1, named)
+            self.assertTrue(named[0].startswith("foo: rev 2, "), named[0])
+
+    def test_a_restore_of_the_published_stamp_is_reported_as_one(self):
+        # The bullet that filed the issue: a stamper run against the wrong home had junked the
+        # content-sha, the packager put HEAD's stamp back, and `git status` showed nothing. The
+        # file was written, so it is named - and marked as a restore, revision unchanged.
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = self._make_fake_repo(tmp)
+            self._run(repo, Path(tmp) / "dist0")  # foo now carries a current stamp (rev 2)
+            self._git(repo, "init", "-q")
+            self._git(repo, "add", ".")
+            self._git(repo, "commit", "-qm", "published")
+            foo = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            published = foo.read_bytes()
+            foo.write_bytes(re.sub(rb'content-sha: "[0-9a-f]+"', b'content-sha: "badbadbadbad"',
+                                   published))
+            self.assertNotEqual(foo.read_bytes(), published)
+
+            headline, named = self._report(self._run(repo, Path(tmp) / "dist1"))
+            self.assertEqual(headline, "stamps rotated in 1 skills")
+            self.assertEqual(len(named), 1, named)
+            self.assertTrue(named[0].startswith("foo (agents/skills/foo/SKILL.md): rev 2 -> 2, "),
+                            named[0])
+            self.assertTrue(named[0].endswith("(back to the published stamp)"), named[0])
+            self.assertEqual(foo.read_bytes(), published)
+            self.assertEqual(self._git(repo, "status", "--porcelain"), b"")
 
 
 # Issue 172: aac-google-access started life as a personal skill, so the only copy of it in this
