@@ -91,6 +91,14 @@ Windows profile; nothing about it runs on Linux.
 
 ## Before trusting the tracker
 
+The audit runs itself: `.github/workflows/tracker-audit.yml` (issue 473) runs it on every issue
+event and on every push to the default branch, fails the run on drift, and names every finding in
+the run summary. The session-check engine reads that job's latest run for the current head rather
+than spawning the audit, so a cloud container and the desktop print the same line. Read the run
+first — `gh run list --workflow tracker-audit.yml --limit 1`.
+
+By hand, on a machine with `gh` (the same code the job runs):
+
 ```bash
 node tools/tracker-audit.js
 ```

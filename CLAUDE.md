@@ -150,8 +150,9 @@ Version in `docs/agents/harness-version.md`.
   artifact — run the script locally to check output, then discard it.
 - `.githooks/pre-commit` runs the restore test before every commit. Activate in a fresh clone with
   `git config core.hooksPath .githooks`.
-- Tracker conventions: `docs/agents/issue-tracker.md`. Run `node tools/tracker-audit.js` before
-  trusting the tracker — exit 2 means it could not audit, which is not a pass.
+- Tracker conventions: `docs/agents/issue-tracker.md`. The audit is a job — `tracker-audit.yml`
+  runs it on every issue event and push, and the session report reads that run; exit 2 means it
+  could not audit, which is not a pass.
 - `node tools/claude-md-lint.js <CLAUDE.md>` checks a CLAUDE.md against the concision paradigm
   (would removing this line cause a mistake?). Findings are prompts to ask that question, not
   verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one. The restore
