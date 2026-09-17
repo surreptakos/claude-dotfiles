@@ -40,6 +40,11 @@
  *                                                    // a deliberately unharnessed repo
  *   }
  *
+ * At --end the test command is skipped on a committed, pushed head in a repo with CI: the
+ * pre-commit hook ran the suite on each commit and CI runs it on the pushed head, so a third
+ * run here learns nothing (and in claude-dotfiles costs a full restore-test). A dirty tree or
+ * an unpushed commit still runs it — those are the cases nothing else has seen.
+ *
  * READ ONLY. It fetches (which changes no files) and reports. It never commits, pushes, merges or
  * deploys — the point is to tell a human what to decide, not to decide it.
  *
@@ -197,6 +202,9 @@ const CFG = config();
 
 /* ------------------------------------------------------------------ git ---------------------- */
 
+/** What gitChecks found, for workChecks' end-of-session test skip. */
+const GIT = { upstream: null, dirtyCount: 0, ahead: 0 };
+
 function gitChecks() {
   head('Git');
   if (!has('.git')) { note('not a git repo — skipping'); return; }
@@ -225,6 +233,7 @@ function gitChecks() {
     const counts = tryRun('git', ['rev-list', '--left-right', '--count', `${upstream}...HEAD`]);
     if (counts) { const m = counts.split(/\s+/); behind = Number(m[0]) || 0; ahead = Number(m[1]) || 0; }
   }
+  Object.assign(GIT, { upstream, dirtyCount, ahead });
 
   if (END) {
     if (dirtyCount) { stop(`${dirtyCount} uncommitted file(s) — this work is not saved anywhere`); note('`git status --short`'); }
@@ -347,7 +356,15 @@ async function workChecks() {
       t = { label, argv: [label], shell: true };
     }
   }
-  if (!t) note('no test command detected — set "test" in .claude/session.json if there is one');
+  // At --end on a committed, pushed head the suite has already run on exactly this content:
+  // the pre-commit hook on each commit, CI on the pushed head. A third run here learns
+  // nothing. It is kept for the cases that carry information — a dirty tree (pre-commit
+  // never saw it), unpushed commits (CI has not), no upstream, or no workflows to hand the
+  // verdict to.
+  const covered = t && END && GIT.upstream && !GIT.dirtyCount && !GIT.ahead && has('.github/workflows');
+  if (covered) {
+    skipped(`tests — \`${t.label}\` not re-run: HEAD is committed and pushed, so pre-commit and CI on that head own the verdict`);
+  } else if (!t) note('no test command detected — set "test" in .claude/session.json if there is one');
   else {
     const timeout = configuredTimeout('testTimeoutMs', 300000);
     const r = await runReadingOutputAsync(

@@ -20,8 +20,14 @@ name: Refresh dashboard
 on:
   push:
     branches: [main]
+  # TWO issue types only. The 2026-09-16 Actions-quota ruling (claude-dotfiles issue 117,
+  # `docs/tickets/117-decision.md`): the eight-type list ran `Refresh dashboard` at 179.2 runs/day
+  # across six repos, 3.09x the 58 runs/day baseline, because `edited`, `labeled`, `unlabeled`,
+  # `assigned` and `unassigned` fire on every triage touch while changing little the dashboard
+  # shows. Do not restore the long list by reflex; a label-driven refresh is one
+  # `workflow_dispatch` away.
   issues:
-    types: [opened, closed, reopened, edited, labeled, unlabeled, assigned, unassigned]
+    types: [opened, closed]
   workflow_dispatch:
 
 concurrency:

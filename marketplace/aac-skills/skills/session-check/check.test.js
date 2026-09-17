@@ -507,3 +507,71 @@ test('tracker audit: a cloud session reads the job and never spawns the audit', 
     fs.rmSync(marker, { force: true });
   }
 });
+
+/**
+ * A real git repo with a pushed upstream, for the end-of-session test skip: the fake `.git`
+ * directory `runChecker` builds makes every git call fail, which reads as "no upstream" and
+ * never reaches the skip. `mutate(work)` runs after the push, before check.js.
+ */
+function runCheckerPushed(config, mutate, args) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-check-git-'));
+  const remote = path.join(root, 'remote.git');
+  const work = path.join(root, 'work');
+  const git = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  try {
+    git(root, 'init', '--quiet', '--bare', remote);
+    git(root, 'clone', '--quiet', remote, work);
+    fs.mkdirSync(path.join(work, '.claude'));
+    fs.mkdirSync(path.join(work, '.github', 'workflows'), { recursive: true });
+    fs.writeFileSync(path.join(work, '.claude', 'session.json'), JSON.stringify(config));
+    fs.writeFileSync(path.join(work, '.github', 'workflows', 'ci.yml'), 'on: push\n');
+    git(work, 'add', '.');
+    git(work, 'commit', '--quiet', '-m', 'init');
+    git(work, 'push', '--quiet', '-u', 'origin', 'HEAD');
+    if (mutate) mutate(work, git);
+    return execFileSync(process.execPath, [CHECKER, ...(args || ['--end'])], {
+      cwd: work, encoding: 'utf8', env: localEnv(), stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    if (!error.stdout && !error.stderr) throw error;
+    return String(error.stdout || '') + String(error.stderr || '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+const MARKER_TEST = { test: `${JSON.stringify(process.execPath)} -e "console.log('ran-marker')"` };
+
+test('--end on a committed, pushed head with CI skips the suite and says who owns the verdict', () => {
+  const output = runCheckerPushed(MARKER_TEST);
+  assert.match(output, /nothing unpushed/);
+  assert.match(output, /-- +tests — .*not re-run: HEAD is committed and pushed/);
+  assert.doesNotMatch(output, /tests pass/);
+});
+
+test('--end with an uncommitted file still runs the suite', () => {
+  const output = runCheckerPushed(MARKER_TEST, (work) => {
+    fs.writeFileSync(path.join(work, 'scratch.txt'), 'x');
+  });
+  assert.match(output, /1 uncommitted file/);
+  assert.match(output, /tests pass/);
+  assert.doesNotMatch(output, /not re-run/);
+});
+
+test('--end with an unpushed commit still runs the suite', () => {
+  const output = runCheckerPushed(MARKER_TEST, (work, git) => {
+    fs.writeFileSync(path.join(work, 'more.txt'), 'x');
+    git(work, 'add', '.');
+    git(work, 'commit', '--quiet', '-m', 'local only');
+  });
+  assert.match(output, /1 commit\(s\) not pushed/);
+  assert.match(output, /tests pass/);
+  assert.doesNotMatch(output, /not re-run/);
+});
+
+test('start on the same pushed head runs the suite — the skip is end-only', () => {
+  const output = runCheckerPushed(MARKER_TEST, null, []);
+  assert.match(output, /tests pass/);
+  assert.doesNotMatch(output, /not re-run/);
+});
