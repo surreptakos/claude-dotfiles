@@ -4,7 +4,12 @@
 `### Four standing disciplines` section of the owner's global `CLAUDE.md` into the payload at
 `rules/global-rules.md` and wires one `UserPromptSubmit` entry per part of it
 (`hooks/scripts/global-rules.js`). The pointer fallback the ticket allowed for is **not** used:
-the cap is per hook output, so N parts under it deliver the file in full on every prompt.
+the cap is per hook output, so N parts under it deliver the file in full.
+
+> **Amended by issue 533** (`docs/tickets/533-decision.md`): those N entries moved from
+> `UserPromptSubmit` to `SessionStart` (`global-rules.js start <k>`), and a prompt now carries a
+> generated digest instead of the whole text — 2,539 bytes a turn rather than 13,637. Everything
+> measured below still holds; only the event the parts ride on changed.
 
 ## The measurement
 
