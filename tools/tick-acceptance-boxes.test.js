@@ -70,6 +70,25 @@ test('only unticked boxes under the acceptance heading are ticked, each naming t
   assert.deepEqual(untickedBoxes(body).hard, []);
 });
 
+test('a wrapped box takes its evidence after its last word, not inside its first line', () => {
+  // The ticket templates wrap criteria at ~100 columns and `untickedBoxes` reads only the first
+  // line of one, so appending there splits the sentence — #415 carried two such criteria.
+  const wrapped = [
+    '## Acceptance criteria',
+    '',
+    '- [ ] `.claude/session.json`\'s test command runs `tests/*.test.js`, so both new test files',
+    '      are in the repo\'s own gate',
+    '- [ ] a short one',
+    '',
+  ].join('\n');
+  const { body, ticked } = tickAcceptanceBoxes(wrapped, 'verified in PR #443');
+  assert.equal(ticked.length, 2);
+  assert.ok(body.includes('runs `tests/*.test.js`, so both new test files\n'));
+  assert.ok(body.includes('      are in the repo\'s own gate — verified in PR #443\n'));
+  assert.ok(body.includes('- [x] a short one — verified in PR #443'));
+  assert.deepEqual(untickedBoxes(body).hard, []);
+});
+
 test('a body with nothing left to tick is returned byte-identical (idempotent replay)', () => {
   const once = tickAcceptanceBoxes(TICKET, 'verified in PR #451').body;
   const twice = tickAcceptanceBoxes(once, 'verified in PR #451');

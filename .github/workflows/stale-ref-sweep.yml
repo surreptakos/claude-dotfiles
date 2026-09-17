@@ -1,0 +1,86 @@
+name: Stale ref sweep
+
+# Delete every stale branch and worktree ref this repo can PROVE landed, close the open PRs those
+# refs superseded, and keep one `ready-for-human` issue holding whatever is left.
+#
+# WHY A WORKFLOW (issue 474): `/session-end` step 11 used to sweep the whole repo from inside the
+# session that happened to be wrapping up. A session runs in a worktree, and a worktree cannot
+# delete its own branch or read `git branch --merged` honestly; a cloud container's auto-mode
+# classifier refuses `git push origin --delete` and `git branch -D` mid-sweep, so the cleanup ended
+# up as prose in a reply; and a sweep that only runs at session end is a sweep that does not run —
+# 40 `agent/*` refs from four fleet waves were standing on the remote when this ticket was written.
+# A runner has no worktree, no classifier and a cron. Step 11 is now scoped to the session's own
+# branch and worktree, and this job owns the repo-wide half.
+#
+# THE SWEEP IS NOT WRITTEN HERE. `tools/stale-ref-sweep.js` holds every decision — which namespaces
+# are sweepable, what counts as proof that a branch landed, which refs may never be deleted, and
+# the one-issue upsert. The first step below runs `node --test tools/stale-ref-sweep.test.js`
+# before a single ref is touched. Do not move logic into this file: YAML bash is the one thing in
+# this repo nothing can test.
+#
+# WHITELIST, NOT BLOCKLIST. Only `agent/*`, `worktree-*`, `wf_*` and `claude/*` are candidates.
+# `deploy/run`, `deploy/test` and `deploy/prod` are the gas package's live deploy channel
+# (gas/README.md) and `gas-canary`, `dashboard` and `research/*` are standing refs; a
+# "delete what looks merged" sweep would eventually take one of them, and that breaks a production
+# deploy. The run log names every ref it left alone, so the boundary is visible, not assumed.
+#
+# NEVER FORCE-DELETE. A ref goes only on patch-id evidence (ancestor, `git cherry` twin, or the
+# squash commit's patch-id). A branch that merely matches by SUBJECT is reported, never deleted.
+# Stranded work is named by branch on the sweep's issue — `tools/stale-ref-sweep.js` refuses every
+# force spelling before a git command runs, and the test file holds that rule.
+#
+# TOKEN: the built-in `github.token`, with the three write scopes below. No PAT: unlike the board
+# sweep (issue 215) nothing here touches an owner-level ProjectsV2 board, so a repo-scoped token is
+# exactly enough — branch delete needs `contents: write`, the sweep issue needs `issues: write`,
+# closing a superseded PR needs `pull-requests: write`.
+#
+# THE CRON IS SAFE: this job writes no commit and advances no branch, so it cannot trip the
+# dotfiles state3 lockup that made dashboard.yml's cron dangerous (issue 21). Weekly rather than
+# daily because the findings issue is meant to be read, and a daily rewrite of the same list trains
+# the owner to skip it.
+#
+# A DISPATCH WRITES, like the cron. That is issue 474's acceptance criterion executed: create a
+# throwaway branch, squash-merge it to the default branch, dispatch this workflow, and the run log
+# names the ref it deleted. An `apply` box defaulted off would make the proof two dispatches and
+# make "deleted by the next dispatch" untrue. `dry_run` is there for the opposite case — someone who
+# wants to read the verdicts before anything moves.
+
+on:
+  schedule:
+    - cron: '23 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        default: false
+        description: 'Print every verdict and change nothing (no ref deleted, no PR closed, no issue written)'
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    concurrency:
+      # Never cancel in flight: the sweep deletes refs one at a time and a cancelled run leaves
+      # half the refs gone with nothing recording which half. Queue instead.
+      group: stale-ref-sweep
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The squash-landed check reads the default branch's history and computes patch-ids over
+          # it; a shallow clone would report every squash-merged branch as stranded.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (squash-landed detection, the never-force-delete rule, the one-issue upsert)
+        run: node --test tools/stale-ref-sweep.test.js
+      - name: Sweep stale branches, worktree refs and superseded PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STALE_REF_SWEEP_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: node tools/stale-ref-sweep.js ${{ inputs.dry_run && ' ' || '--apply' }}
