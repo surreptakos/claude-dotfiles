@@ -87,7 +87,7 @@ What runs, measured 2026-09-17 under 7.4.6 in a fleet container:
 | `tests/sync-worktree-guard.tests.ps1` | `pass 12 fail 0`, exit 0 |
 | `tests/git-env-leak.tests.ps1` | `pass 16 fail 3`, exit 1 |
 | `tests/settings-defaultmode.tests.ps1` | `pass 6 fail 3`, exit 1 |
-| `tests/restore-test.ps1` | Windows-only |
+| `tests/restore-test.ps1` | Windows-only — proved on `windows-latest`, below |
 
 The two partial suites and the restore test are blocked by Windows-only code *outside* the test
 files — `$env:USERPROFILE` and directory junctions in `restore-test.ps1`, and a hard-coded
@@ -120,6 +120,21 @@ the opposite of what this job is for. And a global `url.…insteadOf` credential
 because default mode clones the *private* remote from a scratch directory, where the credential
 `actions/checkout` wrote into the checkout's local config does not reach — the reason the suite's own
 header says CI cannot clone a private remote.
+
+First run, on the branch that added the job — run 35174522573, job "restore test on Windows
+PowerShell 5.1", 6m48s, both steps green (`shell: cmd` propagates the exit code, so green *is*
+exit 0):
+
+```
+Engine identification        5.1.26100.33296
+                             C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
+  pass 80 / fail 0 / RESTORE PROVEN - 80 checks, 0 failures
+
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+  pass 83 / fail 0 / RESTORE PROVEN - 83 checks, 0 failures
+```
 
 So "a desktop still owes a run" is no longer the answer for a `.ps1` change. The desktop remains the
 only place the restore actually lands over a live `~/.claude`, but *does 5.1 still pass?* is now a
