@@ -91,6 +91,14 @@ Windows profile; nothing about it runs on Linux.
 
 ## Before trusting the tracker
 
+The audit runs itself: `.github/workflows/tracker-audit.yml` (issue 473) runs it on every issue
+event and on every push to the default branch, fails the run on drift, and names every finding in
+the run summary. The session-check engine reads that job's latest run for the current head rather
+than spawning the audit, so a cloud container and the desktop print the same line. Read the run
+first — `gh run list --workflow tracker-audit.yml --limit 1`.
+
+By hand, on a machine with `gh` (the same code the job runs):
+
 ```bash
 node tools/tracker-audit.js
 ```
@@ -134,6 +142,18 @@ script's own `closingRefs`. And from a container the `--apply` run itself can be
 auto-mode classifier as `[External System Writes]` even though the same write through the GitHub MCP
 tools goes through with no prompt (seen 2026-09-16 mid-sweep, issue 438) — a refusal there says
 nothing about the ticker.
+
+## Who undoes a closure that claimed too much
+
+`.github/workflows/closure-guard.yml` runs `tools/closure-guard.js` on the `issues: closed` event
+and reopens an issue that a **commit** closed while a box the audit would report was still unticked,
+with one comment naming the boxes and the closing PR or commit. A close made by a *person* is read as
+a decision and left alone, and so is a `wontfix` or a close as not planned. It defers to the tick
+above on the merges that job covers — it re-reads the body for up to three minutes first — so what it
+actually catches is a bare `Fixes #N` pushed straight to the default branch, which no
+`pull_request` event ever sees (issue 475). `/session-end` step 5 reads this job's latest run instead
+of re-verifying closures by hand, and `closed-with-open-boxes` in the audit is the backstop behind
+both.
 
 ## Intake
 
