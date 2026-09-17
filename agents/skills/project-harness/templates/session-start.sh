@@ -22,6 +22,8 @@
 #      SessionStart);
 #   5. record the payload version + skills fingerprint at a stable marker path so session-check
 #      can STOP with a named reason when either is missing (spec #207 user story 7);
+#      a stage that fails (clone, payload) writes a failed marker naming its cause instead
+#      (issue 483), so "marker absent" is never the only signal;
 #   6. emit ONE SessionStart additionalContext line (under 2KB, the platform cap probe #175
 #      measured) naming the installed skills and payload version.
 #
@@ -73,9 +75,79 @@ DOTFILES_REF="${BOOTSTRAP_DOTFILES_REF:-master}"
 GH_VERSION="${BOOTSTRAP_GH_VERSION:-2.86.0}"
 
 mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$STATE_DIR" "$BIN_DIR"
+SCRATCH_DIR="$(mktemp -d)"
+trap 'rm -rf "$SCRATCH_DIR"' EXIT
+
+# A named failure is a marker too (issue 483). Before this, a clone that could not authenticate
+# (`fatal: could not read Username for 'https://github.com'`, every container of 2026-09-16/17
+# whose environment carried a caveman ANTHROPIC_BASE_URL, issue 519) killed the hook under
+# `set -e` with no marker written, so session-check could only say "marker absent" and two
+# sessions read that as a platform outage. Now the failing stage writes `{"failed": true,
+# "stage", "reason"}` at the marker path, bootstrap-check.js reports the cause as its STOP, and
+# the SessionStart additionalContext carries the same line so the model reads it on prompt 1.
+# Exit 0 on purpose: Claude Code parses hookSpecificOutput only from a hook that exits 0, and a
+# non-zero exit would drop this line and leave stderr as the only trace, the old shape.
+bootstrap_fail() {
+  local stage="$1" reason="$2"
+  echo "aac-bootstrap: STOP - $stage failed: $reason" >&2
+  BOOTSTRAP_FAIL_MARKER="$MARKER_FILE" BOOTSTRAP_FAIL_STAGE="$stage" BOOTSTRAP_FAIL_REASON="$reason" \
+  BOOTSTRAP_FAIL_REPO="$DOTFILES_REPO" BOOTSTRAP_FAIL_REF="$DOTFILES_REF" \
+  BOOTSTRAP_FAIL_GH="$(command -v gh 2>/dev/null || echo missing)" \
+  python3 - <<'PYFAIL'
+import json, os, time
+e = os.environ
+marker = e['BOOTSTRAP_FAIL_MARKER']
+os.makedirs(os.path.dirname(marker), exist_ok=True)
+with open(marker, 'w') as f:
+    json.dump({
+        'failed': True,
+        'stage': e['BOOTSTRAP_FAIL_STAGE'],
+        'reason': e['BOOTSTRAP_FAIL_REASON'],
+        'dotfiles_repo': e['BOOTSTRAP_FAIL_REPO'],
+        'dotfiles_ref': e['BOOTSTRAP_FAIL_REF'],
+        'gh_path': e['BOOTSTRAP_FAIL_GH'],
+        'skills': [],
+        'failed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    }, f, indent=2)
+msg = (
+    f"AAC-BOOTSTRAP STOP: {e['BOOTSTRAP_FAIL_STAGE']} failed - {e['BOOTSTRAP_FAIL_REASON']};"
+    f" no aac payload, skills or governance hooks landed in this container;"
+    f" gh={e['BOOTSTRAP_FAIL_GH']}; git push falls back to GitHub MCP push_files"
+    f" (session-end cloud table); if git cannot read a username for github.com, check"
+    f" `env | grep ANTHROPIC_BASE_URL` (issues 483, 519)"
+)
+print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': msg}}))
+PYFAIL
+  exit 0
+}
 
 # ---------------------------------------------------------------------------
-# 1. dotfiles source: local override (BOOTSTRAP_SOURCE) or a shallow clone of master.
+# 1. install gh (pinned) into ~/.local/bin and put it on PATH for the rest of the session.
+#    Runs BEFORE the clone on purpose (issue 483): the gh tarball is a public download that
+#    passes the proxy even when credential injection is broken, so a failed clone still leaves
+#    gh on PATH for the REST fallbacks the STOP line names.
+# ---------------------------------------------------------------------------
+if [ -z "${BOOTSTRAP_SKIP_GH:-}" ] && ! command -v gh >/dev/null 2>&1 && [ ! -x "$BIN_DIR/gh" ]; then
+  tmp="$(mktemp -d)"
+  curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
+    | tar xz -C "$tmp"
+  install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" "$BIN_DIR/gh"
+  rm -rf "$tmp"
+fi
+# Idempotent against the double SessionStart (issue 166): the hook's own PATH never carries
+# BIN_DIR, so test the env file itself, not $PATH, before appending the export line.
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  env_line="export PATH=\"$BIN_DIR:\$PATH\""
+  if ! { [ -f "$CLAUDE_ENV_FILE" ] && grep -qxF "$env_line" "$CLAUDE_ENV_FILE"; }; then
+    echo "$env_line" >> "$CLAUDE_ENV_FILE"
+  fi
+fi
+export PATH="$BIN_DIR:$PATH"
+
+python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# 2. dotfiles source: local override (BOOTSTRAP_SOURCE) or a shallow clone of master.
 # ---------------------------------------------------------------------------
 if [ -n "${BOOTSTRAP_SOURCE:-}" ]; then
   DOTFILES_SRC="$BOOTSTRAP_SOURCE"
@@ -131,7 +203,12 @@ else
       echo "aac-bootstrap: rebuilding cached clone at $DOTFILES_CLONE — $_bootstrap_reclone_reason" >&2
     fi
     rm -rf "$DOTFILES_CLONE"
-    git clone --depth 1 --branch "$DOTFILES_REF" "$DOTFILES_REPO" "$DOTFILES_CLONE" >&2
+    _clone_err="$SCRATCH_DIR/clone.err"
+    if ! git clone --depth 1 --branch "$DOTFILES_REF" "$DOTFILES_REPO" "$DOTFILES_CLONE" 2>"$_clone_err" >&2; then
+      cat "$_clone_err" >&2
+      bootstrap_fail clone "git clone --depth 1 --branch $DOTFILES_REF $DOTFILES_REPO: $(tail -n 1 "$_clone_err" | tr -d '\r')"
+    fi
+    cat "$_clone_err" >&2
   fi
   DOTFILES_SRC="$DOTFILES_CLONE"
 fi
@@ -141,31 +218,8 @@ PLUGIN_MANIFEST="$PAYLOAD/.claude-plugin/plugin.json"
 HOOKS_MANIFEST="$PAYLOAD/hooks/hooks.json"
 
 if [ ! -d "$PAYLOAD/skills" ]; then
-  echo "aac-bootstrap: no marketplace/aac-skills/skills under $DOTFILES_SRC" >&2
-  exit 1
+  bootstrap_fail payload "no marketplace/aac-skills/skills under $DOTFILES_SRC"
 fi
-
-# ---------------------------------------------------------------------------
-# 2. install gh (pinned) into ~/.local/bin and put it on PATH for the rest of the session.
-# ---------------------------------------------------------------------------
-if [ -z "${BOOTSTRAP_SKIP_GH:-}" ] && ! command -v gh >/dev/null 2>&1 && [ ! -x "$BIN_DIR/gh" ]; then
-  tmp="$(mktemp -d)"
-  curl -sSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" \
-    | tar xz -C "$tmp"
-  install -m 0755 "$tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" "$BIN_DIR/gh"
-  rm -rf "$tmp"
-fi
-# Idempotent against the double SessionStart (issue 166): the hook's own PATH never carries
-# BIN_DIR, so test the env file itself, not $PATH, before appending the export line.
-if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-  env_line="export PATH=\"$BIN_DIR:\$PATH\""
-  if ! { [ -f "$CLAUDE_ENV_FILE" ] && grep -qxF "$env_line" "$CLAUDE_ENV_FILE"; }; then
-    echo "$env_line" >> "$CLAUDE_ENV_FILE"
-  fi
-fi
-export PATH="$BIN_DIR:$PATH"
-
-python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 3, 4, 5, 6. Everything else is JSON- and hash-shaped; hand it to Python once.

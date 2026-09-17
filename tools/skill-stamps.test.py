@@ -3,6 +3,7 @@
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -163,16 +164,27 @@ class Stamping(unittest.TestCase):
             self.assertEqual(ss.check_skill(a)[0], "unstamped")
 
 
+def clean_env(**overrides):
+    """This process's environment minus git's hook exports (tests/git-env-scrub-names.test.js)."""
+    env = dict(os.environ)
+    for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+              "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"):
+        env.pop(k, None)
+    env.update(overrides)
+    return env
+
+
+def git(repo, *args, date=None):
+    env = clean_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@x",
+                    GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@x")
+    if date:
+        env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+
+
 class GitDates(unittest.TestCase):
     def _git(self, repo, *args, date=None):
-        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t",
-               "GIT_COMMITTER_EMAIL": "t@x"}
-        for k in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
-                  "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"):
-            env.pop(k, None)
-        if date:
-            env["GIT_AUTHOR_DATE"] = env["GIT_COMMITTER_DATE"] = date
-        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, env=env)
+        git(repo, *args, date=date)
 
     def test_first_stamp_in_a_clean_repo_takes_the_last_two_commit_dates(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -269,6 +281,81 @@ class Cli(unittest.TestCase):
                     self.assertEqual(ss.main(["check", str(Path(tmp) / "skills")]), 0)
                 finally:
                     sys.stdout, sys.stderr = real
+
+
+class OwnerHome(unittest.TestCase):
+    """Issue 492: the CLI's --home default is the owner's home, wherever the CLI runs.
+
+    Before, it defaulted to the running user's home. aac-skills/ carries the owner's path
+    literally and the mirrors carry it as tokens, so a container (home /root) hashing against
+    its own home rotated aac-google-access and ticket-fleet on every bare `stamp`, while CI -
+    which passes the owner's home - called the untouched skills fine.
+    """
+    WORKFLOW = HERE.parent / ".github" / "workflows" / "skill-stamps.yml"
+    LITERAL = "see C:/Users/Dan/x, C:\\Users\\Dan\\y and the JSON C:\\\\Users\\\\Dan\n"
+    TOKENS = "see __USERHOME_FWD__/x, __USERHOME__\\y and the JSON __USERHOME_JSON__\n"
+
+    def test_default_is_the_home_ci_checks_with(self):
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        ci_homes = set(re.findall(r"skill-stamps\.py check \S+ --home '([^']+)'", text))
+        self.assertEqual(ci_homes, {ss.OWNER_HOME},
+                         "OWNER_HOME and skill-stamps.yml's --home must be one spelling")
+        self.assertEqual(ss.cli_home(None), ss.OWNER_HOME)
+        self.assertEqual(ss.cli_home("/elsewhere"), "/elsewhere")
+
+    def _cli(self, repo, home_dir, *args):
+        env = clean_env(HOME=str(home_dir), USERPROFILE=str(home_dir))
+        return subprocess.run([sys.executable, str(HERE / "skill-stamps.py"), *args],
+                              cwd=str(repo), env=env, capture_output=True, text=True)
+
+    def test_bare_stamp_from_a_non_owner_home_rotates_nothing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            nobody = Path(tmp) / "home" / "nobody"
+            nobody.mkdir(parents=True)
+            git(repo.parent, "init", "-q", str(repo))
+            literal = make_skill(repo / "aac-skills", "literal", extra={"ref.md": self.LITERAL})
+            tokens = make_skill(repo / "agents" / "skills", "tokens", extra={"ref.md": self.TOKENS})
+            trees = ["aac-skills", "agents/skills"]
+            # Published the CI-shaped way, with the owner's home spelled out.
+            explicit = self._cli(repo, nobody, "stamp", *trees, "--home", ss.OWNER_HOME)
+            self.assertEqual(explicit.returncode, 0, explicit.stderr)
+            git(repo, "add", ".")
+            git(repo, "commit", "-qm", "published", date="2026-09-01T10:00:00-05:00")
+            before = {d: (d / "SKILL.md").read_bytes() for d in (literal, tokens)}
+
+            # A bare stamp from a home that is not the owner's: nothing may rotate.
+            bare = self._cli(repo, nobody, "stamp", *trees)
+            self.assertEqual(bare.returncode, 0, bare.stderr)
+            self.assertEqual([l.split()[0] for l in bare.stdout.splitlines()], ["ok", "ok"],
+                             bare.stdout)
+            for d, raw in before.items():
+                self.assertEqual((d / "SKILL.md").read_bytes(), raw, f"{d.name} rotated")
+            self.assertEqual(self._cli(repo, nobody, "check", *trees).returncode, 0)
+
+            # The fixture has teeth: hashed against that home instead, the literal skill moves.
+            wrong = self._cli(repo, nobody, "stamp", *trees, "--home", str(nobody))
+            self.assertEqual(wrong.returncode, 0, wrong.stderr)
+            self.assertEqual([l.split()[0] for l in wrong.stdout.splitlines()], ["stamped", "ok"],
+                             wrong.stdout)
+
+    def test_bare_check_and_explicit_check_agree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp) / "repo"
+            nobody = Path(tmp) / "home" / "nobody"
+            nobody.mkdir(parents=True)
+            git(repo.parent, "init", "-q", str(repo))
+            make_skill(repo / "aac-skills", "literal", extra={"ref.md": self.LITERAL})
+            self.assertEqual(self._cli(repo, nobody, "stamp", "aac-skills").returncode, 0)
+            bare = self._cli(repo, nobody, "check", "aac-skills", "--json")
+            explicit = self._cli(repo, nobody, "check", "aac-skills", "--json",
+                                 "--home", ss.OWNER_HOME)
+            self.assertEqual((bare.returncode, bare.stdout), (0, explicit.stdout))
+            # The drift hint echoes an explicit --home only; a bare run needs no flag.
+            (repo / "aac-skills" / "literal" / "ref.md").write_bytes(b"edited\n")
+            drift = self._cli(repo, nobody, "check", "aac-skills")
+            self.assertEqual(drift.returncode, 1)
+            self.assertIn("python3 tools/skill-stamps.py stamp aac-skills\n", drift.stderr)
 
 
 if __name__ == "__main__":

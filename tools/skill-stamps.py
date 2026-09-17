@@ -30,12 +30,15 @@ Usage (`--home` names the OWNER's home, not the container's - see below):
     python3 tools/skill-stamps.py check aac-skills --json                  # machine-readable report
 
 Each positional argument is a directory of skills (each child holding a SKILL.md) or a single
-skill directory. `--home` defaults to the running user's home, which is only the right answer on
-the owner's own machine: anywhere else (a cloud container, CI) every skill whose text carries the
-owner's home path hashes differently, so `stamp` rotates skills nobody touched and `check` calls
-them drifted. Off that machine, pass the owner's home - the spelling CI and CLAUDE.md use (issue
-431). `check` is for SOURCE trees only: the packaged copies under marketplace/ carry
-the source stamps verbatim but their bodies are rewritten for the cloud, so their hashes differ.
+skill directory. `--home` is the home whose spelling the trees carry: aac-skills/ holds it
+literally, the claude/ and agents/ mirrors hold it as `__USERHOME__` tokens, and CI checks
+against it. It defaults to OWNER_HOME below, never to the running user's home: a container
+(home /root) or CI hashing against its own home saw every skill that carries the owner's path
+as edited, so a bare `stamp` rotated skills nobody touched and `check` called them drifted
+(issues 431, 492). The flag stays for the day the owner's home moves; `stamp` and `check` share
+the default, so a bare run of either agrees with CI. `check` is for SOURCE trees only: the
+packaged copies under marketplace/ carry the source stamps verbatim but their bodies are
+rewritten for the cloud, so their hashes differ.
 
 The git history supplies the dates for a skill stamped for the first time: the last commit that
 touched it becomes `modified`, the one before that `previous-modified`. A skill with uncommitted
@@ -62,6 +65,18 @@ BACKUP_RE = re.compile(r"\.bak(-|\.|$)", re.IGNORECASE)
 NOISE_FILES = {".DS_Store", "Thumbs.db"}
 SHA_LEN = 12
 TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+
+# The one home this repo's trees are spelled against, and the CLI's `--home` default (the
+# packager's too). CLAUDE.md's recipe and skill-stamps.yml pass the same spelling explicitly;
+# tools/skill-stamps.test.py pins this constant to the workflow's, so the three move together.
+# Change it here, in CLAUDE.md and in the workflow when the owner's home moves - and re-spell
+# the literal occurrences under aac-skills/ in the same commit, or their hashes move.
+OWNER_HOME = r"C:\Users\Dan"
+
+
+def cli_home(arg):
+    """The home the CLIs hash with: the explicit --home, else the owner's (never Path.home())."""
+    return arg if arg is not None else OWNER_HOME
 
 
 def is_noise(name):
@@ -445,10 +460,11 @@ def main(argv=None):
     ap.add_argument("paths", nargs="+", help="skill directories, or directories of skills")
     ap.add_argument("--home", default=None,
                     help="owner's home path to fold into sync tokens before hashing "
-                         "(default: this user's home)")
+                         f"(default: {OWNER_HOME}, the spelling CI checks with - never the "
+                         "running user's home)")
     ap.add_argument("--json", action="store_true", help="machine-readable report")
     args = ap.parse_args(argv)
-    home = args.home if args.home is not None else str(Path.home())
+    home = cli_home(args.home)
 
     report, bad = [], 0
     for d in skill_dirs(args.paths):
