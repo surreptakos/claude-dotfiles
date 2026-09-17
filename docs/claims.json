@@ -27,6 +27,12 @@
       "type": "expected-text",
       "doc": "CLAUDE.md",
       "expected": "`claude/`, `codex/` and `memory/` are generated. Never hand-edit them."
+    },
+    {
+      "id": "bootstrap-gate-named",
+      "type": "expected-text",
+      "doc": "CLAUDE.md",
+      "expected": "`.github/workflows/bootstrap-test.yml` is the **bootstrap gate**"
     }
   ]
 }

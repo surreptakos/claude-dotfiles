@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: "2026-09-16T22:47:11Z"
-  previous-modified: "2026-09-16T20:56:43Z"
-  revision: "18"
-  content-sha: "6b421c9f2a53"
+  modified: "2026-09-17T01:54:06Z"
+  previous-modified: "2026-09-17T00:00:35Z"
+  revision: "20"
+  content-sha: "e75e643cc987"
 ---
 
 # Project Harness
@@ -82,7 +82,7 @@ cross-repo Projects board instead of per-repo (see step 6).
    - It needs the network and an authenticated `gh`, so it lives at the command line, optionally as a CI step (a separate workflow, or a job in `dashboard.yml` kept clear of the test job) — a commit gate that needs the network breaks committing offline, which keeps it out of `.githooks/pre-commit`.
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
    - In `claude-dotfiles` itself the template is **generated** from `tools/tracker-audit.js` by `tools/build-harness-tracker-audit.js`; never hand-edit `templates/tracker-audit.js` there. Fix the repo copy, re-run the generator, and `tools/tracker-audit-template.test.js` goes green (issue 336).
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 25.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139), so close an out-of-date harness before writing code.
+9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 27.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139), so close an out-of-date harness before writing code — a repo without the v27 cloud bootstrap hook is exactly that state, and the STOP line is the only thing that says so.
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
@@ -126,17 +126,38 @@ cross-repo Projects board instead of per-repo (see step 6).
     - **First run in a repo: pass `deliver: false`** (verify-only dry run) before letting the
       fleet push branches and open PRs.
 
-16. **Cloud plugin + widened autoMode.allow** — make `.claude/settings.json` declare the marketplace,
-    the plugin AND the widened autoMode.allow ruling (Dan, 2026-09-15, issue 245), so a cloud
-    session (claude.ai/code) installs `aac-skills` at startup and any unattended session (cloud or
-    Routine master) is sanctioned to run every action its work requires — destructive and
-    irreversible included — instead of the classifier parking it. Run
-    `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`: it creates
-    the file when absent (equivalent to copying `templates/claude-settings.json`) and otherwise
-    merges four keys (`extraKnownMarketplaces`, `enabledPlugins`, `permissions.defaultMode` +
-    `permissions.allow` union, `autoMode.allow` union with the ruling prose), leaving `hooks` and
-    everything else verbatim. Then confirm it still parses:
-    `node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`.
+16. **Cloud bootstrap hook + plugin + auto-mode posture** — one command delivers all three, and it
+    is the whole cut-over of a repo to cloud sessions (issue 218, spec #207):
+    `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`.
+    - **The bootstrap hook is the one per-repo artefact** (issue 163). The script copies
+      `templates/session-start.sh` to `<repo>/.claude/hooks/session-start.sh`, marks it
+      executable, and prepends one `hooks.SessionStart` entry
+      (`$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh`, timeout 120) so it runs before any
+      hook that needs gh, the skills or the rules text. In a container
+      (`CLAUDE_CODE_REMOTE=true`) the hook shallow-clones dotfiles master, installs gh from the
+      pinned tarball onto PATH through `$CLAUDE_ENV_FILE`, copies the `aac-skills` payload into
+      `~/.claude/skills/`, merges the payload's hooks manifest into the container's user settings
+      so governance fires on prompt 1, writes the marker session-check reads, and emits one
+      sub-2KB `additionalContext` line. A local session exits 0 immediately. **No repo carries
+      skill content** — the payload comes from master at session start, and the hook body itself
+      is generated in `claude-dotfiles` from the `.claude/hooks/session-start.sh` that repo runs
+      (`tools/build-harness-bootstrap-hook.js`), so the delivered body is the exercised one.
+    - **The plugin declaration** (`extraKnownMarketplaces`, `enabledPlugins`) makes a cloud
+      session install `aac-skills` at startup where the marketplace route cannot.
+    - **The posture** (`permissions.defaultMode` `auto` + the blanket `permissions.allow`, and the
+      widened `autoMode.allow` ruling — Dan, 2026-09-15, issue 245) keeps an unattended session
+      (cloud or Routine master) sanctioned to run every action its work requires, destructive and
+      irreversible included, instead of the classifier parking it.
+    - The script creates `.claude/settings.json` when absent (equivalent to copying
+      `templates/claude-settings.json`) and otherwise merges only those keys plus
+      `hooks.SessionStart`, leaving everything else verbatim. It detects an already-wired hook by
+      the command path, never by a tag, so a repo whose entry predates this step (claude-dotfiles)
+      gains no duplicate. Then confirm it still parses:
+      `node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`.
+    - **Idempotent, and prove it: run it twice and the second run prints
+      `already delivered: ...` and leaves `git status` clean.** That is the acceptance criterion of
+      issue 218, and it is the reason the template is a byte-identical copy of the hook rather than
+      a copy with a generated banner.
     - **PRESERVE an existing `.claude/settings.json`.** Same hazard as step 12's session.json: repo
       copies carry hand-built `permissions` allowlists (aac-bill-intake, aac-contract-builder) and
       `hooks` (aac-sales-cockpit, claude-dotfiles). Never regenerate the file; the script only adds
@@ -188,6 +209,12 @@ cross-repo Projects board instead of per-repo (see step 6).
 - **Cloud plugin** — `.claude/settings.json` parses and carries `enabledPlugins["aac-skills@claude-dotfiles"]`
   plus the `claude-dotfiles` marketplace. The real test is a fresh cloud session on the repo: its
   skill list shows `aac-skills:` entries and the plugin's SessionStart hook prints its marker line.
+- **Cloud bootstrap hook** — `.claude/hooks/session-start.sh` is present and executable, one
+  `hooks.SessionStart` entry names it, and a second `add-cloud-plugin.js` run prints
+  `already delivered` with nothing to commit. It exits 0 in a local session (no
+  `CLAUDE_CODE_REMOTE`), so running it here proves nothing beyond that; the real test is one cloud
+  session on the repo quoting the `AAC-BOOTSTRAP MARKER` line, `gh --version`, one
+  `gh api repos/<owner>/<repo>` call, and session-check's `Cloud bootstrap` block reading `ok`.
 
 ## 5 — Projects board (optional but default-yes)
 

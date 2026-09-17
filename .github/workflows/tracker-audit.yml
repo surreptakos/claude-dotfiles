@@ -1,0 +1,106 @@
+name: Tracker audit
+
+# Audit the LIVE tracker for drift on every event that can create it (issue 473).
+#
+# WHY A WORKFLOW. `tools/tracker-audit.js` used to run twice per session through the session-check
+# engine, which needs `gh` and the network. A cloud container has neither — `gh` is absent — so the
+# audit exited 2 there and every session report in a container carried "the tracker audit could not
+# run — that is not a pass", at both ends, forever (aac-routines map #154). On the desktop it was
+# the opposite problem: a full live read of the tracker twice per session, whether anything had
+# moved or not. A runner has gh, a token and the git history; drift belongs on a red check with a
+# link, not in a line of a session report nobody can act on twice a day.
+#
+# THE AUDIT IS NOT WRITTEN HERE, AND NOT COPIED INTO tools/. `tools/tracker-audit.js` is the audit —
+# sixteen checks and its own `--paginate`-free page loop (issue 171, issue 230), which is what this
+# job runs. `tools/tracker-audit-job.js` is a thin runner: token refusal, job-summary mirror,
+# exit-code propagation, all under `node --test tools/tracker-audit-job.test.js`, which the first
+# step below runs. Do not move logic into this file: YAML bash is the one thing in this repo nothing
+# can test.
+#
+# TRIGGERS. `issues` covers every edit that can create drift the audit names — a new untriaged or
+# unmilestoned ticket, a close leaving acceptance boxes unticked, a body edit adding a prose blocker
+# with no native edge, a label or milestone change. `push` to the default branch covers the classes
+# that read the git log instead of the tracker (landed-but-open, deleted-subject?), which move when
+# code lands rather than when an issue does. `workflow_dispatch` is for re-reading on demand and for
+# the proof below.
+#
+# EXIT CODES ARE THE AUDIT'S: 0 clean, 1 drift, 2 could not audit. Both non-zero codes fail the run.
+# 2 is not a pass — an audit that cannot see the tracker returning green is the one failure this tool
+# exists to refuse, and its NOTE lines say which check went blind.
+#
+# WHO READS THE RESULT. The session-check engine (agents/skills/session-check/check.js) stops
+# spawning the audit and reads this job's latest run for the current default-branch head instead —
+# `tracker audit clean`, `tracker audit: drift — <url>`, or `tracker audit: no run for this head`.
+# A container and the desktop now print the same line. Renaming this file breaks that read:
+# TRACKER_AUDIT_WORKFLOW in check.js names it.
+#
+# THE `proof` INPUT is issue 473's first acceptance criterion, executed: `tools/tracker-audit-proof.js`
+# opens a throwaway issue carrying one unticked acceptance box, closes it with the PAT (a
+# GITHUB_TOKEN close raises no workflow event), requires the run that close triggers to go red with
+# a `closed-with-open-boxes` finding naming that issue, quotes the run log, and then ticks the box so
+# the tracker it just dirtied is clean again. Dispatch it once after this file reaches the default
+# branch — a workflow fires from the default branch only. It writes to the live tracker, so it never
+# runs on an event.
+
+on:
+  issues:
+    types: [opened, closed, edited, labeled, unlabeled, milestoned]
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      proof:
+        type: boolean
+        default: false
+        description: 'Run the live acceptance proof (opens and closes a throwaway issue with an unticked box) instead of the audit'
+
+permissions:
+  contents: read
+  issues: read
+  # Without this the /pulls read 403s, `prsUnavailable` fires and the audit exits 2 on a clean
+  # tracker — the audit's own NOTE says "under Actions this means the workflow grants no
+  # pull-requests: read".
+  pull-requests: read
+
+jobs:
+  audit:
+    if: github.event_name != 'workflow_dispatch' || !inputs.proof
+    runs-on: ubuntu-latest
+    concurrency:
+      # A fleet wave labels, closes and edits dozens of issues in minutes, and each run is a full
+      # live read of the tracker. Cancel in flight: only the newest read is worth having, and the
+      # engine skips a cancelled run rather than reading a verdict off one.
+      group: tracker-audit
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # landed-but-open and deleted-subject? read the default branch's whole log; a shallow
+          # checkout has none of it and both classes would report as blind (exit 2).
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (token refusal, summary naming, exit-code propagation)
+        run: node --test tools/tracker-audit-job.test.js
+      - name: Audit the live tracker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node tools/tracker-audit-job.js
+
+  proof:
+    if: github.event_name == 'workflow_dispatch' && inputs.proof
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (the proof's own verdicts)
+        run: node --test tools/tracker-audit-proof.test.js
+      - name: Close a throwaway issue with an unticked box and require the next run to go red
+        env:
+          # A PAT, for the same reason board-sweep's proof needs one: events raised by
+          # GITHUB_TOKEN do not trigger workflows, so a GITHUB_TOKEN close would prove nothing.
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN }}
+        run: node tools/tracker-audit-proof.js
