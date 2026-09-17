@@ -91,9 +91,39 @@ What runs, measured 2026-09-17 under 7.4.6 in a fleet container:
 
 The two partial suites and the restore test are blocked by Windows-only code *outside* the test
 files — `$env:USERPROFILE` and directory junctions in `restore-test.ps1`, and a hard-coded
-`powershell` spawn in `sync.ps1` — not by the engine. A cloud session should therefore run the first
-three and say so, and still ask a desktop for
-`powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1`.
+`powershell` spawn in `sync.ps1` — not by the engine. A cloud session runs the first three and says
+so; the restore test has its own venue, below.
+
+### The restore test runs on `windows-latest`, not only on the desktop (issue 454)
+
+`.github/workflows/windows-restore-test.yml` is a real Windows PowerShell 5.1 running the desktop
+command verbatim, twice — `-From worktree` for the branch's own copies of the suites, then the bare
+documented command for the default clone-origin path:
+
+```
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+```
+
+It fires on any push that touches a `.ps1`, `.githooks/pre-commit` or the workflow itself (paths, not
+every push: a Windows runner bills at 2x), and by hand on any branch:
+
+```bash
+gh api -X POST repos/surreptakos/claude-dotfiles/actions/workflows/windows-restore-test.yml/dispatches -f ref=<branch>
+gh run list --workflow windows-restore-test.yml --branch <branch> --limit 1
+gh run view <run-id> --log | tail -40
+```
+
+Two things in that file are load-bearing. `shell: cmd` at every step: the runner's default shell is
+pwsh 7, and letting it wrap the command would make pwsh the engine the suite resolves and spawns —
+the opposite of what this job is for. And a global `url.…insteadOf` credential before the run,
+because default mode clones the *private* remote from a scratch directory, where the credential
+`actions/checkout` wrote into the checkout's local config does not reach — the reason the suite's own
+header says CI cannot clone a private remote.
+
+So "a desktop still owes a run" is no longer the answer for a `.ps1` change. The desktop remains the
+only place the restore actually lands over a live `~/.claude`, but *does 5.1 still pass?* is now a
+branch-level question a cloud session answers for itself.
 
 ## Pull requests as a triage surface
 

@@ -1,0 +1,76 @@
+name: Windows restore test
+
+# The Windows half of this repo's gate, on a real Windows PowerShell 5.1 (issue 454).
+#
+# Every .ps1 here was written for the desktop's 5.1, and until this job existed the only place
+# `powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1` could be run was Dan's
+# machine: a cloud session could change a suite, prove it under pwsh 7 on Linux, and have no way
+# to show the Windows path still worked (#408 exists to ask a desktop to do it after a merge
+# pass; #362's third acceptance box asks a container for something no container could assert).
+# This job is that venue. It runs the desktop command verbatim, so the engine fallback - the
+# literal `powershell`, which is what 5.1 resolves to - is exercised by the machine the suite
+# was written for on every branch that touches a PowerShell file.
+#
+# Two runs, because they cover different halves and both are cheap once the runner is up:
+#
+#   -From worktree   what the pre-commit hook runs: the suite and the child suites it spawns come
+#                    from THIS branch, so a change to any of them is what is under test.
+#   (no -From)       the desktop's default: the parent is this branch's copy, the tree it installs
+#                    is a fresh clone of origin's default branch. That is the mode the acceptance
+#                    box names, and the one that proves nothing in the change broke the shape of
+#                    the documented command.
+#
+# The clone in default mode goes over HTTPS to a private remote, which a runner cannot do with
+# the checkout's credential alone (actions/checkout writes it into the clone's LOCAL config, and
+# the suite clones into a scratch directory). The insteadOf line below puts the job's own token
+# where any git in this job will find it. That is the whole reason the suite's own header says
+# "CI cannot clone a private remote from inside the runner".
+#
+# Paths, not every push: a Windows runner bills at 2x and nothing outside these files can change
+# what 5.1 does. workflow_dispatch is for re-running it by hand after a merge.
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [dashboard]
+    paths:
+      - 'tests/**.ps1'
+      - 'tools/**.ps1'
+      - 'lib/**.ps1'
+      - 'sync.ps1'
+      - 'install.ps1'
+      - '.githooks/pre-commit'
+      - '.github/workflows/windows-restore-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  restore-test:
+    name: restore test on Windows PowerShell 5.1
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # check 0 compares the clone's bytes against the pushed blobs
+
+      - name: Engine identification
+        shell: cmd
+        run: powershell -NoProfile -Command "$PSVersionTable.PSVersion.ToString(); (Get-Process -Id $PID).MainModule.FileName"
+
+      - name: Token for the default-mode clone of the private remote
+        shell: cmd
+        run: git config --global url."https://x-access-token:${{ github.token }}@github.com/".insteadOf "https://github.com/"
+
+      # `shell: cmd` on purpose: the command must reach the suite as the desktop types it, not
+      # re-wrapped by the runner's default pwsh 7 (which would make pwsh, not 5.1, the parent
+      # engine the suite resolves and spawns). cmd propagates the exit code, so a red suite is
+      # a red job.
+      - name: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
+        shell: cmd
+        run: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
+
+      - name: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+        shell: cmd
+        run: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
