@@ -1,0 +1,110 @@
+#!/usr/bin/env node
+/**
+ * node --test tools/harness-bootstrap-delivery.test.js
+ *
+ * Harness v26 (issue 218): the project-harness skill delivers the cloud bootstrap hook and the
+ * auto-mode posture to any repo, through `templates/add-cloud-plugin.js`. Three things can break
+ * that delivery silently, so each gets one case:
+ *
+ *   1. the skill's `templates/session-start.sh` drifting from the `.claude/hooks/session-start.sh`
+ *      this repo actually runs — the copy nobody diffs (the issue 336 lesson);
+ *   2. a fresh repo not getting the hook, the SessionStart entry or the posture;
+ *   3. a second run changing something — an acceptance criterion of the ticket, and the reason a
+ *      repo that already carries an untagged entry (claude-dotfiles) must gain no duplicate.
+ */
+'use strict';
+
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { test } = require('node:test');
+
+const REPO_ROOT = path.resolve(__dirname, '..');
+const SKILL_TEMPLATES = path.join(REPO_ROOT, 'agents', 'skills', 'project-harness', 'templates');
+const DELIVER = path.join(SKILL_TEMPLATES, 'add-cloud-plugin.js');
+const { renderTemplate, SOURCE, TARGET } = require('./build-harness-bootstrap-hook.js');
+
+function scratchRepo() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'harness-v26-'));
+}
+
+function deliver(root) {
+  const r = spawnSync(process.execPath, [DELIVER, root], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 0, `add-cloud-plugin.js exited ${r.status}: ${r.stderr}`);
+  return r.stdout;
+}
+
+function snapshot(root) {
+  const out = {};
+  for (const rel of ['.claude/settings.json', '.claude/hooks/session-start.sh']) {
+    const p = path.join(root, rel);
+    out[rel] = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  }
+  return out;
+}
+
+test('the skill template is the generated copy of .claude/hooks/session-start.sh, byte for byte', () => {
+  assert.strictEqual(
+    fs.readFileSync(TARGET, 'utf8'),
+    renderTemplate(fs.readFileSync(SOURCE, 'utf8')),
+    'template is stale — run: node tools/build-harness-bootstrap-hook.js'
+  );
+});
+
+test('a fresh repo gets the bootstrap hook, its SessionStart entry and the posture', () => {
+  const root = scratchRepo();
+  const stdout = deliver(root);
+  assert.match(stdout, /bootstrap hook installed:/);
+
+  const hook = path.join(root, '.claude', 'hooks', 'session-start.sh');
+  assert.strictEqual(fs.readFileSync(hook, 'utf8'), fs.readFileSync(TARGET, 'utf8'));
+  if (process.platform !== 'win32') {
+    assert.ok(fs.statSync(hook).mode & 0o111, 'hook must be executable');
+  }
+
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  const entries = s.hooks.SessionStart;
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].hooks[0].command,
+                     '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh');
+  assert.strictEqual(s.permissions.defaultMode, 'auto');
+  assert.deepStrictEqual(s.permissions.allow, ['Bash(*)', 'Edit', 'Write', 'mcp__github__*']);
+  assert.match(s.autoMode.allow[0], /issue 245/);
+  assert.strictEqual(s.enabledPlugins['aac-skills@claude-dotfiles'], true);
+});
+
+test('a second run changes nothing and says so', () => {
+  const root = scratchRepo();
+  deliver(root);
+  const before = snapshot(root);
+  const stdout = deliver(root);
+  assert.match(stdout, /already delivered/);
+  assert.deepStrictEqual(snapshot(root), before);
+});
+
+test('a repo that already wired the hook untagged keeps its entry, its mode and its other hooks', () => {
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude', 'settings.json'), JSON.stringify({
+    permissions: { defaultMode: 'bypassPermissions', allow: ['Bash(git *)'] },
+    hooks: {
+      SessionStart: [
+        { hooks: [{ type: 'command', command: '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh', timeout: 120 }] },
+        { hooks: [{ type: 'command', command: 'node "tools/freshness.js"' }] },
+      ],
+    },
+  }, null, 2) + '\n');
+  deliver(root);
+
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  const commands = s.hooks.SessionStart
+    .flatMap((g) => g.hooks.map((h) => h.command))
+    .filter((c) => c.includes('.claude/hooks/session-start.sh'));
+  assert.strictEqual(commands.length, 1, 'the untagged entry must not be duplicated');
+  assert.strictEqual(s.hooks.SessionStart.length, 2, 'other SessionStart hooks survive');
+  assert.strictEqual(s.permissions.defaultMode, 'bypassPermissions', 'never downgrade an explicit mode');
+  assert.ok(s.permissions.allow.includes('Bash(git *)'), 'never shrink an existing allow list');
+  assert.ok(s.permissions.allow.includes('mcp__github__*'));
+});
