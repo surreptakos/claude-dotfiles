@@ -26,6 +26,19 @@ while hunting it after it vanished:
 - The enqueue line's `content` field carries the full task prompt verbatim, so the last run
   record is the recovery copy. Decode `\n` and `\"`, strip nothing.
 
+**Superseded for Todoist Triage, 2026-09-11.** The `RemoteTrigger list` bullet above is true as of
+2026-09-10 and no longer describes today. A claude.ai/code routine "Todoist Triage Routine Dan-AAC"
+(`trig_01WgTYXvzFQQUFGFZgKQAa5m`, weekdays 13:00 UTC) was created 2026-09-11T14:06Z and is the
+runner now; `list_triggers` returns it. Todoist Triage is no longer a Cowork scheduled task. The
+recovery lesson below still stands for any task that *is* one.
+
+Two further facts about routines, verified 2026-09-17 and worth knowing before planning one:
+a routine cannot carry environment variables (the trigger API rejects `environment_variables`
+outright, because trigger configs are persisted and replayed on every fire), and an agent may
+only fire or delete a routine **it** created via `create_trigger` — one created through the HTTP
+API or the UI can be run and deleted only by the owner. Both `fire_trigger` and `delete_trigger`
+refuse otherwise.
+
 **Why:** two sessions were spent proving a negative across four registries and two accounts
 before the run record surfaced the answer.
 
