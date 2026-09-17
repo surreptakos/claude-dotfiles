@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-17T20:12:40Z'
-  previous-modified: '2026-09-17T20:06:29Z'
-  revision: '22'
-  content-sha: 77b44ba29b6a
+  modified: '2026-09-17T20:19:55Z'
+  previous-modified: '2026-09-17T20:12:40Z'
+  revision: '23'
+  content-sha: c6bff32aae2f
 ---
 
 # ticket-fleet
@@ -456,6 +456,21 @@ merge, pushes nothing and opens no PR; the ticket appears in the run result's `f
 with `conflictPaths` naming every path still in conflict. A test command that fails after an
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
+
+Resolving is not the same as having resolved. A `git add -A` stages a file whose conflict
+markers are still in it, and the commit that follows looks clean to everything that only reads
+exit codes - in run `6aab1eac` that commit reached origin on #472 with `<<<<<<<` still inside
+`agents/skills/session-end/SKILL.md`. So the last thing before any push is a **marker scan**:
+`git grep -l -E '^(<<<<<<< |>>>>>>> |=======$)' HEAD`. Nothing printed is the pass. A path
+printed stops the push - the stage re-resolves it by its class and amends the unpushed merge,
+or, when it is a real conflict, returns `blocked` with that path in `conflictPaths`.
+
+**A bad commit that already reached origin is repaired forward, never force-pushed.** The
+published history stays; the corrected merge is laid on top of it as an ordinary commit whose
+tree is the corrected one - `git reset --hard origin/<branch>`, `git read-tree -u --reset
+<corrected>`, `git commit` - which pushes as a fast-forward. That is what commit `b00db2e`
+did for #472. `git push --force`, `--force-with-lease` and a request that the orchestrating
+session force-push are all out, for the deliver stage and for anyone repairing after it.
 
 ## Branch names
 

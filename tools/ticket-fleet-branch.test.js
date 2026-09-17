@@ -879,6 +879,26 @@ for (const file of RESUME_GUARD_PAIR) {
       'the merge instructions must precede the push in the deliver prompt');
   });
 
+  // ---- Marker scan before the push (issue 514) ----
+  // Run 6aab1eac staged a conflicted file with `git add -A`, committed the merge with
+  // `<<<<<<<` still inside it, pushed that commit and then asked the orchestrating session for
+  // a force push. The scan is the gate; a follow-up commit carrying the corrected tree is the
+  // repair, and force is never the answer.
+
+  test(`${rel} deliver prompt scans the merge result for conflict markers before pushing`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /git grep -l -E '\^\(<<<<<<< /,
+      'deliver must scan the merge result for conflict markers before it pushes (issue 514)');
+    const scanIdx = prompt.indexOf('MARKER SCAN');
+    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    assert.ok(scanIdx > 0 && pushIdx > scanIdx,
+      'the marker scan must run before the push, not after it');
+    assert.match(prompt, /git read-tree -u --reset/,
+      'a marker commit already on origin is repaired by a follow-up commit whose tree is the corrected merge');
+    assert.match(prompt, /git push --force[\s\S]*?are all forbidden/,
+      'the prompt must forbid a force push outright, never offer it as the repair');
+  });
+
   test(`${rel} runCodeLane reports the conflicting paths and opens no PR when the merge is blocked`, async () => {
     const calls = [];
     const agentMock = async (_prompt, opts) => {
