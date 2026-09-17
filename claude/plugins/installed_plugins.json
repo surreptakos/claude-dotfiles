@@ -268,12 +268,21 @@
       },
       {
         "scope": "project",
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\sweet-jang-0350be",
         "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
         "version": "2026.9.161952",
         "installedAt": "2026-09-17T03:52:19.945Z",
         "lastUpdated": "2026-09-17T03:52:19.945Z",
+        "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5"
+      },
+      {
+        "scope": "project",
+        "installPath": "__USERHOME_JSON__\\.claude\\plugins\\cache\\claude-dotfiles\\aac-skills\\2026.9.161952",
+        "version": "2026.9.161952",
+        "installedAt": "2026-09-17T05:24:18.322Z",
+        "lastUpdated": "2026-09-17T05:24:18.322Z",
         "gitCommitSha": "55f83b410faeb82f071867d2ef0da46b25aff8c5",
-        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\claude-dotfiles\\.claude\\worktrees\\sweet-jang-0350be"
+        "projectPath": "__USERHOME_JSON__\\Claude\\Projects\\Meta\\aac-routines\\.claude\\worktrees\\todoist-integration-review-7da79b"
       }
     ],
     "yes@sstklen": [

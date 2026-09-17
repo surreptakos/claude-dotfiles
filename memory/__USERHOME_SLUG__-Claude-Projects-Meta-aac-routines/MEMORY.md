@@ -14,3 +14,4 @@
 - [PowerShell gh --jq output is an array](powershell-gh-jq-output-is-array.md) — join before editing or edit in Python; flattened issue #216 body 2026-09-15
 - [Pause shared-state cleanup when sessions run concurrently](pause-shared-state-when-sessions-concurrent.md) — Dan halted session-end sweeps 2026-09-16; check for live fleet PRs and branches first
 - [WRH = William Ryan Homes](wrh-william-ryan-homes.md) — Dan's home builder; WRH tasks are personal, left in the Inbox untouched
+- [aacx record corrections](aacx-record-corrections.md) — 53 projects were deliberate; 08-05 stop decision has no transcript; old todoist_sync.py is prior art for Sync tickets
