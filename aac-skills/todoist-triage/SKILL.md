@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-17T20:45:25Z"
-  previous-modified: "2026-09-16T14:50:56Z"
-  revision: "5"
-  content-sha: "78a51f71675d"
+  modified: "2026-09-17T21:08:53Z"
+  previous-modified: "2026-09-17T20:45:25Z"
+  revision: "6"
+  content-sha: "ca5148f01281"
 ---
 
 # todoist-triage
@@ -63,14 +63,14 @@ Load the two prior run records first, then the exports, then the live tail.
 
 - **Prior run records.** Read the newest `aac-forgotten-tasks` run record and the previous `todoist-triage` run record before building the queue. Run, from the `aac-routines` checkout (the `Meta/aac-routines` project — the ledger commands resolve nowhere else).
 
-  **In a cloud session, pull the record store first.** The checkout is fresh and `state/run-ledger/` is git-ignored, so the ledger directory holds nothing until something fills it; the 2026-09-17 run skipped this and reported an empty store it had never looked at (aac-routines#461). List `Documents/Claude/Run Ledger` in OneDrive with `mcp__Microsoft-365__sharepoint_folder_search`, fetch the newest `aac-forgotten-tasks-*.json` and `todoist-triage-*.json` with `mcp__Microsoft-365__read_resource` into `state/run-ledger/`, then stamp the pull — and only if it happened:
+  **Pull the record store first.** The checkout is fresh and `state/run-ledger/` is git-ignored, so the ledger directory holds nothing until something fills it; the 2026-09-17 run skipped this and reported an empty store it had never looked at (aac-routines#461). The store is the Google Drive folder `aac-run-ledger`, beside the `aacx-inbox` exports. Resolve it with `mcp__Google-Drive__search_files` (`title contains 'aac-run-ledger' and mimeType = 'application/vnd.google-apps.folder'`), list it with `parentId = '<id>'`, fetch the newest `aac-forgotten-tasks-*.json` and `todoist-triage-*.json` with `mcp__Google-Drive__read_file_content` into `state/run-ledger/`, then stamp the pull — and only if it happened:
 
   ```
   python -m aac_routines.run_ledger remote                 # store, ledger dir, sync state
   python -m aac_routines.run_ledger synced --count <files pulled>
   ```
 
-  On the PC there is nothing to pull: the ledger directory is the OneDrive folder and `remote` says `local`. Uploading this run's own record needs a write scope the connector does not yet hold, so until an administrator grants it, expect the store to carry only records written on the PC.
+  A machine that mounts the folder as its ledger directory sets `AAC_ROUTINES_RUN_LEDGER_LOCAL` instead and has nothing to pull; `remote` then says `local`. Everywhere else, no marker means not pulled — that is the default, and it is the honest one.
 
   ```
   python -m aac_routines.run_ledger prior --routine todoist-triage
@@ -138,6 +138,8 @@ Vocabulary: plain English throughout. No internal names in the body — nothing 
 ```
 python -m aac_routines.run_ledger record --input <record.json>
 ```
+
+Then upload that file to the `aac-run-ledger` Drive folder with `mcp__Google-Drive__create_file` (`contentMimeType: application/json`, `disableConversionToGoogleType: true`, so Drive keeps it as JSON instead of converting it to a Doc). The local copy dies with the session, so a record that is not uploaded did not happen as far as tomorrow's run is concerned.
 
 The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task Dan put in Wontfix. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
 
