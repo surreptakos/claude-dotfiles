@@ -150,6 +150,55 @@ def retarget_paths(body):
     return CLOUD_NOTE + "\n" + new, True
 
 
+# governance-reminder.js (issue 495). The per-turn reminder tells the model twice where the full
+# rules are: "~/.claude/CLAUDE.md", true on the PC and false in a container, which has no live
+# tree. What a container does have is the payload's own rules/global-rules.md (issue 209),
+# injected every prompt by global-rules.js as "GLOBAL RULES (part N of M ...)". The packaged copy
+# is retargeted at that file during the copy -- the live hook keeps its true text -- through a
+# RULES_FILE resolved at run time, so the reminder names an absolute path the model can open,
+# not a "${CLAUDE_PLUGIN_ROOT}" it cannot expand. Same shape as the session-gate CHECK rewire:
+# the marker strings are the mirror's exact text, and a build whose source drifted fails loudly.
+GOV_REMINDER_ANCHOR = "const os = require('os');\n"
+GOV_REMINDER_RULES_FILE = (
+    "\n"
+    "// Packaged copy (issue 495): a container has no ~/.claude/CLAUDE.md. The rules this reminder\n"
+    "// summarises ship in the plugin at rules/global-rules.md, two levels up from hooks/scripts/,\n"
+    "// and global-rules.js injects them every prompt -- so the pointers below name that file.\n"
+    "const RULES_FILE = process.env.CLAUDE_PLUGIN_ROOT\n"
+    "  ? path.join(process.env.CLAUDE_PLUGIN_ROOT, 'rules', 'global-rules.md')\n"
+    "  : path.resolve(__dirname, '..', '..', 'rules', 'global-rules.md');\n")
+GOV_REMINDER_REWRITES = [
+    ("  'GOVERNANCE (always on — full rules in ~/.claude/CLAUDE.md):',\n",
+     "  'GOVERNANCE (always on — full rules already in this context as GLOBAL RULES, from '\n"
+     "    + RULES_FILE + '):',\n"),
+    ("  '3. ASK-MATT: name which flow applies before starting work (see the map in ~/.claude/CLAUDE.md).',\n",
+     "  '3. ASK-MATT: name which flow applies before starting work (see the map in the GLOBAL RULES'\n"
+     "    + ' already in this context, from ' + RULES_FILE + ').',\n"),
+]
+
+
+def retarget_governance_reminder(text):
+    """Point the packaged governance-reminder.js at the plugin's rules file (issue 495).
+
+    `text` is the mirror script with LF newlines. Raises RuntimeError when any marker is
+    missing, so a drifted source breaks the build instead of shipping the home path."""
+    if text.count(GOV_REMINDER_ANCHOR) != 1:
+        raise RuntimeError(
+            "governance-reminder.js no longer has a single `const os = require('os');` line; the "
+            "plugin packager cannot place RULES_FILE. Update GOV_REMINDER_ANCHOR in "
+            "build-cloud-plugin.py.")
+    for marker, _ in GOV_REMINDER_REWRITES:
+        if text.count(marker) != 1:
+            raise RuntimeError(
+                "governance-reminder.js pointer text has drifted; the plugin packager can no "
+                f"longer retarget it at the payload rules file (issue 495). Missing: {marker!r}. "
+                "Update GOV_REMINDER_REWRITES in build-cloud-plugin.py.")
+    text = text.replace(GOV_REMINDER_ANCHOR, GOV_REMINDER_ANCHOR + GOV_REMINDER_RULES_FILE)
+    for marker, replacement in GOV_REMINDER_REWRITES:
+        text = text.replace(marker, replacement)
+    return text
+
+
 def split_frontmatter(text):
     """Return (frontmatter_str, body) or (None, text) when no frontmatter."""
     if not text.startswith("---"):
@@ -617,6 +666,10 @@ def main():
                     "session-gate.js CHECK default block has drifted; the plugin packager can no "
                     "longer rewire it to CLAUDE_PLUGIN_ROOT. Update the marker in build-cloud-plugin.py.")
             text = text.replace(marker_line, plugin_line)
+        elif name == "governance-reminder.js":
+            # Point the two "full rules in ~/.claude/CLAUDE.md" pointers at the payload's own
+            # rules file (issue 495); the live hook keeps the home path, which is true there.
+            text = retarget_governance_reminder(text.replace("\r\n", "\n"))
         text = _insert_after_shebang_js(text.replace("\r\n", "\n"), js_guard_call)
         # write_bytes with a fixed newline: the payload must not depend on the building OS's newline.
         (scripts_dir / name).write_bytes(text.encode("utf-8"))
