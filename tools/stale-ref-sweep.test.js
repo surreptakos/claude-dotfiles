@@ -405,6 +405,15 @@ test('session-end step 11 is scoped to the session, and hands the repo-wide swee
     'the repo-wide merged-branch pipeline belongs to the workflow now');
   assert.equal(/List foreign worktrees/.test(step11), false,
     'sweeping other sessions\' worktrees belongs to the workflow now');
-  // And the cloud table must name the job rather than a skipped step.
-  assert.match(skill, /^\| `git branch --merged`.*\(step 11\) \| .*Stale ref sweep.*stale-ref-sweep\.yml/m);
+  // And the cloud section must name the job rather than a skipped step. Issue 212 narrowed the
+  // substitution table to GraphQL-backed spellings only, and a git ref delete is not one, so the
+  // fact lives in the quirks list beneath the table instead of in a row of it.
+  const cloud = skill.slice(skill.indexOf('## In a cloud container'));
+  assert.ok(cloud.length > 500, 'cloud section not found in the skill');
+  assert.match(cloud, /stale-ref-sweep\.yml/,
+    'the cloud section names the job that owns the repo-wide sweep');
+  assert.equal(/^\|.*stale-ref-sweep\.yml/m.test(cloud), false,
+    'but not as a substitution row — a container runs step 11 the same way the desktop does');
+  assert.equal(/^\|.*git branch --merged/m.test(cloud), false,
+    'a git ref delete is not GraphQL-backed, so it does not belong in the substitution table');
 });

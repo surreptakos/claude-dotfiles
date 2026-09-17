@@ -21,8 +21,9 @@
  *                           branch's head, never audited here (issue 473)
  *   tools/canary.js         pre-release gate, run at --end
  *   a GitHub remote         open tickets by label — via gh, or the GitHub REST API when gh is
- *                           missing (cloud containers have no gh, but their egress proxy
- *                           authenticates api.github.com, private repos included)
+ *                           missing (a cloud container gets gh from the bootstrap SessionStart
+ *                           hook, and its egress proxy authenticates api.github.com — private
+ *                           repos included — for the REST fallback when it does not)
  *   ~/.claude/accounts.json which Claude account owns this repo, versus the one the session runs
  *                           under (identity.js); in the registry's auditRepo, also which desktop
  *                           routines are enabled outside their owner. Warnings only, never STOP.
@@ -62,8 +63,10 @@ const END = process.argv.includes('--end');
 const REPO = findRepoRoot(process.cwd());
 
 /** A Claude Code cloud container (claude.ai/code, Cowork). Several checks mean something
- *  different there: no gh, no clasp credential, and the machine is a downstream copy of the
- *  skills rather than where they are authored. */
+ *  different there: no GraphQL through the egress proxy, no clasp credential, and the machine is a
+ *  downstream copy of the skills rather than where they are authored. gh itself is present once
+ *  the bootstrap SessionStart hook has run (issue 163), which is why the gh checks below probe for
+ *  it rather than assuming either way. */
 const IS_CLOUD = Boolean(process.env.CLAUDE_CODE_REMOTE_SESSION_ID
   || process.env.CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE);
 
@@ -442,10 +445,13 @@ async function workChecks() {
 
 /** The tracker audit is a JOB now, not something this checker spawns (issue 473).
  *
- *  `tools/tracker-audit.js` needs `gh` and the network. A cloud container has no `gh`, so the
- *  audit exited 2 there and every session report in a container carried "the tracker audit could
- *  not run — that is not a pass" at both ends, every time; on the desktop it was a full live read
- *  of the tracker twice per session. `.github/workflows/tracker-audit.yml` runs it on every issue
+ *  `tools/tracker-audit.js` needs `gh` and the network, and both halves of the setup used to pay
+ *  for it: a container that had not run the bootstrap hook yet had no `gh`, so the audit exited 2
+ *  and the report carried "the tracker audit could not run — that is not a pass" at both ends; on
+ *  the desktop it was a full live read of the tracker twice per session. (With the bootstrap hook's
+ *  gh in place the audit does run in a container — measured 2026-09-17, exit 0 with its ProjectsV2
+ *  board checks degraded to a NOTE — which is why the job's value is one verdict per head for every
+ *  host, not a container's missing binary.) `.github/workflows/tracker-audit.yml` runs it on every issue
  *  event and every push to the default branch, and this reads that job's latest run for the head
  *  the default branch is on — the way session-end's cloud table reads Board sweep. A container and
  *  the desktop print the same line.
