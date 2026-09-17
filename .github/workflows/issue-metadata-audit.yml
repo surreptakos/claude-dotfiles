@@ -1,0 +1,70 @@
+name: Issue metadata audit
+
+# Issue 472: `/session-end` step 9 swept the WHOLE tracker on every session for two tracker-only
+# conditions — an open issue with no milestone, and an open issue whose acceptance ledger has zero
+# unticked boxes (usually prose bullets nobody converted to `- [ ]`). Both scale with the size of
+# the tracker rather than with what the session touched, and in a cloud container each session paid
+# two paged REST queries plus one edit per hit for housekeeping that has nothing to do with its own
+# branch. An `issues` event is the earliest moment either condition can appear, so it belongs here.
+# Step 9 now reads this job's latest run, the way step 6 reads Board sweep.
+#
+# THE LOGIC IS NOT WRITTEN HERE. `tools/issue-metadata-audit.js` holds it, and the step below runs
+# its unit tests before anything is written to the tracker. YAML bash is the one thing in this repo
+# nothing can test — keep this file thin.
+#
+# GITHUB_TOKEN only. Everything the job touches (issue body, milestone assignment, comments) is
+# repo-scoped, unlike the board sweep's owner-level ProjectsV2 board, so no PAT is needed and none
+# should be added. `issues: write` is the whole permission set.
+#
+# NO RECURSION. The body PATCH and the milestone assignment both fire `issues` events, but a write
+# made with GITHUB_TOKEN does not trigger a workflow run, and the script is idempotent anyway: the
+# rewrite matches nothing once the bullets are boxes, and every comment is gated on its own HTML
+# marker already being present on the issue. A second run on an unchanged tracker writes nothing.
+
+on:
+  issues:
+    types: [opened, edited, reopened, milestoned, demilestoned]
+  schedule:
+    # Daily tick, for a body edited by a path that fires no `issues` event (an import, a transfer)
+    # and for the first run after this workflow lands.
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'One issue number to audit (blank sweeps every open issue)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  # Two runs editing one issue body would race and one would overwrite the other's rewrite.
+  group: issue-metadata-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (prose-bullet conversion, milestone plan, ticked ledger, idempotency)
+        run: node --test tools/issue-metadata-audit.test.js
+      - name: Audit issue metadata (idempotent; no writes when the tracker is clean)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # An `issues` event audits that one issue; cron and a blank dispatch sweep them all.
+          ISSUE: ${{ github.event_name == 'issues' && github.event.issue.number || inputs.issue }}
+        # Exit 1 when the tracker cannot be read: a token-less run must never look like a clean
+        # sweep.
+        run: |
+          if [ -n "$ISSUE" ]; then
+            node tools/issue-metadata-audit.js --issue "$ISSUE" --apply
+          else
+            node tools/issue-metadata-audit.js --apply
+          fi
