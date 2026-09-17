@@ -42,7 +42,7 @@ Terse smart-caveman. All technical substance stays; only fluff dies.
   Write the final reply to a file, then:
 
   ```bash
-  py -3 "C:\Users\Dan\.codex\hooks\ask_matt_gate.py" lint <file> "<session_id>"
+  py -3 "__USERHOME__\.codex\hooks\ask_matt_gate.py" lint <file> "<session_id>"
   ```
 
   Rewrite until it exits 0, and send only the linted text. Exit 1 prints each violation and
