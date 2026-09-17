@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-16T22:14:27Z"
-  previous-modified: "2026-09-16T15:32:13Z"
-  revision: "7"
-  content-sha: "dd7576543e09"
+  modified: "2026-09-17T01:19:23Z"
+  previous-modified: "2026-09-16T22:14:27Z"
+  revision: "8"
+  content-sha: "19e2dbb1e402"
 ---
 
 # Finish a session
@@ -52,9 +52,22 @@ step's `gh` spelling through the substitution table in the cloud section below):
 4. **Merge the PR** with `gh pr merge <n> --squash --delete-branch`. If the merge fails because
    of branch protection, pending checks, or required reviewers, say so plainly and stop: the
    session stays short of archive-ready.
-5. **Verify closures** — for each `Closes #N` in the commit, confirm the issue closed; for any
-   other issue touched, confirm it stayed open. Reopen with a reason if a push closed one that
-   should have stayed open.
+5. **Verify closures — read the Closure guard's latest run, do not re-check by hand.** The
+   **Closure guard** job (`.github/workflows/closure-guard.yml`, issue 475) runs on every
+   `issues: closed` event: an issue that a commit or a PR merge closed while an acceptance box was
+   still unticked is reopened with a comment naming the box and the closing PR, so a `Fixes #N`
+   that closed a ticket held open for a deploy or an owner ruling has already been undone by the
+   time this step runs. Confirm and quote its latest run:
+   ```bash
+   curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/closure-guard.yml/runs?per_page=1
+   ```
+   and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any
+   other. A reopened issue is the guard working, not a fault: tick the box where it was verified
+   and close again, or say on the ticket what it is waiting for. Two things the guard does not
+   cover, so they stay here: it reads a close made by a *person* as a decision and leaves it
+   alone, and it never fires for an issue a workflow's own `GITHUB_TOKEN` closed. So for each
+   `Closes #N` in the commit confirm the issue closed, and for any other issue touched confirm it
+   stayed open — reopening with a reason if a push closed one that should have stayed open.
 6. **Move CLOSED items to Done on the project board** — issues/PRs closed off-board leave stale
    Todo/In-Progress cards that clog the board. Run:
    ```bash
@@ -374,8 +387,10 @@ reply.
 
 **Did the push close an issue that should have stayed open?** A commit message containing `Fixes #N`
 closes that issue the moment it reaches the default branch — including issues deliberately left open
-because a box still needs a deploy or an owner's ruling. Verify the state of every issue the session
-touched, and reopen with a reason. This has happened more than once.
+because a box still needs a deploy or an owner's ruling. This has happened more than once, which is
+why the Closure guard job now reopens those closures on the close event (step 5); what it cannot
+judge — a close made by a person, or one made by a workflow's own token — is still verified here, by
+reading the state of every issue the session touched.
 
 **Are the acceptance boxes honest?** In a repo where closing means *verified*, a box needing a live
 run stays unticked and the issue stays open, however finished the code is.

@@ -1,0 +1,77 @@
+name: Closure guard
+
+# Issue 475: an issue that a COMMIT closed while an acceptance box was still unticked is reopened
+# here, with one comment naming the unticked boxes and the closing PR or commit.
+#
+# WHY A CLOSE-EVENT WORKFLOW AND NOT A SESSION STEP. `Fixes #N` closes an issue the moment it
+# reaches the default branch, including one deliberately held open because a box still needs a
+# deploy, a live run or an owner's ruling. `/session-end` step 5 used to ask the assistant to
+# re-verify every closure by hand after each push, and the session-end skill records that this has
+# been missed more than once. A close event is the exact moment the check is cheap, so step 5 now
+# reads this job's latest run instead, and `tools/tracker-audit.js`'s `closed-with-open-boxes`
+# class is a backstop rather than the only catch.
+#
+# THE LOGIC IS NOT WRITTEN HERE. `tools/closure-guard.js` holds it, and the step below runs its
+# unit tests before anything is written to the tracker. YAML bash is the one thing in this repo
+# nothing can test — keep this file thin.
+#
+# A PERSON'S CLOSE IS LEFT ALONE, and so is a `wontfix` or a close as not planned — the script
+# reads the last `closed` event of the timeline and reopens only what carries a `commit_id`. That
+# is also why `pull-requests: read` is here: naming the PR a closing commit came from is a read of
+# `/commits/{sha}/pulls`. Still the built-in GITHUB_TOKEN and nothing else.
+#
+# IT DEFERS TO THE ACCEPTANCE-BOX TICK. `tick-acceptance-boxes.yml` (issue 438) wakes on the same
+# merge and ticks the boxes of every issue a merged PR closes, on the strength of the verifier
+# evidence quoted in that PR. A guard that read the body first would reopen a ticket that tick is
+# about to tick — an OPEN issue with a full ledger, which is worse drift than the one this stops.
+# So when a PR closed the issue the script re-reads the body for up to three minutes and reopens
+# only if the boxes are STILL unticked. The tick wins the merges it covers; the guard keeps the
+# ones it does not — a bare `Fixes #N` pushed straight to the default branch (no PR, so no tick
+# ever runs: issue 475's own evidence), and a merge whose tick failed. That division is a
+# consequence of 438 landing first, not a ruling; see the note in tools/closure-guard.js.
+#
+# The reopen is written with GITHUB_TOKEN, whose events trigger no workflow, so the guard cannot
+# loop on itself. By the same rule a PR merged BY a workflow's GITHUB_TOKEN raises no
+# `issues: closed` event at all — back-fill those with the `workflow_dispatch` input below.
+#
+# The script is idempotent — an issue that is already open is left alone — so the dispatch is safe
+# to replay, and is how the live acceptance proof is run once this file is on the default branch
+# (a workflow fires from the default branch only).
+
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue:
+        description: 'Issue number to re-check (replay, or the live proof of a close that already happened)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    concurrency:
+      # Per issue: two runs reopening one issue would double the comment, while closes of
+      # different issues have no reason to queue behind each other. Never cancel — a cancelled run
+      # leaves the close unexamined, which is the state this job exists to remove.
+      group: closure-guard-${{ github.event_name == 'workflow_dispatch' && inputs.issue || github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (commit close vs person close, box scope, settle window, injected-gh write path)
+        run: node --test tools/closure-guard.test.js
+      - name: Reopen the issue if a commit closed it with unticked acceptance boxes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.issue || github.event.issue.number }}
+        run: node tools/closure-guard.js --issue "$ISSUE_NUMBER" --apply
