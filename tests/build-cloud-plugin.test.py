@@ -577,5 +577,74 @@ class PluginHookDedupGuard(unittest.TestCase):
             self.assertEqual(proc.stdout, "SENTINEL_WROTE")
 
 
+# Regression guard for issue 495: the per-turn reminder must point at rules that exist where it
+# runs. The live/mirror copy says ~/.claude/CLAUDE.md, true on the PC; a container has no such
+# file, and the rules it summarises ship in this payload at rules/global-rules.md (issue 209). The
+# packager retargets the two pointers during the copy, the way session-gate.js's CHECK path is
+# retargeted, so the live hook keeps its true text and the payload copy gets its own.
+class GovernanceReminderRetarget(unittest.TestCase):
+    HOME_POINTER = "~/.claude/CLAUDE.md"
+    PLUGIN_ROOT = REPO / "marketplace" / "aac-skills"
+    PAYLOAD_SCRIPT = PLUGIN_ROOT / "hooks" / "scripts" / "governance-reminder.js"
+    MIRROR_SCRIPT = REPO / "claude" / "hooks" / "governance-reminder.js"
+
+    @staticmethod
+    def _context(script, plugin_root=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"     # no settings.json: the dedup guard never skips
+            home.mkdir()
+            env = {**os.environ, "HOME": str(home), "USERPROFILE": str(home),
+                   "CLAUDE_CONFIG_DIR": str(home / ".claude"), "PLUGIN_HOOK_GUARD_DISABLE": ""}
+            if plugin_root is None:
+                env.pop("CLAUDE_PLUGIN_ROOT", None)
+            else:
+                env["CLAUDE_PLUGIN_ROOT"] = str(plugin_root)
+            proc = subprocess.run(["node", str(script)], input="{}", capture_output=True,
+                                  text=True, env=env, timeout=15)
+        assert proc.returncode == 0, f"stderr: {proc.stderr!r}"
+        return json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_payload_copy_names_the_plugin_rules_file_not_the_home_path(self):
+        ctx = self._context(self.PAYLOAD_SCRIPT, self.PLUGIN_ROOT)
+        self.assertNotIn(self.HOME_POINTER, ctx,
+                         "payload reminder still points a container at ~/.claude/CLAUDE.md")
+        rules = self.PLUGIN_ROOT / "rules" / "global-rules.md"
+        self.assertTrue(rules.is_file(), "payload lost rules/global-rules.md (issue 209)")
+        self.assertEqual(ctx.count(str(rules)), 2,
+                         "both pointers (header and ASK-MATT line) should name the payload rules file")
+        self.assertIn("GLOBAL RULES", ctx,
+                      "reminder should say the rules are already in context (global-rules.js)")
+
+    def test_payload_copy_resolves_the_rules_file_without_plugin_root(self):
+        # A bare run of the payload script (no CLAUDE_PLUGIN_ROOT) still names a real file: the
+        # rules sit two levels up from hooks/scripts/, the same fallback global-rules.js uses.
+        ctx = self._context(self.PAYLOAD_SCRIPT)
+        self.assertNotIn(self.HOME_POINTER, ctx)
+        self.assertIn(str(self.PLUGIN_ROOT / "rules" / "global-rules.md"), ctx)
+
+    def test_mirror_copy_still_names_the_home_path(self):
+        # On the PC ~/.claude/CLAUDE.md is real and is where the rules live; the retarget is
+        # confined to the packager's copy.
+        ctx = self._context(self.MIRROR_SCRIPT)
+        self.assertEqual(ctx.count(self.HOME_POINTER), 2)
+        self.assertNotIn("global-rules.md", ctx)
+
+    def test_packager_refuses_a_drifted_source(self):
+        # Like the session-gate CHECK marker: if the mirror's pointer text moves, the build must
+        # fail loudly rather than ship a payload that silently keeps the home path.
+        body = self.MIRROR_SCRIPT.read_text(encoding="utf-8")
+        with self.assertRaises(RuntimeError):
+            bcp.retarget_governance_reminder(body.replace(self.HOME_POINTER, "~/elsewhere.md"))
+
+    def test_retarget_touches_only_the_two_pointers(self):
+        src = self.MIRROR_SCRIPT.read_text(encoding="utf-8")
+        out = bcp.retarget_governance_reminder(src)
+        # Only the two emitted strings move; the header comment keeps its history.
+        self.assertNotIn("full rules in " + self.HOME_POINTER, out)
+        self.assertNotIn("see the map in " + self.HOME_POINTER, out)
+        self.assertIn("WHY: ~/.claude/CLAUDE.md carries the full rules", out)
+        self.assertIn("RULES_FILE", out)
+
+
 if __name__ == "__main__":
     unittest.main()
