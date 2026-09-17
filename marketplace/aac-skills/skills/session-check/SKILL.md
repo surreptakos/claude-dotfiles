@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-16T18:59:09Z'
-  previous-modified: '2026-09-16T17:35:01Z'
-  revision: '13'
-  content-sha: 312a4e683e0f
+  modified: '2026-09-16T22:14:27Z'
+  previous-modified: '2026-09-16T18:59:09Z'
+  revision: '14'
+  content-sha: 4e87f582f6a8
 ---
 
 # Session check (engine)
@@ -29,6 +29,10 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end    # adds release
 Everything is universal (git), auto-detected, or read from an optional `.claude/session.json`
 (`test`, `testTimeoutMs`, `ticketLabel`, `releaseGates`, `checks`, `note`). Exit 1 reports
 STOP-level findings from a run that completed.
+
+At `--end` the test command is skipped on a committed, pushed head in a repo with
+`.github/workflows`: pre-commit ran the suite on each commit and CI runs it on the pushed head,
+so a third run learns nothing. A dirty tree, an unpushed commit, or no upstream still runs it.
 
 A `checks` entry may carry `"host": "desktop"` (or `"cloud"`). A check whose host is not this one
 is reported as `skipped (<host>-only)` and not run — a desktop-only sweep that can only exit 2 in a
