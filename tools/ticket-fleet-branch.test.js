@@ -871,12 +871,43 @@ for (const file of RESUME_GUARD_PAIR) {
       'deliver must take the default branch side for a generated-file conflict');
     assert.match(src, /node tools\/resolve-stamp-conflict\.js/,
       'deliver must classify a SKILL.md stamp conflict with the resolver script, not by eye');
+    assert.match(src, /node tools\/renumber-harness-upgrade\.js/,
+      'deliver must renumber a colliding harness upgrade row with the script, not by hand (issue 515)');
     assert.match(src, /git merge --abort/,
       'a conflict outside the two classes must abort the merge rather than guess');
     const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
     const pushIdx = src.indexOf('git push -u origin ${branch}');
     assert.ok(deliverIdx > 0 && pushIdx > deliverIdx,
       'the merge instructions must precede the push in the deliver prompt');
+  });
+
+  // ---- No push before the conflict-marker scan (issue 514) ----
+  // Run 6aab1eac's deliverer resolved a merge by staging the conflict markers, committed that,
+  // pushed it, and then asked the session for a force push. The scan is what stands between the
+  // merge commit and `git push`, and a commit that did reach origin is repaired forward.
+
+  test(`${rel} deliver prompt scans the merge result for conflict markers before pushing (issue 514)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /git grep -l -e '\^<<<<<<< ' -e '\^>>>>>>> ' HEAD/,
+      'deliver must scan the merge result for committed conflict markers, by the exact command');
+    const scanIdx = prompt.indexOf('git grep -l -e');
+    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    assert.ok(scanIdx > 0 && pushIdx > scanIdx,
+      'the marker scan must come before the push: the gate that ran before the bad commit did not catch it');
+    assert.match(prompt, /runs on EVERY path through STEP A, a clean merge included/,
+      'the scan must run on the clean-merge path too, not only after a resolved conflict');
+    assert.match(prompt, /mergeStatus:"blocked", conflictPaths:\[every path the scan listed\]/,
+      'a scan hit that cannot be resolved must block delivery with the marker-carrying paths, not push');
+  });
+
+  test(`${rel} deliver prompt repairs a pushed bad merge forward rather than force-pushing (issue 514)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /git read-tree -u --reset <corrected-commit>/,
+      'the repair must set the tree of the corrected merge onto the pushed head (the read-tree pattern of b00db2e)');
+    assert.match(prompt, /git push --force\\`, \\`git push --force-with-lease\\`, deleting the remote branch and rewriting its pushed history are out of bounds/,
+      'the prompt must forbid a force push outright - PR #504 was recovered without one and none should ever be asked for');
+    assert.doesNotMatch(prompt, /(?:run|use|do) (?:a )?(?:`?git )?push --force/i,
+      'nothing in the prompt may instruct a force push');
   });
 
   test(`${rel} runCodeLane reports the conflicting paths and opens no PR when the merge is blocked`, async () => {
