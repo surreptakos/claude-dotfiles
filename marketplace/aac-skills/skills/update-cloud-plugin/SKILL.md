@@ -79,7 +79,7 @@ Two packager routes, same output, different source of truth:
   reproducible):
 
   ```bash
-  py -3 tools/build-cloud-plugin.py --from-mirror --home '__USERHOME__'
+  py -3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
   ```
 
   `--home` substitutes the owner's path back where the mirror holds home-path tokens (see

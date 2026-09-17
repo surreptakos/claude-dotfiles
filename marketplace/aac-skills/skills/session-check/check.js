@@ -856,6 +856,17 @@ function bootstrapChecks() {
     stop(`aac-bootstrap marker at ${r.path} is unreadable — ${r.reason}`);
     return;
   }
+  if (r.state === 'failed') {
+    // Issue 483: the hook ran and a stage failed; the marker names which and why. No payload,
+    // skills or governance hooks landed. The clone case is the credential one (2026-09-17: a
+    // caveman ANTHROPIC_BASE_URL in the environment stripped github.com injection, issue 519).
+    stop(`aac-bootstrap ${r.stage} failed — ${r.reason}`);
+    note(`marker ${r.path}${r.marker.failed_at ? ` written ${r.marker.failed_at}` : ''}; no aac payload, skills or governance hooks in this container`);
+    if (r.stage === 'clone') {
+      note('if git could not read a username for github.com: `env | grep ANTHROPIC_BASE_URL` (a caveman proxy URL at environment level strips credential injection, issue 519); git push falls back to GitHub MCP push_files, see the session-end cloud table');
+    }
+    return;
+  }
   const marker = r.marker;
   const v = bootstrap.verifySkills(marker, process.env);
   if (v.state === 'skills-missing') {
