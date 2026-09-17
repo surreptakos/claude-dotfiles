@@ -410,7 +410,10 @@ test('session-end step 11 is scoped to the session, and hands the repo-wide swee
   // fact lives in the quirks list beneath the table instead of in a row of it.
   const cloud = skill.slice(skill.indexOf('## In a cloud container'));
   assert.ok(cloud.length > 500, 'cloud section not found in the skill');
-  assert.match(cloud, /step 11[\s\S]{0,400}stale-ref-sweep\.yml/);
+  assert.match(cloud, /stale-ref-sweep\.yml/,
+    'the cloud section names the job that owns the repo-wide sweep');
+  assert.equal(/^\|.*stale-ref-sweep\.yml/m.test(cloud), false,
+    'but not as a substitution row — a container runs step 11 the same way the desktop does');
   assert.equal(/^\|.*git branch --merged/m.test(cloud), false,
     'a git ref delete is not GraphQL-backed, so it does not belong in the substitution table');
 });
