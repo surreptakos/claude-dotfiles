@@ -1,11 +1,22 @@
 #!/usr/bin/env node
-// project-harness step 16: make <repo>/.claude/settings.json declare the aac-skills plugin so a
-// cloud session (claude.ai/code) installs it at startup, AND carry the widened autoMode.allow
-// ruling (Dan, 2026-09-15, issue 245) so an unattended cloud/Routine session is sanctioned to run
-// every action its work requires, destructive and irreversible included. MERGES four keys into
-// whatever the file already holds (extraKnownMarketplaces, enabledPlugins, permissions,
-// autoMode.allow) and leaves everything else byte-for-byte; creates the file when absent.
-// Idempotent: a second run changes nothing.
+// project-harness step 16: make a repo cloud-ready in one command (issue 218). Three deliveries,
+// all idempotent — a second run changes nothing:
+//
+//   1. the CLOUD BOOTSTRAP HOOK, the one per-repo artefact (issue 163, spec #207): copies
+//      `templates/session-start.sh` to <repo>/.claude/hooks/session-start.sh and wires one
+//      SessionStart entry for it. The hook body is the same file claude-dotfiles runs, generated
+//      from it by `tools/build-harness-bootstrap-hook.js` there; no repo carries skill content,
+//      because the hook installs the payload from dotfiles master at session start.
+//   2. the PLUGIN DECLARATION (extraKnownMarketplaces + enabledPlugins), so a cloud session
+//      (claude.ai/code) installs aac-skills at startup.
+//   3. the PERMISSION POSTURE: permissions.defaultMode auto + a blanket allow list, and the
+//      widened autoMode.allow ruling (Dan, 2026-09-15, issue 245), so an unattended cloud or
+//      Routine session is sanctioned to run every action its work requires, destructive and
+//      irreversible included.
+//
+// MERGES into whatever the file already holds (extraKnownMarketplaces, enabledPlugins,
+// permissions, autoMode.allow, hooks.SessionStart) and leaves everything else byte-for-byte;
+// creates the file when absent.
 //
 //   node add-cloud-plugin.js <repo-root>
 //
@@ -61,7 +72,55 @@ if (!existingAutoAllow.includes(AUTOMODE_ALLOW_RULING)) {
   settings.autoMode.allow = existingAutoAllow;
 }
 
-if (JSON.stringify(settings) === before) { console.log('already declared:', file); process.exit(0); }
-fs.mkdirSync(path.dirname(file), { recursive: true });
-fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
-console.log('declared', PLUGIN, '+ widened autoMode.allow (issue 245) in', file);
+// ---------------------------------------------------------------------------------------------
+// The cloud bootstrap hook. Body copied from the template beside this script; the SessionStart
+// entry prepended so the bootstrap runs before any hook that needs gh, the skills or the rules
+// text. Detection is by COMMAND PATH, not by a tag: claude-dotfiles' own entry predates this
+// script and carries no tag, and a second entry pointing at the same script would double the
+// bootstrap (the issue 166 shape).
+// ---------------------------------------------------------------------------------------------
+const HOOK_REL = '.claude/hooks/session-start.sh';
+const HOOK_TEMPLATE = path.join(__dirname, 'session-start.sh');
+const HOOK_ENTRY = {
+  hooks: [{
+    type: 'command',
+    command: '$CLAUDE_PROJECT_DIR/' + HOOK_REL,
+    timeout: 120,
+    statusMessage: 'Cloud container: installing the aac-skills payload...',
+  }],
+};
+
+const hookDest = path.join(root, '.claude', 'hooks', 'session-start.sh');
+const hookBody = fs.readFileSync(HOOK_TEMPLATE, 'utf8');
+const hookHad = fs.existsSync(hookDest) ? fs.readFileSync(hookDest, 'utf8') : null;
+let hookAction = 'unchanged';
+if (hookHad !== hookBody) {
+  hookAction = hookHad === null ? 'installed' : 'updated';
+  fs.mkdirSync(path.dirname(hookDest), { recursive: true });
+  fs.writeFileSync(hookDest, hookBody);
+}
+// Always ensure the executable bit: a copy landed by a tool that drops it never runs.
+try { fs.chmodSync(hookDest, 0o755); } catch (_e) { /* a filesystem with no mode bit to set */ }
+
+settings.hooks = Object.assign({}, settings.hooks);
+const sessionStart = Array.isArray(settings.hooks.SessionStart) ? settings.hooks.SessionStart : [];
+const wired = sessionStart.some((group) => {
+  const inner = group && Array.isArray(group.hooks) ? group.hooks : [];
+  return inner.some((h) => h && typeof h.command === 'string' && h.command.includes(HOOK_REL));
+});
+settings.hooks.SessionStart = wired ? sessionStart : [HOOK_ENTRY].concat(sessionStart);
+
+const settingsChanged = JSON.stringify(settings) !== before;
+if (settingsChanged) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(settings, null, 2) + '\n');
+}
+
+if (!settingsChanged && hookAction === 'unchanged') {
+  console.log('already delivered: bootstrap hook + plugin + posture in', file);
+  process.exit(0);
+}
+console.log('bootstrap hook', hookAction + ':', hookDest);
+console.log(settingsChanged
+  ? 'declared ' + PLUGIN + ' + posture (issue 245) + the SessionStart bootstrap hook in ' + file
+  : 'settings already carried the plugin, the posture and the SessionStart hook: ' + file);

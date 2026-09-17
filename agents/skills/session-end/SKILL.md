@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: "2026-09-17T02:05:05Z"
-  previous-modified: "2026-09-17T01:24:21Z"
-  revision: "10"
-  content-sha: "e5959d0373d8"
+  modified: "2026-09-17T02:24:38Z"
+  previous-modified: "2026-09-17T02:05:05Z"
+  revision: "11"
+  content-sha: "155344995ea8"
 ---
 
 # Finish a session
@@ -85,66 +85,52 @@ GraphQL-backed spellings listed in the cloud section below need a substitute):
    container where the plugin did not load and `/to-tickets` is uninvocable, read
    `marketplace/aac-skills/skills/to-tickets/SKILL.md` from a clone of `surreptakos/claude-dotfiles`
    and follow it by hand; the create call is then that skill's publish step, not ad hoc.
-8. **Refresh tracker audit** — `node tools/tracker-audit.js` (or the project's equivalent). If the
-   audit flags acceptance boxes on issues touched this session, tick them or record N/A with a
-   justification before finishing.
-9. **Audit issue metadata — every issue must live in a milestone, and no issue should sit
-   open while all its acceptance boxes are ticked.** Two failure modes the tracker audit does
-   not catch on its own; both surface with two `gh` queries the assistant runs here.
+8. **Read the tracker audit's latest run** — the audit is a job now
+   (`.github/workflows/tracker-audit.yml`, issue 473): it runs on every issue event and every push
+   to the default branch, and the session report prints its verdict for the current head
+   (`tracker audit clean`, `tracker audit: drift — <url>`, or `tracker audit: no run for this
+   head`). Open the run when it is red — its summary names every finding. If they include
+   acceptance boxes on issues touched this session, tick them or record N/A with a justification
+   before finishing. `node tools/tracker-audit.js` still reads the findings locally on a machine
+   with `gh`; nothing spawns it per session any more.
+9. **Read the Issue metadata audit job — do not re-run its queries.** Two failure modes the
+   tracker audit does not catch on its own (an open issue with no milestone, and an open issue
+   whose acceptance ledger has zero unticked boxes) used to be two whole-tracker `gh` queries run
+   here, on every session, for housekeeping that has nothing to do with the session's own branch.
+   They are now the **Issue metadata audit** job (`.github/workflows/issue-metadata-audit.yml`,
+   issue 472), which runs `tools/issue-metadata-audit.js` on every `issues` event plus a daily
+   tick: it assigns the single open milestone when the repo has exactly one, converts a
+   prose-bullet acceptance section to `- [ ]` boxes in place (leaving `## Non-goals` /
+   `## Evidence` / `## References` alone), and comments once — closing nothing — on a fully-ticked
+   open ledger. Confirm and quote its latest run:
+   ```bash
+   curl -s https://api.github.com/repos/<owner>/<repo>/actions/workflows/issue-metadata-audit.yml/runs?per_page=1
+   ```
+   Read `.workflow_runs[0].conclusion` and `.html_url`; the run's job summary lists every issue it
+   changed. A `failure` is a STOP like any other and means the sweep did NOT happen rather than
+   that the tracker is dirty — the script exits 1 when it cannot read the tracker, so a token-less
+   run never looks clean. Re-run it (`gh workflow run issue-metadata-audit.yml`, or MCP
+   `actions_run_trigger` in a container) and read the result. Do not re-run the two queries by
+   hand: that cost is what this job removed.
 
-   **The two checks in THIS step — un-milestoned open issues, and open issues whose acceptance
-   ledger has zero unticked boxes — resolve EVERY open issue that fails them, whichever session
-   caused it.** `/session-end` is the housekeeping pass for the whole tracker, so a pre-existing
-   hit is a blocker the assistant clears here: read the body, pick the best-fit milestone from the
-   open list, or convert prose bullets to `- [ ]` boxes. Ruling 2026-08-31, after a `/session-end`
-   reply routed five pre-existing hits back as questions ("which milestone for each?", "close, add
-   box, or hold?"). Escalate only when the tracker will not yield the body, or two open milestones
-   fit equally — and then still act: pick one and name the alternative in a comment.
+   **What the job deliberately leaves for a reader is work THIS pass does, for every open issue
+   carrying one, whichever session caused it.** Two comments to answer, both findable with
+   `gh search issues --repo <owner>/<repo> --state open 'issue-metadata-audit'`:
+   - a comment naming several open milestones — the job assigns nothing when more than one is
+     open. Pick the one whose title's scope decision most directly names the issue's subject and
+     run `gh issue edit <n> --milestone "<Milestone N — Title>"`, leaving a one-line comment on the
+     ticket if the second choice is close.
+   - a close-or-add-box comment on a fully-ticked open ledger. **Close** it with a comment naming
+     what proved each box, if the work genuinely landed; or **add the missing box** if a live run,
+     deploy or owner sign-off is still required. A ticked ledger with no real acceptance box is
+     dishonest — that pattern closed real issues prematurely before the tracker audit was written.
+     **Leave open and say why** in one line only when the hold-open reason is genuine and not yet
+     captured on the issue.
 
-   a. **Un-milestoned open issues.** Every open issue must be assigned to a milestone — the
-      milestone is what maps a ticket to a scope decision, and an un-milestoned ticket is
-      invisible to the milestone view the owner works from. Run:
-      ```bash
-      gh issue list --state open --limit 1000 --json number,title,milestone \
-        --jq '[.[] | select(.milestone == null) | {n: .number, t: .title}]'
-      ```
-      For each result: list open milestones with
-      `gh api repos/OWNER/REPO/milestones --jq '.[] | select(.state == "open") | {n: .number, t: .title}'`,
-      read the issue body, and assign the best-fit milestone with
-      `gh issue edit <n> --milestone "<Milestone N — Title>"`. Ambiguity between two open
-      milestones is resolved by picking the one whose title's scope decision most directly
-      names the issue's subject; leave a one-line comment on the ticket if the second choice
-      is close. Skip this check for repos that deliberately do not use milestones (state so
-      out loud the first time it comes up in a session).
-
-   b. **Delivered-but-open issues.** An open issue whose `## Done when` / `## Acceptance` /
-      `## Acceptance criteria` section has zero unticked boxes is either finished-and-forgotten
-      or held open on a signal that is not written down. Run this expression against `gh issue
-      list --json number,title,body --jq <expr>` (jq strings need `\\[` for a literal `[`, and
-      `scan()` must be wrapped in `[...]` before `length` because it streams matches by default):
-      ```jq
-      .[]
-      | select(.body != null and (.body | test("(?m)^##+ (Done when|Acceptance criteria|Acceptance)$")))
-      | select((.body | [scan("(?m)^[- \t*]*\\[ \\][ \t]")] | length) == 0)
-      | {n: .number, t: .title}
-      ```
-      For each hit, do one of exactly three things — no fourth. **The frequent case is a
-      prose-bullet acceptance (`- foo` instead of `- [ ] foo`), which reads as "zero unticked
-      boxes" to the scanner even though the work has not started.** That is not a real
-      delivered-but-open — convert the prose bullets to unchecked boxes in the SAME `/session-end`
-      pass. `gh issue view N --json body --jq .body > body.md`, rewrite the Acceptance section's
-      `- ` bullets to `- [ ] ` (leave `## Non-goals` / `## Evidence` / `## References` sections
-      alone — those are prose lists, not acceptance), then `gh issue edit N --body-file body.md`.
-      Re-run the scan to confirm zero hits before `Ready to archive`.
-      - **Close** with a comment naming what proved each box, if the work genuinely landed
-        this session or earlier.
-      - **Add the missing box** to the body if a live-run, deploy, or owner sign-off is still
-        required, OR if the Acceptance section is prose bullets that need converting to `- [ ]`
-        boxes (see paragraph above; the two cases share a fix). A ticked ledger without a
-        real acceptance box is dishonest — that pattern closed real issues prematurely before
-        the tracker audit was written.
-      - **Leave open and say why** in one line to the user, if the hold-open reason is
-        genuine but not captured on the issue AND the box conversion above does not apply.
+   Neither is a blocker: reading the body settles both, and routing them back as questions is what
+   the 2026-08-31 ruling forbids (a `/session-end` reply asked "which milestone for each?" and
+   "close, add box, or hold?" about five pre-existing hits). Escalate only when the tracker will
+   not yield the body — and then still act: pick one and name the alternative in a comment.
 
 10. **Clean up the worktree** — if the session ran in a git worktree and the branch has landed:
    `git worktree remove` refuses to remove the current worktree, so use the `ExitWorktree` tool
@@ -247,28 +233,37 @@ it into `~/.local/bin` on every AAC repo (issue 163; 2.86.0, measured 2026-09-17
 lacks is **GraphQL**: the egress proxy answers `api.github.com/graphql` with `HTTP 403: GitHub
 GraphQL is not available from Claude Code sessions` whatever the token carries. `gh issue`, `gh pr`
 and `gh repo view --json` all go through gh's GraphQL client, so each exits 1, while every
-`gh api repos/<owner>/<repo>/…` REST spelling exits 0. **This table is that list and nothing
-else** — a step whose command is not here runs verbatim, gh and all (issue 212):
+`gh api repos/<owner>/<repo>/…` REST spelling exits 0. **This table is that list and nothing else**
+— a step whose command is not here runs verbatim, gh and all (issue 212):
 
 | The GraphQL-backed spelling | In a container use |
 | --- | --- |
 | `gh pr create` | GitHub MCP `create_pull_request`, or REST `gh api --method POST repos/<owner>/<repo>/pulls -f head=<branch> -f base=main -f title=… -F body=@body.md` |
 | `gh pr merge --squash --delete-branch` | MCP `merge_pull_request` (method squash). The branch delete is step 11a's business, with git |
-| `gh issue list --json … --jq …` | REST `gh api "repos/<owner>/<repo>/issues?state=open&per_page=100&page=N"` — it carries `milestone`, so it drives step 9a; MCP `search_issues` also returns milestone, `list_issues` did not on 2026-09-14 (claude-dotfiles#154 evidence) |
-| `gh issue view <n> --json body`, `gh issue edit <n> --body-file` (step 9b) | REST `gh api repos/<owner>/<repo>/issues/<n> --jq .body > body.md`, then `gh api --method PATCH repos/<owner>/<repo>/issues/<n> -F body=@body.md`; MCP `issue_write` (update) does the same and takes the body inline |
+| `gh issue list --json … --jq …` | REST `gh api "repos/<owner>/<repo>/issues?state=open&per_page=100&page=N"` — it carries `milestone`, so it answers a milestone question; MCP `search_issues` also returns milestone, `list_issues` did not on 2026-09-14 (claude-dotfiles#154 evidence) |
+| `gh issue view <n> --json body`, `gh issue edit <n> --body-file` | REST `gh api repos/<owner>/<repo>/issues/<n> --jq .body > body.md`, then `gh api --method PATCH repos/<owner>/<repo>/issues/<n> -F body=@body.md`; MCP `issue_write` (update) does the same and takes the body inline |
 | `gh issue edit <n> --milestone` | MCP `issue_write` (update), or REST `gh api --method PATCH repos/<owner>/<repo>/issues/<n> -F milestone=<number>` |
 | `gh pr list --state open` | REST `gh api "repos/<owner>/<repo>/pulls?state=open&per_page=30"`, or MCP `list_pull_requests` with `perPage` 30 or less — 100 overflows the tool-result limit and spills to a file |
 | `gh pr close <n> --comment` | MCP `update_pull_request` (state closed) + `add_issue_comment` |
-| `sweep-closed-to-done.js --apply` (step 6) | ProjectsV2 is GraphQL-only, so nothing runs by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `gh api "repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1"` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other, and the run log says which of three causes it is: `PROJECT_TOKEN` missing or expired; a board with no `Status`/`Done` option; or `GraphQL: API rate limit already exceeded for user ID <id>`, the PAT's own hourly bucket drained by a concurrent fleet wave — that one is transient, so re-dispatch the job (`workflow_dispatch`, `proof` false) after the bucket resets and read THAT run rather than passing over a red one |
+| `sweep-closed-to-done.js --apply` (step 6) | ProjectsV2 is GraphQL-only, so nothing runs by hand — the **Board sweep** job (`.github/workflows/board-sweep.yml`, issue 216) runs that same script on every issue and PR close plus a daily tick. Confirm and quote its latest run: `gh api "repos/<owner>/<repo>/actions/workflows/board-sweep.yml/runs?per_page=1"` and read `.workflow_runs[0].conclusion` and `.html_url`. A `failure` there is a STOP like any other, and the run log says which of three causes it is: `PROJECT_TOKEN` missing or expired; a board with no `Status`/`Done` option; or `GraphQL: API rate limit already exceeded for user ID <id>`, the PAT's own hourly bucket drained by a concurrent fleet wave — that one is transient, so re-dispatch the job (`workflow_dispatch`, `proof` false) once the bucket resets and read THAT run rather than passing over a red one |
 
 Everything else answers through `gh api repos/<owner>/<repo>/…`; the session's egress proxy
-authenticates api.github.com, private repos included, so no `curl` and no token of your own is
-needed. `gh run list` and `gh api …/actions/…` are REST and work, which is how the job rows above
-and in step 11c are read. Git itself (push, fetch) works normally through the same proxy.
+authenticates api.github.com (a plain `curl` to it is authenticated too), private repos included,
+so no token of your own is needed. `gh run list` and `gh api …/actions/…` are REST and work, which
+is how every job row the sequence reads — Closure guard, Issue metadata audit, Tracker audit, Stale
+ref sweep, Board sweep — is quoted. Git itself (push, fetch) works normally through the same proxy.
 
-Four container quirks that are NOT GraphQL, so they are not in the table above. Each is said out
-loud **and filed** — a ticket, or a comment on the ticket that owns the step (rule above); a
-container's missing instrument is the commonest way a step ends up living only in the reply:
+**Steps 8, 9, 11 and the audits are NOT in the table**, because they are not substitutions: each is
+a GitHub Actions job now for the desktop as much as for a container — Tracker audit
+(`tracker-audit.yml`, issue 473), Issue metadata audit (`issue-metadata-audit.yml`, issue 472),
+Stale ref sweep (`stale-ref-sweep.yml`, issue 474). Every session reads the run its step names, so
+neither the audit nor the repo-wide `git branch --merged` / ref-delete sweep is handed on from a
+container, and neither earns a `ready-for-local-agent` ticket. A session still deletes its own
+branch, with git.
+
+Four container quirks that are NOT GraphQL either. Each is said out loud **and filed** — a ticket,
+or a comment on the ticket that owns the step (rule above); a container's missing instrument is the
+commonest way a step ends up living only in the reply:
 
 - **`gh api --paginate` dies on page 2** with `Numeric-ID repository paths (repositories/{id}/...)
   are not supported through this proxy` (HTTP 403) — gh follows the Link header, which is spelled
@@ -276,18 +271,16 @@ container's missing instrument is the commonest way a step ends up living only i
 - **A bash `gh api --method POST|PATCH` is refused intermittently by the session's own auto-mode
   classifier** (`[External System Writes]`), not by GitHub. Measured 2026-09-17 in one container:
   the `dependencies/blocked_by` POST the tracker audit prints as its own fix ran first try, a
-  `PATCH …/issues/<n>` in a compound command was refused and the identical command alone ran a
+  `PATCH …/issues/<n>` inside a compound command was refused and the identical command alone ran a
   moment later. Retry once; if it refuses again, every write the sequence needs has a GitHub MCP
   tool (`issue_write`, `add_issue_comment`, `merge_pull_request`) and those are not classified.
-- **Step 6 (board sweep) and step 11 (the repo-wide `git branch --merged` / ref-delete sweep)** are
-  not a container's problem any more: each is a GitHub Actions job — `board-sweep.yml` (issue 216)
-  and the **Stale ref sweep**, `stale-ref-sweep.yml` (issue 474) — so read the job's verdict as its
-  step says and file no `ready-for-local-agent` ticket for either. A session still deletes its own
-  branch, with git, which works normally through the proxy. Neither is a table row: git is not
-  GraphQL, and the board sweep's row is there for the ProjectsV2 read underneath it.
+- **A repo whose plugin payload predates the session** reads as drift that no session can fix: the
+  harness check compares the repo's marker against the `project-harness` copy this session loaded,
+  and a container's copy is a snapshot taken at bootstrap. A `!!` naming a harness version BELOW
+  the repo's own marker on a clean master is that, not an edited marker — say which it is by
+  reading `marketplace/aac-skills/skills/project-harness/templates/harness-version.md` on master.
 - **The cloud-plugin staleness check** is skipped in containers: the container IS the downstream
-  copy. The tracker audit is NOT skipped — it shells out to gh and runs, exiting 0 or 1; only its
-  ProjectsV2 board checks degrade, and they say so with a `NOTE` naming GraphQL rather than passing.
+  copy.
 
 **Handing on** means one thing throughout: file or update a `ready-for-local-agent` ticket that
 names the step and what is left of it. A desktop session can run all of it, so `ready-for-human`
@@ -316,7 +309,8 @@ older "yours versus theirs" reading). The audit prints the fix beside each findi
 cross-repo `#N` as `owner/repo#N`, tick or justify an open box on a closed issue, add the missing
 triage label. A finding that needs an owner ruling gets a `ready-for-human` ticket.
 
-**Scope.** Step 9's two checks and this rule together sweep the WHOLE tracker, origin irrelevant:
+**Scope.** The Issue metadata audit job (step 9) and this rule together sweep the WHOLE tracker,
+origin irrelevant:
 `/session-end` is the housekeeping pass, and a hit left for "the session that caused it" is a hit
 the next session re-investigates from scratch. Advisories count too: a `landed-but-open?` line is
 resolved by reading the named commit, then closing the issue or commenting on what is left (ruling

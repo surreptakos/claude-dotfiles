@@ -94,6 +94,16 @@ text-mode writer's re-serialization (Claude Code at session start, VS Code defau
 5.1 `Get-Content` + `Set-Content`) is byte-identical to the blob and `git status` stays clean. Do
 not "normalize" them to LF: an LF blob reopens the phantom ` M` on a fresh worktree.
 
+## The bootstrap gate
+
+`.github/workflows/bootstrap-test.yml` is the **bootstrap gate**: the one end-to-end check on what
+a cloud container gets. `tests/bootstrap-test.sh` runs `.claude/hooks/session-start.sh` into an
+empty home and asserts the payload's skills, the governance hook entries merged into user settings,
+the rules text, gh on the PATH the hook exported, and session-check exit 0 with its payload-version
+line. Any change to the bootstrap hook, the plugin payload or session-check adds an assertion there.
+`tests/bootstrap-test.sh --fault missing-hook-entry` must exit non-zero — CI runs that too, because
+a gate never seen to fail is not known to work.
+
 ## Testing a change to the scripts
 
 Run the restore test. It is the only thing here that checks the *pull* half end to end:
@@ -150,8 +160,9 @@ Version in `docs/agents/harness-version.md`.
   artifact — run the script locally to check output, then discard it.
 - `.githooks/pre-commit` runs the restore test before every commit. Activate in a fresh clone with
   `git config core.hooksPath .githooks`.
-- Tracker conventions: `docs/agents/issue-tracker.md`. Run `node tools/tracker-audit.js` before
-  trusting the tracker — exit 2 means it could not audit, which is not a pass.
+- Tracker conventions: `docs/agents/issue-tracker.md`. The audit is a job — `tracker-audit.yml`
+  runs it on every issue event and push, and the session report reads that run; exit 2 means it
+  could not audit, which is not a pass.
 - `node tools/claude-md-lint.js <CLAUDE.md>` checks a CLAUDE.md against the concision paradigm
   (would removing this line cause a mistake?). Findings are prompts to ask that question, not
   verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one. The restore

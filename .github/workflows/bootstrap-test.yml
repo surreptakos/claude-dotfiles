@@ -1,0 +1,57 @@
+name: bootstrap gate
+
+# The one end-to-end gate on what a fresh claude.ai/code container gets (issue 211, spec #207
+# testing seam 1). `tests/bootstrap-test.sh` starts from an EMPTY home, sets CLAUDE_CODE_REMOTE,
+# runs `.claude/hooks/session-start.sh`, and asserts the state a governed session depends on:
+# the payload's skills on disk, the spec's governance hook entries merged into user settings,
+# the global rules text, gh reachable through the PATH the hook exported, and the installed
+# session-check exiting 0 with its payload-version line (quoted in the log).
+#
+# It replaces the CI premise recorded on #174 (closed 2026-09-14: nothing ran the restore test)
+# and, when #213 retires the Windows venue, the restore test itself. Every change to the
+# bootstrap hook, the plugin payload or session-check adds an assertion to that script.
+#
+# SECOND STEP, on purpose. A gate nobody has seen fail is a gate nobody knows works, so the job
+# also runs the same script with one governance hook entry removed from the payload and requires
+# a non-zero exit. That is issue 211's acceptance criterion 2, re-proved on every push rather
+# than quoted once from a scratch branch. Reproduce it locally with:
+#
+#   tests/bootstrap-test.sh --fault missing-hook-entry
+#
+#     fault injected: removed PreToolUse entry "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/...
+#     FAIL  1 governance hook entr(y/ies) missing from .../.claude/settings.json:
+#           ask-matt gate (pre-tool)
+#     bootstrap gate: FAIL (1 check(s))        # exit 1
+#
+# Linux only, and that is the point: the bootstrap hook is bash and only ever runs in a
+# container. `timeout-minutes: 3` holds the runtime criterion; the gate itself takes seconds,
+# the rest is the checkout and the pinned gh download.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [dashboard]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: bootstrap from a clean home
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Bootstrap gate
+        run: tests/bootstrap-test.sh
+      - name: Fault injection — a missing governance hook entry must turn this red
+        run: |
+          if tests/bootstrap-test.sh --fault missing-hook-entry; then
+            echo "::error::the gate passed with a governance hook entry removed from the payload"
+            exit 1
+          fi
+          echo "the gate fails when the payload loses a hook entry, as it must"
