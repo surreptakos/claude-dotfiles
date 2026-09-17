@@ -448,6 +448,18 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state fr
   }
 });
 
+// Issue 489: ~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten
+// by the PARENT session, so it is always newer than the implementer's first commit - without this
+// exclusion no attempt can pass the rail, and a rail that always fires teaches the next verifier
+// to wave it through.
+test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from the live-tree sweep (issue 489)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
+    `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/sessions alongside hook-state and projects`);
+  assert.match(src, /~\/\.claude\/sessions\/<pid>\.json is the CLI's own process registry, heartbeat-rewritten/,
+    `${FLEET_SCRIPT_REL} must state why ~/.claude/sessions is excluded so the verifier does not re-derive it`);
+});
+
 // ---- Three-copies gone (issue 138) ----
 // The consolidation ticket deletes the pre-plugin copies. A regression that re-adds one
 // silently re-opens the drift the plugin move was meant to close.
