@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: '2026-09-16T23:12:18Z'
-  previous-modified: '2026-09-16T15:32:13Z'
-  revision: '7'
-  content-sha: 70a774c1dfe1
+  modified: '2026-09-17T01:19:38Z'
+  previous-modified: '2026-09-16T23:12:18Z'
+  revision: '8'
+  content-sha: 3148c12653ef
 ---
 
 # Finish a session
@@ -182,9 +182,13 @@ step's `gh` spelling through the substitution table in the cloud section below):
     never does — patch-id evidence or nothing — and neither does a session: stranded work belongs on
     the sweep's issue, by branch name, with its unique commits.
 
-12. **Re-run the end check** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end --refresh` — and
-    report the fresh result. Every STOP line must be resolved before the `Ready to archive` line
-    is emitted.
+12. **Re-run the end check** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end` — and report
+    the result. Add `--refresh` only when steps 1–11 committed, pushed, or otherwise moved the
+    tree; otherwise the report the hook ran on this prompt is still the state of the tree and is
+    reused inside its five-minute cooldown. A refresh on a clean, pushed head costs git and
+    tracker calls, not a test run: the engine skips the suite there, because pre-commit ran it
+    on each commit and CI runs it on the pushed head. Every STOP line must be resolved before
+    the `Ready to archive` line is emitted.
 
 If any step in 1–11 fails or is blocked for a reason the assistant cannot resolve, name the
 blocker, **file it as a ticket — `ready-for-agent` when another session can finish it,
