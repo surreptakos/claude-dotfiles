@@ -1033,6 +1033,66 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(prompt, /blockedReason:"push failed: <the git output of all three commands, VERBATIM>"/,
       'a failed push must come back with the git output verbatim, not a paraphrase');
   });
+
+  // ---- A refused merge does not lose the delivery (issue 544) ----
+  // Run 6aac3d3b ended with no PR for #489 or #493: the auto-mode classifier refused the pre-push
+  // `git merge` in each lane and both deliverers returned {pushed:false, prUrl:""} over a branch
+  // that was verified and complete. The refusals are non-deterministic on byte-identical retries,
+  // so the stage retries once and then delivers without the merge.
+
+  test(`${rel} deliver prompt retries a classifier-refused merge once, byte-identical (issue 544)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /re-issue it ONCE, byte-identical/,
+      'the deliverer must be told to re-issue a refused command once with the same spelling - that is what usually goes through');
+    assert.match(prompt, /If the classifier REFUSES that merge command, re-issue it byte-identical once \(A0\); if the retry is refused as well, go to A8/,
+      'the merge step itself must name the retry and the fallback, not only the general rule');
+    assert.match(prompt, /"Modify Shared Resources".*"Interfere With Workloads"/,
+      'the prompt must name the classifier categories the waves have seen, so a refusal does not read as a rule violation');
+    assert.match(prompt, /never as a sign that you are doing something forbidden and never as a reason to stop the delivery/,
+      'the prompt must say outright that a refusal is not a rule violation');
+  });
+
+  test(`${rel} deliver prompt delivers without the merge when it is refused twice (issue 544)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /A8\. DELIVER WITHOUT THE MERGE/,
+      'a twice-refused merge must have its own step, reached from A1');
+    assert.match(prompt, /go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths \[\] and blockedReason holding the refusal text VERBATIM/,
+      'the unmerged path must push, open the PR and record the refusal text verbatim');
+    assert.match(prompt, /STEP B - push and open the PR \(only when STEP A ended clean, resolved, or unmerged-by-classifier\)/,
+      "STEP B's gate must admit the unmerged path, or A8 would hand over to a step that refuses to run");
+    assert.match(prompt, /Not merged with \$\{defaultBranch\}: classifier refusal/,
+      'the PR body must carry the refusal under a heading a reviewer can act on');
+    assert.match(prompt, /NEVER end this stage with \{pushed:false, prUrl:""\} while the branch is verified/,
+      'the rule that a verified branch always reaches origin and a PR must be stated, not implied');
+    assert.match(prompt, /mcp__github__create_pull_request/,
+      'a refused PR call has the MCP route as its fallback (issue 245 evidence), so the refusal cannot end the delivery either');
+    const src = fs.readFileSync(file, 'utf8');
+    assert.match(src, /enum: \['clean', 'resolved', 'blocked', 'unmerged-by-classifier'\]/,
+      'the DELIVERED schema must accept the status the prompt asks for, or the deliverer cannot return it');
+  });
+
+  test(`${rel} runCodeLane keeps a delivery whose merge the classifier refused (issue 544)`, async () => {
+    const refusal = 'Permission denied to execute git merge by Claude Code auto mode classifier - Modify Shared Resources';
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-544-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) {
+        return { pushed: true, prUrl: 'https://github.com/x/y/pull/544', mergeStatus: 'unmerged-by-classifier', conflictPaths: [], blockedReason: refusal };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 544, title: 't', criteria: '' }, 0);
+    assert.equal(result.done, true, 'an unmerged-by-classifier delivery is a delivery, not a blocked merge');
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/544', 'the PR the deliverer opened must reach the run result');
+    assert.equal(result.deliveryFailure, null, 'a delivery with a PR is not a delivery failure');
+    assert.deepEqual(result.conflictPaths, [], 'a refused merge conflicted with nothing - it never ran');
+    assert.match(result.mergeNote, new RegExp(refusal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+      'the run result must carry the refusal text, so the orchestrator merges master instead of re-implementing');
+    assert.ok(logs.some((m) => /WITHOUT the pre-push merge/.test(m)),
+      'the log must say the PR still owes the default-branch merge');
+  });
 }
 
 // ---- The open-PR check runs once, in the Scout phase, before wave selection (issue 430) ----
