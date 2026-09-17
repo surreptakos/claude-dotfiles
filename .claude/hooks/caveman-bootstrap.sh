@@ -36,11 +36,12 @@
 #     ANTHROPIC_BASE_URL into ~/.claude/settings.json, and a cloud session ignores that: the host
 #     sets ANTHROPIC_BASE_URL in the process environment and settings do not override it (probed
 #     2026-09-16: a nested `claude -p` routed through the proxy only when the variable was forced in
-#     its environment). Routing is therefore an environment-level decision - set
-#     ANTHROPIC_BASE_URL=http://127.0.0.1:8787/w/claude and _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL=1
-#     in the claude.ai environment's variables - and this hook starts the proxy early enough for
-#     that to work. It never sets the variable itself: a route with no proxy behind it is a dead
-#     session, and a hook that can fail on the network must not hold that switch.
+#     its environment). Do NOT set ANTHROPIC_BASE_URL / _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL in
+#     the claude.ai environment's variables either: tried 2026-09-17, it strips the platform's
+#     github.com credential injection and every container loses gh, the dotfiles clone and the
+#     governance hooks (issues 483, 519). This hook starts the proxy for nested callers that set
+#     the variable themselves; it never sets it for the session (a route with no proxy behind it
+#     is a dead session, and a hook that can fail on the network must not hold that switch).
 #   - copy the cavecrew agents into ~/.claude/agents/: the agent registry is read before
 #     SessionStart hooks run, so they would resolve only from the second session on (issue 339).
 #     The cavecrew skill is installed; its subagents are not.
