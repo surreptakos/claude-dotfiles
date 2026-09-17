@@ -2,10 +2,10 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: '2026-09-17T19:14:13Z'
-  previous-modified: '2026-09-17T02:24:38Z'
-  revision: '12'
-  content-sha: 70c718d12812
+  modified: '2026-09-17T20:19:59Z'
+  previous-modified: '2026-09-17T19:14:13Z'
+  revision: '13'
+  content-sha: 7f9b75721293
 ---
 
 # Finish a session
@@ -78,7 +78,9 @@ GraphQL-backed spellings listed in the cloud section below need a substitute):
    node ${CLAUDE_PLUGIN_ROOT}/skills/session-end/sweep-closed-to-done.js --apply
    ```
    Zero configuration: auto-discovers every open ProjectsV2 board linked to the repo's `origin`
-   remote and sweeps each. No-op if no linked board has a `Status` field with a `Done` option.
+   remote and sweeps each. A linked board it cannot sweep - no `Status`/`Done` option, or a `gh`
+   call against it that failed - exits non-zero with gh's own stderr on the line (issue 409); a
+   run that moved nothing is never green.
    Dry-run without `--apply` first when unsure. Requires `gh auth refresh -s project`. In a
    container that command has nowhere to run — but the step is not skipped there any more: the
    same script runs as a GitHub Actions job, so take the row for it in the cloud table below.

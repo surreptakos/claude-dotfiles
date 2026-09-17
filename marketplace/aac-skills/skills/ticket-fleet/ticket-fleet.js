@@ -76,7 +76,9 @@ const cfg = Object.assign({
   // the PR opens mergeable instead of landing the same generated-file conflict on the session
   // once per PR. Only two conflict classes are resolvable without judgment: a path the packager
   // generates, and a SKILL.md conflict confined to the four-key metadata stamp block. Anything
-  // else stops delivery for that ticket.
+  // else stops delivery for that ticket. A marker scan of the merge result gates the push either
+  // way, and a bad commit that already reached origin is repaired by a follow-up commit carrying
+  // the corrected tree, never by a force push (issue 514).
   generatedPaths: ['.claude-plugin/marketplace.json', 'marketplace/**'],
   // Shell commands that re-stamp and rebuild the generated files after such a merge. null means
   // "read them out of CLAUDE.md" - this repo names both in its 'Skill stamps' section, and a
@@ -647,8 +649,8 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
-  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, or the test command failed after the merge - nothing was pushed and no PR was opened' },
-  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U) plus any path the stamp resolver refused; empty otherwise' },
+  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened' },
+  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp resolver refused, and any path the pre-push marker scan found conflict markers in; empty otherwise' },
   blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail' },
 } }
 
@@ -906,6 +908,16 @@ async function treeGuardCheck(label, ticketNumber) {
   log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}`)
   throw new Error(breachMessage())
 }
+
+// ---------------------------------------------------------------------------
+// Orchestrator-tree rail (aac-routines issue 192, extended by claude-dotfiles issue 493)
+// ---------------------------------------------------------------------------
+// The paragraph every fleet agent that runs UNISOLATED in the orchestrator's own checkout carries.
+// Both verifiers do. The code lane's always has; the probe lane's did not until issue 493, and it
+// is the one agent in the fleet with a reason to run arbitrary commands - it re-runs whatever a
+// probe ticket named - and, until then, no rule about where. `leakExample` is the ref that lane's
+// verifier would reach for first: the branch under review, or the tip a probe is about.
+const orchestratorTreeRail = (leakExample) => `Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${leakExample} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.`
 
 // ---------------------------------------------------------------------------
 // Python editable-install rail (claude-dotfiles issue 413)
@@ -1290,6 +1302,7 @@ Return structured output only.`,
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
+${orchestratorTreeRail('origin/' + scout.defaultBranch)}
 ${PYTHON_RAIL}
 The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
 In this repo run: git fetch origin, then git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
@@ -1306,6 +1319,14 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
       } catch (err) {
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
+
+      // Probe-lane isolation checkpoint (aac-routines issue 192, claude-dotfiles issue 493): the
+      // probe lane's verifier is the one probe-lane agent that is NOT worktree-isolated - the
+      // prober above runs with isolation:'worktree', this one re-runs the same commands in the
+      // orchestrator's own checkout. Same shape as the code lane's post-Verify checkpoint, and
+      // what makes the rail's closing sentence true here rather than a bluff.
+      await treeGuardCheck(pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`, t.number)
+
       if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
       // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
       // later read (the retry prompt, the run report) sees an array.
@@ -1457,8 +1478,9 @@ function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resume
   // merge workflow, that workflow ticks the boxes on the `pull_request` closed+merged event.
   // Pre-push merge (issue 318). A wave's branches all fork from the same commit; by the time
   // the last one is verified, master has moved and every branch that touched a skill carries a
-  // rotated stamp block and a rebuilt marketplace payload. Merging here, with the two safe
-  // conflict classes named explicitly, means the PR opens mergeable. Anything outside those
+  // rotated stamp block and a rebuilt marketplace payload. Merging here, with the three safe
+  // conflict classes named explicitly, means the PR opens mergeable. The third is the harness
+  // upgrade row two bumps in one wave both claim (issue 515). Anything outside those
   // classes is a real merge and stops this ticket: PR #306 showed what taking master's whole
   // SKILL.md costs when the branch had edited its prose.
   const generatedList = (cfg.generatedPaths || []).map(p => '`' + p + '`').join(', ') || '(none configured)'
@@ -1470,20 +1492,28 @@ This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
 A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`.
-A2. Clean merge (exit 0, nothing conflicted): mergeStatus is "clean" - go to STEP B.
-A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly two classes may be resolved here; a path in neither is a real merge you must NOT guess at.
+A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`agents/skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - go to STEP A7, which runs on this path too.
+A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly three classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
     (b) SKILL.md STAMP BLOCK - a SKILL.md whose conflict sits entirely inside the four-key metadata stamp block (modified, previous-modified, revision, content-sha). Do NOT judge this by eye and do NOT take the default branch's whole file: run \`node tools/resolve-stamp-conflict.js <path>\`. Exit 0 means every hunk in that file was stamp-only and was resolved to the default branch's side - then \`git add -- <path>\`. A NON-ZERO exit means the file conflicts outside the stamp block; that path belongs to class (c). If this repo has no such script, class (b) does not apply here: treat the path as class (c).
-    (c) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
-A4. Once every conflicted path was class (a) or (b): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Then \`git add -A\`.
+    (c) HARNESS UPGRADE ROW - the path is \`agents/skills/project-harness/UPGRADES.md\`. Two tickets in one wave that both bump the harness version both write the NEXT \`| N |\` row, so the conflict is a numbering collision, not a disagreement (issue 515). Do NOT pick a side and do NOT renumber by hand: run \`node tools/renumber-harness-upgrade.js\`. Exit 0 means the branch's row took the next free number, every other place the branch wrote that number moved with it, and the generated bootstrap template was rebuilt - then \`git add -A\`. A NON-ZERO exit means the branch changed that file by more than adding rows; that path belongs to class (d). If this repo has no such script, class (c) does not apply here. If the script names a file that is still conflicted, resolve that file by these same classes and re-run it before A4.
+    (d) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
+A4. Once every conflicted path was class (a), (b) or (c): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Then \`git add -A\`.
 A5. Re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
+A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, and nothing is pushed until it passes (issue 514): \`git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD\`. Exit 1 with no output is the pass - go to STEP B. Exit 0 lists paths whose COMMITTED content still carries conflict markers, which is what a resolution that staged the markers instead of removing them leaves behind; run 6aab1eac committed and pushed exactly that and then asked for a force push. Do NOT push and do NOT open a PR. For each listed path that is class (a) or (b): resolve it again (\`git checkout --theirs -- <path>\`, or \`node tools/resolve-stamp-conflict.js <path>\`), redo A4's regeneration and A5's test run, \`git add -- <path>\`, amend the merge commit with \`git commit --amend --no-edit\` (which keeps both merge parents), and run the scan again. For any listed path that is class (c), and for any path a second scan still lists: \`git reset --hard HEAD~1\` if the merge is already committed (\`git merge --abort\` if it is not), push nothing, open no PR, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every path the scan listed], blockedReason:"conflict markers left in <paths> after the merge"}.
 
 STEP B - push and open the PR (only when STEP A ended clean or resolved):
-B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run \`git ls-remote --heads origin ${branch}\` and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said.
+B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run \`git ls-remote --heads origin ${branch}\` and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C.
 B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
 B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean" or "resolved").
+
+STEP C - repair a commit that ALREADY reached origin (issue 514), which happens when the A7 scan hits markers you did not introduce or a push slipped past it. \`git push --force\`, \`git push --force-with-lease\`, deleting the remote branch and rewriting its pushed history are out of bounds here whatever the history looks like - that branch may already be a PR head. Repair it FORWARD: a follow-up commit whose TREE is the corrected merge and whose parent is the bad commit, pushed as an ordinary fast-forward.
+C1. \`git fetch origin ${branch}\`, then \`git checkout -B ${branch} origin/${branch}\` - HEAD now sits on the bad commit.
+C2. \`git read-tree -u --reset <corrected-commit>\` - index and worktree become the tree of the corrected merge you produced locally, and nothing already pushed is rewritten.
+C3. \`git commit -m "repair merge <bad-sha> (issue ${t.number}): conflict markers removed"\`, then re-run the STEP A7 scan on the new HEAD.
+C4. \`git push origin ${branch}\` - a fast-forward, no force flag - and go on with STEP B from B2. This is the pattern that recovered commit 966a36f by hand, as repair commit b00db2e; the run performs it itself.
 
 Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${defaultBranch} itself. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`
 }
@@ -1679,13 +1709,13 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
-Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
+${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
 In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
-4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*'\`. Those two exclusions are the harness's own scratch, not implementer output: ~/.claude/hook-state is hook bookkeeping and ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes - keep both exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
+4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*' -not -path '*/.claude/sessions/*'\`. Those three exclusions are the harness's own bookkeeping, not implementer output: ~/.claude/hook-state is hook bookkeeping; ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes; and ~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489) - keep all three exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
 Clean up your scratch worktree (git worktree remove) when done. If this repo is a Python package, check afterwards that the container's editable install still names the MAIN checkout (\`python -m pip show -f <dist> | grep -i 'editable project location'\`): when it names a scratch path, quote that line in evidence and leave it alone - do NOT repair it by installing from the orchestrator's checkout, because pip writes .egg-info into the very tree the isolation checkpoint is watching. This run's editable-install guard repairs it once the wave has drained. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,

@@ -31,6 +31,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const GUARD = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'editable-install-guard.js');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
 const guard = require(GUARD);
+const { sliceBetween, sliceBetweenTags } = require('./source-slice.js');
 
 const PY = ['python3', 'python'].find((exe) => spawnSync(exe, ['-c', 'print(1)'], { encoding: 'utf8' }).status === 0);
 
@@ -147,8 +148,9 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
   // which is worktree-isolated too and runs whatever commands its ticket asks for.
   for (const [prompt, tail] of [
     ['Implement GitHub issue', 'label: `impl:'],
-    // The tail must be text that really follows the prompt: a tail indexOf cannot find slices to
-    // the end of the file, and every later prompt's rail then satisfies this one vacuously.
+    // The tail must be text that really follows the prompt: a tail indexOf cannot find used to
+    // slice to the end of the file, and every later prompt's rail then satisfied this one
+    // vacuously. sliceBetween throws on the missing anchor now (issue 488).
     ['You are an independent verifier. Your job', '{ label: verifyLabel, phase: \'Verify\''],
     ['Probe GitHub issue', 'label: `probe:'],
     // Issue 435: the probe lane's verifier re-runs whatever commands a probe ticket named, and
@@ -156,24 +158,47 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
     // orchestrator's own checkout. It carries the same rail now.
     ['You are an independent verifier for a probe ticket', 'Clean up your scratch worktree (git worktree remove) when done. Make no repository changes'],
   ]) {
-    const start = src.indexOf(prompt);
-    assert.ok(start > 0, `prompt "${prompt}" is gone from the fleet script`);
-    const body = src.slice(start, src.indexOf(tail, start));
+    const body = sliceBetween(src, prompt, tail, `the "${prompt}" prompt in the fleet script`);
     assert.ok(body.includes('${PYTHON_RAIL}'), `the "${prompt}" prompt must carry the rail`);
   }
   assert.match(src, /editable-install-guard\.js/, 'the fleet must run the guard once the wave has drained');
 });
 
+// Issue 493: the probe lane's verifier re-runs whatever commands a probe ticket named, in the
+// orchestrator's own checkout, and was the only fleet agent that could touch a tree with neither
+// `isolation: 'worktree'` nor the orchestrator-tree paragraph. Both verifiers now render it from
+// one named helper. The tail of each slice is text that really follows that prompt: a tail found
+// past the end of it would let a LATER prompt's copy of the rail satisfy this assertion.
+test("the probe lane's verifier carries the orchestrator-tree rail (issue 493)", () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const rail = src.match(/^const orchestratorTreeRail = \([\s\S]*?\) => `[\s\S]*?`$/m);
+  assert.ok(rail, 'the orchestrator-tree rail the two verifiers share must be one named helper');
+  assert.match(rail[0], /aac-routines issue 192, non-negotiable/, 'the rail must name the issue it comes from');
+  assert.match(rail[0], /you are NOT worktree-isolated/, 'the rail must say the tree it starts in is the orchestrator\'s own');
+  for (const [prompt, tail] of [
+    ['You are an independent verifier for a probe ticket', 'Clean up your scratch worktree (git worktree remove) when done. Make no repository changes'],
+    ['You are an independent verifier. Your job', '{ label: verifyLabel, phase: \'Verify\''],
+  ]) {
+    const start = src.indexOf(prompt);
+    assert.ok(start > 0, `prompt "${prompt}" is gone from the fleet script`);
+    const end = src.indexOf(tail, start);
+    assert.ok(end > start, `the tail for "${prompt}" no longer follows it - this assertion would pass on another prompt's rail`);
+    assert.ok(src.slice(start, end).includes('${orchestratorTreeRail('),
+      `the "${prompt}" prompt must carry the orchestrator-tree rail`);
+  }
+  // The rail's last sentence promises a checkpoint straight after the verifier. The probe lane
+  // had none, so it must run one now or the paragraph is a bluff.
+  assert.match(src, /await treeGuardCheck\(pass === 1 \? `probe-verify-attempt/,
+    'the probe lane must run an orchestrator-tree checkpoint straight after its verifier');
+});
+
 /** The fleet's own guard-path block, evaluated exactly as the fleet script evaluates it. */
 function fleetEditableGuardBlock() {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  const startTag = '// [FLEET-EDITABLE-GUARD-START]';
-  const endTag = '// [FLEET-EDITABLE-GUARD-END]';
-  const s = src.indexOf(startTag);
-  const e = src.indexOf(endTag);
-  assert.ok(s >= 0 && e > s, 'the FLEET-EDITABLE-GUARD markers are gone from the fleet script');
+  const block = sliceBetweenTags(src, '// [FLEET-EDITABLE-GUARD-START]', '// [FLEET-EDITABLE-GUARD-END]',
+    "the fleet script's editable-guard block");
   // eslint-disable-next-line no-new-func
-  return new Function(`${src.slice(s + startTag.length, e)}
+  return new Function(`${block}
 return { editableGuardPaths, editableGuardCommand, editableGuardAbsentMessage };`)();
 }
 
