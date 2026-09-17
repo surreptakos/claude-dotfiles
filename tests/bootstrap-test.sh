@@ -30,6 +30,11 @@
 # USAGE
 #   tests/bootstrap-test.sh                          # the gate
 #   tests/bootstrap-test.sh --fault missing-hook-entry   # prove it can fail
+#   tests/bootstrap-test.sh --scenario clone-failure     # issue 483: an unreachable dotfiles repo
+#                                                        # leaves a FAILED marker naming the cause,
+#                                                        # a STOP additionalContext line, and gh;
+#                                                        # session-check STOPs on the cause. Exits 0
+#                                                        # when that honesty holds, 1 when it does not.
 #
 # ENV
 #   BOOTSTRAP_TEST_SCRATCH   scratch root to use instead of a fresh mktemp -d
@@ -43,10 +48,13 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOK="$REPO/.claude/hooks/session-start.sh"
 
 FAULT=""
+SCENARIO=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --fault) FAULT="${2:-}"; shift 2 ;;
     --fault=*) FAULT="${1#*=}"; shift ;;
+    --scenario) SCENARIO="${2:-}"; shift 2 ;;
+    --scenario=*) SCENARIO="${1#*=}"; shift ;;
     -h|--help) sed -n '1,40p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "bootstrap-test: unknown argument '$1'" >&2; exit 64 ;;
   esac
@@ -54,6 +62,10 @@ done
 case "$FAULT" in
   ""|missing-hook-entry) ;;
   *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry)" >&2; exit 64 ;;
+esac
+case "$SCENARIO" in
+  ""|clone-failure) ;;
+  *) echo "bootstrap-test: unknown scenario '$SCENARIO' (known: clone-failure)" >&2; exit 64 ;;
 esac
 
 fails=0
@@ -121,6 +133,74 @@ for _v in HTTP_PROXY HTTPS_PROXY http_proxy https_proxy NO_PROXY no_proxy \
           SSL_CERT_FILE SSL_CERT_DIR CURL_CA_BUNDLE NODE_EXTRA_CA_CERTS REQUESTS_CA_BUNDLE; do
   [ -n "${!_v:-}" ] && passthrough+=("$_v=${!_v}")
 done
+
+# ------------------------------------------------ scenario: clone-failure (issue 483) ---------
+# No BOOTSTRAP_SOURCE, and the clone URL points at a path that does not exist, so the hook has
+# to clone and cannot. The real-world shape is a container whose credential injection is gone
+# (`fatal: could not read Username for 'https://github.com'`, issue 519); the effect on the hook
+# is the same exit from `git clone`. What must hold: the hook still exits 0 and prints ONE
+# SessionStart JSON line whose additionalContext starts with `AAC-BOOTSTRAP STOP:` and names the
+# clone; the marker exists with `failed: true`, `stage: clone` and git's own last line as the
+# reason; and session-check (this checkout's copy, since no payload landed) STOPs on that cause
+# rather than on "marker absent". gh install is skipped (offline), so the marker records
+# `gh_path: missing` and that is asserted too: the field has to be present either way.
+if [ "$SCENARIO" = "clone-failure" ]; then
+  : > "$ENV_FILE"
+  hook_out="$SCRATCH/hook-stdout.json"
+  hook_err="$SCRATCH/hook-stderr.txt"
+  env -i \
+    PATH="$PATH_SHIM" \
+    HOME="$CLEAN_HOME" \
+    CLAUDE_CODE_REMOTE=true \
+    BOOTSTRAP_HOME="$CLEAN_HOME" \
+    BOOTSTRAP_DOTFILES_REPO="$SCRATCH/no-such-repo.git" \
+    BOOTSTRAP_SKIP_GH=1 \
+    CLAUDE_ENV_FILE="$ENV_FILE" \
+    ${passthrough[@]+"${passthrough[@]}"} \
+    bash "$HOOK" >"$hook_out" 2>"$hook_err"
+  hook_status=$?
+  if [ "$hook_status" -eq 0 ]; then
+    pass "hook exited 0 with an unreachable dotfiles repo (a non-zero exit would drop the STOP line)"
+  else
+    fail "hook exited $hook_status; stderr: $(tail -3 "$hook_err" | tr '\n' ' ')"
+  fi
+  if grep -q 'aac-bootstrap: STOP - clone failed' "$hook_err"; then
+    pass "stderr carries the STOP line: $(grep 'aac-bootstrap: STOP' "$hook_err" | head -1 | cut -c1-120)"
+  else
+    fail "stderr has no 'aac-bootstrap: STOP - clone failed' line"
+  fi
+  MARKER="$CLEAN_HOME/.claude/hook-state/aac-bootstrap/state.json"
+  if BOOTSTRAP_TEST_MARKER="$MARKER" BOOTSTRAP_TEST_HOOK_OUT="$hook_out" \
+     python3 "$REPO/tests/bootstrap-assert-clone-failure.py"; then :; else fails=$((fails + 1)); fi
+  CHECK="$REPO/agents/skills/session-check/check.js"
+  check_out="$SCRATCH/session-check.txt"
+  mkdir -p "$FIXTURE/.git" "$FIXTURE/.claude"
+  echo '{"harness": false}' > "$FIXTURE/.claude/session.json"
+  ( cd "$FIXTURE" && env -i \
+      PATH="$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+      node "$CHECK" ) >"$check_out" 2>&1
+  check_status=$?
+  if [ "$check_status" -ne 0 ] && grep -q 'STOP aac-bootstrap clone failed' "$check_out"; then
+    pass "session-check exited $check_status and STOPs on the cause: $(grep 'STOP aac-bootstrap clone failed' "$check_out" | sed 's/^ *//' | cut -c1-120)"
+  else
+    fail "session-check exited $check_status without 'STOP aac-bootstrap clone failed' (STOP lines: $(grep -c 'STOP' "$check_out"))"
+    grep -n 'STOP\|aac-bootstrap' "$check_out" | head -10 >&2
+  fi
+  if grep -q 'marker absent' "$check_out"; then
+    fail "session-check still says 'marker absent' — the failed marker was not read"
+  fi
+  echo ""
+  if [ "$fails" -eq 0 ]; then
+    echo "bootstrap gate (clone-failure scenario): PASS"
+  else
+    echo "bootstrap gate (clone-failure scenario): FAIL ($fails check(s))"
+  fi
+  [ -n "${BOOTSTRAP_TEST_KEEP:-}" ] || rm -rf "$SCRATCH" 2>/dev/null || true
+  [ "$fails" -eq 0 ] || exit 1
+  exit 0
+fi
 
 # ---------------------------------------------------------------- 1. run the hook -------------
 : > "$ENV_FILE"

@@ -55,3 +55,5 @@ jobs:
             exit 1
           fi
           echo "the gate fails when the payload loses a hook entry, as it must"
+      - name: Clone failure — an unreachable dotfiles repo must leave a named STOP, not a missing marker (issue 483)
+        run: tests/bootstrap-test.sh --scenario clone-failure
