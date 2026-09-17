@@ -58,6 +58,32 @@ test('readMarker returns unreadable when the marker is not valid JSON', () => {
   assert.equal(r.state, 'unreadable');
 });
 
+test('readMarker returns failed, with stage and reason, when the hook recorded a failed stage (issue 483)', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    failed: true,
+    stage: 'clone',
+    reason: "git clone --depth 1 --branch master https://github.com/x/y.git: fatal: could not read Username for 'https://github.com': No such device or address",
+    skills: [],
+    failed_at: '2026-09-17T18:00:00Z',
+  });
+  const r = readMarker(env(f));
+  assert.equal(r.state, 'failed');
+  assert.equal(r.stage, 'clone');
+  assert.match(r.reason, /could not read Username/);
+  assert.equal(r.marker.failed_at, '2026-09-17T18:00:00Z');
+  assert.equal(r.path, f.marker);
+});
+
+test('readMarker: a failed marker with no stage or reason still reads as failed, never as ok', () => {
+  const f = fixture();
+  writeMarker(f.marker, { failed: true, skills: [] });
+  const r = readMarker(env(f));
+  assert.equal(r.state, 'failed');
+  assert.equal(r.stage, 'unknown stage');
+  assert.equal(r.reason, 'no reason recorded');
+});
+
 test('readMarker returns ok with the parsed marker', () => {
   const f = fixture();
   writeMarker(f.marker, { payload_version: '2026.9.15', skills: ['ticket-fleet'] });
