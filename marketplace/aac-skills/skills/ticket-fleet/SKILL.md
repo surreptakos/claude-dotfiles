@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-17T19:29:00Z'
-  previous-modified: '2026-09-17T19:10:33Z'
-  revision: '20'
-  content-sha: 7702f8e7d7be
+  modified: '2026-09-17T20:06:09Z'
+  previous-modified: '2026-09-17T19:29:00Z'
+  revision: '21'
+  content-sha: 3e90f0e66dc4
 ---
 
 # ticket-fleet
