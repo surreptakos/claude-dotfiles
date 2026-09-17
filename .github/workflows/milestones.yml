@@ -1,0 +1,46 @@
+name: Milestones
+
+# docs/agents/milestones.json is the source of truth for this repo's milestones; this job writes it
+# into the tracker. A cloud container cannot: it has no GitHub credential for git or curl (issue
+# 483) and the GitHub MCP has no milestone tool. GITHUB_TOKEN with `issues: write` covers
+# milestones, so the job needs no PAT and none should be added.
+#
+# THE LOGIC IS NOT WRITTEN HERE. `tools/ensure-milestones.js` holds it (create, reopen, refresh a
+# description; never delete or close), and the step below runs its unit tests before anything is
+# written. Idempotent: a run over a matched repo writes nothing.
+#
+# Milestone creation fires no `milestone` workflow event for GITHUB_TOKEN writes, and the issue
+# metadata audit's next run (daily, or the next `issues` event) is what reacts to the new set.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - docs/agents/milestones.json
+      - tools/ensure-milestones.js
+      - .github/workflows/milestones.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: milestones
+  cancel-in-progress: false
+
+jobs:
+  ensure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests (plan, POST and PATCH bodies, idempotency, token refusal)
+        run: node --test tools/ensure-milestones.test.js
+      - name: Ensure milestones (idempotent; no writes when the tracker matches the file)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node tools/ensure-milestones.js --apply

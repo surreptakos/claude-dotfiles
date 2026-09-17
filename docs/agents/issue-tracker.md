@@ -13,6 +13,17 @@ Issues and PRDs for this repo live as GitHub issues. Use the `gh` CLI for all op
 
 Infer the repo from `git remote -v` — `gh` does this automatically when run inside a clone.
 
+## Milestones
+
+`docs/agents/milestones.json` is the source of truth; `.github/workflows/milestones.yml` writes it
+into the tracker (`tools/ensure-milestones.js`: create, reopen, refresh a description, never close
+or delete) on every push to `master` that touches the file and on dispatch. Change a milestone by
+editing the file on a branch. A container cannot create one directly: no GitHub credential for git
+or curl (issue 483), no milestone tool in the GitHub MCP. Every open issue carries a milestone
+(`Backlog` for work off the parity path): with more than one open milestone the issue metadata
+audit comments on each unmilestoned issue, and the tracker audit reports `unmilestoned` drift.
+Assign one with `gh issue edit <n> --milestone "<title>"` or the MCP `issue_write` milestone field.
+
 ## From a cloud session (no GraphQL)
 
 A claude.ai/code or Cowork container reaches this tracker through the Anthropic proxy, which

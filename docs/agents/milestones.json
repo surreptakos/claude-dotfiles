@@ -1,0 +1,14 @@
+[
+  {
+    "title": "M1 cloud parity: claude-dotfiles",
+    "description": "A claude.ai/code session on this repo has full functional parity with a session on the desktop: every governance hook, skill, tracker tool, git and GitHub write, and test suite works from a container with no PC step. Proving ground for M2. Map #154, spec #207."
+  },
+  {
+    "title": "M2 cloud parity: all repos",
+    "description": "The same parity for every AAC repo: the harness delivers the bootstrap hook and permission posture, each repo cuts over (#219 to #225), the four masters run on cloud Routines, and the PC is retired as a session venue. Map #154, spec #207."
+  },
+  {
+    "title": "Backlog",
+    "description": "Open work that is not on the cloud-parity path. Exists so every open issue carries a milestone: with more than one open milestone the issue metadata audit comments on each unmilestoned issue, and the tracker audit reports it as drift."
+  }
+]
