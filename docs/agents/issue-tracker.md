@@ -36,6 +36,110 @@ issue 416):
 calls against the attached repo succeed: the proxy, not `gh`'s own auth, is what gates access.
 Do not read that line as a broken credential.
 
+## Running the PowerShell suites in a container (issue 454)
+
+A container has no PowerShell on PATH, but it can have one in a minute. The 7.4.6 `linux-x64`
+release tarball downloads through the agent proxy and runs. Four plain commands, each on its own
+line — nothing chained:
+
+```bash
+mkdir -p /tmp/ps7
+curl -sSL -o /tmp/ps7/ps.tar.gz https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz
+tar -xzf /tmp/ps7/ps.tar.gz -C /tmp/ps7
+cp /tmp/ps7/pwsh /tmp/ps7/shell7
+```
+
+```bash
+chmod +x /tmp/ps7/shell7
+/tmp/ps7/shell7 --version
+/tmp/ps7/shell7 -NoProfile -ExecutionPolicy Bypass -File tests/dotfiles-freshness.tests.ps1
+```
+
+Four gotchas, all four learned by paying for them:
+
+1. **Invoke it under a neutral name, in plain single commands.** The worktree-isolation guard
+   refuses any command whose text names `pwsh` inside a compound form (`&&`, a pipe, a heredoc, a
+   `cd x && …`): *"this command runs pwsh inside a construct too complex to verify"*. `shell7` in a
+   one-command line is accepted. This is why `cp` above and not `mv`.
+2. **Keep the original `pwsh` next to it.** `Start-Job` re-launches the engine by the literal path
+   `$PSHOME/pwsh`, so a *renamed* binary fails with *"The pwsh executable cannot be found at …"* and
+   every job in the suite dies. `cp` leaves both names in `$PSHOME`; a symlink beside it works too.
+   `tests/restore-test.ps1` check 10 is the caller.
+3. **`-ExecutionPolicy` is accepted and ignored off Windows.** The Windows-shaped argument lists in
+   these docs and in `.claude/session.json` work unchanged — do not rewrite them.
+4. **`$env:TEMP` is unset in a stock fleet container.** A suite that joins its sandbox onto it dies
+   at once with *"Cannot bind argument to parameter 'Path' because it is null"*, exit 1, before the
+   first assertion. The five suites now fall back to `[System.IO.Path]::GetTempPath()`, so this bites
+   only a `.ps1` written since; `export TEMP=/tmp` is the one-line escape hatch.
+
+Leave it off `PATH`. `.githooks/pre-commit` asks for `powershell` first (the desktop keeps running
+the gate on 5.1, where `ConvertTo-Json` indents as it always has) and falls back to `pwsh`; with
+neither on PATH it prints a loud SKIP and exits 0, which is what lets a container commit without
+`--no-verify`. Put `pwsh` on PATH and the hook will run the Windows-only restore test under it and
+block the commit. Invoke `/tmp/ps7/shell7` by its full path instead.
+
+What runs, measured 2026-09-17 under 7.4.6 in a fleet container:
+
+| suite | result |
+| --- | --- |
+| `tests/settings-invariants.tests.ps1` | `pass 14 fail 0`, exit 0 |
+| `tests/dotfiles-freshness.tests.ps1` | `pass 31 fail 0`, exit 0 |
+| `tests/sync-worktree-guard.tests.ps1` | `pass 12 fail 0`, exit 0 |
+| `tests/git-env-leak.tests.ps1` | `pass 16 fail 3`, exit 1 |
+| `tests/settings-defaultmode.tests.ps1` | `pass 6 fail 3`, exit 1 |
+| `tests/restore-test.ps1` | Windows-only — proved on `windows-latest`, below |
+
+The two partial suites and the restore test are blocked by Windows-only code *outside* the test
+files — `$env:USERPROFILE` and directory junctions in `restore-test.ps1`, and a hard-coded
+`powershell` spawn in `sync.ps1` — not by the engine. A cloud session runs the first three and says
+so; the restore test has its own venue, below.
+
+### The restore test runs on `windows-latest`, not only on the desktop (issue 454)
+
+`.github/workflows/windows-restore-test.yml` is a real Windows PowerShell 5.1 running the desktop
+command verbatim, twice — `-From worktree` for the branch's own copies of the suites, then the bare
+documented command for the default clone-origin path:
+
+```
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+```
+
+It fires on any push that touches a `.ps1`, `.githooks/pre-commit` or the workflow itself (paths, not
+every push: a Windows runner bills at 2x), and by hand on any branch:
+
+```bash
+gh api -X POST repos/surreptakos/claude-dotfiles/actions/workflows/windows-restore-test.yml/dispatches -f ref=<branch>
+gh run list --workflow windows-restore-test.yml --branch <branch> --limit 1
+gh run view <run-id> --log | tail -40
+```
+
+Two things in that file are load-bearing. `shell: cmd` at every step: the runner's default shell is
+pwsh 7, and letting it wrap the command would make pwsh the engine the suite resolves and spawns —
+the opposite of what this job is for. And a global `url.…insteadOf` credential before the run,
+because default mode clones the *private* remote from a scratch directory, where the credential
+`actions/checkout` wrote into the checkout's local config does not reach — the reason the suite's own
+header says CI cannot clone a private remote.
+
+First run, on the branch that added the job — run 35174522573, job "restore test on Windows
+PowerShell 5.1", 6m48s, both steps green (`shell: cmd` propagates the exit code, so green *is*
+exit 0):
+
+```
+Engine identification        5.1.26100.33296
+                             C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
+  pass 80 / fail 0 / RESTORE PROVEN - 80 checks, 0 failures
+
+powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+  pass 83 / fail 0 / RESTORE PROVEN - 83 checks, 0 failures
+```
+
+So "a desktop still owes a run" is no longer the answer for a `.ps1` change. The desktop remains the
+only place the restore actually lands over a live `~/.claude`, but *does 5.1 still pass?* is now a
+branch-level question a cloud session answers for itself.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_

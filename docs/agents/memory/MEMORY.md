@@ -14,7 +14,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - agent-remote-isolation-runs-locally: ran on the desktop
 - answer-yes-no-in-one-line: outcome, action, timing
 - bash-tool-collapses-backslashes: `\\` arrives as `\`
-- cloud-containers-have-no-powershell: pwsh=none, prove .ps1 on the PC
+- cloud-containers-can-run-powershell: install the 7.4.6 tarball
 - cloud-only-criteria-stall-the-desktop-fleet: prove from cloud
 - cowork-runs-plugin-hooks: obeys text, not hooks
 - cowork-scheduled-tasks-live-in-session-uploads: no registry

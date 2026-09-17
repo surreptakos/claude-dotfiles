@@ -2,6 +2,11 @@
 
 What a claude.ai/code container proved on 2026-09-16, and the one step that needs the desktop.
 
+> The note this run used as its fixture, `cloud-containers-have-no-powershell`, was superseded on
+> 2026-09-17 by `cloud-containers-can-run-powershell` (issue 454): a container does run the
+> PowerShell 7.4.6 tarball. Nothing about the loader evidence below changes — only that note's
+> name and claim.
+
 ## What changed
 
 - 29 of the 31 claude-dotfiles notes moved from the generated `memory/` mirror to
