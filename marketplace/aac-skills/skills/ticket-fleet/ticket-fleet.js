@@ -908,6 +908,16 @@ async function treeGuardCheck(label, ticketNumber) {
 }
 
 // ---------------------------------------------------------------------------
+// Orchestrator-tree rail (aac-routines issue 192, extended by claude-dotfiles issue 493)
+// ---------------------------------------------------------------------------
+// The paragraph every fleet agent that runs UNISOLATED in the orchestrator's own checkout carries.
+// Both verifiers do. The code lane's always has; the probe lane's did not until issue 493, and it
+// is the one agent in the fleet with a reason to run arbitrary commands - it re-runs whatever a
+// probe ticket named - and, until then, no rule about where. `leakExample` is the ref that lane's
+// verifier would reach for first: the branch under review, or the tip a probe is about.
+const orchestratorTreeRail = (leakExample) => `Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${leakExample} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.`
+
+// ---------------------------------------------------------------------------
 // Python editable-install rail (claude-dotfiles issue 413)
 // ---------------------------------------------------------------------------
 // A container has ONE interpreter and ONE site-packages, so a Python project is installed
@@ -1290,6 +1300,7 @@ Return structured output only.`,
       `You are an independent verifier for a probe ticket. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 You have not been told what the prober concluded; judge only the criteria and the raw material below.
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code this ticket is about, so a command re-run there answers about the wrong tree and refutes or confirms nothing. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
+${orchestratorTreeRail('origin/' + scout.defaultBranch)}
 ${PYTHON_RAIL}
 The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
 In this repo run: git fetch origin, then git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
@@ -1306,6 +1317,14 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
       } catch (err) {
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
+
+      // Probe-lane isolation checkpoint (aac-routines issue 192, claude-dotfiles issue 493): the
+      // probe lane's verifier is the one probe-lane agent that is NOT worktree-isolated - the
+      // prober above runs with isolation:'worktree', this one re-runs the same commands in the
+      // orchestrator's own checkout. Same shape as the code lane's post-Verify checkpoint, and
+      // what makes the rail's closing sentence true here rather than a bluff.
+      await treeGuardCheck(pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`, t.number)
+
       if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
       // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
       // later read (the retry prompt, the run report) sees an array.
@@ -1679,7 +1698,7 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
       `You are an independent verifier. Your job is to REFUTE, not confirm - default to pass=false unless evidence forces true.
 Branch under review: ${branch} (do NOT trust its author; you have not seen their claims).
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
-Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${branch} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.
+${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
 In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
