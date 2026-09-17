@@ -19,12 +19,10 @@ every project, before any other text.
 
 ### Four standing disciplines — always on, no exceptions
 
-These are the operating rules, inlined because a pointer to a skill is not a rule: `ask-matt` and
-`i-have-adhd` are both `disable-model-invocation: true`, and the `yes` skill (an 11 KB plugin skill,
-never actually empty — that claim was checked and dropped 2026-09-03) loads only when its
-description matches the task, which is exactly when discipline is not needed.
-Re-read this section when a session runs long — **drift is the failure mode**, and a per-turn style
-hook firing ~25 times did not prevent it.
+Inlined because a pointer to a skill is not a rule: `ask-matt` and `i-have-adhd` are
+`disable-model-invocation: true`, and the `yes` skill loads only when its description matches the
+task, which is exactly when discipline is not needed. Re-read this section when a session runs long:
+**drift is the failure mode**, and a per-turn style hook firing ~25 times did not prevent it.
 
 ---
 
@@ -68,10 +66,8 @@ Terse smart-caveman. All technical substance stays; only fluff dies.
 
   Rewrite until it exits 0, and send only the linted text. Exit 1 prints each violation and
   `REWRITE BEFORE SENDING`; exit 0 stamps the session state. Off drops only the style caps; full and
-  lite loosen them; the YES checks never switch off. It is a step, not a hook, because no hook event sees assistant text
-  before the reader does (`Stop` appends a second reply instead of retracting the first — measured
-  2026-08-12). Skipping is audited: `Stop` checks the stamp against the turn's nonce and injects a
-  miss into the next turn.
+  lite loosen them; the YES checks never switch off. It is a step, not a hook: no hook event sees
+  assistant text before the reader does. `Stop` audits the stamp and injects a miss into the next turn.
 
 #### 2. YES — process discipline (PUA says NO, YES says YES)
 
@@ -205,23 +201,18 @@ gates. Direct runners (CLI, `gas run owner/repo <fn>` for a self-deploying Apps 
 running the file locally) first; edit-commit-deploy-and-invoke is the universal fallback.
 
 **Pinning a subagent to a specific model version (e.g. Opus 4.7) is always possible — never claim
-otherwise.** The Agent tool's `model` param takes only family aliases and agent definitions cannot be
-registered mid-session; those are limits of two mechanisms, not the environment. In-session: the
-Workflow tool's `agent()` accepts a full model ID in `opts.model` and serves it (verified 2026-08-19).
-Unattended: a headless CLI run with the full model ID (verified 2026-08-17, auth re-verified
-2026-09-01):
+otherwise.** The Agent tool's `model` param takes family aliases only; that limits one mechanism, not
+the environment. In-session: the Workflow tool's `agent()` takes a full model ID in `opts.model`.
+Unattended: write the prompt to `.agent-prompt.md` in the agent's worktree, run in the background,
+read `.agent-result.json` and check the real exit code:
 
 ```
 cd <agent worktree> && cat .agent-prompt.md | claude -p --model claude-opus-4-7 --dangerously-skip-permissions --strict-mcp-config --output-format json > .agent-result.json 2> .agent-stderr.log
 ```
 
-Write the prompt to `.agent-prompt.md` in the agent's own worktree first; run in the background; read
-`.agent-result.json` and check the real exit code. Gotchas: without `--dangerously-skip-permissions`
-gated tools are denied non-interactively; an untrusted cwd prints `Ignoring N permissions.allow
-entries` on stderr, so keep stderr out of anything parsed as JSON; a cwd under an AAC project inherits
-the full governance hooks (40 turns, ~$0.42 on a trivial prompt), so point throwaway probes at a
-neutral cwd. A later failed headless run supersedes the auth note; verification history lives in the
-claude-dotfiles memory notes.
+Without `--dangerously-skip-permissions` gated tools are denied non-interactively. Keep stderr out of
+anything parsed as JSON. Point throwaway probes at a cwd outside any AAC project (its hooks cost
+~40 turns). Verification history lives in the claude-dotfiles memory notes.
 
 **Do not hand a solvable question back to the user dressed up as "your call to make."** Before
 writing "owner must decide", check whether it is genuinely a preference or business judgment call —
@@ -264,10 +255,5 @@ headless run, so no deploy or run ever waits on a clasp token.
 
 ## Browser Automation
 
-Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
-
-Core workflow:
-1. `agent-browser open <url>` - Navigate to page
-2. `agent-browser snapshot -i` - Get interactive elements with refs (@e1, @e2)
-3. `agent-browser click @e1` / `fill @e2 "text"` - Interact using refs
-4. Re-snapshot after page changes
+Use `agent-browser` (open, `snapshot -i` for @refs, click/fill by ref, re-snapshot after changes).
+`agent-browser --help` lists the rest.

@@ -2,11 +2,12 @@
 name: ux-copy
 description: Write or review UX copy — microcopy, error messages, empty states, CTAs. Trigger with "write copy for", "what should this button say?", "review this error message", or when naming a CTA, wording a confirmation dialog, filling an empty state, or writing onboarding text.
 metadata:
+  disable-model-invocation: 'true'
   argument-hint: <context or copy to review>
-  modified: '2026-08-12T20:29:42Z'
-  previous-modified: none
-  revision: '1'
-  content-sha: 77569c0c3e74
+  modified: '2026-09-16T23:37:30Z'
+  previous-modified: '2026-08-12T20:29:42Z'
+  revision: '2'
+  content-sha: a58da2585a7c
 ---
 
 # /ux-copy

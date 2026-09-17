@@ -1,12 +1,13 @@
 ---
 name: research-synthesis
+disable-model-invocation: true
 description: Synthesize user research into themes, insights, and recommendations. Use when you have interview transcripts, survey results, usability test notes, support tickets, or NPS responses that need to be distilled into patterns, user segments, and prioritized next steps.
 argument-hint: "<research data, transcripts, or survey results>"
 metadata:
-  modified: "2026-08-12T20:29:42Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "7103cfafcc77"
+  modified: "2026-09-16T23:37:30Z"
+  previous-modified: "2026-08-12T20:29:42Z"
+  revision: "2"
+  content-sha: "7221e157e05b"
 ---
 
 # /research-synthesis

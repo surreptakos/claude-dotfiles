@@ -1,11 +1,12 @@
 ---
 name: user-research
+disable-model-invocation: true
 description: Plan, conduct, and synthesize user research. Trigger with "user research plan", "interview guide", "usability test", "survey design", "research questions", or when the user needs help with any aspect of understanding their users through research.
 metadata:
-  modified: "2026-08-12T20:29:42Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "c9ea13048da1"
+  modified: "2026-09-16T23:37:30Z"
+  previous-modified: "2026-08-12T20:29:42Z"
+  revision: "2"
+  content-sha: "89a34510be35"
 ---
 
 # User Research

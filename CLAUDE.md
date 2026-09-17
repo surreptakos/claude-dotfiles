@@ -124,26 +124,14 @@ Three sources, and the difference matters:
 - `-From worktree` copies what `git ls-files` sees — staged changes included, no network. This is
   what the pre-commit hook runs.
 
-Rules the suite depends on:
+Rules the suite depends on (each has a `-Fault` that proves it): tidy-up never decides the verdict
+(`locked-scratch`); the scratch root carries a per-run id (`collision`); `RESTORE_TEST_ACTIVE` stops
+the suite restoring itself, so leave the variable alone in anything the suite spawns; a hook sees
+only `tests FAIL`, detail is in `%TEMP%\restore-test-failures`.
 
-- Tidying up must never decide the verdict. The final scratch delete can lose a race with a child
-  process and `$ErrorActionPreference = 'Stop'` would end the run non-zero; `-Fault locked-scratch`
-  proves it still exits 0.
-- The scratch root carries a per-run id; two overlapping runs on one root fail on a fine repo
-  (`-Fault collision` shows it).
-- `RESTORE_TEST_ACTIVE` stops the suite restoring itself: check 9 runs the restored `session-check`,
-  which runs this suite, which finds the variable set and reports `pass 0` / `fail 0`. Leave the
-  variable alone in anything the suite spawns.
-- A failure seen by a hook prints only `tests FAIL`; detail is in `%TEMP%\restore-test-failures`.
-
-Windows PowerShell 5.1 traps:
-
-- `DirectoryInfo.Target` is a `string[]`, not a string — binding it to a `[string]` parameter throws
-  "cannot convert value to type System.String".
-- `@(Get-Content x -Raw | ConvertFrom-Json)` does not reliably enumerate a JSON array. Use
-  `Read-JsonArray`.
-- `$ErrorActionPreference = 'Stop'` turns git's stderr (line-ending warnings included) into a
-  terminating error.
+Windows PowerShell 5.1 traps: `DirectoryInfo.Target` is a `string[]`; `Get-Content -Raw |
+ConvertFrom-Json` does not reliably enumerate a JSON array, use `Read-JsonArray`; with
+`$ErrorActionPreference = 'Stop'` git's stderr warnings become terminating errors.
 
 Then `-DryRun` on both scripts, then a real `push` — it is idempotent and git status shows exactly
 what moved. Round-trip a real file through `ConvertTo-Tokens` / `ConvertFrom-Tokens` for the

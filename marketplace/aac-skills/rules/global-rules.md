@@ -1,11 +1,9 @@
 ### Four standing disciplines — always on, no exceptions
 
-These are the operating rules, inlined because a pointer to a skill is not a rule: `ask-matt` and
-`i-have-adhd` are both `disable-model-invocation: true`, and the `yes` skill (an 11 KB plugin skill,
-never actually empty — that claim was checked and dropped 2026-09-03) loads only when its
-description matches the task, which is exactly when discipline is not needed.
-Re-read this section when a session runs long — **drift is the failure mode**, and a per-turn style
-hook firing ~25 times did not prevent it.
+Inlined because a pointer to a skill is not a rule: `ask-matt` and `i-have-adhd` are
+`disable-model-invocation: true`, and the `yes` skill loads only when its description matches the
+task, which is exactly when discipline is not needed. Re-read this section when a session runs long:
+**drift is the failure mode**, and a per-turn style hook firing ~25 times did not prevent it.
 
 ---
 
@@ -49,10 +47,8 @@ Terse smart-caveman. All technical substance stays; only fluff dies.
 
   Rewrite until it exits 0, and send only the linted text. Exit 1 prints each violation and
   `REWRITE BEFORE SENDING`; exit 0 stamps the session state. Off drops only the style caps; full and
-  lite loosen them; the YES checks never switch off. It is a step, not a hook, because no hook event sees assistant text
-  before the reader does (`Stop` appends a second reply instead of retracting the first — measured
-  2026-08-12). Skipping is audited: `Stop` checks the stamp against the turn's nonce and injects a
-  miss into the next turn.
+  lite loosen them; the YES checks never switch off. It is a step, not a hook: no hook event sees
+  assistant text before the reader does. `Stop` audits the stamp and injects a miss into the next turn.
 
 #### 2. YES — process discipline (PUA says NO, YES says YES)
 
