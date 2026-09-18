@@ -736,6 +736,38 @@ class AskMattGateTests(unittest.TestCase):
             )
             self.assertEqual(stopped["decision"], "block")
 
+    def test_claude_stop_releases_a_session_that_cannot_run_the_declaration(self) -> None:
+        # Issue 499: declaring a route needs Bash or PowerShell. A session with neither — a headless
+        # `claude -p` with Bash denied — cannot satisfy the block, and refusing every Stop loops to
+        # the turn limit and returns an empty result with no error. Refuse once, then release.
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.run_gate("claude-prompt", {"session_id": "s-nobash"}, state_dir)
+            first = json.loads(
+                self.run_gate("claude-stop", {"session_id": "s-nobash"}, state_dir).stdout
+            )
+            self.assertEqual(first["decision"], "block")
+            self.assertIn("No Bash or PowerShell tool", first["reason"])
+
+            second = json.loads(
+                self.run_gate("claude-stop", {"session_id": "s-nobash"}, state_dir).stdout
+            )
+            self.assertNotIn("decision", second)
+            self.assertIn("recorded as undeclared", second["systemMessage"])
+            self.assertTrue(self._state(state_dir, "s-nobash")["undeclared_stop"])
+
+            # Claude Code's own loop bound releases it on the first Stop too.
+            self.run_gate("claude-prompt", {"session_id": "s-nobash-flag"}, state_dir)
+            flagged = json.loads(
+                self.run_gate(
+                    "claude-stop",
+                    {"session_id": "s-nobash-flag", "stop_hook_active": True},
+                    state_dir,
+                ).stdout
+            )
+            self.assertNotIn("decision", flagged)
+            self.assertIn("recorded as undeclared", flagged["systemMessage"])
+
     def test_caveman_violations_are_enforced_on_the_next_prompt_not_by_blocking(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)

@@ -1319,9 +1319,40 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         # message is the lesser cost.
         carried = (state or {}).get("last_flow")
         if not carried:
+            # That block is only worth anything if the model can satisfy it, and the sole way to
+            # declare a route is a Bash or PowerShell command. A session that has neither — a
+            # headless `claude -p` with Bash denied — can never satisfy it, so an unconditional
+            # refusal loops until the turn limit and hands the caller an empty `result` with
+            # `is_error: false`, the worst failure shape there is (issue 499). So refuse ONCE per
+            # turn (the stamp is nonce-keyed, and a fresh prompt writes fresh state, so the next
+            # turn is refused once too), then let the turn end with the undeclared route
+            # recorded — the per-turn rigor survives, the deadlock does not. Claude Code's own
+            # `stop_hook_active` flag is the same bound from the other side; either one releases.
+            nonce = (state or {}).get("nonce") or True
+            refused = bool(state) and state.get("stop_refused") == nonce
+            current = dict(state or {})
+            if event.get("stop_hook_active") or refused:
+                current["undeclared_stop"] = True
+                _write_state("claude", session_id, current)
+                _log_governance(
+                    session_id, "undeclared turn allowed to end: no route could be declared"
+                )
+                return {
+                    "systemMessage": (
+                        "GOVERNANCE: this turn ended with no route declared and none to reconcile "
+                        "against — recorded as undeclared. Declare one next turn; if this session "
+                        "has no Bash or PowerShell tool, say so in your reply."
+                    )
+                }
+            current["stop_refused"] = nonce
+            _write_state("claude", session_id, current)
             return {
                 "decision": "block",
-                "reason": "Declare Ask Matt route; apply Yes governance; use caveman ultra.",
+                "reason": (
+                    "Declare Ask Matt route; apply Yes governance; use caveman ultra. No Bash or "
+                    "PowerShell tool to declare it with? Say that in your reply and end the turn — "
+                    "this gate refuses once, then records the turn as undeclared and lets it end."
+                ),
             }
         _write_state(
             "claude",
