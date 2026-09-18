@@ -453,7 +453,7 @@ async function workChecks() {
  *  board checks degraded to a NOTE — which is why the job's value is one verdict per head for every
  *  host, not a container's missing binary.) `.github/workflows/tracker-audit.yml` runs it on every issue
  *  event and every push to the default branch, and this reads that job's latest run for the head
- *  the default branch is on — the way session-end's cloud table reads Board sweep. A container and
+ *  the default branch is on — the way the session-end check reads Board sweep. A container and
  *  the desktop print the same line.
  *
  *  The workflow's filename is the contract between the two halves. Renaming one renames both. */
@@ -863,7 +863,7 @@ function bootstrapChecks() {
     stop(`aac-bootstrap ${r.stage} failed — ${r.reason}`);
     note(`marker ${r.path}${r.marker.failed_at ? ` written ${r.marker.failed_at}` : ''}; no aac payload, skills or governance hooks in this container`);
     if (r.stage === 'clone') {
-      note('if git could not read a username for github.com: `env | grep ANTHROPIC_BASE_URL` (a caveman proxy URL at environment level strips credential injection, issue 519); git push falls back to GitHub MCP push_files, see the session-end cloud table');
+      note('if git could not read a username for github.com: `env | grep ANTHROPIC_BASE_URL` (a caveman proxy URL at environment level strips credential injection, issue 519); git push falls back to GitHub MCP push_files');
     }
     return;
   }
