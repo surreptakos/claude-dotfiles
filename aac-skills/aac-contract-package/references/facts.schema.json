@@ -1,0 +1,188 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/surreptakos/aac-contract-builder/skill/aac-contract-package/references/facts.schema.json",
+  "title": "AAC _facts.json (deal record) v1.0",
+  "description": "Schema for the _facts.json deal record consumed by skill/aac-contract-package/scripts/build_package.py. Ratified as version 1.0 in the 2026-09-10 spec session (issues #123, #215). Field meanings, authority citations, and the resolved open-question ledger live in FACTS-SCHEMA.md alongside this file. Never restate a standard here; the reference files under skill/aac-contract-package/references/ own every governed value.",
+  "type": "object",
+  "required": ["customer", "sites", "deal"],
+  "additionalProperties": true,
+  "properties": {
+    "customer": {
+      "type": "object",
+      "required": ["subscriber_name", "billing_address"],
+      "additionalProperties": true,
+      "properties": {
+        "subscriber_name": {"type": "string", "minLength": 1},
+        "billing_address": {"type": "string", "minLength": 1},
+        "phone": {"type": ["string", "null"]},
+        "cell": {"type": ["string", "null"]},
+        "email": {"type": ["string", "null"], "format": "email"},
+        "entity_verified": {"type": "boolean"},
+        "assumed_name": {"type": ["string", "null"]},
+        "state_of_incorporation": {"type": ["string", "null"]}
+      }
+    },
+    "sites": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["site_name", "site_address", "price", "systems"],
+        "additionalProperties": true,
+        "properties": {
+          "site_name": {"type": "string", "minLength": 1},
+          "site_address": {"type": "string", "minLength": 1},
+          "price": {"type": "number"},
+          "price_source": {"type": "string"},
+          "deposit": {"type": ["number", "null"]},
+          "systems": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["system", "designation", "equipment"],
+              "additionalProperties": true,
+              "properties": {
+                "system": {"type": "string", "minLength": 1},
+                "designation": {"type": "string", "minLength": 1},
+                "scope": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "properties": {
+                    "coverage_sentence": {"type": "string"},
+                    "extra_sentences": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  }
+                },
+                "equipment": {
+                  "type": "array",
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "required": ["qty", "description"],
+                    "additionalProperties": true,
+                    "properties": {
+                      "qty": {"type": ["integer", "number"]},
+                      "description": {"type": "string"}
+                    }
+                  }
+                },
+                "services": {
+                  "type": "array",
+                  "maxItems": 20,
+                  "items": {
+                    "type": "object",
+                    "required": ["qty", "description", "unit"],
+                    "additionalProperties": true,
+                    "properties": {
+                      "qty": {"type": ["integer", "number"]},
+                      "description": {"type": "string"},
+                      "unit": {"type": "number"},
+                      "kind": {"type": "string", "enum": ["new", "replacement", "existing"]}
+                    }
+                  },
+                  "allOf": [
+                    {
+                      "contains": {
+                        "type": "object",
+                        "properties": {"kind": {"const": "new"}},
+                        "required": ["kind"]
+                      },
+                      "minContains": 0,
+                      "maxContains": 5
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "properties": {"kind": {"const": "replacement"}},
+                        "required": ["kind"]
+                      },
+                      "minContains": 0,
+                      "maxContains": 10
+                    },
+                    {
+                      "contains": {
+                        "type": "object",
+                        "properties": {"kind": {"const": "existing"}},
+                        "required": ["kind"]
+                      },
+                      "minContains": 0,
+                      "maxContains": 5
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "deal": {
+      "type": "object",
+      "required": ["rep", "prospect"],
+      "additionalProperties": true,
+      "properties": {
+        "rep": {"type": "string", "minLength": 1},
+        "prospect": {"type": ["string", "integer"]},
+        "work_order": {"type": ["string", "integer", "null"]},
+        "package_situation": {"type": "string", "enum": ["initial", "subsequent"]},
+        "commercial": {"type": "boolean"},
+        "term_years": {"type": ["integer", "number"]},
+        "paid_by": {"type": "string", "enum": ["subscriber", "lender"]},
+        "lender": {"type": ["string", "null"]},
+        "inspections_per_year": {"type": ["string", "integer", "null"]}
+      }
+    },
+    "flags": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "prevailing_wage": {"type": "boolean"},
+        "tax_exempt": {"type": "boolean"},
+        "customer_furnished_equipment": {"type": "boolean"},
+        "detector_cleaning_discussed": {"type": "boolean"},
+        "submittals_excluded_confirmed": {"type": "boolean"},
+        "equipment_reused": {"type": "boolean"},
+        "fire_alarm_to_code": {"type": "boolean"},
+        "no_master_agreement": {"type": "boolean"},
+        "new_construction": {"type": "boolean"}
+      }
+    },
+    "job_clarifications": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {"type": "string"},
+          {
+            "type": "object",
+            "required": ["text"],
+            "additionalProperties": true,
+            "properties": {
+              "order": {"type": ["integer", "number"]},
+              "text": {"type": "string"}
+            }
+          }
+        ]
+      }
+    },
+    "held": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {"deal": {"type": "object", "properties": {"commercial": {"const": true}}, "required": ["commercial"]}},
+        "required": ["deal"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {"deal": {"required": ["package_situation"]}}
+      }
+    }
+  ]
+}

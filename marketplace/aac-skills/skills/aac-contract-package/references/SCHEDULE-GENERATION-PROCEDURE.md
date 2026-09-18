@@ -111,6 +111,53 @@ Tab: `Equip & Services`. Rows shift as you insert equipment lines, so fill top t
 
 **Editing mechanics are governed by SCHEDULE-EDIT-PROCEDURE.md.** Never save a schedule through openpyxl or any other spreadsheet library. Use `scripts/xlsx_surgical.py`. A56 is rich text with four runs: bold `Clarifications`, body, bold `Exclusions`, body. Update runs 1 and 3 only. Line breaks inside the cell are `\r\n`; bullets are `• `.
 
+**Multi-Site and multi-System layout.** *Amended 2026-09-10 (spec 215 stream B, ADR-0001); awaiting Dan's signature.* The cell map above shows the single-Site single-System base form. A Project spanning multiple Sites or Systems within one Contract family (SOW-BASELINES §3) repeats the Site and System blocks inside the same anchored regions, and every row anchor is located by its label — never by fixed row number — because block repetition shifts the row counts in the base map:
+
+- **Equipment and Labor** carries one Site block per Site. The Site line (`-` in column A, `Site: <name and address>` in column B, that Site's unit and extended purchase price in F and G) opens the block. Below the Site line, one System sub-block per System: `System: <approved system name>` in column B, followed by that System's equipment lines (quantity in A, description in B, no per-line price in the default variant). The next Site starts a new Site line. `G35` still sums the whole Equipment and Labor range; deposit and balance derive from that sum unchanged.
+- **Services** repeats the same Site-then-System sub-block structure. Inside each System sub-block the per-subgroup rows — `New Services`, `Replacement Services`, `Existing Services` — appear only for subgroups that carry lines for that System. A System with no service lines carries no System sub-block in the Services section; the Equipment sub-block is unaffected. `G53` sums the whole Services range.
+- Cross-family Projects are not built as one schedule: the builder refuses with a split instruction (issue #10 ruling 1; SOW-BASELINES §3).
+
+Worked two-system example, tokens only, drawn from `fixtures/golden/golden-17/expected/`:
+
+```
+                                          EQUIPMENT AND LABOR
+
+Qty Description                                                    Unit Price   Extended Price
+
+-   Site: SITE-17
+
+    System: Intrusion Alarm
+
+2   Wireless Door Transmitter
+
+    System: Access Control
+
+1   Mullion Smart Reader
+    22/6 Stranded Shielded Riser Cable
+    18/2 Stranded Unshielded Riser Cable
+    Conduit & Electrical
+
+                                                SERVICES
+
+Qty Description                                                    Unit Monthly   Extended Monthly
+
+-   Site: SITE-17
+
+    System: Intrusion Alarm
+
+    New Services
+
+1   Alta Cloud Video with Analytics and 30 Days of Cloud Storage - Per Camera   $20.00   $20.00
+
+    System: Access Control
+
+    New Services
+
+1   Alta Cloud Access Control, Premium Tier - Up to 1 Entry        $22.50         $22.50
+```
+
+The Site line carries the Site's extended price in the default variant; the Purchase Price at G35 sums every Site line across the block. On the line-item variant (§6), the Site line's price cells are cleared and each equipment line carries its own quantity × unit price = extended price.
+
 ---
 
 ## 5. Scope of work
@@ -142,7 +189,7 @@ Determine the designation from the work-up and the proposal, not from the folder
 
 **These work-up lines never appear as schedule lines:** trip charges, freight, `MISC` roll-ups, tax, labor line items, supplier conduit and fittings sections, and anything with a blank quantity. They are inside the price on the Site line.
 
-**Line-item variant, on request only.** The standard format above (price on the Site line, no per-line costs) is the default. When the customer asks for parts-and-labor line-item pricing and Sales approves the deviation (Dan approved it for Clearbrook Riley Building, 2026-08-13), the approval is recorded in the handoff email — who approved and when — and the rules are:
+**Line-item variant, on request only.** The standard format above (price on the Site line, no per-line costs) is the default. When the customer asks for parts-and-labor line-item pricing and Sales approves the deviation (Dan approved it for the Riley Building job, 2026-08-13), the approval is recorded in the handoff email — who approved and when — and the rules are:
 
 - Parts-list order: new equipment first (largest unit price first), then materials, then labor by category, then Subscriber-furnished equipment separated at the end under its own header line ("SUBSCRIBER-FURNISHED EQUIPMENT, REINSTALLED AT NO CHARGE:", qty "-", no prices, items beneath with quantity and description only).
 - Every line's quantity times unit price equals its extended price exactly. No line rounds off.

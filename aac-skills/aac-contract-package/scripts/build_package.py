@@ -103,7 +103,8 @@ FIRE = {
 # appendix, so a rename or removal there breaks tests instead of drifting
 # silently. The schema-level question — whether `services[].description`
 # should carry a full enum of every MAPPING-APPENDIX RMR name — stays open
-# in `docs/FACTS-SCHEMA.md` Q6.
+# in `skill/aac-contract-package/references/FACTS-SCHEMA.md` — Q6 Resolved
+# 2026-09-10, kept out of the schema.
 _FIRE_MASTER_MONITORING_NAMES = (
     'Fire Alarm Monitoring via Phone Line',
     'Fire Alarm Monitoring via Mesh Radio',
@@ -184,28 +185,41 @@ def _categorize_fire_master_rmr(services):
     return picked['monitoring'], picked['inspection'], picked['repair_service']
 
 
-# STARTER field set is reconciled against docs/facts.schema.json (issue 31).
-# Every field the code below reads appears here; every field here is either
-# read by the code or explicitly justified as a future-validator input in
-# docs/FACTS-SCHEMA.md ("Fields present in the starter that build_package.py
-# does not read", Open Question Q2). Currently unread-but-retained:
-#   - customer.entity_verified: consumed by a future pre-build gate per
-#     references/DRAFTER-PRESEND-CHECKLIST.md (A.1); docs/FACTS-SCHEMA.md Q2.
-#   - pricing.price_source: consumed by a future validator per
-#     references/SCHEDULE-GENERATION-PROCEDURE.md §1; docs/FACTS-SCHEMA.md Q2.
+# STARTER is the tree-shape v1.0 record ratified by Dan on 2026-09-10 (issue
+# #215 stream A). The schema and its companion live at
+# skill/aac-contract-package/references/facts.schema.json and
+# skill/aac-contract-package/references/FACTS-SCHEMA.md; every field the code
+# below reads appears in STARTER, and every unread field is a provenance
+# field the pre-build gate consumes (Q2 Resolved in the companion):
+#   - customer.entity_verified: A.1 verification track record
+#   - sites[].price_source: source-precedence provenance per
+#     references/SCHEDULE-GENERATION-PROCEDURE.md §1
+# The commercial default carries deal.package_situation = "initial" so the
+# starter validates against the schema's conditional required rule
+# (commercial => package_situation). A drafter editing the starter for a
+# repeat commercial Project changes it to "subsequent"; a residential deal
+# flips deal.commercial to False and removes the situation.
 STARTER = {
-    "customer": {"subscriber_name": "", "billing_address": "", "site_name": "",
-                 "site_address": "", "phone": "", "cell": "", "email": "",
+    "customer": {"subscriber_name": "", "billing_address": "",
+                 "phone": "", "cell": "", "email": "",
                  "entity_verified": False, "assumed_name": None,
                  "state_of_incorporation": None},
-    "deal": {"rep": "", "prospect": "", "system": "Fire Alarm",
-             "designation": "new", "commercial": True, "term_years": 5,
+    "sites": [{
+        "site_name": "", "site_address": "",
+        "price": 0, "price_source": "proposal", "deposit": None,
+        "systems": [{
+            "system": "Fire Alarm",
+            "designation": "new",
+            "scope": {"coverage_sentence": "", "extra_sentences": []},
+            "equipment": [{"qty": 1, "description": ""}],
+            "services": [{"qty": 1, "description": "", "unit": 0, "kind": "new"}],
+        }],
+    }],
+    "deal": {"rep": "", "prospect": "", "work_order": None,
+             "package_situation": "initial",
+             "commercial": True, "term_years": 5,
              "paid_by": "subscriber", "lender": None,
              "inspections_per_year": None},
-    "pricing": {"price": 0, "price_source": "proposal", "deposit": None},
-    "equipment": [{"qty": 1, "description": ""}],
-    "services": [{"qty": 1, "description": "", "unit": 0, "kind": "new"}],
-    "scope": {"coverage_sentence": "", "extra_sentences": []},
     "flags": {"prevailing_wage": False, "tax_exempt": False,
               "customer_furnished_equipment": False,
               "detector_cleaning_discussed": False,
@@ -217,12 +231,89 @@ STARTER = {
 }
 
 
+def _flatten_v1(f):
+    """Normalise a v1.0 tree record into the flat working shape the
+    build_schedule / build_agreements / select_bullets code consumes.
+
+    Stream A (issue #217) lands the tree shape and the schema without
+    changing the single-Site single-System output layout; multi-Site,
+    multi-System composition ships in stream B (issue #218) which will
+    replace this normaliser with a walker over sites/systems.
+
+    Refuses a record with more than one Site or more than one System per
+    Site with a message naming the stream-B ticket, so the failure mode is
+    a clear pointer instead of a silent one-System build of a multi-System
+    packet.
+
+    Missing optional blocks default to empty (Q7 Resolved in
+    references/FACTS-SCHEMA.md); a missing kind tag on a service line is
+    left absent and the grouped-fill code warns and defaults to "new".
+    """
+    if 'sites' not in f or not isinstance(f['sites'], list) or not f['sites']:
+        raise SystemExit(
+            '_facts.json is not a v1.0 tree record: "sites" list is missing '
+            'or empty. See skill/aac-contract-package/references/FACTS-SCHEMA.md.'
+        )
+    if len(f['sites']) > 1:
+        raise SystemExit(
+            f'{len(f["sites"])} sites in _facts.json — multi-site builds '
+            'ship in stream B (issue #218). Split the packet into one '
+            '_facts.json per Site until then.'
+        )
+    site = f['sites'][0]
+    if 'systems' not in site or not isinstance(site['systems'], list) or not site['systems']:
+        raise SystemExit(
+            f'_facts.json site {site.get("site_name", "?")!r} carries no '
+            'systems. See skill/aac-contract-package/references/FACTS-SCHEMA.md.'
+        )
+    if len(site['systems']) > 1:
+        raise SystemExit(
+            f'{len(site["systems"])} systems at site '
+            f'{site.get("site_name", "?")!r} — multi-system builds ship in '
+            'stream B (issue #218). Split the packet into one _facts.json '
+            'per System until then.'
+        )
+    sysrec = site['systems'][0]
+
+    cust = dict(f.get('customer') or {})
+    cust['site_name'] = site['site_name']
+    cust['site_address'] = site['site_address']
+
+    deal = dict(f.get('deal') or {})
+    deal['system'] = sysrec['system']
+    deal['designation'] = sysrec['designation']
+
+    pricing = {
+        'price': site['price'],
+        'price_source': site.get('price_source', ''),
+        'deposit': site.get('deposit'),
+    }
+
+    scope = sysrec.get('scope') or {}
+    flat = {
+        'customer': cust,
+        'deal': deal,
+        'pricing': pricing,
+        'equipment': list(sysrec.get('equipment') or []),
+        'services': list(sysrec.get('services') or []),
+        'scope': {
+            'coverage_sentence': scope.get('coverage_sentence', ''),
+            'extra_sentences': list(scope.get('extra_sentences') or []),
+        },
+        'flags': dict(f.get('flags') or {}),
+        'job_clarifications': list(f.get('job_clarifications') or []),
+        'held': list(f.get('held') or []),
+    }
+    return flat
+
+
 def load(job):
     p = os.path.join(job, '_facts.json')
     if not os.path.exists(p):
         raise SystemExit(f'no _facts.json in {job}\nRun with --facts to write a starter.')
     with open(p, encoding='utf8') as fh:
-        return json.load(fh)
+        raw = json.load(fh)
+    return _flatten_v1(raw)
 
 
 def lib():
@@ -332,7 +423,8 @@ def _jurisdiction_phrase(state):
     format). The reference wording quotes an Illinois example; this routine
     reads the state from the record and picks the English article. Semantic
     ambiguity — default-to-Illinois vs required-when-assumed-name — is Open
-    Question Q3 in docs/FACTS-SCHEMA.md, not resolved here (hard rule 7).
+    Question Q3 in skill/aac-contract-package/references/FACTS-SCHEMA.md
+    (Resolved 2026-08-25: required-when-assumed-name, full state names only).
     """
     article = 'an' if state[:1].upper() in ('A', 'E', 'I', 'O', 'U') else 'a'
     return f"{article} {state} corporation"
@@ -347,8 +439,9 @@ def build_schedule(job, f, L, R):
             raise SystemExit(
                 "customer.assumed_name is set but customer.state_of_incorporation "
                 "is missing; the assumed-name subscriber block cannot be rendered "
-                "without a jurisdiction. See docs/FACTS-SCHEMA.md Open Question "
-                "Q3; add the field to _facts.json.")
+                "without a jurisdiction. See "
+                "skill/aac-contract-package/references/FACTS-SCHEMA.md Q3; "
+                "add the field to _facts.json.")
         name = f"{cust['subscriber_name']}, {_jurisdiction_phrase(state)}, d/b/a {cust['assumed_name']}"
     sub = CR.join([name] + [x for x in cust['billing_address'].split('\n') if x.strip()])
     siteline = f"Site: {cust['site_name']}, {cust['site_address'].replace(chr(10), ', ')}"
