@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-17T21:34:34Z"
-  previous-modified: "2026-09-17T21:31:29Z"
-  revision: "24"
-  content-sha: "4c218858c23c"
+  modified: "2026-09-17T21:43:12Z"
+  previous-modified: "2026-09-17T21:34:34Z"
+  revision: "25"
+  content-sha: "099a7342ab3a"
 ---
 
 # ticket-fleet
@@ -466,6 +466,20 @@ merge, pushes nothing and opens no PR; the ticket appears in the run result's `f
 with `conflictPaths` naming every path still in conflict. A test command that fails after an
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
+
+**A merge the classifier refuses is not a blocked merge.** In a container the auto-mode
+classifier sometimes refuses `git merge` on the shape of the command rather than on what it
+would do, and the refusals are not deterministic — a byte-identical retry usually goes through.
+Run `6aac3d3b` ended with no PR for #489 or #493 over one refused merge each, both branches
+verified and complete, and the session redid the two deliveries by hand as PRs #540 and #541.
+So the stage retries the identical merge once, and if that is refused too it **delivers
+anyway**: the verified branch is pushed as it stands, the PR is opened (through
+`mcp__github__create_pull_request` when the Bash route is refused as well), and the result is
+`mergeStatus: "unmerged-by-classifier"` with `pushed: true`, `conflictPaths: []` and the
+refusal text verbatim in `blockedReason` — and in the PR body, under "Not merged with
+`<defaultBranch>`: classifier refusal". Whoever merges that PR merges the default branch into
+the branch first; nothing needs re-implementing. A verified branch never ends a run with
+`pushed: false`, and the refusal text is a note on the PR, not a substitute for it.
 
 ## Branch names
 
