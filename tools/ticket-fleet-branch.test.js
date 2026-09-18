@@ -900,6 +900,33 @@ for (const file of RESUME_GUARD_PAIR) {
       'a scan hit that cannot be resolved must block delivery with the marker-carrying paths, not push');
   });
 
+  // ---- The regenerate is not evidence that the stamps are right (issue 553) ----
+  // Run 6aac4a53 delivered #550 and #552 with every stamp hashed against the container's home
+  // instead of the owner's: A4's regenerate ran, the payload rebuilt, the tests passed, and
+  // skill-stamps.yml's `pull_request` run (the merge ref) was green - while the push-event run of
+  // the same `check` job was red the moment each PR opened. A5's first half is what stands
+  // between that regenerate and the push.
+
+  test(`${rel} deliver prompt runs the stamps check after the regenerate and before the push (issue 553)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    const prompt = extractMarked(src, 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /\(i\) STAMPS CHECK \(issue 553\): \$\{regenCheckNote\}/,
+      "A5's first half must run the repo's configured stamps check");
+    const regenIdx = prompt.indexOf('${regenNote}');
+    const checkIdx = prompt.indexOf('${regenCheckNote}');
+    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    assert.ok(regenIdx > 0 && checkIdx > regenIdx && pushIdx > checkIdx,
+      'the stamps check must sit between A4 regenerate and the STEP B push, in that order');
+    assert.match(prompt, /Do NOT hand-edit a stamp to make this pass/,
+      'a stamp bumped by hand makes the check green and the dates a lie - the recipe is the only fix');
+    assert.match(prompt, /If the second run still fails.*blockedReason naming every skill the check listed/,
+      'a stamp still stale after one re-run must block the push with a named reason, not arrive as a red PR');
+    assert.match(prompt, /run A5\(i\)'s stamps check on the merge result/,
+      'the clean-merge path has no regenerate behind it and still needs the check');
+    assert.match(src, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills agents\/skills claude\/skills --home '/,
+      "the default check must be the command CI runs, --home included: a stamp hashed against the container's home is the bug");
+  });
+
   test(`${rel} deliver prompt repairs a pushed bad merge forward rather than force-pushing (issue 514)`, () => {
     const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
     assert.match(prompt, /git read-tree -u --reset <corrected-commit>/,
