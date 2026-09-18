@@ -30,14 +30,32 @@ and `Assert-NoSecrets` exist so a pull or a commit cannot carry them. What this 
 **How to use them:** `python3 tools/zoho-rest.py transport|probe|whoami|get <url-or-path>`. It
 mints a fresh access token from the trio on every run (the stored one is a fallback only), sends
 `Authorization: Zoho-oauthtoken …` (a `Bearer` header answers `INVALID_TOKEN`), and prints no
-token: `probe` shows scope, `expires_in` and `api_domain`, which is also how to learn what the
-grant covers before assuming CRM, Books or Desk. Desk is on `desk.zoho.com`, Books on
-`www.zohoapis.com/books/v3`; pass those as full URLs.
+token: `probe` shows scope, `expires_in` and `api_domain`. Desk is on `desk.zoho.com`; pass it as
+a full URL. **Books is not in the grant** — `/books/v3/organizations` answers
+`{"code":57,"message":"You are not authorized to perform this operation"}`; Books from a cloud
+session is the claude.ai Zoho Books connector, or a re-consent that adds `ZohoBooks.*` scopes.
 
-**Not yet proven live (2026-09-18):** the auto-mode classifier refused every call that put a
-credential on the wire from this session (`Credential Exploration`), so the trio's grant, the
-scope list and the GitHub token's login are unverified. Run `probe` and `whoami` in a session
-where the operator allows it, and replace this paragraph with the transcript. The helper's own
-tests (`python3 tools/zoho-rest.test.py`) cover the picker, the token request and the header
-without a network. Related: [[caveman-base-url-stays-with-the-proxy]] for a variable that must
-*not* live in the environment.
+**Verified 2026-09-18** (this transcript is the proof; a later failed run supersedes it):
+
+```
+$ python3 tools/zoho-rest.py probe
+{"api_domain": "https://www.zohoapis.com", "expires_in": 3600, "scope": "ZohoCRM.modules.ALL
+ZohoCRM.settings.ALL ZohoCRM.users.ALL ZohoCRM.org.ALL ZohoCRM.bulk.ALL ZohoCRM.notifications.ALL
+ZohoCRM.coql.READ Desk.tickets.ALL Desk.contacts.ALL Desk.tasks.ALL Desk.basic.ALL
+Desk.settings.ALL Desk.events.ALL Desk.articles.ALL Desk.search.READ", "token_type": "Bearer"}
+$ python3 tools/zoho-rest.py whoami
+dgatsakos@activealarm.com	Dan Gatsakos
+$ python3 tools/zoho-rest.py get https://desk.zoho.com/api/v1/organizations   # ids + names
+[(874367220, 'Active Alarm Company'), (882152284, 'activealarmcompany1742061430233'),
+ (932165744, 'activealarmcompany1784572118742')]
+```
+
+Desk calls need `orgId: 874367220` (the named org; the two `activealarmcompany17…` ids are
+sandbox-style duplicates, untested). `GAS_GITHUB_TOKEN` answers `/user` as `surreptakos` with an
+empty `X-OAuth-Scopes` header, so it is a fine-grained PAT, and it differs from the platform's
+`GH_TOKEN`. The stored `ZOHO_ACCESS_TOKEN` still answered `200` on the day it was set; do not
+expect that a week later. The auto-mode classifier refuses every call that puts one of these on the
+wire (`Credential Exploration`), the helper included — verify from a session with auto mode off.
+The helper's own tests (`python3 tools/zoho-rest.test.py`) cover the picker, the token request
+and the header without a network. Related: [[caveman-base-url-stays-with-the-proxy]] for a
+variable that must *not* live in the environment.

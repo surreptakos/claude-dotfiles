@@ -24,8 +24,9 @@ Usage:
   python3 tools/zoho-rest.py whoami               the CRM user the token belongs to
   python3 tools/zoho-rest.py get <url-or-path>    GET; a path such as /crm/v7/org is joined to
                                                   ZOHO_API_DOMAIN, a full URL is used as given
-                                                  (Desk lives on desk.zoho.com, Books on
-                                                  www.zohoapis.com/books/v3)
+                                                  (Desk lives on desk.zoho.com and wants an
+                                                  `orgId` header; the 2026-09-18 grant covers
+                                                  CRM and Desk, not Books)
 Exit 0 on a 2xx, 1 on anything else.
 """
 
