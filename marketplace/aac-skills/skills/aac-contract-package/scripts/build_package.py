@@ -50,12 +50,14 @@ CR = '\r\n'
 # while any subgroup is in use. Row-visibility runs through
 # xlsx_surgical.set_row_hidden (the sanctioned write path — hard rule 2)
 # rather than inserting or reindexing rows.
+EQ_SYS_ROW = 22          # the template's own System line (B22)
 EQ_START = 23
 EQ_CAP = 50
 EQ_END = EQ_START + EQ_CAP - 1  # row 72
 DEP_CELL = 'G74'
 SVC_SITE_CELL = 'B79'
-SVC_SYS_CELL = 'B80'
+SVC_SYS_ROW = 80         # the template's own System line under Services
+SVC_SYS_CELL = f'B{SVC_SYS_ROW}'
 # Per-subgroup fill regions (kind, first row, cap, label cell, label row).
 # Order matches the visual order down the sheet.
 SVC_SUBGROUPS = (
@@ -67,6 +69,25 @@ SVC_KINDS = tuple(k for k, *_ in SVC_SUBGROUPS)
 SVC_CAP = sum(cap for _, _, cap, _, _ in SVC_SUBGROUPS)  # 20
 SVC_START = SVC_SUBGROUPS[0][1]                          # 82
 SVC_END = SVC_SUBGROUPS[-1][1] + SVC_SUBGROUPS[-1][2] - 1  # 103
+# The subgroup label text the template carries in B81/B87/B98, keyed by kind,
+# for the rows a multi-System schedule writes below the first System's block.
+SVC_LABELS = {'new': 'New Services', 'replacement': 'Replacement Services',
+              'existing': 'Existing Services'}
+# Multi-System schedule (issue #226, spec 215 stream B): the Site and System
+# blocks repeat inside the same anchored regions per the amended cell map in
+# references/SCHEDULE-GENERATION-PROCEDURE.md §4. Under Equipment and Labor
+# every System after the first takes one row of the fill region for its
+# System line; under Services, when more than one System sells a service,
+# the region from the System line at SVC_SYS_ROW to SVC_END is filled top to
+# bottom with one System sub-block per System (its subgroup label rows only
+# for subgroups that carry lines). Repeated rows take the template's own
+# styles for that role (rows EQ_SYS_ROW, SVC_SYS_ROW, SVC_LABEL_ROW,
+# SVC_ITEM_ROW) through xlsx_surgical.copy_row_styles; rows are hidden or
+# shown, never inserted or deleted, and a region that cannot hold the
+# schedule refuses before anything is written.
+SVC_LABEL_ROW = SVC_SUBGROUPS[0][4]                      # 81
+SVC_ITEM_ROW = SVC_START                                 # 82
+SVC_REGION_ROWS = SVC_END - SVC_SYS_ROW + 1              # 24
 CLAR_CELL = 'A107'
 
 PACKAGES = {
@@ -414,23 +435,23 @@ def compose(record):
 
 
 def _flatten_v1(f):
-    """Normalise a v1.0 tree record into the flat working shape the
-    build_schedule / build_agreements / select_bullets code consumes.
+    """Normalise a v1.0 tree record into the working shape the
+    build_schedule / build_agreements / select_bullets code consumes: the
+    one Site's identity and pricing at the top, and ``systems`` — one entry
+    per System at that Site, in record order, each carrying its
+    designation, scope, equipment and services. A single-System record is
+    the same shape with one entry (issue #226, spec 215 stream B).
 
-    Stream A (issue #217) lands the tree shape and the schema without
-    changing the single-Site single-System output layout; the multi-System
-    schedule (issue #226) and the multi-Site schedule (issue #227) will
-    replace this normaliser with a walker over sites/systems. Package
-    composition and the cross-family refusal (issue #225) run over the
-    whole tree in ``compose`` before this normaliser is reached.
-
-    Refuses a record with more than one Site or more than one System per
-    Site with a message naming the ticket, so the failure mode is a clear
-    pointer instead of a silent one-System build of a multi-System packet.
+    Refuses a record with more than one Site with a message naming the
+    ticket (the multi-Site schedule is issue #227), so the failure mode is
+    a clear pointer instead of a silent one-Site build of a multi-Site
+    packet. Package composition and the cross-family refusal (issue #225)
+    run over the whole tree in ``compose`` before this normaliser is
+    reached.
 
     Missing optional blocks default to empty (Q7 Resolved in
     references/FACTS-SCHEMA.md); a missing kind tag on a service line is
-    left absent and the grouped-fill code warns and defaults to "new".
+    left absent and the services fill warns and defaults to "new".
     """
     pairs = _tree_systems(f)
     if len(f['sites']) > 1:
@@ -440,21 +461,10 @@ def _flatten_v1(f):
             'per Site until then.'
         )
     site = f['sites'][0]
-    if len(pairs) > 1:
-        raise SystemExit(
-            f'{len(pairs)} systems at site {site.get("site_name", "?")!r} — '
-            'the multi-system schedule is issue #226. Split the packet into '
-            'one _facts.json per System until then.'
-        )
-    sysrec = pairs[0][1]
 
     cust = dict(f.get('customer') or {})
     cust['site_name'] = site['site_name']
     cust['site_address'] = site['site_address']
-
-    deal = dict(f.get('deal') or {})
-    deal['system'] = sysrec['system']
-    deal['designation'] = sysrec['designation']
 
     pricing = {
         'price': site['price'],
@@ -462,22 +472,29 @@ def _flatten_v1(f):
         'deposit': site.get('deposit'),
     }
 
-    scope = sysrec.get('scope') or {}
-    flat = {
+    systems = []
+    for _, sysrec in pairs:
+        scope = sysrec.get('scope') or {}
+        systems.append({
+            'system': sysrec['system'],
+            'designation': sysrec['designation'],
+            'scope': {
+                'coverage_sentence': scope.get('coverage_sentence', ''),
+                'extra_sentences': list(scope.get('extra_sentences') or []),
+            },
+            'equipment': list(sysrec.get('equipment') or []),
+            'services': list(sysrec.get('services') or []),
+        })
+
+    return {
         'customer': cust,
-        'deal': deal,
+        'deal': dict(f.get('deal') or {}),
         'pricing': pricing,
-        'equipment': list(sysrec.get('equipment') or []),
-        'services': list(sysrec.get('services') or []),
-        'scope': {
-            'coverage_sentence': scope.get('coverage_sentence', ''),
-            'extra_sentences': list(scope.get('extra_sentences') or []),
-        },
+        'systems': systems,
         'flags': dict(f.get('flags') or {}),
         'job_clarifications': list(f.get('job_clarifications') or []),
         'held': list(f.get('held') or []),
     }
-    return flat
 
 
 def read_record(job):
@@ -504,7 +521,8 @@ def select_bullets(f, L):
     Selection logic lives here; wording and print order live in clarifications.json.
     """
     c, e = L['clarifications'], L['exclusions']
-    sys_name = f['deal']['system']
+    sys_names = [s['system'] for s in f['systems']]
+    replaces = any(s['designation'] in ('replacement', 'takeover') for s in f['systems'])
     price = float(f['pricing']['price'] or 0)
     fl, deal = f['flags'], f['deal']
     paid_by = deal.get('paid_by', 'subscriber')
@@ -538,8 +556,11 @@ def select_bullets(f, L):
                       ('customer_furnished', 'customer_furnished_equipment')):
         if fl.get(flag):
             b = cond[key]; picked.append((b['order'], b['text']))
-    picked += [(b['order'], b['text']) for b in c['by_system'].get(sys_name, [])]
-    reused = deal['designation'] in ('replacement', 'takeover') and fl.get('equipment_reused')
+    # The system-specific set, once per System sold; a bullet two Systems
+    # share prints once.
+    for name in sys_names:
+        picked += [(b['order'], b['text']) for b in c['by_system'].get(name, [])]
+    reused = replaces and fl.get('equipment_reused')
     if reused:
         picked += [(b['order'], b['text']) for b in c['reused_takeover']]
     if fl.get('new_construction'):
@@ -549,7 +570,7 @@ def select_bullets(f, L):
             picked.append((j.get('order', default_order), j['text']))
         else:
             picked.append((default_order, j))
-    clar = [t for _, t in sorted(picked, key=lambda x: x[0])]
+    clar = _unique([t for _, t in sorted(picked, key=lambda x: x[0])])
 
     ex, last = [], None
     for b in e['universal']:
@@ -560,37 +581,62 @@ def select_bullets(f, L):
             txt = e['conditional']['detector_cleaning']['merged_text']
         # Item 21 applicability tag the record can decide: existing-equipment removal
         # applies only when existing equipment sits in or near the scope.
-        if b['id'] == 'existing_removal' and not (
-                deal['designation'] in ('replacement', 'takeover') or fl.get('equipment_reused')):
+        if b['id'] == 'existing_removal' and not (replaces or fl.get('equipment_reused')):
             continue
         ex.append(txt)
     if fl.get('submittals_excluded_confirmed'):
         ex.append(e['conditional']['submittals']['text'])
-    ex += [b['text'] for b in e['by_system'].get(sys_name, [])]
+    for name in sys_names:
+        ex += [b['text'] for b in e['by_system'].get(name, [])]
     if reused:
         ex += [b['text'] for b in e.get('reused_takeover', [])]
     if fl.get('new_construction'):
         ex += [b['text'] for b in e.get('new_construction', [])]
+    ex = _unique(ex)
     if last:
         ex.append(last)
     return clar, ex
 
 
-def build_sow(f, L):
-    sys_name = f['deal']['system']
+def _unique(texts):
+    """The texts in order, each printed once."""
+    seen, out = set(), []
+    for t in texts:
+        if t not in seen:
+            seen.add(t); out.append(t)
+    return out
+
+
+def _sow_paragraph(s, L):
+    """One System's scope-of-work paragraph: its template from the bullet
+    library, the record's coverage and extra sentences, and the closer."""
+    sys_name = s['system']
     tpl = L['sow_templates'].get(sys_name)
     if not tpl:
         raise SystemExit(f'no SOW template for system "{sys_name}"')
-    parts = [tpl.format(designation=f['deal']['designation'])]
-    if f['scope'].get('coverage_sentence'):
-        parts.append(f['scope']['coverage_sentence'])
-    parts += list(f['scope'].get('extra_sentences', []))
+    parts = [tpl.format(designation=s['designation'])]
+    if s['scope'].get('coverage_sentence'):
+        parts.append(s['scope']['coverage_sentence'])
+    parts += list(s['scope'].get('extra_sentences', []))
     closer = L.get('sow_closer_by_system', {}).get(sys_name)
     if closer is None:
         closer = L['sow_closer_fire'] if sys_name == 'Fire Alarm' else L['sow_closer']
     if closer:
         parts.append(closer)
     return ' '.join(p.strip() for p in parts if p.strip())
+
+
+def build_sow(f, L):
+    """The scope of work: one paragraph per System, in the order the Systems
+    appear under Equipment and Labor. With more than one System each
+    paragraph opens with its label — the System's approved name and a colon
+    — per the per-System labelled paragraph form of references/SOW-BASELINES.md
+    §1; a single System keeps the unlabelled paragraph the cell map's A15
+    row describes, so single-System output is unchanged."""
+    paragraphs = [_sow_paragraph(s, L) for s in f['systems']]
+    if len(paragraphs) == 1:
+        return paragraphs[0]
+    return (CR * 2).join(f"{s['system']}: {p}" for s, p in zip(f['systems'], paragraphs))
 
 
 def _jurisdiction_phrase(state):
@@ -607,8 +653,133 @@ def _jurisdiction_phrase(state):
     return f"{article} {state} corporation"
 
 
+def _systems_label(names):
+    """The Systems a schedule carries, as its filename names them: one name
+    alone, two joined with '&', three or more comma-separated with '&'
+    before the last. A character a Windows filename cannot carry becomes
+    '-' (the approved name Audio/Visual is the case)."""
+    if len(names) == 1:
+        label = names[0]
+    elif len(names) == 2:
+        label = ' & '.join(names)
+    else:
+        label = ', '.join(names[:-1]) + ', & ' + names[-1]
+    return re.sub(r'[<>:"/\\|?*]', '-', label)
+
+
+def plan_equipment_rows(systems):
+    """The rows of the Equipment and Labor fill region (EQ_START..EQ_END),
+    top to bottom: ``('blank', None)`` then ``('system', name)`` for every
+    System after the first (the first System's line is the template's own
+    EQ_SYS_ROW) and ``('item', line)`` for every equipment line — the
+    repeated System sub-blocks of references/SCHEDULE-GENERATION-PROCEDURE.md
+    §4, one blank spacer row between consecutive sub-blocks.
+
+    Refuses before anything is written when one System's lines exceed the
+    per-System cap or the region cannot hold every System, naming the
+    System where the overflow begins."""
+    rows, offender = [], None
+    for k, s in enumerate(systems):
+        eq = s['equipment']
+        if len(eq) > EQ_CAP:
+            whom = f" for System {s['system']!r}" if len(systems) > 1 else ''
+            raise SystemExit(f'{len(eq)} equipment lines{whom} exceed the {EQ_CAP}-line '
+                             'cap in the schedule template. Split the schedule '
+                             'across two packages.')
+        if k:
+            rows += [('blank', None), ('system', s['system'])]
+        rows += [('item', item) for item in eq]
+        if len(rows) > EQ_CAP and offender is None:
+            offender = s['system']
+    if offender is not None:
+        n_items = sum(len(s['equipment']) for s in systems)
+        raise SystemExit(
+            f'the Equipment and Labor region of the schedule template holds '
+            f'{EQ_CAP} rows; {len(systems)} Systems need {len(rows)} ({n_items} '
+            f'equipment lines plus {len(systems) - 1} System lines, each behind '
+            f'a blank spacer row), '
+            f'{len(rows) - EQ_CAP} more than it has, and the overflow begins '
+            f'inside System {offender!r}. Split the schedule across two packages.')
+    return rows
+
+
+def _service_buckets(s):
+    """One System's service lines partitioned by kind, in record order
+    (owner ruling 2026-09-01: GROUPED-FILL). A missing kind defaults to
+    "new" with a warning (the ruling's "absent tag defaults to New,
+    validator flags missing tag" clause); an unknown kind refuses; a
+    subgroup over its cap refuses, naming the System and the subgroup."""
+    buckets = {k: [] for k in SVC_KINDS}
+    for idx, svc in enumerate(s['services']):
+        kind = svc.get('kind')
+        if kind is None:
+            print(f'WARNING: service #{idx + 1} of System {s["system"]!r} missing '
+                  f'"kind" tag; defaulting to "new". Add "kind": "new"/"replacement"/'
+                  f'"existing" to _facts.json services.', file=sys.stderr)
+            kind = 'new'
+        if kind not in SVC_KINDS:
+            raise SystemExit(f'service #{idx + 1} of System {s["system"]!r} has '
+                             f'unknown kind "{kind}"; allowed: {", ".join(SVC_KINDS)}')
+        buckets[kind].append(svc)
+    for kind, _, cap, _, _ in SVC_SUBGROUPS:
+        if len(buckets[kind]) > cap:
+            raise SystemExit(
+                f'{len(buckets[kind])} {kind} service lines for System '
+                f'{s["system"]!r} exceed the {cap}-line cap for that subgroup in '
+                'the schedule template. Split the schedule across two packages.')
+    return buckets
+
+
+def plan_service_rows(systems):
+    """How the Services region is filled, decided before anything is written.
+
+    ``None`` when no System sells a service (the section then reads N/A).
+    One System with services keeps the template's fixed subgroup rows:
+    ``('grouped', system, buckets)``. Two or more fill the region from the
+    System line at SVC_SYS_ROW down to SVC_END, top to bottom, with one
+    System sub-block per System that carries services, a subgroup label
+    row only for the subgroups that carry lines and one blank spacer row
+    between consecutive sub-blocks (references/
+    SCHEDULE-GENERATION-PROCEDURE.md §4): ``('sequential', rows)`` where
+    each row is ``('blank', None)``, ``('system', name)``, ``('label',
+    kind)`` or ``('item', service)``. A region that cannot hold every
+    System refuses, naming the System where the overflow begins."""
+    selling = [(s, _service_buckets(s)) for s in systems if s['services']]
+    if not selling:
+        return None
+    if len(selling) == 1:
+        return ('grouped',) + selling[0]
+    rows, offender = [], None
+    for s, buckets in selling:
+        if rows:
+            rows.append(('blank', None))
+        rows.append(('system', s['system']))
+        for kind, *_ in SVC_SUBGROUPS:
+            if buckets[kind]:
+                rows.append(('label', kind))
+                rows += [('item', svc) for svc in buckets[kind]]
+        if len(rows) > SVC_REGION_ROWS and offender is None:
+            offender = s['system']
+    if offender is not None:
+        raise SystemExit(
+            f'the Services region of the schedule template holds {SVC_REGION_ROWS} '
+            f'rows; {len(selling)} Systems need {len(rows)} (System lines, subgroup '
+            f'labels, service lines and one blank spacer row between Systems), '
+            f'{len(rows) - SVC_REGION_ROWS} more than it '
+            f'has, and the overflow begins inside System {offender!r}. Split the '
+            'schedule across two packages.')
+    return ('sequential', rows)
+
+
+def _write_service(w, r, s):
+    w.set_num(SHEET, f'A{r}', s['qty'])
+    w.set_inline_text(SHEET, f'B{r}', s['description'])
+    w.set_num(SHEET, f'F{r}', s['unit'])
+    w.set_num(SHEET, f'G{r}', round(s['qty'] * s['unit'], 2))
+
+
 def build_schedule(job, f, L, R):
-    cust, deal, pr = f['customer'], f['deal'], f['pricing']
+    cust, deal, pr, systems = f['customer'], f['deal'], f['pricing'], f['systems']
     name = cust['subscriber_name']
     if cust.get('assumed_name'):
         state = cust.get('state_of_incorporation')
@@ -624,8 +795,17 @@ def build_schedule(job, f, L, R):
     siteline = f"Site: {cust['site_name']}, {cust['site_address'].replace(chr(10), ', ')}"
     site = CR.join([cust['site_name']] + [x for x in cust['site_address'].split('\n') if x.strip()])
 
+    # Lay every row out before the template is copied, so a refusal (a
+    # region that cannot hold the schedule, a subgroup over its cap) writes
+    # nothing into the job folder.
+    eq_rows = plan_equipment_rows(systems)
+    svc_plan = plan_service_rows(systems)
+    sow = build_sow(f, L)
+    clar, ex = select_bullets(f, L)
+
     out = os.path.join(job, f"{cust['site_name']}_{_slug(cust['site_address'])} - "
-                            f"{deal['system']} Equip & Svc Schedule.xlsx")
+                            f"{_systems_label([s['system'] for s in systems])} "
+                            "Equip & Svc Schedule.xlsx")
     os.makedirs(R.to_delete, exist_ok=True)
     shutil.copy2(R.schedule_template, out)
     bak = os.path.join(R.to_delete, os.path.basename(out).replace('.xlsx', ' BACKUP pre-build.xlsx'))
@@ -636,68 +816,46 @@ def build_schedule(job, f, L, R):
     w.set_inline_text(SHEET, 'C10', site)
     w.set_inline_text(SHEET, 'G10', deal['rep'])
     w.set_inline_text(SHEET, 'G11', str(deal['prospect']))
-    w.set_inline_text(SHEET, 'A15', build_sow(f, L))
+    w.set_inline_text(SHEET, 'A15', sow)
 
     price = float(pr['price'])
     w.set_inline_text(SHEET, 'B21', siteline)
     w.set_num(SHEET, 'F21', price)
     w.set_num(SHEET, 'G21', price)
-    w.set_inline_text(SHEET, 'B22', f"System: {deal['system']}")
-    eq = f['equipment']
-    if len(eq) > EQ_CAP:
-        raise SystemExit(f'{len(eq)} equipment lines exceed the {EQ_CAP}-line '
-                         'cap in the schedule template. Split the schedule '
-                         'across two packages.')
-    for i, item in enumerate(eq):
+    w.set_inline_text(SHEET, f'B{EQ_SYS_ROW}', f"System: {systems[0]['system']}")
+    for i, (role, payload) in enumerate(eq_rows):
         r = EQ_START + i
-        w.set_num(SHEET, f'A{r}', item['qty'])
-        w.set_inline_text(SHEET, f'B{r}', item['description'])
+        if role == 'blank':
+            continue        # the template's fill rows are empty already
+        if role == 'system':
+            w.copy_row_styles(SHEET, EQ_SYS_ROW, r)
+            w.set_inline_text(SHEET, f'B{r}', f'System: {payload}')
+        else:
+            w.set_num(SHEET, f'A{r}', payload['qty'])
+            w.set_inline_text(SHEET, f'B{r}', payload['description'])
     # Row-visibility toggle across the equipment fill region. Filled rows
     # unhidden, unused rows hidden — no row insertion, no reindexing (issue 39).
     for i in range(EQ_CAP):
-        w.set_row_hidden(SHEET, EQ_START + i, hidden=(i >= len(eq)))
+        w.set_row_hidden(SHEET, EQ_START + i, hidden=(i >= len(eq_rows)))
 
     dep = pr.get('deposit')
     if dep is None:
         dep = round(price * 0.5, 2) if (price > 5000 and deal.get('paid_by') == 'subscriber') else 0
     w.set_num(SHEET, DEP_CELL, dep)
 
-    svc = f.get('services') or []
-    if svc:
-        w.set_inline_text(SHEET, SVC_SITE_CELL, siteline)
-        w.set_inline_text(SHEET, SVC_SYS_CELL, f"System: {deal['system']}")
-        # Partition services by kind (owner ruling 2026-09-01: GROUPED-FILL).
-        # Services keep their original ordering inside each subgroup. Missing
-        # kind defaults to 'new' and prints a warning (validator surface for
-        # the ruling's "absent tag defaults to New, validator flags missing
-        # tag" clause) — the build still proceeds.
-        buckets = {k: [] for k in SVC_KINDS}
-        for idx, s in enumerate(svc):
-            kind = s.get('kind')
-            if kind is None:
-                print(f'WARNING: service #{idx + 1} missing "kind" tag; '
-                      f'defaulting to "new". Add "kind": "new"/"replacement"/'
-                      f'"existing" to _facts.json services.', file=sys.stderr)
-                kind = 'new'
-            if kind not in SVC_KINDS:
-                raise SystemExit(f'service #{idx + 1} has unknown kind '
-                                 f'"{kind}"; allowed: {", ".join(SVC_KINDS)}')
-            buckets[kind].append(s)
+    if svc_plan is None:
+        w.set_inline_text(SHEET, SVC_SITE_CELL, 'N/A')
+    elif svc_plan[0] == 'grouped':
+        # One System sells services: the template's fixed subgroup rows.
         # Per-subgroup fill + row-visibility toggle. Labels are never
         # cleared; the label row is hidden only when the subgroup is unused.
+        _, s, buckets = svc_plan
+        w.set_inline_text(SHEET, SVC_SITE_CELL, siteline)
+        w.set_inline_text(SHEET, SVC_SYS_CELL, f"System: {s['system']}")
         for kind, start, cap, label_cell, label_row in SVC_SUBGROUPS:
             items = buckets[kind]
-            if len(items) > cap:
-                raise SystemExit(
-                    f'{len(items)} {kind} service lines exceed the {cap}-line '
-                    f'cap for that subgroup in the schedule template. Split '
-                    f'the schedule across two packages.')
-            for i, s in enumerate(items):
-                r = start + i
-                w.set_num(SHEET, f'A{r}', s['qty'])
-                w.set_inline_text(SHEET, f'B{r}', s['description'])
-                w.set_num(SHEET, f'F{r}', s['unit'])
-                w.set_num(SHEET, f'G{r}', round(s['qty'] * s['unit'], 2))
+            for i, svc in enumerate(items):
+                _write_service(w, start + i, svc)
             for i in range(cap):
                 w.set_row_hidden(SHEET, start + i, hidden=(i >= len(items)))
             # Hide the label row only for Replacement/Existing when their
@@ -707,9 +865,30 @@ def build_schedule(job, f, L, R):
             if kind != 'new':
                 w.set_row_hidden(SHEET, label_row, hidden=(not items))
     else:
-        w.set_inline_text(SHEET, SVC_SITE_CELL, 'N/A')
+        # Two or more Systems sell services: one System sub-block after
+        # another from the System line down, each row styled like the
+        # template's own row for that role. A spacer row takes the item
+        # row's look and is cleared, since it may land on one of the
+        # template's own subgroup label rows.
+        _, rows = svc_plan
+        w.set_inline_text(SHEET, SVC_SITE_CELL, siteline)
+        style_row = {'system': SVC_SYS_ROW, 'label': SVC_LABEL_ROW,
+                     'item': SVC_ITEM_ROW, 'blank': SVC_ITEM_ROW}
+        for i, (role, payload) in enumerate(rows):
+            r = SVC_SYS_ROW + i
+            if r != style_row[role]:
+                w.copy_row_styles(SHEET, style_row[role], r)
+            if role == 'blank':
+                w.set_inline_text(SHEET, f'B{r}', '')
+            elif role == 'system':
+                w.set_inline_text(SHEET, f'B{r}', f'System: {payload}')
+            elif role == 'label':
+                w.set_inline_text(SHEET, f'B{r}', SVC_LABELS[payload])
+            else:
+                _write_service(w, r, payload)
+        for r in range(SVC_SYS_ROW + 1, SVC_END + 1):
+            w.set_row_hidden(SHEET, r, hidden=(r - SVC_SYS_ROW >= len(rows)))
 
-    clar, ex = select_bullets(f, L)
     body = lambda items, tail=1: CR + CR.join('• ' + t for t in items) + CR * tail
     w.set_runs(SHEET, CLAR_CELL, {1: body(clar, 2), 3: body(ex)})
     w.save(out + '.tmp'); os.replace(out + '.tmp', out)
@@ -731,10 +910,26 @@ def _verify_zip_parts(bak, out):
         return [n for n in a.namelist() if a.read(n) != b.read(n)]
 
 
+def _fire_master_rmr(systems):
+    """(monitoring, inspection, repair_service) monthly amounts for the
+    Commercial Fire master, each summed across the Systems that carry a
+    canonical line of that category (spec 215 stream B: RMR categories sum
+    across Systems into the master's fields); inside one System the first
+    canonical line of a category is the one that counts (issue 33). None
+    for a category no System carries."""
+    cats = ('monitoring', 'inspection', 'repair_service')
+    totals = dict.fromkeys(cats)
+    for s in systems:
+        for cat, pick in zip(cats, _categorize_fire_master_rmr(s['services'])):
+            if pick is not None:
+                totals[cat] = (totals[cat] or 0.0) + float(pick['unit'])
+    return tuple(totals[c] for c in cats)
+
+
 def build_agreements(job, f, R):
     from pypdf import PdfReader, PdfWriter
     deal, cust = f['deal'], f['customer']
-    if deal['system'] != 'Fire Alarm':
+    if not any(s['system'] == 'Fire Alarm' for s in f['systems']):
         return None, None, 'only the Commercial Fire form is mapped so far'
     folder, mname, rname = PACKAGES['Fire Alarm']
     mpath = os.path.join(R.agreements_root, folder, mname)
@@ -742,7 +937,8 @@ def build_agreements(job, f, R):
     if not os.path.exists(mpath):
         return None, None, f'agreement forms not reachable at {mpath}'
 
-    mon, insp, rep = _categorize_fire_master_rmr(f.get('services', []))
+    mon, insp, rep = _fire_master_rmr(f['systems'])
+    amount = lambda x: f'{x:.2f}' if x is not None else 'N/A'
 
     text = {
         FIRE['name']: cust['subscriber_name'],
@@ -751,11 +947,11 @@ def build_agreements(job, f, R):
         FIRE['email']: cust.get('email', ''),
         FIRE['cell']: cust.get('cell', ''),
         FIRE['comm_value']: 'N/A',
-        FIRE['monitoring']: f"{mon['unit']:.2f}" if mon else 'N/A',
-        FIRE['service_monthly']: f"{rep['unit']:.2f}" if rep else 'N/A',
-        FIRE['inspection']: f"{insp['unit']:.2f}" if insp else 'N/A',
+        FIRE['monitoring']: amount(mon),
+        FIRE['service_monthly']: amount(rep),
+        FIRE['inspection']: amount(insp),
         FIRE['inspections_per_year']: f.get('deal', {}).get('inspections_per_year', '') or
-                                     ('one (1)' if insp else 'N/A'),
+                                     ('one (1)' if insp is not None else 'N/A'),
         FIRE['ul_cert']: 'N/A',
         FIRE['in_lieu_of']: 'N/A',
         FIRE['term']: f"{deal['term_years']} years",
@@ -767,9 +963,9 @@ def build_agreements(job, f, R):
         FIRE['cb_area_refuge']: False, FIRE['cb_wireless']: False,
         FIRE['cb_monthly']: False, FIRE['cb_quarter']: True,
         FIRE['cb_semi']: False, FIRE['cb_annual']: False,
-        FIRE['cb_monitoring']: bool(mon),
-        FIRE['cb_service_percall']: not rep, FIRE['cb_service_monthly']: bool(rep),
-        FIRE['cb_inspections']: bool(insp), FIRE['cb_insp_fire']: bool(insp),
+        FIRE['cb_monitoring']: mon is not None,
+        FIRE['cb_service_percall']: rep is None, FIRE['cb_service_monthly']: rep is not None,
+        FIRE['cb_inspections']: insp is not None, FIRE['cb_insp_fire']: insp is not None,
         FIRE['cb_insp_refuge']: False, FIRE['cb_insp_wireless']: False,
         FIRE['cb_ul']: False, FIRE['cb_in_lieu_of']: False,
     }
@@ -827,9 +1023,9 @@ def main():
     plan = compose(raw)          # every refusal here lands before a byte is written
     f, L = _flatten_v1(raw), lib()
     print('=' * 78)
-    print('BUILD —', f['customer']['subscriber_name'], '|', f['deal']['system'],
-          '|', f['deal']['designation'], '|', plan['family'],
-          '|', f'{PACKAGE_RULES} §{plan["section"]}')
+    print('BUILD —', f['customer']['subscriber_name'], '|',
+          '; '.join(f"{s['system']} ({s['designation']})" for s in f['systems']),
+          '|', plan['family'], '|', f'{PACKAGE_RULES} §{plan["section"]}')
     print('=' * 78)
 
     sched, changed, nc, ne, dep = build_schedule(job, f, L, R)
