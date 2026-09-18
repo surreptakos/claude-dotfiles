@@ -64,22 +64,57 @@ markdown fences. The extractor rejects anything else.
 
 ### `facts`
 
-The top-level keys and value shapes come from the `STARTER` dict in
-`skill/aac-contract-package/scripts/build_package.py`. Read that
-dict as the schema — this file does not restate its keys. The
-builder is the schema authority: if this file ever names a key or
-shape that disagrees with `STARTER`, `STARTER` wins and this file
-is the one that needs an edit.
+The shape is the v1.0 tree governed by `facts.schema.json` in this
+folder, with the companion `FACTS-SCHEMA.md` giving the field-by-field
+authority citations. Read the schema as the contract — this file does
+not restate its keys.
 
-Leave a fact absent (or set it to `STARTER`'s default) when no source
-carries it. Do not invent a value to fill a slot.
+The tree has three top-level required blocks: `customer` (subscriber
+identity — subscriber name and billing address are the only two
+required scalars here), `sites` (a list; one Site per protected
+address the Project touches, each carrying `site_name`,
+`site_address`, `price`, and its own `systems` list), and `deal` (the
+commercial envelope — rep, prospect, work order, package situation,
+term, paid-by, lender). Per-System scope, equipment lines and service
+lines live inside the corresponding `sites[].systems[]` entry, not at
+the top level. Optional top-level blocks: `flags` (bullet-selection
+toggles), `job_clarifications`, `held`.
+
+A single-Site single-System record is the same tree with one element
+in each list. Emit the tree even when the packet describes one Site
+and one System — the builder consumes the same shape.
+
+Leave a fact absent when no source carries it. Do not invent a value
+to fill a slot. Do not fabricate a Site or a System to pad the list —
+extract only what the packet actually names.
+
+Two things the extractor never sets, whatever the packet suggests:
+
+- `deal.package_situation` (initial vs. subsequent) is a human field
+  Amanda sets after the extraction returns. Leave it absent. The
+  pilot orchestrator surfaces the missing field to the drafter; the
+  drafter's answer is written into the record before the build.
+- The Contract family (Commercial Fire, Commercial Security,
+  Elevator Monitoring, Residential Security). The extractor emits
+  the raw system string(s) the packet carries under
+  `sites[].systems[].system`; the builder maps each System to its
+  family through the governing system-to-family table (issue #10
+  ruling 1). Do not classify.
+
+`sites[].systems[].services[].kind` is `"new"`, `"replacement"`, or
+`"existing"` per the ratified per-service kind tag; absent tag
+defaults to `"new"` at build time and the pre-build gate warns —
+extract the tag when the packet carries it, and omit it when the
+packet does not.
 
 ### `validations`
 
 One entry per extracted fact. Every entry carries:
 
 - `path` — the dotted path into `facts` (for example,
-  `"deal.term_years"`, `"pricing.price"`, `"customer.site_address"`).
+  `"deal.term_years"`, `"sites[0].price"`,
+  `"sites[0].site_address"`, `"sites[0].systems[0].system"`). Use
+  `[<n>]` for array indices in the path.
 - `status` — one of exactly three strings:
   - `validated` — at least two of the packet artifacts agree on the
     value.
@@ -228,11 +263,12 @@ If a fact requires domain judgment that only the standards can settle
 (for example, whether a customer's stated system name belongs to the
 Commercial Fire, Elevator Monitoring, Commercial Security, or
 Residential Security agreement type per the issue #10 ruling 1
-taxonomy — cited by issue #49 as the source the pilot maps
-`deal.system` against), emit the raw system string the packet uses
-under `deal.system` and let the builder do the mapping. The pilot's
-agreement-type routing (issue #49) reads from `deal.system` — not
-from a classifier you run.
+taxonomy — cited by issue #49 as the source the pilot maps the
+Contract family against), emit the raw system string the packet uses
+under `sites[].systems[].system` and let the builder do the mapping.
+The pilot's agreement-type routing (issue #49) reads from the raw
+`system` strings in the tree — not from a classifier you run, and
+not from a Contract family or Package situation you set yourself.
 
 ## What you must never do
 
