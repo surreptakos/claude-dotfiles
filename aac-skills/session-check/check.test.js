@@ -554,9 +554,11 @@ function runCheckerPushed(config, mutate, args, env) {
     git(work, 'add', '.');
     git(work, 'commit', '--quiet', '-m', 'init');
     git(work, 'push', '--quiet', '-u', 'origin', 'HEAD');
-    if (mutate) mutate(work, git);
+    // A mutate that returns a path runs the checker there instead — for the worktree case, where
+    // the point is that the checkout git config belongs to is NOT the directory being checked.
+    const from = (mutate && mutate(work, git)) || work;
     return execFileSync(process.execPath, [CHECKER, ...(args || ['--end'])], {
-      cwd: work, encoding: 'utf8', env: localEnv(env), stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: from, encoding: 'utf8', env: localEnv(env), stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (error) {
     if (!error.stdout && !error.stderr) throw error;
@@ -641,6 +643,26 @@ test("--end still skips when core.hooksPath does point at the repo's .githooks",
   }));
   assert.match(output, /-- +tests — .*not re-run: HEAD is committed and pushed/);
   assert.doesNotMatch(output, /tests pass/);
+  assert.doesNotMatch(output, /commit gate on this head is untrusted/);
+});
+
+// A worktree shares its checkout's config, and the hook installer writes an absolute path, so
+// core.hooksPath there names the MAIN checkout's .githooks. That is the same repo's gate: read
+// naively it made every worktree session look ungated, which is where this was caught.
+test('--end in a worktree trusts the main checkout .githooks its config names', () => {
+  const output = runCheckerPushed(MARKER_TEST, (work, git) => {
+    fs.mkdirSync(path.join(work, '.githooks'), { recursive: true });
+    fs.writeFileSync(path.join(work, '.githooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    git(work, 'add', '.');
+    git(work, 'commit', '--quiet', '-m', 'hooks');
+    git(work, 'push', '--quiet');
+    git(work, 'config', 'core.hooksPath', path.join(work, '.githooks'));
+    const tree = path.join(path.dirname(work), 'wt');
+    git(work, 'worktree', 'add', '--quiet', '-b', 'side', tree);
+    git(tree, 'push', '--quiet', '-u', 'origin', 'side');
+    return tree;
+  });
+  assert.match(output, /-- +tests — .*not re-run: HEAD is committed and pushed/);
   assert.doesNotMatch(output, /commit gate on this head is untrusted/);
 });
 
