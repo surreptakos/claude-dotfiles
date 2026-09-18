@@ -793,7 +793,7 @@ function harnessChecks() {
   head('Harness');
   if (s.state === 'stamp-mismatch') {
     warn(`the project-harness skill is inconsistent — template v${s.template}, SKILL.md v${s.skill}`);
-    note('rebuild the plugin: `python3 tools/build-cloud-plugin.py --from-mirror --home <your-home>`');
+    note('rebuild the plugin: `python3 tools/build-cloud-plugin.py` in a claude-dotfiles checkout');
     return;
   }
   if (s.state === 'skill-missing') {
