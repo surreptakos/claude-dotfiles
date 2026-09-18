@@ -2,10 +2,10 @@
 name: session-start
 description: Re-print the start-of-session checks for a git project — the remote, uncommitted work, the deploy credential, tests, tickets. Use when that report has scrolled out of context, or with --refresh to re-run it after the tree has moved.
 metadata:
-  modified: '2026-09-16T04:38:45Z'
-  previous-modified: '2026-09-14T21:42:38Z'
-  revision: '3'
-  content-sha: 2873bd2d1176
+  modified: '2026-09-18T20:01:29Z'
+  previous-modified: '2026-09-16T04:38:45Z'
+  revision: '4'
+  content-sha: 9b4c6242e27e
 ---
 
 # Start a session
@@ -79,6 +79,11 @@ has it runs.
 
 **`STOP tests FAIL`** — find out whether it was already broken before this session. `git stash` and
 re-run, or check the last commit that touched the failing area.
+
+**A line that prints a command** (`claude plugin update`, `claude plugin marketplace update`,
+`git push`, `git status`) — run it in this turn and report the result. Relay only what needs the
+owner: an app restart, a device code, a UI toggle. On 2026-09-18 three consecutive reports copied
+`claude plugin update aac-skills` into chat instead of running it.
 
 **Tickets** — offer the ones that look actionable rather than reading the list out. When the user
 picks one, read it **with its comments** (`gh issue view <n> --comments`): measurements and owner
