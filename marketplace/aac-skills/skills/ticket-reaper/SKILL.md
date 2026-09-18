@@ -2,10 +2,10 @@
 name: ticket-reaper
 description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs weekly from a cloud Routine and as step 0 of /maintain-repo.
 metadata:
-  modified: '2026-09-18T06:04:32Z'
-  previous-modified: '2026-09-18T06:10:00Z'
-  revision: '2'
-  content-sha: 3b558b9deee3
+  modified: '2026-09-18T06:17:04Z'
+  previous-modified: '2026-09-18T06:04:32Z'
+  revision: '3'
+  content-sha: 7d5a35803362
 ---
 
 # Ticket reaper
@@ -50,15 +50,19 @@ that works:
 
 **Leave alone** — a real problem that bit, or work on a live route:
 - a bug with a date and an observed failure in its body
-- a child of an open PRD, a cut-over ticket, an owner ruling recorded this month
+- work a live route depends on today: a cut-over step, a PRD child whose body names the failure
+  it removes. Being a PRD child, carrying a milestone, or having a ruling on it is not by itself
+  a reason to leave it: judge the body. Assume nothing about the quality of an existing ticket
+  from where it sits.
 - anything labelled `ready-for-human`, `orchestrator` or `wayfinder:map` (rulings and state
-  containers are never the reaper's), anything in a milestone other than Backlog or none
+  containers are never the reaper's)
 - anything Dan pulled back out of Maybe Someday (an issue event shows the milestone change)
 
 ## Land it
 
 - Park: `gh api --method PATCH repos/<owner>/<repo>/issues/<n> -f milestone=<number>` (MCP
-  `issue_write` in a container), labels untouched. No comment on the ticket; the digest is the
+  `issue_write` in a container), labels untouched. A ticket already in another milestone moves
+  the same way; the digest names the milestone it left. No comment on the ticket; the digest is the
   record.
 - Close: one comment naming the reason class and the evidence (the open duplicate's number, the
   commit or line that delivered it), then close with `not_planned` and swap the state label for
