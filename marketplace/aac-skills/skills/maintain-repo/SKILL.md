@@ -3,10 +3,10 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-18T18:13:34Z'
-  previous-modified: '2026-09-18T06:04:32Z'
-  revision: '3'
-  content-sha: aaa47ed2c66e
+  modified: '2026-09-18T18:14:35Z'
+  previous-modified: '2026-09-18T18:13:34Z'
+  revision: '4'
+  content-sha: dab0ba1a424e
 ---
 
 # Maintain repo
@@ -27,17 +27,13 @@ Truth first, shape second. Consolidating memory before auditing merges two wrong
 
 ## Gate — no memory, no run (Dan, 2026-09-18)
 
-Before step 0, resolve the repo's memory directory (the auto-memory section of the system prompt names
-it: `~/.claude/projects/<project-slug>/memory/`, plus `MEMORY.md`) and count the files in it. **Zero
-files on a repo with commit history is a stop, not a finding.** A developed repo has memory; a container
-that sees none cannot see it (cloud sessions hold no copy of the desktop's memory), and a sweep that
-proceeds without it is a partial sweep reporting as a full one — which is what the 2026-09-18
-aac-sales-cockpit run did before Dan caught it (PR #631 there). Stop, report the resolved path and the
-count, and say what unblocks it: run on the desktop where the memory lives, or commit the memory into
-the repo (`docs/agents/memory/` + `MEMORY.md`, injected by the SessionStart hook the way this repo's
-own is). Do not run step 0, 1 or 2 on a repo whose memory is unreachable; do not report "0 files, nothing
-to consolidate" as a result. A repo with fewer than ten commits and no memory yet is the one exception,
-and the report says so.
+Before step 0, resolve the memory directory (`~/.claude/projects/<project-slug>/memory/` + `MEMORY.md`,
+per the system prompt's auto-memory section) and count its files. **Zero files on a repo with commit
+history is a stop, not a finding**: the memory exists where this session cannot see it (a cloud container
+holds no copy of the desktop's). Report the path and the count, name what unblocks it — run on the desktop,
+or commit the memory into the repo (`docs/agents/memory/` + `MEMORY.md`) — and end there. Never run steps
+0–2 on a repo whose memory is unreachable; "0 files, nothing to consolidate" is a false report. The one
+exception is a repo with fewer than ten commits, and the report says so.
 
 ## Step 0 — ticket-reaper
 
