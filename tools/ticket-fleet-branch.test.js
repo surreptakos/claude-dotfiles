@@ -1532,6 +1532,54 @@ for (const file of RESUME_GUARD_PAIR) {
   });
 }
 
+// ---- A re-run implementer sees the verifier's own findings (issue 277) ----
+// Run 6aa99b19 re-ran issue 241 three times and the reviewer feedback each retry carried was the
+// filler `test1` / `test2`, so the implementer could not see why it had been rejected and shipped
+// the same approach again. The trace: a verdict reaches the next attempt through exactly one door,
+// priorFindingsBlock, which reads `failures` - the filler came from the verifier itself, which had
+// to invent entries while `failures` was a required property (issue 265). What the script did lose
+// is the empty case: both lanes normalise a missing `failures` key to `[]`, and an empty list used
+// to render as a lone `- ` bullet. These two drive the whole lane, so what is asserted is the text
+// the attempt-2 implementer agent is actually sent.
+
+test(`${FLEET_SCRIPT_REL} quotes the verifier's own findings in the next attempt's implementer prompt (issue 277)`, async () => {
+  const calls = [];
+  await driveCodeLane(FLEET_SCRIPT, twoAttemptAgent(calls), TICKET_42, 0);
+  const impl1 = calls.find((c) => c.label === 'impl:#42.1').prompt;
+  const impl2 = calls.find((c) => c.label === 'impl:#42.2').prompt;
+  assert.ok(!impl1.includes('Previous attempt FAILED'), 'attempt 1 has no prior verdict to quote');
+  assert.ok(impl2.includes('Previous attempt FAILED verification'),
+    'the retry must be told the previous attempt was refuted');
+  for (const finding of ['criterion 2 is not met', 'the suite exits 1']) {
+    assert.ok(impl2.includes(`- ${finding}`),
+      `the attempt-2 implementer prompt must quote the verifier finding "${finding}" verbatim`);
+  }
+});
+
+test(`${FLEET_SCRIPT_REL} falls back to the verifier's evidence when a failing verdict lists no findings (issue 277)`, async () => {
+  const calls = [];
+  const evidence = 'ran `node --test tools/x.test.js` in the scratch worktree; exit 2, 3 assertions failed';
+  const agentMock = async (prompt, opts) => {
+    calls.push({ label: opts.label, prompt });
+    const attempt = Number(opts.label.slice(-1));
+    if (opts.label.startsWith('impl:')) {
+      return { branch: buildBranchName(42, 'testrun', 0, attempt), committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    }
+    // Attempt 1 fails with no `failures` key at all - the shape the schema allows since issue 265
+    // and the lanes normalise to []. Attempt 2 passes, so the lane stops there.
+    if (opts.label === 'verify:#42.1') return { pass: false, evidence };
+    if (opts.label === 'verify:#42.2') return { pass: true, evidence: 'exit 0', failures: [] };
+    if (opts.label === 'deliver:#42') return { pushed: true, prUrl: 'https://github.com/x/y/pull/9' };
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, TICKET_42, 0);
+  const impl2 = calls.find((c) => c.label === 'impl:#42.2').prompt;
+  assert.ok(!/findings \([^)]*\):\n-\s*\n/.test(impl2),
+    'a findings block whose only bullet is empty tells the retry nothing - that is the issue 277 drop');
+  assert.ok(impl2.includes(evidence),
+    "with no findings listed, the retry must carry the verifier's own evidence verbatim");
+});
+
 // ---- Closed blockers are cleared in code, not by editing the body (issue 403) ----
 // The scout reports the numbers a ticket's "Blocked by" section names; the fleet reads each of
 // those issues through the tracker instrument and drops the ones the tracker calls closed. These

@@ -450,11 +450,31 @@ function stableList(value) {
  * The block the next attempt's implementer/prober prompt carries after a failed
  * verdict. `howToFix` is the lane's wording; everything else comes from the
  * verdict through stableList.
+ *
+ * Issue 277 traced what a failing verdict actually hands the next attempt. The
+ * script substitutes no placeholder anywhere: `verdict.failures` reaches the
+ * prompt through this one door, and on run 6aa99b19 the filler entries
+ * (`test1`, `test2`) issue 241's retries were shown were the verifier's own
+ * output - `failures` was a REQUIRED property of VERDICT then, so a verifier
+ * with nothing to list had to invent entries to clear the StructuredOutput
+ * retry cap (the same requirement killed that run's attempt 3, issue 265). The
+ * requirement is gone. What was left is the drop this function now covers: both
+ * lanes normalise a missing `failures` key to `[]` before the next attempt is
+ * built, and an empty list rendered as a lone `- ` bullet told the implementer
+ * it had failed and nothing else. An empty list therefore falls back to the
+ * verifier's own `evidence` - the same silence `failuresOf` refuses to print in
+ * the run report, refused here on the prompt path too.
  */
 function priorFindingsBlock(verdict, howToFix) {
-  return verdict
-    ? `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${stableList(verdict.failures).join('\n- ')}`
-    : '';
+  if (!verdict) return '';
+  const findings = stableList(verdict.failures);
+  if (!findings.length) {
+    const evidence = stableText(verdict.evidence);
+    findings.push(evidence
+      ? `the verifier listed no findings; its evidence for the failing verdict, verbatim:\n${evidence}`
+      : 'the verifier listed no findings and recorded no evidence - treat nothing about the previous attempt as verified and check each criterion yourself');
+  }
+  return `\nPrevious attempt FAILED verification. Independent reviewer findings (${howToFix}):\n- ${findings.join('\n- ')}`;
 }
 
 // [FLEET-INLINE-END]
