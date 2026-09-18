@@ -1,6 +1,6 @@
 {
-  "_about": "Bullet library: the only place clarification and exclusion wording lives (BASELINES.md keeps the §0 rules and reviewer prose and points here). build_package.py reads it; the reviewer reads it. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order. \"when\" is the applicability rule and \"note\" the drafter instruction, both carried over from the BASELINES.md bracket notes; they never print. The builder applies a \"when\" it can decide from the record (price, payer, designation, flags, system); one it cannot decide is the drafter's call and the bullet prints unless the drafter prunes it. A conditional bullet with \"merge_into\" prints as \"merged_text\" in place of the named universal bullet when its \"when\" holds.",
-  "_version": "1.3",
+  "_about": "Bullet library: the only place clarification and exclusion wording lives (BASELINES.md keeps the §0 rules and reviewer prose and points here). build_package.py reads it; the reviewer reads it. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order. \"when\" is the applicability rule and \"note\" the drafter instruction, both carried over from the BASELINES.md bracket notes; they never print. The builder applies a \"when\" it can decide from the record (price, payer, designation, flags, system); one it cannot decide is the drafter's call and the bullet prints unless the drafter prunes it. A conditional bullet with \"merge_into\" prints as \"merged_text\" in place of the named universal bullet when its \"when\" holds. The SOW templates carry the designation as a phrase, never the bare token: \"sow_designation_phrases\" maps each SOW-BASELINES.md §2 token to the words that stand in for {designation} (before a system noun, article included) and {designation_bare} (before an uncounted noun such as cabling); the addition token renders as \"an addition to the\" per §2.",
+  "_version": "1.4",
   "_updated": "2026-09-18",
   "clarifications": {
     "universal": [
@@ -328,18 +328,36 @@
     ]
   },
   "sow_templates": {
-    "Fire Alarm": "Active Alarm Company will furnish, install, program, and test a {designation} fire alarm system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Intrusion Alarm": "Active Alarm Company will furnish, install, program, and test a {designation} intrusion alarm system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Video Surveillance": "Active Alarm Company will furnish, install, program, and test a {designation} video surveillance system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Access Control": "Active Alarm Company will furnish, install, program, and test a {designation} access control system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Elevator Monitoring": "Active Alarm Company will furnish, install, program, and test a {designation} elevator monitoring connection at the site listed above, as itemized in the Equipment and Labor section.",
-    "Nurse Call": "Active Alarm Company will furnish, install, program, and test a {designation} nurse call system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Area of Refuge": "Active Alarm Company will furnish, install, program, and test a {designation} area of refuge two-way communication system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Network": "Active Alarm Company will furnish, install, and test {designation} network cabling at the site listed above, as itemized in the Equipment and Labor section.",
-    "Standalone Intercom": "Active Alarm Company will furnish, install, program, and test a {designation} intercom system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Visitor Management": "Active Alarm Company will furnish, install, program, and test a {designation} visitor management system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Standalone Environmental Monitoring": "Active Alarm Company will furnish, install, program, and test a {designation} environmental monitoring system at the site listed above, as itemized in the Equipment and Labor section.",
-    "Audio/Visual": "Active Alarm Company will furnish, install, program, and test a {designation} audio/visual system at the site listed above, as itemized in the Equipment and Labor section."
+    "Fire Alarm": "Active Alarm Company will furnish, install, program, and test {designation} fire alarm system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Intrusion Alarm": "Active Alarm Company will furnish, install, program, and test {designation} intrusion alarm system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Video Surveillance": "Active Alarm Company will furnish, install, program, and test {designation} video surveillance system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Access Control": "Active Alarm Company will furnish, install, program, and test {designation} access control system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Elevator Monitoring": "Active Alarm Company will furnish, install, program, and test {designation} elevator monitoring connection at the site listed above, as itemized in the Equipment and Labor section.",
+    "Nurse Call": "Active Alarm Company will furnish, install, program, and test {designation} nurse call system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Area of Refuge": "Active Alarm Company will furnish, install, program, and test {designation} area of refuge two-way communication system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Network": "Active Alarm Company will furnish, install, and test {designation_bare} network cabling at the site listed above, as itemized in the Equipment and Labor section.",
+    "Standalone Intercom": "Active Alarm Company will furnish, install, program, and test {designation} intercom system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Visitor Management": "Active Alarm Company will furnish, install, program, and test {designation} visitor management system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Standalone Environmental Monitoring": "Active Alarm Company will furnish, install, program, and test {designation} environmental monitoring system at the site listed above, as itemized in the Equipment and Labor section.",
+    "Audio/Visual": "Active Alarm Company will furnish, install, program, and test {designation} audio/visual system at the site listed above, as itemized in the Equipment and Labor section."
+  },
+  "sow_designation_phrases": {
+    "new": {
+      "designation": "a new",
+      "designation_bare": "new"
+    },
+    "replacement": {
+      "designation": "a replacement",
+      "designation_bare": "replacement"
+    },
+    "takeover": {
+      "designation": "a takeover",
+      "designation_bare": "takeover"
+    },
+    "addition": {
+      "designation": "an addition to the",
+      "designation_bare": "an addition to the"
+    }
   },
   "sow_closer": "Upon completion, Active Alarm Company will test the system and provide end-user training.",
   "sow_closer_fire": "Upon completion, Active Alarm Company will test the system with the AHJ as required and provide end-user training.",

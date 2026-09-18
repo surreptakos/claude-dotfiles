@@ -23,7 +23,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 | `SCHEDULE-GENERATION-PROCEDURE.md` | Source precedence, package composition, template paths, the schedule cell map, work-up to Equipment-and-Labor translation, services layout, pricing block, conditional clarifications, verification, the handoff email | §1, §6, §11, §11a and §12 **ratified by Dan 2026-08-19** (wayfinder ticket #4); §4 multi-Site multi-System layout amendment **awaiting Dan's signature (2026-09-10, spec 215 stream B, ADR-0001, issue 218)**; remaining sections draft |
 | `PART-TRANSLATIONS.md` | Part number to customer-facing schedule description; §6 resolution order step 2 | Active, seeded 2026-08-19 |
 | `SCHEDULE-EDIT-PROCEDURE.md` | Workbook editing mechanics, and why a spreadsheet library must never save a schedule | Active |
-| `clarifications.json` | Every clarification and exclusion, the SOW templates, and the print order. The only place this wording exists. `build_package.py` reads it | Active, v1.3 (2026-09-18: resynced to the 2026-08-26 BASELINES revision, OPEN-DECISIONS item 21) |
+| `clarifications.json` | Every clarification and exclusion, the SOW templates, and the print order. The only place this wording exists. `build_package.py` reads it | Active, v1.4 (2026-09-18: designation renders as a phrase, "an addition to the" per SOW-BASELINES §2; v1.3 2026-09-18: resynced to the 2026-08-26 BASELINES revision, OPEN-DECISIONS item 21) |
 
 ## Pilot
 
