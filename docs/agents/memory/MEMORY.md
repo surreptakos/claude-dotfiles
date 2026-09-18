@@ -34,6 +34,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - restore-test-reads-live-skill-copies: live edit fails others
 - scratchpad-path-too-long-for-git-clone: short root
 - sed-strips-crlf-in-this-repo: no sed -i on .ps1
+- session-env-carries-zoho-and-gas-tokens: names only; tools/zoho-rest.py
 - session-end-fixes-all-drift: every finding
 - state-a-standing-rule-once: one copy only
 - three-skill-channels: only local in repo
