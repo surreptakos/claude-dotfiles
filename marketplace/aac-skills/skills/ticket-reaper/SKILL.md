@@ -2,10 +2,10 @@
 name: ticket-reaper
 description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs weekly from a cloud Routine and as step 0 of /maintain-repo.
 metadata:
-  modified: '2026-09-18T06:17:04Z'
-  previous-modified: '2026-09-18T06:04:32Z'
-  revision: '3'
-  content-sha: 7d5a35803362
+  modified: '2026-09-18T06:25:28Z'
+  previous-modified: '2026-09-18T06:17:04Z'
+  revision: '4'
+  content-sha: de6485952fb6
 ---
 
 # Ticket reaper
@@ -65,8 +65,11 @@ that works:
   the same way; the digest names the milestone it left. No comment on the ticket; the digest is the
   record.
 - Close: one comment naming the reason class and the evidence (the open duplicate's number, the
-  commit or line that delivered it), then close with `not_planned` and swap the state label for
-  `wontfix`.
+  commit or line that delivered it). Then **nullify every unticked box** in the body — append
+  ` — not planned: <reason class>, ticket reaper <date>` to each `- [ ]` line, leaving the box
+  unticked (a tick claims verified; `not planned` is the wording `tools/tracker-audit.js` accepts
+  as a legitimate closure). Then close with `not_planned` and swap the state label for `wontfix`.
+  The label is what the audit exempts; the annotated boxes are what a reader sees.
 - Digest: one comment on the digest issue, three lists (parked, closed, left with a one-clause
   reason where the call was close), counts at the top. A run that changes nothing still posts a
   one-line digest, so a silent week reads differently from a week the Routine did not run.
@@ -74,7 +77,8 @@ that works:
 ## Rails
 
 - Never close a ticket that is parked, labelled `ready-for-human`, or younger than 48 hours.
-- Never edit a ticket body. Never touch labels except the state swap on a close.
+- Never edit a ticket body except the box annotation on a close. Never touch labels except the
+  state swap on a close.
 - One run touches at most 40 tickets; list the rest under "not reached" in the digest so the next
   run starts there.
 - A ticket Dan pulled back is left alone forever after: check the issue's events for a
