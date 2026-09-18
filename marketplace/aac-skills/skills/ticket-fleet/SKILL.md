@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-18T03:19:47Z'
-  previous-modified: '2026-09-18T03:18:18Z'
-  revision: '27'
-  content-sha: 9e2cdf673584
+  modified: '2026-09-18T03:36:36Z'
+  previous-modified: '2026-09-18T03:19:47Z'
+  revision: '28'
+  content-sha: db8cc13eb261
 ---
 
 # ticket-fleet
@@ -199,6 +199,10 @@ prompts before letting the fleet push branches and open PRs. Full args list:
   the paths the pre-push merge may resolve by taking the default branch's side.
 - `regenCommands` (array of shell commands, default `null`): what re-stamps and rebuilds those
   paths after such a merge. `null` tells the deliver stage to read the commands out of CLAUDE.md.
+- `regenCheckCommands` (array of shell commands, default the claude-dotfiles stamps check,
+  `python3 tools/skill-stamps.py check aac-skills agents/skills claude/skills --home 'C:\Users\Dan'`):
+  the read-only check that proves the regenerate took, run after it and before the push. An empty
+  array turns that gate off for a fork that has no such check.
 - `verifierAgent` (string, default `null`): the agent type the blind verifier launches under.
   `null` takes the default the env probe decides - `fleet-verifier` on a desktop session whose
   `~/.claude/agents/fleet-verifier.md` is on disk, unpinned in a cloud session (custom agent
@@ -456,8 +460,18 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly three re
   merge too — two rows appended far enough apart merge silently and still collide.
 
 After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
-the ones CLAUDE.md names), re-runs the test command, and commits the merge; the PR body says
-which paths the merge resolved.
+the ones CLAUDE.md names), then passes a two-part gate before anything is pushed: the
+`regenCheckCommands` stamps check, and the test command. It commits the merge after both; the PR
+body says which paths the merge resolved.
+
+**The stamps check is what proves the regenerate took** (issue 553). Run `6aac4a53` delivered
+#550 and #552 with every stamp hashed against the container's home instead of the owner's: the
+payload rebuilt, the tests passed, and the `pull_request` run of `skill-stamps.yml` — which tests
+the merge ref — was green, while the push-event run of the same `check` job was red the moment
+each PR opened. A failing check sends the stage back to re-run the regenerate commands
+byte-identical, never to a hand-edited stamp; a second failure blocks the delivery with the
+skills the check named. It runs on the clean-merge path too, where a branch's skill edit and the
+default branch's fold together with no conflict to resolve and no regenerate behind them.
 
 **Anything else is a real merge and stops delivery for that ticket.** The stage aborts the
 merge, pushes nothing and opens no PR; the ticket appears in the run result's `failed` list
