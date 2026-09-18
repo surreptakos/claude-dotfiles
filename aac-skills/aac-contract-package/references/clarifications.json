@@ -1,6 +1,6 @@
 {
-  "_about": "Bullet library: the only place clarification and exclusion wording lives (BASELINES.md keeps the §0 rules and reviewer prose and points here). build_package.py reads it; the reviewer reads it. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order. \"when\" is the applicability rule and \"note\" the drafter instruction, both carried over from the BASELINES.md bracket notes; they never print. The builder applies a \"when\" it can decide from the record (price, payer, designation, flags, system); one it cannot decide is the drafter's call and the bullet prints unless the drafter prunes it. A conditional bullet with \"merge_into\" prints as \"merged_text\" in place of the named universal bullet when its \"when\" holds. The SOW templates carry the designation as a phrase, never the bare token: \"sow_designation_phrases\" maps each SOW-BASELINES.md §2 token to the words that stand in for {designation} (before a system noun, article included) and {designation_bare} (before an uncounted noun such as cabling); the addition token renders as \"an addition to the\" per §2.",
-  "_version": "1.4",
+  "_about": "Bullet library: the only place clarification and exclusion wording lives (BASELINES.md keeps the §0 rules and reviewer prose and points here). build_package.py reads it; the reviewer reads it. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order. \"when\" is the applicability rule and \"note\" the drafter instruction, both carried over from the BASELINES.md bracket notes; they never print. The builder applies a \"when\" it can decide from the record (price, payer, designation, flags, system); one it cannot decide is the drafter's call and the bullet prints unless the drafter prunes it. A conditional bullet with \"merge_into\" prints as \"merged_text\" in place of the named universal bullet when its \"when\" holds. The SOW templates carry the designation as a phrase, never the bare token: \"sow_designation_phrases\" maps each SOW-BASELINES.md §2 token to the words that stand in for {designation} (before a system noun, article included) and {designation_bare} (before an uncounted noun such as cabling); the addition token renders as \"an addition to the existing\" per §2.",
+  "_version": "1.5",
   "_updated": "2026-09-18",
   "clarifications": {
     "universal": [
@@ -355,8 +355,8 @@
       "designation_bare": "takeover"
     },
     "addition": {
-      "designation": "an addition to the",
-      "designation_bare": "an addition to the"
+      "designation": "an addition to the existing",
+      "designation_bare": "an addition to the existing"
     }
   },
   "sow_closer": "Upon completion, Active Alarm Company will test the system and provide end-user training.",
