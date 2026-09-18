@@ -164,8 +164,10 @@ for (const board of openBoards) {
       stale.push({ id: it.id, num, title: (c.title || '').slice(0, 60), current: it.status || '(none)' });
     }
   }
-  if (!stale.length) { console.log(`${label}: 0 stale`); continue; }
-  console.log(`${label}: ${stale.length} stale`);
+  // The card count rides on the line so a run that fetched nothing reads as what it is: a
+  // board of zero cards is a listing problem, not a clean board (issue 569).
+  if (!stale.length) { console.log(`${label}: 0 stale of ${items.length} cards`); continue; }
+  console.log(`${label}: ${stale.length} stale of ${items.length} cards`);
   for (const s of stale) console.log(`  #${s.num} ${s.current.padEnd(12)} ${s.title}`);
   if (!APPLY) continue;
 
