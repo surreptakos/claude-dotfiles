@@ -3,10 +3,10 @@ name: grill-ready-for-human
 description: Walk every ready-for-human ticket one at a time — grill for the ruling, land it as a comment, relabel or close.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-14T22:40:59Z'
-  previous-modified: '2026-09-10T15:58:50Z'
-  revision: '2'
-  content-sha: f115e39a346f
+  modified: '2026-09-18T20:01:13Z'
+  previous-modified: '2026-09-14T22:40:59Z'
+  revision: '3'
+  content-sha: a7eab8aeb907
 ---
 
 # Grill ready-for-human
@@ -43,7 +43,7 @@ Follow-through by ruling shape:
 - **Unblocks an agent** → `gh issue edit N --add-label ready-for-agent --remove-label ready-for-human`.
 - **Decision was the outcome / ships as-is** → `gh issue close N --reason completed`.
 - **Not happening** → `gh issue edit N --add-label wontfix --remove-label ready-for-human` then `gh issue close N --reason "not planned"`.
-- **Spawns child tickets** → keep `ready-for-human`, note the follow-up in the comment; owner runs `/to-tickets` next to publish the children.
+- **Spawns child tickets** → keep `ready-for-human`, note the follow-up in the comment, then run `/to-tickets` in this session to publish the children — publishing is agent work, not the owner's.
 
 Verify: `gh issue view N --json labels,state`. A tracker that does not reflect the ruling is a landing failure — retry until it does.
 

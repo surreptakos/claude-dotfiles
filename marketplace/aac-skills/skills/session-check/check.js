@@ -693,15 +693,15 @@ function installedPluginChecks() {
   head('Plugins');
   behindRows.forEach((r) => {
     warn(`${r.name} is behind its marketplace — installed ${r.have}, available ${r.offered}`);
-    note(`\`claude plugin update ${r.name}\`, then restart`);
+    note(`run \`claude plugin update ${r.name}\` now — the session runs it itself; the owner only restarts the app afterwards`);
   });
   aheadRows.forEach((r) => {
     warn(`the marketplace clone of ${r.market} is stale — installed ${r.name} ${r.have}, clone offers ${r.offered}`);
-    note(`\`claude plugin marketplace update ${r.market}\` refreshes the clone (do NOT \`claude plugin update\` — the clone would reinstall ${r.offered})`);
+    note(`run \`claude plugin marketplace update ${r.market}\` now to refresh the clone (never \`claude plugin update\` here — the clone would reinstall ${r.offered})`);
   });
   stale.forEach((s) => {
     note(`marketplace ${s.market} last fetched ${s.days}d ago — `
-      + '`claude plugin marketplace update` refreshes every one');
+      + 'run `claude plugin marketplace update` now; it refreshes every one');
   });
 }
 
