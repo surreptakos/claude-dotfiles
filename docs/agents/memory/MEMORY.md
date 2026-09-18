@@ -25,7 +25,6 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - environment-verification-log: evidence log
 - fable-usage-is-rationed: weekly cap; keep pins
 - gate-declare-bare-command: nothing appended
-- install-mirror-prs-to-live-before-sync-push: live first
 - marketplace-is-the-distribution-spine: installs come from here
 - msys-mangles-git-rev-colon-path: MSYS_NO_PATHCONV=1
 - personal-profile-parity: pull only
