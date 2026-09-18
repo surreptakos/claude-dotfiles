@@ -18,7 +18,7 @@ const { test } = require('node:test');
 
 const { renderTemplate, SOURCE, TARGET } = require('./build-harness-tracker-audit.js');
 const repoCopy = require('./tracker-audit.js');
-const template = require('../agents/skills/project-harness/templates/tracker-audit.js');
+const template = require('../aac-skills/project-harness/templates/tracker-audit.js');
 
 test('the template is the generated copy of tools/tracker-audit.js, byte for byte', () => {
   assert.strictEqual(

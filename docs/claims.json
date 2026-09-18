@@ -2,7 +2,7 @@
   "_comment": [
     "Docs claims-audit tripwire. Verified by the shared engine (whose home-installed copy lives",
     "at ~/.claude/skills/consistency-audit/claims-audit.js and whose mirror is",
-    "claude/skills/consistency-audit/claims-audit.js) via tests/docs-claims.test.js, chained",
+    "aac-skills/consistency-audit/claims-audit.js) via tests/docs-claims.test.js, chained",
     "into the session.json test command. tests/claims-audit.test.js is the ENGINE's unit suite;",
     "this file plus docs-claims.test.js is the repo's own docs tripwire. Adding a claim is a",
     "JSON edit; see the consistency-audit SKILL.md 'Automate' section for the schema."
@@ -23,10 +23,10 @@
       "symbol": "Copy-OneFile"
     },
     {
-      "id": "generated-trees-rule",
+      "id": "repo-is-the-source-rule",
       "type": "expected-text",
       "doc": "CLAUDE.md",
-      "expected": "`claude/`, `codex/` and `memory/` are generated. Never hand-edit them."
+      "expected": "**This repo is the source. Nothing in it is generated from a live `~/.claude` tree**"
     },
     {
       "id": "bootstrap-gate-named",

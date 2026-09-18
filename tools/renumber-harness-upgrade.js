@@ -4,7 +4,7 @@
  * same fleet wave always produce: both branches take the same version number (issue 515).
  *
  * A wave's branches all fork from the same commit, so two tickets that each bump the harness
- * both write the NEXT row of `agents/skills/project-harness/UPGRADES.md` — the same `| N |`.
+ * both write the NEXT row of `aac-skills/project-harness/UPGRADES.md` — the same `| N |`.
  * The first merges; the second's pre-push merge stops on a conflict that is not a
  * disagreement. Run `6aab1eac` hit exactly that (#453 and #218 both took v26) and the number
  * was moved by hand in nine places, found by grep.
@@ -48,7 +48,7 @@ const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_TABLE = 'agents/skills/project-harness/UPGRADES.md';
+const DEFAULT_TABLE = 'aac-skills/project-harness/UPGRADES.md';
 const GENERATOR = 'tools/build-harness-bootstrap-hook.js';
 
 /** A version row: `| 27 | 2026-09-17 | … | … |`. The separator row has no digits and is not one. */

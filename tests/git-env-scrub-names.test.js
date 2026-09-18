@@ -31,10 +31,10 @@ const NAMES = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_
 /** file → the regex that isolates that file's scrub list. A list that moves must move this with
  *  it: a regex that stops matching fails the test rather than passing vacuously. */
 const LISTS = [
-  ['agents/skills/project-harness/templates/pre-commit', /^unset\s+GIT_[^\n]*/m],
+  ['aac-skills/project-harness/templates/pre-commit', /^unset\s+GIT_[^\n]*/m],
   ['lib/manifest.ps1', /^\$script:GitEnvNames = @\([^)]*\)/m],
   ['tools/tracker-audit.js', /for \(const k of \[[\s\S]*?\]\)/],
-  ['agents/skills/project-harness/templates/tracker-audit.js', /for \(const k of \[[\s\S]*?\]\)/],
+  ['aac-skills/project-harness/templates/tracker-audit.js', /for \(const k of \[[\s\S]*?\]\)/],
   ['tools/skill-stamps.py', /if k not in \{[\s\S]*?\}/],
   ['tools/skill-stamps.test.py', /for k in \([\s\S]*?\):/],
   ['tests/restore-test.ps1', /foreach \(\$name in 'GIT_DIR'[^)]*\)/],

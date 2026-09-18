@@ -1,17 +1,17 @@
 name: skill tests
 
 # The session-check skill ships its own regression suite next to the engine it covers
-# (agents/skills/session-check/*.test.js). Nothing ran it when this workflow was written: the repo
+# (aac-skills/session-check/*.test.js). Nothing ran it when this workflow was written: the repo
 # test command in .claude/session.json named tools/*.test.js and a single file out of tests/, and
 # the restore test only asserts that each junctioned skill carries a SKILL.md. So check.test.js sat
 # red on master until issue 300, and the five files beside it could have gone the same way unseen.
-# That command now names agents/skills/session-check/*.test.js as well, and tests/*.test.js as a
+# That command now names aac-skills/session-check/*.test.js as well, and tests/*.test.js as a
 # glob (issue 415) -- but it runs on Windows, from this checkout, so the second job below is still
 # the only thing that sees the bug described next.
 #
 # TWO RUNS, on purpose. These tests are written to be run from wherever the skill is installed, and
 # the bug issue 300 fixed was exactly a location assumption: "this repo" was `__dirname/../../..`,
-# which is the repo root from the agents/skills mirror and the HOME DIRECTORY from the installed
+# which is the repo root from the aac-skills mirror and the HOME DIRECTORY from the installed
 # copy at ~/.claude/skills/session-check that SKILL.md tells you to run them from. A run from the
 # checkout alone is green on that bug. The second run — the same files, copied out of the checkout,
 # with only their sibling skill for company — is the one that sees it.
@@ -36,8 +36,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: From the checkout (agents/skills mirror)
-        run: node --test agents/skills/session-check/*.test.js
+      - name: From the checkout (aac-skills mirror)
+        run: node --test aac-skills/session-check/*.test.js
       - name: From a copy outside any checkout (where the skill is actually installed)
         run: |
           dest="$RUNNER_TEMP/installed-skills"
@@ -45,6 +45,6 @@ jobs:
           mkdir -p "$dest"
           # project-harness travels too: the harness tests discover it as a sibling, which is how
           # it sits in ~/.claude/skills and in the plugin payload.
-          cp -r agents/skills/session-check agents/skills/project-harness "$dest/"
+          cp -r aac-skills/session-check aac-skills/project-harness "$dest/"
           cd "$dest/session-check"
           node --test *.test.js

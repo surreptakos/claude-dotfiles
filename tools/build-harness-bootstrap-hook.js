@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate `agents/skills/project-harness/templates/session-start.sh` from this repo's own
+ * Generate `aac-skills/project-harness/templates/session-start.sh` from this repo's own
  * `.claude/hooks/session-start.sh` — the cloud bootstrap hook the harness delivers to every
  * AAC repo (harness v27, issue 218).
  *
@@ -24,7 +24,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SOURCE = path.join(__dirname, '..', '.claude', 'hooks', 'session-start.sh');
-const TARGET = path.join(__dirname, '..', 'agents', 'skills', 'project-harness',
+const TARGET = path.join(__dirname, '..', 'aac-skills', 'project-harness',
                          'templates', 'session-start.sh');
 
 /** Pure: source text in, template text out. Exported so the test can render without writing. */

@@ -7,7 +7,7 @@
  * both runners would spawn implementers that try to create
  * `agent/issue-<N>-attempt1`, and the second git-branch or push collides.
  *
- * The scout template (agents/skills/project-harness/templates/ticket-fleet.js
+ * The scout template (aac-skills/project-harness/templates/ticket-fleet.js
  * and its live copy at .claude/workflows/ticket-fleet.js) mints a `runId` per
  * invocation and hands each spawned implementer a per-worker suffix
  * `wf_<runId>-w<workerN>` (workerN = the ticket's index in the wave). That

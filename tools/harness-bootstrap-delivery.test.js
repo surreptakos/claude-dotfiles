@@ -25,7 +25,7 @@ const path = require('node:path');
 const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const SKILL_TEMPLATES = path.join(REPO_ROOT, 'agents', 'skills', 'project-harness', 'templates');
+const SKILL_TEMPLATES = path.join(REPO_ROOT, 'aac-skills', 'project-harness', 'templates');
 const DELIVER = path.join(SKILL_TEMPLATES, 'add-cloud-plugin.js');
 const { renderTemplate, SOURCE, TARGET } = require('./build-harness-bootstrap-hook.js');
 

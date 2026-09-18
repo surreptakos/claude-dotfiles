@@ -13,7 +13,7 @@
  *      and passes a reply shaped per the skill. One failing and one passing draft per check.
  *   3. The flag file `~/.claude/.adhd-off` switches the ADHD checks off and leaves caveman alone.
  *
- * Every case drives `codex/hooks/ask_matt_gate.py` end to end and reads its real exit code, the
+ * Every case drives `profile/codex/hooks/ask_matt_gate.py` end to end and reads its real exit code, the
  * same style as ask-matt-gate-publish.test.js. GOVERNANCE_CLAUDE_HOME points at a scratch home so
  * the machine's own caveman and ADHD flags never decide a verdict.
  */
@@ -27,7 +27,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 
 const REPO = path.resolve(__dirname, '..');
-const GATE = path.join(REPO, 'codex', 'hooks', 'ask_matt_gate.py');
+const GATE = path.join(REPO, 'profile', 'codex', 'hooks', 'ask_matt_gate.py');
 
 function pyCmd() {
   return process.platform === 'win32' ? ['py', ['-3', GATE]] : ['python3', [GATE]];

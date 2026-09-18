@@ -469,7 +469,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from th
 const REMOVED_COPIES = [
   '.claude/workflows/ticket-fleet.js',
   'orchestrator/ticket-fleet-cloud.js',
-  'agents/skills/project-harness/templates/ticket-fleet.js',
+  'aac-skills/project-harness/templates/ticket-fleet.js',
 ];
 
 for (const rel of REMOVED_COPIES) {

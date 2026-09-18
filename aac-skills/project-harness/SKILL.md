@@ -2,17 +2,13 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-18T04:12:48Z'
-  previous-modified: '2026-09-17T23:00:21Z'
-  revision: '25'
-  content-sha: 2851806e3888
+  modified: "2026-09-18T04:12:48Z"
+  previous-modified: "2026-09-17T23:00:21Z"
+  revision: "25"
+  content-sha: "2851806e3888"
 ---
 
 # Project Harness
-
-> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below
-> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
-> every run is fresh.
 
 Install **or upgrade** the organization harness proven on `aac-cockpit` (2026-07-28). Every piece is
 idempotent: skip what exists, update in place, never duplicate. Reference implementation if anything here is
@@ -21,7 +17,7 @@ ambiguous: `Sales Data KPIs/aac-cockpit` on this machine.
 **Step 0 decides which job this is. Read it before anything else** — most invocations after the
 first are upgrades, and step 7 is the whole upgrade path.
 
-> **Never back this skill up inside `${CLAUDE_PLUGIN_ROOT}/skills/`.** A copied folder there is loaded as a
+> **Never back this skill up inside `~/.claude/skills/`.** A copied folder there is loaded as a
 > second skill with an identical description, so skill selection has two indistinguishable
 > candidates. Copy to a temp directory instead. (Hit while editing this skill on 2026-07-28.)
 
@@ -92,7 +88,7 @@ cross-repo Projects board instead of per-repo (see step 6).
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
 12. **Session checks** — copy `templates/session.json` to `.claude/session.json`, substituting `TEST_COMMAND` (same value as the hook and `ticket.yml`). Copy `templates/session-runbook.md` to `docs/runbooks/session.md`; if the repo does not deploy, delete that template's Releasing section as its comment says.
     - **PRESERVE an existing `.claude/session.json` verbatim.** Identical hazard to step 3.3's `CONFIG` block, and for the identical reason: this file carries the hand-corrected test command and the repo's release gates, and detection cannot reproduce either. Merge in missing keys; never regenerate the file.
-    - The engine lives once at `${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js` rather than per repo, and `~/.claude/hooks/session-gate.js` runs it from the global `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks — so a harnessed repo gets the checks without anyone invoking a skill. `/session-start` and `/session-end` only re-print the cached result. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
+    - The engine lives once at `~/.claude/skills/session-check/check.js` rather than per repo, and `~/.claude/hooks/session-gate.js` runs it from the global `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks — so a harnessed repo gets the checks without anyone invoking a skill. `/session-start` and `/session-end` only re-print the cached result. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
     - Fill `releaseGates` with what the repo actually gates on — `node tools/canary.js` where it exists, `[]` otherwise; never `clasp-auth` for a self-deploying repo. They run at `--end`.
 13. **Self-deploy (gas)** — an Apps Script repo adopts the gas package instead of a clasp credential: follow the `gas-deploy` team skill (claude-dotfiles `gas/README.md`): `gas init` (prefills `preserve` from the live script), `gas vendor`, the `deploy.yml` template with the repo's test command, one `gasEnsureTrigger_();` line in an existing trigger, then the one-time `gas push` + `gas seed`. The script then pulls every merge from GitHub and no credential exists in CI or on a machine. `templates/clasp-auth.js` is legacy — copy it to `tools/clasp-auth.js` only for a repo the owner explicitly keeps on clasp, and then:
     - **It is AAC-hardcoded on purpose.** `CLIENT_ID` and `ACCOUNT` name the private OAuth client in `gpt-sheets-access-475817` and the account owning the bound scripts. A non-AAC repo needs both edited; there is no detection that could infer them, and a wrong guess yields a tool that confidently validates the wrong credential. Say so at handoff rather than installing it silently into a non-AAC project.
@@ -132,7 +128,7 @@ cross-repo Projects board instead of per-repo (see step 6).
 
 16. **Cloud bootstrap hook + plugin + auto-mode posture** — one command delivers all three, and it
     is the whole cut-over of a repo to cloud sessions (issue 218, spec #207):
-    `node ${CLAUDE_PLUGIN_ROOT}/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`.
+    `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`.
     - **The bootstrap hook is the one per-repo artefact** (issue 163). The script copies
       `templates/session-start.sh` to `<repo>/.claude/hooks/session-start.sh`, marks it
       executable, and prepends one `hooks.SessionStart` entry
@@ -140,7 +136,7 @@ cross-repo Projects board instead of per-repo (see step 6).
       hook that needs gh, the skills or the rules text. In a container
       (`CLAUDE_CODE_REMOTE=true`) the hook shallow-clones dotfiles master, installs gh from the
       pinned tarball onto PATH through `$CLAUDE_ENV_FILE`, copies the `aac-skills` payload into
-      `${CLAUDE_PLUGIN_ROOT}/skills/`, merges the payload's hooks manifest into the container's user settings
+      `~/.claude/skills/`, merges the payload's hooks manifest into the container's user settings
       so governance fires on prompt 1, writes the marker session-check reads, and emits one
       sub-2KB `additionalContext` line. A local session exits 0 immediately. **No repo carries
       skill content** — the payload comes from master at session start, and the hook body itself
@@ -208,7 +204,7 @@ cross-repo Projects board instead of per-repo (see step 6).
   neither is authoritative. `node scripts/build-dashboard.js && git add DASHBOARD.md` then continue.
   Simplest habit: after the initial install, stop generating it locally and let CI own it — run the
   script only to check output, and discard the result.
-- **Session checks** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js` from the repo. It must find the test command (via `.claude/session.json` or `npm test`) and report the tracker audit; a `no test command detected` line means the substitution did not land. On a clasp repo, confirm the Apps Script section reports the credential rather than `no tools/clasp-auth.js`.
+- **Session checks** — `node ~/.claude/skills/session-check/check.js` from the repo. It must find the test command (via `.claude/session.json` or `npm test`) and report the tracker audit; a `no test command detected` line means the substitution did not land. On a clasp repo, confirm the Apps Script section reports the credential rather than `no tools/clasp-auth.js`.
 - Let the next real issue exercise the issue-event trigger.
 - **Cloud plugin** — `.claude/settings.json` parses and carries `enabledPlugins["aac-skills@claude-dotfiles"]`
   plus the `claude-dotfiles` marketplace. The real test is a fresh cloud session on the repo: its

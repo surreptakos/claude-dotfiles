@@ -172,7 +172,7 @@ if [ "$SCENARIO" = "clone-failure" ]; then
   MARKER="$CLEAN_HOME/.claude/hook-state/aac-bootstrap/state.json"
   if BOOTSTRAP_TEST_MARKER="$MARKER" BOOTSTRAP_TEST_HOOK_OUT="$hook_out" \
      python3 "$REPO/tests/bootstrap-assert-clone-failure.py"; then :; else fails=$((fails + 1)); fi
-  CHECK="$REPO/agents/skills/session-check/check.js"
+  CHECK="$REPO/aac-skills/session-check/check.js"
   check_out="$SCRATCH/session-check.txt"
   mkdir -p "$FIXTURE/.git" "$FIXTURE/.claude"
   echo '{"harness": false}' > "$FIXTURE/.claude/session.json"

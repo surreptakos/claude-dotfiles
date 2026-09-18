@@ -25,7 +25,7 @@ the live-tree entry, and the plugin copy exits 0 silently to let it fire once.
   runs. One fire per event.
 
 It deliberately does **not** key on the live *file* existing. The live-tree
-files stay after the entries come out: `codex/hooks/` and `claude/hooks/` are
+files stay after the entries come out: `profile/codex/hooks/` and `profile/claude/hooks/` are
 the mirror the packager builds this very payload from, and the restore test
 executes them from a fresh home. A presence check would keep skipping forever
 and the hook would fire zero times.

@@ -2,17 +2,13 @@
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin (the single package built from the repo's aac-skills/ tree) when the session-end sweep reports drift. Merging the rebuild is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
 metadata:
-  modified: '2026-09-18T04:29:15Z'
-  previous-modified: '2026-09-18T04:27:06Z'
-  revision: '7'
-  content-sha: 0352dcf5a110
+  modified: "2026-09-18T04:29:15Z"
+  previous-modified: "2026-09-18T04:27:06Z"
+  revision: "7"
+  content-sha: "0352dcf5a110"
 ---
 
 # Update the cloud plugin
-
-> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below
-> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
-> every run is fresh.
 
 **One plugin.** `aac-skills` — every skill in the repo's hand-edited `aac-skills/` tree, packaged
 by `tools/build-cloud-plugin.py`. Served from
@@ -29,7 +25,7 @@ does not exist on any account or in any zip.
    marketplace itself after git credentials are wired and loads every packaged skill plus the
    plugin's SessionStart hook. Serves **cloud claude.ai/code sessions**, and any local machine that
    runs `claude plugin install aac-skills@claude-dotfiles`. Installed per repo by `project-harness`
-   **step 16** (`node ${CLAUDE_PLUGIN_ROOT}/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`);
+   **step 16** (`node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`);
    verified in a cloud container (claude-dotfiles#100, 2026-09-09) loading all packaged skills from
    a fresh startup.
 3. **Account Skills pages** — individual skills uploaded at `claude.ai/settings/customize` > Skills
@@ -58,7 +54,7 @@ Installed at user scope 2026-08-31 for both profiles.
 ## 1. See what drifted
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/session-check/cloud-plugin-sweep.js"
+node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js"
 ```
 
 Exit 0 in sync, 1 drift or never uploaded, 2 could not check — **2 is never a pass**. In sync means
@@ -142,8 +138,8 @@ The merge IS the upload for every skill the plugin serves, so there is no claude
 the publish for this machine, then confirm:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/session-check/cloud-plugin-sweep.js" --stamp
-node "${CLAUDE_PLUGIN_ROOT}/skills/session-check/cloud-plugin-sweep.js"
+node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js" --stamp
+node "$HOME/.claude/skills/session-check/cloud-plugin-sweep.js"
 ```
 
 Must print `cloud plugin is current`. A later edit will move the fingerprint and the sweep will

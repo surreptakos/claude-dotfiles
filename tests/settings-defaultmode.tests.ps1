@@ -11,7 +11,7 @@
          throw and tell the operator to edit by hand, which left the invariant unenforceable
          on any machine whose settings.json carries an allow/deny list. Every other byte -
          the sibling keys, their order, the indentation, the line endings - must survive,
-         because claude\settings.json is a byte-for-byte mirror of the live file. Asserted
+         because profile\claude\settings.json is what pull writes to the live file. Asserted
          for an LF file (the mirror) and a CRLF one (the live tree, issue 87).
 
       2. sync.ps1 -Mode pull FAILS when that tool exits non-zero. Both call sites used to
@@ -173,21 +173,15 @@ try {
         ("exit={0}`n{1}" -f $r.Exit, [System.IO.File]::ReadAllText($crlfFile))
 
     # ---- sandbox repo for the two pull cases -------------------------------------------
-    # sync.ps1 dot-sources lib\, runs tools\settings-invariants.ps1, and restores the skill
-    # junctions from claude\skill-links.json. That last file is carried because
-    # Restore-SkillLinks dies under Set-StrictMode when the manifest is absent (an empty
-    # result unrolls to $null, and $null.Count throws) - a bug of its own, not this ticket's.
-    # Its targets all resolve under the sandbox home and none of them exist, so every link is
-    # skipped.
+    # sync.ps1 dot-sources lib\ and runs tools\settings-invariants.ps1. Nothing else of the
+    # repo is needed: every whitelist entry is absent from this sandbox, so pull skips them all
+    # and reaches the invariant step, which is the half under test.
     $repo = Join-Path $sandbox 'repo'
     New-Item -ItemType Directory -Path (Join-Path $repo 'tools') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $repo 'claude') -Force | Out-Null
     Copy-Item -Path (Join-Path $RepoRoot 'sync.ps1') -Destination (Join-Path $repo 'sync.ps1') -Force
     Copy-Item -Path (Join-Path $RepoRoot 'lib') -Destination (Join-Path $repo 'lib') -Recurse -Force
     Copy-Item -Path (Join-Path $RepoRoot 'tools\settings-invariants.ps1') `
               -Destination (Join-Path $repo 'tools\settings-invariants.ps1') -Force
-    Copy-Item -Path (Join-Path $RepoRoot 'claude\skill-links.json') `
-              -Destination (Join-Path $repo 'claude\skill-links.json') -Force
 
     # ---- (3) pull reports failure when the tool exits non-zero --------------------------
     # defaultMode present but not a plain "..." string literal: the tool refuses to guess at

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate `agents/skills/project-harness/templates/tracker-audit.js` from this repo's own
+ * Generate `aac-skills/project-harness/templates/tracker-audit.js` from this repo's own
  * `tools/tracker-audit.js`.
  *
  *   node tools/build-harness-tracker-audit.js            # write the template
@@ -29,7 +29,7 @@ const fs = require('fs');
 const path = require('path');
 
 const SOURCE = path.join(__dirname, 'tracker-audit.js');
-const TARGET = path.join(__dirname, '..', 'agents', 'skills', 'project-harness',
+const TARGET = path.join(__dirname, '..', 'aac-skills', 'project-harness',
                          'templates', 'tracker-audit.js');
 
 /** Inserted directly under the shebang. It has to be true in BOTH places it is read: in this repo

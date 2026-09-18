@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-18T03:19:47Z'
-  previous-modified: '2026-09-18T03:18:18Z'
-  revision: '27'
-  content-sha: 9e2cdf673584
+  modified: '2026-09-18T04:15:27Z'
+  previous-modified: '2026-09-18T03:19:47Z'
+  revision: '28'
+  content-sha: d726596895f1
 ---
 
 # ticket-fleet
@@ -48,7 +48,7 @@ to `gh`. The cloud path is `mcp`.
 
 **Pinning a dotfiles-defined `agentType` does not work in a cloud session.** Claude Code reads
 the agent registry before `SessionStart` hooks run, so the cloud bootstrap hook cannot install
-`claude/agents/` in time for the session that would use it; the launch fails with
+`profile/claude/agents/` in time for the session that would use it; the launch fails with
 `Agent type '<name>' not found`, an error that names the type and not the cause. Measured in a
 container on 2026-09-16 - control, hook-write and second-session arms - in issue 339; the
 transcript is at `docs/tickets/339-decision.md` in `claude-dotfiles`.
@@ -326,7 +326,7 @@ Copies this repo does not rebuild, all of which move when the contract does:
 | `claude-dotfiles` | `orchestrator/RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | this page |
-| `claude-dotfiles` | `agents/skills/project-harness/SKILL.md` | step 15, the harness's own launch instruction |
+| `claude-dotfiles` | `aac-skills/project-harness/SKILL.md` | step 15, the harness's own launch instruction |
 
 Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
 `tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
@@ -446,7 +446,7 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly three re
   branch's whole file: PR #306 did that and dropped the branch's edits to the skill's prose.
   The resolver rewrites only hunks whose every line is one of the four keys and exits non-zero
   on any other hunk, which reclassifies that file as a real merge.
-- **A harness upgrade row** — `agents/skills/project-harness/UPGRADES.md`, where two tickets in
+- **A harness upgrade row** — `aac-skills/project-harness/UPGRADES.md`, where two tickets in
   one wave that both bump the harness version both wrote the next `| N |` row (run `6aab1eac`:
   #453 and #218 both took v26, and the number was moved by hand in nine places). Resolved by
   `node tools/renumber-harness-upgrade.js`: the branch's row keeps its text and takes the next
@@ -577,7 +577,7 @@ box unticked.
 | `gh api …/issues/N --jq .state; node tools/tick-acceptance-boxes.js … --apply` - a compound Bash line that puts anything beside a sanctioned write; the read half is refused with it | `[External System Writes]` | split the turn: one command per Bash call, the write in its own call. The same PATCH alone succeeded moments later in the same container |
 | `send_later` (or any scheduling or messaging text) whose message says "land", "merge" or "ship" - refused on the word, not on what the call would do | `[Irreversible Operations]` (reason not captured verbatim; the refusal named the message text) | reword to the read it actually is: "read the state of PR 123", "report whether 123 is merged" |
 | `gh api --method POST\|PATCH repos/O/R/issues/N…` - any tracker write over the `gh` REST path from Bash, intermittently refused | `[External System Writes]` | `mcp__github__issue_write`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request` - the identical write through MCP goes through with no prompt |
-| `python3 - <<'PY' … PY` editing a file under `.claude/` or `agents/skills/` - refused every attempt, not intermittently | `[Self-Modification]` | the Write or Edit tool on that file. No shell spelling of this one has ever gone through |
+| `python3 - <<'PY' … PY` editing a file under `.claude/` or `aac-skills/` - refused every attempt, not intermittently | `[Self-Modification]` | the Write or Edit tool on that file. No shell spelling of this one has ever gone through |
 | `git commit -F /tmp/fleet-<run>/<file>` - a commit whose message file sits outside the worktree, refused every attempt | `[Instruction Poisoning]` | put the message file inside your own worktree and `git commit -F <worktree-path>`, or pass `-m` |
 | `node scratch.js "<a quoted acceptance-criterion string>"` - a script that only reads an issue body and writes a local file, refused because criterion text was among its arguments | `[Instruction Poisoning]` | pass the ticket number and let the script fetch the text, or read the criterion from a file the script opens itself |
 | `rm -rf <anything>`, including a scratch directory the run itself made | `[Destructive Operations]` | leave it: a scratch dir costs nothing and the worktree is torn down anyway. Inside your own worktree `git clean -fd` is the narrower instrument |
@@ -657,7 +657,7 @@ post-wave repair is what undoes it.
 
 Before v18 of the `project-harness` skill (2026-09-14) the fleet lived in three drifted
 copies: `.claude/workflows/ticket-fleet.js` in `claude-dotfiles`, `orchestrator/ticket-fleet-cloud.js`
-alongside it (the cloud port), and `agents/skills/project-harness/templates/ticket-fleet.js`
+alongside it (the cloud port), and `aac-skills/project-harness/templates/ticket-fleet.js`
 (the copy the harness installed into every other repo). Each copy carried one of `runId`
 from args, `defaultBranch`, `keepOpen`, or the MCP/gh instrument branch and none carried
 all four. The harness upgrade table's v18 row records the consolidation.

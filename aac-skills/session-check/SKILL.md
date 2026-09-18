@@ -1,19 +1,15 @@
 ---
 name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
+disable-model-invocation: true
 metadata:
-  disable-model-invocation: 'true'
-  modified: '2026-09-18T04:15:58Z'
-  previous-modified: '2026-09-17T19:13:12Z'
-  revision: '18'
-  content-sha: 07c1bcfb0b2b
+  modified: "2026-09-18T04:15:58Z"
+  previous-modified: "2026-09-17T19:13:12Z"
+  revision: "18"
+  content-sha: "07c1bcfb0b2b"
 ---
 
 # Session check (engine)
-
-> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below
-> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
-> every run is fresh.
 
 `check.js` is the single global engine the session hooks run — one copy, shared by every repo.
 This `SKILL.md` exists so the folder is a well-formed skill for tooling that expects one (the
@@ -22,8 +18,8 @@ use `/session-start` or `/session-end`; run the engine by hand when the engine i
 are debugging:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js          # start-of-session checks
-node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end    # adds release gates
+node ~/.claude/skills/session-check/check.js          # start-of-session checks
+node ~/.claude/skills/session-check/check.js --end    # adds release gates
 ```
 
 Everything is universal (git), auto-detected, or read from an optional `.claude/session.json`
