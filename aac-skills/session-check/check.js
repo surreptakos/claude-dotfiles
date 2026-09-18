@@ -849,7 +849,7 @@ function bootstrapChecks() {
   const r = bootstrap.readMarker(process.env);
   if (r.state === 'missing') {
     stop(`aac-bootstrap marker absent at ${r.path} — the SessionStart bootstrap hook did not run`);
-    note('the hook is `.claude/hooks/session-start.sh` in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true');
+    note('the hook is `.claude/hooks/session-start.sh` (or `session-start-bootstrap.sh` beside a repo\'s own hook, issue 542) in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true');
     return;
   }
   if (r.state === 'unreadable') {

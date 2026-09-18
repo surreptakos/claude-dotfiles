@@ -92,24 +92,47 @@ if (!existingAutoAllow.includes(AUTOMODE_ALLOW_RULING)) {
 // bootstrap (the issue 166 shape).
 // ---------------------------------------------------------------------------------------------
 const HOOK_REL = '.claude/hooks/session-start.sh';
+const SIDECAR_REL = '.claude/hooks/session-start-bootstrap.sh';
 const HOOK_TEMPLATE = path.join(__dirname, 'session-start.sh');
+const hookBody = fs.readFileSync(HOOK_TEMPLATE, 'utf8');
+
+// Issue 542: a repo may already own a `session-start.sh` that is NOT this template (aac-routines
+// used the name for its test-deps hook). Classify the destination by CONTENT, never by existence:
+// an earlier copy of the template carries both markers and is overwritten in place; anything
+// else is somebody's hook and is left byte-for-byte, with the bootstrap installed beside it under
+// SIDECAR_REL and the SessionStart entry wired to that path instead.
+const isTemplateCopy = (text) => text.includes('aac-bootstrap') && text.includes('CLAUDE_CODE_REMOTE');
+const readOrNull = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null);
+const primaryPath = path.join(root, HOOK_REL);
+const sidecarPath = path.join(root, SIDECAR_REL);
+const primaryHad = readOrNull(primaryPath);
+let hookRel = HOOK_REL;
+let keptForeign = null;
+if (readOrNull(sidecarPath) !== null) {
+  hookRel = SIDECAR_REL; // a previous run already chose the sidecar; keep using it
+} else if (primaryHad !== null && primaryHad.trim() !== '' && !isTemplateCopy(primaryHad)) {
+  hookRel = SIDECAR_REL;
+  keptForeign = HOOK_REL;
+}
 const HOOK_ENTRY = {
   hooks: [{
     type: 'command',
-    command: '$CLAUDE_PROJECT_DIR/' + HOOK_REL,
+    command: '$CLAUDE_PROJECT_DIR/' + hookRel,
     timeout: 120,
     statusMessage: 'Cloud container: installing the aac-skills payload...',
   }],
 };
 
-const hookDest = path.join(root, '.claude', 'hooks', 'session-start.sh');
-const hookBody = fs.readFileSync(HOOK_TEMPLATE, 'utf8');
-const hookHad = fs.existsSync(hookDest) ? fs.readFileSync(hookDest, 'utf8') : null;
+const hookDest = path.join(root, hookRel);
+const hookHad = readOrNull(hookDest);
 let hookAction = 'unchanged';
 if (hookHad !== hookBody) {
   hookAction = hookHad === null ? 'installed' : 'updated';
   fs.mkdirSync(path.dirname(hookDest), { recursive: true });
   fs.writeFileSync(hookDest, hookBody);
+}
+if (keptForeign && hookAction === 'installed') {
+  hookAction = 'installed alongside ' + keptForeign + ' (kept: not a copy of the template)';
 }
 // Always ensure the executable bit: a copy landed by a tool that drops it never runs.
 try { fs.chmodSync(hookDest, 0o755); } catch (_e) { /* a filesystem with no mode bit to set */ }
@@ -118,7 +141,7 @@ settings.hooks = Object.assign({}, settings.hooks);
 const sessionStart = Array.isArray(settings.hooks.SessionStart) ? settings.hooks.SessionStart : [];
 const wired = sessionStart.some((group) => {
   const inner = group && Array.isArray(group.hooks) ? group.hooks : [];
-  return inner.some((h) => h && typeof h.command === 'string' && h.command.includes(HOOK_REL));
+  return inner.some((h) => h && typeof h.command === 'string' && h.command.includes(hookRel));
 });
 settings.hooks.SessionStart = wired ? sessionStart : [HOOK_ENTRY].concat(sessionStart);
 
