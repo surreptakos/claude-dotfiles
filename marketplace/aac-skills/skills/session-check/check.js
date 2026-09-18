@@ -356,11 +356,15 @@ function untrustedCommitGate() {
   const reasons = [];
   if (has('.githooks')) {
     const configured = (tryRun('git', ['config', '--get', 'core.hooksPath']) || '').trim();
-    const want = path.resolve(REPO, '.githooks');
+    // A worktree shares the checkout's config, and the hook installer writes an absolute path, so
+    // in a worktree `core.hooksPath` names the MAIN checkout's `.githooks` — the same repo's gate,
+    // and a trusted one. Accept either, or every worktree session reads as ungated.
+    const common = tryRun('git', ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+    const wants = [path.resolve(REPO, '.githooks')];
+    if (common) wants.push(path.resolve(path.dirname(common.trim()), '.githooks'));
     const got = configured ? path.resolve(REPO, configured) : '';
-    const same = got && (process.platform === 'win32'
-      ? got.toLowerCase() === want.toLowerCase()
-      : got === want);
+    const norm = (p2) => (process.platform === 'win32' ? p2.toLowerCase() : p2);
+    const same = got && wants.some((w) => norm(w) === norm(got));
     if (!configured) {
       reasons.push("`core.hooksPath` is unset, so this repo's `.githooks/pre-commit` never ran on those commits");
     } else if (!same) {
