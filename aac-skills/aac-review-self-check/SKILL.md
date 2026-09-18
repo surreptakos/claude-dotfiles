@@ -2,10 +2,10 @@
 name: "aac-review-self-check"
 description: "Check an AAC One Page performance review draft against the house standards before it goes to the skip-level. Use whenever the user is writing, revising, or about to send a performance review for one of their directs."
 metadata:
-  modified: "2026-09-14T15:48:24Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "6da68841091d"
+  modified: "2026-09-18T17:31:23Z"
+  previous-modified: "2026-09-14T15:48:24Z"
+  revision: "2"
+  content-sha: "76b4a55378c7"
 ---
 
 # AAC review self-check
@@ -33,7 +33,6 @@ If you ask it to just fix it all, the answer is no, and that is the skill workin
 
 1. Upload the files into the session, not just open them on your screen. The draft as a .docx, the direct's self-appraisal if there is one, and the prior review if the direct has had one. The checks read all three. Without the prior review the repeat test cannot run; without the self-appraisal the test for quoting the direct's own words back as your observation cannot run. Say so in the report rather than passing an item that was never tested.
 2. Work out the review period. It is 12 months. A first review runs 12 months from the start date. Every later review runs 12 months from the day after the prior review's period ended, not from the day you deliver it. Nothing on the page is dated after the period end; a later event belongs in next year's review and can still come up in the meeting.
-3. Work out the review period before running anything, because every date check depends on it.
 
 ## The standards
 
