@@ -12,7 +12,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 
 | File | Governs | Status |
 |---|---|---|
-| `PROMPT.md` | The reviewer standard: run order, what you fix versus what you ask, recurring defect checks, the Output Contract for the review email | Active, rev. 4 |
+| `PROMPT.md` | The reviewer standard: run order, what you fix versus what you ask, recurring defect checks, the Output Contract for the review email | Active, rev. 5 |
 | `LIVING-STANDARD.md` | The full reviewer standard behind PROMPT.md | Active |
 | `DRAFTER-PRESEND-CHECKLIST.md` | Completion and export QA | Active |
 
@@ -29,7 +29,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 
 | File | Governs | Status |
 |---|---|---|
-| `EXTRACTION-PROMPT.md` | The prompt the pilot fact extractor (`scripts/pilot/fact_extractor.py`) hands to headless Claude: output contract for `_facts.json`, the cross-artifact validation statuses (`validated` / `single-source` / `conflict`), and the re-read-on-anomaly discipline (hard rule 6 applied inside extraction). Cited by the extractor by path; never restated in code | **Draft, awaiting ratification by Dan** (issue #53, delivered 2026-08-21) |
+| `EXTRACTION-PROMPT.md` | The prompt the pilot fact extractor (`pilot/extract/fact_extractor.py`, repo root) hands to headless Claude: output contract for `_facts.json`, the cross-artifact validation statuses (`validated` / `single-source` / `conflict`), and the re-read-on-anomaly discipline (hard rule 6 applied inside extraction). Cited by the extractor by path; never restated in code | Active (correction rounds ratified 2026-08-21, issue 71; whole file ratified by Dan 2026-09-18, in session; delivered under issue #53) |
 | `FACTS-SCHEMA.md` + `facts.schema.json` | The `_facts.json` deal record: the tree shape (Customer / Sites / Systems), field types, required/conditional/optional membership, and the resolved open-question ledger. `facts.schema.json` is the machine-checkable JSON Schema; the Markdown file is the human-readable companion. Read by the extractor, the builder and the pre-build gate | **Active, v1.0**, ratified by Dan 2026-09-10 (issue #215 stream A) |
 
 ## Content standards

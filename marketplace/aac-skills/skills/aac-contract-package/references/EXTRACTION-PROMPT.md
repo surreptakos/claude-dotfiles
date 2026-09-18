@@ -1,9 +1,9 @@
 # EXTRACTION-PROMPT — headless-Claude fact extraction
 
-**Status: Draft. Awaiting ratification by Dan Gatsakos.**
+**Status: Active.** Correction rounds ratified 2026-08-21 (issue 71); the whole file ratified by Dan Gatsakos 2026-09-18 (in session, recorded on issue 273).
 
 This is the prompt the pilot fact extractor
-(`skill/aac-contract-package/scripts/pilot/fact_extractor.py`) hands to
+(`pilot/extract/fact_extractor.py`, at the repo root) hands to
 headless Claude when it is asked to extract a packet's facts. It is the
 only copy — the extractor cites this file by path and never restates
 its contents (hard rule 1). Change this file to change what the
