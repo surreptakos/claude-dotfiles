@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-17T21:08:53Z'
-  previous-modified: '2026-09-17T20:45:25Z'
-  revision: '6'
-  content-sha: ca5148f01281
+  modified: '2026-09-18T21:07:02Z'
+  previous-modified: '2026-09-17T21:08:53Z'
+  revision: '7'
+  content-sha: 04a7ab2708ec
 ---
 
 # todoist-triage
@@ -55,6 +55,14 @@ Priority sorts within a ball, never sets it. The 10-item `do` cap in Current Wor
 
 - ThreatLocker (ExcalTech approval requests for scripts on Dan's machines): ignore. Do not triage or alarm; when the routine creates one, propose Delete in the same pass and delete on approval. Other ExcalTech tickets are still triaged normally.
 
+## Standing rulings (Dan, 2026-09-18, issue 204)
+
+Notification mail from a system whose state lives in its own portal proves an event was raised, never that it is still outstanding: the 2026-09-15 run proposed approving a Leave Dates request Dan had already approved. Read the system, or file the mail.
+
+- **Readable: rule from the system, never from its mail.** Leave Dates: `python -m aac_routines.leave_dates pending` from the aac-routines checkout (`awaiting_me` is Dan's queue, `requested` is every open request company-wide; `out` says who is out). Zoho Desk tickets: `python3 tools/zoho-rest.py get https://desk.zoho.com/api/v1/tickets/<id>` from this repo. If the read fails, the item is `unknown` naming that surface; never fall back to the mail.
+- **Mail carries the state.** ExcalTech tickets: every transition (opened, updated, resolved) is mailed and replies travel by mail, so the newest mail in the thread is the evidence.
+- **Fenced: no readable surface in the stack.** Rippling (pay-run approvals, assigned tasks), Bill.com (bills, vendor credits), Zoho Flow failure alerts, the `sec-portal.io` quarantine digest, Intuit Data Protect backup alerts, Microsoft 365 admin alerts, vendor status mail (Brivo, RingCentral, Avigilon Alta), Smartsheet report mail. File the mail as informational: never a task, never an "outstanding" ruling, never an approve, pay or release proposal. A task Dan typed about one of these is triaged as his words, not as the mail's.
+
 ## Procedure
 
 ### 1. Read
@@ -80,6 +88,7 @@ Load the two prior run records first, then the exports, then the live tail.
 - **Exports (primary source of source material).** Every ruling rests on the message and thread bodies Power Automate exports to Google Drive, not on live-connector snippets. They live in the folder named by `folder_name` in `aac-routines`' `config/m365-exports.json` — today **`aacx-inbox`** — and each file is named for its **source**, never for the routine: `<source>__<key>__<YYYY-MM-DDTHHMM>.json`, so `outlook_inbox__inbox__2026-09-17T2016.json`, `outlook_sent__sent__...`, `teams__nick__...`, `calendar__global__...`. Searching for the routine's name finds nothing and is not evidence that the exports are missing — that error cost the 2026-09-17 run its primary reader.
 
   In a cloud session: `mcp__Google-Drive__search_files` with `title contains 'aacx-inbox' and mimeType = 'application/vnd.google-apps.folder'` for the folder id, then `parentId = '<id>' and modifiedTime > '<recent>'` for its contents, newest stamp first. Two parameter traps, both hit on 2026-09-17: the tool takes no `orderBy`, so sort the returned `modifiedTime` values yourself; and the query field is `title`, never `name` — `name contains ...` is rejected outright as an unsupported field. Read the newest file per source with `mcp__Google-Drive__read_file_content`. Record the newest stamp — that is the tail-window start.
+- **Leave Dates (API, never mail).** Before any leave item is ruled on, run `python -m aac_routines.leave_dates pending` (and `out` when the week's absences matter). A `hello@leavedates.com` mail with no matching `awaiting_me` row is filed; exit 2 makes Leave Dates an unreachable surface for step 6.
 - **Live tail (tail-fill only).** Fill the window "newest export stamp → now" from Gmail (`mcp__Gmail__search_threads`), Teams (`mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`), meeting notes (Granola), and Todoist history (`find-activity`). Never widen this window past the export stamp; never let the connectors stand in as the primary reader. Any connector that fails or returns no access is recorded and carried into step 6 as an unreachable surface.
 - **Todoist queue.** `find-tasks` on all three projects — Current Work, the backlog, and the Inbox project named by `inbox_project_id` in aac-routines' `config/task-capture.json` — `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link. An Inbox item is triaged where it sits; the router moves it, this skill does not.
 
