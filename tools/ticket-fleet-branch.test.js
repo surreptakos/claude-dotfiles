@@ -469,7 +469,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from th
 const REMOVED_COPIES = [
   '.claude/workflows/ticket-fleet.js',
   'orchestrator/ticket-fleet-cloud.js',
-  'agents/skills/project-harness/templates/ticket-fleet.js',
+  'aac-skills/project-harness/templates/ticket-fleet.js',
 ];
 
 for (const rel of REMOVED_COPIES) {
@@ -923,7 +923,7 @@ for (const file of RESUME_GUARD_PAIR) {
       'a stamp still stale after one re-run must block the push with a named reason, not arrive as a red PR');
     assert.match(prompt, /run A5\(i\)'s stamps check on the merge result/,
       'the clean-merge path has no regenerate behind it and still needs the check');
-    assert.match(src, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills agents\/skills claude\/skills --home '/,
+    assert.match(src, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills --home '/,
       "the default check must be the command CI runs, --home included: a stamp hashed against the container's home is the bug");
   });
 

@@ -316,7 +316,7 @@ class OwnerHome(unittest.TestCase):
             git(repo.parent, "init", "-q", str(repo))
             literal = make_skill(repo / "aac-skills", "literal", extra={"ref.md": self.LITERAL})
             tokens = make_skill(repo / "agents" / "skills", "tokens", extra={"ref.md": self.TOKENS})
-            trees = ["aac-skills", "agents/skills"]
+            trees = ["aac-skills", "aac-skills"]
             # Published the CI-shaped way, with the owner's home spelled out.
             explicit = self._cli(repo, nobody, "stamp", *trees, "--home", ss.OWNER_HOME)
             self.assertEqual(explicit.returncode, 0, explicit.stderr)

@@ -91,17 +91,19 @@ test('a home with no projects directory is not an error', () => {
   assert.deepEqual(run({ home, homeExplicit: true, backup: null, dryRun: false }), []);
 });
 
-test('both sync modes call the pointer, and the slug is no longer mirrored', () => {
+test('the surviving sync mode calls the pointer, and no memory tree is mirrored', () => {
   const sync = fs.readFileSync(path.join(REPO, 'sync.ps1'), 'utf8');
   const manifest = fs.readFileSync(path.join(REPO, 'lib', 'manifest.ps1'), 'utf8');
   assert.match(sync, /function Invoke-RepoMemoryPointer/);
   assert.match(sync, /tools\\repo-memory-pointer\.js/);
-  // Once in push (no backup dir of its own) and once in pull (into the pull's backup).
-  assert.equal((sync.match(/^\s*Invoke-RepoMemoryPointer(\s|$)/gm) || []).length, 2,
-    'push and pull must each call it');
+  // Once, in pull (into the pull's backup). Push retired with the mirrors (issue 214).
+  assert.equal((sync.match(/^\s*Invoke-RepoMemoryPointer(\s|$)/gm) || []).length, 1,
+    'pull must call it, and it is the only mode left');
   assert.match(sync, /Invoke-RepoMemoryPointer -BackupRoot \$backup/);
-  assert.match(manifest, /\$script:RepoOwnedMemoryMarker = '-claude-dotfiles'/);
-  assert.match(manifest, /-and -not \(Test-RepoOwnedMemory -Slug \$_\.Name\)/);
+  // The memory mirror retired with push: nothing in the manifest carries a project's notes.
+  assert.ok(!/Get-MemoryItems/.test(manifest), 'lib/manifest.ps1 still mirrors project memory');
+  assert.ok(!/memory/i.test(manifest.split('function Get-DotfileItems')[1].split('\n}')[0]),
+    'the whitelist still names a memory tree');
   // CRLF is load-bearing for these two files (CLAUDE.md, issue 87 neighbourhood).
   for (const rel of ['sync.ps1', path.join('lib', 'manifest.ps1')]) {
     const raw = fs.readFileSync(path.join(REPO, rel));

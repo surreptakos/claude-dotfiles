@@ -484,13 +484,13 @@ const DELETED_LISTING = [
   'aac-skills/writing/references/audience.md',
   'aac-skills/writing/scripts/refresh_vercel.js',
   'marketplace/aac-skills/skills/writing/SKILL.md',
-  'agents/skills/project-harness/templates/ticket-fleet.js',
+  'aac-skills/project-harness/templates/ticket-fleet.js',
   'docs/adr/0003-old-note.md',
 ].join('\n');
 const LIVE_LISTING = [
   'aac-skills/writing-great-skills/SKILL.md',
   'aac-skills/ticket-fleet/ticket-fleet.js',
-  'agents/skills/project-harness/SKILL.md',
+  'aac-skills/project-harness/SKILL.md',
   'docs/adr/0004-kept.md',
   'tools/tracker-audit.js',
 ].join('\n');

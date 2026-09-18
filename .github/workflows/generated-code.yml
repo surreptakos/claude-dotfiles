@@ -5,7 +5,7 @@ name: Generated code
 #   tools/build-fleet-inline.js            <- tools/ticket-fleet-branch.js
 #     -> the [FLEET-GENERATED] region of aac-skills/ticket-fleet/ticket-fleet.js (issue 440)
 #   tools/build-harness-tracker-audit.js   <- tools/tracker-audit.js
-#     -> agents/skills/project-harness/templates/tracker-audit.js (issue 336)
+#     -> aac-skills/project-harness/templates/tracker-audit.js (issue 336)
 # So the ordinary sequence - edit the source, commit, forget the generator - put a stale artifact
 # on master and surfaced only in the next unrelated test run. This job is the whole gate: the
 # commit-time half ran the same two --check calls from `.githooks/pre-commit` until that hook

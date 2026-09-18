@@ -8,7 +8,7 @@
  * the whole ~12 KB rulebook. What is pinned here, one per stated behaviour:
  *
  *   - the payload's rules/global-rules.md is the verbatim `### Four standing disciplines` section
- *     of claude/CLAUDE.md (the mirror of the PC's ~/.claude/CLAUDE.md) — one source, no hand copy
+ *     of profile/claude/CLAUDE.md (the mirror of the PC's ~/.claude/CLAUDE.md) — one source, no hand copy
  *   - `start k` emits a SessionStart part; the parts concatenate back to that file byte for byte
  *   - each part's additionalContext stays under 10,000 bytes, the pass-through cap measured in a
  *     cloud container on 2026-09-16 (10,240 bytes came back as a 2KB preview of a persisted file)
@@ -72,10 +72,10 @@ function entries(event) {
 }
 
 test('the payload rules file is the CLAUDE.md section verbatim, not a hand copy', () => {
-  const md = fs.readFileSync(path.join(REPO, 'claude', 'CLAUDE.md'), 'utf8').replace(/\r\n/g, '\n');
+  const md = fs.readFileSync(path.join(REPO, 'profile', 'claude', 'CLAUDE.md'), 'utf8').replace(/\r\n/g, '\n');
   const lines = md.split(/(?<=\n)/);
   const start = lines.findIndex((l) => l.startsWith('### Four standing disciplines'));
-  assert.ok(start >= 0, 'claude/CLAUDE.md lost the standing-disciplines heading');
+  assert.ok(start >= 0, 'profile/claude/CLAUDE.md lost the standing-disciplines heading');
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i += 1) {
     if (lines[i].startsWith('### ') || lines[i].startsWith('## ')) { end = i; break; }
@@ -85,7 +85,7 @@ test('the payload rules file is the CLAUDE.md section verbatim, not a hand copy'
   // --home substitution); re-tokenize so the comparison does not depend on whose home built it.
   const shipped = fs.readFileSync(RULES, 'utf8').replace(/[A-Za-z]:\\Users\\[^\\"]+/g, '__USERHOME__');
   assert.equal(shipped, section,
-    'marketplace/aac-skills/rules/global-rules.md drifted from claude/CLAUDE.md — rerun the packager');
+    'marketplace/aac-skills/rules/global-rules.md drifted from profile/claude/CLAUDE.md — rerun the packager');
 });
 
 test('the SessionStart parts concatenate back to the whole rules file', () => {

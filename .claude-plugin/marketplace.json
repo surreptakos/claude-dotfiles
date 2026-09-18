@@ -1,6 +1,6 @@
 {
   "name": "claude-dotfiles",
-  "description": "Dan Gatsakos's personal skill marketplace, generated from the live ~/.claude/skills tree by tools/build-cloud-plugin.py.",
+  "description": "Dan Gatsakos's personal skill marketplace, generated from the repo's aac-skills/ tree by tools/build-cloud-plugin.py.",
   "owner": {
     "name": "Dan Gatsakos"
   },
@@ -9,7 +9,7 @@
       "name": "aac-skills",
       "source": "./marketplace/aac-skills",
       "description": "AAC Skills - Dan's full skill set plus the Active Alarm Company team skills, one package for every surface.",
-      "version": "2026.9.180337"
+      "version": "2026.9.180453"
     }
   ]
 }

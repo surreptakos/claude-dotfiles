@@ -84,6 +84,13 @@ jobs:
         shell: cmd
         run: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
 
+      # -From origin clones the remote's default branch, so it answers "would a new machine
+      # work?" only where origin IS the head under test: master. On a pull request or a
+      # feature-branch push it would restore master with THIS checkout's manifest and checks,
+      # which is a mismatch as soon as a branch changes the layout (issue 214 moved the skills
+      # tree and the profile, and this step went red on master's old tree, not on the branch).
+      # The -From worktree step above is the PR's own proof; this one runs after the merge.
       - name: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
+        if: github.ref == 'refs/heads/master'
         shell: cmd
         run: powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1

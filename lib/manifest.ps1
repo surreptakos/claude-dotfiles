@@ -5,9 +5,13 @@ Set-StrictMode -Version Latest
 
 # ---------------------------------------------------------------- what travels
 
-# Every entry is copied by name. Nothing outside this list is ever read, which is
-# what keeps credentials, transcripts and caches out of the repo — a .gitignore
-# alone would only catch what someone remembered to list.
+# The consumer profile (issue 214). The repo is the source now: a skill is edited on a branch
+# under aac-skills/, CI stamps it and rebuilds the plugin, and merge is the release. Sync push,
+# the generated claude/ codex/ memory/ mirrors and the skill junctions retired with that; what is
+# left is one direction - master -> this machine - and this list is everything it writes.
+#
+# Every entry is copied by name. Nothing outside this list is ever read or written, which is what
+# keeps credentials, transcripts and caches out of the picture in both directions.
 function Get-DotfileItems {
     param(
         [Parameter(Mandatory = $true)][string]$RepoRoot,
@@ -16,38 +20,38 @@ function Get-DotfileItems {
 
     $claude = Join-Path $UserHome '.claude'
     $codex  = Join-Path $UserHome '.codex'
-    $agents = Join-Path $UserHome '.agents'
     $docs   = Get-DocumentsPath -UserHome $UserHome
 
     @(
-        [pscustomobject]@{ Type = 'File'; Repo = 'claude/CLAUDE.md';                       Local = (Join-Path $claude 'CLAUDE.md') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'claude/settings.json';                   Local = (Join-Path $claude 'settings.json') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }
+        # The skill tree itself: one hand-edited source, restored as ~/.claude/skills. The plugin
+        # payload under marketplace/ is built from the same tree for cloud containers; a desktop
+        # reads the source copy, which keeps this machine's paths rather than the plugin root.
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'aac-skills';                              Local = (Join-Path $claude 'skills') }
+
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/CLAUDE.md';                Local = (Join-Path $claude 'CLAUDE.md') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/settings.json';            Local = (Join-Path $claude 'settings.json') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }
         # Which Claude account owns which repo and routine (issue 103). Read by the session check
-        # in every repo and by the master watchdog; hand-written, uuids and one email, no secrets.
-        [pscustomobject]@{ Type = 'File'; Repo = 'claude/accounts.json';                    Local = (Join-Path $claude 'accounts.json') }
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/skills';                          Local = (Join-Path $claude 'skills') }
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/hooks';                           Local = (Join-Path $claude 'hooks') }
+        # in every repo; hand-written, uuids and one email, no secrets.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/accounts.json';            Local = (Join-Path $claude 'accounts.json') }
+        # The governance hook scripts settings.json dispatches. Also the source the packager
+        # copies into the plugin payload, so the desktop and a container run the same code.
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/hooks';                    Local = (Join-Path $claude 'hooks') }
         # User-level subagent definitions (issue 86). Claude Code auto-discovers *.md files here
-        # for the agent registry the Agent tool and Workflow's `agentType` share. Carrying this
-        # tree via sync means the ticket-fleet's tool-restricted verifier reaches every repo the
-        # fleet runs in on any machine, without a per-repo install step.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'claude/agents';                          Local = (Join-Path $claude 'agents') }
-        # Most of the flow skills the global CLAUDE.md names (implement, tdd, triage, handoff,
-        # to-spec...) live here and reach ~/.claude/skills through junctions. Carrying only
-        # ~/.claude/skills captured 13 of 37 skills and said nothing about the other 24.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'agents/skills';                          Local = (Join-Path $agents 'skills') }
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'codex/hooks';                            Local = (Join-Path $codex  'hooks') }
+        # for the agent registry the Agent tool and Workflow's `agentType` share, so the
+        # ticket-fleet's tool-restricted verifier reaches every repo the fleet runs in.
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/agents';                   Local = (Join-Path $claude 'agents') }
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/codex/hooks';                     Local = (Join-Path $codex  'hooks') }
         # Without hooks.json the carried ask_matt_gate.py is inert on the Codex side: the script
         # is there and nothing calls it. AGENTS.md is Codex's half of the global rules.
-        [pscustomobject]@{ Type = 'File'; Repo = 'codex/hooks.json';                       Local = (Join-Path $codex  'hooks.json') }
-        # Codex's settings file - the counterpart of claude/settings.json. Without it a fresh
-        # machine gets the carried hooks wired over default settings (issue #2). Scanned for
-        # credential values 2026-08-12 and again 2026-08-19: none; the sha256 values in it are
-        # trust pins for hooks.json entries, not secrets.
-        [pscustomobject]@{ Type = 'File'; Repo = 'codex/config.toml';                      Local = (Join-Path $codex  'config.toml') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'codex/AGENTS.md';                        Local = (Join-Path $codex  'AGENTS.md') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/codex/hooks.json';                Local = (Join-Path $codex  'hooks.json') }
+        # Codex's settings file - the counterpart of the Claude one. Without it a fresh machine
+        # gets the carried hooks wired over default settings (issue #2). Scanned for credential
+        # values 2026-08-12 and again 2026-08-19: none; the sha256 values in it are trust pins
+        # for hooks.json entries, not secrets.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/codex/config.toml';               Local = (Join-Path $codex  'config.toml') }
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/codex/AGENTS.md';                 Local = (Join-Path $codex  'AGENTS.md') }
         # The two PowerShell profiles. They are the only place a shell-level Claude Code setting
         # (CLAUDE_CODE_USE_POWERSHELL_TOOL) reaches a session launched from a terminal, and the
         # registry User variable does not substitute: an already-running Explorer hands its stale
@@ -74,13 +78,13 @@ function Get-DocumentsPath {
     return (Join-Path $UserHome 'Documents')
 }
 
-# ------------------------------------------------------------------- skill links
+# ------------------------------------------------------------------ links on disk
 
-# Junctions are the reason a skill can be installed and invisible to a file copy:
-# Get-ChildItem -Recurse -File does not traverse a reparse point, so Copy-Tree walks straight
-# past one and reports a smaller count with no error. Record them as data instead, and recreate
-# them on pull once their targets are back.
-$script:SkillLinkFile = 'claude/skill-links.json'
+# ~/.claude/skills used to hold junctions into ~/.agents/skills, and push recorded them as data
+# because Get-ChildItem -Recurse -File walks straight past a reparse point. The repo has one
+# skill tree now (issue 214) and pull writes real directories, so nothing here creates a link -
+# but a machine restored before the cut still has them, and lib/personal.ps1 mirrors whatever it
+# finds into ~/.claude-personal. These two readers are what it uses.
 
 function Test-IsLink {
     param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
@@ -99,173 +103,6 @@ function Get-LinkTarget {
         return [string]$target[0]
     }
     return [string]$target
-}
-
-function Get-SkillLinks {
-    param([Parameter(Mandatory = $true)][string]$UserHome)
-
-    $skills = Join-Path $UserHome '.claude\skills'
-    if (-not (Test-Path $skills)) { return @() }
-
-    Get-ChildItem -Path $skills -Directory -Force |
-        Where-Object { Test-IsLink -Item $_ } |
-        ForEach-Object {
-            [pscustomobject]@{ Name = $_.Name; Target = (Get-LinkTarget -Item $_) }
-        } |
-        Where-Object { $_.Target -ne '' }
-}
-
-# ConvertTo-Json is not an engine-independent formatter: Windows PowerShell 5.1 indents four
-# spaces and pads the colon ("Name":  "x"), PowerShell 7 indents two and does not. The same
-# push run from the two engines therefore rewrites every line of skill-links.json with
-# identical content - `git diff -w` comes back empty - and the file flip-flops in history
-# depending on which shell the owner happened to be in. Emit the bytes here instead.
-function Write-JsonStringLiteral {
-    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
-
-    $sb = New-Object System.Text.StringBuilder
-    [void]$sb.Append('"')
-    foreach ($ch in $Value.ToCharArray()) {
-        switch ($ch) {
-            '"'     { [void]$sb.Append('\"');   continue }
-            '\'     { [void]$sb.Append('\\');   continue }
-            "`b"    { [void]$sb.Append('\b');   continue }
-            "`f"    { [void]$sb.Append('\f');   continue }
-            "`n"    { [void]$sb.Append('\n');   continue }
-            "`r"    { [void]$sb.Append('\r');   continue }
-            "`t"    { [void]$sb.Append('\t');   continue }
-            default {
-                if ([int]$ch -lt 32) { [void]$sb.Append(('\u{0:x4}' -f [int]$ch)) }
-                else                 { [void]$sb.Append($ch) }
-            }
-        }
-    }
-    [void]$sb.Append('"')
-    return $sb.ToString()
-}
-
-# Two-space indent, CRLF, no trailing newline - the shape ConvertTo-Json produced under
-# PowerShell 7, so pinning it left the committed file unchanged.
-function ConvertTo-SkillLinkJson {
-    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][array]$Links)
-
-    $nl    = "`r`n"
-    $lines = New-Object System.Collections.ArrayList
-    [void]$lines.Add('[')
-    for ($i = 0; $i -lt $Links.Count; $i++) {
-        $comma = if ($i -lt $Links.Count - 1) { ',' } else { '' }
-        [void]$lines.Add('  {')
-        [void]$lines.Add('    "Name": '   + (Write-JsonStringLiteral -Value $Links[$i].Name) + ',')
-        [void]$lines.Add('    "Target": ' + (Write-JsonStringLiteral -Value $Links[$i].Target))
-        [void]$lines.Add('  }' + $comma)
-    }
-    [void]$lines.Add(']')
-    return ($lines -join $nl)
-}
-
-function Save-SkillLinks {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$UserHome,
-        [switch]$DryRun
-    )
-
-    $links = @(Get-SkillLinks -UserHome $UserHome | ForEach-Object {
-        [pscustomobject]@{ Name = $_.Name; Target = (ConvertTo-Tokens -Text $_.Target -UserHome $UserHome) }
-    })
-    $path = Join-Path $RepoRoot ($script:SkillLinkFile -replace '/', '\')
-    if ($DryRun) {
-        Write-Host ("  would write {0}  ({1} links)" -f $path, $links.Count)
-        return $links.Count
-    }
-    $json = ConvertTo-SkillLinkJson -Links $links
-    [System.IO.File]::WriteAllText($path, $json, $script:Utf8NoBom)
-    return $links.Count
-}
-
-# @(Get-Content x -Raw | ConvertFrom-Json) does NOT reliably give you N elements on Windows
-# PowerShell 5.1: the deserialised array can arrive as a single pipeline object, so @() wraps it
-# into one nested element and a 22-entry file reads as one entry whose every property is an
-# array. Piping through ForEach-Object enumerates it either way.
-function Read-JsonArray {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    if (-not (Test-Path $Path)) { return @() }
-    $parsed = Get-Content $Path -Raw | ConvertFrom-Json
-    if ($null -eq $parsed) { return @() }
-    return @($parsed | ForEach-Object { $_ })
-}
-
-function Restore-SkillLinks {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$UserHome,
-        [switch]$DryRun
-    )
-
-    $path = Join-Path $RepoRoot ($script:SkillLinkFile -replace '/', '\')
-    $links = Read-JsonArray -Path $path
-    if ($links.Count -eq 0) { return 0 }
-    $made = 0
-    foreach ($link in $links) {
-        $target = ConvertFrom-Tokens -Text $link.Target -UserHome $UserHome
-        $linkPath = Join-Path $UserHome (".claude\skills\" + $link.Name)
-
-        if (-not (Test-Path $target)) {
-            Write-Host ("  skip link (no target): {0} -> {1}" -f $link.Name, $target) -ForegroundColor Yellow
-            continue
-        }
-        if ($DryRun) { Write-Host ("  would link {0} -> {1}" -f $linkPath, $target); $made++; continue }
-
-        # A real directory already sitting there is somebody's local edit, not ours to replace.
-        if (Test-Path $linkPath) {
-            $existing = Get-Item $linkPath -Force
-            if (-not (Test-IsLink -Item $existing)) {
-                Write-Host ("  skip link (real directory in the way): {0}" -f $linkPath) -ForegroundColor Yellow
-                continue
-            }
-            Remove-Item -Path $linkPath -Force -Recurse
-        }
-        $parent = Split-Path $linkPath -Parent
-        if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        New-Item -ItemType Junction -Path $linkPath -Target $target | Out-Null
-        $made++
-    }
-    return $made
-}
-
-# Per-project memory lives under ~/.claude/projects/<slug>/memory. The slug is the
-# project's absolute path with every non-alphanumeric character replaced by "-",
-# so it embeds the username and has to be re-slugged on a machine with a different one.
-#
-# One exception, and it is deliberate (issue 210): THIS repo's own notes are not mirrored. They
-# are committed at docs/agents/memory/ with MEMORY.md as the index, and the aac-skills plugin's
-# SessionStart hook loads them from whichever checkout the session opened - so a cloud container
-# has them too. Carrying the live copy as well would mean two copies of one note, each able to
-# drift; tools/repo-memory-pointer.js (both sync modes call it) empties the live directory down
-# to a pointer file instead. Matched anywhere in the slug, not just at the end, so it holds for any
-# checkout of this repo on any machine AND for its agent worktrees, whose slug carries the checkout
-# path plus `--claude-worktrees-<id>`.
-$script:RepoOwnedMemoryMarker = '-claude-dotfiles'
-
-function Test-RepoOwnedMemory {
-    param([Parameter(Mandatory = $true)][string]$Slug)
-    return ($Slug -like ('*' + $script:RepoOwnedMemoryMarker + '*'))
-}
-
-function Get-MemoryItems {
-    param(
-        [Parameter(Mandatory = $true)][string]$UserHome
-    )
-
-    $projects = Join-Path $UserHome '.claude\projects'
-    if (-not (Test-Path $projects)) { return @() }
-
-    Get-ChildItem -Path $projects -Directory | ForEach-Object {
-        $memory = Join-Path $_.FullName 'memory'
-        if ((Test-Path $memory) -and -not (Test-RepoOwnedMemory -Slug $_.Name)) {
-            [pscustomobject]@{ Type = 'Dir'; Slug = $_.Name; Local = $memory }
-        }
-    }
 }
 
 # ------------------------------------------------------------------ exclusions
@@ -303,11 +140,6 @@ function Test-TextFile {
     return $script:TextExtensions -contains ([System.IO.Path]::GetExtension($Path).ToLower())
 }
 
-function ConvertTo-Slug {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    return ($Path -replace '[^A-Za-z0-9]', '-')
-}
-
 function Get-HomeForms {
     param([Parameter(Mandatory = $true)][string]$UserHome)
 
@@ -318,7 +150,6 @@ function Get-HomeForms {
         Fwd   = $trimmed.Replace('\', '/')                                                 # C:/Users/Dan
         Posix = '/' + $trimmed.Substring(0, 1).ToLower() + $trimmed.Substring(2).Replace('\', '/')  # /c/Users/Dan
         Lower = $trimmed.ToLower()                                                         # c:\users\dan (Codex trust keys)
-        Slug  = (ConvertTo-Slug $trimmed)                                                  # C--Users-Dan
     }
 }
 
@@ -357,24 +188,6 @@ function ConvertFrom-Tokens {
     $out = $out.Replace('__USERHOME_LC__',    $h.Lower)
     $out = $out.Replace('__USERHOME__',       $h.Raw)
     return $out
-}
-
-function ConvertTo-TokenSlug {
-    param(
-        [Parameter(Mandatory = $true)][string]$Slug,
-        [Parameter(Mandatory = $true)][string]$UserHome
-    )
-    $h = Get-HomeForms -UserHome $UserHome
-    return $Slug.Replace($h.Slug, '__USERHOME_SLUG__')
-}
-
-function ConvertFrom-TokenSlug {
-    param(
-        [Parameter(Mandatory = $true)][string]$Slug,
-        [Parameter(Mandatory = $true)][string]$UserHome
-    )
-    $h = Get-HomeForms -UserHome $UserHome
-    return $Slug.Replace('__USERHOME_SLUG__', $h.Slug)
 }
 
 # ------------------------------------------------------------------- file copy
@@ -424,9 +237,6 @@ function Copy-Tree {
         return 0
     }
 
-    # -Recurse does not traverse reparse points, and that is load-bearing rather than incidental:
-    # it is what stops a junctioned skill being copied twice, once under claude/skills and again
-    # under agents/skills. The junctions themselves travel as data - see Get-SkillLinks.
     $count = 0
     Get-ChildItem -Path $Source -Recurse -File | ForEach-Object {
         $relative = $_.FullName.Substring($Source.Length).TrimStart('\', '/')

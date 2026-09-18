@@ -15,7 +15,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
-const CHECKER = path.join(ROOT, 'agents', 'skills', 'session-check', 'check.js');
+const CHECKER = path.join(ROOT, 'aac-skills', 'session-check', 'check.js');
 const FAILING_SUITE = "require('node:test')('boom', () => { throw new Error('boom'); });\n";
 
 function tempDir() { return fs.mkdtempSync(path.join(os.tmpdir(), 'node-test-context-')); }
@@ -63,14 +63,14 @@ test('session-check reports a failing suite even when it is spawned from inside 
 
 test('every swept spawn site strips NODE_TEST_CONTEXT from the child environment', () => {
   const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
-  for (const rel of ['agents/skills/session-check/check.js',
+  for (const rel of ['aac-skills/session-check/check.js',
                      'scripts/build-dashboard.js',
-                     'agents/skills/project-harness/templates/build-dashboard.js']) {
+                     'aac-skills/project-harness/templates/build-dashboard.js']) {
     assert.match(read(rel), /delete\s+\w+\.NODE_TEST_CONTEXT/, rel);
     assert.match(read(rel), /env:\s*CHILD_ENV/, `${rel} must pass the scrubbed env to its children`);
   }
   // This repo's own pre-commit gate retired with the freshness loop (issue 213); the
   // harness template still ships the scrub to the repos that install it.
-  assert.match(read('agents/skills/project-harness/templates/pre-commit'),
-    /^unset NODE_TEST_CONTEXT$/m, 'agents/skills/project-harness/templates/pre-commit');
+  assert.match(read('aac-skills/project-harness/templates/pre-commit'),
+    /^unset NODE_TEST_CONTEXT$/m, 'aac-skills/project-harness/templates/pre-commit');
 });

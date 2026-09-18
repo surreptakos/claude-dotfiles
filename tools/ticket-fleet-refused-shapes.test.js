@@ -79,7 +79,7 @@ const CLASSIFIER_ROWS = [
   { shape: 'compound Bash beside a sanctioned write', refused: /--apply` - a compound Bash line/, category: /\[External System Writes\]/, works: /split the turn/ },
   { shape: 'scheduling text naming land or merge', refused: /`send_later`.*says "land"/, category: /\[Irreversible Operations\]/, works: /read the state of/ },
   { shape: 'gh api tracker write from Bash', refused: /`gh api --method POST\\\|PATCH/, category: /\[External System Writes\]/, works: /mcp__github__issue_write/ },
-  { shape: 'heredoc edit under .claude/ or agents/skills/', refused: /<<'PY'.*`\.claude\/` or `agents\/skills\/`/, category: /\[Self-Modification\]/, works: /the Write or Edit tool/ },
+  { shape: 'heredoc edit under .claude/ or aac-skills/', refused: /<<'PY'.*`\.claude\/` or `aac-skills\/`/, category: /\[Self-Modification\]/, works: /the Write or Edit tool/ },
   { shape: 'git commit -F from the shared scratchpad', refused: /`git commit -F \/tmp\/fleet-<run>\/<file>`/, category: /\[Instruction Poisoning\]/, works: /inside your own worktree/ },
   { shape: 'a script carrying a quoted acceptance criterion', refused: /refused because criterion text was among its arguments/, category: /\[Instruction Poisoning\]/, works: /pass the ticket number/ },
   { shape: 'rm -rf of anything', refused: /`rm -rf <anything>`/, category: /\[Destructive Operations\]/, works: /git clean -fd/ },

@@ -33,7 +33,7 @@ const { sliceBetween, sliceFrom } = require('./source-slice.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'stale-ref-sweep.yml');
-const SKILL = path.join(REPO_ROOT, 'agents', 'skills', 'session-end', 'SKILL.md');
+const SKILL = path.join(REPO_ROOT, 'aac-skills', 'session-end', 'SKILL.md');
 const quiet = () => {};
 
 // ---- the fixture repository -------------------------------------------------------------------

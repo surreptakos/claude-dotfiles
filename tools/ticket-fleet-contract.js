@@ -52,7 +52,7 @@ const RUNBOOKS = [
   'claude-dotfiles orchestrator/RUNBOOK.md',
   'claude-dotfiles orchestrator/LOCAL-RUNBOOK.md',
   'claude-dotfiles aac-skills/ticket-fleet/SKILL.md',
-  'claude-dotfiles agents/skills/project-harness/SKILL.md',
+  'claude-dotfiles aac-skills/project-harness/SKILL.md',
 ];
 
 /** The sentence every contract failure ends with: where the other copies are. */
