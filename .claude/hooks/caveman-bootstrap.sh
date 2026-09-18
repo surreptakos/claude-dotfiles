@@ -233,20 +233,33 @@ fi
 # ---------------------------------------------------------------------------
 # 4. marker.
 # ---------------------------------------------------------------------------
+# One JSON string: backslash, double quote and the control characters a path or a message can
+# carry are escaped. A bare printf left a Windows checkout path's backslashes raw, and every
+# reader of the marker threw on `\U` (issue 482). The layout is unchanged, so a marker written
+# under a POSIX path is byte-identical to the one the hook wrote before.
+json_str() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
 {
   printf '{\n'
-  printf '  "ref": "%s",\n' "$REF"
-  printf '  "source": "%s",\n' "$SRC"
-  printf '  "cli_version": "%s",\n' "$CLI_VERSION"
-  printf '  "cli": "%s",\n' "$cli_state"
-  printf '  "proxy": "%s",\n' "$proxy_state"
-  printf '  "enable": "%s",\n' "$enable_state"
+  printf '  "ref": "%s",\n' "$(json_str "$REF")"
+  printf '  "source": "%s",\n' "$(json_str "$SRC")"
+  printf '  "cli_version": "%s",\n' "$(json_str "$CLI_VERSION")"
+  printf '  "cli": "%s",\n' "$(json_str "$cli_state")"
+  printf '  "proxy": "%s",\n' "$(json_str "$proxy_state")"
+  printf '  "enable": "%s",\n' "$(json_str "$enable_state")"
   printf '  "skills_count": %s,\n' "${#skill_names[@]}"
   printf '  "skills": ['
   first=1
   for n in "${skill_names[@]+"${skill_names[@]}"}"; do
     if [ $first -eq 1 ]; then first=0; else printf ', '; fi
-    printf '"%s"' "$n"
+    printf '"%s"' "$(json_str "$n")"
   done
   printf '],\n'
   printf '  "copied_this_run": %s,\n' "$copied"

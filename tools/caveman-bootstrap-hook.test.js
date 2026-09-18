@@ -113,6 +113,24 @@ test('skills land under ~/.claude/skills and the plugin copy of caveman replaces
   assert.equal(marker.problems, 0);
 });
 
+test('a checkout path holding backslashes lands in the marker escaped, so the marker still parses (issue 482)', () => {
+  // On Windows every temp path already carries backslashes; on POSIX a backslash is an ordinary
+  // filename character, so put one in the checkout's own name.
+  const f = makeHome();
+  let source = f.source;
+  if (process.platform !== 'win32') {
+    source = path.join(f.home, 'back\\slash');
+    fs.renameSync(f.source, source);
+  }
+  assert.match(source, /\\/, 'the fixture path must contain a backslash for this test to mean anything');
+  const ctx = contextOf(run(BOOTSTRAP, { ...f, source, stdin: '{}' }));
+  assert.match(ctx, /skills copied=3 of 3;.*problems=0/);
+  const raw = fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8');
+  const marker = JSON.parse(raw);
+  assert.equal(marker.source, source);
+  assert.equal(marker.ref, 'v2.7.0');
+});
+
 test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', () => {
   const f = makeHome();
   const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{"session_id":"t","source":"startup"}' }));

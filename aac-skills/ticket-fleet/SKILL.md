@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-18T04:15:27Z"
-  previous-modified: "2026-09-18T03:19:47Z"
-  revision: "28"
-  content-sha: "d726596895f1"
+  modified: "2026-09-18T04:48:00Z"
+  previous-modified: "2026-09-18T04:15:27Z"
+  revision: "29"
+  content-sha: "2dcc89c16f4b"
 ---
 
 # ticket-fleet
@@ -50,7 +50,7 @@ to `gh`. The cloud path is `mcp`.
 
 **Pinning a dotfiles-defined `agentType` does not work in a cloud session.** Claude Code reads
 the agent registry before `SessionStart` hooks run, so the cloud bootstrap hook cannot install
-`profile/claude/agents/` in time for the session that would use it; the launch fails with
+`claude/agents/` in time for the session that would use it; the launch fails with
 `Agent type '<name>' not found`, an error that names the type and not the cause. Measured in a
 container on 2026-09-16 - control, hook-write and second-session arms - in issue 339; the
 transcript is at `docs/tickets/339-decision.md` in `claude-dotfiles`.
@@ -201,6 +201,10 @@ prompts before letting the fleet push branches and open PRs. Full args list:
   the paths the pre-push merge may resolve by taking the default branch's side.
 - `regenCommands` (array of shell commands, default `null`): what re-stamps and rebuilds those
   paths after such a merge. `null` tells the deliver stage to read the commands out of CLAUDE.md.
+- `regenCheckCommands` (array of shell commands, default the claude-dotfiles stamps check,
+  `python3 tools/skill-stamps.py check aac-skills agents/skills claude/skills --home 'C:\Users\Dan'`):
+  the read-only check that proves the regenerate took, run after it and before the push. An empty
+  array turns that gate off for a fork that has no such check.
 - `verifierAgent` (string, default `null`): the agent type the blind verifier launches under.
   `null` takes the default the env probe decides - `fleet-verifier` on a desktop session whose
   `~/.claude/agents/fleet-verifier.md` is on disk, unpinned in a cloud session (custom agent
@@ -328,7 +332,7 @@ Copies this repo does not rebuild, all of which move when the contract does:
 | `claude-dotfiles` | `orchestrator/RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | this page |
-| `claude-dotfiles` | `aac-skills/project-harness/SKILL.md` | step 15, the harness's own launch instruction |
+| `claude-dotfiles` | `agents/skills/project-harness/SKILL.md` | step 15, the harness's own launch instruction |
 
 Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
 `tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
@@ -448,7 +452,7 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly three re
   branch's whole file: PR #306 did that and dropped the branch's edits to the skill's prose.
   The resolver rewrites only hunks whose every line is one of the four keys and exits non-zero
   on any other hunk, which reclassifies that file as a real merge.
-- **A harness upgrade row** — `aac-skills/project-harness/UPGRADES.md`, where two tickets in
+- **A harness upgrade row** — `agents/skills/project-harness/UPGRADES.md`, where two tickets in
   one wave that both bump the harness version both wrote the next `| N |` row (run `6aab1eac`:
   #453 and #218 both took v26, and the number was moved by hand in nine places). Resolved by
   `node tools/renumber-harness-upgrade.js`: the branch's row keeps its text and takes the next
@@ -458,8 +462,18 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly three re
   merge too — two rows appended far enough apart merge silently and still collide.
 
 After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
-the ones CLAUDE.md names), re-runs the test command, and commits the merge; the PR body says
-which paths the merge resolved.
+the ones CLAUDE.md names), then passes a two-part gate before anything is pushed: the
+`regenCheckCommands` stamps check, and the test command. It commits the merge after both; the PR
+body says which paths the merge resolved.
+
+**The stamps check is what proves the regenerate took** (issue 553). Run `6aac4a53` delivered
+#550 and #552 with every stamp hashed against the container's home instead of the owner's: the
+payload rebuilt, the tests passed, and the `pull_request` run of `skill-stamps.yml` — which tests
+the merge ref — was green, while the push-event run of the same `check` job was red the moment
+each PR opened. A failing check sends the stage back to re-run the regenerate commands
+byte-identical, never to a hand-edited stamp; a second failure blocks the delivery with the
+skills the check named. It runs on the clean-merge path too, where a branch's skill edit and the
+default branch's fold together with no conflict to resolve and no regenerate behind them.
 
 **Anything else is a real merge and stops delivery for that ticket.** The stage aborts the
 merge, pushes nothing and opens no PR; the ticket appears in the run result's `failed` list
@@ -579,7 +593,7 @@ box unticked.
 | `gh api …/issues/N --jq .state; node tools/tick-acceptance-boxes.js … --apply` - a compound Bash line that puts anything beside a sanctioned write; the read half is refused with it | `[External System Writes]` | split the turn: one command per Bash call, the write in its own call. The same PATCH alone succeeded moments later in the same container |
 | `send_later` (or any scheduling or messaging text) whose message says "land", "merge" or "ship" - refused on the word, not on what the call would do | `[Irreversible Operations]` (reason not captured verbatim; the refusal named the message text) | reword to the read it actually is: "read the state of PR 123", "report whether 123 is merged" |
 | `gh api --method POST\|PATCH repos/O/R/issues/N…` - any tracker write over the `gh` REST path from Bash, intermittently refused | `[External System Writes]` | `mcp__github__issue_write`, `mcp__github__add_issue_comment`, `mcp__github__create_pull_request` - the identical write through MCP goes through with no prompt |
-| `python3 - <<'PY' … PY` editing a file under `.claude/` or `aac-skills/` - refused every attempt, not intermittently | `[Self-Modification]` | the Write or Edit tool on that file. No shell spelling of this one has ever gone through |
+| `python3 - <<'PY' … PY` editing a file under `.claude/` or `agents/skills/` - refused every attempt, not intermittently | `[Self-Modification]` | the Write or Edit tool on that file. No shell spelling of this one has ever gone through |
 | `git commit -F /tmp/fleet-<run>/<file>` - a commit whose message file sits outside the worktree, refused every attempt | `[Instruction Poisoning]` | put the message file inside your own worktree and `git commit -F <worktree-path>`, or pass `-m` |
 | `node scratch.js "<a quoted acceptance-criterion string>"` - a script that only reads an issue body and writes a local file, refused because criterion text was among its arguments | `[Instruction Poisoning]` | pass the ticket number and let the script fetch the text, or read the criterion from a file the script opens itself |
 | `rm -rf <anything>`, including a scratch directory the run itself made | `[Destructive Operations]` | leave it: a scratch dir costs nothing and the worktree is torn down anyway. Inside your own worktree `git clean -fd` is the narrower instrument |
@@ -659,7 +673,7 @@ post-wave repair is what undoes it.
 
 Before v18 of the `project-harness` skill (2026-09-14) the fleet lived in three drifted
 copies: `.claude/workflows/ticket-fleet.js` in `claude-dotfiles`, `orchestrator/ticket-fleet-cloud.js`
-alongside it (the cloud port), and `aac-skills/project-harness/templates/ticket-fleet.js`
+alongside it (the cloud port), and `agents/skills/project-harness/templates/ticket-fleet.js`
 (the copy the harness installed into every other repo). Each copy carried one of `runId`
 from args, `defaultBranch`, `keepOpen`, or the MCP/gh instrument branch and none carried
 all four. The harness upgrade table's v18 row records the consolidation.
