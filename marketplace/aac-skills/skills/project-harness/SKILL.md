@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-18T15:52:50Z'
-  previous-modified: '2026-09-18T04:12:48Z'
-  revision: '26'
-  content-sha: 4762710afed6
+  modified: '2026-09-18T17:39:10Z'
+  previous-modified: '2026-09-18T15:52:50Z'
+  revision: '27'
+  content-sha: 0de4500f117c
 ---
 
 # Project Harness

@@ -863,7 +863,7 @@ function bootstrapChecks() {
     stop(`aac-bootstrap ${r.stage} failed — ${r.reason}`);
     note(`marker ${r.path}${r.marker.failed_at ? ` written ${r.marker.failed_at}` : ''}; no aac payload, skills or governance hooks in this container`);
     if (r.stage === 'clone') {
-      note('if git could not read a username for github.com: `env | grep ANTHROPIC_BASE_URL` (a caveman proxy URL at environment level strips credential injection, issue 519); git push falls back to GitHub MCP push_files');
+      note('if git could not read a username for github.com: the dotfiles repo is not a source of this session (add it as a second source of the environment or Routine, aac-routines issue 489), or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
     }
     return;
   }
