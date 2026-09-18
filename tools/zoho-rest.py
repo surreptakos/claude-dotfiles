@@ -15,8 +15,8 @@ The cloud environment carries five Zoho variables (memory note
 
 This helper always prefers minting: a stored access token is only used when the refresh trio is
 absent. It never prints a token - `probe` reports scope, expiry and data centre, nothing else -
-and every request carries `Authorization: Zoho-oauthtoken <token>`, which is the header Zoho's
-v2+ APIs require (a `Bearer` header answers `INVALID_TOKEN`).
+and every request carries `Authorization: Zoho-oauthtoken <token>`, the prefix Zoho documents
+(it accepts `Bearer` too; both verified 2026-09-18).
 
 Usage:
   python3 tools/zoho-rest.py transport            which credentials the surface holds (names only)

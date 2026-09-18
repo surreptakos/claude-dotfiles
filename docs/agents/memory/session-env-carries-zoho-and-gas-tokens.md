@@ -29,8 +29,8 @@ and `Assert-NoSecrets` exist so a pull or a commit cannot carry them. What this 
 
 **How to use them:** `python3 tools/zoho-rest.py transport|probe|whoami|get <url-or-path>`. It
 mints a fresh access token from the trio on every run (the stored one is a fallback only), sends
-`Authorization: Zoho-oauthtoken …` (a `Bearer` header answers `INVALID_TOKEN`), and prints no
-token: `probe` shows scope, `expires_in` and `api_domain`. Desk is on `desk.zoho.com`; pass it as
+`Authorization: Zoho-oauthtoken …` (Zoho also accepts the `Bearer` prefix; both answered `200`
+on 2026-09-18), and prints no token: `probe` shows scope, `expires_in` and `api_domain`. Desk is on `desk.zoho.com`; pass it as
 a full URL. **Books is not in the grant** — `/books/v3/organizations` answers
 `{"code":57,"message":"You are not authorized to perform this operation"}`; Books from a cloud
 session is the claude.ai Zoho Books connector, or a re-consent that adds `ZohoBooks.*` scopes.
@@ -50,7 +50,12 @@ $ python3 tools/zoho-rest.py get https://desk.zoho.com/api/v1/organizations   # 
  (932165744, 'activealarmcompany1784572118742')]
 ```
 
-Desk calls need `orgId: 874367220` (the named org; the two `activealarmcompany17…` ids are
+The same client also honours the **`client_credentials` grant** for CRM
+(`grant_type=client_credentials&scope=…&soid=ZohoCRM.873111975`, token acts as
+`dgatsakos@activealarm.com`, Administrator), which is the shape a proxy-held credential could mint
+without a refresh token — but only if the credential form takes the extra `soid` body field. Desk
+scopes under that grant answer `{"error":"missing_org_info"}` with either `soid=ZohoDesk.874367220`
+or the CRM one, so Desk stays on the refresh trio. Desk calls need `orgId: 874367220` (the named org; the two `activealarmcompany17…` ids are
 sandbox-style duplicates, untested). `GAS_GITHUB_TOKEN` answers `/user` as `surreptakos` with an
 empty `X-OAuth-Scopes` header, so it is a fine-grained PAT, and it differs from the platform's
 `GH_TOKEN`. The stored `ZOHO_ACCESS_TOKEN` still answered `200` on the day it was set; do not
