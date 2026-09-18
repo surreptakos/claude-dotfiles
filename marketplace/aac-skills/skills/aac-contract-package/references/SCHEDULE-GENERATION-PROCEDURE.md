@@ -69,7 +69,7 @@ Two standing rules from the same source:
 | Commercial Fire master and rider | `P:\Agreements\New Agreements 8-22-19\Commercial Fire Package` |
 | Commercial Security master and rider | `P:\Agreements\New Agreements 8-22-19\Commercial Security Package` |
 | Residential | `P:\Agreements\New Agreements 8-22-19\Residential Security Package` |
-| Baseline clarifications | BASELINES.md is authoritative. The docx in the template folder is a convenience copy. |
+| Baseline clarifications | `clarifications.json` is authoritative for the bullet text; BASELINES.md for the §0 rules. The docx in the template folder is a convenience copy. |
 | FSI worksheet | `_SALES .TEMPLATE FOLDER\Source docs\Fire Repair & Inspection Template Rev.1.xlsx` |
 | Lease calculator | `_SALES .TEMPLATE FOLDER\Lease Guide & Calculator Rev 1.xlsx` — **superseded 2026-08-24** for financed-deal payments (OPEN-DECISIONS item 18); route to `LEASE-PAYMENTS-POINTER.md`, which cites `SOP-LEAF-Financed-Installations.docx`. File stays retrievable under this name; do not rename or move it. |
 | Onboarding forms | `P:\Contract Training\Customer Onboarding Forms` |
@@ -192,7 +192,7 @@ Any discount appears exactly once across the work-up, the schedule, and the agre
 
 ## 9. Clarifications and exclusions
 
-The template ships with the unconditional universal set from BASELINES. Add the conditional bullets the job earns:
+The template ships with the unconditional universal set from `clarifications.json`. Add the conditional bullets the job earns:
 
 | Bullet | Include when |
 |---|---|
@@ -202,7 +202,7 @@ The template ships with the unconditional universal set from BASELINES. Add the 
 | Prevailing wage, affirmative form | Labor is priced at prevailing wage rates |
 | Reused / taken-over equipment set | Designation is replacement or takeover |
 | Site constraints | The site imposes a constraint |
-| System-specific set | Per BASELINES, by system type |
+| System-specific set | Per `clarifications.json` `by_system`, by system type |
 
 Then run BASELINES §0. Group by topic, find topics carrying more than one bullet, merge. Target 12 to 16 clarifications and 8 to 10 exclusions on a single-system commercial schedule.
 

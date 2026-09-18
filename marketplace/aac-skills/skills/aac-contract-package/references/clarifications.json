@@ -1,13 +1,20 @@
 {
-  "_about": "Bullet library for build_package.py. Text is authoritative here and nowhere else; the builder never carries its own copy. Sourced verbatim from BASELINES.md. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order.",
-  "_version": "1.2",
-  "_updated": "2026-08-19",
+  "_about": "Bullet library: the only place clarification and exclusion wording lives (BASELINES.md keeps the §0 rules and reviewer prose and points here). build_package.py reads it; the reviewer reads it. Dan holds language authority: edit the text here, not in the Python. Bullet order is set by the \"order\" field: lower prints first, gaps left for insertion. job_clarifications default to 40 (the scope group) unless given their own order. \"when\" is the applicability rule and \"note\" the drafter instruction, both carried over from the BASELINES.md bracket notes; they never print. The builder applies a \"when\" it can decide from the record (price, payer, designation, flags, system); one it cannot decide is the drafter's call and the bullet prints unless the drafter prunes it. A conditional bullet with \"merge_into\" prints as \"merged_text\" in place of the named universal bullet when its \"when\" holds.",
+  "_version": "1.3",
+  "_updated": "2026-09-18",
   "clarifications": {
     "universal": [
       {
         "id": "validity",
-        "text": "Pricing is valid for 30 days; pricing is based on all work being performed Monday through Friday, 8:00 AM to 5:00 PM.",
-        "order": 10
+        "text": "Pricing is valid for 30 days; pricing is based on all work being performed Monday through Friday, 8:00 AM to 5:00 PM. Repair Service hours are governed by the master agreement.",
+        "order": 10,
+        "note": "Opens with \"Pricing is valid for 30 days\" — not \"Quotation,\" not \"Schedule.\" Anchors to the date of this schedule, never the proposal date. The Repair Service sentence is always included (Dan, 2026-09-18, item 23); no-master accounts omit it via validity_no_master."
+      },
+      {
+        "id": "payments",
+        "text": "Payments made by credit card with an amount in excess of $1,000.00 will be charged a 3.5% fee.",
+        "order": 16,
+        "note": "Fee sentence always; the deposit sentence joins it whenever the total price exceeds $5,000 and Subscriber pays (deposit.merged_text). Lender-paid deals carry third_party_finance instead of the deposit sentence."
       },
       {
         "id": "labor_materials",
@@ -26,48 +33,45 @@
       },
       {
         "id": "access",
-        "text": "Subscriber must provide free, safe, and unobstructed access to all work areas for the duration of the installation. Delays caused by denied or restricted access may result in rescheduling and/or additional charges.",
-        "order": 65
-      },
-      {
-        "id": "pathways",
-        "text": "All cabling pathways are assumed to be accessible and free from obstruction.",
-        "order": 70
+        "text": "Subscriber must provide free, safe, and unobstructed access to all work areas for the duration of the installation.",
+        "order": 65,
+        "note": "Commercial ¶13 carries the delay consequences; do not restate or soften them here. No-master accounts append the delay sentence via access_no_master."
       },
       {
         "id": "permits",
         "text": "Active Alarm Company will file for and procure the permits required by local law for the work described above. Permit fees are the responsibility of Subscriber.",
-        "order": 55
-      },
-      {
-        "id": "credit_card",
-        "text": "Payments made by credit card with an amount in excess of $1,000.00 will be charged a 3.5% fee.",
-        "order": 75
+        "order": 55,
+        "note": "Matches Commercial ¶12 and ¶27 and long-standing practice. Never write an exclusion that excludes permit procurement. Alarm-user permits and false-alarm registration remain Subscriber's under ¶27. For fire alarm, confirm against the Fire Alarm master and the \"Fire Alarm System to Code\" option (the Commercial Security master is verified; the Fire Alarm master is not)."
       },
       {
         "id": "site_conditions",
-        "text": "Pricing is based on the drawings, specifications, and site conditions represented by Subscriber and on any pre-installation site walk. Concealed or materially different conditions discovered during installation are subject to change order.",
-        "order": 90
+        "text": "Pricing is based on the drawings, specifications, and site conditions represented by Subscriber and on any pre-installation site walk, and assumes cabling pathways are accessible and free from obstruction. Concealed or materially different conditions discovered during installation are subject to change order.",
+        "order": 90,
+        "note": "One bullet covers Subscriber-provided information, site conditions, cabling pathways, and concealed conditions. Do not write a second or third version of this."
       },
       {
         "id": "assumptions_closer",
         "text": "If any assumption stated above is or becomes untrue, the affected work will be addressed by change order.",
-        "order": 99
+        "order": 99,
+        "note": "Closing bullet. Supplies the consequence for every assumption above, so none of them needs its own change-order tail."
       }
     ],
     "conditional": {
       "deposit": {
         "when": "total price exceeds $5,000 and the customer is paying us",
         "text": "A 50% deposit is required to initiate scheduling and procurement of material; the remaining balance will be due upon completion.",
-        "order": 15
+        "order": 15,
+        "merge_into": "payments",
+        "merged_text": "A 50% deposit is required to initiate scheduling and procurement of material; the remaining balance will be due upon completion. Payments made by credit card with an amount in excess of $1,000.00 will be charged a 3.5% fee."
       },
       "prevailing_wage_not_subject": {
-        "when": "commercial and labor is not priced at prevailing wage rates",
+        "when": "commercial only, never residential, and labor is not priced at prevailing wage rates",
         "text": "Pricing assumes the project and related work are not subject to prevailing wage requirements under any local, state, or federal law. If prevailing wage obligations are found to apply, Subscriber must notify Active Alarm Company in writing within 48 hours so that revised pricing may be issued reflecting any additional wage-related costs.",
-        "order": 80
+        "order": 80,
+        "note": "Where the job is known to be prevailing wage and the pricing carries those rates, replace with an affirmative statement anchored to the date of this schedule (a job clarification)."
       },
       "tax_exempt": {
-        "when": "nonprofit, school or park district, or municipality",
+        "when": "nonprofit, school district, park district, or municipality; omit on taxable jobs",
         "text": "Pricing assumes Subscriber is tax-exempt and will provide a tax exemption certificate prior to purchase of equipment.",
         "order": 82
       },
@@ -80,6 +84,26 @@
         "when": "a lender finances the equipment",
         "text": "The purchase price stated above is payable by {lender} under its separate lease agreement with Subscriber. No deposit or progress payment is due to Active Alarm Company from Subscriber.",
         "order": 15
+      },
+      "access_no_master": {
+        "when": "the account has no master agreement (ACCOUNT-RULES.md); Commercial ¶13 carries the delay consequence everywhere else",
+        "merge_into": "access",
+        "merged_text": "Subscriber must provide free, safe, and unobstructed access to all work areas for the duration of the installation. Delays caused by denied or restricted access may result in rescheduling and/or additional charges."
+      },
+      "validity_no_master": {
+        "when": "the account has no master agreement (ACCOUNT-RULES.md): the schedule never refers to one",
+        "merge_into": "validity",
+        "merged_text": "Pricing is valid for 30 days; pricing is based on all work being performed Monday through Friday, 8:00 AM to 5:00 PM."
+      },
+      "integration_existing_platform": {
+        "when": "Access Control, only when integrating with an existing access control platform, database, or third-party system; the record cannot decide this, so the drafter adds it",
+        "text": "Where integration with an existing access control platform, database, or third-party system is required, compatibility is assumed based solely on information provided prior to the proposal date. Active Alarm Company does not warrant compatibility with undocumented configurations, non-standard firmware, or end-of-life equipment.",
+        "order": 57
+      },
+      "maglock_egress": {
+        "when": "Access Control, only where magnetic locks are installed; the record cannot decide this, so the drafter adds it",
+        "text": "Where magnetic locks are installed, Subscriber’s designated fire alarm contractor is responsible for all fire-alarm-side work required for code-compliant egress: raceway and wiring from the nearest fire alarm connection point to the lock power supply, a set of normally closed dry contacts, and wiring from those contacts to the power supply. Active Alarm Company will terminate that interface wiring at the lock power supply and program the power supply to release the locks on fire alarm activation. All fire alarm modification, programming, testing, and certification remain the fire alarm contractor’s responsibility.",
+        "order": 59
       }
     },
     "by_system": {
@@ -99,7 +123,8 @@
         {
           "id": "network_ac",
           "text": "Network connectivity, IP addresses, and switch ports for headend equipment must be provided by Subscriber’s IT department. Wireless access points, switches, routers, patch panels, and network configuration are Subscriber’s responsibility.",
-          "order": 50
+          "order": 50,
+          "when": "list Subscriber-owned network gear only as the job's architecture requires; on cloud-hosted systems with no headend server the bullet reduces to connectivity and switch ports for the door controllers"
         },
         {
           "id": "openings_condition",
@@ -110,6 +135,16 @@
           "id": "door_hardware",
           "text": "Subscriber’s designated door hardware contractor will provide and install all mechanical and electrified locking hardware not expressly listed in the Equipment and Labor section, including locksets, exit devices, closers, electric strikes, magnetic locks, and electrified locksets, and will complete any door or frame modification required.",
           "order": 54
+        },
+        {
+          "id": "idf_conduit",
+          "text": "Subscriber’s designated contractor will provide conduit and cabling from the secured openings to the IDF.",
+          "order": 56
+        },
+        {
+          "id": "software_licensing_ac",
+          "text": "Software licenses, cloud subscriptions, and software maintenance fees are included only where expressly listed in the equipment and services section; Subscriber is responsible for maintaining active licensing for continued system operation.",
+          "order": 58
         }
       ],
       "Video Surveillance": [
@@ -127,6 +162,12 @@
           "id": "camera_placement",
           "text": "Camera placement is based on the site survey and drawings on file. Final mounting positions, heights, and aiming will be determined in the field; material deviations will be addressed by change order.",
           "order": 54
+        },
+        {
+          "id": "video_retention",
+          "text": "Video retention will vary based on scene activity, resolution settings, and available storage. Active Alarm Company makes no guarantee of a minimum retention duration.",
+          "order": 56,
+          "when": "omit when the schedule sells a fixed cloud-storage term as a licensed service; the license sets the retention"
         }
       ],
       "Intrusion Alarm": [
@@ -153,6 +194,28 @@
         "text": "Existing equipment found to be non-functional, non-compliant, or incompatible during takeover or integration will be brought to Subscriber’s attention prior to proceeding, and resolution will be addressed by change order.",
         "order": 92
       }
+    ],
+    "new_construction": [
+      {
+        "id": "construction_schedule",
+        "text": "Pricing is based on the construction schedule and site conditions represented at the time of quoting. Delays in the general construction schedule, or delays caused by other trades, that affect Active Alarm Company’s ability to mobilize or complete work may result in rescheduling and/or revised pricing.",
+        "order": 93
+      },
+      {
+        "id": "single_mobilization",
+        "text": "Rough-in and trim-out are priced as a single mobilization sequence. Extended phase separation requested by Subscriber or required by the construction schedule may result in additional mobilization charges.",
+        "order": 94
+      },
+      {
+        "id": "surfaces_ready",
+        "text": "Pricing assumes finished surfaces, above-ceiling access and support structure, and power rough-ins will be complete and available at the time of scheduled installation.",
+        "order": 95
+      },
+      {
+        "id": "rough_in_by_others",
+        "text": "Conduit installation, back-box setting, wire rough-in, concrete embedment, underground conduit sleeves, and in-slab rough-in performed by other trades are Subscriber’s responsibility unless expressly listed.",
+        "order": 96
+      }
     ]
   },
   "exclusions": {
@@ -167,43 +230,45 @@
       },
       {
         "id": "core_drilling",
-        "text": "Core drilling, saw cutting, structural penetrations, and slab penetrations requiring engineering review or structural trade work are excluded. Ordinary low-voltage device mounting and cable penetrations required for Active Alarm Company’s included installation scope are not excluded by this item."
+        "text": "Core drilling, saw cutting, structural penetrations, and slab penetrations requiring engineering review or structural trade work are excluded. Ordinary low-voltage device mounting and cable penetrations required for Active Alarm Company’s included installation scope are not excluded by this item.",
+        "when": "only when the job's pathways make slab, masonry, or structural penetrations plausible"
       },
       {
         "id": "backing",
-        "text": "Structural steel, backing, blocking, or framing beyond standard device mounting is excluded. Subscriber or Subscriber’s designated contractor is responsible for providing adequate backing at all mounting locations."
+        "text": "Structural steel, backing, blocking, or framing beyond standard device mounting is excluded. Subscriber or Subscriber’s designated contractor is responsible for providing adequate backing at all mounting locations.",
+        "when": "only when device weight or mounting surfaces make added backing plausible (operators, maglocks on hollow frames, large enclosures)"
       },
       {
         "id": "other_trade_debris",
-        "text": "Removal of debris, materials, or conditions left by other trades is excluded. Active Alarm Company will remove debris generated by its own installation work."
+        "text": "Removal of debris, materials, or conditions left by other trades is excluded. Active Alarm Company will remove debris generated by its own installation work.",
+        "when": "only when other trades are on site during the work"
       },
       {
         "id": "existing_removal",
-        "text": "Removal, disposal, or decommissioning of existing equipment not identified in this contract’s scope is excluded."
+        "text": "Removal, disposal, or decommissioning of existing equipment not identified in this contract’s scope is excluded.",
+        "when": "only when existing equipment sits in or near the scope (takeovers, replacements, decommissions); the builder applies this one from the record's designation and equipment_reused flag"
       },
       {
         "id": "periodic_maintenance",
         "text": "Annual or periodic inspection, testing, and preventive maintenance beyond the initial commissioning and acceptance testing included in this contract are excluded. Recurring service programs are available under a separate agreement."
       },
       {
+        "id": "licensing",
+        "text": "Licensing, subscription, or license-renewal fees beyond the recurring services listed in the Services section are excluded."
+      },
+      {
         "id": "ahj_fees",
-        "text": "Permit fees, engineering fees, plan-review fees, inspection fees, and re-inspection or re-test fees assessed by the authority having jurisdiction are excluded."
+        "text": "Permit fees, engineering fees, and inspection fees assessed by the authority having jurisdiction are excluded.",
+        "note": "Fees only. Procurement is included per the permits clarification. The permit-fee restatement of that boundary is deliberate — ratified 2026-08-19 (wayfinder ticket #8); §0 Rule 1 sweeps keep both bullets."
       },
       {
         "id": "catchall",
         "text": "Any item, task, service, material, or deliverable not specifically identified in the Scope of Work is excluded. The absence of an explicit exclusion for any item does not imply inclusion.",
-        "always_last": true
+        "always_last": true,
+        "note": "Always last. This is the bullet that lets the rest of the list stay short."
       }
     ],
     "conditional": {
-      "licensing": {
-        "when": "the job sells software, licenses, or a cloud subscription",
-        "text": "Licensing, subscription, or license-renewal fees beyond the recurring services listed in the Services section are excluded."
-      },
-      "cybersecurity": {
-        "when": "the system touches the customer's network",
-        "text": "Cybersecurity risk assessments, penetration testing, network vulnerability scanning, or security hardening of Subscriber’s network infrastructure are excluded beyond standard device-level configuration performed by Active Alarm Company during commissioning."
-      },
       "detector_cleaning": {
         "when": "fire alarm and routine cleaning was discussed but not sold",
         "text": "Routine cleaning of detectors and other periodic preventive maintenance are excluded unless expressly listed as a recurring service.",
@@ -216,13 +281,51 @@
       }
     },
     "by_system": {
+      "Fire Alarm": [
+        {
+          "id": "ahj_reinspection",
+          "text": "Re-inspection or re-test fees assessed by the AHJ for failures attributable to conditions outside Active Alarm Company’s scope are excluded."
+        },
+        {
+          "id": "engineer_of_record",
+          "text": "Engineer-of-record fees or plan revision costs required to satisfy AHJ comments resulting from code changes or interpretive positions postdating Active Alarm Company’s original submission are excluded."
+        },
+        {
+          "id": "temporary_fire_alarm",
+          "text": "Temporary fire alarm systems required during construction or phased occupancy are excluded."
+        }
+      ],
       "Video Surveillance": [
         {
           "id": "rack_ups",
           "text": "NVR/DVR rack space and UPS power protection for recording equipment must be provided by Subscriber unless expressly listed in the equipment section."
         }
       ]
-    }
+    },
+    "reused_takeover": [
+      {
+        "id": "existing_troubleshooting",
+        "text": "Troubleshooting, repair, replacement, or relocation of existing equipment not listed in the equipment section is excluded and will be addressed on a time-and-material basis if required."
+      }
+    ],
+    "new_construction": [
+      {
+        "id": "as_builts",
+        "text": "As-built drawings, record drawings, and O&M manuals are excluded unless expressly listed."
+      },
+      {
+        "id": "gc_coordination",
+        "text": "General contractor coordination meetings, BIM clash detection, and pre-construction submittal participation are excluded unless expressly listed and priced."
+      },
+      {
+        "id": "site_safety_program",
+        "text": "Site-specific safety training, site badging fees, and general-contractor-imposed safety program requirements are excluded unless expressly listed."
+      },
+      {
+        "id": "builders_risk",
+        "text": "Builder’s risk insurance, installation floater, and contractor-required bonds are excluded unless expressly listed."
+      }
+    ]
   },
   "sow_templates": {
     "Fire Alarm": "Active Alarm Company will furnish, install, program, and test a {designation} fire alarm system at the site listed above, as itemized in the Equipment and Labor section.",
@@ -245,5 +348,6 @@
     "Network": "Upon completion, Active Alarm Company will test all cabling and provide test results.",
     "Elevator Monitoring": ""
   },
-  "_job_clarification_default_order": 40
+  "_job_clarification_default_order": 40,
+  "_when_new_construction": "flags.new_construction: the site is under active construction or Active Alarm Company is a subcontractor on a new build"
 }

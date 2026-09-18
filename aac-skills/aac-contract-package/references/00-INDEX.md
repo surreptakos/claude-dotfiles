@@ -14,7 +14,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 |---|---|---|
 | `PROMPT.md` | The reviewer standard: run order, what you fix versus what you ask, recurring defect checks, the Output Contract for the review email | Active, rev. 4 |
 | `LIVING-STANDARD.md` | The full reviewer standard behind PROMPT.md | Active |
-| `DRAFTER-PRESEND-CHECKLIST.md` | Completion and export QA, 35 items. `scripts/verify_package.py` covers about 20 | Active |
+| `DRAFTER-PRESEND-CHECKLIST.md` | Completion and export QA | Active |
 
 ## Create side
 
@@ -23,7 +23,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 | `SCHEDULE-GENERATION-PROCEDURE.md` | Source precedence, package composition, template paths, the schedule cell map, work-up to Equipment-and-Labor translation, services layout, pricing block, conditional clarifications, verification, the handoff email | §1, §6, §11, §11a and §12 **ratified by Dan 2026-08-19** (wayfinder ticket #4); remaining sections draft |
 | `PART-TRANSLATIONS.md` | Part number to customer-facing schedule description; §6 resolution order step 2 | Active, seeded 2026-08-19 |
 | `SCHEDULE-EDIT-PROCEDURE.md` | Workbook editing mechanics, and why a spreadsheet library must never save a schedule | Active |
-| `clarifications.json` | Every clarification and exclusion, the SOW templates, and the print order. The only place this wording exists. `build_package.py` reads it | Active, v1.1 |
+| `clarifications.json` | Every clarification and exclusion, the SOW templates, and the print order. The only place this wording exists. `build_package.py` reads it | Active, v1.3 (2026-09-18: resynced to the 2026-08-26 BASELINES revision, OPEN-DECISIONS item 21) |
 
 ## Pilot
 
@@ -36,7 +36,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 | File | Governs | Status |
 |---|---|---|
 | `ACCOUNT-RULES.md` | Standing per-customer exceptions. **Read before judging anything** | Active |
-| `BASELINES.md` | Clarification and exclusion baselines by system, and the §0 length discipline | Active |
+| `BASELINES.md` | The §0 length discipline, the master-agreement relationship, site constraints and reviewer rules; each section points at its bullets in `clarifications.json` by id | Active (bullet lists moved to `clarifications.json` 2026-09-18, issue 274) |
 | `SOW-BASELINES.md` | SOW templates for all sold system types (§7.1–§7.12 + fallback rule), approved system names, designation tokens | Active |
 | `MAPPING-APPENDIX.md` | RMR names, price tiers, master agreement mapping, §3a price validation, Repair Service start date | Active. §3a rewritten validation-only and start date ruled (cutover), **ratified by Dan 2026-08-19** (wayfinder ticket #7) |
 | `CONTRACT-PACKAGE-RULES.md` | Which documents make up each package situation (commercial initial, commercial subsequent, residential) plus the standing rules (IN LIEU OF combine note, service always checked, combo fire/burg both agreements). Verbatim transcription of the Contract Package Rules tab from the RMR Items Google Sheet; repo-authoritative per the issue #15 ruling | Active, migrated 2026-08-21 (issue #43) |
@@ -50,8 +50,8 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 |---|---|
 | `CONTEXT.md` | AAC, the people, prior architectural decisions, failure modes already corrected. Snapshot as of 2026-08-11; keeping it current is a deliberate act |
 | `OPEN-DECISIONS.md` | Governing rulings and their status. Open items are those without a Resolved or Executed line in the file itself; historical ledger stays inside. Do not restate item counts anywhere else — read the file (Dan's rule 2026-08-25) |
-| `PORTFOLIO-SWEEP.md` | 25 drafted packages carrying findings and 22 recurring patterns, as of 2026-08-11 |
-| `PORTFOLIO-SWEEP-TRIAGE.md` | Classifies the 22 `PORTFOLIO-SWEEP.md` recurring patterns as (a) template-fixed, (b) standard-fixed, or (c) `OPEN-DECISIONS.md`-open; input to the pilot's three-metric scorecard (issue #41 ruling 7) | Active, 2026-08-20 |
+| `PORTFOLIO-SWEEP.md` | Drafted packages carrying findings and recurring patterns, snapshot 2026-08-11 |
+| `PORTFOLIO-SWEEP-TRIAGE.md` | Classifies each `PORTFOLIO-SWEEP.md` recurring pattern as (a) template-fixed, (b) standard-fixed, or (c) `OPEN-DECISIONS.md`-open; input to the pilot's three-metric scorecard (issue #41 ruling 7) | Active, 2026-08-20 |
 
 ## What is not here, and why
 

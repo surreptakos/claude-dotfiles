@@ -90,7 +90,7 @@ Do not approve if:
 - Recurring services are acknowledged so operational and billing scope stay aligned.
 - New, existing, reused, taken over, replaced, removed, or reprogrammed components are called out where that affects responsibility or coverage.
 - Access control identifies the doors secured. Fire alarm identifies system elements, inspection responsibilities, and third-party integration boundaries.
-- The training commitment is bounded; the session count lives in Clarifications per BASELINES.
+- The training commitment is bounded; the session count lives in the training bullet in `clarifications.json`.
 
 ### What not to do
 - **No site address.** The Site box has it.
@@ -258,7 +258,7 @@ Reviewer-notes mode, used only when explicitly requested instead of the email, r
 - **PROMPT.md** — run order, checks, and the email Output Contract
 - **ACCOUNT-RULES.md** — account-level exceptions; read first
 - **Schedule-to-Master Mapping Appendix — Final**
-- **BASELINES.md** — baseline clarifications and exclusions, and §0 length discipline
+- **BASELINES.md** — the §0 length discipline and the clarification and exclusion rules; the bullet text is in **clarifications.json**
 - **SOW-BASELINES.md** — SOW templates and the canonical opener
 - **SCHEDULE-EDIT-PROCEDURE.md** — how to edit the workbook without damaging it
 - **DRAFTER-PRESEND-CHECKLIST.md** — drafter completion and export QA
@@ -266,7 +266,5 @@ Reviewer-notes mode, used only when explicitly requested instead of the email, r
 - **Standard Fire Alarm Agreement** — not yet verified; confirm permit and warranty provisions before relying on the commercial positions.
 
 ## 20) Open items
-- **Repair Service "total cost" basis** — equipment cost or full WU cost. Unsettled.
-- **Repair Service start date** — cutover or month 13.
-- **Final acceptance** — the commercial master has no acceptance definition; ¶12 runs warranty from installation and ¶14 transfers possession at installation. Route through counsel before drafting.
-- **Fire Alarm master verification** — permit, warranty, and inspection provisions unchecked.
+
+Open rulings and their status live in `OPEN-DECISIONS.md`. Do not restate them here.

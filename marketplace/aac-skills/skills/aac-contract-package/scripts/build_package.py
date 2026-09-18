@@ -30,21 +30,41 @@ SHEET = 'Equip & Services'
 CR = '\r\n'
 
 # Schedule template coordinates after the 50/20 expansion (issue 38).
-# Equipment: rows 23-72 (50 fillable). Service: three subgroups totalling 20
-# fillable items — New 82-86, Replacement 88-97, Existing 99-103 — with group
-# labels at rows 81, 87 and 98. Pricing block sits at rows 73-75; monthly
-# total at G104; clarifications block at A107. build_package.py still fills
-# only the originally-visible fillable rows so this branch stays scoped to
-# the template artifact; the wider cap lift and per-row hidden toggle land
-# on issue 39's branch.
+# Equipment: rows 23-72 (50 fillable). Purchase Price G73, Deposit G74,
+# Balance G75 (=G73-G74). Service block header rows 77-80 (Site B79, System
+# B80). Services split into three labeled subgroups totalling 20 fillable
+# items:
+#     New (label row 81, B81)          fill rows 82-86  cap 5
+#     Replacement (label row 87, B87)  fill rows 88-97  cap 10
+#     Existing (label row 98, B98)     fill rows 99-103 cap 5
+# Monthly Total G104; clarifications block A107.
+#
+# Issue 39 lifts the fill caps from 12/9 to 50/20 and toggles row visibility
+# per-row: filled rows unhidden, unused rows in each fill region hidden.
+# GROUPED-FILL (owner ruling 2026-09-01) supersedes the pre-#39 flat fill:
+# services land inside their subgroup, per-subgroup overflow raises a
+# split-the-schedule SystemExit, and the Replacement/Existing label rows
+# are hidden only when their subgroup is unused. Labels are NEVER cleared
+# while any subgroup is in use. Row-visibility runs through
+# xlsx_surgical.set_row_hidden (the sanctioned write path — hard rule 2)
+# rather than inserting or reindexing rows.
 EQ_START = 23
+EQ_CAP = 50
+EQ_END = EQ_START + EQ_CAP - 1  # row 72
 DEP_CELL = 'G74'
 SVC_SITE_CELL = 'B79'
 SVC_SYS_CELL = 'B80'
-SVC_START = 82
-SVC_NEW_LABEL_CELL = 'B81'
-SVC_REPL_LABEL_CELL = 'B87'
-SVC_EXIST_LABEL_CELL = 'B98'
+# Per-subgroup fill regions (kind, first row, cap, label cell, label row).
+# Order matches the visual order down the sheet.
+SVC_SUBGROUPS = (
+    ('new',         82,  5, 'B81', 81),
+    ('replacement', 88, 10, 'B87', 87),
+    ('existing',    99,  5, 'B98', 98),
+)
+SVC_KINDS = tuple(k for k, *_ in SVC_SUBGROUPS)
+SVC_CAP = sum(cap for _, _, cap, _, _ in SVC_SUBGROUPS)  # 20
+SVC_START = SVC_SUBGROUPS[0][1]                          # 82
+SVC_END = SVC_SUBGROUPS[-1][1] + SVC_SUBGROUPS[-1][2] - 1  # 103
 CLAR_CELL = 'A107'
 
 PACKAGES = {
@@ -184,13 +204,14 @@ STARTER = {
              "inspections_per_year": None},
     "pricing": {"price": 0, "price_source": "proposal", "deposit": None},
     "equipment": [{"qty": 1, "description": ""}],
-    "services": [{"qty": 1, "description": "", "unit": 0}],
+    "services": [{"qty": 1, "description": "", "unit": 0, "kind": "new"}],
     "scope": {"coverage_sentence": "", "extra_sentences": []},
     "flags": {"prevailing_wage": False, "tax_exempt": False,
-              "customer_furnished_equipment": False, "sells_licensing": False,
-              "touches_customer_network": False, "detector_cleaning_discussed": False,
+              "customer_furnished_equipment": False,
+              "detector_cleaning_discussed": False,
               "submittals_excluded_confirmed": False,
-              "equipment_reused": False, "fire_alarm_to_code": False},
+              "equipment_reused": False, "fire_alarm_to_code": False,
+              "no_master_agreement": False, "new_construction": False},
     "job_clarifications": [],
     "held": []
 }
@@ -221,13 +242,28 @@ def select_bullets(f, L):
     paid_by = deal.get('paid_by', 'subscriber')
     default_order = L.get('_job_clarification_default_order', 40)
 
-    picked = [(b['order'], b['text']) for b in c['universal']]
     cond = c['conditional']
-    if paid_by == 'lender' and deal.get('lender'):
+    lender_pays = paid_by == 'lender' and bool(deal.get('lender'))
+    picked = []
+    for b in c['universal']:
+        txt = b['text']
+        # BASELINES 2026-08-26 (OPEN-DECISIONS item 21): the deposit sentence and the
+        # credit-card fee are one payments bullet; the deposit half applies over $5,000
+        # when Subscriber pays. Wording lives in clarifications.json (merged_text).
+        if b['id'] == 'payments' and price > 5000 and not lender_pays:
+            txt = cond['deposit']['merged_text']
+        # Same ruling: the access bullet's delay clause is appended only on accounts
+        # with no master agreement (ACCOUNT-RULES.md); Commercial ¶13 governs elsewhere.
+        if b['id'] == 'access' and fl.get('no_master_agreement'):
+            txt = cond['access_no_master']['merged_text']
+        # Ruling 2026-09-18 (OPEN-DECISIONS item 23): the Repair Service sentence prints on
+        # every agreement; a no-master account's schedule never refers to one.
+        if b['id'] == 'validity' and fl.get('no_master_agreement'):
+            txt = cond['validity_no_master']['merged_text']
+        picked.append((b['order'], txt))
+    if lender_pays:
         b = cond['third_party_finance']
         picked.append((b['order'], b['text'].format(lender=deal['lender'])))
-    elif price > 5000:
-        b = cond['deposit']; picked.append((b['order'], b['text']))
     if deal.get('commercial') and not fl.get('prevailing_wage'):
         b = cond['prevailing_wage_not_subject']; picked.append((b['order'], b['text']))
     for key, flag in (('tax_exempt', 'tax_exempt'),
@@ -235,8 +271,11 @@ def select_bullets(f, L):
         if fl.get(flag):
             b = cond[key]; picked.append((b['order'], b['text']))
     picked += [(b['order'], b['text']) for b in c['by_system'].get(sys_name, [])]
-    if deal['designation'] in ('replacement', 'takeover') and fl.get('equipment_reused'):
+    reused = deal['designation'] in ('replacement', 'takeover') and fl.get('equipment_reused')
+    if reused:
         picked += [(b['order'], b['text']) for b in c['reused_takeover']]
+    if fl.get('new_construction'):
+        picked += [(b['order'], b['text']) for b in c.get('new_construction', [])]
     for j in f.get('job_clarifications', []):
         if isinstance(j, dict):
             picked.append((j.get('order', default_order), j['text']))
@@ -251,13 +290,19 @@ def select_bullets(f, L):
         txt = b['text']
         if b['id'] == 'periodic_maintenance' and fl.get('detector_cleaning_discussed'):
             txt = e['conditional']['detector_cleaning']['merged_text']
+        # Item 21 applicability tag the record can decide: existing-equipment removal
+        # applies only when existing equipment sits in or near the scope.
+        if b['id'] == 'existing_removal' and not (
+                deal['designation'] in ('replacement', 'takeover') or fl.get('equipment_reused')):
+            continue
         ex.append(txt)
-    for key, flag in (('licensing', 'sells_licensing'),
-                      ('cybersecurity', 'touches_customer_network'),
-                      ('submittals', 'submittals_excluded_confirmed')):
-        if fl.get(flag):
-            ex.append(e['conditional'][key]['text'])
+    if fl.get('submittals_excluded_confirmed'):
+        ex.append(e['conditional']['submittals']['text'])
     ex += [b['text'] for b in e['by_system'].get(sys_name, [])]
+    if reused:
+        ex += [b['text'] for b in e.get('reused_takeover', [])]
+    if fl.get('new_construction'):
+        ex += [b['text'] for b in e.get('new_construction', [])]
     if last:
         ex.append(last)
     return clar, ex
@@ -329,14 +374,18 @@ def build_schedule(job, f, L, R):
     w.set_num(SHEET, 'G21', price)
     w.set_inline_text(SHEET, 'B22', f"System: {deal['system']}")
     eq = f['equipment']
-    if len(eq) > 12:
-        raise SystemExit(f'{len(eq)} equipment lines exceed the 12-line cap '
-                         'this builder currently writes; issue 39 lifts the '
-                         'cap to 50. Split the schedule for now.')
+    if len(eq) > EQ_CAP:
+        raise SystemExit(f'{len(eq)} equipment lines exceed the {EQ_CAP}-line '
+                         'cap in the schedule template. Split the schedule '
+                         'across two packages.')
     for i, item in enumerate(eq):
         r = EQ_START + i
         w.set_num(SHEET, f'A{r}', item['qty'])
         w.set_inline_text(SHEET, f'B{r}', item['description'])
+    # Row-visibility toggle across the equipment fill region. Filled rows
+    # unhidden, unused rows hidden — no row insertion, no reindexing (issue 39).
+    for i in range(EQ_CAP):
+        w.set_row_hidden(SHEET, EQ_START + i, hidden=(i >= len(eq)))
 
     dep = pr.get('deposit')
     if dep is None:
@@ -347,18 +396,46 @@ def build_schedule(job, f, L, R):
     if svc:
         w.set_inline_text(SHEET, SVC_SITE_CELL, siteline)
         w.set_inline_text(SHEET, SVC_SYS_CELL, f"System: {deal['system']}")
-        if len(svc) > 9:
-            raise SystemExit(f'{len(svc)} service lines exceed the 9-line cap '
-                             'this builder currently writes; issue 39 lifts '
-                             'the cap to 20. Split the schedule for now.')
-        for i, s in enumerate(svc):
-            r = SVC_START + i
-            w.set_num(SHEET, f'A{r}', s['qty'])
-            w.set_inline_text(SHEET, f'B{r}', s['description'])
-            w.set_num(SHEET, f'F{r}', s['unit'])
-            w.set_num(SHEET, f'G{r}', round(s['qty'] * s['unit'], 2))
-        w.set_inline_text(SHEET, SVC_REPL_LABEL_CELL, '')
-        w.set_inline_text(SHEET, SVC_EXIST_LABEL_CELL, '')
+        # Partition services by kind (owner ruling 2026-09-01: GROUPED-FILL).
+        # Services keep their original ordering inside each subgroup. Missing
+        # kind defaults to 'new' and prints a warning (validator surface for
+        # the ruling's "absent tag defaults to New, validator flags missing
+        # tag" clause) — the build still proceeds.
+        buckets = {k: [] for k in SVC_KINDS}
+        for idx, s in enumerate(svc):
+            kind = s.get('kind')
+            if kind is None:
+                print(f'WARNING: service #{idx + 1} missing "kind" tag; '
+                      f'defaulting to "new". Add "kind": "new"/"replacement"/'
+                      f'"existing" to _facts.json services.', file=sys.stderr)
+                kind = 'new'
+            if kind not in SVC_KINDS:
+                raise SystemExit(f'service #{idx + 1} has unknown kind '
+                                 f'"{kind}"; allowed: {", ".join(SVC_KINDS)}')
+            buckets[kind].append(s)
+        # Per-subgroup fill + row-visibility toggle. Labels are never
+        # cleared; the label row is hidden only when the subgroup is unused.
+        for kind, start, cap, label_cell, label_row in SVC_SUBGROUPS:
+            items = buckets[kind]
+            if len(items) > cap:
+                raise SystemExit(
+                    f'{len(items)} {kind} service lines exceed the {cap}-line '
+                    f'cap for that subgroup in the schedule template. Split '
+                    f'the schedule across two packages.')
+            for i, s in enumerate(items):
+                r = start + i
+                w.set_num(SHEET, f'A{r}', s['qty'])
+                w.set_inline_text(SHEET, f'B{r}', s['description'])
+                w.set_num(SHEET, f'F{r}', s['unit'])
+                w.set_num(SHEET, f'G{r}', round(s['qty'] * s['unit'], 2))
+            for i in range(cap):
+                w.set_row_hidden(SHEET, start + i, hidden=(i >= len(items)))
+            # Hide the label row only for Replacement/Existing when their
+            # subgroup is empty. The New label (row 81) is always kept
+            # visible: New is the default kind and its label is the anchor
+            # for the whole services block.
+            if kind != 'new':
+                w.set_row_hidden(SHEET, label_row, hidden=(not items))
     else:
         w.set_inline_text(SHEET, SVC_SITE_CELL, 'N/A')
 

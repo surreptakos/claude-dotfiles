@@ -110,11 +110,46 @@ def extract_xlsx(path, out):
     return hidden, visible
 
 
+# Poppler pdftotext (poppler-utils on Linux, poppler-windows on Windows) is a
+# runtime prerequisite for PDF text extraction. When it is missing on PATH,
+# subprocess.run raises FileNotFoundError from execvp — we swallow that so the
+# extract pass keeps running against workbooks and form-field data, but we
+# surface a stderr WARN (once per run) so a degraded extract does not read as
+# clean. Aligned with verify_package.pdf_text (issue 180).
+_pdftotext_missing_warned = False
+
+
+def _warn_pdftotext_missing():
+    global _pdftotext_missing_warned
+    if _pdftotext_missing_warned:
+        return
+    _pdftotext_missing_warned = True
+    sys.stderr.write(
+        "WARN  pdftotext binary on PATH — poppler pdftotext not on PATH; "
+        "PDF text extraction disabled (form fields still captured). Install "
+        "poppler-utils on Linux / poppler-windows on Windows.\n"
+    )
+
+
 def extract_pdf(path, out):
-    """pdftotext -layout, plus a form-field dump when the PDF carries one."""
-    r = subprocess.run(['pdftotext', '-layout', path, '-'],
-                       capture_output=True, text=True, timeout=120)
-    text = r.stdout
+    """pdftotext -layout, plus a form-field dump when the PDF carries one.
+
+    Missing pdftotext is caught (FileNotFoundError from execvp) and reported
+    once on stderr — behaviour aligned with verify_package.pdf_text (issue 180)
+    so a poppler-less runner degrades visibly rather than crashing here and
+    silently skipping there. Form-field extraction still runs against the PDF
+    directly; a returned False (no text, no fields) tells the caller to record
+    the file as unreadable.
+    """
+    try:
+        r = subprocess.run(['pdftotext', '-layout', path, '-'],
+                           capture_output=True, text=True, timeout=120)
+        text = r.stdout
+    except FileNotFoundError:
+        _warn_pdftotext_missing()
+        text = ''
+    except Exception:
+        text = ''
     fields = {}
     try:
         from pypdf import PdfReader
@@ -162,6 +197,8 @@ def walk(job):
 
 
 def main():
+    global _pdftotext_missing_warned
+    _pdftotext_missing_warned = False
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     quiet = '--quiet' in sys.argv
     if not args:

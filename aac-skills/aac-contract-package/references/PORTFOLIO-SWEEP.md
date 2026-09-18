@@ -47,7 +47,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 
 ## By job
 
-### AGAE Contractors, Inc._Columbus Park Fieldhouse_500 S Central Avenue_Fire Additions WO 38268
+### CUSTOMER-19_SITE-19_Fire Additions JOB-19
 *3 fail, 5 warn*
 
 **FAIL**
@@ -62,7 +62,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Clarification count within 12-16  —  23 (cell A57)
 - Permit procurement clarification present
 
-### Bish Creative Display_1290 Ensell Road - Intrusion Alarm LD#Z-4165
+### CUSTOMER-20_SITE-20 - Intrusion Alarm LD#PROSPECT-20
 *2 fail, 4 warn*
 
 **FAIL**
@@ -75,7 +75,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Purchase Price is a SUM over the equipment rows  —  1098
 - Permit procurement clarification present
 
-### CDW 1 Toronto - Intrusion Alarm WO 31359
+### CUSTOMER-21 SITE-21 - Intrusion Alarm JOB-21
 *4 fail, 9 warn*
 
 **FAIL**
@@ -95,7 +95,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Exclusion count within 8-10  —  2
 - Permit procurement clarification present
 
-### CDW_Mississauga_50 Burnhamthorpe Road_Intrusion, Access and CCTV Install WO 17033
+### CUSTOMER-22_SITE-22_Intrusion, Access and CCTV Install JOB-22
 *9 fail, 11 warn*
 
 **FAIL**
@@ -107,7 +107,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Purchase Price non-zero  —  None (literal)
 - Monthly Total equals the service lines  —  None (literal) vs 0
 - Validity bullet opens "Pricing is valid for 30 days"
-- Purchase Price equals the proposal total  —  schedule None vs proposal 21950.0 (CDW - Mississauga - Security Install Proposal.pdf)
+- Purchase Price equals the proposal total  —  schedule None vs proposal 21950.0 (CUSTOMER-22 - SITE-22 - Security Install Proposal.pdf)
 
 **WARN**
 - Equipment heading reads "EQUIPMENT AND LABOR"  —  EQUIPMENT
@@ -304,7 +304,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Permit procurement clarification present
 - Filename names every system sold  —  missing Elevator Monitoring
 
-### Carpenters Apprentice School_1099 Estes - Intrusion Monitoring Increase LD#Z-3543
+### CUSTOMER-23_SITE-23 - Intrusion Monitoring Increase LD#PROSPECT-23
 *3 fail, 9 warn*
 
 **FAIL**
@@ -313,7 +313,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Validity bullet opens "Pricing is valid for 30 days"
 
 **WARN**
-- One schedule in the folder  —  2 found; newest used: Carpenters Apprentice School - Fire Alarm Equip & Svc Schedule.xlsx
+- One schedule in the folder  —  2 found; newest used: CUSTOMER-23 - Fire Alarm Equip & Svc Schedule.xlsx
 - Equipment heading reads "EQUIPMENT AND LABOR"  —  EQUIPMENT
 - SOW carries "at the site listed above"
 - SOW carries "as itemized in the Equipment and Labor"
@@ -323,7 +323,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Exclusions section present  —  no "Exclusions" header in the block
 - Permit procurement clarification present
 
-### Clearbrook 1405 Wescott Rd, Northbrook, IL Access-Network
+### CUSTOMER-24 SITE-24 Access-Network
 *2 fail, 3 warn*
 
 **FAIL**
@@ -335,7 +335,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Deposit amount is 50% of Purchase Price  —  0.0 vs expected 2891.0
 - Purchase Price reconciles to the proposal  —  proposal carries 2 totals 1,184.00, 4,598.00; schedule 5,782.00
 
-### Clearbrook 1835 to 1865 Network Cabling WO 35808
+### CUSTOMER-25 SITE-25 Network Cabling JOB-25
 *6 fail, 7 warn*
 
 **FAIL**
@@ -344,7 +344,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Validity bullet opens "Pricing is valid for 30 days"
 - Clarifications do not say "proposal"
 - Deposit bullet present (price over $5,000)
-- Purchase Price equals the proposal total  —  schedule 5952.0 vs proposal 5780.0 (Clearbrook 1835 W. Central Road Network Cabling Proposal Rev.3.pdf)
+- Purchase Price equals the proposal total  —  schedule 5952.0 vs proposal 5780.0 (CUSTOMER-25 SITE-25 Network Cabling Proposal Rev.3.pdf)
 
 **WARN**
 - SOW carries "at the site listed above"
@@ -355,7 +355,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Permit procurement clarification present
 - Deposit amount is 50% of Purchase Price  —  0.0 vs expected 2976.0
 
-### Cumberland Business Partnership - 4701 N Cumberland Ave - Fire Alarm - Suite 31 LVIV Croissants - WO 37200
+### CUSTOMER-26 - SITE-26 - Fire Alarm - Suite 31 OTHER-26-1 - JOB-26
 *3 fail, 6 warn*
 
 **FAIL**
@@ -371,12 +371,12 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Exclusion count within 8-10  —  2
 - Permit procurement clarification present
 
-### J Emil Anderson and Son - 6533 W Howard St - Fire Alarm Upgrade- Z-4207
+### CUSTOMER-27 - SITE-27 - Fire Alarm Upgrade- PROSPECT-27
 *2 fail, 6 warn*
 
 **FAIL**
 - Validity bullet opens "Pricing is valid for 30 days"
-- Rider Subscriber name matches the schedule  —  rider "J Emil Anderson & Son, Inc."
+- Rider Subscriber name matches the schedule  —  rider "CUSTOMER-27"
 
 **WARN**
 - SOW carries "at the site listed above"
@@ -386,7 +386,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Exclusion count within 8-10  —  14
 - Permit procurement clarification present
 
-### Johnson Res. JV 7088 Mill Run Circle Naples FL. CCTV- Burg - LD#Z-4010
+### CUSTOMER-28 SITE-28 CCTV- Burg - LD#PROSPECT-28
 *1 fail, 7 warn*
 
 **FAIL**
@@ -401,14 +401,14 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Exclusions section present  —  no "Exclusions" header in the block
 - Permit procurement clarification present
 
-### Judy Schultes Long Grove CCTV Upgrade LD#Z-4214
+### CUSTOMER-10 SITE-10 CCTV Upgrade LD#PROSPECT-10
 *0 fail, 2 warn*
 
 **WARN**
 - Purchase Price is a SUM over the equipment rows  —  16500
 - Permit procurement clarification present
 
-### Mark Eschel_5770 Providence Drive - Panic Buttons WO 40908
+### CUSTOMER-29_SITE-29 - Panic Buttons JOB-29
 *1 fail, 6 warn*
 
 **FAIL**
@@ -422,7 +422,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Permit procurement clarification present
 - Filename names every system sold  —  missing Intrusion Alarm
 
-### Marklund_Phillips Center_Renovation Project WO 31351
+### CUSTOMER-30_SITE-30_Renovation Project JOB-30
 *5 fail, 7 warn*
 
 **FAIL**
@@ -441,7 +441,7 @@ Purchase Price formula. Packages drafted before today inherited both.
 - Exclusions section present  —  no "Exclusions" header in the block
 - Permit procurement clarification present
 
-### Precision Homes LLC - Clearbrook - 1865 Central Road -  Fire Alarm Install WO 33096
+### CUSTOMER-31 - OTHER-31-1 - SITE-31 -  Fire Alarm Install JOB-31
 *4 fail, 7 warn*
 
 **FAIL**
