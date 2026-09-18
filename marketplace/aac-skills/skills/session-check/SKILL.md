@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-18T17:39:10Z'
-  previous-modified: '2026-09-18T15:52:50Z'
-  revision: '22'
-  content-sha: fd3b4a93a3c9
+  modified: '2026-09-18T18:08:45Z'
+  previous-modified: '2026-09-18T17:58:12Z'
+  revision: '24'
+  content-sha: 751ec950b4ea
 ---
 
 # Session check (engine)
@@ -32,7 +32,10 @@ STOP-level findings from a run that completed.
 
 At `--end` the test command is skipped on a committed, pushed head in a repo with
 `.github/workflows`: pre-commit ran the suite on each commit and CI runs it on the pushed head,
-so a third run learns nothing. A dirty tree, an unpushed commit, or no upstream still runs it.
+so a third run learns nothing. A dirty tree, an unpushed commit, or no upstream still runs it — and
+so does a head whose pre-commit gate was never in force: `core.hooksPath` not pointing at the repo's
+`.githooks`, or a cloud container with no `aac-bootstrap` marker, where the gate is inert and the
+suite's dependencies are not installed.
 
 A `checks` entry may carry `"host": "desktop"` (or `"cloud"`). A check whose host is not this one
 is reported as `skipped (<host>-only)` and not run — a desktop-only sweep that can only exit 2 in a

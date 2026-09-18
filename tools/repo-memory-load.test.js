@@ -85,6 +85,18 @@ test('a note committed without its index line still reaches the next session', (
   assert.match(context, /- not in the index yet: beta-added-in-a-cloud-session/);
 });
 
+test('the auto-memory link form `- [Title](name.md) — hook` counts as indexed', () => {
+  // Every other repo's index is in this shape (aac-routines, aac-bill-intake, ...); before this
+  // case the loader named every one of their notes "not in the index yet".
+  const root = fakeRepo(
+    ['- [Alpha rule](alpha.md) — first', '- [Gamma: with colon](gamma.md) — third'],
+    ['alpha', 'gamma', 'beta-added-in-a-cloud-session'],
+  );
+  const context = contextFor(path.join(root, 'docs'));
+  assert.match(context, /- not in the index yet: beta-added-in-a-cloud-session$/);
+  assert.doesNotMatch(context, /not in the index yet: .*(alpha|gamma)/);
+});
+
 test('an over-budget index truncates and counts what it dropped', () => {
   const lines = [];
   for (let i = 0; i < 80; i += 1) lines.push(`- note-number-${i}: a hook line that costs bytes`);
