@@ -2,10 +2,10 @@
 name: "consolidate-memory"
 description: "Full holistic pass over every memory file — merge duplicates, fix stale facts, prune the index. Never a delta sweep."
 metadata:
-  modified: "2026-08-26T14:35:01Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "5213c7309dfb"
+  modified: "2026-09-18T18:13:34Z"
+  previous-modified: "2026-08-26T14:35:01Z"
+  revision: "2"
+  content-sha: "768c328d0374"
 ---
 
 # Memory Consolidation
@@ -20,7 +20,13 @@ Every invocation walks the complete memory set. Never restrict to files created 
 
 ## Phase 1 — Take stock (whole directory, every time)
 
-- List the memory directory. Read every file in it, not a subset.
+- List the memory directory. **An empty or missing directory on a repo with commit history is a stop**
+  (Dan, 2026-09-18): the memory exists somewhere this session cannot see — cloud containers hold no copy
+  of the desktop's `~/.claude/projects/<slug>/memory/` — and "0 files, nothing to consolidate" is a false
+  report, not a result. Say the resolved path and the count, name what unblocks it (run where the memory
+  lives, or commit it into the repo), and end there. The only repo that legitimately has none is one with
+  fewer than ten commits.
+- Read every file in it, not a subset.
 - Read `MEMORY.md` in full.
 - Note which files overlap, which look stale, which are thin, which are dated.
 

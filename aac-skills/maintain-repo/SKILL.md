@@ -3,10 +3,10 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-18T06:04:32Z"
-  previous-modified: "2026-08-26T14:35:01Z"
-  revision: "2"
-  content-sha: "020e790e6a64"
+  modified: "2026-09-18T18:13:34Z"
+  previous-modified: "2026-09-18T06:04:32Z"
+  revision: "3"
+  content-sha: "aaa47ed2c66e"
 ---
 
 # Maintain repo
@@ -20,6 +20,20 @@ Every run is holistic. Never restrict scope to files changed since last sweep, g
 ## Order matters
 
 Truth first, shape second. Consolidating memory before auditing merges two wrong notes into one wrong note. Fix reality-drift, then dedupe.
+
+## Gate — no memory, no run (Dan, 2026-09-18)
+
+Before step 0, resolve the repo's memory directory (the auto-memory section of the system prompt names
+it: `~/.claude/projects/<project-slug>/memory/`, plus `MEMORY.md`) and count the files in it. **Zero
+files on a repo with commit history is a stop, not a finding.** A developed repo has memory; a container
+that sees none cannot see it (cloud sessions hold no copy of the desktop's memory), and a sweep that
+proceeds without it is a partial sweep reporting as a full one — which is what the 2026-09-18
+aac-sales-cockpit run did before Dan caught it (PR #631 there). Stop, report the resolved path and the
+count, and say what unblocks it: run on the desktop where the memory lives, or commit the memory into
+the repo (`docs/agents/memory/` + `MEMORY.md`, injected by the SessionStart hook the way this repo's
+own is). Do not run step 0, 1 or 2 on a repo whose memory is unreachable; do not report "0 files, nothing
+to consolidate" as a result. A repo with fewer than ten commits and no memory yet is the one exception,
+and the report says so.
 
 ## Step 0 — ticket-reaper
 
@@ -41,7 +55,7 @@ Invoke `/consolidate-memory` (local override at `~/.claude/skills/consolidate-me
 
 It walks every `memory/*.md` file plus `MEMORY.md`, merges duplicates, retires dated entries, converts relative to absolute dates, and trims the index under 200 lines / 25KB. Every file every run — never "only files added since last consolidation".
 
-**Completion criterion:** the summary names files touched and reports the resulting `MEMORY.md` line and byte count under the limits. Any line still over 150 chars or file still overlapping another is a failure. A summary listing "N new files reviewed" without confirming the full set was walked is a failure.
+**Completion criterion:** the summary names files touched and reports the resulting `MEMORY.md` line and byte count under the limits. Any line still over 150 chars or file still overlapping another is a failure. A summary listing "N new files reviewed" without confirming the full set was walked is a failure. A summary reporting zero files read is not a completion at all — it is the gate above having been skipped.
 
 ## Report
 
