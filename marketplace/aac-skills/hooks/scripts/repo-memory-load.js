@@ -48,7 +48,12 @@ function indexLines(text) {
 // Note files present on disk but missing from the index. A session that adds a note and forgets
 // the index line would otherwise be invisible to the next session; one line names them instead.
 function unindexed(indexPath, lines) {
-  const named = new Set(lines.map((line) => line.slice(2).split(':')[0].trim()));
+  // Two index line shapes are in use: `- name: hook` (this repo) and the auto-memory
+  // `- [Title](name.md) — hook` (every other repo's index). Both name the file.
+  const named = new Set(lines.map((line) => {
+    const link = line.match(/\]\(([^)]+?)(?:\.md)?\)/);
+    return link ? link[1].trim() : line.slice(2).split(':')[0].trim();
+  }));
   let entries;
   try {
     entries = fs.readdirSync(path.dirname(indexPath));
