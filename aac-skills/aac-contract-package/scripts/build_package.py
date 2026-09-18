@@ -609,12 +609,24 @@ def _unique(texts):
 
 def _sow_paragraph(s, L):
     """One System's scope-of-work paragraph: its template from the bullet
-    library, the record's coverage and extra sentences, and the closer."""
+    library, the record's coverage and extra sentences, and the closer.
+
+    The designation enters the sentence as the phrase the library maps
+    its token to (``sow_designation_phrases``), so the article agrees
+    and the addition token reads the way references/SOW-BASELINES.md §2
+    says to write it; a token outside §2's four refuses."""
     sys_name = s['system']
     tpl = L['sow_templates'].get(sys_name)
     if not tpl:
         raise SystemExit(f'no SOW template for system "{sys_name}"')
-    parts = [tpl.format(designation=s['designation'])]
+    phrases = L['sow_designation_phrases'].get(s['designation'])
+    if phrases is None:
+        raise SystemExit(
+            f'System {sys_name!r} has designation {s["designation"]!r}; the SOW '
+            f'designation token is one of {", ".join(L["sow_designation_phrases"])} '
+            '(skill/aac-contract-package/references/SOW-BASELINES.md §2). Fix '
+            '_facts.json.')
+    parts = [tpl.format(**phrases)]
     if s['scope'].get('coverage_sentence'):
         parts.append(s['scope']['coverage_sentence'])
     parts += list(s['scope'].get('extra_sentences', []))
