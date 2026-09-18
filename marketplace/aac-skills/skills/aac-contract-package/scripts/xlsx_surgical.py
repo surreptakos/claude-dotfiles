@@ -207,6 +207,52 @@ class Workbook:
         self.parts[name] = sh.encode('utf8')
         self.dirty.add(name)
 
+    def copy_row_styles(self, sheet, src_row, dst_row):
+        """Give every cell of ``dst_row`` the style index (``s``) of the
+        same-column cell in ``src_row``; values, types and every other
+        attribute of the destination cells stay as they are.
+
+        This is how a repeated block row (a second ``System:`` line inside
+        the equipment fill region, a subgroup label inside the services
+        region) takes the look of the template's own row for that role
+        without inserting or reindexing anything. Only the ``s`` attribute
+        of the destination row's cells is rewritten in the sheet part;
+        no other zip member changes. Destination cells with no counterpart
+        in the source row are left alone. Raises KeyError when either row
+        is missing or the destination row carries no cells to style.
+        """
+        name = self.sheets[sheet]
+        sh = self.parts[name].decode('utf8')
+        # Cell-bearing rows only: a self-closing <row .../> has no cells, so
+        # the source has nothing to copy and the destination nothing to
+        # style. Match the self-closing form first so its trailing slash is
+        # never mistaken for an attribute (same discipline as set_row_hidden).
+        def span(n):
+            if re.search(r'<row r="%d"[^>]*?/>' % n, sh):
+                raise KeyError('row %d has no cells' % n)
+            m = re.search(r'<row r="%d"[^>]*>.*?</row>' % n, sh, re.S)
+            if m is None:
+                raise KeyError('row %d not found' % n)
+            return m
+        src = span(src_row)
+        styles = {}
+        for c in re.finditer(r'<c r="([A-Z]+)%d"([^>]*?)/?>' % src_row, src.group(0)):
+            s = re.search(r'\bs="([^"]*)"', c.group(2))
+            if s:
+                styles[c.group(1)] = s.group(1)
+        dst = span(dst_row)
+
+        def restyle(m):
+            col, attrs, close = m.group(1), m.group(2), m.group(3)
+            if col not in styles:
+                return m.group(0)
+            attrs = re.sub(r'\s+s="[^"]*"', '', attrs)
+            return '<c r="%s%d" s="%s"%s%s>' % (col, dst_row, styles[col], attrs, close)
+        body = re.sub(r'<c r="([A-Z]+)%d"([^>]*?)(/?)>' % dst_row, restyle, dst.group(0))
+        sh = sh[:dst.start()] + body + sh[dst.end():]
+        self.parts[name] = sh.encode('utf8')
+        self.dirty.add(name)
+
     def rename_sheet(self, old_name, new_name):
         """Rename a sheet tab. Rewrites only the <sheet name="..."> attribute in
         xl/workbook.xml; the sheet's own XML file has no self-referential tab
