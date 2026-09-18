@@ -10,7 +10,7 @@
 
 ## How to use this document
 
-Use with `SCHEDULE-GENERATION-PROCEDURE.md` §2 (Package composition), which cites this file. Build every document on the applicable Situation row; nothing on a row is optional. The three Situation rows are mutually exclusive — pick one, then build every listed item in its Contract Package column. The four bottom notes (§2.4–§2.7) apply across every situation as written.
+Use with `SCHEDULE-GENERATION-PROCEDURE.md` §2 (Package composition), which cites this file. Build every document on the applicable Situation row; nothing on a row is optional. The three Situation rows are mutually exclusive — pick one, then build every listed item in its Contract Package column. The four bottom notes (§2.5–§2.8) apply across every situation as written.
 
 ## 2. Contract Package Rules — verbatim from source
 

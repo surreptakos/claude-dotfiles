@@ -1,8 +1,17 @@
 # Open Decisions — 2026-08-11
 
-Everything from 2026-08-11 still waiting on a ruling, consolidated from the ratification record. Nothing here is blocking the CUSTOMER-14 package except items 11 and 12.
+The ruling ledger, opened 2026-08-11 and carried forward since. An item is open when it carries no **Resolved** or **Executed** line; the ledger below is history and is never rewritten (Dan's rule 2026-08-25: do not restate item counts elsewhere — read this file).
 
-Each line names who owns it and what changes once it is settled.
+## Still open (2026-09-18)
+
+- **12** — Tom's five answers (CUSTOMER-14 only; live-deal work, not roadmap).
+- **13** — Fire Alarm System to Code checkbox and plans-filed-by field (CUSTOMER-14 only).
+- **15** — Pre-ticked checkbox semantics on the Commercial Security and Residential masters; gates their field maps (spec 215 out of scope).
+- **16** — Whether anything still in flight from the portfolio sweep gets corrected.
+- **17** — Deleting the two duplicate document sets (Claude project knowledge; Documents folder) — off-repo.
+- **22** — The crew-day floor remainder of the subcontractor markup ruling.
+
+Everything else below is resolved, and where execution was pending it is recorded on the item. Each line names who owns it and what changes once it is settled.
 
 ---
 
@@ -52,7 +61,7 @@ Each line names who owns it and what changes once it is settled.
 
 **20. Live-Drive coordination of the Contract Package Rules migration.** Opened and **resolved 2026-08-21** (issue #43). Dan ruled in chat: **stamp the title** — the live first tab of the RMR Items sheet is renamed to `MIRROR OF REPO — DO NOT EDIT (PRs only)`, keeping the content visible to Sales Admin during the bridge period. The rename was applied the same day via the Sheets API and read-back verified; `docs/DRIVE-COORDINATION-LOG.md` carries the dated entry. The rule text is repo-authoritative in `references/CONTRACT-PACKAGE-RULES.md` (§5 records the coordination model); the target-state fixture `fixtures/google-drive/RMR-Items-post-retirement-target.xlsx` carries the stamped form, pinned by `tests/test_drive_retirement_target.py`. `py -3 scripts/apply_drive_mirror_stamp.py --check-live` re-proves live state at any time; `--revert` restores the pre-migration name if ever needed. (Item numbered 20 because PR #83 assigns 19 to registry entity-name verification.)
 
-**14. Retiring Active Alarm as lessor.** Three LEASE packages sit in the agreements folder and the Lease Guide and Calculator documents three AAC-as-lessor structures with our own rate factors. Nothing has been moved or deleted, because St. Sophia, Wentworth Volo and Cleaver Brooks are live AAC-as-lessor leases and the forms must stay retrievable. ~~Say how you want them marked superseded: a `_RETIRED` prefix on the folders, a note inside each, or a line at the top of the Lease Guide.~~ **Resolved 2026-08-21** (Dan, in-session ruling): **`_RETIRED` prefix on the folders.** Visible at a glance, no file content touched, forms stay retrievable for the three live leases. The jobs drive is not mounted on the dev machine; the rename executes the next time it is reachable. The Lease Guide wrong-payment risk was split out to item 18 (Dan's ruling, 2026-08-21).
+**14. Retiring Active Alarm as lessor.** Three LEASE packages sit in the agreements folder and the Lease Guide and Calculator documents three AAC-as-lessor structures with our own rate factors. Nothing has been moved or deleted, because St. Sophia, Wentworth Volo and Cleaver Brooks are live AAC-as-lessor leases and the forms must stay retrievable. ~~Say how you want them marked superseded: a `_RETIRED` prefix on the folders, a note inside each, or a line at the top of the Lease Guide.~~ **Resolved 2026-08-21** (Dan, in-session ruling): **`_RETIRED` prefix on the folders.** Visible at a glance, no file content touched, forms stay retrievable for the three live leases. The jobs drive is not mounted on the dev machine; the rename executes the next time it is reachable. **Executed** — Dan confirmed the `_RETIRED` rename done, 2026-09-18 (in session, recorded on issue 273). The Lease Guide wrong-payment risk was split out to item 18 (Dan's ruling, 2026-08-21).
 
 **15. Pre-ticked checkboxes on the other masters.** The Commercial Security master ships with six boxes ticked and the Residential with seven. On the Fire master, two pre-ticked boxes turned out to be correct defaults (Quarter Annually billing, and 2(a) service per call). I did not touch the other two forms because their field semantics are unmapped and a default cannot be told from a leftover without reading the clauses. Worth a look before the next security or residential job.
 
