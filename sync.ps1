@@ -22,7 +22,6 @@
 param(
     [Parameter(Mandatory = $true)][ValidateSet('push', 'pull')][string]$Mode,
     [switch]$DryRun,
-    [string]$Commit,
     [string]$UserHome = $env:USERPROFILE
 )
 
