@@ -137,23 +137,41 @@ const BOARD = {
       },
     },
   }),
-  items: JSON.stringify({
-    items: [
-      // the throwaway issue: closed, card still In Progress -> must move
-      { id: 'ITEM_closed_issue', status: 'In Progress', content: { title: 'throwaway', url: 'https://github.com/surreptakos/claude-dotfiles/issues/900' } },
-      // closed PR whose card is already Done -> must be left alone (no pointless write)
-      { id: 'ITEM_done_pr', status: 'Done', content: { title: 'merged pr', url: 'https://github.com/surreptakos/claude-dotfiles/pull/901' } },
-      // still open -> must be left alone
-      { id: 'ITEM_open_issue', status: 'Todo', content: { title: 'open work', url: 'https://github.com/surreptakos/claude-dotfiles/issues/902' } },
-    ],
+  // The board's items, as the ProjectsV2 `items` connection returns them (issue 569): two pages,
+  // so the sweep is seen to follow endCursor rather than stop at the first hundred.
+  itemsPage1: JSON.stringify({
+    data: { user: { projectV2: { items: {
+      pageInfo: { hasNextPage: true, endCursor: 'CUR_page2' },
+      nodes: [
+        // the throwaway issue: closed, card still In Progress -> must move
+        { id: 'ITEM_closed_issue', fieldValueByName: { name: 'In Progress' }, content: { title: 'throwaway', url: 'https://github.com/surreptakos/claude-dotfiles/issues/900' } },
+        // closed PR whose card is already Done -> must be left alone (no pointless write)
+        { id: 'ITEM_done_pr', fieldValueByName: { name: 'Done' }, content: { title: 'merged pr', url: 'https://github.com/surreptakos/claude-dotfiles/pull/901' } },
+      ],
+    } } } },
+  }),
+  itemsPage2: JSON.stringify({
+    data: { user: { projectV2: { items: {
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        // still open -> must be left alone
+        { id: 'ITEM_open_issue', fieldValueByName: { name: 'Todo' }, content: { title: 'open work', url: 'https://github.com/surreptakos/claude-dotfiles/issues/902' } },
+        // a draft item with no Status and no content -> skipped, never a crash
+        { id: 'ITEM_draft', fieldValueByName: null, content: null },
+        // closed issue on the second page, card still Todo -> must move too (pagination proof)
+        { id: 'ITEM_closed_issue_p2', fieldValueByName: { name: 'Todo' }, content: { title: 'late closer', url: 'https://github.com/surreptakos/claude-dotfiles/issues/903' } },
+      ],
+    } } } },
   }),
 };
 
 function stubGh(dir, callsFile, opts = {}) {
   const bin = path.join(dir, 'gh');
-  const itemList = opts.itemListStderr
-    ? `printf '%s\\n' '${opts.itemListStderr}' >&2; exit 1`
-    : `cat <<'J'\n${BOARD.items}\nJ`;
+  // The items query is told apart from the field query by its text; the second page by the
+  // cursor the first page handed back.
+  const itemsQuery = opts.itemsStderr
+    ? `printf '%s\\n' '${opts.itemsStderr}' >&2; exit 1`
+    : `case "$*" in *"after=CUR_page2"*) cat <<'J'\n${BOARD.itemsPage2}\nJ\n;; *) cat <<'J'\n${BOARD.itemsPage1}\nJ\n;; esac`;
   fs.writeFileSync(bin, `#!/usr/bin/env bash
 set -eu
 printf '%s\\n' "$*" >> "${callsFile}"
@@ -162,13 +180,16 @@ case "$1 \${2:-}" in
 ${BOARD.repoView}
 J
   ;;
-  "issue list")        echo '[{"number":900}]' ;;
+  "issue list")        echo '[{"number":900},{"number":903}]' ;;
   "pr list")           echo '[{"number":901}]' ;;
-  "api graphql")       cat <<'J'
+  "api graphql")       case "$*" in
+    *"items(first:100"*) ${itemsQuery}
+    ;;
+    *) cat <<'J'
 ${BOARD.fields}
 J
-  ;;
-  "project item-list") ${itemList}
+    ;;
+  esac
   ;;
   "project item-edit") exit 0 ;;
   *) echo "stub gh: unexpected call: $*" >&2; exit 9 ;;
@@ -199,24 +220,35 @@ test('a closed issue whose card is not Done is moved to Done; nothing else is to
   });
 
   assert.equal(r.code, 0, `sweep failed:\n${r.output}`);
-  const edits = fs.readFileSync(callsFile, 'utf8').split('\n').filter(l => l.startsWith('project item-edit'));
-  assert.equal(edits.length, 1, `expected exactly one board write, got:\n${edits.join('\n')}`);
+  const calls = fs.readFileSync(callsFile, 'utf8').split('\n');
+  // No item-list anywhere: that is the call PROJECT_TOKEN cannot make (issue 569). The items
+  // came over two GraphQL pages, the second asked for with the first page's cursor.
+  assert.equal(calls.some(l => l.startsWith('project item-list')), false, `gh project item-list was called:\n${calls.join('\n')}`);
+  const itemPages = calls.filter(l => l.startsWith('api graphql') && l.includes('items(first:100'));
+  assert.equal(itemPages.length, 2, `expected two item pages, got:\n${itemPages.join('\n')}`);
+  assert.equal(itemPages[0].includes('after='), false, 'the first page carries no cursor');
+  assert.match(itemPages[1], /after=CUR_page2/);
+  const edits = calls.filter(l => l.startsWith('project item-edit'));
+  assert.equal(edits.length, 2, `expected exactly two board writes, got:\n${edits.join('\n')}`);
   assert.match(edits[0], /--project-id PVT_board/);
-  assert.match(edits[0], /--id ITEM_closed_issue/);
+  assert.match(edits[0], /--id ITEM_closed_issue /);
   assert.match(edits[0], /--field-id FLD_status/);
   assert.match(edits[0], /--single-select-option-id OPT_done/);
-  assert.equal(/ITEM_done_pr|ITEM_open_issue/.test(edits[0]), false);
+  assert.match(edits[1], /--id ITEM_closed_issue_p2 /);
+  assert.equal(/ITEM_done_pr|ITEM_open_issue|ITEM_draft/.test(edits.join('\n')), false);
+  assert.match(r.output, /surreptakos\/#3 "AAC": 2 stale of 5 cards/, 'the card count proves the listing fetched every page');
   assert.match(r.output, /#900\s+In Progress/);
-  assert.match(r.output, /total moved 1, fails 0/);
+  assert.match(r.output, /#903\s+Todo/);
+  assert.match(r.output, /total moved 2, fails 0/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
 // ---- an unsweepable linked board is a failure, not a green skip (issue 409) -------------------
 
 // The Board sweep job read `success` for weeks while moving nothing: the only `gh` call that
-// failed was the per-board item-list, and the sweep logged it as a one-line "skip" with gh's
+// failed was the per-board item listing, and the sweep logged it as a one-line "skip" with gh's
 // stderr — the rate limit that actually caused it — discarded, then exited 0.
-test('a linked board whose item-list fails: exits non-zero and prints gh\'s full stderr',
+test('a linked board whose items query fails: exits non-zero and prints gh\'s full stderr',
   { skip: process.platform === 'win32' && 'POSIX shell stub gh; runs on Linux CI' }, () => {
   const dir = tmpdir('unswept');
   const repo = path.join(dir, 'repo');
@@ -225,7 +257,7 @@ test('a linked board whose item-list fails: exits non-zero and prints gh\'s full
   execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/surreptakos/claude-dotfiles'], { cwd: repo });
   const callsFile = path.join(dir, 'gh-calls.txt');
   fs.writeFileSync(callsFile, '');
-  stubGh(dir, callsFile, { itemListStderr: 'GraphQL: API rate limit already exceeded for user ID 12160797.' });
+  stubGh(dir, callsFile, { itemsStderr: 'GraphQL: API rate limit already exceeded for user ID 12160797.' });
 
   const r = boardSweep({
     env: { PROJECT_TOKEN: 'tok-215', PATH: `${dir}:${process.env.PATH}`, HOME: dir },
@@ -235,7 +267,7 @@ test('a linked board whose item-list fails: exits non-zero and prints gh\'s full
   });
 
   assert.notEqual(r.code, 0, `an unswept linked board must fail the run:\n${r.output}`);
-  assert.match(r.output, /FAIL surreptakos\/#3 "AAC": item-list failed/);
+  assert.match(r.output, /FAIL surreptakos\/#3 "AAC": items query failed/);
   assert.match(r.output, /API rate limit already exceeded for user ID 12160797/);
   assert.match(r.output, /could not be swept/);
   assert.equal(/^skip /m.test(r.output), false, 'a linked board must never read as a skip');

@@ -1,19 +1,15 @@
 ---
 name: claude-md-lint
+disable-model-invocation: true
 description: Audit or trim a CLAUDE.md, AGENTS.md or other always-loaded instructions file against the concision paradigm ("would removing this line cause a mistake?"). Use when asked to lint, audit, trim, shrink or review a CLAUDE.md, when a rulebook feels ignored or bloated, or before adding a new section to one. Bundles the deterministic linter; the trim pass is the model's job.
 metadata:
-  disable-model-invocation: 'true'
-  modified: '2026-09-18T04:06:51Z'
-  previous-modified: '2026-09-16T23:37:30Z'
-  revision: '5'
-  content-sha: 0ebe7efce6bd
+  modified: "2026-09-18T04:06:51Z"
+  previous-modified: "2026-09-16T23:37:30Z"
+  revision: "5"
+  content-sha: "0ebe7efce6bd"
 ---
 
 # claude-md-lint — keep instruction files to what a session cannot derive
-
-> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below
-> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
-> every run is fresh.
 
 Bloated instruction files make the rules that matter get ignored. This skill runs a deterministic
 linter over one, then walks the trim pass the bundled `/doctor` skill describes but does not
@@ -22,7 +18,7 @@ apply to global or non-checked-in files.
 ## Run the linter
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/skills/claude-md-lint/claude-md-lint.js" <file> [--against <other.md>]... [--json]
+node "~/.claude/skills/claude-md-lint/claude-md-lint.js" <file> [--against <other.md>]... [--json]
 ```
 
 Exit 0 clean, 1 findings, 2 usage. One tab-separated line per finding: `file:line  rule  message`.

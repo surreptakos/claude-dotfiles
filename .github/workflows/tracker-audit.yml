@@ -28,7 +28,7 @@ name: Tracker audit
 # 2 is not a pass — an audit that cannot see the tracker returning green is the one failure this tool
 # exists to refuse, and its NOTE lines say which check went blind.
 #
-# WHO READS THE RESULT. The session-check engine (agents/skills/session-check/check.js) stops
+# WHO READS THE RESULT. The session-check engine (aac-skills/session-check/check.js) stops
 # spawning the audit and reads this job's latest run for the current default-branch head instead —
 # `tracker audit clean`, `tracker audit: drift — <url>`, or `tracker audit: no run for this head`.
 # A container and the desktop now print the same line. Renaming this file breaks that read:

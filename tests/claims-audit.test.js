@@ -43,7 +43,7 @@ const test = require('node:test');
 // preference: an absent env var falls through to the mirror; a non-existent path throws below and
 // fails the run rather than silently masking a broken restore.
 const ENGINE = process.env.CLAIMS_AUDIT_ENGINE || path.join(
-  __dirname, '..', 'claude', 'skills', 'consistency-audit', 'claims-audit.js'
+  __dirname, '..', 'aac-skills', 'consistency-audit', 'claims-audit.js'
 );
 const { auditClaims } = require(ENGINE);
 

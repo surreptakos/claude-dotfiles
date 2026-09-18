@@ -92,9 +92,9 @@ test('SessionStart additionalContext stays under the 2 KB platform cap (probe #1
  * The hook writes a marker at ~/.claude/hook-state/aac-bootstrap/state.json — one dict on the
  * success path, one on the named-failure path (issue 483). Attempt 1 on issue 242 added a
  * `slash_form` key to that dict with a comment claiming session-check read it; nothing under
- * agents/skills/ did. That field never shipped, but nothing stopped the next key arriving the
+ * aac-skills/ did. That field never shipped, but nothing stopped the next key arriving the
  * same way. So: enumerate the keys out of the hook source and require each to be read somewhere
- * under agents/skills/ or tools/ — or by the hook itself, which reads its own `skills_hash` back
+ * under aac-skills/ or tools/ — or by the hook itself, which reads its own `skills_hash` back
  * to decide whether to recopy the payload — or to be declared diagnostic-only below.
  *
  * The reader scan is deliberately generous: any read spelling of the name anywhere in those trees
@@ -135,7 +135,7 @@ function readerSources() {
       else if (/\.(js|mjs|sh|py)$/.test(entry.name) && p !== __filename) files.push(p);
     }
   };
-  walk(path.join(REPO_ROOT, 'agents', 'skills'));
+  walk(path.join(REPO_ROOT, 'aac-skills'));
   walk(path.join(REPO_ROOT, 'tools'));
   files.push(HOOK);
   // This file is excluded above: it names every key, so counting it would make the check vacuous.
@@ -150,7 +150,7 @@ function markerKeysWithoutReader(keys, sources) {
   });
 }
 
-test('every aac-bootstrap marker key has a reader under agents/skills/ or tools/ (issue 279)', () => {
+test('every aac-bootstrap marker key has a reader under aac-skills/ or tools/ (issue 279)', () => {
   const keys = markerKeysFromHookSource(fs.readFileSync(HOOK, 'utf8'));
   // Guard the extractor: if a refactor moves the marker writes out of a `json.dump({...}, f)`
   // literal, this check must go red rather than quietly scan an empty key set.
@@ -161,7 +161,7 @@ test('every aac-bootstrap marker key has a reader under agents/skills/ or tools/
   const unread = markerKeysWithoutReader(keys, readerSources())
     .filter((key) => !(key in DIAGNOSTIC_ONLY_MARKER_KEYS));
   assert.deepEqual(unread, [],
-    `marker key(s) ${unread.map((k) => `'${k}'`).join(', ')} are written by .claude/hooks/session-start.sh and read by nothing under agents/skills/ or tools/ (issue 279). Either add the reader, or add the key to DIAGNOSTIC_ONLY_MARKER_KEYS in this file with the reason it is written for a human only.`);
+    `marker key(s) ${unread.map((k) => `'${k}'`).join(', ')} are written by .claude/hooks/session-start.sh and read by nothing under aac-skills/ or tools/ (issue 279). Either add the reader, or add the key to DIAGNOSTIC_ONLY_MARKER_KEYS in this file with the reason it is written for a human only.`);
 });
 
 test('a marker key nothing reads fails the check (issue 279 fault injection)', () => {

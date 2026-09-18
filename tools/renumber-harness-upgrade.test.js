@@ -23,7 +23,7 @@ const { test } = require('node:test');
 
 const CLI = path.join(__dirname, 'renumber-harness-upgrade.js');
 const GENERATOR = path.join(__dirname, 'build-harness-bootstrap-hook.js');
-const TABLE = 'agents/skills/project-harness/UPGRADES.md';
+const TABLE = 'aac-skills/project-harness/UPGRADES.md';
 
 function git(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
@@ -99,11 +99,11 @@ function fixtureBranch(opts) {
   git(dir, ['config', 'user.name', 'Fixture']);
 
   write(dir, TABLE, TABLE_TEXT([ROW_24, ROW_25]));
-  write(dir, 'agents/skills/project-harness/SKILL.md', SKILL(25));
-  write(dir, 'agents/skills/project-harness/templates/harness-version.md', MARKER(25));
+  write(dir, 'aac-skills/project-harness/SKILL.md', SKILL(25));
+  write(dir, 'aac-skills/project-harness/templates/harness-version.md', MARKER(25));
   write(dir, 'docs/agents/harness-version.md', MARKER(25));
   write(dir, '.claude/hooks/session-start.sh', HOOK(25));
-  write(dir, 'agents/skills/project-harness/templates/session-start.sh', HOOK(25));
+  write(dir, 'aac-skills/project-harness/templates/session-start.sh', HOOK(25));
   // The real generator, so the rebuild step under test is the one that ships.
   write(dir, 'tools/build-harness-bootstrap-hook.js',
     fs.readFileSync(GENERATOR, 'utf8').replace(/harness v\d+, issue 218/, 'harness v25, issue 218'));
@@ -113,7 +113,7 @@ function fixtureBranch(opts) {
 
   // master: its own bump to v26, plus a file the branch never touches.
   write(dir, TABLE, TABLE_TEXT([ROW_24, ROW_25, ROW_26_MASTER]));
-  write(dir, 'agents/skills/project-harness/templates/harness-version.md', MARKER(26));
+  write(dir, 'aac-skills/project-harness/templates/harness-version.md', MARKER(26));
   write(dir, 'docs/agents/harness-version.md', MARKER(26));
   write(dir, 'README.md', 'The dashboard workflow was narrowed in harness v26.\n');
   git(dir, ['add', '-A']);
@@ -126,11 +126,11 @@ function fixtureBranch(opts) {
   let table = TABLE_TEXT(rows);
   if (o.branchEditsProse) table = table.replace('One row per harness version:', 'One row per harness release:');
   write(dir, TABLE, table);
-  write(dir, 'agents/skills/project-harness/SKILL.md', SKILL(v));
-  write(dir, 'agents/skills/project-harness/templates/harness-version.md', MARKER(v));
+  write(dir, 'aac-skills/project-harness/SKILL.md', SKILL(v));
+  write(dir, 'aac-skills/project-harness/templates/harness-version.md', MARKER(v));
   write(dir, 'docs/agents/harness-version.md', MARKER(v));
   write(dir, '.claude/hooks/session-start.sh', HOOK(v));
-  write(dir, 'agents/skills/project-harness/templates/session-start.sh', HOOK(v));
+  write(dir, 'aac-skills/project-harness/templates/session-start.sh', HOOK(v));
   write(dir, 'tools/build-harness-bootstrap-hook.js',
     read(dir, 'tools/build-harness-bootstrap-hook.js').replace(/harness v\d+, issue 218/, `harness v${v}, issue 218`));
   write(dir, 'tools/harness-delivery.test.js', `// Harness v${v} (issue 218).\nconst PREFIX = 'harness-v${v}-';\n`);
@@ -158,15 +158,15 @@ test('renumbers a colliding row and every other place the branch wrote that vers
   assert.ok(table.indexOf(ROW_26_MASTER) < table.indexOf('| 27 |'), 'rows must stay in version order');
 
   // The nine places, each read back at its new number.
-  assert.match(read(dir, 'agents/skills/project-harness/templates/harness-version.md'), /harness-version: 27/);
+  assert.match(read(dir, 'aac-skills/project-harness/templates/harness-version.md'), /harness-version: 27/);
   assert.match(read(dir, 'docs/agents/harness-version.md'), /harness-version: 27/);
-  assert.match(read(dir, 'agents/skills/project-harness/SKILL.md'), /Current version: 27\./);
-  assert.match(read(dir, 'agents/skills/project-harness/SKILL.md'), /the v27 bootstrap hook/);
+  assert.match(read(dir, 'aac-skills/project-harness/SKILL.md'), /Current version: 27\./);
+  assert.match(read(dir, 'aac-skills/project-harness/SKILL.md'), /the v27 bootstrap hook/);
   assert.match(read(dir, '.claude/hooks/session-start.sh'), /harness v27, issue 218/);
   assert.match(read(dir, 'tools/build-harness-bootstrap-hook.js'), /harness v27, issue 218/);
   assert.match(read(dir, 'tools/harness-delivery.test.js'), /harness-v27-/);
   assert.match(read(dir, 'docs/tickets/218-decision.md'), /harness v27/);
-  assert.equal(read(dir, 'agents/skills/project-harness/templates/session-start.sh'),
+  assert.equal(read(dir, 'aac-skills/project-harness/templates/session-start.sh'),
     read(dir, '.claude/hooks/session-start.sh'),
     'the generated template must be rebuilt from the renumbered hook by build-harness-bootstrap-hook.js');
 
@@ -183,7 +183,7 @@ test('refuses a UPGRADES.md change that is not a pure row addition', () => {
   assert.equal(r.code, 1, 'a prose edit is a real merge, not a renumber');
   assert.match(r.stderr, /outside the version table/);
   assert.equal(read(dir, TABLE), before, 'the conflicted file must be left exactly as git wrote it');
-  assert.match(read(dir, 'agents/skills/project-harness/SKILL.md'), /Current version: 26\./,
+  assert.match(read(dir, 'aac-skills/project-harness/SKILL.md'), /Current version: 26\./,
     'a refusal must move no version number anywhere');
   fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -200,7 +200,7 @@ test('combines the rows without renumbering when the two branches took different
   const table = read(dir, TABLE);
   assert.ok(table.includes(ROW_26_MASTER) && table.includes('| 27 |'), 'both rows must survive');
   assert.doesNotMatch(table, /^<{7}/m, 'the conflict must be resolved');
-  assert.match(read(dir, 'agents/skills/project-harness/SKILL.md'), /Current version: 27\./,
+  assert.match(read(dir, 'aac-skills/project-harness/SKILL.md'), /Current version: 27\./,
     'nothing outside the table moves when no number collided');
   fs.rmSync(dir, { recursive: true, force: true });
 });

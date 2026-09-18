@@ -123,12 +123,12 @@ class SessionSkillsInCloudPlugin(unittest.TestCase):
                              f"{name}: packaged frontmatter carries validator-rejected keys {extras}")
 
 
-# Regression guard for issue 237: --from-mirror wrote its rotated stamps into a tempdir copy of
-# the mirror and threw them away when the run ended, so the mirror SKILL.md kept its stale hash
-# and CI's stale check went red. The write-back must land on the real mirror path.
-STALE_MIRROR_SKILL = """---
+# Regression guard for issue 237: a build used to write its rotated stamps into a tempdir copy of
+# the source and throw them away when the run ended, so the source SKILL.md kept its stale hash
+# and CI's stale check went red. The write-back must land on the real source path.
+STALE_SOURCE_SKILL = """---
 name: foo
-description: A regression fixture for from-mirror stamp write-back.
+description: A regression fixture for stamp write-back.
 metadata:
   modified: "2026-01-01T00:00:00Z"
   previous-modified: "none"
@@ -142,49 +142,45 @@ A body that no longer matches the recorded content-sha above.
 """
 
 
-class FromMirrorStampWriteBack(unittest.TestCase):
+class SourceStampWriteBack(unittest.TestCase):
     def _make_fake_repo(self, tmp):
         repo = Path(tmp) / "repo"
-        (repo / "agents" / "skills" / "foo").mkdir(parents=True)
-        (repo / "claude" / "skills").mkdir(parents=True)
-        (repo / "agents" / "skills" / "foo" / "SKILL.md").write_text(
-            STALE_MIRROR_SKILL, encoding="utf-8")
-        (repo / "claude" / "skill-links.json").write_text(
-            json.dumps([{"Name": "foo", "Target": "__USERHOME__\\.agents\\skills\\foo"}]),
-            encoding="utf-8")
+        (repo / "aac-skills" / "foo").mkdir(parents=True)
+        (repo / "aac-skills" / "foo" / "SKILL.md").write_text(
+            STALE_SOURCE_SKILL, encoding="utf-8")
         return repo
 
     def _run(self, repo, argv):
         with mock.patch.object(bcp, "REPO", repo), mock.patch.object(sys, "argv", ["bcp", *argv]):
             return bcp.main()
 
-    def test_from_mirror_restamps_agents_skills_mirror_in_place(self):
+    def test_a_build_restamps_the_aac_skills_source_in_place(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._make_fake_repo(tmp)
             out = Path(tmp) / "dist"
-            mirror_skill = repo / "agents" / "skills" / "foo" / "SKILL.md"
-            before = mirror_skill.read_text(encoding="utf-8")
+            source_skill = repo / "aac-skills" / "foo" / "SKILL.md"
+            before = source_skill.read_text(encoding="utf-8")
 
             rc = self._run(repo, [
-                "--from-mirror", "--home", "C:\\Users\\Dan",
+                "--home", "C:\\Users\\Dan",
                 "--out", str(out), "--no-marketplace",
             ])
             self.assertEqual(rc, 0)
 
-            after = mirror_skill.read_text(encoding="utf-8")
+            after = source_skill.read_text(encoding="utf-8")
             self.assertNotEqual(after, before,
-                                "mirror SKILL.md should have been restamped on disk")
+                                "source SKILL.md should have been restamped on disk")
             fm = yaml.safe_load(bcp.split_frontmatter(after.replace("\r\n", "\n"))[0]) or {}
             meta = fm.get("metadata") or {}
             self.assertNotEqual(meta.get("content-sha"), "deadbeefdead",
-                                "content-sha did not rotate; write-back missed the mirror")
+                                "content-sha did not rotate; write-back missed the source")
             self.assertEqual(meta.get("previous-modified"), "2026-01-01T00:00:00Z",
                              "previous-modified should carry the pre-restamp modified value")
             self.assertEqual(meta.get("revision"), "2",
                              "revision should bump by one when the hash rotates")
 
     def test_no_stamp_write_second_rebuild_reproduces_committed_payload(self):
-        # After the first rebuild has written the new stamp back to the mirror, a second rebuild
+        # After the first rebuild has written the new stamp back to the source, a second rebuild
         # with --no-stamp-write must emit the same plugin payload (CI's determinism check).
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._make_fake_repo(tmp)
@@ -192,11 +188,11 @@ class FromMirrorStampWriteBack(unittest.TestCase):
             second_out = Path(tmp) / "dist2"
 
             self.assertEqual(self._run(repo, [
-                "--from-mirror", "--home", "C:\\Users\\Dan",
+                "--home", "C:\\Users\\Dan",
                 "--out", str(first_out), "--no-marketplace",
             ]), 0)
             self.assertEqual(self._run(repo, [
-                "--from-mirror", "--home", "C:\\Users\\Dan", "--no-stamp-write",
+                "--home", "C:\\Users\\Dan", "--no-stamp-write",
                 "--out", str(second_out), "--no-marketplace",
             ]), 0)
 
@@ -212,7 +208,7 @@ class FromMirrorStampWriteBack(unittest.TestCase):
                              "second --no-stamp-write rebuild did not reproduce the payload")
 
 
-# Issue 432: plugin_version() is a wall clock, so every rebuild of an unchanged mirror moved
+# Issue 432: plugin_version() is a wall clock, so every rebuild of an unchanged source moved
 # marketplace/aac-skills/.claude-plugin/plugin.json and .claude-plugin/marketplace.json and nothing
 # else - a two-file diff no content movement explained. The version now follows the payload.
 
@@ -220,18 +216,14 @@ class FromMirrorStampWriteBack(unittest.TestCase):
 class VersionFollowsThePayload(unittest.TestCase):
     def _make_fake_repo(self, tmp):
         repo = Path(tmp) / "repo"
-        (repo / "agents" / "skills" / "foo").mkdir(parents=True)
-        (repo / "claude" / "skills").mkdir(parents=True)
-        (repo / "agents" / "skills" / "foo" / "SKILL.md").write_text(
-            STALE_MIRROR_SKILL, encoding="utf-8")
-        (repo / "claude" / "skill-links.json").write_text(
-            json.dumps([{"Name": "foo", "Target": "__USERHOME__\\.agents\\skills\\foo"}]),
-            encoding="utf-8")
+        (repo / "aac-skills" / "foo").mkdir(parents=True)
+        (repo / "aac-skills" / "foo" / "SKILL.md").write_text(
+            STALE_SOURCE_SKILL, encoding="utf-8")
         return repo
 
     def _rebuild(self, repo, out):
         with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
-                sys, "argv", ["bcp", "--from-mirror", "--home", "C:\\Users\\Dan",
+                sys, "argv", ["bcp", "--home", "C:\\Users\\Dan",
                               "--out", str(out)]):
             self.assertEqual(bcp.main(), 0)
 
@@ -248,7 +240,7 @@ class VersionFollowsThePayload(unittest.TestCase):
         return json.loads((repo / "marketplace" / bcp.PLUGIN_NAME / bcp.MANIFEST_REL)
                           .read_text(encoding="utf-8"))["version"]
 
-    def test_unchanged_mirror_rebuilds_byte_identically(self):
+    def test_an_unchanged_source_rebuilds_byte_identically(self):
         # The clock moves between the two rebuilds, as it does between two branches on one day.
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._make_fake_repo(tmp)
@@ -257,7 +249,7 @@ class VersionFollowsThePayload(unittest.TestCase):
             with mock.patch.object(bcp, "plugin_version", lambda now=None: "2099.1.29999"):
                 self._rebuild(repo, Path(tmp) / "dist2")
             self.assertEqual(first, self._tracked(repo),
-                             "a rebuild of an unchanged mirror moved a tracked byte")
+                             "a rebuild of an unchanged source moved a tracked byte")
 
     def test_a_moved_payload_takes_a_fresh_clock_stamp(self):
         # The reuse must not outlive the content: a payload that really moved takes the UTC clock
@@ -267,7 +259,7 @@ class VersionFollowsThePayload(unittest.TestCase):
             self._rebuild(repo, Path(tmp) / "dist1")
             published = self._version(repo)
 
-            skill = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            skill = repo / "aac-skills" / "foo" / "SKILL.md"
             skill.write_text(skill.read_text(encoding="utf-8") + "\nA new paragraph.\n",
                              encoding="utf-8")
             with mock.patch.object(bcp, "plugin_version", lambda now=None: "2099.1.10000"):
@@ -334,24 +326,20 @@ class RotationReport(unittest.TestCase):
 
     def _make_fake_repo(self, tmp):
         repo = Path(tmp) / "repo"
-        (repo / "claude" / "skills").mkdir(parents=True)
         for name in ("foo", "bar"):
-            (repo / "agents" / "skills" / name).mkdir(parents=True)
-        (repo / "agents" / "skills" / "foo" / "SKILL.md").write_text(
-            STALE_MIRROR_SKILL, encoding="utf-8")
-        bar = repo / "agents" / "skills" / "bar" / "SKILL.md"
+            (repo / "aac-skills" / name).mkdir(parents=True)
+        (repo / "aac-skills" / "foo" / "SKILL.md").write_text(
+            STALE_SOURCE_SKILL, encoding="utf-8")
+        bar = repo / "aac-skills" / "bar" / "SKILL.md"
         bar.write_text(CURRENT_SKILL.format(sha="000000000000"), encoding="utf-8")
         bar.write_text(CURRENT_SKILL.format(
             sha=bcp.skill_stamps.content_sha(bar.parent, self.HOME)), encoding="utf-8")
-        (repo / "claude" / "skill-links.json").write_text(json.dumps([
-            {"Name": n, "Target": f"__USERHOME__\\.agents\\skills\\{n}"} for n in ("foo", "bar")
-        ]), encoding="utf-8")
         return repo
 
     def _run(self, repo, out, *extra):
         buf = io.StringIO()
         with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
-                sys, "argv", ["bcp", "--from-mirror", "--home", self.HOME, "--out", str(out),
+                sys, "argv", ["bcp", "--home", self.HOME, "--out", str(out),
                               "--no-marketplace", *extra]), contextlib.redirect_stdout(buf):
             rc = bcp.main()
         self.assertEqual(rc, 0, buf.getvalue())
@@ -380,14 +368,14 @@ class RotationReport(unittest.TestCase):
     def test_names_exactly_the_skill_whose_bytes_changed_and_where(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._make_fake_repo(tmp)
-            foo = repo / "agents" / "skills" / "foo" / "SKILL.md"
-            bar = repo / "agents" / "skills" / "bar" / "SKILL.md"
+            foo = repo / "aac-skills" / "foo" / "SKILL.md"
+            bar = repo / "aac-skills" / "bar" / "SKILL.md"
             foo_before, bar_before = foo.read_bytes(), bar.read_bytes()
 
             headline, named = self._report(self._run(repo, Path(tmp) / "dist1"))
             self.assertEqual(headline, "stamps rotated in 1 skills")
             self.assertEqual(len(named), 1, named)
-            self.assertTrue(named[0].startswith("foo (agents/skills/foo/SKILL.md): rev 1 -> 2, "),
+            self.assertTrue(named[0].startswith("foo (aac-skills/foo/SKILL.md): rev 1 -> 2, "),
                             named[0])
             self.assertNotIn("published", named[0])
             self.assertNotEqual(foo.read_bytes(), foo_before, "foo was reported but not written")
@@ -397,7 +385,7 @@ class RotationReport(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._make_fake_repo(tmp)
             self._run(repo, Path(tmp) / "dist1")
-            sources = {p: p.read_bytes() for p in (repo / "agents" / "skills").rglob("SKILL.md")}
+            sources = {p: p.read_bytes() for p in (repo / "aac-skills").rglob("SKILL.md")}
 
             headline, named = self._report(self._run(repo, Path(tmp) / "dist2"))
             self.assertEqual(headline, "stamps rotated in 0 skills")
@@ -407,7 +395,7 @@ class RotationReport(unittest.TestCase):
     def test_no_stamp_write_says_the_sources_were_left_alone(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = self._make_fake_repo(tmp)
-            foo = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            foo = repo / "aac-skills" / "foo" / "SKILL.md"
             before = foo.read_bytes()
             headline, named = self._report(
                 self._run(repo, Path(tmp) / "dist1", "--no-stamp-write"))
@@ -427,7 +415,7 @@ class RotationReport(unittest.TestCase):
             self._git(repo, "init", "-q")
             self._git(repo, "add", ".")
             self._git(repo, "commit", "-qm", "published")
-            foo = repo / "agents" / "skills" / "foo" / "SKILL.md"
+            foo = repo / "aac-skills" / "foo" / "SKILL.md"
             published = foo.read_bytes()
             foo.write_bytes(re.sub(rb'content-sha: "[0-9a-f]+"', b'content-sha: "badbadbadbad"',
                                    published))
@@ -436,58 +424,11 @@ class RotationReport(unittest.TestCase):
             headline, named = self._report(self._run(repo, Path(tmp) / "dist1"))
             self.assertEqual(headline, "stamps rotated in 1 skills")
             self.assertEqual(len(named), 1, named)
-            self.assertTrue(named[0].startswith("foo (agents/skills/foo/SKILL.md): rev 2 -> 2, "),
+            self.assertTrue(named[0].startswith("foo (aac-skills/foo/SKILL.md): rev 2 -> 2, "),
                             named[0])
             self.assertTrue(named[0].endswith("(back to the published stamp)"), named[0])
             self.assertEqual(foo.read_bytes(), published)
             self.assertEqual(self._git(repo, "status", "--porcelain"), b"")
-
-
-# Issue 172: aac-google-access started life as a personal skill, so the only copy of it in this
-# repo was the generated claude/ mirror -- which no branch may hand-edit. Moving the source into
-# the hand-edited aac-skills/ tree is the only way a cloud branch can revise such a skill, and for
-# as long as the owner's personal copy still exists both trees hold the name. That overlap used to
-# fail the build outright, so the move could not land in one commit. The team copy must win, and
-# exactly one copy must ship.
-TEAM_SKILL = """---
-name: foo
-description: The hand-edited team source, which supersedes the mirrored personal copy.
----
-
-# Foo (team)
-"""
-
-PERSONAL_SKILL = """---
-name: foo
-description: The mirrored personal copy, stale during the migration window.
----
-
-# Foo (personal)
-"""
-
-
-class AacSkillsSupersedesMirroredPersonalCopy(unittest.TestCase):
-    def test_team_source_ships_and_the_build_still_succeeds(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp) / "repo"
-            (repo / "claude" / "skills" / "foo").mkdir(parents=True)
-            (repo / "claude" / "skills" / "foo" / "SKILL.md").write_text(
-                PERSONAL_SKILL, encoding="utf-8")
-            (repo / "aac-skills" / "foo").mkdir(parents=True)
-            (repo / "aac-skills" / "foo" / "SKILL.md").write_text(TEAM_SKILL, encoding="utf-8")
-            out = Path(tmp) / "dist"
-
-            with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
-                    sys, "argv", ["bcp", "--from-mirror", "--home", "C:\\Users\\Dan",
-                                  "--out", str(out), "--no-marketplace"]):
-                rc = bcp.main()
-
-            self.assertEqual(rc, 0, "the name in both trees must not fail the build")
-            body = (out / bcp.PLUGIN_NAME / "skills" / "foo" / "SKILL.md").read_text(
-                encoding="utf-8")
-            self.assertIn("# Foo (team)", body,
-                          "the hand-edited aac-skills/ source must be the copy that ships")
-            self.assertNotIn("# Foo (personal)", body)
 
 
 # Regression guard for issue 208: the plugin's hooks manifest must not name a script that isn't
@@ -588,8 +529,8 @@ class PluginHooksManifest(unittest.TestCase):
 # governance script self-guards: running as the plugin copy while settings.json still dispatches
 # the same script by name, it exits silently and leaves the user-settings entry to fire once.
 # The guard keys on the settings ENTRY, not on the live file: the live-tree files stay after the
-# entries are gone (the packager builds this payload from their mirror, and the restore test
-# executes them), so a presence check would skip forever and the hook would fire zero times.
+# entries are gone (the packager builds this payload from profile/claude/hooks/, and pull restores
+# them), so a presence check would skip forever and the hook would fire zero times.
 class PluginHookDedupGuard(unittest.TestCase):
     scripts_dir = REPO / "marketplace" / "aac-skills" / "hooks" / "scripts"
 
@@ -750,7 +691,7 @@ class PluginHookDedupGuard(unittest.TestCase):
 
 
 # Regression guard for issue 495: the per-turn reminder must point at rules that exist where it
-# runs. The live/mirror copy says ~/.claude/CLAUDE.md, true on the PC; a container has no such
+# runs. The source copy says ~/.claude/CLAUDE.md, true on the PC; a container has no such
 # file, and the rules it summarises ship in this payload at rules/global-rules.md (issue 209). The
 # packager retargets the two pointers during the copy, the way session-gate.js's CHECK path is
 # retargeted, so the live hook keeps its true text and the payload copy gets its own.
@@ -758,7 +699,7 @@ class GovernanceReminderRetarget(unittest.TestCase):
     HOME_POINTER = "~/.claude/CLAUDE.md"
     PLUGIN_ROOT = REPO / "marketplace" / "aac-skills"
     PAYLOAD_SCRIPT = PLUGIN_ROOT / "hooks" / "scripts" / "governance-reminder.js"
-    MIRROR_SCRIPT = REPO / "claude" / "hooks" / "governance-reminder.js"
+    SOURCE_SCRIPT = REPO / "profile" / "claude" / "hooks" / "governance-reminder.js"
 
     @staticmethod
     def _context(script, plugin_root=None):
@@ -822,22 +763,22 @@ class GovernanceReminderRetarget(unittest.TestCase):
         self.assertNotIn(self.HOME_POINTER, ctx)
         self.assertIn(str(root / "rules" / "global-rules.md"), ctx)
 
-    def test_mirror_copy_still_names_the_home_path(self):
+    def test_source_copy_still_names_the_home_path(self):
         # On the PC ~/.claude/CLAUDE.md is real and is where the rules live; the retarget is
         # confined to the packager's copy.
-        ctx = self._context(self.MIRROR_SCRIPT)
+        ctx = self._context(self.SOURCE_SCRIPT)
         self.assertEqual(ctx.count(self.HOME_POINTER), 2)
         self.assertNotIn("global-rules.md", ctx)
 
     def test_packager_refuses_a_drifted_source(self):
-        # Like the session-gate CHECK marker: if the mirror's pointer text moves, the build must
+        # Like the session-gate CHECK marker: if the source's pointer text moves, the build must
         # fail loudly rather than ship a payload that silently keeps the home path.
-        body = self.MIRROR_SCRIPT.read_text(encoding="utf-8")
+        body = self.SOURCE_SCRIPT.read_text(encoding="utf-8")
         with self.assertRaises(RuntimeError):
             bcp.retarget_governance_reminder(body.replace(self.HOME_POINTER, "~/elsewhere.md"))
 
     def test_retarget_touches_only_the_two_pointers(self):
-        src = self.MIRROR_SCRIPT.read_text(encoding="utf-8")
+        src = self.SOURCE_SCRIPT.read_text(encoding="utf-8")
         out = bcp.retarget_governance_reminder(src)
         # Only the two emitted strings move; the header comment keeps its history.
         self.assertNotIn("full rules in " + self.HOME_POINTER, out)
@@ -848,8 +789,8 @@ class GovernanceReminderRetarget(unittest.TestCase):
 
 # Issue 533: the rulebook rides SessionStart; every PROMPT carries a digest of it instead. The
 # digest is GENERATED from marks the rules section already carries -- bold run-in labels, numbered
-# rules, the ask-matt paragraph's opening line -- because the source is claude/CLAUDE.md, a mirror
-# of the owner's live file that must never be hand-edited. Nothing was added to it to make this
+# rules, the ask-matt paragraph's opening line -- because the source is profile/claude/CLAUDE.md,
+# the owner's global rules, edited for their own sake. Nothing was added to it to make this
 # work, and nothing here is a hand-kept copy of the rules: the shipped file has to be exactly what
 # a rebuild produces from the shipped rules text.
 class RulesDigest(unittest.TestCase):
@@ -932,12 +873,12 @@ class DeadLoadSkillDecisions(unittest.TestCase):
     def test_a_dropped_skill_is_not_packaged(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp) / "repo"
-            (repo / "claude" / "skills" / "ux-copy").mkdir(parents=True)
-            (repo / "claude" / "skills" / "ux-copy" / "SKILL.md").write_text(
+            (repo / "aac-skills" / "ux-copy").mkdir(parents=True)
+            (repo / "aac-skills" / "ux-copy" / "SKILL.md").write_text(
                 DROPPED_SKILL, encoding="utf-8")
             out = Path(tmp) / "dist"
             with mock.patch.object(bcp, "REPO", repo), mock.patch.object(
-                    sys, "argv", ["bcp", "--from-mirror", "--home", "C:\\Users\\Dan",
+                    sys, "argv", ["bcp", "--home", "C:\\Users\\Dan",
                                   "--out", str(out), "--no-marketplace"]):
                 rc = bcp.main()
             self.assertEqual(rc, 0)

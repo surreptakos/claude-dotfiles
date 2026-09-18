@@ -1,8 +1,8 @@
 <#
 .SYNOPSIS
     Prove that a leaked GIT_DIR does not redirect any of the git-invoking helpers
-    (sync.ps1, tools/tracker-audit.js, restore-test.ps1) away from the path they
-    were told to operate on. Issue 28.
+    (tools/tracker-audit.js, restore-test.ps1) away from the path they were told to
+    operate on. Issue 28.
 
 .DESCRIPTION
     A git hook that runs restore-test.ps1 leaks GIT_DIR / GIT_INDEX_FILE /
@@ -16,15 +16,16 @@
     Every helper now clears the six vars for the duration of its git calls. This suite
     proves each one:
 
-      1  sync.ps1               operates on the target under GIT_DIR=/unrelated/repo/.git
       2  tools/tracker-audit.js reads the target's git log under GIT_DIR leak
       3  restore-test.ps1       bootstraps the target under GIT_DIR leak
 
-    Two checks retired with the freshness loop in issue 213: the classifier's own check, and
-    the audit clause that ran tests/dotfiles-freshness.tests.ps1 under a leak and compared the
-    parent bare repo's config before and after. That clause proved no test file ran `git init`
-    or `git config` without clearing its own env first; the freshness suite was the only file
-    here with that shape, and it is gone.
+    Three checks have retired; the numbering is kept so an old run's output still lines up.
+    With the freshness loop (issue 213): the classifier's own check, and the audit clause that
+    ran tests/dotfiles-freshness.tests.ps1 under a leak and compared the parent bare repo's
+    config before and after. With sync push (issue 214): check 1, which drove `sync.ps1 -Mode
+    push -Commit` — the only git call sync.ps1 ever made. Pull writes files and shells out to
+    no VCS, so nothing is left of it to redirect; lib/manifest.ps1 keeps Clear-GitEnv for the
+    helpers that still need it.
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tests\git-env-leak.tests.ps1
@@ -102,93 +103,6 @@ function Read-BareConfig {
 Write-Host ''
 Write-Host 'GIT-ENV LEAK TESTS'
 Write-Host ''
-
-# --------------------------------------------------------------------------------------- 1
-# sync.ps1 under a leaked GIT_DIR
-
-Write-Host 'sync.ps1: -Commit block operates on the target under GIT_DIR leak'
-$sandbox1 = New-Sandbox
-try {
-    $leakBare = New-LeakBareRepo -Root $sandbox1
-    $leakConfigBefore = Read-BareConfig -BareRoot $leakBare
-
-    # Real target: a dotfiles-shaped checkout with lib/, tools/, sync.ps1. sync.ps1's
-    # -Commit path expects a git repo at RepoRoot; give it one, seeded with the current
-    # RepoRoot's manifest.ps1 and sync.ps1 so the whole flow (Get-DotfileItems + git add
-    # + git commit) exercises the same code the real repo does.
-    $target = Join-Path $sandbox1 'target'
-    New-Item -ItemType Directory -Path $target -Force | Out-Null
-    & git -C $target init --quiet --initial-branch=master | Out-Null
-    & git -C $target config user.email 'target@example.com' | Out-Null
-    & git -C $target config user.name  'Target' | Out-Null
-
-    # Seed just enough of the repo shape that sync.ps1 push can run. It reads the whitelist
-    # from lib/manifest.ps1, so copy the real one plus lib/personal.ps1, plus sync.ps1
-    # itself. UserHome points at a freshly-seeded fake home; sync.ps1 will tokenize files
-    # into $target's mirror directories.
-    New-Item -ItemType Directory -Path (Join-Path $target 'lib') -Force | Out-Null
-    Copy-Item -Path (Join-Path $RepoRoot 'lib\manifest.ps1') -Destination (Join-Path $target 'lib\manifest.ps1')
-    Copy-Item -Path (Join-Path $RepoRoot 'lib\personal.ps1') -Destination (Join-Path $target 'lib\personal.ps1')
-    Copy-Item -Path (Join-Path $RepoRoot 'sync.ps1')        -Destination (Join-Path $target 'sync.ps1')
-    Set-Content -Path (Join-Path $target 'README.md') -Value 'seed' -Encoding utf8
-    & git -C $target add -A | Out-Null
-    & git -C $target commit --quiet -m 'seed target' | Out-Null
-
-    # Fake home with the minimum shape sync.ps1 expects to read.
-    $fakeHome = Join-Path $sandbox1 'home'
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.claude\hooks') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.claude\skills') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.claude\plugins') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.codex\hooks') -Force | Out-Null
-    New-Item -ItemType Directory -Path (Join-Path $fakeHome '.agents\skills') -Force | Out-Null
-    Set-Content -Path (Join-Path $fakeHome '.claude\CLAUDE.md') -Value '# fake' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.claude\settings.json') -Value '{ "hooks": {} }' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.claude\plugins\installed_plugins.json') -Value '{}' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.claude\plugins\known_marketplaces.json') -Value '{}' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.claude\hooks\dummy.js') -Value '// dummy' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.codex\hooks\dummy.py') -Value '# dummy' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.codex\hooks.json') -Value '{}' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.codex\config.toml') -Value 'note = "fake"' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.codex\AGENTS.md') -Value '# fake' -Encoding utf8
-    Set-Content -Path (Join-Path $fakeHome '.agents\skills\dummy.md') -Value '# fake' -Encoding utf8
-
-    # THE LEAK. From here on every git call inherits GIT_DIR pointing at the unrelated
-    # bare repo. `git -C $target` does NOT override this by itself; only the helper's
-    # own env-clear does.
-    $env:GIT_DIR = Join-Path $leakBare ''
-
-    # Capture the target's HEAD before the run; a successful commit will advance it.
-    $targetHeadBefore = (& git --git-dir (Join-Path $target '.git') rev-parse HEAD).Trim()
-
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    $syncPath = Join-Path $target 'sync.ps1'
-    $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $syncPath `
-                        -Mode push -Commit 'leak test: sync commit' -UserHome $fakeHome 2>&1 | Out-String
-    $syncExit = $LASTEXITCODE
-    $ErrorActionPreference = $prev
-    Remove-Item Env:\GIT_DIR -ErrorAction SilentlyContinue
-
-    $targetHeadAfter = (& git --git-dir (Join-Path $target '.git') rev-parse HEAD 2>&1 | Out-String).Trim()
-    $leakConfigAfter = Read-BareConfig -BareRoot $leakBare
-
-    Assert 'sync.ps1 exits 0 under GIT_DIR leak' ($syncExit -eq 0) `
-        (($out -split "`n") | Select-Object -Last 8 | Out-String)
-    Assert 'sync.ps1 advanced the TARGET repo HEAD (commit landed on target)' `
-        ($targetHeadAfter -ne $targetHeadBefore -and $targetHeadAfter -match '^[a-f0-9]{40}$') `
-        ("before={0}, after={1}" -f $targetHeadBefore, $targetHeadAfter)
-    Assert 'sync.ps1 did NOT write into the leaked bare repo config' `
-        ($leakConfigAfter -eq $leakConfigBefore) `
-        ("before={0}`nafter ={1}" -f $leakConfigBefore, $leakConfigAfter)
-    # A bare repo with a commit written into it would have grown a refs/heads/master; the
-    # bare shell should stay empty of refs. This catches the case where a config bytewise
-    # matches (git config idempotent write) but a commit still shipped.
-    $leakRefs = @(Get-ChildItem -Path (Join-Path $leakBare 'refs\heads') -Recurse -File -ErrorAction SilentlyContinue)
-    Assert 'sync.ps1 did NOT write a commit into the leaked bare repo' ($leakRefs.Count -eq 0) `
-        (($leakRefs | ForEach-Object { $_.FullName }) -join "`n")
-} finally {
-    Remove-Item -Path $sandbox1 -Recurse -Force -ErrorAction SilentlyContinue
-}
 
 # --------------------------------------------------------------------------------------- 2
 # tools/tracker-audit.js under a leaked GIT_DIR

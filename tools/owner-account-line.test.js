@@ -42,7 +42,7 @@ const {
 } = require('./owner-account-line.js');
 const { lint } = require('./claude-md-lint.js');
 
-// A minimal registry that mirrors the shape of claude/accounts.json without depending on the live
+// A minimal registry that mirrors the shape of profile/claude/accounts.json without depending on the live
 // file. Each account gets a distinct surface list so a swapped label produces a visibly different
 // line.
 function fixtureRegistry() {
@@ -310,8 +310,8 @@ test('checkAll: missing clone → skipped, not counted against exit code', () =>
   assert.equal(results.some((r) => r.status === 'skipped'), true);
 });
 
-test('checkAll: exercises every live repo in the real claude/accounts.json (registry drift guard)', () => {
-  const regPath = path.join(__dirname, '..', 'claude', 'accounts.json');
+test('checkAll: exercises every live repo in the real profile/claude/accounts.json (registry drift guard)', () => {
+  const regPath = path.join(__dirname, '..', 'profile', 'claude', 'accounts.json');
   if (!fs.existsSync(regPath)) return;
   const reg = JSON.parse(fs.readFileSync(regPath, 'utf8'));
   const live = liveRepos(reg);
@@ -541,15 +541,15 @@ test('readViaGithub: falls back to AGENTS.md on a CLAUDE.md 404, propagates non-
 // Real-file drift guard (issue 114, attempt 2 review fix): the prior attempt's
 // tests all synthesized their "actual" content from the registry via renderBlock,
 // so corrupting the real CLAUDE.md left the suite green. This test reads THIS
-// repo's own CLAUDE.md and claude/accounts.json off disk without synthesizing
+// repo's own CLAUDE.md and profile/claude/accounts.json off disk without synthesizing
 // either side, and fails if the block on disk disagrees with the registry. Hand
 // edit the block or the registry and this test goes red before commit.
 // -----------------------------------------------------------------------------
 
-test('drift-guard: THIS repo\'s CLAUDE.md carries the block claude/accounts.json says it should (no synthesis)', () => {
+test('drift-guard: THIS repo\'s CLAUDE.md carries the block profile/claude/accounts.json says it should (no synthesis)', () => {
   const repoRoot = path.join(__dirname, '..');
   const mdPath = path.join(repoRoot, 'CLAUDE.md');
-  const regPath = path.join(repoRoot, 'claude', 'accounts.json');
+  const regPath = path.join(repoRoot, 'profile', 'claude', 'accounts.json');
   assert.ok(fs.existsSync(mdPath), `expected ${mdPath} to exist`);
   assert.ok(fs.existsSync(regPath), `expected ${regPath} to exist`);
 

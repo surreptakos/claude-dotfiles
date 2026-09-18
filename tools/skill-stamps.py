@@ -20,12 +20,12 @@ or a second edit) still lands one revision bump with `previous-modified` naming 
 version. `check` only reports, exit 1 on any skill that was edited without a re-stamp or never
 stamped.
 
-The packager (tools/build-cloud-plugin.py) stamps every source skill on each build, so a normal
-`sync.ps1 -Mode push` keeps the stamps current with no one remembering to. This CLI exists for the
-hand-edited aac-skills/ tree on a cloud branch, where no push runs, and for CI.
+The packager (tools/build-cloud-plugin.py) stamps every source skill on each build, so rebuilding
+the plugin keeps the stamps current with no one remembering to. This CLI exists for checking a
+branch that edited aac-skills/ without rebuilding, and for CI.
 
 Usage (`--home` names the OWNER's home, not the container's - see below):
-    python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\\Users\\Dan'
+    python3 tools/skill-stamps.py stamp aac-skills aac-skills claude/skills --home 'C:\\Users\\Dan'
     python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'  # exit 1 on drift, writes nothing
     python3 tools/skill-stamps.py check aac-skills --json                  # machine-readable report
 

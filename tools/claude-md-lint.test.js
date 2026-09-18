@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 
-const { lint, repoContext, warnOnlyFor, DEFAULTS, RULES, WARN_ONLY_DEFAULT, MIRROR_REVISION } = require('./claude-md-lint.js');
+const { lint, repoContext, warnOnlyFor, DEFAULTS, RULES, WARN_ONLY_DEFAULT } = require('./claude-md-lint.js');
 const REPO = path.join(__dirname, '..');
 const CLI = path.join(__dirname, 'claude-md-lint.js');
 
@@ -264,55 +264,43 @@ test('repoContext: reads package.json and finds formatter configs beside the fil
   }
 });
 
-test('the claude-md-lint skill copy is byte-identical, or declares itself a revision behind', () => {
-  // The skill (mirrored in this repo as claude/skills/claude-md-lint) is how other repos and cloud
-  // sessions run this; tools/ is where it is tested. Same pattern as the ticket-fleet copies: two
-  // files, one assertion, no silent drift. Only the in-repo mirror is compared — never the live
-  // ~/.claude copy: that copy is shared across every worktree of this repo, so a concurrent fleet
-  // worker's live edit would fail the restore test in every other worktree on a repo that is
-  // fine (issue 134). A fresh CI clone with no mirror still passes.
-  //
-  // The mirror is generated: only `sync.ps1 -Mode push` on the owner's machine can refresh it, so
-  // a branch that edits tools/ cannot make the bytes agree (hand-editing claude/ is the one rule).
-  // A difference is therefore allowed while tools/ carries a higher MIRROR_REVISION than the
-  // mirror — a bump the diff shows, which the next push clears. Equal revisions with different
-  // bytes, or a mirror ahead, is the silent drift this test exists to catch.
+test('the claude-md-lint skill copy is byte-identical to tools/', () => {
+  // The skill (aac-skills/claude-md-lint) is how other repos and cloud sessions run this; tools/
+  // is where it is tested. One tree since issue 214: both copies are hand-edited on the same
+  // branch, so a change to one has no excuse for not reaching the other and this is a straight
+  // equality. A fresh clone with no skill tree still passes.
   const here = fs.readFileSync(path.join(__dirname, 'claude-md-lint.js'), 'utf8');
-  const mirrorPath = path.join(REPO, 'claude', 'skills', 'claude-md-lint', 'claude-md-lint.js');
-  if (!fs.existsSync(mirrorPath)) return;
-  const mirror = fs.readFileSync(mirrorPath, 'utf8');
-  if (mirror === here) return;
-  const revOf = (t) => { const m = t.match(/^const MIRROR_REVISION = (\d+);$/m); return m ? Number(m[1]) : 0; };
-  assert.equal(revOf(here), MIRROR_REVISION);
-  assert.ok(
-    revOf(mirror) < MIRROR_REVISION,
-    `${mirrorPath} differs from tools/claude-md-lint.js at the same MIRROR_REVISION (${revOf(mirror)}) — undeclared drift; run sync.ps1 -Mode push from the owner's machine, or bump MIRROR_REVISION here if tools/ is deliberately ahead`
+  const skillPath = path.join(REPO, 'aac-skills', 'claude-md-lint', 'claude-md-lint.js');
+  if (!fs.existsSync(skillPath)) return;
+  assert.equal(
+    fs.readFileSync(skillPath, 'utf8'), here,
+    `${skillPath} differs from tools/claude-md-lint.js — copy tools/claude-md-lint.js over it and re-stamp the skill`
   );
 });
 
-test('warn-only: per-file default, path default for the mirror, --warn-only override', () => {
+test('warn-only: per-file default, path default for the global rules, --warn-only override', () => {
   assert.deepEqual([...warnOnlyFor('CLAUDE.md')], [...WARN_ONLY_DEFAULT]);
   assert.deepEqual([...warnOnlyFor('docs/whatever/CLAUDE.md')], [...WARN_ONLY_DEFAULT]);
-  const mirror = ['size', 'volatile', 'code-derivable', 'tutorial'];
-  assert.deepEqual([...warnOnlyFor('claude/CLAUDE.md')], mirror);
-  assert.deepEqual([...warnOnlyFor('C:\\repo\\claude\\CLAUDE.md')], mirror);
-  assert.deepEqual([...warnOnlyFor('claude/CLAUDE.md', [])], []);
+  const globalRules = ['size', 'volatile', 'code-derivable', 'tutorial'];
+  assert.deepEqual([...warnOnlyFor('profile/claude/CLAUDE.md')], globalRules);
+  assert.deepEqual([...warnOnlyFor('C:\\repo\\profile\\claude\\CLAUDE.md')], globalRules);
+  assert.deepEqual([...warnOnlyFor('profile/claude/CLAUDE.md', [])], []);
   assert.deepEqual([...warnOnlyFor('CLAUDE.md', ['volatile'])], ['volatile']);
 });
 
 test('CLI exit code: warn-only findings print but do not gate; gating findings still do', () => {
-  // Direction 1 (issue 337): the mirror's findings are all warn-only for that path, so the linter
-  // agrees with the restore suite's gate instead of reporting a healthy file as failing.
-  const mirror = path.join(REPO, 'claude', 'CLAUDE.md');
-  if (fs.existsSync(mirror)) {
-    const run = spawnSync(process.execPath, [CLI, 'claude/CLAUDE.md'], { cwd: REPO, encoding: 'utf8' });
+  // Direction 1 (issue 337): the global rules text's findings are all warn-only for that path, so
+  // the linter agrees with the restore suite's gate instead of reporting a healthy file as failing.
+  const rel = 'profile/claude/CLAUDE.md';
+  if (fs.existsSync(path.join(REPO, 'profile', 'profile', 'claude', 'CLAUDE.md'))) {
+    const run = spawnSync(process.execPath, [CLI, rel], { cwd: REPO, encoding: 'utf8' });
     const printed = run.stdout.split('\n').map((l) => l.split('\t')).filter((p) => p.length === 3);
-    const warn = warnOnlyFor('claude/CLAUDE.md');
-    assert.ok(printed.length > 0, 'the mirror still prints its findings');
+    const warn = warnOnlyFor(rel);
+    assert.ok(printed.length > 0, 'the global rules text still prints its findings');
     assert.deepEqual(printed.filter((p) => !warn.has(p[1])), []);
     assert.equal(run.status, 0, run.stdout + run.stderr);
     // ...and every rule still gates when the warn set is emptied.
-    assert.equal(spawnSync(process.execPath, [CLI, 'claude/CLAUDE.md', '--warn-only', ''], { cwd: REPO, encoding: 'utf8' }).status, 1);
+    assert.equal(spawnSync(process.execPath, [CLI, rel, '--warn-only', ''], { cwd: REPO, encoding: 'utf8' }).status, 1);
   }
 
   // Direction 2: a root CLAUDE.md with an unsuppressed gating finding still exits 1, and the same

@@ -4,7 +4,7 @@
  *
  * Thin wrapper over the shared engine at ~/.claude/skills/consistency-audit/claims-audit.js —
  * the installed copy the sync pipeline lands on every machine (this repo also carries its mirror
- * at claude/skills/consistency-audit/claims-audit.js, and tests/claims-audit.test.js is that
+ * at aac-skills/consistency-audit/claims-audit.js, and tests/claims-audit.test.js is that
  * ENGINE's own unit suite; this file is different — it audits THIS repo's docs). The engine runs
  * from repo root, reads docs/claims.json, and exits 0 clean / 1 findings (one tab-separated line
  * each: "<claimId>\t<doc>:<line>\t<message>") / 2 config error.
@@ -26,7 +26,7 @@ const ROOT = path.join(__dirname, '..');
 // own mirror so a fresh clone — or a CI runner with no ~/.claude — still audits with the same
 // engine the sync would install. Only a machine with NEITHER fails.
 const HOME_ENGINE = path.join(os.homedir(), '.claude', 'skills', 'consistency-audit', 'claims-audit.js');
-const MIRROR_ENGINE = path.join(ROOT, 'claude', 'skills', 'consistency-audit', 'claims-audit.js');
+const MIRROR_ENGINE = path.join(ROOT, 'aac-skills', 'consistency-audit', 'claims-audit.js');
 const ENGINE = fs.existsSync(HOME_ENGINE) ? HOME_ENGINE : MIRROR_ENGINE;
 
 test('docs/claims.json verifies clean', () => {

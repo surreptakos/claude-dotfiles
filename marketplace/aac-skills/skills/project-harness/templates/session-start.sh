@@ -29,7 +29,7 @@
 #
 # Local sessions exit immediately: ~/.claude is authored there, not delivered.
 #
-# What this hook deliberately does NOT deliver: custom agent types (`claude/agents/` in the
+# What this hook deliberately does NOT deliver: custom agent types (`profile/claude/agents/` in the
 # dotfiles repo). Custom agent types are a desktop-only facility and no plugin-served script
 # may pin a dotfiles-defined `agentType` for a cloud session. The reason is timing, not
 # paths: Claude Code reads the agent registry BEFORE SessionStart hooks run, so anything this
@@ -39,7 +39,7 @@
 # SessionStart hook wrote the identical file answered "Agent type 'exp-probe' not found.
 # Available agents: claude, claude-code-guide, Explore, general-purpose, Plan,
 # statusline-setup" although the file was on disk when the run ended; a second session over
-# that same config dir resolved it. Copying claude/agents/ here would therefore buy a
+# that same config dir resolved it. Copying profile/claude/agents/ here would therefore buy a
 # capability that works only from the second session onward in a container - exactly the
 # "looks available and silently is not" state issue 339 was filed against. Step 6 states the
 # limitation in the additionalContext line instead.

@@ -35,7 +35,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 // The mirror of ~/.claude/skills first, the built plugin payload second. skill-stamps.yml fails
 // any branch where those two disagree, so which one runs is not a behavioural choice.
 const SCRIPT_CANDIDATES = [
-  'agents/skills/session-end/sweep-closed-to-done.js',
+  'aac-skills/session-end/sweep-closed-to-done.js',
   'marketplace/aac-skills/skills/session-end/sweep-closed-to-done.js',
 ];
 

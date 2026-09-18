@@ -2,17 +2,13 @@
 name: session-end
 description: Re-print the end-of-session checks for a git project — whether anything is uncommitted or unpushed, whether tests and release gates pass, and whether the tracker is clean. The checks already run automatically when a turn reads as wrapping up; use this to see them again or to force a fresh run.
 metadata:
-  modified: '2026-09-18T05:08:35Z'
-  previous-modified: '2026-09-18T05:04:58Z'
-  revision: '16'
-  content-sha: c4aeaa2950f4
+  modified: "2026-09-18T05:08:35Z"
+  previous-modified: "2026-09-18T05:04:58Z"
+  revision: "16"
+  content-sha: "c4aeaa2950f4"
 ---
 
 # Finish a session
-
-> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below
-> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
-> every run is fresh.
 
 **The checks are a hook.** `~/.claude/hooks/session-gate.js prompt` watches for wrap-up wording
 ("wrap up", "done for now", "anything left", "handing off", `/session-end`) and runs the end checks
@@ -23,13 +19,13 @@ abrupt exit still leaves a record.
 To see it again, or to re-run after committing or pushing:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end
+node ~/.claude/hooks/session-gate.js report --end
 ```
 
 Add `--refresh` to force a fresh run — do that after any commit or push, since the point of the
 check is the state of the tree *now*. If that hook file does not exist (a cloud container with the
 skills but not the hooks), run the engine directly — same report, always fresh:
-`node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end`. If that path is missing too, the plugin did
+`node ~/.claude/skills/session-check/check.js --end`. If that path is missing too, the plugin did
 not load (claude-dotfiles#157): clone `surreptakos/claude-dotfiles` and run
 `marketplace/aac-skills/skills/session-check/check.js --end` from that clone, and say so in the report.
 
@@ -75,7 +71,7 @@ GraphQL-backed spellings listed in the cloud section below need a substitute):
 6. **Move CLOSED items to Done on the project board** — issues/PRs closed off-board leave stale
    Todo/In-Progress cards that clog the board. Run:
    ```bash
-   node ${CLAUDE_PLUGIN_ROOT}/skills/session-end/sweep-closed-to-done.js --apply
+   node ~/.claude/skills/session-end/sweep-closed-to-done.js --apply
    ```
    Zero configuration: auto-discovers every open ProjectsV2 board linked to the repo's `origin`
    remote and sweeps each. A linked board it cannot sweep - no `Status`/`Done` option, or a `gh`
@@ -183,7 +179,7 @@ GraphQL-backed spellings listed in the cloud section below need a substitute):
     never does — patch-id evidence or nothing — and neither does a session: stranded work belongs on
     the sweep's issue, by branch name, with its unique commits.
 
-12. **Re-run the end check** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end` — and report
+12. **Re-run the end check** — `node ~/.claude/hooks/session-gate.js report --end` — and report
     the result. Add `--refresh` only when steps 1–11 committed, pushed, or otherwise moved the
     tree; otherwise the report the hook ran on this prompt is still the state of the tree and is
     reused inside its five-minute cooldown. A refresh on a clean, pushed head costs git and
@@ -427,6 +423,6 @@ Then watch the first real piece of work through it.
 
 - `/session-start`
 - `/update-cloud-plugin` — closes a stale cloud plugin the sweep found
-- `${CLAUDE_PLUGIN_ROOT}/skills/session-check/cloud-plugin-sweep.js` — the sweep itself; `--stamp` after a
+- `~/.claude/skills/session-check/cloud-plugin-sweep.js` — the sweep itself; `--stamp` after a
   verified upload, `--json` for tooling
 - A project may have its own `docs/runbooks/session.md`

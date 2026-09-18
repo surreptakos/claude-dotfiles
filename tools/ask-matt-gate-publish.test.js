@@ -13,7 +13,7 @@
  * TICKET_FLOWS, and both must appear in each hint string so a session finds them by reading the
  * prompt. The tests below fail if either route is missing from either set.
  *
- * The tests drive `codex/hooks/ask_matt_gate.py` in `claude-pre-tool` mode with a synthetic
+ * The tests drive `profile/codex/hooks/ask_matt_gate.py` in `claude-pre-tool` mode with a synthetic
  * Bash event and read the JSON decision. Pure end-to-end against the gate — no unit-level
  * imports — so the wiring the shell actually hits is what gets covered.
  */
@@ -27,7 +27,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 
 const REPO = path.resolve(__dirname, '..');
-const GATE = path.join(REPO, 'codex', 'hooks', 'ask_matt_gate.py');
+const GATE = path.join(REPO, 'profile', 'codex', 'hooks', 'ask_matt_gate.py');
 
 function pyCmd() {
   // `py -3` on Windows, `python3` elsewhere.

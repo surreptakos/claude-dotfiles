@@ -16,7 +16,6 @@
       0  the clone materialized the exact bytes that were pushed (clone modes only)
       1  install.ps1 exits 0
       2  every whitelisted item landed, with the same file count as the repo
-      3  memory slugs were de-tokenized back into real project directory names
       4  no __USERHOME* token survives in any restored file
       5  no real-home path survives in any restored file
       6  settings.json parses, and every absolute path in it points inside the fake home
@@ -66,13 +65,12 @@ param(
     #   secret       a credential value reached the repo              -> check 8
     #   drift        a restored file does not round-trip              -> check 7
     #   broken-hook  a restored hook is present but not runnable      -> check 9
-    #   dead-link    a junctioned skill's target never travelled      -> check 6b
     #   collision    two overlapping runs share one scratch root      -> check 10
     #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
     #   lint-root    unsuppressed finding planted in the root CLAUDE.md   -> claude-md-lint gate
-    #   lint-mirror  unsuppressed finding planted in claude/CLAUDE.md     -> claude-md-lint gate
+    #   lint-mirror  unsuppressed finding planted in profile/claude/CLAUDE.md     -> claude-md-lint gate
     #   sandbox-identity  the test suites' user.email is what this checkout would commit as -> check 0-pre2
-    [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook', 'dead-link',
+    [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity')]
     [string]$Fault = 'none',
 
@@ -310,7 +308,7 @@ Write-Host ''
 if ($Fault -eq 'crlf') {
     # What an unpinned checkout under core.autocrlf=true did to every LF file: rewrite the
     # bytes on the way out of git. Flip one cloned file's endings, whichever way they point.
-    $victim = Join-Path $Clone 'claude\CLAUDE.md'
+    $victim = Join-Path $Clone 'profile\claude\CLAUDE.md'
     $text   = [System.IO.File]::ReadAllText($victim)
     if ($text.Contains("`r`n")) { $text = $text.Replace("`r`n", "`n") }
     else                        { $text = $text.Replace("`n", "`r`n") }
@@ -319,7 +317,7 @@ if ($Fault -eq 'crlf') {
 }
 if ($Fault -eq 'home-leak') {
     # What a copy that bypassed Copy-OneFile would leave behind: this machine's home, verbatim.
-    Set-Content -Path (Join-Path $Clone 'claude\skills\leak-probe.md') `
+    Set-Content -Path (Join-Path $Clone 'aac-skills\leak-probe.md') `
                 -Value ("Log at {0}\.claude\hook-state\probe.log" -f $RealHome) -Encoding utf8
     Note 'fault: planted a raw real-home path in the repo'
 }
@@ -327,17 +325,8 @@ if ($Fault -eq 'secret') {
     # Assembled rather than written out, because a literal credential pair in this file would
     # trip the repo's own secret guard on the next push - which is the guard working correctly.
     $pair = '{ "' + 'refresh' + '_token": "' + ('A1b2C3d4E5' * 3) + '" }'
-    Set-Content -Path (Join-Path $Clone 'claude\skills\secret-probe.json') -Value $pair -Encoding utf8
+    Set-Content -Path (Join-Path $Clone 'aac-skills\secret-probe.json') -Value $pair -Encoding utf8
     Note 'fault: planted a credential value in the repo'
-}
-if ($Fault -eq 'dead-link') {
-    # Has to be a directory something actually links TO. agents/skills holds more skills than
-    # ~/.claude/skills junctions to, so picking the first directory there hits a non-linked one
-    # and the fault quietly does nothing - which it did, the first time.
-    $link   = (Read-JsonArray -Path (Join-Path $Clone 'claude\skill-links.json'))[0]
-    $victim = Join-Path $Clone ('agents\skills\' + (Split-Path $link.Target -Leaf))
-    Remove-Item -Path $victim -Recurse -Force
-    Note ('fault: removed a junction target from the repo - ' + $link.Name)
 }
 Write-Host ''
 
@@ -379,9 +368,8 @@ Write-Host ''
 # Issue #9: pull refreshes ~/.claude-personal when it exists, and must not create one when it
 # does not. A fresh fake home would exercise only the skip path, which proves nothing about the
 # refresh - so seed a minimal personal profile carrying exactly what the refresh must preserve:
-# a personal pref in settings.json, a stale hooks key that must be replaced and rewritten, and a
-# personal-only memory file with its own MEMORY.md pointer line. The checks in section 6c read
-# these back after the install.
+# a personal pref in settings.json and a stale hooks key that must be replaced and rewritten.
+# The checks in section 6c read these back after the install.
 $FakePersonal = Join-Path $FakeHome '.claude-personal'
 New-Item -ItemType Directory -Path (Join-Path $FakePersonal 'hooks') -Force | Out-Null
 $seedSettings = @'
@@ -405,21 +393,6 @@ $seedSettings = @'
 Set-Content -Path (Join-Path $FakePersonal 'CLAUDE.md') `
             -Value "STALE personal CLAUDE.md - issue 40 refresh must remove this file, not keep it in sync" `
             -Encoding utf8
-
-# The seed memory lives under a slug the work profile also restores, so the union merge runs on it.
-$seedSourceDir = Get-ChildItem -Path (Join-Path $Clone 'memory') -Directory -ErrorAction SilentlyContinue |
-    Where-Object { Test-Path (Join-Path $_.FullName 'MEMORY.md') } | Select-Object -First 1
-$seedSlug = ''
-$seedMem  = ''
-if ($null -ne $seedSourceDir) {
-    $seedSlug = ConvertFrom-TokenSlug -Slug $seedSourceDir.Name -UserHome $FakeHome
-    $seedMem  = Join-Path $FakePersonal ("projects\" + $seedSlug + "\memory")
-    New-Item -ItemType Directory -Path $seedMem -Force | Out-Null
-    Set-Content -Path (Join-Path $seedMem 'personal-only-note.md') `
-                -Value 'personal-only memory - must survive the refresh untouched' -Encoding utf8
-    Set-Content -Path (Join-Path $seedMem 'MEMORY.md') `
-                -Value '- [Personal-only note](personal-only-note.md) - stays out of the work profile' -Encoding utf8
-}
 
 # ------------------------------------------------------------------ 1. run the installer
 
@@ -468,25 +441,6 @@ foreach ($item in (Get-DotfileItems -RepoRoot $Clone -UserHome $FakeHome)) {
     }
 }
 
-$memoryRoot = Join-Path $Clone 'memory'
-$memoryDirs = @()
-if (Test-Path $memoryRoot) {
-    $memoryDirs = Get-ChildItem -Path $memoryRoot -Directory
-    foreach ($dir in $memoryDirs) {
-        $slug   = ConvertFrom-TokenSlug -Slug $dir.Name -UserHome $FakeHome
-        $target = Join-Path $FakeHome (".claude\projects\" + $slug + "\memory")
-        Get-ChildItem -Path $dir.FullName -Recurse -File | ForEach-Object {
-            $relative = $_.FullName.Substring($dir.FullName.Length).TrimStart('\')
-            if (Test-Excluded -RelativePath $relative) { return }
-            $pairs += [pscustomobject]@{
-                Repo  = $_.FullName
-                Local = (Join-Path $target $relative)
-                Group = 'memory'
-            }
-        }
-    }
-}
-
 # ------------------------------------------------------------------ 2. everything landed
 
 Write-Host ''
@@ -515,22 +469,6 @@ $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction Silently
                              $_.FullName -notlike '*\.claude.json.bak-*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
-
-# ------------------------------------------------------------------ 3. slugs de-tokenized
-
-Write-Host ''
-Write-Host 'Path templating'
-$stillTokenised = @(Get-ChildItem -Path $FakeHome -Recurse -Directory -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Name -like '*__USERHOME*' } | ForEach-Object { $_.FullName })
-Check 'no memory directory kept its __USERHOME_SLUG__ name' ($stillTokenised.Count -eq 0) $stillTokenised
-
-$fakeSlug = (Get-HomeForms -UserHome $FakeHome).Slug
-$badSlug  = @()
-foreach ($dir in $memoryDirs) {
-    $slug = ConvertFrom-TokenSlug -Slug $dir.Name -UserHome $FakeHome
-    if (-not $slug.StartsWith($fakeSlug)) { $badSlug += ("{0} -> {1}" -f $dir.Name, $slug) }
-}
-Check ("all {0} memory slugs re-slugged onto the new username" -f $memoryDirs.Count) ($badSlug.Count -eq 0) $badSlug
 
 # ------------------------------------------------------------------ 4/5. no residue
 
@@ -671,46 +609,34 @@ if (Test-Path $codexConfig) {
     Check 'every user-profile path in it points inside the fake home' ($badPaths.Count -eq 0) $badPaths
 }
 
-# ------------------------------------------------------------------ 6b. skill junctions
+# ------------------------------------------------------------------ 6b. skills are really there
 
-# The check that would have caught the original hole: most flow skills reach ~/.claude/skills
-# through a junction, and a junction is invisible to a file copy. Present-and-empty is the
-# failure mode to look for, so this asserts the target resolves and carries a SKILL.md.
+# The check that would have caught the original hole: most flow skills used to reach
+# ~/.claude/skills through a junction, and a junction is invisible to a file copy. One tree since
+# issue 214, so pull writes real directories - and present-and-empty is still the failure mode to
+# look for, so this asserts each restored skill carries a SKILL.md.
 Write-Host ''
-Write-Host 'Skill junctions'
-$linkFile = Join-Path $Clone 'claude\skill-links.json'
-if (-not (Test-Path $linkFile)) {
-    Check 'claude/skill-links.json is in the repo' $false @('push never recorded the junctions')
-} else {
-    $links = Read-JsonArray -Path $linkFile
-    Check 'skill-links.json lists the junctions' ($links.Count -gt 0)
-    $broken = @()
-    foreach ($link in $links) {
-        $linkPath = Join-Path $FakeHome (".claude\skills\" + $link.Name)
-        if (-not (Test-Path $linkPath)) { $broken += ("{0}: not recreated" -f $link.Name); continue }
-        $item = Get-Item $linkPath -Force
-        if (-not (Test-IsLink -Item $item)) {
-            $broken += ("{0}: exists but is not a link" -f $link.Name); continue
-        }
-        $target = Get-LinkTarget -Item $item
-        if (-not $target.ToLower().StartsWith($FakeHome.ToLower())) {
-            $broken += ("{0}: points outside the fake home - {1}" -f $link.Name, $target); continue
-        }
-        if (-not (Test-Path (Join-Path $linkPath 'SKILL.md'))) {
-            $broken += ("{0}: link resolves to nothing readable" -f $link.Name)
-        }
+Write-Host 'Skills'
+$repoSkills = @(Get-ChildItem -Path (Join-Path $Clone 'aac-skills') -Directory -ErrorAction SilentlyContinue)
+$emptySkills = @()
+foreach ($skill in $repoSkills) {
+    if (-not (Test-Path (Join-Path $skill.FullName 'SKILL.md'))) { continue }
+    $restoredSkill = Join-Path $FakeHome ('.claude\skills\' + $skill.Name)
+    if (-not (Test-Path (Join-Path $restoredSkill 'SKILL.md'))) {
+        $emptySkills += ("{0}: no SKILL.md under the restored home" -f $skill.Name)
     }
-    Check ("all {0} junctioned skills resolve to a real SKILL.md" -f $links.Count) ($broken.Count -eq 0) $broken
-
-    # The flows the global CLAUDE.md names by name. If these are missing the machine restores
-    # into a configuration whose own rules point at skills that are not there.
-    $required = @('ask-matt', 'implement', 'tdd', 'triage', 'handoff', 'to-spec', 'to-tickets',
-                  'code-review', 'diagnosing-bugs', 'grill-with-docs', 'wayfinder', 'research')
-    $absentFlows = @($required | Where-Object {
-        -not (Test-Path (Join-Path $FakeHome (".claude\skills\" + $_ + "\SKILL.md")))
-    })
-    Check 'every flow skill named in the global CLAUDE.md is invocable' ($absentFlows.Count -eq 0) $absentFlows
 }
+Check ("all {0} skills in aac-skills/ restored with a readable SKILL.md" -f $repoSkills.Count) `
+    (($repoSkills.Count -gt 0) -and ($emptySkills.Count -eq 0)) $emptySkills
+
+# The flows the global CLAUDE.md names by name. If these are missing the machine restores
+# into a configuration whose own rules point at skills that are not there.
+$required = @('ask-matt', 'implement', 'tdd', 'triage', 'handoff', 'to-spec', 'to-tickets',
+              'code-review', 'diagnosing-bugs', 'grill-with-docs', 'wayfinder', 'research')
+$absentFlows = @($required | Where-Object {
+    -not (Test-Path (Join-Path $FakeHome ('.claude\skills\' + $_ + '\SKILL.md')))
+})
+Check 'every flow skill named in the global CLAUDE.md is invocable' ($absentFlows.Count -eq 0) $absentFlows
 
 # ------------------------------------------------------------------ 6b2. PowerShell profiles
 
@@ -747,25 +673,6 @@ Check 'Get-DocumentsPath keeps a foreign home inside that home' `
 Check 'Get-DocumentsPath asks the shell for the real profile' `
     ($docsReal -eq [Environment]::GetFolderPath('MyDocuments')) @("resolved to $docsReal")
 
-# ------------------------------------------------------------------ 6b3. skill-links formatting
-
-# ConvertTo-Json indents four spaces on 5.1 and two on 7, so the generated file used to churn
-# whole-file depending on which shell ran the push. The writer is pinned; assert the bytes.
-Write-Host ''
-Write-Host 'skill-links.json formatting'
-
-$sampleLinks = @(
-    [pscustomobject]@{ Name = 'a';    Target = '__USERHOME__\.agents\skills\a' }
-    [pscustomobject]@{ Name = 'b"q';  Target = "x`ty" }
-)
-$pinned = ConvertTo-SkillLinkJson -Links $sampleLinks
-# The CRLF sits between the line text and the \n that (?m)$ anchors to, so \r? is not optional here.
-Check 'pinned writer emits two-space indent'  ($pinned -match '(?m)^  \{\r?$')
-Check 'pinned writer emits CRLF'              ($pinned.Contains("`r`n") -and $pinned -notmatch "(?<!`r)`n")
-Check 'pinned writer escapes quote and tab'   ($pinned.Contains('"b\"q"') -and $pinned.Contains('"x\ty"'))
-$parsed = @($pinned | ConvertFrom-Json | ForEach-Object { $_ })
-Check 'pinned writer round-trips as JSON'     ($parsed.Count -eq 2 -and $parsed[1].Name -eq 'b"q')
-
 # ------------------------------------------------------------------ 6b4. global CLAUDE.md single-load (issue 40)
 
 # Regression check for /doctor's finding of 2026-08-28: with CLAUDE_CONFIG_DIR=~/.claude-personal
@@ -775,14 +682,14 @@ Check 'pinned writer round-trips as JSON'     ($parsed.Count -eq 2 -and $parsed[
 # work-active scenario does not fire. The fix: Update-PersonalProfile removes any CLAUDE.md at
 # the personal path (backed up first), so the ancestor scan is the single source in a personal-
 # active session with cwd under $HOME. The reopen constraint: the work-profile CLAUDE.md at
-# ~/.claude/CLAUDE.md must NOT be deleted as an "orphan" by pull, because push reads only there
-# and it is the machine's live source of truth.
+# ~/.claude/CLAUDE.md must NOT be deleted as an "orphan" by pull - it is what the session
+# actually loads.
 Write-Host ''
 Write-Host 'Global CLAUDE.md single-load (issue 40)'
 Check 'personal CLAUDE.md removed after refresh (no CLAUDE_CONFIG_DIR=personal double-load)' `
     (-not (Test-Path (Join-Path $FakePersonal 'CLAUDE.md'))) `
     @('~/.claude-personal/CLAUDE.md still present - a personal-active session would load global memory twice')
-Check 'work-profile CLAUDE.md at ~/.claude/CLAUDE.md survives (push source of truth, not an orphan)' `
+Check 'work-profile CLAUDE.md at ~/.claude/CLAUDE.md survives (not an orphan)' `
     (Test-Path (Join-Path $FakeHome '.claude\CLAUDE.md')) `
     @('~/.claude/CLAUDE.md missing - pull treated the active-profile source of truth as an orphan and removed it')
 
@@ -860,55 +767,22 @@ foreach ($command in $pCommands) {
 Check ("all {0} personal hook commands are rewritten to .claude-personal and resolve" -f $pCommands.Count) `
     ($pCmdBad.Count -eq 0) $pCmdBad
 
-$pLinksBad = @()
-$workJunctions = @(Get-ChildItem -Path (Join-Path $FakeHome '.claude\skills') -Directory -Force |
-                   Where-Object { Test-IsLink -Item $_ })
-foreach ($junction in $workJunctions) {
-    $twin = Join-Path $FakePersonal ('skills\' + $junction.Name)
-    if (-not (Test-Path $twin)) { $pLinksBad += ("{0}: not created" -f $junction.Name); continue }
-    $item = Get-Item $twin -Force
-    if (-not (Test-IsLink -Item $item)) { $pLinksBad += ("{0}: exists but is not a link" -f $junction.Name); continue }
-    if ((Get-LinkTarget -Item $item) -ne (Get-LinkTarget -Item $junction)) {
-        $pLinksBad += ("{0}: different target" -f $junction.Name); continue
-    }
+$pSkillsBad = @()
+$workSkills = @(Get-ChildItem -Path (Join-Path $FakeHome '.claude\skills') -Directory -Force |
+                Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') })
+foreach ($skill in $workSkills) {
+    $twin = Join-Path $FakePersonal ('skills\' + $skill.Name)
     if (-not (Test-Path (Join-Path $twin 'SKILL.md'))) {
-        $pLinksBad += ("{0}: link resolves to nothing readable" -f $junction.Name)
+        $pSkillsBad += ("{0}: not overlaid into the personal profile" -f $skill.Name); continue
+    }
+    $workBytes = [System.IO.File]::ReadAllBytes((Join-Path $skill.FullName 'SKILL.md'))
+    $twinBytes = [System.IO.File]::ReadAllBytes((Join-Path $twin 'SKILL.md'))
+    if (-not [System.Linq.Enumerable]::SequenceEqual($workBytes, $twinBytes)) {
+        $pSkillsBad += ("{0}: personal copy differs from the work profile's" -f $skill.Name)
     }
 }
-Check ("all {0} personal skill junctions mirror the work profile's" -f $workJunctions.Count) `
-    (($workJunctions.Count -gt 0) -and ($pLinksBad.Count -eq 0)) $pLinksBad
-
-$pMemOk = $false; $pMemDetail = @()
-if ($null -ne $seedSourceDir) {
-    $workMem = Join-Path $FakeHome ('.claude\projects\' + $seedSlug + '\memory')
-    $missingInPersonal = @(Get-ChildItem -Path $workMem -File |
-                           Where-Object { -not (Test-Path (Join-Path $seedMem $_.Name)) } |
-                           ForEach-Object { $_.Name })
-    $noteSurvived = Test-Path (Join-Path $seedMem 'personal-only-note.md')
-    $index = ''
-    if (Test-Path (Join-Path $seedMem 'MEMORY.md')) {
-        $index = [System.IO.File]::ReadAllText((Join-Path $seedMem 'MEMORY.md'))
-    }
-    $unionHasPersonal = $index.Contains('(personal-only-note.md)')
-    $workIndexTargets = @()
-    if (Test-Path (Join-Path $workMem 'MEMORY.md')) {
-        $workIndexTargets = @(([regex]'\]\(([^)]+\.md)\)').Matches(
-            [System.IO.File]::ReadAllText((Join-Path $workMem 'MEMORY.md'))) |
-            ForEach-Object { $_.Groups[1].Value })
-    }
-    $unionHasWork = (@($workIndexTargets | Where-Object { -not $index.Contains('(' + $_ + ')') }).Count -eq 0)
-    $pMemOk = ($missingInPersonal.Count -eq 0) -and $noteSurvived -and $unionHasPersonal -and $unionHasWork
-    if (-not $pMemOk) {
-        $pMemDetail = @(
-            ("work files missing in personal: {0}" -f ($missingInPersonal -join ', ')),
-            ("personal-only note survived: {0}" -f $noteSurvived),
-            ("index keeps the personal pointer line: {0}" -f $unionHasPersonal),
-            ("index keeps every work pointer line: {0}" -f $unionHasWork))
-    }
-} else {
-    $pMemDetail = @('no repo memory dir with a MEMORY.md to seed against')
-}
-Check 'personal memory is a union: work files in, personal-only file and pointer line kept' $pMemOk $pMemDetail
+Check ("all {0} work skills are overlaid byte-for-byte into the personal profile" -f $workSkills.Count) `
+    (($workSkills.Count -gt 0) -and ($pSkillsBad.Count -eq 0)) $pSkillsBad
 
 # ------------------------------------------------------------------ 7. round trip is lossless
 
@@ -1019,14 +893,14 @@ if (Test-Path $mdLintTest) {
 }
 
 # Issue 97: the linter gates the checked-in instruction files. Root CLAUDE.md and the mirrored
-# global claude/CLAUDE.md are both linted; any unsuppressed finding whose rule is not in the
+# global profile/claude/CLAUDE.md are both linted; any unsuppressed finding whose rule is not in the
 # warn-only set fails the run with the file and line named. `size` warns on both files - the
 # decision is stated in the project's CLAUDE.md next to the linter's entry. The mirror also
 # warns on volatile, code-derivable and tutorial, because it is a byte copy of Dan's personal
 # ~/.claude/CLAUDE.md whose text quotes counterexamples that trip those regexes ("3 of 5",
 # "halfway done", `func()` accepts ...). Every other rule stays blocking on both files.
 $rootLintTarget   = Join-Path $Clone 'CLAUDE.md'
-$mirrorLintTarget = Join-Path $Clone 'claude\CLAUDE.md'
+$mirrorLintTarget = Join-Path $Clone 'profile\claude\CLAUDE.md'
 $mdLintWarnRoot   = @('size')
 $mdLintWarnMirror = @('size', 'volatile', 'code-derivable', 'tutorial')
 $mdLintFindingRe  = '^(?<file>.+):(?<line>\d+)\t(?<rule>[\w-]+)\t(?<msg>.*)$'
@@ -1041,7 +915,7 @@ if ($Fault -eq 'lint-root') {
 }
 if ($Fault -eq 'lint-mirror') {
     Add-Content -Path $mirrorLintTarget -Value "`nAlways write clean code."
-    Note 'fault: planted a self-evident line at the end of claude/CLAUDE.md'
+    Note 'fault: planted a self-evident line at the end of profile/claude/CLAUDE.md'
 }
 
 function Invoke-MdLint {
@@ -1080,7 +954,7 @@ function Test-MdLintGate {
 }
 
 Test-MdLintGate -Label 'CLAUDE.md'       -Path $rootLintTarget   -WarnRules $mdLintWarnRoot   -CloneDir $Clone
-Test-MdLintGate -Label 'claude/CLAUDE.md' -Path $mirrorLintTarget -WarnRules $mdLintWarnMirror -CloneDir $Clone
+Test-MdLintGate -Label 'profile/claude/CLAUDE.md' -Path $mirrorLintTarget -WarnRules $mdLintWarnMirror -CloneDir $Clone
 
 # Suppression: an in-file `<!-- claude-md-lint-ignore -->` above a line silences the finding on
 # that line, so the linter itself emits nothing and the gate stays green. A throwaway file, so
@@ -1095,7 +969,7 @@ Check 'in-file `claude-md-lint-ignore` silences a finding (linter emits nothing)
 
 # Fleet verifier subagent (issue 86): the ticket-fleet's blind refuter runs under a tool-restricted
 # subagent definition that ships in ~/.claude/agents/fleet-verifier.md. The whitelist entry
-# claude/agents in lib/manifest.ps1 is what carries it; without an assertion behind that entry, a
+# profile/claude/agents in lib/manifest.ps1 is what carries it; without an assertion behind that entry, a
 # silent drop (missing frontmatter key, wrong tool set, model drift, or a fleet script that forgets
 # to pass agentType) would slip past the file-count check (line 434) unnoticed. Since issue 138
 # the fleet lives in one plugin-served script; the restore suite asserts against that copy
@@ -1136,12 +1010,12 @@ if (Test-Path $fleetScriptPlugin) {
 }
 
 # owner-account-line (issue 114): the CLAUDE.md line naming which Claude account owns this
-# repo, generated from claude/accounts.json so a wrong-account cloud session cannot happen
+# repo, generated from profile/claude/accounts.json so a wrong-account cloud session cannot happen
 # silently. The tool + tests + registry are read from $RepoRoot (the worktree we ran from),
 # not $Clone, so these checks fire under every -From mode - not only worktree.
 $ownerModule   = Join-Path $RepoRoot 'tools\owner-account-line.js'
 $ownerTest     = Join-Path $RepoRoot 'tools\owner-account-line.test.js'
-$ownerRegistry = Join-Path $RepoRoot 'claude\accounts.json'
+$ownerRegistry = Join-Path $RepoRoot 'profile\claude\accounts.json'
 $ownerClaudeMd = Join-Path $RepoRoot 'CLAUDE.md'
 Check 'tools/owner-account-line.js shipped (issue 114 registry-driven owner-account block)' (Test-Path $ownerModule)
 Check 'tools/owner-account-line.test.js shipped (issue 114)' (Test-Path $ownerTest)
@@ -1161,7 +1035,7 @@ if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry) -and (Test-Path $ow
         $out = & node $ownerModule check --repo $RepoRoot --registry $ownerRegistry --slug 'surreptakos/claude-dotfiles' 2>&1
         $checkExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
-    Check 'this repo''s CLAUDE.md carries the owner-account line that claude/accounts.json says it should (AC2)' `
+    Check 'this repo''s CLAUDE.md carries the owner-account line that profile/claude/accounts.json says it should (AC2)' `
         ($checkExit -eq 0) @($out)
 }
 # Synthetic sweep across every live registered repo: seed a fake clones root, run apply-all

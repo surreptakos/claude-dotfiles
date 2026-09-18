@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Package every active personal skill into one uploadable plugin.
+"""Package every skill in this repo into one uploadable plugin.
 
-Reads the live ~/.claude/skills tree (junctions resolve to their targets), rewrites
+Reads aac-skills/, the repo's one hand-edited skill tree (issue 214: the generated
+claude/skills and aac-skills mirrors retired, and every skill they carried moved
+here, so a branch is the only way a skill changes and merge is the release), rewrites
 each SKILL.md so its frontmatter carries only the six keys the claude.ai upload
 validator accepts (name, description, allowed-tools, license, metadata,
 compatibility), and emits dist/dan-skills/ plus dist/dan-skills.zip ready for
@@ -33,13 +35,12 @@ content hash no longer matches the recorded one, and are written back into the S
 (the live tree, or aac-skills/) so the mirror, the package and the file an agent edits all say
 the same thing. --no-stamp-write computes them for the package only.
 
-Usage:  py -3 tools/build-cloud-plugin.py [--source DIR] [--out DIR] [--no-marketplace]
-                                          [--from-mirror [--home C:\\Users\\Dan]] [--no-stamp-write]
---from-mirror builds from this repo's generated mirror (claude/skills, agents/skills via
-claude/skill-links.json, plus the previous build's dead-junction skills) instead of ~/.claude/skills,
-so a cloud session with no live tree can still republish. --home de-tokenizes __USERHOME__ back to
-the owner's path so the package matches one built on that machine; it defaults to the owner's home
-(skill-stamps.py OWNER_HOME), the same default the stamper uses, never the running user's (492).
+Usage:  python3 tools/build-cloud-plugin.py [--source DIR] [--out DIR] [--no-marketplace]
+                                            [--home C:\\Users\\Dan] [--no-stamp-write]
+--source defaults to aac-skills/ in this checkout, so the build needs no live ~/.claude tree and
+runs the same on the desktop, in a container and in CI. --home names the home the tree is spelled
+against and is folded out of every content hash; it defaults to the owner's home (skill-stamps.py
+OWNER_HOME), the same default the stamper uses, never the running user's (492).
 Exit 0 on success, 1 on any skill that could not be packaged.
 """
 
@@ -49,7 +50,6 @@ import json
 import re
 import shutil
 import sys
-import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -103,12 +103,17 @@ DEAD_LOAD_DROPPED = {
     "user-research": "research-planning prompt, no files but its own; nothing in the payload "
                      "calls it.",
     "ux-copy": "microcopy prompt, no files but its own; nothing in the payload calls it.",
+    # Never shipped: neither had a junction into ~/.claude/skills while the mirrors existed, so no
+    # build ever carried them. Kept as sources (issue 214 moved them in with the rest of
+    # ~/.agents/skills); to-spec and to-tickets are the pair the flows actually name.
+    "to-issues": "superseded by to-tickets; no payload skill, hook or test references it.",
+    "to-prd": "superseded by to-spec; no payload skill, hook or test references it.",
 }
 DEAD_LOAD_KEPT = {
     "claude-md-lint": "the skill dir carries claude-md-lint.js, and the packaged copy is how a "
                       "cloud session in ANOTHER repo runs the linter - tools/claude-md-lint.js "
-                      "and its mirror only reach this one. Dropping it would take the tool off "
-                      "every other checkout, which no token saving is worth.",
+                      "only reaches this one. Dropping it would take the tool off every other "
+                      "checkout, which no token saving is worth.",
 }
 
 # Never shipped: editor backups and VCS/tooling noise. session-check/cloud-plugin-sweep.js applies
@@ -187,8 +192,8 @@ def split_rules_parts(text, limit=RULES_PART_BYTES):
 # this digest -- about 1.2 KB instead of about 12 KB. It is GENERATED, never hand-kept: each entry
 # below names a mark the source section already carries (a bold run-in label, a numbered rule, the
 # ask-matt paragraph's opening) and the digest is the verbatim span that mark opens. Nothing is
-# added to the source to make this work -- claude/CLAUDE.md is a generated mirror of the owner's
-# live file and must not be hand-edited -- so the marks are the ones the prose already has. A
+# added to the source to make this work -- profile/claude/CLAUDE.md is the owner's global rules,
+# edited for their own sake -- so the marks are the ones the prose already has. A
 # source that loses a mark fails the build loudly, the way RULES_HEADING does.
 DIGEST_CAP_BYTES = 1500
 DIGEST_FILENAME = "global-rules-digest.md"
@@ -438,50 +443,6 @@ def stamp_source(entry, history_paths, mirror_dir, home, write):
     }
 
 
-def source_from_mirror(repo, home, tmp):
-    """Assemble what ~/.claude/skills holds on the owner's machine from the repo's generated mirror.
-
-    Real skill dirs live in claude/skills; junctions are recorded in claude/skill-links.json and
-    resolve to agents/skills. A dead junction (its target reads empty on the owner's machine, so
-    the packager falls back to ~/.agents/skills) is in neither list - the previous build's skill
-    set names those. Text files get the owner's home path back when --home is given.
-    """
-    src = Path(tmp) / "skills"
-    src.mkdir()
-    names = {}
-    for entry in sorted((repo / "claude" / "skills").iterdir()):
-        if entry.is_dir():
-            names[entry.name] = entry
-    links_file = repo / "claude" / "skill-links.json"
-    if links_file.is_file():
-        for link in json.loads(links_file.read_text(encoding="utf-8-sig")):
-            names.setdefault(link["Name"], repo / "agents" / "skills" / link["Name"])
-    aac = {p.name for p in (repo / "aac-skills").iterdir()} if (repo / "aac-skills").is_dir() else set()
-    prev = repo / "marketplace" / PLUGIN_NAME / "skills"
-    if prev.is_dir():
-        for entry in sorted(prev.iterdir()):
-            if entry.name in names or entry.name in aac:
-                continue
-            cand = repo / "agents" / "skills" / entry.name
-            if (cand / "SKILL.md").is_file():
-                names[entry.name] = cand
-    for name, path in names.items():
-        if (path / "SKILL.md").is_file():
-            shutil.copytree(path, src / name, ignore=ignore_noise)
-    if home:
-        for f in src.rglob("*"):
-            if not f.is_file():
-                continue
-            raw = f.read_bytes()
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                continue
-            if "__USERHOME" in text:
-                f.write_bytes(skill_stamps.detokenize(text, home).encode("utf-8"))
-    return src
-
-
 def plugin_version(now=None):
     """Version string for plugin.json: YYYY.M.DHHMM in UTC.
 
@@ -513,7 +474,7 @@ def plugin_manifest(version):
                 "author": {"name": "Dan Gatsakos"},
                 "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm "
                 "Company team skills from the repo's aac-skills/ tree. Built by "
-                "tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/.",
+                "tools/build-cloud-plugin.py from aac-skills/.",
             },
             indent=2,
         )
@@ -578,15 +539,14 @@ def resolve_version(payload_root, published_root, now=None):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", default=str(Path.home() / ".claude" / "skills"))
+    ap.add_argument("--source", default=str(REPO / "aac-skills"),
+                    help="the skill tree to package (default: this repo's aac-skills/)")
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "dist"))
     ap.add_argument("--no-marketplace", action="store_true",
                     help="skip refreshing <repo>/marketplace and marketplace.json")
-    ap.add_argument("--from-mirror", action="store_true",
-                    help="build from this repo's generated mirror instead of --source")
     ap.add_argument("--home", default=None,
-                    help="the owner's home path: de-tokenizes the mirror with --from-mirror and is "
-                         f"folded out of every content hash. Default: {skill_stamps.OWNER_HOME} "
+                    help="the owner's home path, folded out of every content hash. "
+                         f"Default: {skill_stamps.OWNER_HOME} "
                          "(skill-stamps.py OWNER_HOME, the spelling CI checks with - never the "
                          "running user's home, issue 492)")
     ap.add_argument("--no-stamp-write", action="store_true",
@@ -595,12 +555,7 @@ def main():
 
     home = skill_stamps.cli_home(args.home)
     stamp_write = not args.no_stamp_write
-    tmp = None
-    if args.from_mirror:
-        tmp = tempfile.TemporaryDirectory()
-        src = source_from_mirror(REPO, home, tmp.name)
-    else:
-        src = Path(args.source)
+    src = Path(args.source)
     out = Path(args.out)
     plugin_root = out / PLUGIN_NAME
     if plugin_root.exists():
@@ -611,10 +566,7 @@ def main():
     # published stamp forward instead of churning on the clock (issue 432).
     (plugin_root / MANIFEST_REL).write_bytes(plugin_manifest(PLACEHOLDER_VERSION))
 
-    fallback = Path.home() / ".agents" / "skills"
-    aac_names = {p.name for p in (REPO / "aac-skills").iterdir()
-                 if (p / "SKILL.md").is_file()} if (REPO / "aac-skills").is_dir() else set()
-    packaged, failures, restamped, superseded = [], [], [], []
+    packaged, failures, restamped = [], [], []
     dropped = []
     for entry in sorted(src.iterdir()):
         if not entry.is_dir():
@@ -622,40 +574,23 @@ def main():
         if entry.name in DEAD_LOAD_DROPPED:
             # Decided out of the payload (issue 530); the reason is in the table. Skipped before
             # stamping too: a skill the payload does not carry has no packaged copy to keep in
-            # step, and `skill-stamps.py stamp claude/skills` still rotates the source.
+            # step, and `skill-stamps.py stamp aac-skills` still rotates the source.
             dropped.append(entry.name)
-            continue
-        if entry.name in aac_names:
-            # Migration window (issue 172): a skill's hand-edited source has moved to aac-skills/
-            # while the owner's personal copy is still in ~/.claude/skills, and so in the claude/
-            # mirror -- which is generated and which no branch may hand-edit. The team tree wins:
-            # it is the copy this repo can actually revise, so it is the one that ships, and the
-            # aac-skills loop below packages it. This used to be a hard failure ("name collides
-            # with a personal skill"), which made the move impossible to land in one commit: the
-            # branch could not delete the mirror and could not keep it either. The window closes
-            # when the owner deletes ~/.claude/skills/<name> and runs sync.ps1 -Mode push.
-            superseded.append(entry.name)
             continue
         skill_md = entry / "SKILL.md"
         if not skill_md.is_file():
-            # dead junction: the live dir reads empty but the junction target has content
-            alt = fallback / entry.name
-            if (alt / "SKILL.md").is_file():
-                entry, skill_md = alt, alt / "SKILL.md"
-            else:
-                failures.append(f"{entry.name}: no SKILL.md")
-                continue
+            failures.append(f"{entry.name}: no SKILL.md")
+            continue
         dest = plugin_root / "skills" / entry.name
-        mirror = next((REPO / t / entry.name for t in ("claude/skills", "agents/skills")
-                       if (REPO / t / entry.name / "SKILL.md").is_file()), None)
-        # In --from-mirror mode `entry` is a tempdir copy that vanishes at the end of the run, so
-        # a stamp written back there is lost. Stamp the actual mirror (claude/skills or
-        # agents/skills) instead, matching how the aac-skills loop stamps aac-skills/<name>.
-        stamp_target = mirror if args.from_mirror and mirror is not None else entry
         try:
+            # The retired mirror paths ride as extra history (issue 214): a skill that moved out
+            # of claude/skills or aac-skills keeps its dates when it is stamped for the first
+            # time under its new path.
             stamp, changed, report = stamp_source(
-                stamp_target, [f"claude/skills/{entry.name}", f"agents/skills/{entry.name}"],
-                mirror, home, stamp_write)
+                entry,
+                [f"aac-skills/{entry.name}",
+                 f"aac-skills/{entry.name}", f"aac-skills/{entry.name}"],
+                None, home, stamp_write)
             new_text, moved, retargeted = transform_skill_md(skill_md, stamp)
         except Exception as exc:  # noqa: BLE001 - report and keep packaging the rest
             failures.append(f"{entry.name}: {exc}")
@@ -693,7 +628,8 @@ def main():
     )
     # Governance hooks (issue 208): the eight hook entries a PC session runs today ship inside the
     # plugin payload, so a container that installs the plugin is gated the same way. Scripts are
-    # copied from the repo mirror (claude/hooks/, codex/hooks/) into hooks/scripts/ and each hook
+    # copied from the repo profile (profile/claude/hooks/, profile/codex/hooks/) into
+    # hooks/scripts/ and each hook
     # command names its script through ${CLAUDE_PLUGIN_ROOT}, never through a home path. Every
     # script runs on `node` or `python3` (Linux/cloud container) with a `commandWindows` counterpart
     # that uses `py -3`; nothing here requires pwsh, and no pwsh-only invocation is emitted -- a
@@ -712,8 +648,8 @@ def main():
     # marker hook, matching the pre-issue-208 behaviour. Every-or-nothing avoids a half-populated
     # manifest that names a script the payload does not carry.
     gov_sources_present = (
-        all((REPO / "claude" / "hooks" / n).is_file() for n in GOV_JS)
-        and all((REPO / "codex" / "hooks" / n).is_file() for n in GOV_PY))
+        all((REPO / "profile" / "claude" / "hooks" / n).is_file() for n in GOV_JS)
+        and all((REPO / "profile" / "codex" / "hooks" / n).is_file() for n in GOV_PY))
     # Ship the plugin/live-tree dedup guard (issue 208 criterion 4) alongside the governance
     # scripts. Sources live under tools/plugin-hook-guards/ so they are trackable and not
     # mistaken for generated mirror content; the packager copies them in and prepends a one-line
@@ -724,17 +660,13 @@ def main():
     guard_js_src = guard_src_dir / guard_js_name
     guard_py_src = guard_src_dir / guard_py_name
 
-    # Global rules text (issue 209). ONE source: the owner's global CLAUDE.md. A live build reads
-    # it next to --source (~/.claude/skills -> ~/.claude/CLAUDE.md); a --from-mirror build (cloud,
-    # CI) reads this repo's generated mirror claude/CLAUDE.md, de-tokenized with --home so both
-    # routes emit the same bytes. Nothing here is hand-written into the payload.
-    rules_src = None
-    if not args.from_mirror:
-        live_md = Path(args.source).resolve().parent / "CLAUDE.md"
-        if live_md.is_file():
-            rules_src = live_md
-    if rules_src is None and (REPO / "claude" / "CLAUDE.md").is_file():
-        rules_src = REPO / "claude" / "CLAUDE.md"
+    # Global rules text (issue 209). ONE source: profile/claude/CLAUDE.md, the consumer profile's
+    # copy of the owner's global CLAUDE.md, de-tokenized with --home. Every build - desktop,
+    # container, CI - reads the same file, so all three emit the same bytes (issue 214 retired the
+    # live-tree route with sync push). Nothing here is hand-written into the payload.
+    rules_src = REPO / "profile" / "claude" / "CLAUDE.md"
+    if not rules_src.is_file():
+        rules_src = None
     rules_text = None
     if rules_src is not None:
         raw = rules_src.read_text(encoding="utf-8")
@@ -829,7 +761,7 @@ def main():
         return prefix + sep + block + suffix
 
     for name in GOV_JS:
-        src_file = REPO / "claude" / "hooks" / name
+        src_file = REPO / "profile" / "claude" / "hooks" / name
         if not gov_sources_present:
             break
         text = src_file.read_text(encoding="utf-8")
@@ -856,7 +788,7 @@ def main():
         # write_bytes with a fixed newline: the payload must not depend on the building OS's newline.
         (scripts_dir / name).write_bytes(text.encode("utf-8"))
     for name in GOV_PY:
-        src_file = REPO / "codex" / "hooks" / name
+        src_file = REPO / "profile" / "codex" / "hooks" / name
         if not gov_sources_present:
             break
         text = src_file.read_text(encoding="utf-8").replace("\r\n", "\n")
@@ -990,36 +922,6 @@ def main():
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )
 
-    # ---------------------------------------------------------------- AAC team skills
-    # The org-published skills live in the hand-edited aac-skills/ tree in this repo, not in
-    # ~/.claude/skills. They ride the same single plugin: one package, every surface, one name.
-    # aac-skills/yes is a vendored copy of sstklen/yes.md's English skill (MIT, LICENSE alongside);
-    # the plugin's three hooks are not carried - this package ships skills only.
-    aac_src = REPO / "aac-skills"
-    if aac_src.is_dir():
-        for entry in sorted(aac_src.iterdir()):
-            if not entry.is_dir() or not (entry / "SKILL.md").is_file():
-                continue
-            if entry.name in DEAD_LOAD_DROPPED:
-                dropped.append(entry.name)
-                continue
-            dest = plugin_root / "skills" / entry.name
-            if dest.exists():
-                failures.append(f"aac/{entry.name}: name collides with a personal skill")
-                continue
-            try:
-                stamp, changed, report = stamp_source(
-                    entry, [f"aac-skills/{entry.name}"], None, home, stamp_write)
-                new_text, moved, retargeted = transform_skill_md(entry / "SKILL.md", stamp)
-            except Exception as exc:  # noqa: BLE001
-                failures.append(f"aac/{entry.name}: {exc}")
-                continue
-            if changed:
-                restamped.append((entry.name, stamp, report))
-            shutil.copytree(entry, dest, ignore=ignore_noise)
-            (dest / "SKILL.md").write_bytes(new_text.encode("utf-8"))
-            packaged.append((entry.name, moved, retargeted))
-
     # ------------------------------------------------------------------------ version
     # Last, because it is a fact about the assembled payload. The zip follows it (and the team
     # skills above), so every surface ships the same bytes under the same version.
@@ -1051,7 +953,7 @@ def main():
                 {
                     "name": "claude-dotfiles",
                     "description": "Dan Gatsakos's personal skill marketplace, generated from "
-                    "the live ~/.claude/skills tree by tools/build-cloud-plugin.py.",
+                    "the repo's aac-skills/ tree by tools/build-cloud-plugin.py.",
                     "owner": {"name": "Dan Gatsakos"},
                     "plugins": [
                         {
@@ -1086,9 +988,6 @@ def main():
         print(f"  kept anyway: {name} - {DEAD_LOAD_KEPT[name]}")
     print(f"local paths retargeted at the plugin in {len(retargeted)} skills"
           + (f": {', '.join(retargeted)}" if retargeted else ""))
-    if superseded:
-        print("personal copy superseded by the aac-skills/ source (delete ~/.claude/skills/<name> "
-              "and push to close the window): " + ", ".join(superseded))
     # The rotation report names exactly the source files this run wrote with a changed stamp
     # (issue 484). With --no-stamp-write only the packaged copies moved, and the line says so.
     if stamp_write:
@@ -1104,8 +1003,6 @@ def main():
         for name, stamp, _r in restamped:
             print(f"  {name}: rev {stamp['revision']}, modified {stamp['modified']}, "
                   f"previous {stamp['previous-modified']}")
-    if tmp:
-        tmp.cleanup()
     if failures:
         print("FAILURES:")
         for f in failures:

@@ -16,7 +16,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
-const TEMPLATE = path.join(ROOT, 'agents', 'skills', 'project-harness', 'templates', 'pre-commit');
+const TEMPLATE = path.join(ROOT, 'aac-skills', 'project-harness', 'templates', 'pre-commit');
 // This repo's own .githooks/pre-commit retired with the freshness loop (issue 213); the
 // harness template is the hook this repo still ships to everywhere else.
 const HOOKS = [TEMPLATE];

@@ -1,8 +1,8 @@
 {
   "name": "aac-skills",
-  "version": "2026.9.180442",
+  "version": "2026.9.180508",
   "author": {
     "name": "Dan Gatsakos"
   },
-  "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm Company team skills from the repo's aac-skills/ tree. Built by tools/build-cloud-plugin.py from ~/.claude/skills and aac-skills/."
+  "description": "AAC Skills - Dan's Claude Code skills plus the Active Alarm Company team skills from the repo's aac-skills/ tree. Built by tools/build-cloud-plugin.py from aac-skills/."
 }

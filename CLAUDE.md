@@ -4,59 +4,49 @@
 Owner account: Dan-AAC (desktop app)
 <!-- owner-account:end -->
 
-The machine-local half of a Claude Code setup, under version control: global rules, skills, hooks,
-plugin manifests, per-project memory. `README.md` explains the design; this file is what an agent
-working *on* the repo needs to know.
+The Claude Code setup itself, under version control: global rules, skills, hooks, plugin manifests.
+`README.md` explains the design; this file is what an agent working *on* the repo needs to know.
 
-## The one rule
+## The edit path
 
-**`claude/`, `codex/` and `memory/` are generated. Never hand-edit them.**
+**This repo is the source. Nothing in it is generated from a live `~/.claude` tree** (issue 214
+retired the `claude/`, `codex/` and `memory/` mirrors and `sync.ps1 -Mode push` with them).
 
-They are copies. Edit the real file in `~/.claude` or `~/.codex`, then:
+Edit `aac-skills/<name>/` for a skill and `profile/` for the consumer profile — the global rules
+text, `settings.json`, the hook scripts, the Codex half. Do it on a branch, run the two commands
+below, commit, and merge: **the merge to master is the release**, and it is what a cloud container
+installs and what a desktop takes with `.\sync.ps1 -Mode pull`.
 
-```powershell
-.\sync.ps1 -Mode push
-```
+Generated, and never hand-edited: `marketplace/`, `.claude-plugin/marketplace.json` and the
+`aac-skills/project-harness/templates/` files the two generators own. `DASHBOARD.md` too — see
+the harness section.
 
-A hand edit here is silently overwritten by the next push, and — worse — looks committed while the
-machine it came from never changed. Hand-written: `sync.ps1`, `install.ps1`, `lib/manifest.ps1`,
-`tests/`, `tools/`, `README.md`, `.gitignore`, `aac-skills/`, `orchestrator/`, `gas/` (the Apps Script
-self-deploy package; `gas/README.md`), the `gas-*.yml` reusable workflows, and this file.
-`agents/`, `claude/skill-links.json`, `marketplace/` and `.claude-plugin/marketplace.json` are
-generated too — the packager (`tools/build-cloud-plugin.py`, run by every push) rebuilds them from
-`~/.claude/skills` and `aac-skills/`. Edit `aac-skills/` directly; never edit `marketplace/`.
-
-This repo's own memory notes are the one exception to `memory/`: they are hand-written at
-`docs/agents/memory/` with `MEMORY.md` as the index, and the plugin's SessionStart hook
-(`tools/repo-memory-load.js`) injects that index, so cloud sessions have them too. Add a note
-there and commit — that commit is the whole publish; both sync modes run
+This repo's memory notes are hand-written at `docs/agents/memory/` with `MEMORY.md` as the index,
+and the plugin's SessionStart hook (`tools/repo-memory-load.js`) injects that index, so cloud
+sessions have them too. Add a note there and commit — that commit is the whole publish; pull runs
 `tools/repo-memory-pointer.js`, which empties the PC copy to a pointer so the two cannot diverge.
 
 ## Skill stamps
 
 Every `SKILL.md` carries four keys under `metadata:` — `modified`, `previous-modified`, `revision`,
-`content-sha` (`tools/skill-stamps.py`). The packager rotates them on every sync push when a
-skill's content hash moved, and writes them back into the *source* file, so the live tree, the
-mirror and the plugin all say the same thing. Never edit the four by hand and never bump one to
-make a check pass: the hash is what makes the dates believable. The previous text of any skill
-is `git log -p -- <skill>/SKILL.md`; the stamp tells you it is there to look for.
+`content-sha` (`tools/skill-stamps.py`). The packager rotates them whenever a skill's content hash
+moved and writes them back into the source file, so the tree and the plugin say the same thing.
+Never edit the four by hand and never bump one to make a check pass: the hash is what makes the
+dates believable. The previous text of any skill is `git log -p -- <skill>/SKILL.md`; the stamp
+tells you it is there to look for.
 
-After editing anything under `aac-skills/` — or under the `agents/skills/` or `claude/skills/`
-mirrors — on a branch with no live tree (a cloud session), run both, or CI (`skill-stamps.yml`)
-fails the branch:
+After editing anything under `aac-skills/`, run both, or CI (`skill-stamps.yml`) fails the branch:
 
 ```bash
-python3 tools/skill-stamps.py stamp aac-skills agents/skills claude/skills --home 'C:\Users\Dan'
-python3 tools/build-cloud-plugin.py --from-mirror --home 'C:\Users\Dan'
+python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
+python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
 ```
 
-The second rebuilds `marketplace/` from the repo mirror instead of `~/.claude/skills`. `--home`
-names the owner's home on both (their default too: `OWNER_HOME` in `tools/skill-stamps.py`, never
-the running user's home, issue 492): the stamper folds it into the sync tokens before hashing, and
-the packager puts it back where the mirror holds `__USERHOME__` tokens. CI checks that a rebuild
-from the mirror reproduces the committed payload, `diff -r` over the whole of
-`marketplace/aac-skills`, `plugin.json` included: the plugin version follows the payload, not the
-clock, so only a moved payload takes a fresh UTC stamp (issue 432).
+`--home` names the owner's home on both (their default too: `OWNER_HOME` in
+`tools/skill-stamps.py`, never the running user's home, issue 492): the stamper folds it into the
+sync tokens before hashing. CI checks that a rebuild reproduces the committed payload, `diff -r`
+over the whole of `marketplace/aac-skills`, `plugin.json` included: the plugin version follows the
+payload, not the clock, so only a moved payload takes a fresh UTC stamp (issue 432).
 `.claude-plugin/marketplace.json` repeats that version and is outside the check.
 
 Both commands stamp, and so does a second edit after them: run them as often as you like, the
@@ -65,28 +55,32 @@ never from an intermediate one, so `previous-modified` names the published versi
 
 ## Layout
 
-- `lib/manifest.ps1` — the whitelist of what travels, the exclusions, the path templating, the secret
-  guard. Adding something to the setup means adding it to `Get-DotfileItems` here, nowhere else.
-- `sync.ps1 -Mode push|pull [-DryRun]` — push runs the packager (which stamps the live skills),
-  then clears the mirrored trees so deletions propagate, then copies; pull backs up to
-  `~/.claude-dotfiles-backup-<timestamp>` before writing, and never deletes.
-- `install.ps1 [-DryRun]` — fresh machine: prerequisites, pull, then the manual list.
+- `aac-skills/` — every skill, one tree, hand-edited. The packager builds the plugin payload from
+  it and pull restores it as `~/.claude/skills`.
+- `profile/` — what a desktop consumer needs beyond the skills: `profile/claude/CLAUDE.md` (the
+  global rules, and the one source the payload's rules text is copied from), `settings.json`,
+  `hooks/`, `agents/`, the plugin manifests, and `profile/codex/`.
+- `lib/manifest.ps1` — the whitelist of what pull writes, the exclusions, the path templating, the
+  secret guard. Adding something to the setup means adding it to `Get-DotfileItems` here.
+- `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before
+  writing, and never deletes. `-Mode push` prints why it is retired and exits 2. On a fresh
+  machine `install.ps1 [-DryRun]` wraps it: prerequisites, pull, then the manual list.
 - `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md`, `worker-cycle.md`. The fleet
   itself is served by the `aac-skills` plugin at `aac-skills/ticket-fleet/ticket-fleet.js`, one
   script for local and cloud sessions (it picks between `gh` and the GitHub MCP tools at run
-  time). Hand-written, not synced to any machine; the master session reads it from this repo.
+  time). The master session reads the runbook from this repo.
 
 ## Two invariants worth keeping
 
-**Whitelist, not blocklist.** `sync.ps1` reads only the paths named in `Get-DotfileItems`. That is
-what keeps `~/.claude/.credentials.json`, `~/.clasprc.json`, session transcripts and the plugin
-cache out of the repo. A pattern-based sweep would eventually catch one of them. The `.gitignore` and
-the secret guard are backstops behind that choice, not the mechanism.
+**Whitelist, not blocklist.** `sync.ps1` writes only the paths named in `Get-DotfileItems`, so a
+pull cannot clobber `~/.claude/.credentials.json`, `~/.clasprc.json` or the plugin cache, and
+nothing outside that list is ever read back. A pattern-based sweep would eventually catch one of
+them. The `.gitignore` and the secret guard are backstops behind that choice, not the mechanism.
 
-**Home paths are tokens.** Hook commands in `settings.json` and every memory directory name carry
-this machine's home path. Push rewrites it to `__USERHOME__` (one token per spelling that occurs;
-see `ConvertTo-Tokens`) and pull substitutes the local home back. Any new script that copies a text
-file must go through `Copy-OneFile`, or it will bake this machine's paths into the repo.
+**Home paths are tokens.** Hook commands in `settings.json` carry the owner's home path. The
+committed copy spells it `__USERHOME__` (one token per spelling that occurs; see
+`ConvertFrom-Tokens`) and pull substitutes the local home back. Any new script that copies a text
+file must go through `Copy-OneFile`, or it will bake one machine's paths into a restore.
 
 **Keep `.claude/session.json` and `.claude/settings.json` as CRLF blobs (issue 87).** `.gitattributes`
 pins them with `-text` so git does no EOL conversion, and the stored blob is CRLF so a Windows
@@ -133,13 +127,13 @@ the suite restoring itself, so leave the variable alone in anything the suite sp
 only `tests FAIL`, detail is in `%TEMP%\restore-test-failures`.
 
 Windows PowerShell 5.1 traps: `DirectoryInfo.Target` is a `string[]`; `Get-Content -Raw |
-ConvertFrom-Json` does not reliably enumerate a JSON array, use `Read-JsonArray`; with
-`$ErrorActionPreference = 'Stop'` git's stderr warnings become terminating errors.
+ConvertFrom-Json` does not reliably enumerate a JSON array; with `$ErrorActionPreference = 'Stop'`
+git's stderr warnings become terminating errors.
 
-Then `-DryRun` on both scripts, then a real `push` — it is idempotent and git status shows exactly
-what moved. Round-trip a real file through `ConvertTo-Tokens` / `ConvertFrom-Tokens` for the
-templating. To exercise the secret guard, plant a file holding a JSON `refresh_token` key whose value
-is twenty junk characters, run `Assert-NoSecrets`, and delete it. The guard matches credential
+Then `-DryRun` on the pull, then a real one — it is idempotent and the backup directory shows
+exactly what moved. Round-trip a real file through `ConvertTo-Tokens` / `ConvertFrom-Tokens` for
+the templating. To exercise the secret guard, plant a file holding a JSON `refresh_token` key whose
+value is twenty junk characters, run `Assert-NoSecrets`, and delete it. The guard matches credential
 *values*, not the words — prose here names `refresh_token`, and a guard that fires on documentation
 gets disabled.
 
@@ -157,16 +151,16 @@ Version in `docs/agents/harness-version.md`.
 - `node tools/claude-md-lint.js <CLAUDE.md>` checks a CLAUDE.md against the concision paradigm
   (would removing this line cause a mistake?). Findings are prompts to ask that question, not
   verdicts; `<!-- claude-md-lint-ignore -->` above a line keeps a deliberate one. The restore
-  suite gates this file and `claude/CLAUDE.md` (the mirror of `~/.claude/CLAUDE.md`) on
-  unsuppressed findings, naming the file and line. `size` warns only so a slow creep shows
-  without going red; the mirror also warns on `volatile`, `code-derivable` and `tutorial`, which
-  its counterexamples trip on purpose. The exit code follows that split (issue 337): warn-only
+  suite gates this file and `profile/claude/CLAUDE.md` (the global rules text) on unsuppressed
+  findings, naming the file and line. `size` warns only so a slow creep shows without going red;
+  the global rules also warn on `volatile`, `code-derivable` and `tutorial`, which their
+  counterexamples trip on purpose. The exit code follows that split (issue 337): warn-only
   findings print and exit 0; `--warn-only a,b` replaces the per-file set.
 - Session runbook: `docs/runbooks/session.md`. Release here is the push to `origin/master`.
 
 ## Related
 
 - `../claude-account-handoff` — moves *accounts* on one machine (`CLAUDE_CONFIG_DIR`). Different
-  problem: this repo moves one profile between machines.
+  problem: this repo is where one profile is authored.
 - The project half of a new-machine setup is written up in the commissions repo at
   `docs/runbooks/new-machine.md`.

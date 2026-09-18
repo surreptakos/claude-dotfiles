@@ -10,7 +10,7 @@
  * turned on — in BOTH copies of the rule, and keeps the two copies identical.
  *
  * The copies are `.claude/settings.json` (this repo) and the harness template
- * `agents/skills/project-harness/templates/claude-settings.json` (every harnessed repo, via step
+ * `aac-skills/project-harness/templates/claude-settings.json` (every harnessed repo, via step
  * 16). There is no third: `templates/add-cloud-plugin.js` reads the template rather than repeating
  * it, and this suite pins that too — a re-introduced literal is a copy nobody diffs.
  */
@@ -23,9 +23,9 @@ const { test } = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
 const REPO_SETTINGS = path.join(ROOT, '.claude', 'settings.json');
-const TEMPLATE = path.join(ROOT, 'agents', 'skills', 'project-harness', 'templates',
+const TEMPLATE = path.join(ROOT, 'aac-skills', 'project-harness', 'templates',
                            'claude-settings.json');
-const INSTALLER = path.join(ROOT, 'agents', 'skills', 'project-harness', 'templates',
+const INSTALLER = path.join(ROOT, 'aac-skills', 'project-harness', 'templates',
                             'add-cloud-plugin.js');
 
 const ruling = (file) => JSON.parse(fs.readFileSync(file, 'utf8')).autoMode.allow[0];
@@ -42,7 +42,7 @@ const CATEGORIES = [
 test('.claude/settings.json carries the issue 543 rule at all', () => {
   assert.match(ruling(REPO_SETTINGS), /issue 543/,
     'this repo is still running the superseded 245 text. Land it with one command — ' +
-    '`node agents/skills/project-harness/templates/add-cloud-plugin.js .` — which prepends the ' +
+    '`node aac-skills/project-harness/templates/add-cloud-plugin.js .` — which prepends the ' +
     'template rule and keeps the CRLF blob (issue 87). The session that drafted the text could ' +
     'not: every write to this path was refused [Instruction Poisoning] / [Self-Modification], ' +
     'logged in docs/cloud-permission-posture-2026-09-17.md.');
