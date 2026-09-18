@@ -1,0 +1,26 @@
+name: zoho-rest tests
+
+# tools/zoho-rest.py turns the cloud environment's Zoho variables (memory note
+# session-env-carries-zoho-and-gas-tokens) into an authenticated call: it mints from the refresh
+# trio, sends the Zoho-oauthtoken header and prints no token. The picker, the token request and
+# the header rules are gated here. Stdlib only, no network.
+
+on:
+  push:
+    paths: ['tools/zoho-rest*.py', '.github/workflows/zoho-rest-tests.yml']
+  pull_request:
+    paths: ['tools/zoho-rest*.py', '.github/workflows/zoho-rest-tests.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 tools/zoho-rest.test.py
