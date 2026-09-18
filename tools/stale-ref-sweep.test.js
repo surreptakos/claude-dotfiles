@@ -394,25 +394,16 @@ test('stale-ref-sweep.yml ticks weekly, applies on dispatch, and runs the tests 
   assert.equal(/git commit/.test(yml), false);
 });
 
-test('session-end step 11 is scoped to the session, and hands the repo-wide sweep to the job', () => {
+test('session-end leaves the repo-wide ref sweep to the job and keeps only the session\'s own branch', () => {
   const skill = fs.readFileSync(SKILL, 'utf8');
-  const step11 = sliceBetween(skill, '\n11. ', '\n12. ', "session-end's step 11");
-  assert.match(step11, /this session's own branch and worktree/);
-  assert.match(step11, /stale-ref-sweep\.yml/);
-  assert.match(step11, /do not delete them/, 'other sessions\' refs are the job\'s, not the step\'s');
-  // The two repo-wide instructions the step used to carry are gone, not merely reworded.
-  assert.equal(/xargs -r git branch -d/.test(step11), false,
-    'the repo-wide merged-branch pipeline belongs to the workflow now');
-  assert.equal(/List foreign worktrees/.test(step11), false,
-    'sweeping other sessions\' worktrees belongs to the workflow now');
-  // And the cloud section must name the job rather than a skipped step. Issue 212 narrowed the
-  // substitution table to GraphQL-backed spellings only, and a git ref delete is not one, so the
-  // fact lives in the quirks list beneath the table instead of in a row of it.
-  const cloud = sliceFrom(skill, '## In a cloud container', "session-end's cloud section");
-  assert.match(cloud, /stale-ref-sweep\.yml/,
-    'the cloud section names the job that owns the repo-wide sweep');
-  assert.equal(/^\|.*stale-ref-sweep\.yml/m.test(cloud), false,
-    'but not as a substitution row — a container runs step 11 the same way the desktop does');
-  assert.equal(/^\|.*git branch --merged/m.test(cloud), false,
-    'a git ref delete is not GraphQL-backed, so it does not belong in the substitution table');
+  // The four-step skill (Dan, 2026-09-18) names the stale-ref sweep as the owner of every ref
+  // that is not this session's, and carries no repo-wide pipeline of its own.
+  assert.match(skill, /stale-ref sweep/);
+  assert.match(skill, /only its own branch/);
+  assert.equal(/xargs -r git branch -d/.test(skill), false,
+    'the repo-wide merged-branch pipeline belongs to the workflow');
+  assert.equal(/List foreign worktrees/.test(skill), false,
+    'sweeping other sessions\' worktrees belongs to the workflow');
+  assert.equal(/git branch --merged/.test(skill), false,
+    'a session never enumerates merged branches itself');
 });

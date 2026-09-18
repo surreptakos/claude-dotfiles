@@ -3,10 +3,10 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-08-26T14:35:01Z'
-  previous-modified: '2026-08-25T22:33:19Z'
-  revision: '1'
-  content-sha: 3cdb0a47d334
+  modified: '2026-09-18T06:04:32Z'
+  previous-modified: '2026-08-26T14:35:01Z'
+  revision: '2'
+  content-sha: 020e790e6a64
 ---
 
 # Maintain repo
@@ -24,6 +24,12 @@ Every run is holistic. Never restrict scope to files changed since last sweep, g
 ## Order matters
 
 Truth first, shape second. Consolidating memory before auditing merges two wrong notes into one wrong note. Fix reality-drift, then dedupe.
+
+## Step 0 — ticket-reaper
+
+Run `/ticket-reaper` first: it parks belt-and-suspenders tickets in the Maybe Someday milestone
+and closes the moot ones, so the two steps below do not spend effort keeping speculative work
+consistent. Its digest is on the repo's "Ticket reaper digest" issue.
 
 ## Step 1 — consistency-audit
 
