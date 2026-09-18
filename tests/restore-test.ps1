@@ -49,8 +49,8 @@ param(
     # origin   clone the pushed remote - the honest test, and the one to run before trusting a restore
     # local    clone this checkout's committed state, for iterating before pushing
     # worktree copy what git currently sees (index + working tree), no clone and no network. This is
-    #          the automation mode: a pre-commit gate that cloned HEAD would be testing the PREVIOUS
-    #          commit, and CI cannot clone a private remote from inside the runner.
+    #          the automation mode: it is what the branch under test holds, not the PREVIOUS
+    #          commit, and it needs no clone of the private remote from inside a runner.
     [ValidateSet('origin', 'local', 'worktree')][string]$From = 'origin',
 
     # Empty means "derive one per run", which is what keeps concurrent runs apart. Passing a path
@@ -106,7 +106,7 @@ $Engine   = 'powershell'
 try { $Engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName } catch { }
 $TempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
 
-# Issue 28: the pre-commit hook runs this suite as a child of `git commit`, which exports
+# Issue 28: a git hook that runs this suite makes it a child of `git commit`, which exports
 # GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE / GIT_PREFIX / GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY. Those env
 # vars OVERRIDE `git -C <path>` - git honours them first, and -C only relocates its path
 # resolution when they are unset. Without clearing them here, the bootstrap `git -C $RepoRoot
@@ -212,7 +212,7 @@ New-Item -ItemType Directory -Path $FakeRoot -Force | Out-Null
 
 if ($From -eq 'worktree') {
     # git ls-files rather than a directory copy: it is exactly what git sees, so it picks up
-    # staged changes (what a pre-commit gate must test) while excluding ignored paths and
+    # staged changes (what a gate on the working tree must test) while excluding ignored paths and
     # .claude/worktrees, which holds whole checkouts of this same repo.
     Write-Host ("Copying the working tree from {0}" -f $RepoRoot)
     $listed = & git -C $RepoRoot ls-files
@@ -262,8 +262,7 @@ if ($BootstrapOnly) {
 # worktree directories as submodules. That broke every Actions run with
 # `No url found for submodule path` and this test's clone-fidelity pass (a gitlink cannot be
 # hash-object'd). .gitignore is the primary block; this check is the backstop for a `git add -f`
-# regression and catches the fault in `-From worktree` (pre-commit) as well as against `-From
-# origin`/`local`.
+# regression and catches the fault in `-From worktree` as well as against `-From origin`/`local`.
 Write-Host 'Worktrees guard (issue 238)'
 $wtGitRepo = if ($From -eq 'worktree') { $RepoRoot } else { $Clone }
 $wtEntries = @(& git -C $wtGitRepo ls-files -s -- .claude/worktrees 2>$null)
@@ -992,33 +991,6 @@ if (Test-Path $identityTest) {
     Check 'restored identity.js passes its own test suite' $false @('identity.test.js was not restored')
 }
 
-# ------------------------------------------------------------------ 9a. dotfiles freshness ships
-
-# Issue 12: sync stamps + freshness classifier + block hook. The tool and the hook driver ship in
-# tools/ (hand-written space) and .claude/settings.json (project-level, hand-written) so they
-# survive a sync push - the previous attempt at this issue committed them into the generated
-# claude/hooks mirror and would have been wiped by the next push. The clone is the check for that:
-# these files must exist in the pushed remote, and the Node hook driver must pass its own tests.
-
-Write-Host ''
-Write-Host 'Dotfiles freshness (issue 12)'
-
-$freshnessTool = Join-Path $Clone 'tools\dotfiles-freshness.ps1'
-$freshnessHook = Join-Path $Clone 'tools\dotfiles-freshness-hook.js'
-$freshnessHookTest = Join-Path $Clone 'tools\dotfiles-freshness-hook.test.js'
-$freshnessSettings = Join-Path $Clone '.claude\settings.json'
-
-Check 'tools/dotfiles-freshness.ps1 shipped' (Test-Path $freshnessTool)
-Check 'tools/dotfiles-freshness-hook.js shipped' (Test-Path $freshnessHook)
-Check 'tools/dotfiles-freshness-hook.test.js shipped' (Test-Path $freshnessHookTest)
-Check '.claude/settings.json wires the hook' (Test-Path $freshnessSettings)
-
-if (Test-Path $freshnessHookTest) {
-    $out = & node --test $freshnessHookTest 2>&1
-    Check 'dotfiles-freshness-hook.js passes its own test suite' `
-        ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
-}
-
 # ticket-fleet branch-naming + gh/mcp instrument switch (issues 29, 138): the workflow's
 # concurrent-attempt guard and the tracker instrument switch both live in a pure helper
 # (tools/ticket-fleet-branch.js) so their tests can run without spinning up the Workflow tool.
@@ -1240,63 +1212,6 @@ if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry)) {
     } finally { $ErrorActionPreference = $prev }
 }
 
-# Round-trip: run the classifier against a stamp we just wrote from the restored home; it must
-# return `synced` (no drift, no origin-ahead against the clone's own HEAD which has no upstream).
-# The tool tolerates "no upstream" as `unknown` - that is the expected reading here, since the
-# depth-1 clone has no remote-tracking branch. The point of this check is that the tool runs to
-# completion after a restore, produces JSON, and answers something the driver can parse.
-if (Test-Path $freshnessTool) {
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $freshnessTool `
-                            -Mode classify -RepoRoot $Clone -UserHome $FakeHome -SkipFetch 2>&1 | Out-String
-        $exit = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $prev }
-    $reportBlock = ''
-    $m = [regex]::Match($out.Trim(), '\{[\s\S]*\}\s*$')
-    if ($m.Success) { $reportBlock = $m.Value }
-    $report = $null
-    if ($reportBlock) { try { $report = $reportBlock | ConvertFrom-Json } catch { $report = $null } }
-    $stateName = ''
-    if ($null -ne $report) { $stateName = [string]$report.state }
-    Check ('freshness classifier runs from a restored checkout (state={0}, exit={1})' -f $stateName, $exit) `
-        (($exit -eq 0) -and ($null -ne $report) -and ($stateName -ne '')) `
-        @(($out -split "`r?`n") | Select-Object -Last 12)
-}
-
-# Stamp round-trip + classify-state tests from the CLONE. Runs the standalone unit test file
-# against the restored tool; if it passes, all four states plus the stamp round-trip work
-# against a freshly restored home rather than only in the working tree.
-$freshnessPsTests = Join-Path $Clone 'tests\dotfiles-freshness.tests.ps1'
-if (Test-Path $freshnessPsTests) {
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $freshnessPsTests 2>&1 | Out-String
-        $exit = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $prev }
-    Check 'dotfiles-freshness.tests.ps1 passes (stamp round-trip + 4 states)' `
-        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
-}
-
-# sync.ps1 -Mode push refusal from a git worktree (issue 32). Runs against the CLONE so the
-# ship pass proves the test file made it into the mirror, and the sync.ps1 in the clone is
-# what the guard is being tested on - not the working tree's copy.
-$syncWtTests = Join-Path $Clone 'tests\sync-worktree-guard.tests.ps1'
-if (Test-Path $syncWtTests) {
-    $prev = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $syncWtTests 2>&1 | Out-String
-        $exit = $LASTEXITCODE
-    } finally { $ErrorActionPreference = $prev }
-    Check 'sync-worktree-guard.tests.ps1 passes (push refuses from worktree; -FromWorktree bypasses)' `
-        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
-} else {
-    Check 'sync-worktree-guard.tests.ps1 shipped' $false @('tests/sync-worktree-guard.tests.ps1 missing from clone')
-}
-
 # settings.json invariants, and sync.ps1 honouring their exit code (issue 362). Runs the
 # standalone suite against the CLONE so the ship pass proves both the suite and the tool
 # travelled. The pull that suite exercises targets its own sandbox home under %TEMP% - never
@@ -1336,9 +1251,9 @@ if (Test-Path $invariantTests) {
 
 # ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)
 
-# Prove that sync.ps1, tools/dotfiles-freshness.ps1, and tools/tracker-audit.js do not honour a
+# Prove that sync.ps1, tools/tracker-audit.js and restore-test.ps1 itself do not honour a
 # leaked GIT_DIR - `git -C <path>` does not override GIT_DIR by itself, and a hook-invoked child
-# process silently reads/writes the parent's repo unless every helper clears the five GIT_* env
+# process silently reads/writes the parent's repo unless every helper clears the six GIT_* env
 # vars first. Runs the standalone suite against the CLONED tests/ folder; the clone's copy is what
 # ships, so this proves the guard survives the mirror rather than only working in the working tree.
 $leakTests = Join-Path $Clone 'tests\git-env-leak.tests.ps1'
@@ -1349,7 +1264,7 @@ if (Test-Path $leakTests) {
         $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $leakTests 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
-    Check 'git-env-leak.tests.ps1 passes (sync + freshness + tracker + audit)' `
+    Check 'git-env-leak.tests.ps1 passes (sync + tracker + bootstrap)' `
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
 } else {
     Check 'git-env-leak.tests.ps1 shipped' $false @('tests/git-env-leak.tests.ps1 missing from clone')
@@ -1397,8 +1312,8 @@ if ((Test-Path $claimsAuditTest) -and (Test-Path $restoredEngine)) {
 #      autocrlf conversion path that stripped the CRLF on the way in).
 #   2. A byte-preserving CRLF rewrite of any of the three files (the exact effect a Windows
 #      writer has) leaves `git status --porcelain` empty.
-# Worktree mode skips a real git repo; the byte-check still runs there so the pre-commit gate
-# does not silently miss a regression in the blob.
+# Worktree mode skips a real git repo; the byte-check still runs there so that mode does not
+# silently miss a regression in the blob.
 Write-Host ''
 Write-Host 'Issue 87 - CRLF blob byte stability'
 

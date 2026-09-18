@@ -5,10 +5,10 @@
  * Issue 487. Two artifacts here are written by a generator, and nothing invoked either one: the
  * ordinary sequence - edit `tools/ticket-fleet-branch.js` or `tools/tracker-audit.js`, commit,
  * forget the generator - put a stale artifact on master, where the next unrelated test run was
- * what reported it. The gate is now `--check` in two places, `.githooks/pre-commit` (commit time)
- * and `.github/workflows/generated-code.yml` (push and pull request, for a commit made with
- * --no-verify or from a clone with no hook installed). These tests pin the mechanism itself and
- * both of its callers; the per-artifact byte comparisons stay in
+ * what reported it. The gate is `--check` from `.github/workflows/generated-code.yml`, on every
+ * push and pull request. (It ran at commit time too, from `.githooks/pre-commit`, until that hook
+ * retired with the freshness loop in issue 213.) These tests pin the mechanism itself and
+ * its caller; the per-artifact byte comparisons stay in
  * tools/fleet-inline-template.test.js and tools/tracker-audit-template.test.js.
  */
 'use strict';
@@ -21,7 +21,6 @@ const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
-const HOOK = path.join(ROOT, '.githooks', 'pre-commit');
 const WORKFLOW = path.join(ROOT, '.github', 'workflows', 'generated-code.yml');
 
 /** Both generators, with an edit to their SOURCE that must make the artifact stale. */
@@ -77,16 +76,6 @@ test('--check exits non-zero and names the regenerate command when the source mo
   }
 });
 
-test('.githooks/pre-commit runs both generators with --check and blocks on a stale one', () => {
-  const hook = fs.readFileSync(HOOK, 'utf8');
-  for (const { script } of GENERATORS) {
-    assert.ok(hook.includes(script), `pre-commit no longer runs ${script}`);
-  }
-  assert.match(hook, /node "\$gen" --check/, 'pre-commit must call the generators with --check');
-  assert.match(hook, /commit blocked[\s\S]*?\n\s*exit 1/,
-    'pre-commit must exit non-zero when a generated artifact is stale');
-});
-
 test('.github/workflows/generated-code.yml runs both generators with --check', () => {
   const workflow = fs.readFileSync(WORKFLOW, 'utf8');
   for (const { script } of GENERATORS) {
@@ -98,7 +87,6 @@ test('.github/workflows/generated-code.yml runs both generators with --check', (
 test('each generator names, in its header, what invokes it', () => {
   for (const { script } of GENERATORS) {
     const header = fs.readFileSync(path.join(ROOT, script), 'utf8').split("'use strict'")[0];
-    assert.match(header, /\.githooks\/pre-commit/, `${script} header omits the pre-commit gate`);
     assert.match(header, /generated-code\.yml/, `${script} header omits the CI gate`);
   }
 });

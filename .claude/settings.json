@@ -7,10 +7,6 @@
     "hand-written, committed to the repo, and loaded by Claude Code when a",
     "session starts anywhere under this checkout.",
     "",
-    "Wires the dotfiles-freshness loop (issue 12) - see tools/dotfiles-freshness.ps1",
-    "and tools/dotfiles-freshness-hook.js. Runs only for sessions in this repo,",
-    "which is where the freshness of ~/.claude vs origin actually matters.",
-    "",
     "extraKnownMarketplaces + enabledPlugins make cloud sessions (claude.ai/code)",
     "install the aac-skills plugin from this repo at startup. Two other routes were",
     "tried and do not work: the claude.ai account-level plugin sync returns zero",
@@ -114,16 +110,6 @@
             "statusMessage": "Cloud container: installing the caveman suite..."
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"tools/dotfiles-freshness-hook.js\" session-start",
-            "timeout": 120,
-            "statusMessage": "Checking dotfiles freshness..."
-          }
-        ]
       }
     ],
     "UserPromptSubmit": [
@@ -131,31 +117,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"tools/dotfiles-freshness-hook.js\" prompt",
-            "timeout": 30,
-            "statusMessage": "Guarding against dotfiles divergence..."
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/caveman-prompt.sh",
             "timeout": 30,
             "statusMessage": "Tracking caveman mode..."
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"tools/dotfiles-freshness-hook.js\" session-end",
-            "timeout": 30,
-            "statusMessage": "Recording dotfiles freshness at end..."
           }
         ]
       }

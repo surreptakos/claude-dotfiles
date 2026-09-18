@@ -6,7 +6,7 @@
  * GIT_PREFIX / GIT_COMMON_DIR exported, and a child `git` honours those over its own cwd — so a
  * test that runs `git init` or `git config` in a temp directory acts on the real repository. On
  * 2026-09-16 that left aac-routines' main checkout with `core.bare = true` in `.git/config`.
- * Both hooks strip the variables before the test command; these tests fail if an edit drops that.
+ * The hook strips the variables before the test command; these tests fail if an edit drops that.
  */
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
@@ -17,7 +17,9 @@ const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE = path.join(ROOT, 'agents', 'skills', 'project-harness', 'templates', 'pre-commit');
-const HOOKS = [path.join(ROOT, '.githooks', 'pre-commit'), TEMPLATE];
+// This repo's own .githooks/pre-commit retired with the freshness loop (issue 213); the
+// harness template is the hook this repo still ships to everywhere else.
+const HOOKS = [TEMPLATE];
 const SCRUBBED = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_COMMON_DIR'];
 
 test('every pre-commit hook unsets git\'s hook environment before it runs the test command', () => {

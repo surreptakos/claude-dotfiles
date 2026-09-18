@@ -481,91 +481,6 @@ function Assert-NoSecrets {
     return $true
 }
 
-# --------------------------------------------------------- freshness fingerprint
-
-# SHA256 over the LIVE contents of every whitelisted file (relative path + null
-# byte + raw bytes, sorted by relative path). Relative paths, raw bytes: the same
-# ~/.claude on two machines with different usernames must fingerprint identically,
-# so the stamp travels through the pull/push round trip without a false mismatch.
-# Missing files contribute nothing (they show up in the sorted-list difference
-# instead), which keeps the fingerprint defined on a partial install.
-function Get-DotfilesFingerprint {
-    param(
-        [Parameter(Mandatory = $true)][string]$UserHome
-    )
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $items = Get-DotfileItems -RepoRoot 'unused' -UserHome $UserHome
-        $entries = New-Object System.Collections.Generic.List[object]
-
-        foreach ($item in $items) {
-            if (-not (Test-Path $item.Local)) { continue }
-            if ($item.Type -eq 'File') {
-                $entries.Add([pscustomobject]@{
-                    Relative = $item.Repo
-                    Full     = $item.Local
-                }) | Out-Null
-                continue
-            }
-            $base = $item.Local
-            Get-ChildItem -Path $base -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-                $relative = $_.FullName.Substring($base.Length).TrimStart('\', '/') -replace '\\', '/'
-                if (Test-Excluded -RelativePath $relative) { return }
-                $entries.Add([pscustomobject]@{
-                    Relative = ($item.Repo + '/' + $relative)
-                    Full     = $_.FullName
-                }) | Out-Null
-            }
-        }
-        foreach ($memory in (Get-MemoryItems -UserHome $UserHome)) {
-            $slug = ConvertTo-TokenSlug -Slug $memory.Slug -UserHome $UserHome
-            $base = $memory.Local
-            Get-ChildItem -Path $base -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
-                $relative = $_.FullName.Substring($base.Length).TrimStart('\', '/') -replace '\\', '/'
-                if (Test-Excluded -RelativePath $relative) { return }
-                $entries.Add([pscustomobject]@{
-                    Relative = ('memory/' + $slug + '/' + $relative)
-                    Full     = $_.FullName
-                }) | Out-Null
-            }
-        }
-
-        $sorted = @($entries | Sort-Object -Property Relative)
-        $utf8 = New-Object System.Text.UTF8Encoding($false)
-        $stream = New-Object System.IO.MemoryStream
-        try {
-            foreach ($entry in $sorted) {
-                $prefix = $utf8.GetBytes($entry.Relative)
-                $stream.Write($prefix, 0, $prefix.Length)
-                $stream.WriteByte(0)
-                # Text files: tokenize so the fingerprint is username-invariant.
-                # Binary files: raw bytes.
-                if (Test-TextFile -Path $entry.Full) {
-                    $text = [System.IO.File]::ReadAllText($entry.Full)
-                    $text = ConvertTo-Tokens -Text $text -UserHome $UserHome
-                    $bytes = $utf8.GetBytes($text)
-                } else {
-                    $bytes = [System.IO.File]::ReadAllBytes($entry.Full)
-                }
-                $stream.Write($bytes, 0, $bytes.Length)
-                $stream.WriteByte(0)
-            }
-            $stream.Position = 0
-            $hash = $sha.ComputeHash($stream)
-        } finally {
-            $stream.Dispose()
-        }
-        return ([System.BitConverter]::ToString($hash) -replace '-', '').ToLower()
-    } finally {
-        $sha.Dispose()
-    }
-}
-
-# The stamp lives under the user profile, NOT the repo. Push and pull each write
-# it after they finish; the freshness check reads it. If the file is missing
-# ("no stamp"), the freshness check stays silent - the criterion "auto-pull must
-# never run while live drift exists" then holds trivially because a missing
-# stamp cannot possibly report "unedited since last sync".
 # Names of the six GIT_* environment variables that override `git -C <path>` and would silently
 # redirect any child git call to the parent process's repo. See Clear-GitEnv below for the full
 # rationale; issue 28.
@@ -579,8 +494,8 @@ function Clear-GitEnv {
     .DESCRIPTION
         `git -C <path>` does NOT override GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE / GIT_PREFIX /
         GIT_COMMON_DIR / GIT_OBJECT_DIRECTORY: git honours those env vars first, and the -C
-        flag only relocates its resolution of a path when they are unset. A pre-commit hook
-        that runs restore-test.ps1 (which runs the freshness suite, which runs git) leaks
+        flag only relocates its resolution of a path when they are unset. A git hook that
+        runs a PowerShell suite (which runs git) leaks
         those vars into every child process; every downstream `git -C <target>` then silently
         operates on the PARENT repo instead of the intended target. Corrupted state1
         detection 2026-08-25 and polluted a parent bare repo's .git/config with test
@@ -608,45 +523,3 @@ function Restore-GitEnv {
     }
 }
 
-function Get-DotfilesStampPath {
-    param([Parameter(Mandatory = $true)][string]$UserHome)
-    return (Join-Path $UserHome '.claude\hook-state\dotfiles-sync\state.json')
-}
-
-function Write-DotfilesStamp {
-    param(
-        [Parameter(Mandatory = $true)][string]$RepoRoot,
-        [Parameter(Mandatory = $true)][string]$UserHome,
-        [Parameter(Mandatory = $true)][ValidateSet('push', 'pull', 'install')][string]$Kind
-    )
-    $stampPath = Get-DotfilesStampPath -UserHome $UserHome
-    $parent = Split-Path $stampPath -Parent
-    if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-
-    $commit = ''
-    $savedGitEnv = Clear-GitEnv
-    try {
-        $commit = (& git -C $RepoRoot rev-parse HEAD 2>$null).Trim()
-    } catch { $commit = '' }
-    finally { Restore-GitEnv -Saved $savedGitEnv }
-
-    $stamp = [ordered]@{
-        version         = 1
-        kind            = $Kind
-        stampedAt       = (Get-Date).ToUniversalTime().ToString('o')
-        repoRoot        = $RepoRoot
-        syncedCommit    = $commit
-        liveFingerprint = (Get-DotfilesFingerprint -UserHome $UserHome)
-    }
-    $json = ConvertTo-Json -InputObject $stamp -Depth 3
-    [System.IO.File]::WriteAllText($stampPath, $json, $script:Utf8NoBom)
-    return $stampPath
-}
-
-function Read-DotfilesStamp {
-    param([Parameter(Mandatory = $true)][string]$UserHome)
-    $stampPath = Get-DotfilesStampPath -UserHome $UserHome
-    if (-not (Test-Path $stampPath)) { return $null }
-    try { return Get-Content $stampPath -Raw | ConvertFrom-Json }
-    catch { return $null }
-}

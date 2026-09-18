@@ -134,9 +134,7 @@ if ($Mode -eq 'push') {
     # from one either (a) clears then rewrites claude/, codex/, memory/ against the branch's
     # tree - which is almost never what the caller wants when they meant to sync live to
     # master - or (b) with -Commit, drops the sync commit onto the ticket's feature branch,
-    # polluting the diff. Mirrors the push-state2 hook guard's `-not $repo.isWorktree`
-    # clause (tools/dotfiles-freshness.ps1) and its rationale. Detection matches Get-RepoState
-    # in tools/dotfiles-freshness.ps1: `git rev-parse --git-dir` returns a path under
+    # polluting the diff. Detection: `git rev-parse --git-dir` returns a path under
     # `.git/worktrees/<name>/` for a worktree checkout and plain `.git` (or the bare .git
     # dir) otherwise. LASTEXITCODE gates the check so a non-git RepoRoot (should not happen,
     # but does under some test fixtures) does not throw here.
@@ -274,9 +272,8 @@ if ($Mode -eq 'push') {
             # only sin was mixed line endings. Exit codes are the signal here, not stderr.
             #
             # GIT_* env vars are cleared for the duration of this block (issue 28). When
-            # sync.ps1 is invoked from a pre-commit hook (or from the state2 auto-push path
-            # in dotfiles-freshness-hook.js, which is called from a hook itself), the parent
-            # git process leaks GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE into the child;
+            # sync.ps1 is invoked from a git hook, the parent git process leaks
+            # GIT_DIR / GIT_INDEX_FILE / GIT_WORK_TREE into the child;
             # `git -C $RepoRoot add/commit` would then silently operate on the PARENT repo
             # instead of the target. `-C` does not override GIT_DIR - only unsetting does.
             $previous = $ErrorActionPreference
@@ -309,12 +306,6 @@ if ($Mode -eq 'push') {
             Write-Host ('  git -C "{0}" status --short' -f $RepoRoot)
             Write-Host '  (or re-run with -Commit "<message>" so the guard gates the commit)'
         }
-
-        # Stamp AFTER the commit so syncedCommit records what the mirror actually holds. The
-        # freshness check (tools/dotfiles-freshness.ps1) reads this to decide whether live has
-        # drifted since the last sync; without a stamp the whole check stays silent.
-        $stampPath = Write-DotfilesStamp -RepoRoot $RepoRoot -UserHome $UserHome -Kind 'push'
-        Write-Host ("Stamped {0}" -f $stampPath)
     }
     exit 0
 }
@@ -386,8 +377,8 @@ if ($Mode -eq 'pull') {
         $args_ = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $invariants,
                    '-Path', $liveSettings, '-Trust', '-UserHome', $UserHome)
         if ($DryRun) { $args_ += '-DryRun' }
-        # Fails fast: the stamp below must not record a clean pull when the invariants the
-        # repo owns could not be applied to the live tree.
+        # Fails fast: a pull must not report success when the invariants the repo owns could
+        # not be applied to the live tree.
         Invoke-SettingsInvariants -ScriptArgs $args_ -Label 'live'
     }
 
@@ -397,14 +388,6 @@ if ($Mode -eq 'pull') {
     Write-Host ''
     Write-Host 'Personal profile (~/.claude-personal)'
     Update-PersonalProfile -UserHome $UserHome -DryRun:$DryRun
-
-    # Stamp AFTER the writes so liveFingerprint matches what pull just landed. Same file the
-    # push branch writes; a fresh install runs `install.ps1 -> sync.ps1 -Mode pull` and gets
-    # its initial stamp for free.
-    if (-not $DryRun) {
-        $stampPath = Write-DotfilesStamp -RepoRoot $RepoRoot -UserHome $UserHome -Kind 'pull'
-        Write-Host ("Stamped {0}" -f $stampPath)
-    }
 
     Write-Host ''
     Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)

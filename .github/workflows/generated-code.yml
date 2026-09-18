@@ -7,10 +7,10 @@ name: Generated code
 #   tools/build-harness-tracker-audit.js   <- tools/tracker-audit.js
 #     -> agents/skills/project-harness/templates/tracker-audit.js (issue 336)
 # So the ordinary sequence - edit the source, commit, forget the generator - put a stale artifact
-# on master and surfaced only in the next unrelated test run. `.githooks/pre-commit` runs the same
-# two --check calls before every commit; this job is what catches a commit made with --no-verify,
-# from a clone that never ran `git config core.hooksPath .githooks`, or by a cloud session whose
-# container has no hook installed at all.
+# on master and surfaced only in the next unrelated test run. This job is the whole gate: the
+# commit-time half ran the same two --check calls from `.githooks/pre-commit` until that hook
+# retired with the freshness loop (issue 213), and it never covered a cloud session's container
+# or a commit made with --no-verify anyway.
 #
 # The fix for either failure is the command the generator itself prints: run it without --check,
 # which rewrites the artifact, then commit the result.

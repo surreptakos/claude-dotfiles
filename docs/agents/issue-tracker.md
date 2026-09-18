@@ -63,7 +63,7 @@ cp /tmp/ps7/pwsh /tmp/ps7/shell7
 ```bash
 chmod +x /tmp/ps7/shell7
 /tmp/ps7/shell7 --version
-/tmp/ps7/shell7 -NoProfile -ExecutionPolicy Bypass -File tests/dotfiles-freshness.tests.ps1
+/tmp/ps7/shell7 -NoProfile -ExecutionPolicy Bypass -File tests/settings-invariants.tests.ps1
 ```
 
 Four gotchas, all four learned by paying for them:
@@ -83,27 +83,25 @@ Four gotchas, all four learned by paying for them:
    first assertion. The five suites now fall back to `[System.IO.Path]::GetTempPath()`, so this bites
    only a `.ps1` written since; `export TEMP=/tmp` is the one-line escape hatch.
 
-Leave it off `PATH`. `.githooks/pre-commit` asks for `powershell` first (the desktop keeps running
-the gate on 5.1, where `ConvertTo-Json` indents as it always has) and falls back to `pwsh`; with
-neither on PATH it prints a loud SKIP and exits 0, which is what lets a container commit without
-`--no-verify`. Put `pwsh` on PATH and the hook will run the Windows-only restore test under it and
-block the commit. Invoke `/tmp/ps7/shell7` by its full path instead.
+Leave it off `PATH` and invoke `/tmp/ps7/shell7` by its full path. Anything that resolves a
+PowerShell engine by name gets 7.4.6 the moment `pwsh` is on PATH, and these suites are written for
+the desktop's 5.1, where `ConvertTo-Json` indents as it always has.
 
-What runs, measured 2026-09-17 under 7.4.6 in a fleet container:
+What runs, re-measured 2026-09-17 under 7.4.6 in a fleet container after issue 213 retired the
+freshness and worktree-guard suites:
 
 | suite | result |
 | --- | --- |
 | `tests/settings-invariants.tests.ps1` | `pass 14 fail 0`, exit 0 |
-| `tests/dotfiles-freshness.tests.ps1` | `pass 31 fail 0`, exit 0 |
-| `tests/sync-worktree-guard.tests.ps1` | `pass 12 fail 0`, exit 0 |
-| `tests/git-env-leak.tests.ps1` | `pass 16 fail 3`, exit 1 |
+| `tests/git-env-leak.tests.ps1` | `pass 9 fail 3`, exit 1 |
 | `tests/settings-defaultmode.tests.ps1` | `pass 6 fail 3`, exit 1 |
 | `tests/restore-test.ps1` | Windows-only — proved on `windows-latest`, below |
 
 The two partial suites and the restore test are blocked by Windows-only code *outside* the test
 files — `$env:USERPROFILE` and directory junctions in `restore-test.ps1`, and a hard-coded
-`powershell` spawn in `sync.ps1` — not by the engine. A cloud session runs the first three and says
-so; the restore test has its own venue, below.
+`powershell` spawn in `sync.ps1` — not by the engine, and `git-env-leak`'s third failure wants an
+authenticated `gh`. A cloud session runs what it can and says so; the restore test has its own
+venue, below.
 
 ### The restore test runs on `windows-latest`, not only on the desktop (issue 454)
 
@@ -116,8 +114,8 @@ powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From worktree
 powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1
 ```
 
-It fires on any push that touches a `.ps1`, `.githooks/pre-commit` or the workflow itself (paths, not
-every push: a Windows runner bills at 2x), and by hand on any branch:
+It fires on any pull request or push that touches a `.ps1` or the workflow itself (paths, not every
+push: a Windows runner bills at 2x), and by hand on any branch:
 
 ```bash
 gh api -X POST repos/surreptakos/claude-dotfiles/actions/workflows/windows-restore-test.yml/dispatches -f ref=<branch>

@@ -259,8 +259,8 @@ function Invoke-StateRefRepair {
     # Issue 92: sweep the master orchestrator state issues (#74-#77) so a bare `#N` reference
     # to work in the owning repo is qualified to `owner/repo#N`. Deterministic backstop for
     # the prose rule in Get-BootPrompt; idempotent (no `gh issue edit` call when nothing needs
-    # changing). Node is already required elsewhere in this repo (tracker-audit,
-    # dotfiles-freshness-hook, sync tooling), so this adds no new dependency.
+    # changing). Node is already required elsewhere in this repo (tracker-audit, the code
+    # generators, sync tooling), so this adds no new dependency.
     #
     # Called two ways:
     #   * -Slug '<slug>' for a targeted sweep right after that master closes.
