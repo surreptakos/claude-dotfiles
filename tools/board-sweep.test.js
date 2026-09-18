@@ -236,6 +236,7 @@ test('a closed issue whose card is not Done is moved to Done; nothing else is to
   assert.match(edits[0], /--single-select-option-id OPT_done/);
   assert.match(edits[1], /--id ITEM_closed_issue_p2 /);
   assert.equal(/ITEM_done_pr|ITEM_open_issue|ITEM_draft/.test(edits.join('\n')), false);
+  assert.match(r.output, /surreptakos\/#3 "AAC": 2 stale of 5 cards/, 'the card count proves the listing fetched every page');
   assert.match(r.output, /#900\s+In Progress/);
   assert.match(r.output, /#903\s+Todo/);
   assert.match(r.output, /total moved 2, fails 0/);
