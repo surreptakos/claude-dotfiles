@@ -3,10 +3,10 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-18T06:04:32Z'
-  previous-modified: '2026-08-26T14:35:01Z'
-  revision: '2'
-  content-sha: 020e790e6a64
+  modified: '2026-09-18T18:12:23Z'
+  previous-modified: '2026-09-18T06:04:32Z'
+  revision: '3'
+  content-sha: 60778f598eba
 ---
 
 # Maintain repo
@@ -43,7 +43,7 @@ It sweeps every prose surface (README, CLAUDE.md, ADRs, PRDs, runbooks, memory f
 
 Invoke `/consolidate-memory` (local override at `${CLAUDE_PLUGIN_ROOT}/skills/consolidate-memory/`, which wraps the anthropic-skills version with the full-sweep rule).
 
-It walks every `memory/*.md` file plus `MEMORY.md`, merges duplicates, retires dated entries, converts relative to absolute dates, and trims the index under 200 lines / 25KB. Every file every run — never "only files added since last consolidation".
+It walks every note plus `MEMORY.md` in the repo's memory set — `docs/agents/memory/` when the repo commits its notes (the auto-memory directory is then a pointer on the PC and empty in a cloud container), the auto-memory directory only when the repo has no `docs/agents/memory/` — merges duplicates, retires dated entries, converts relative to absolute dates, and trims the index under 200 lines / 25KB. Every file every run — never "only files added since last consolidation".
 
 **Completion criterion:** the summary names files touched and reports the resulting `MEMORY.md` line and byte count under the limits. Any line still over 150 chars or file still overlapping another is a failure. A summary listing "N new files reviewed" without confirming the full set was walked is a failure.
 

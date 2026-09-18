@@ -2,17 +2,17 @@
 name: consolidate-memory
 description: Full holistic pass over every memory file — merge duplicates, fix stale facts, prune the index. Never a delta sweep.
 metadata:
-  modified: '2026-08-26T14:35:01Z'
-  previous-modified: none
-  revision: '1'
-  content-sha: 5213c7309dfb
+  modified: '2026-09-18T18:12:22Z'
+  previous-modified: '2026-08-26T14:35:01Z'
+  revision: '2'
+  content-sha: d2615725fe31
 ---
 
 # Memory Consolidation
 
 Reflective pass over the auto-memory directory. Goal: a future session orients quickly — who the user works with, what they're focused on, how they like things done — without re-asking.
 
-The system prompt's auto-memory section defines the directory, file format, and memory types. Follow it.
+The system prompt's auto-memory section defines the file format and memory types. Follow it. The directory is the repo's when the repo commits its notes: if `docs/agents/memory/MEMORY.md` exists in the checkout, that directory is the whole memory set, the auto-memory directory holds only a pointer (in a cloud container it is empty), and the edits are committed and pushed like any other change. Only when the repo has no `docs/agents/memory/` is the auto-memory directory the set. An empty auto-memory directory next to a committed set is not "no memories to consolidate".
 
 ## Always a full sweep — never a delta
 
