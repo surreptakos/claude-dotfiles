@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-18T04:12:48Z'
-  previous-modified: '2026-09-17T23:00:21Z'
-  revision: '25'
-  content-sha: 2851806e3888
+  modified: '2026-09-18T15:52:50Z'
+  previous-modified: '2026-09-18T04:12:48Z'
+  revision: '26'
+  content-sha: 4762710afed6
 ---
 
 # Project Harness
@@ -137,7 +137,10 @@ cross-repo Projects board instead of per-repo (see step 6).
       `templates/session-start.sh` to `<repo>/.claude/hooks/session-start.sh`, marks it
       executable, and prepends one `hooks.SessionStart` entry
       (`$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh`, timeout 120) so it runs before any
-      hook that needs gh, the skills or the rules text. In a container
+      hook that needs gh, the skills or the rules text. A repo whose `session-start.sh` is
+      **not** a copy of the template (no `aac-bootstrap` marker: somebody's own hook, as in
+      aac-routines) is left byte-for-byte; the bootstrap lands beside it as
+      `.claude/hooks/session-start-bootstrap.sh` and that path is wired instead (issue 542). In a container
       (`CLAUDE_CODE_REMOTE=true`) the hook shallow-clones dotfiles master, installs gh from the
       pinned tarball onto PATH through `$CLAUDE_ENV_FILE`, copies the `aac-skills` payload into
       `${CLAUDE_PLUGIN_ROOT}/skills/`, merges the payload's hooks manifest into the container's user settings
@@ -213,7 +216,8 @@ cross-repo Projects board instead of per-repo (see step 6).
 - **Cloud plugin** — `.claude/settings.json` parses and carries `enabledPlugins["aac-skills@claude-dotfiles"]`
   plus the `claude-dotfiles` marketplace. The real test is a fresh cloud session on the repo: its
   skill list shows `aac-skills:` entries and the plugin's SessionStart hook prints its marker line.
-- **Cloud bootstrap hook** — `.claude/hooks/session-start.sh` is present and executable, one
+- **Cloud bootstrap hook** — `.claude/hooks/session-start.sh` (or `session-start-bootstrap.sh`
+  beside a repo's own hook, issue 542) is present and executable, one
   `hooks.SessionStart` entry names it, and a second `add-cloud-plugin.js` run prints
   `already delivered` with nothing to commit. It exits 0 in a local session (no
   `CLAUDE_CODE_REMOTE`), so running it here proves nothing beyond that; the real test is one cloud

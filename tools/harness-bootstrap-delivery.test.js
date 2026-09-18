@@ -41,7 +41,8 @@ function deliver(root) {
 
 function snapshot(root) {
   const out = {};
-  for (const rel of ['.claude/settings.json', '.claude/hooks/session-start.sh']) {
+  for (const rel of ['.claude/settings.json', '.claude/hooks/session-start.sh',
+                     '.claude/hooks/session-start-bootstrap.sh']) {
     const p = path.join(root, rel);
     out[rel] = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
   }
@@ -123,4 +124,50 @@ test('a repo that already wired the hook untagged keeps its entry, its mode and 
   assert.strictEqual(s.permissions.defaultMode, 'bypassPermissions', 'never downgrade an explicit mode');
   assert.ok(s.permissions.allow.includes('Bash(git *)'), 'never shrink an existing allow list');
   assert.ok(s.permissions.allow.includes('mcp__github__*'));
+});
+
+test('a foreign session-start.sh survives byte-for-byte; the bootstrap lands beside it (issue 542)', () => {
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude', 'hooks'), { recursive: true });
+  const foreign = '#!/bin/sh\n# test-deps hook: pip install -e ".[dev]"; git config core.hooksPath .githooks\n';
+  fs.writeFileSync(path.join(root, '.claude', 'hooks', 'session-start.sh'), foreign);
+  fs.writeFileSync(path.join(root, '.claude', 'settings.json'), JSON.stringify({
+    hooks: { SessionStart: [
+      { hooks: [{ type: 'command', command: 'sh "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"' }] },
+    ] },
+  }, null, 2) + '\n');
+  const stdout = deliver(root);
+  assert.match(stdout, /installed alongside \.claude\/hooks\/session-start\.sh \(kept/);
+
+  assert.strictEqual(fs.readFileSync(path.join(root, '.claude', 'hooks', 'session-start.sh'), 'utf8'), foreign,
+    'the foreign hook must be untouched');
+  const sidecar = path.join(root, '.claude', 'hooks', 'session-start-bootstrap.sh');
+  assert.strictEqual(fs.readFileSync(sidecar, 'utf8'), fs.readFileSync(TARGET, 'utf8'));
+  if (process.platform !== 'win32') assert.ok(fs.statSync(sidecar).mode & 0o111, 'sidecar must be executable');
+
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  const commands = s.hooks.SessionStart.flatMap((g) => g.hooks.map((h) => h.command));
+  assert.strictEqual(commands.length, 2, 'both hooks are wired');
+  assert.strictEqual(commands[0], '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-bootstrap.sh', 'bootstrap first');
+  assert.match(commands[1], /session-start\.sh"$/, 'the foreign entry survives, after it');
+
+  // A second run is idempotent on the sidecar and never grows a second copy.
+  const before = snapshot(root);
+  assert.match(deliver(root), /already delivered/);
+  assert.deepStrictEqual(snapshot(root), before);
+});
+
+test('an older copy of the template under session-start.sh is overwritten in place, not sidecar-installed', () => {
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude', 'hooks'), { recursive: true });
+  const older = fs.readFileSync(TARGET, 'utf8').replace(/\n/, '\n# older copy of the template\n');
+  assert.ok(older.includes('aac-bootstrap') && older.includes('CLAUDE_CODE_REMOTE'), 'fixture keeps the markers');
+  fs.writeFileSync(path.join(root, '.claude', 'hooks', 'session-start.sh'), older);
+  const stdout = deliver(root);
+  assert.match(stdout, /bootstrap hook updated:/);
+  assert.strictEqual(fs.readFileSync(path.join(root, '.claude', 'hooks', 'session-start.sh'), 'utf8'),
+                     fs.readFileSync(TARGET, 'utf8'));
+  assert.ok(!fs.existsSync(path.join(root, '.claude', 'hooks', 'session-start-bootstrap.sh')), 'no sidecar');
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.strictEqual(s.hooks.SessionStart[0].hooks[0].command, '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh');
 });
