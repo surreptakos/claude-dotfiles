@@ -112,9 +112,11 @@ with open(marker, 'w') as f:
 msg = (
     f"AAC-BOOTSTRAP STOP: {e['BOOTSTRAP_FAIL_STAGE']} failed - {e['BOOTSTRAP_FAIL_REASON']};"
     f" no aac payload, skills or governance hooks landed in this container;"
-    f" gh={e['BOOTSTRAP_FAIL_GH']}; git push falls back to GitHub MCP push_files"
-    f" (session-end cloud table); if git cannot read a username for github.com, check"
-    f" `env | grep ANTHROPIC_BASE_URL` (issues 483, 519)"
+    f" gh={e['BOOTSTRAP_FAIL_GH']}; git push falls back to GitHub MCP push_files;"
+    f" if git cannot read a username for github.com, the dotfiles repo is not a source of this"
+    f" session (add {e['BOOTSTRAP_FAIL_REPO']} as a second source of the environment or Routine,"
+    f" aac-routines issue 489) or a caveman ANTHROPIC_BASE_URL stripped credential injection"
+    f" (`env | grep ANTHROPIC_BASE_URL`, issues 483, 519)"
 )
 print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': msg}}))
 PYFAIL
