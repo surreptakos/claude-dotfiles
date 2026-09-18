@@ -538,7 +538,7 @@ test('tracker audit: a cloud session reads the job and never spawns the audit', 
  * directory `runChecker` builds makes every git call fail, which reads as "no upstream" and
  * never reaches the skip. `mutate(work)` runs after the push, before check.js.
  */
-function runCheckerPushed(config, mutate, args) {
+function runCheckerPushed(config, mutate, args, env) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-check-git-'));
   const remote = path.join(root, 'remote.git');
   const work = path.join(root, 'work');
@@ -556,7 +556,7 @@ function runCheckerPushed(config, mutate, args) {
     git(work, 'push', '--quiet', '-u', 'origin', 'HEAD');
     if (mutate) mutate(work, git);
     return execFileSync(process.execPath, [CHECKER, ...(args || ['--end'])], {
-      cwd: work, encoding: 'utf8', env: localEnv(), stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: work, encoding: 'utf8', env: localEnv(env), stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch (error) {
     if (!error.stdout && !error.stderr) throw error;
@@ -599,4 +599,59 @@ test('start on the same pushed head runs the suite — the skip is end-only', ()
   const output = runCheckerPushed(MARKER_TEST, null, []);
   assert.match(output, /tests pass/);
   assert.doesNotMatch(output, /not re-run/);
+});
+
+/** Writes a `.githooks/pre-commit` into the pushed work tree and commits+pushes it, so the head
+ *  stays clean and the repo has a gate the skip could be leaning on. */
+function withGithooks(extra) {
+  return (work, git) => {
+    fs.mkdirSync(path.join(work, '.githooks'), { recursive: true });
+    fs.writeFileSync(path.join(work, '.githooks', 'pre-commit'), '#!/bin/sh\nexit 0\n');
+    git(work, 'add', '.');
+    git(work, 'commit', '--quiet', '-m', 'hooks');
+    git(work, 'push', '--quiet');
+    if (extra) extra(work, git);
+  };
+}
+
+// Issue 459's follow-on: the skip's premise is that the pre-commit hook ran, and in the
+// aac-routines session of 2026-09-18 it had not — `core.hooksPath` was empty because the
+// bootstrap hook never ran, so the commit passed through no gate at all while this line
+// printed a benign `--`.
+test('--end on a pushed head whose core.hooksPath is unset runs the suite and names the gap', () => {
+  const output = runCheckerPushed(MARKER_TEST, withGithooks());
+  assert.match(output, /tests pass/);
+  assert.doesNotMatch(output, /not re-run/);
+  assert.match(output, /`core\.hooksPath` is unset/);
+  assert.match(output, /commit gate on this head is untrusted/);
+});
+
+test('--end on a pushed head whose core.hooksPath points elsewhere runs the suite', () => {
+  const output = runCheckerPushed(MARKER_TEST, withGithooks((work, git) => {
+    git(work, 'config', 'core.hooksPath', '.git/hooks');
+  }));
+  assert.match(output, /tests pass/);
+  assert.doesNotMatch(output, /not re-run/);
+  assert.match(output, /not this repo's `\.githooks`/);
+});
+
+test("--end still skips when core.hooksPath does point at the repo's .githooks", () => {
+  const output = runCheckerPushed(MARKER_TEST, withGithooks((work, git) => {
+    git(work, 'config', 'core.hooksPath', '.githooks');
+  }));
+  assert.match(output, /-- +tests — .*not re-run: HEAD is committed and pushed/);
+  assert.doesNotMatch(output, /tests pass/);
+  assert.doesNotMatch(output, /commit gate on this head is untrusted/);
+});
+
+// Same head, same git state, in a container the bootstrap hook never reached: the suite's
+// dependencies are not installed there either, so "committed and pushed" proves nothing.
+test('--end in a cloud container with no bootstrap marker runs the suite instead of skipping', () => {
+  const output = runCheckerPushed(MARKER_TEST, null, ['--end'], {
+    CLAUDE_CODE_REMOTE_SESSION_ID: '1',
+    BOOTSTRAP_MARKER_FILE: path.join(os.tmpdir(), `no-such-marker-${process.pid}.json`),
+  });
+  assert.match(output, /tests pass/);
+  assert.doesNotMatch(output, /not re-run/);
+  assert.match(output, /aac-bootstrap marker is missing/);
 });

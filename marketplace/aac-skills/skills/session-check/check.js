@@ -44,7 +44,9 @@
  * At --end the test command is skipped on a committed, pushed head in a repo with CI: the
  * pre-commit hook ran the suite on each commit and CI runs it on the pushed head, so a third
  * run here learns nothing (and in claude-dotfiles costs a full restore-test). A dirty tree or
- * an unpushed commit still runs it — those are the cases nothing else has seen.
+ * an unpushed commit still runs it — those are the cases nothing else has seen. So does a head
+ * whose pre-commit gate was never in force: `core.hooksPath` not pointing at the repo's
+ * `.githooks`, or a cloud container with no aac-bootstrap marker (issue 459's follow-on).
  *
  * READ ONLY. It fetches (which changes no files) and reports. It never commits, pushes, merges or
  * deploys — the point is to tell a human what to decide, not to decide it.
@@ -340,6 +342,40 @@ function cloudTestFallback(t) {
   return { kept, missing };
 }
 
+/** Evidence that the commit gate the --end skip leans on was actually in force on this head
+ *  (issue 459's follow-on). "HEAD is committed and pushed" only implies "verified" when the
+ *  pre-commit hook really ran. In a cloud container where the bootstrap SessionStart hook never
+ *  ran, `core.hooksPath` is unset, `.githooks/pre-commit` is inert, and the suite's dependencies
+ *  are not installed either — on 2026-09-18 an aac-routines commit reached a pushed branch with
+ *  nothing having verified it while this checker printed the skip as a benign `--`. Returns one
+ *  string per reason the gate cannot be trusted; empty means the skip's premise holds.
+ *
+ *  A repo with no `.githooks` has no pre-commit gate to distrust — only the CI half of the
+ *  premise, which `has('.github/workflows')` already covers. */
+function untrustedCommitGate() {
+  const reasons = [];
+  if (has('.githooks')) {
+    const configured = (tryRun('git', ['config', '--get', 'core.hooksPath']) || '').trim();
+    const want = path.resolve(REPO, '.githooks');
+    const got = configured ? path.resolve(REPO, configured) : '';
+    const same = got && (process.platform === 'win32'
+      ? got.toLowerCase() === want.toLowerCase()
+      : got === want);
+    if (!configured) {
+      reasons.push("`core.hooksPath` is unset, so this repo's `.githooks/pre-commit` never ran on those commits");
+    } else if (!same) {
+      reasons.push(`\`core.hooksPath\` is \`${configured}\`, not this repo's \`.githooks\`, so its pre-commit gate never ran`);
+    }
+  }
+  if (IS_CLOUD) {
+    const r = bootstrap.readMarker(process.env);
+    if (r.state !== 'ok') {
+      reasons.push(`the aac-bootstrap marker is ${r.state} at ${r.path}, so the SessionStart hook that installs the gate and the suite's dependencies did not complete`);
+    }
+  }
+  return reasons;
+}
+
 async function workChecks() {
   head('Work');
 
@@ -363,12 +399,18 @@ async function workChecks() {
   // the pre-commit hook on each commit, CI on the pushed head. A third run here learns
   // nothing. It is kept for the cases that carry information — a dirty tree (pre-commit
   // never saw it), unpushed commits (CI has not), no upstream, or no workflows to hand the
-  // verdict to.
-  const covered = t && END && GIT.upstream && !GIT.dirtyCount && !GIT.ahead && has('.github/workflows');
-  if (covered) {
+  // verdict to — and for a head whose commit gate was never active, which is a claim about
+  // this container, not about git (untrustedCommitGate).
+  const pushedHeadWithCI = t && END && GIT.upstream && !GIT.dirtyCount && !GIT.ahead
+    && has('.github/workflows');
+  const gateGaps = pushedHeadWithCI ? untrustedCommitGate() : [];
+  if (pushedHeadWithCI && !gateGaps.length) {
     skipped(`tests — \`${t.label}\` not re-run: HEAD is committed and pushed, so pre-commit and CI on that head own the verdict`);
   } else if (!t) note('no test command detected — set "test" in .claude/session.json if there is one');
   else {
+    if (gateGaps.length) {
+      note(`the commit gate on this head is untrusted, so the suite runs rather than being skipped: ${gateGaps.join('; ')}`);
+    }
     const timeout = configuredTimeout('testTimeoutMs', 300000);
     const r = await runReadingOutputAsync(
       t.shell ? t.argv.join(' ') : t.argv[0],
