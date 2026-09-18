@@ -49,7 +49,7 @@ Where the work covers only part of a multi-building site, do not solve it in the
 | **takeover** | An existing system is being retained and brought under AAC service/monitoring |
 | **addition** | Extending an existing AAC system |
 
-Selecting **replacement** or **takeover** triggers the Reused/Taken-Over baselines in BASELINES.md, the removal/disposal exclusion check, and Living Standard §11. Determine the designation from the job documents; a site with an existing system of the same type is not "new." Where "addition" reads awkwardly, write "an addition to the [SYSTEM TYPE]" — the token still governs.
+Selecting **replacement** or **takeover** triggers the Reused/Taken-Over baselines in BASELINES.md, the removal/disposal exclusion check, and Living Standard §11. Determine the designation from the job documents; a site with an existing system of the same type is not "new." Where "addition" reads awkwardly, write "an addition to the existing [SYSTEM TYPE]" — the token still governs.
 
 ## 3) Approved system type names
 
@@ -202,7 +202,7 @@ On a licensing-only deal (no hardware installed), the opening verb string reduce
 The approved name is **Audio/Visual** — never "Sound system" (§3).
 
 ## 8) Worked example — CPD Fosco Park, Z-4184
-> Active Alarm Company will furnish, install, program, and test an addition to the video surveillance system at the site listed above, as itemized in the Equipment and Labor section. The system consists of four (4) cameras covering the north exterior elevation along W. 13th Street and the adjacent grounds, the basketball court, and the indoor pool area. The four cameras will be added to the park district's existing Avigilon Alta video system. The existing analog cameras at the basketball court and the indoor pool will be removed by Active Alarm Company.
+> Active Alarm Company will furnish, install, program, and test an addition to the existing video surveillance system at the site listed above, as itemized in the Equipment and Labor section. The system consists of four (4) cameras covering the north exterior elevation along W. 13th Street and the adjacent grounds, the basketball court, and the indoor pool area. The four cameras will be added to the park district's existing Avigilon Alta video system. The existing analog cameras at the basketball court and the indoor pool will be removed by Active Alarm Company.
 >
 > The system includes 30 days of cloud video storage with analytics for the four cameras, and Repair Service covering those cameras. Upon completion, Active Alarm Company will test the system and provide end-user training.
 
