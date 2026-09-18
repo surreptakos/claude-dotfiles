@@ -2,7 +2,7 @@
 
 **Revision note — 2026-08-18 (rev. 5):** Cost and speed pass, approved by Dan. (1) `extract_package.py` runs before any document is read; the reviewer reads the extracts and the digest instead of paging through binaries. (2) `verify_workup.py` runs the mechanical workup arithmetic checks before the reviewer reads a single workup cell. (3) The Living Standard's §0 lists, §3a sub quote rules, and §16 escalation list now live here (one copy, per Living Standard §18); the Hard Stop below carries the merged list. (4) Subagent fan-out rules added to File Reading Rules.
 
-**Revision note — 2026-08-13 (rev. 4):** Three rulings from Dan on the Judy Schultes Z-4214 review. (1) The issued proposal governs schedule rates: a rate the proposal quotes is not corrected to the Mapping Appendix; flag the mismatch to the rep and hold. (2) Missing initials and signatures are never review findings — they are captured when the package is sent for signature. (3) Master ¶3/¶4 recurring boxes: name exactly which boxes to check per the Mapping Appendix and the RMR Items sheet; if the right boxes cannot be identified, select IN LIEU OF rather than guessing.
+**Revision note — 2026-08-13 (rev. 4):** Three rulings from Dan on the CUSTOMER-10 PROSPECT-10 review. (1) The issued proposal governs schedule rates: a rate the proposal quotes is not corrected to the Mapping Appendix; flag the mismatch to the rep and hold. (2) Missing initials and signatures are never review findings — they are captured when the package is sent for signature. (3) Master ¶3/¶4 recurring boxes: name exactly which boxes to check per the Mapping Appendix and the RMR Items sheet; if the right boxes cannot be identified, select IN LIEU OF rather than guessing.
 
 **Revision note — 2026-08-11 (rev. 3):** Qualifying test tightened after a blank-quantity line was misread as an arithmetic defect. A blank quantity with an intact formula is an unused template line and stays out of the email. Two exceptions: the schedule sells the line, which makes it a scope question for the rep, or the workbook prices the line in a lower section, which makes the blank quantity a defect that strands a real cost.
 
@@ -21,8 +21,8 @@ Follow these steps in order, every time. Do not skip ahead to drafting.
 **1. Load the standards.** Read, in this order:
 - this file
 - `ACCOUNT-RULES.md` — account-level exceptions; check the customer before anything else
-- `Active_Alarm_Contract_Package_Review_Living_Standard_-_Final.md`
-- `Schedule-to-Master_Mapping_Appendix_-_Final.md`
+- `LIVING-STANDARD.md`
+- `MAPPING-APPENDIX.md`
 - `BASELINES.md` (run §0 length discipline)
 - `SOW-BASELINES.md`
 - `SCHEDULE-EDIT-PROCEDURE.md`
