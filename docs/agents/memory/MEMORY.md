@@ -18,7 +18,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - classifier-refusals-are-shape-not-action: retry once, then MCP
 - cloud-containers-can-run-powershell: 7.4.6 tarball
 - cloud-only-criteria-stall-the-desktop-fleet: prove in cloud
-- cowork-runs-plugin-hooks: obeys text, not hooks
+- cowork-runs-plugin-hooks: hooks run on host; shell is mcp__workspace__bash
 - cowork-scheduled-tasks-live-in-session-uploads: no registry
 - cowork-transcripts-not-local: server-side
 - desktop-scheduled-tasks-are-per-org: per org

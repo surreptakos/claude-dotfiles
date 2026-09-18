@@ -1,29 +1,29 @@
 ---
 name: cowork-runs-plugin-hooks
-description: "Cowork does NOT surface plugin hooks (tested 2026-09-03 with the aac-skills marker hook); neither user-level nor plugin hooks govern it, only instruction text does"
+description: "Cowork DOES run the aac-skills plugin hooks, on the Windows host (proved 2026-09-18, plugin 2026.9.182049): SessionStart marker delivered with host and timestamp, PreToolUse gate fires; the model's shell is a Linux sandbox tool named mcp__workspace__bash"
 metadata: 
   node_type: memory
   type: project
   originSessionId: 6163f97e-2557-4f4b-a19e-f45845bf9312
-  modified: 2026-09-03T23:31:29.454Z
+  modified: 2026-09-18T21:30:00.000Z
 ---
 
-Cowork runs the agent in a VM, so nothing wired in `~/.claude/settings.json` or pointing at a Windows
-path executes there. Plugin-carried hooks do not reach the model either: on 2026-09-03 the aac-skills
-`hooks/hooks.json` SessionStart hook echoed an `AAC-SKILLS HOOK MARKER` sentence with hostname and
-UTC timestamp, and a fresh Cowork session that listed the plugin's skills reported no such sentence in
-its context. Cowork's own words: "project chats aren't Claude Code sessions, so repo hooks don't run
-here." An earlier Cowork session had "quoted" the marker — verbatim from the hook file, with none of
-the runtime values — so that was a file read or a fabrication, and the repo README briefly claimed
-the opposite on its strength.
+Cowork runs the aac-skills plugin hooks. Proved 2026-09-18 on claude-dotfiles #228: a Cowork session
+quoted the SessionStart marker with its runtime values (`RUNTIME PROBE: os=MINGW64_NT-10.0-26200 ...
+home=/c/Users/Dan host=Dan-Inspiron15`), and its session export shows the PreToolUse ask-matt gate
+denying every tool call. The hooks run on the Windows host from the desktop app's plugin directory
+(`%APPDATA%\Claude\local-agent-mode-sessions\<account>\<org>\rpm\plugin_<id>`, plugin.json
+`2026.9.182049` that day), while the model's shell is a Linux sandbox exposed as the tool
+`mcp__workspace__bash`, not `Bash`. The 2026-09-03 test that found no marker ran an older build, and
+this note said the opposite until 2026-09-18.
 
-**Why:** the whole governance stack (ask-matt gate, YES lint, caveman level) lives in hooks; none of
-it can be forced into Cowork. What Cowork does load: the global `~/.claude/CLAUDE.md` (memory docs
-say Cowork desktop sessions read it), the plugin's skill descriptions and bodies, and its own memory.
+**Why:** the governance stack (ask-matt gate, YES lint, caveman level) reaches Cowork after all, but
+any hook that exempts a command by tool name `Bash`/`PowerShell`, or tells the model to run a Windows
+path with `py -3`, deadlocks there: the gate's declare exemption never matches `mcp__workspace__bash`,
+so no tool call can satisfy it (claude-dotfiles issue #608).
 
-**How to apply:** govern Cowork with text, not hooks — keep the YES and caveman rules in the global
-CLAUDE.md and in Cowork memory; do not spend more time on hook ports for that surface. The marker
-hook stays in the plugin as a standing probe: if a Cowork session ever quotes it with a host and
-timestamp, this note is wrong and the port is back on. Open question: whether the tested Cowork
-session ran plugin version 2026.9.31816 or an older build; a version check closes it. Related:
-[[marketplace-is-the-distribution-spine]], [[cowork-transcripts-not-local]].
+**How to apply:** treat Cowork as a hooked surface with a Linux shell. A hook that gates tool calls
+must recognise `mcp__workspace__bash` and print a command the sandbox can run (`python3` on the
+plugin-root path, never `py -3` on a Windows path). Keep the text-only rules in the global CLAUDE.md
+too; they are the floor, not the whole. Related: [[marketplace-is-the-distribution-spine]],
+[[cowork-transcripts-not-local]], [[gate-declare-bare-command]].
