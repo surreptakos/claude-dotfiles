@@ -19,14 +19,14 @@ As of 2026-08-19 (Dan). These are Active Alarm's internal labor **costs**, the f
 
 ## 2) Repair Service derivation
 
-Ratified 2026-08-03 (per Dan's direction, Norway Kennels). Calculate **both** ways and take the **greater**:
+Ratified 2026-08-03 (per Dan's direction, CUSTOMER-14). Calculate **both** ways and take the **greater**:
 
 1. **FSI method** — run the Fire Repair & Inspection template (or the system-appropriate FSI worksheet) against the verified device count.
 2. **1% rule** — 1% of Active Alarm's total cost on the WU.
 
 ### Open item — the 1% basis (estimating owns this; flag stays until estimating resolves it)
 
-"Total cost" is unresolved. Chris applied the 1% to $3,100 — the equipment cost. The full Norway Kennels WU cost was $3,140.42, including labor, trip charges, and the misc roll-up. The two bases diverge on a labor-heavy job. Ruled 2026-08-19 (wayfinder ticket #7): this is an estimating decision, not the drafter's; no basis ruling is needed for package work because the drafter never derives a Repair Service price.
+"Total cost" is unresolved. Chris applied the 1% to $3,100 — the equipment cost. The full CUSTOMER-14 WU cost was $3,140.42, including labor, trip charges, and the misc roll-up. The two bases diverge on a labor-heavy job. Ruled 2026-08-19 (wayfinder ticket #7): this is an estimating decision, not the drafter's; no basis ruling is needed for package work because the drafter never derives a Repair Service price.
 
 ## 3) Contracted Inspections derivation
 
@@ -66,7 +66,7 @@ Placement replaces judgment about how "integrated" the sub's work is: everything
 
 The job-level health gate is gross profit dollars per AAC crew-day against a floor derived from the P&L; margin percent alone does not tell you whether a job covers its share of expenses. Deferred 2026-08-27 (Dan): P&L not ready for review. Until the floor is computed, 64% on self-performed scope stands as the working standard and no crew-day gate is applied.
 
-## 5) Known divergence — Norway Kennels worked example
+## 5) Known divergence — CUSTOMER-14 worked example
 
 The example that shipped in MAPPING-APPENDIX §3a did not reproduce from the FSI Rev.1 on file, and both were cited as authority. Recorded here so the estimating build starts from the truth:
 

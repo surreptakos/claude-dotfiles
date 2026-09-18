@@ -2,7 +2,8 @@
 AAC contract package skill.
 
 Usage:  python verify_package.py "<job folder>" [--quiet]
-Exit:   0 = no FAILs, 1 = at least one FAIL, 2 = bad input.
+Exit:   0 = no FAILs, 1 = at least one FAIL, 2 = bad input,
+        3 = no drafted schedule in the folder.
 
 Reads only. Never writes to the job folder and never saves a workbook.
 
@@ -17,8 +18,9 @@ Formula values are recomputed from their ranges rather than read from Excel's
 cache, because a cached value is stale until Excel reopens the file.
 
 Covers the mechanical items only. Designation, which conditional clarifications
-a job earns, BASELINES section 0 merges, legal-entity verification and print
-layout stay human.
+a job earns, BASELINES section 0 merges and print layout stay human. The
+registry entity-name check (section A') is advisory: it WARNs on a mismatch and
+the rep-confirmed name governs (OPEN-DECISIONS item 19).
 """
 import sys, os, re, fnmatch, warnings
 warnings.filterwarnings('ignore')
@@ -93,11 +95,35 @@ def pdf_fields(path):
     except Exception:
         return {}
 
+# Poppler pdftotext (bundled with poppler-utils on Linux and poppler-windows
+# on Windows) is a runtime prerequisite for the proposal-reconciliation and
+# other PDF-text checks below. When it is missing on PATH, subprocess.run
+# raises FileNotFoundError from execvp — we swallow that so verify does not
+# crash on an incomplete environment, but we surface a WARN (once per run)
+# so a degraded verify does not read as clean. Aligned with
+# extract_package.extract_pdf (issue 180).
+_pdftotext_missing_warned = False
+
+
+def _warn_pdftotext_missing():
+    global _pdftotext_missing_warned
+    if _pdftotext_missing_warned:
+        return
+    _pdftotext_missing_warned = True
+    rec('WARN', 'pdftotext binary on PATH',
+        'poppler pdftotext not on PATH — proposal reconciliation and other '
+        'PDF-text checks degraded (install poppler-utils on Linux / '
+        'poppler-windows on Windows)')
+
+
 def pdf_text(path):
     import subprocess
     try:
         return subprocess.run(['pdftotext', '-layout', path, '-'],
                               capture_output=True, text=True, timeout=60).stdout
+    except FileNotFoundError:
+        _warn_pdftotext_missing()
+        return ''
     except Exception:
         return ''
 
@@ -197,6 +223,190 @@ def registry_matches(sub_name, reg):
     return False
 
 
+# ---- cross-document reconciliation helpers (issue 219) ----
+# Governing rules for section J below: skill/aac-contract-package/references/
+# DRAFTER-PRESEND-CHECKLIST.md items 7, 9, 22, 23, 24, 32, 33, 35. Each
+# section-J finding names the item number and that file so a reviewer can
+# walk back to the wording without this code restating it (CLAUDE.md hard
+# rule 1).
+CHECKLIST = 'DRAFTER-PRESEND-CHECKLIST.md'
+
+
+def _cite(n):
+    return f'checklist item {n}, {CHECKLIST}'
+
+
+# Filename substrings that mark a workbook as NOT the work-up. A schedule,
+# an agreement, a proposal, and the template all live alongside the WU in
+# some folders and share the .xlsx extension; the schedule tab-based
+# Sheet class already handles the schedule, so the WU finder skips those.
+_WU_EXCLUDE = ('template', 'equip & s', 'schedule', 'agreement',
+               'proposal', 'master', 'rider', 'covered equipment', 'fsi')
+_WU_INCLUDE = ('workup', 'work up', 'work-up', 'wu-', ' wu ', 'wu ',
+               '- wu', 'wu.', 'fire-lite', 'fire lite')
+
+
+def _find_workup(job):
+    """Return WU workbook paths in the job folder, newest first.
+
+    Reuses verify_workup.find_workup's substring heuristics but excludes
+    the schedule, agreement, proposal, template and other siblings that
+    would otherwise match the ``wu`` substring. Never reaches into
+    ``old`` / ``archive`` / ``superseded`` / ``backup`` / hidden / dot
+    directories (same SKIP_DIRS rule as find_files).
+    """
+    hits = []
+    for dirpath, dirs, files in os.walk(job):
+        dirs[:] = [d for d in dirs
+                   if d.lower() not in SKIP_DIRS
+                   and not d.startswith('_') and not d.startswith('.')]
+        for f in files:
+            if f.startswith('~$'):
+                continue
+            low = f.lower()
+            ext = os.path.splitext(f)[1].lower()
+            if ext not in ('.xlsx', '.xlsm'):
+                continue
+            if not any(k in low for k in _WU_INCLUDE):
+                continue
+            if any(k in low for k in _WU_EXCLUDE):
+                continue
+            hits.append(os.path.join(dirpath, f))
+    return sorted(set(hits), key=os.path.getmtime, reverse=True)
+
+
+def _read_workup(path):
+    """Extract every text-and-number-bearing cell from a WU workbook.
+
+    Returns ``(text_blob, numeric_values, labelled_totals)``:
+
+    * ``text_blob`` — all non-numeric cell values on visible sheets, space-
+      joined; used by the equipment-match check and the discount hunt.
+    * ``numeric_values`` — every numeric cell across visible sheets; used
+      as a fallback grand-total source when no labelled total is found.
+    * ``labelled_totals`` — ``[(row_text, max_number_in_row), ...]`` for
+      rows whose text contains ``total`` / ``grand`` / ``investment``.
+
+    Reads only; never saves. Reading with openpyxl is permitted by
+    CLAUDE.md hard rule 2 (only *saving* through openpyxl is disallowed).
+    """
+    import openpyxl
+    wb = openpyxl.load_workbook(path, data_only=True)
+    text_bits = []
+    nums = []
+    labelled = []
+    total_hints = ('total', 'grand', 'investment', 'sale price', 'contract')
+    for ws in wb.worksheets:
+        if ws.sheet_state != 'visible':
+            continue
+        for row in ws.iter_rows(values_only=True):
+            row_text_parts = []
+            row_nums = []
+            for v in row:
+                if v is None:
+                    continue
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    nums.append(float(v))
+                    row_nums.append(float(v))
+                else:
+                    s = str(v).strip()
+                    if s:
+                        text_bits.append(s)
+                        row_text_parts.append(s)
+            if row_nums and row_text_parts:
+                joined = ' '.join(row_text_parts).lower()
+                if any(h in joined for h in total_hints):
+                    labelled.append((' '.join(row_text_parts), max(row_nums)))
+    return ' '.join(text_bits), nums, labelled
+
+
+def _workup_grand_total(labelled, nums):
+    """Return ``(value, source_label)`` or ``(None, None)``.
+
+    Preference order: rows whose text contains ``grand total`` or ``total
+    investment``, then any ``total`` row (largest value wins ties), then
+    the largest numeric on the sheet (labelled ``(largest numeric)``).
+    A None result means the caller should SKIP its dependent check
+    (CLAUDE.md hard rule 7).
+    """
+    if labelled:
+        for prio in ('grand total', 'total investment', 'sale price',
+                     'total contract', 'contract total', 'total'):
+            hits = [(t, v) for t, v in labelled if prio in t.lower()]
+            if hits:
+                best = max(hits, key=lambda kv: kv[1])
+                return best[1], best[0][:60]
+    if nums:
+        return max(nums), '(largest numeric in work-up)'
+    return None, None
+
+
+def _outgoing_pdfs(job):
+    """Return PDFs in the job folder that would ship with the package.
+
+    Excludes the issued proposal (checklist item 32 note: read-only after
+    issue), and any file whose name contains ``lease agreement`` (a lease
+    that lives beside the sale package but does not ship with it). All
+    other exclusions — old/superseded/backup directories, temp files —
+    are already handled by find_files' SKIP_DIRS and ~$ filter.
+    """
+    return [p for p in find_files(job, ['*.pdf'])
+            if 'proposal' not in os.path.basename(p).lower()
+            and 'lease agreement' not in os.path.basename(p).lower()]
+
+
+def _foreign_entities(text, sub_name):
+    """Extract entity-shaped names from ``text`` that are neither the
+    subscriber nor Active Alarm. Case-insensitive substring check against
+    the subscriber name is enough to swallow "Acme Corp" when the
+    subscriber is "Acme Corporation, Inc." — the ENTITY regex fires on
+    both forms."""
+    out = set()
+    for mm in ENTITY.finditer(text or ''):
+        nm = mm.group(0).strip()
+        if sub_name and nm.lower() in sub_name.lower():
+            continue
+        if 'Active Alarm' in nm:
+            continue
+        out.add(nm)
+    return out
+
+
+_SUM_RE = re.compile(r'^=SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)$')
+
+
+def _normalize_formula(f):
+    """Excel-formula normalization for SUM shape checks.
+
+    Strips every whitespace character (space, tab, non-breaking space), drops
+    the ``$`` absolute-reference marker, and uppercases so ``= sum( g14:g40 )``
+    and ``=SUM($G$14:$G$40)`` collapse to the same canonical form. Anything not
+    a string (formulas can be ``None``) returns ``''`` so callers can match
+    without a type guard.
+    """
+    if not isinstance(f, str):
+        return ''
+    return re.sub(r'\s+', '', f).replace('$', '').upper()
+
+
+def _is_sum_range(f):
+    """True when ``f`` is a single ``SUM(col_a:col_b)`` over a column range,
+    tolerating whitespace, absolute refs, and mixed case."""
+    return _SUM_RE.match(_normalize_formula(f)) is not None
+
+
+def _match_sum_range(f):
+    """Return ``(col, first_row, last_row)`` for a single-column ``SUM`` range,
+    or ``None`` if the formula is not that shape or spans two columns."""
+    m = _SUM_RE.match(_normalize_formula(f))
+    if not m:
+        return None
+    c1, a, c2, b = m.group(1), int(m.group(2)), m.group(3), int(m.group(4))
+    if c1 != c2:
+        return None
+    return c1, a, b
+
+
 class Sheet:
     """Label-anchored view of an Equip & Services tab."""
     def __init__(self, path):
@@ -229,9 +439,9 @@ class Sheet:
     def resolve(self, ref):
         f = self.ws[ref].value
         if isinstance(f, str) and f.startswith('='):
-            m = re.match(r'^=SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)$', f.replace(' ', ''))
+            m = _match_sum_range(f)
             if m:
-                c, a, b = m.group(1), int(m.group(2)), int(m.group(4))
+                c, a, b = m
                 tot = 0.0
                 for r in range(a, b + 1):
                     x = self.v(f'{c}{r}')
@@ -267,6 +477,8 @@ class Sheet:
 
 
 def verify(job):
+    global _pdftotext_missing_warned
+    _pdftotext_missing_warned = False
     job = job.rstrip('\\/')
     scheds = find_files(job, ['*Equip & Svc Schedule*.xlsx', '*Equip & Services*.xlsx',
                               '*Equip & Svc*.xlsx', '*Equip*Sv*Schedule*.xlsx',
@@ -388,7 +600,8 @@ def verify(job):
 
     # ---------------- D) pricing block ----------------
     f_pp = S.col('G', pp_row)
-    rec('PASS' if re.match(r'^=SUM\(G\d+:G\d+\)$', f_pp.replace(' ', '')) else 'WARN',
+    pp_match = _match_sum_range(f_pp)
+    rec('PASS' if pp_match and pp_match[0] == 'G' else 'WARN',
         'Purchase Price is a SUM over the equipment rows', f_pp or '(empty)')
     price, psrc = S.resolve(f'G{pp_row}')
     rec('PASS' if price else 'FAIL', 'Purchase Price non-zero', f'{price} ({psrc})')
@@ -403,13 +616,15 @@ def verify(job):
 
     # ---------------- E) services block ----------------
     svc_hdr = next((r for r in qty_hdrs if svc_lbl and r > svc_lbl), None)
+    svc_items = []  # section J below inspects this; keep the name in scope
     if svc_hdr and mt_row:
         blk = range(svc_hdr + 1, mt_row)
         svc_items = [r for r in blk if S.col('B', r).strip()
                      and not S.col('B', r).strip().startswith(('Site:', 'System:'))
                      and S.col('B', r).strip() not in SVC_GROUPS]
-        f_mt = S.col('G', mt_row).replace(' ', '')
-        rec('PASS' if re.match(r'^=SUM\(G\d+:G\d+\)$', f_mt) else 'WARN',
+        f_mt = S.col('G', mt_row)
+        mt_match = _match_sum_range(f_mt)
+        rec('PASS' if mt_match and mt_match[0] == 'G' else 'WARN',
             'Monthly Total is a SUM', f_mt or '(empty)')
         if svc_items:
             # a continuation line describing a replaced service carries no qty by design
@@ -555,6 +770,315 @@ def verify(job):
     elif masters:
         rec('SKIP', 'Rider checks', 'no rider PDF in folder')
 
+    # ---------------- J) cross-document reconciliation (issue 219) ----------------
+    # Eight checks the drafter used to run by eye. Each cites its checklist item
+    # number and the governing file (DRAFTER-PRESEND-CHECKLIST.md) in the
+    # finding's detail; wording of every rule stays in the reference — hard
+    # rule 1. A check whose input is missing SKIPs with a reason instead of
+    # inventing an answer (hard rule 7).
+
+    wus = _find_workup(job)
+    wu_text = ''
+    wu_total = None
+    wu_source = None
+    if wus:
+        try:
+            wu_text, wu_nums, wu_labelled = _read_workup(wus[0])
+            wu_total, wu_source = _workup_grand_total(wu_labelled, wu_nums)
+        except Exception as e:
+            rec('WARN', 'Work-up readable',
+                f'{os.path.basename(wus[0])}: {type(e).__name__}: {e}')
+            wu_text = ''
+            wu_total = None
+
+    # J-22: Schedule Purchase Price equals the work-up total.
+    if not wus:
+        rec('SKIP', 'Schedule Purchase Price equals the work-up total',
+            f'{_cite(22)}; no work-up workbook in the folder')
+    elif wu_total is None:
+        rec('SKIP', 'Schedule Purchase Price equals the work-up total',
+            f'{_cite(22)}; no total figure found in '
+            f'{os.path.basename(wus[0])}')
+    elif price is None:
+        rec('SKIP', 'Schedule Purchase Price equals the work-up total',
+            f'{_cite(22)}; schedule Purchase Price could not be resolved')
+    else:
+        ok = abs(price - wu_total) < 0.01
+        rec('PASS' if ok else 'FAIL',
+            'Schedule Purchase Price equals the work-up total',
+            f'{_cite(22)}; schedule {price:,.2f} vs work-up {wu_total:,.2f} '
+            f'({wu_source})')
+
+    # J-24: Every schedule equipment line has a matching work-up cost.
+    if not wus:
+        rec('SKIP', 'Every schedule equipment line has a matching work-up cost',
+            f'{_cite(24)}; no work-up workbook in the folder')
+    elif not eq_items:
+        rec('SKIP', 'Every schedule equipment line has a matching work-up cost',
+            f'{_cite(24)}; no equipment lines to check')
+    else:
+        wu_lower = (wu_text or '').lower()
+        missing = []
+        for r in eq_items:
+            desc = S.col('B', r).strip()
+            if not desc:
+                continue
+            # Words 4+ chars long serve as a low-false-positive fingerprint;
+            # the WU description rarely reproduces the schedule wording
+            # verbatim but shares at least the first two content words.
+            words = [w for w in re.findall(r"[A-Za-z][A-Za-z']+", desc)
+                     if len(w) >= 4]
+            if not words:
+                continue
+            key = ' '.join(words[:2]).lower()
+            if key not in wu_lower:
+                missing.append(f'B{r}: "{desc[:50]}"')
+        if missing:
+            rec('FAIL', 'Every schedule equipment line has a matching work-up cost',
+                f'{_cite(24)}; work-up carries no matching cost for '
+                + '; '.join(missing[:3])
+                + (f' (+{len(missing) - 3} more)' if len(missing) > 3 else ''))
+        else:
+            rec('PASS',
+                'Every schedule equipment line has a matching work-up cost',
+                f'{_cite(24)}; {len(eq_items)} equipment lines matched')
+
+    # J-23: Discount appears exactly once across work-up, schedule, master.
+    # A discount taken on two of the three under-prices the job — the
+    # checklist's specific concern behind item 23.
+    sched_text_parts = []
+    for r in range(1, S.maxr + 1):
+        for cc in 'ABCDEFG':
+            vv = S.t(f'{cc}{r}')
+            if vv:
+                sched_text_parts.append(vv)
+    sched_all_text = ' '.join(sched_text_parts)
+    master_field_text = ''
+    if masters and mf:
+        master_field_text = ' '.join(str(v) for v in mf.values() if v is not None)
+
+    disc_pat = re.compile(r'\bdiscount', re.I)
+    disc_sources = []
+    if wu_text and disc_pat.search(wu_text):
+        disc_sources.append('work-up')
+    if disc_pat.search(sched_all_text):
+        disc_sources.append('schedule')
+    if master_field_text and disc_pat.search(master_field_text):
+        disc_sources.append('master')
+
+    if len(disc_sources) <= 1:
+        rec('PASS',
+            'Discount appears exactly once across work-up, schedule and master',
+            f'{_cite(23)}; ' +
+            (f'discount recorded in: {disc_sources[0]}' if disc_sources
+             else 'no discount in any document'))
+    else:
+        rec('FAIL',
+            'Discount appears exactly once across work-up, schedule and master',
+            f'{_cite(23)}; discount recorded in multiple documents: '
+            + ', '.join(disc_sources))
+
+    # J-9: Billing frequency is Quarter Annually specifically.
+    # On the Commercial Fire form CheckBox5/6/7/8 = Monthly / Quarter Annually /
+    # Semi-Annually / Annually. The customer's-written-request exception in the
+    # checklist item makes any non-Quarter tick a WARN, not a FAIL.
+    if not masters:
+        rec('SKIP', 'Billing frequency is Quarter Annually',
+            f'{_cite(9)}; no master agreement in the folder')
+    elif not mf:
+        rec('SKIP', 'Billing frequency is Quarter Annually',
+            f'{_cite(9)}; master form fields not readable on this form')
+    else:
+        billing = {}
+        for k, v in mf.items():
+            m = re.search(r'CheckBox([5-8])$', k)
+            if not m:
+                continue
+            billing[int(m.group(1))] = str(v) not in ('', '/Off')
+        if not billing:
+            rec('SKIP', 'Billing frequency is Quarter Annually',
+                f'{_cite(9)}; no billing-frequency checkboxes on this master form')
+        else:
+            names = {5: 'Monthly', 6: 'Quarter Annually',
+                     7: 'Semi-Annually', 8: 'Annually'}
+            ticked = [names[k] for k, v in billing.items() if v]
+            if ticked == ['Quarter Annually']:
+                rec('PASS', 'Billing frequency is Quarter Annually',
+                    f'{_cite(9)}; Quarter Annually ticked, others clear')
+            elif not ticked:
+                rec('FAIL', 'Billing frequency is Quarter Annually',
+                    f'{_cite(9)}; no billing frequency ticked')
+            else:
+                rec('WARN', 'Billing frequency is Quarter Annually',
+                    f'{_cite(9)}; ticked {", ".join(ticked)} — Quarter '
+                    f'Annually is the default, a written customer request '
+                    f'is the only reason to differ')
+
+    # Shared master text for the two dollar-reconciliation checks below.
+    master_all_text = ''
+    if masters:
+        parts = [master_field_text]
+        pt = pdf_text(masters[0])
+        if pt:
+            parts.append(pt)
+        master_all_text = '\n'.join(p for p in parts if p)
+
+    # J-7: Master's Purchase Price / Down Payment / Balance reconcile to the
+    # schedule. On forms that carry these line items (Commercial Security,
+    # residential), the amount beside the label must equal the schedule's
+    # pricing block. On the Commercial Fire form the master delegates to the
+    # attached schedule, so the pattern is absent and the check SKIPs.
+    label_pat = {
+        'purchase price': re.compile(
+            r'purchase\s*price[^\d$]{0,25}\$?\s?([\d,]+\.?\d*)', re.I),
+        'down payment': re.compile(
+            r'down\s*payment[^\d$]{0,25}\$?\s?([\d,]+\.?\d*)', re.I),
+        'balance': re.compile(
+            r'balance[^\d$]{0,25}\$?\s?([\d,]+\.?\d*)', re.I),
+    }
+    if not masters:
+        rec('SKIP', "Master's price, down payment and balance reconcile to schedule",
+            f'{_cite(7)}; no master agreement in the folder')
+    elif not master_all_text:
+        rec('SKIP', "Master's price, down payment and balance reconcile to schedule",
+            f'{_cite(7)}; master text unreadable on this form')
+    else:
+        found = {}
+        for label, pat in label_pat.items():
+            for mm in pat.finditer(master_all_text):
+                try:
+                    amt = float(mm.group(1).replace(',', ''))
+                except ValueError:
+                    continue
+                found.setdefault(label, []).append(amt)
+        if not found:
+            rec('SKIP',
+                "Master's price, down payment and balance reconcile to schedule",
+                f'{_cite(7)}; master carries no Purchase Price / Down Payment / '
+                f'Balance amount (Commercial Fire delegates to the attached schedule)')
+        else:
+            want = {
+                'purchase price': price,
+                'down payment': dep,
+                'balance': (price - dep) if (price is not None and dep is not None)
+                            else None,
+            }
+            mismatches = []
+            for label, amts in found.items():
+                expect = want.get(label)
+                if expect is None:
+                    continue
+                if not any(abs(a - expect) < 0.01 for a in amts):
+                    mismatches.append(
+                        f'{label}: master {amts[0]:,.2f} vs schedule {expect:,.2f}')
+            if mismatches:
+                rec('FAIL',
+                    "Master's price, down payment and balance reconcile to schedule",
+                    f'{_cite(7)}; ' + '; '.join(mismatches))
+            else:
+                rec('PASS',
+                    "Master's price, down payment and balance reconcile to schedule",
+                    f'{_cite(7)}; master figures match the schedule')
+
+    # J-35: Large no-deposit deals show $0 on the master.
+    # Triggered only when the schedule's Purchase Price is over the deposit
+    # threshold and the schedule Deposit reads zero (checklist section H).
+    if not masters:
+        rec('SKIP', 'Large no-deposit deals show $0 on the master',
+            f'{_cite(35)}; no master agreement in the folder')
+    elif price is None or dep is None:
+        rec('SKIP', 'Large no-deposit deals show $0 on the master',
+            f'{_cite(35)}; schedule Purchase Price or Deposit unresolved')
+    elif not (price > DEPOSIT_THRESHOLD and abs(dep) < 0.01):
+        rec('SKIP', 'Large no-deposit deals show $0 on the master',
+            f'{_cite(35)}; not a large no-deposit deal '
+            f'(price {price:,.2f}, deposit {dep:,.2f})')
+    elif not master_all_text:
+        rec('SKIP', 'Large no-deposit deals show $0 on the master',
+            f'{_cite(35)}; master text unreadable on this form')
+    else:
+        dp_amts = []
+        for mm in label_pat['down payment'].finditer(master_all_text):
+            try:
+                dp_amts.append(float(mm.group(1).replace(',', '')))
+            except ValueError:
+                pass
+        if not dp_amts:
+            rec('SKIP', 'Large no-deposit deals show $0 on the master',
+                f'{_cite(35)}; master carries no Down Payment amount to check')
+        elif any(a >= 0.01 for a in dp_amts):
+            rec('FAIL', 'Large no-deposit deals show $0 on the master',
+                f'{_cite(35)}; master Down Payment reads '
+                f'{max(dp_amts):,.2f} — expected 0.00')
+        else:
+            rec('PASS', 'Large no-deposit deals show $0 on the master',
+                f'{_cite(35)}; Down Payment = 0.00 on the master')
+
+    # J-32: Foreign-document check across every outgoing document.
+    # The existing H-section check only reads the master's form fields; item
+    # 32 asks for the same check across schedule cells, rider fields, and any
+    # addenda / disclosure / other PDFs going out. The issued proposal is
+    # explicitly excluded per the checklist item 32 note.
+    doc_foreign = {}
+    sched_foreign = _foreign_entities(sched_all_text, sub_name)
+    if sched_foreign:
+        doc_foreign[os.path.basename(sched)] = sched_foreign
+    for doc in _outgoing_pdfs(job):
+        fields = pdf_fields(doc)
+        text = ' '.join(str(v) for v in fields.values() if v is not None)
+        if not text.strip():
+            text = pdf_text(doc)
+        found = _foreign_entities(text, sub_name)
+        if found:
+            doc_foreign[os.path.basename(doc)] = found
+    if doc_foreign:
+        detail = '; '.join(f'{d}: {", ".join(sorted(names)[:3])}'
+                           for d, names in sorted(doc_foreign.items()))
+        rec('FAIL', 'No other customer name in any outgoing document',
+            f'{_cite(32)}; {detail}')
+    else:
+        rec('PASS', 'No other customer name in any outgoing document',
+            f'{_cite(32)}; every outgoing document names only this subscriber')
+
+    # J-33: Required attachments present.
+    # Trigger set: drawings/placement plans are always expected on the
+    # outgoing package (WARN when missing — some monitoring-only jobs ship
+    # without one); the Covered Equipment Addenda and the FSI worksheet are
+    # required when the schedule sells Repair Service or Inspection RMR
+    # (FAIL when missing).
+    svc_descs = [S.col('B', r).strip() for r in svc_items]
+    rmr_triggers = any(('inspection' in d.lower() or 'repair service' in d.lower())
+                       for d in svc_descs)
+    drawings = find_files(job, ['*Drawing*.pdf', '*Drawings*.pdf',
+                                 '*Placement*.pdf', '*Plan*.pdf'])
+    addenda = find_files(job, ['*Covered Equipment*.pdf', '*Addend*.pdf'])
+    fsi = find_files(job, ['*FSI*.xls*'])
+
+    fails = []
+    warns = []
+    if not drawings:
+        warns.append('drawings/placement plans PDF')
+    if rmr_triggers:
+        if not addenda:
+            fails.append('Covered Equipment Addenda PDF (Repair Service / '
+                         'Inspection sold)')
+        if not fsi:
+            fails.append('FSI worksheet (Repair Service / Inspection sold)')
+    if fails:
+        detail = f'{_cite(33)}; missing: ' + '; '.join(fails)
+        if warns:
+            detail += f'; also missing (WARN): {"; ".join(warns)}'
+        rec('FAIL', 'Required attachments present', detail)
+    elif warns:
+        rec('WARN', 'Required attachments present',
+            f'{_cite(33)}; missing: ' + '; '.join(warns))
+    else:
+        rec('PASS', 'Required attachments present',
+            f'{_cite(33)}; ' +
+            ('addenda and FSI required and found; drawings/placement plans present'
+             if rmr_triggers else
+             'drawings/placement plans present; no RMR triggers attendance of addenda'))
+
     # ---------------- I) filename ----------------
     fn = os.path.basename(sched)
     sysnames = [s for s in SYSTEMS if any(s in S.col('B', r) for r in range(1, S.maxr + 1))]
@@ -670,7 +1194,7 @@ def main():
     print(f"{n['PASS']} pass, {n['FAIL']} fail, {n['WARN']} warn, {n['SKIP']} skipped")
     print("Formula values are recomputed from their ranges, not read from Excel's cache.")
     print('Still human: designation, conditional clarification selection, section 0 merges,')
-    print('legal-entity verification, print layout.')
+    print('print layout.')
     sys.exit(3 if n['N/A'] and not n['PASS'] else (1 if n['FAIL'] else 0))
 
 

@@ -1,6 +1,6 @@
 # Open Decisions — 2026-08-11
 
-Everything from 2026-08-11 still waiting on a ruling, consolidated from the ratification record. Nothing here is blocking the Norway Kennels package except items 11 and 12.
+Everything from 2026-08-11 still waiting on a ruling, consolidated from the ratification record. Nothing here is blocking the CUSTOMER-14 package except items 11 and 12.
 
 Each line names who owns it and what changes once it is settled.
 
@@ -22,11 +22,11 @@ Each line names who owns it and what changes once it is settled.
 
 ## Standards conflicts (Dan, with Mark where noted)
 
-**6. Mapping Appendix §3a, the Norway worked example.** ~~It does not reproduce from the FSI worksheet on file, and both are cited as authority.~~ **Resolved 2026-08-19** (wayfinder ticket #7): §3a rewritten validation-only; the worked example moved to `ESTIMATING-APPENDIX.md` §5 with the $46 relabeled as the combined program (Repair Service alone $21) and the $40-versus-$25 divergence recorded. Mark's 2026-08-03 ruling stands: the customer keeps the quoted $25; the quoted price governs, which is package law already.
+**6. Mapping Appendix §3a, the CUSTOMER-14 worked example.** ~~It does not reproduce from the FSI worksheet on file, and both are cited as authority.~~ **Resolved 2026-08-19** (wayfinder ticket #7): §3a rewritten validation-only; the worked example moved to `ESTIMATING-APPENDIX.md` §5 with the $46 relabeled as the combined program (Repair Service alone $21) and the $40-versus-$25 divergence recorded. Mark's 2026-08-03 ruling stands: the customer keeps the quoted $25; the quoted price governs, which is package law already.
 
 **7. The 1% Repair Service basis.** ~~§3a leaves it open.~~ **Resolved 2026-08-19** (wayfinder ticket #7): estimating-owned, out of contract-package scope. The drafter never derives a Repair Service price, so no basis ruling is needed for package work. The open basis question (equipment cost versus full WU cost) is flagged in `ESTIMATING-APPENDIX.md` §2 for the estimating build.
 
-**8. Repair Service start date.** ~~Cutover or month 13, after the one-year parts-and-labor warranty.~~ **Resolved 2026-08-19** (wayfinder ticket #7): **cutover.** Dan ratified Mark's Norway position as the written rule — the customer pays through year one and is covered for calls the warranty does not reach. Rule recorded in MAPPING-APPENDIX §3a.
+**8. Repair Service start date.** ~~Cutover or month 13, after the one-year parts-and-labor warranty.~~ **Resolved 2026-08-19** (wayfinder ticket #7): **cutover.** Dan ratified Mark's CUSTOMER-14 position as the written rule — the customer pays through year one and is covered for calls the warranty does not reach. Rule recorded in MAPPING-APPENDIX §3a.
 
 **9. The permit fee overlap in BASELINES.** ~~Keep both or drop the exclusion.~~ **Resolved 2026-08-19** (wayfinder ticket #8): **keep both.** Dan ruled the permit-fee restatement deliberate; the exclusion's bracket note now records the ratification so §0 Rule 1 sweeps stop flagging the pair.
 
@@ -36,7 +36,7 @@ Each line names who owns it and what changes once it is settled.
 
 ---
 
-## Blocking Norway Kennels
+## Blocking CUSTOMER-14
 
 **12. Tom's five answers.** In the handoff email: the $5,158 versus $5,134 price, whether the customer knows a 50% deposit applies, the blank Fire tab of the sales checklist including who filed the plans with the AHJ, the legal entity and any assumed name, and confirming she understands detector cleaning is not included.
 
@@ -77,11 +77,14 @@ Each line names who owns it and what changes once it is settled.
 
 ## Settled on 2026-08-11, recorded so they are not reopened
 
-- Norway Kennels is an outright purchase, not a lease.
-- Norway Kennels takes one agreement; the burglar side of the combination panel is not in use at all.
+- CUSTOMER-14 is an outright purchase, not a lease.
+- CUSTOMER-14 takes one agreement; the burglar side of the combination panel is not in use at all.
 - Active Alarm as lessor is retired on new deals. Existing AAC-as-lessor leases stay in force under their own paper.
 - The proposal price governs the schedule. The discrepancy goes to the rep rather than being reconciled silently.
 - Where multiple work-ups exist, the newest by modified date wins.
 - A prevailing wage flag is judged against the labor rate, not taken at face value.
 - The 90 stale baselines copies in job folders stay as they are. Only the template folder copy was corrected.
 - The schedule shape on a financed deal: list the equipment, carry the full purchase price, deposit $0.00, and add the clarification naming the lender.
+
+**23. Validity bullet's Repair Service sentence — universal; cybersecurity exclusion retired.** Opened and **resolved 2026-09-18** (Dan, in-session ruling during the clarifications.json resync, issue 274): the Repair Service sentence prints on every agreement because Repair Service is either contracted or T&M on nearly every account; no-master accounts still omit it (ACCOUNT-RULES.md). The cybersecurity exclusion, which existed only in the builder's library with no BASELINES source, is retired. In the same ruling the library gained the bullets BASELINES carried that it had lacked (Fire Alarm exclusions; Access Control IDF conduit and software-licensing clarifications; video retention; reused-equipment T&M exclusion) and the universal AHJ-fees bullet matches BASELINES with the fire-specific fees under Fire Alarm. Wording in BASELINES.md under the 2026-09-18 revision note and in `clarifications.json` v1.3.
+

@@ -163,6 +163,50 @@ class Workbook:
             return
         self.set_number(sheet, ref, value)
 
+    def set_row_hidden(self, sheet, row_num, hidden=True):
+        """Toggle a row's hidden attribute in place.
+
+        Only the opening ``<row ...>`` tag is rewritten; the row's cells (if
+        any) and the closing ``</row>`` (if any) are left byte-for-byte alone.
+        Handles both cell-bearing rows (``<row ...>...</row>``) and empty
+        self-closing rows (``<row .../>``) — the latter is the shape that
+        motivated issue 97. Falling through to the open-form regex on a
+        self-closing row would capture the trailing ``/`` into the attribute
+        span and emit malformed XML on rewrite; the two-shot match below is
+        exactly how ``set_inline_text`` handles the same ambiguity for cells.
+
+        Idempotent: setting hidden=True on a row that already carries
+        ``hidden="1"`` (or False on one that does not) emits an equivalent
+        opening tag. Any existing ``hidden="..."`` attribute is stripped
+        before the fresh one is written, so the attribute never duplicates.
+        """
+        name = self.sheets[sheet]
+        sh = self.parts[name].decode('utf8')
+        # Try the self-closing form first. Non-greedy ``[^>]*?`` up to
+        # ``/>`` keeps the trailing slash OUT of the captured attributes;
+        # if we let the open-form regex win on a self-closing row it would
+        # capture the ``/`` into ``attrs`` and produce ``<row ... / hidden=...>``.
+        m = re.search(r'<row r="%d"([^>]*?)/>' % row_num, sh)
+        self_closing = m is not None
+        if m is None:
+            m = re.search(r'<row r="%d"([^>]*)>' % row_num, sh)
+        if m is None:
+            raise KeyError('row %d not found' % row_num)
+        attrs = m.group(1)
+        # Drop any pre-existing hidden="..." so a repeat call cannot double it.
+        new_attrs = re.sub(r'\s+hidden="[^"]*"', '', attrs)
+        if hidden:
+            # Prepend rather than append: keeps the attribute close to r="N"
+            # for readability and never lands after a stray whitespace tail.
+            new_attrs = ' hidden="1"' + new_attrs
+        if self_closing:
+            replacement = '<row r="%d"%s/>' % (row_num, new_attrs)
+        else:
+            replacement = '<row r="%d"%s>' % (row_num, new_attrs)
+        sh = sh[:m.start()] + replacement + sh[m.end():]
+        self.parts[name] = sh.encode('utf8')
+        self.dirty.add(name)
+
     def rename_sheet(self, old_name, new_name):
         """Rename a sheet tab. Rewrites only the <sheet name="..."> attribute in
         xl/workbook.xml; the sheet's own XML file has no self-referential tab
