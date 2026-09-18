@@ -76,7 +76,7 @@ Where the current template file is cited, the path is `fixtures/mock-jobs-root/_
 
 **Category:** (c) standard-still-open.
 **Evidence:** No OPEN-DECISIONS entry, unresolved. The check is mechanical (`verify_package.py` lines 254-256); no ratified standard document states "every equipment line carries a Qty" in so many words.
-**Rationale:** Drafter-discipline finding. The template provides a Qty column but nothing ratified yet compels every non-header line to be populated; a rule would sit alongside the equipment-block conventions in `SCHEDULE-GENERATION-PROCEDURE.md` §6 (still draft outside §1/§6/§11/§12).
+**Rationale:** Drafter-discipline finding. The template provides a Qty column but nothing ratified yet compels every non-header line to be populated; a rule would sit alongside the equipment-block conventions in `SCHEDULE-GENERATION-PROCEDURE.md` (its drafting-side sections outside the ratified §1, §6, §11, §11a and §12 are still draft).
 
 ## 12. System header present — 11, WARN
 
