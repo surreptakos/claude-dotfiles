@@ -31,7 +31,9 @@ const path = require('node:path');
 const APPLY = process.argv.includes('--apply');
 
 function run(cmd, args, opts = {}) {
-  // 50MB: a 350+-item board's item-list JSON overflows the 1MB default (ENOBUFS, 2026-08-18)
+  // 50MB: a 350+-item board's item JSON overflowed the 1MB default when it came back in one
+  // item-list response (ENOBUFS, 2026-08-18); the paginated items query below is smaller per
+  // call, and the headroom stays because a page of 100 cards with long titles is still big.
   return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 50 * 1024 * 1024, ...opts });
 }
 function gh(args) { return run('gh', args); }
@@ -94,6 +96,26 @@ function boardUnswept(label, reason) {
   console.log(`FAIL ${label}: ${reason}`);
 }
 
+// One page of a board's items, 100 at a time, until pageInfo says there is no next page.
+function listItems(ownerType, owner, number) {
+  const root = ownerType === 'organization' ? 'organization' : 'user';
+  const query = `query($o:String!,$n:Int!,$after:String){${root}(login:$o){projectV2(number:$n){items(first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{id fieldValueByName(name:"Status"){... on ProjectV2ItemFieldSingleSelectValue{name}} content{... on Issue{title url} ... on PullRequest{title url}}}}}}}`;
+  const items = [];
+  let after = null;
+  for (;;) {
+    const args = ['api', 'graphql', '-f', `query=${query}`, '-f', `o=${owner}`, '-F', `n=${number}`];
+    if (after) args.push('-f', `after=${after}`);
+    const res = JSON.parse(gh(args));
+    if (res.errors && res.errors.length) throw new Error(res.errors.map(e => e.message).join('; '));
+    const page = res.data[root].projectV2.items;
+    for (const n of page.nodes) {
+      items.push({ id: n.id, status: n.fieldValueByName ? n.fieldValueByName.name : undefined, content: n.content });
+    }
+    if (!page.pageInfo.hasNextPage) return items;
+    after = page.pageInfo.endCursor;
+  }
+}
+
 for (const board of openBoards) {
   const pathMatch = (board.resourcePath || '').match(/^\/(users|orgs)\/([^/]+)\/projects\/(\d+)$/);
   if (!pathMatch) { boardUnswept(board.title, `cannot parse ${board.resourcePath}`); continue; }
@@ -118,11 +140,16 @@ for (const board of openBoards) {
   const doneOpt = statusField.options.find(o => o.name.toLowerCase() === 'done');
   if (!doneOpt) { boardUnswept(label, 'no "Done" option'); continue; }
 
+  // The items come over GraphQL with the owner type parsed from resourcePath above, never
+  // through `gh project item-list`: that command resolves whether --owner is a user or an org
+  // through a REST lookup that PROJECT_TOKEN cannot make, and every run since 0b0a993 failed on
+  // it with "unknown owner type" (issue 569). Same shape as item-list's JSON so the loop below
+  // reads {id, status, content.url} either way.
   let items;
   try {
-    items = ghJson(['project', 'item-list', String(NUMBER), '--owner', OWNER, '--format', 'json', '--limit', '500']).items || [];
+    items = listItems(ownerType, OWNER, NUMBER);
   } catch (e) {
-    boardUnswept(label, `item-list failed: ${ghDetail(e)}`);
+    boardUnswept(label, `items query failed: ${ghDetail(e)}`);
     continue;
   }
 
