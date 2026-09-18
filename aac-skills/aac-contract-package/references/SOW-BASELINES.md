@@ -26,6 +26,14 @@ The verb set is fixed: **furnish, install, program, and test** — one string, v
 
 Deprecated openers — do not use: any variant that spells out the site address, "consisting of:" followed by a device list, "purchase and install," "provide and install," "provide, install, configure and program," "will provide a proposal for," or "custom [system]."
 
+### Per-System labelled paragraph form
+
+*Amended 2026-09-10 (spec 215 stream B, ADR-0001); awaiting Dan's signature.* A Project selling more than one System within one Contract family (§3) carries one scope-of-work paragraph per System, in the same order the Systems appear in the Equipment and Labor section. Each paragraph opens with a label — the System's approved name from §3, followed by a colon — and then follows the canonical sentence above and the applicable §5 follow-on sentences for that System. Golden-12 and golden-17 already read this way; see `fixtures/golden/golden-17/expected/` for a three-System example.
+
+The single-System form uses the same labelled shape: one paragraph, the approved system name as its label. Keeping the label on single-System Projects means the drafter, the reviewer and the verifier all read one layout rather than two.
+
+The label is exactly the approved name from §3, verbatim — no synonyms, no site name inside the label, no equipment count in the label, no "System" prefix. Anything else on the label side is a review failure.
+
 ### Naming a building or area within the site
 Where the work covers only part of a multi-building site, do not solve it in the opening sentence. The scope limitation belongs in Clarifications:
 
@@ -45,20 +53,24 @@ Selecting **replacement** or **takeover** triggers the Reused/Taken-Over baselin
 
 ## 3) Approved system type names
 
-| Approved | Never |
-|---|---|
-| Intrusion Alarm | burglar alarm, burg, "security system" as a system name |
-| Video Surveillance | CCTV, camera system (CCTV acceptable in internal docs only) |
-| Access Control | — |
-| Fire Alarm | — |
-| Elevator Monitoring | — |
-| Audio/Visual | Sound system |
-| Nurse Call | — |
-| Area of Refuge | Area of Rescue |
-| Network | data cabling as a system name |
-| Standalone Intercom | — |
-| Visitor Management | — |
-| Standalone Environmental Monitoring | — |
+*Contract family column added 2026-09-10 (spec 215 stream B, ADR-0001); awaiting Dan's signature.*
+
+| Approved | Never | Contract family (commercial Projects) |
+|---|---|---|
+| Intrusion Alarm | burglar alarm, burg, "security system" as a system name | Commercial Security |
+| Video Surveillance | CCTV, camera system (CCTV acceptable in internal docs only) | Commercial Security |
+| Access Control | — | Commercial Security |
+| Fire Alarm | — | Commercial Fire |
+| Elevator Monitoring | — | Elevator Monitoring |
+| Audio/Visual | Sound system | Commercial Security |
+| Nurse Call | — | Commercial Security |
+| Area of Refuge | Area of Rescue | Commercial Fire |
+| Network | data cabling as a system name | Commercial Security |
+| Standalone Intercom | — | Commercial Security |
+| Visitor Management | — | Commercial Security |
+| Standalone Environmental Monitoring | — | Commercial Security |
+
+**Contract family is derived, never entered.** The taxonomy in the third column is issue #10 ruling 1 (Dan, 2026-08-20): Commercial Fire covers Fire Alarm and Area of Refuge; Elevator Monitoring covers Elevator Monitoring; Commercial Security covers every other commercial system. A commercial Project whose Systems span more than one family in this column is refused with a split instruction — the standing case is the combination fire-and-burglar panel, which the Contract Package Rules already route to both agreements. Residential Projects collapse every System — fire included — into **Residential Security** per the same ruling; the column above governs the commercial side only. The builder cites this table; the deal record never carries a family field.
 
 ## 4) Scope description rules — no equipment itemization
 **The SOW does not list equipment.** The Equipment and Labor section is the itemized list, and repeating it in prose creates two versions of the same thing that drift apart.
@@ -133,7 +145,7 @@ Every sold system type has a template below. If a job carries a system type with
 
 #### 7.2a Cloud-native camera variant (no recorder)
 
-Amended 2026-08-17 per Dan, from the Clearbrook Riley Building job. Where the cameras are cloud-native (Avigilon Alta and the like) there is no recorder: the cameras connect directly to the network, record locally to onboard SD cards, and back up to the cloud platform. The template's recorder sentence misstates the system. Use instead:
+Amended 2026-08-17 per Dan, from the Riley Building job. Where the cameras are cloud-native (Avigilon Alta and the like) there is no recorder: the cameras connect directly to the network, record locally to onboard SD cards, and back up to the cloud platform. The template's recorder sentence misstates the system. Use instead:
 
 > "The cameras connect directly to the network through the [PLATFORM] cloud platform, record locally to onboard SD cards, and carry [N] days of cloud backup. Automatic system updates and cybersecurity patches are pushed to the cameras."
 
@@ -190,7 +202,7 @@ On a licensing-only deal (no hardware installed), the opening verb string reduce
 The approved name is **Audio/Visual** — never "Sound system" (§3).
 
 ## 8) Worked example — CPD Fosco Park, Z-4184
-> Active Alarm Company will furnish, install, program, and test an addition to the video surveillance system at the site listed above, as itemized in the Equipment and Labor section. The system consists of four (4) cameras covering the north exterior elevation along W. 13th Street and the adjacent grounds, the basketball court, and the indoor pool area. The four cameras will be added to Chicago Park District's existing Avigilon Alta video system. The existing analog cameras at the basketball court and the indoor pool will be removed by Active Alarm Company.
+> Active Alarm Company will furnish, install, program, and test an addition to the video surveillance system at the site listed above, as itemized in the Equipment and Labor section. The system consists of four (4) cameras covering the north exterior elevation along W. 13th Street and the adjacent grounds, the basketball court, and the indoor pool area. The four cameras will be added to the park district's existing Avigilon Alta video system. The existing analog cameras at the basketball court and the indoor pool will be removed by Active Alarm Company.
 >
 > The system includes 30 days of cloud video storage with analytics for the four cameras, and Repair Service covering those cameras. Upon completion, Active Alarm Company will test the system and provide end-user training.
 
