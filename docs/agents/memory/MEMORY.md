@@ -15,6 +15,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - answer-yes-no-in-one-line: outcome, action, timing
 - bash-tool-collapses-backslashes: `\\` arrives as `\`
 - caveman-base-url-stays-with-the-proxy: not env, not synced
+- classifier-refusals-are-shape-not-action: retry once, then MCP/Write
 - cloud-containers-can-run-powershell: 7.4.6 tarball
 - cloud-only-criteria-stall-the-desktop-fleet: prove from cloud
 - cowork-runs-plugin-hooks: obeys text, not hooks

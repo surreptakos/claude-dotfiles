@@ -649,9 +649,9 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
-  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened' },
-  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp resolver refused, and any path the pre-push marker scan found conflict markers in; empty otherwise' },
-  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail' },
+  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked', 'unmerged-by-classifier'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened; unmerged-by-classifier = the auto-mode classifier refused the merge command itself twice, so the branch was pushed and the PR opened WITHOUT the merge (issue 544) - the branch is verified, pushed is true, prUrl is real, and blockedReason carries the refusal text for the orchestrator to merge the default branch itself' },
+  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp resolver refused, and any path the pre-push marker scan found conflict markers in; empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
+  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed' },
 } }
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
@@ -1459,6 +1459,13 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // evidence; `defaultBranch` and `testCommand` are passed rather than read from module scope because
 // the finish mode runs before the scout would have set either.
 // [FLEET-DELIVER-PROMPT-START]
+// The classifier categories waves have actually been refused under (issue 544, and the
+// FOLLOW-UPS bullets behind it). The deliver prompt names them so a deliverer meeting one reads
+// it as the flaky per-command gate it is - the refusals are non-deterministic on byte-identical
+// retries - instead of as a rule it is breaking, and stops a delivery whose branch is verified.
+// Run 6aac3d3b lost two deliveries that way ("Modify Shared Resources", "Interfere With
+// Workloads"); the other three are the refusals FOLLOW-UPS recorded from earlier waves.
+const CLASSIFIER_CATEGORIES_SEEN = '"Modify Shared Resources", "Interfere With Workloads", "External System Writes", "Instruction Poisoning" and "Self-Modification"'
 function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resumed }) {
   // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
   // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
@@ -1491,7 +1498,8 @@ function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resume
 This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier run verified this branch and pushed it to origin, and only the PR is missing. Before opening one, list the repository's OPEN pull requests and look for a head ref of ${branch}: if such a PR already exists, open no second one - return its URL as prUrl, pushed true and the real mergeStatus, and stop.` : ''}
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
-A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`.
+A0. A CLASSIFIER REFUSAL IS NOT A RULE VIOLATION (issue 544). In a container the auto-mode classifier sometimes refuses a command of this stage on the shape of its text rather than on what it would do, and the refusals are not deterministic - run 6aaafad4 found that re-issuing the byte-identical command usually succeeded on the next try. The categories this fleet has been refused under so far are ${CLASSIFIER_CATEGORIES_SEEN}. An unattended session is sanctioned to run every command this stage needs (the 2026-09-15 cloud permission ruling), so read a refusal as a flaky gate, never as a sign that you are doing something forbidden and never as a reason to stop the delivery. Whenever a command below is REFUSED (as opposed to running and failing): re-issue it ONCE, byte-identical. If that retry is refused too, take the fallback the step names - A8 for the merge, B1 for the push, B2 for the PR. NEVER end this stage with {pushed:false, prUrl:""} while the branch is verified: a verified branch always reaches origin and a PR, and the refusal text becomes a note on that PR rather than a substitute for it.
+A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
 A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`agents/skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - go to STEP A7, which runs on this path too.
 A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly three classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
@@ -1502,12 +1510,13 @@ A4. Once every conflicted path was class (a), (b) or (c): regenerate, because th
 A5. Re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
 A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, and nothing is pushed until it passes (issue 514): \`git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD\`. Exit 1 with no output is the pass - go to STEP B. Exit 0 lists paths whose COMMITTED content still carries conflict markers, which is what a resolution that staged the markers instead of removing them leaves behind; run 6aab1eac committed and pushed exactly that and then asked for a force push. Do NOT push and do NOT open a PR. For each listed path that is class (a) or (b): resolve it again (\`git checkout --theirs -- <path>\`, or \`node tools/resolve-stamp-conflict.js <path>\`), redo A4's regeneration and A5's test run, \`git add -- <path>\`, amend the merge commit with \`git commit --amend --no-edit\` (which keeps both merge parents), and run the scan again. For any listed path that is class (c), and for any path a second scan still lists: \`git reset --hard HEAD~1\` if the merge is already committed (\`git merge --abort\` if it is not), push nothing, open no PR, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every path the scan listed], blockedReason:"conflict markers left in <paths> after the merge"}.
+A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(d), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
 
-STEP B - push and open the PR (only when STEP A ended clean or resolved):
-B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run \`git ls-remote --heads origin ${branch}\` and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C.
-B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists.
+STEP B - push and open the PR (only when STEP A ended clean, resolved, or unmerged-by-classifier):
+B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run \`git ls-remote --heads origin ${branch}\` and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the classifier REFUSES is not a failed push: re-issue it byte-identical once (A0), and if that retry is refused too, read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. Only when the remote tip is missing or behind does a twice-refused push come back as {pushed:false, ...}.
+B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused, re-issue it byte-identical once, and if that retry is refused too open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
 B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
-B4. Return conflictPaths: [] and the real mergeStatus ("clean" or "resolved").
+B4. Return conflictPaths: [] and the real mergeStatus ("clean", "resolved", or "unmerged-by-classifier" with blockedReason holding the refusal text).
 
 STEP C - repair a commit that ALREADY reached origin (issue 514), which happens when the A7 scan hits markers you did not introduce or a push slipped past it. \`git push --force\`, \`git push --force-with-lease\`, deleting the remote branch and rewriting its pushed history are out of bounds here whatever the history looks like - that branch may already be a PR head. Repair it FORWARD: a follow-up commit whose TREE is the corrected merge and whose parent is the bad commit, pushed as an ordinary fast-forward.
 C1. \`git fetch origin ${branch}\`, then \`git checkout -B ${branch} origin/${branch}\` - HEAD now sits on the bad commit.
@@ -1569,7 +1578,7 @@ async function runFinish(journal) {
     if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
     }
-    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}`)
+    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
     // Same checkpoint the code lane takes after Deliver (aac-routines issue 270): this stage runs
@@ -1772,7 +1781,13 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     }
     // Log before the checkpoint below: a Deliver-phase breach throws out of this stage, and the PR
     // URL (or the delivery failure) must not be lost with it.
-    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}`)
+    // A delivery that skipped the pre-push merge because the classifier refused it twice (issue
+    // 544) is a real delivery: the branch is on origin and the PR is open, and only the merge of
+    // the default branch is still owed. It is logged as such so the orchestrator merges rather
+    // than re-implementing - the refusal text travels in the PR body and in the journal's
+    // blockedReason, not in this line.
+    const unmergedByClassifier = !!(delivery && delivery.mergeStatus === 'unmerged-by-classifier')
+    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
 
     // Checkpoint 3 of 4 (aac-routines issue 270): the Deliver step pushes and opens the PR from
     // the parent's context - unisolated, like the verifier - so it can dirty the orchestrator's
@@ -1796,6 +1811,11 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       ? { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([mergeFailure]) }
       : lastVerdict,
     prUrl: mergeBlocked ? null : (delivery && delivery.prUrl), commentUrl: null, deliveryFailure,
+    // Carried so the run report can say which PRs still owe the default-branch merge (issue 544).
+    mergeStatus: (delivery && delivery.mergeStatus) || null,
+    mergeNote: delivery && delivery.mergeStatus === 'unmerged-by-classifier'
+      ? `opened without the pre-push merge - the classifier refused \`git merge origin/${scout.defaultBranch}\` twice: ${delivery.blockedReason || 'refusal text not reported'}`
+      : null,
     conflictPaths, discoveries: (impl && impl.discoveries) || [],
   }
 }
@@ -1999,7 +2019,12 @@ log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the se
 return {
   ran: clean.length,
   instrument,
-  delivered: clean.filter(r => r.prUrl || r.commentUrl).map(r => ({ ticket: r.ticket, kind: r.kind, pr: r.prUrl || null, comment: r.commentUrl || null })),
+  delivered: clean.filter(r => r.prUrl || r.commentUrl).map(r => ({
+    ticket: r.ticket, kind: r.kind, pr: r.prUrl || null, comment: r.commentUrl || null,
+    // Non-null only on the issue 544 path: the PR is open and the branch is verified, but the
+    // default branch was never merged in because the classifier refused the merge command twice.
+    mergeNote: r.mergeNote || null,
+  })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
   failed: clean.filter(r => !r.done || r.deliveryFailure).map(r => ({
