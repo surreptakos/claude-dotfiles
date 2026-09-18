@@ -49,14 +49,15 @@ def fake_net(routes, log):
 
 
 class Transport(unittest.TestCase):
-    def test_refresh_trio_wins_over_stored_token(self):
-        self.assertEqual(zr.pick_transport(dict(TRIO, ZOHO_ACCESS_TOKEN="stale"))[0], "refresh")
+    def test_full_trio_is_the_refresh_transport(self):
+        self.assertEqual(zr.pick_transport(dict(TRIO))[0], "refresh")
 
-    def test_stored_token_alone_is_named_and_flagged_stale(self):
-        name, reason = zr.pick_transport({"ZOHO_ACCESS_TOKEN": "stale", "ZOHO_CLIENT_ID": "cid"})
-        self.assertEqual(name, "stored")
-        self.assertIn("ZOHO_CLIENT_SECRET", reason)
-        self.assertNotIn("stale", reason.replace("stale after", ""))  # names, never the value
+    def test_partial_trio_names_what_is_missing_and_no_value(self):
+        with self.assertRaises(zr.ZohoAccessError) as ctx:
+            zr.pick_transport({"ZOHO_CLIENT_ID": "cid-value"})
+        self.assertIn("ZOHO_CLIENT_SECRET", str(ctx.exception))
+        self.assertIn("ZOHO_REFRESH_TOKEN", str(ctx.exception))
+        self.assertNotIn("cid-value", str(ctx.exception))  # names, never the value
 
     def test_nothing_raises(self):
         with self.assertRaises(zr.ZohoAccessError):
@@ -121,13 +122,12 @@ class Get(unittest.TestCase):
         self.assertEqual(api_req.get_header("Authorization"), "Zoho-oauthtoken at-secret")
         self.assertEqual(api_req.get_header("X-trace"), "1")
 
-    def test_stored_token_used_without_a_mint(self):
+    def test_get_without_the_trio_never_reaches_the_network(self):
         log = []
-        net = fake_net({"https://www.zohoapis.com/crm/v7/org": (401, b'{"code":"INVALID_TOKEN"}')}, log)
-        status, body = zr.get("/crm/v7/org", None, {"ZOHO_ACCESS_TOKEN": "stale"}, net)
-        self.assertEqual(status, 401)
-        self.assertEqual(len(log), 1)
-        self.assertEqual(log[0].get_header("Authorization"), "Zoho-oauthtoken stale")
+        net = fake_net({}, log)
+        with self.assertRaises(zr.ZohoAccessError):
+            zr.get("/crm/v7/org", None, {"ZOHO_CLIENT_ID": "cid"}, net)
+        self.assertEqual(log, [])
 
 
 class Cli(unittest.TestCase):

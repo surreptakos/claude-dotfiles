@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 r"""Reach the Zoho REST APIs (CRM, Books, Desk, ...) with the credential a session already holds.
 
-The cloud environment carries five Zoho variables (memory note
+The cloud environment carries four Zoho variables (memory note
 `session-env-carries-zoho-and-gas-tokens`):
 
   ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET, ZOHO_REFRESH_TOKEN   the durable part: a refresh token never
                                                           expires on its own, and these three mint
                                                           a fresh access token on demand
-  ZOHO_ACCESS_TOKEN                                       one access token, minted when the
-                                                          variables were set; Zoho access tokens
-                                                          live one hour, so treat it as stale
   ZOHO_API_DOMAIN                                         `https://www.zohoapis.com` for the US DC;
                                                           the accounts host follows from it
 
-This helper always prefers minting: a stored access token is only used when the refresh trio is
-absent. It never prints a token - `probe` reports scope, expiry and data centre, nothing else -
+Zoho access tokens live one hour, so this helper mints one per run and holds none in the
+environment (a stored ZOHO_ACCESS_TOKEN was dropped 2026-09-18 for that reason). It never prints
+a token - `probe` reports scope, expiry and data centre, nothing else -
 and every request carries `Authorization: Zoho-oauthtoken <token>`, the prefix Zoho documents
 (it accepts `Bearer` too; both verified 2026-09-18).
 
@@ -66,15 +64,12 @@ def accounts_domain(env):
 def pick_transport(env=None):
     """Return (name, reason) for the credential `env` holds. Never touches the network."""
     env = os.environ if env is None else env
-    present = [k for k in REFRESH_KEYS if env.get(k, "").strip()]
-    if len(present) == len(REFRESH_KEYS):
+    missing = [k for k in REFRESH_KEYS if not env.get(k, "").strip()]
+    if not missing:
         return "refresh", "ZOHO_CLIENT_ID + ZOHO_CLIENT_SECRET + ZOHO_REFRESH_TOKEN (mints per run)"
-    if env.get("ZOHO_ACCESS_TOKEN", "").strip():
-        missing = sorted(set(REFRESH_KEYS) - set(present))
-        return "stored", f"ZOHO_ACCESS_TOKEN only (stale after one hour; missing {', '.join(missing)})"
     raise ZohoAccessError(
-        "zoho-rest: no credential - set ZOHO_CLIENT_ID, ZOHO_CLIENT_SECRET and ZOHO_REFRESH_TOKEN "
-        "(or ZOHO_ACCESS_TOKEN) in the environment"
+        "zoho-rest: no credential - set " + ", ".join(REFRESH_KEYS) + " in the environment "
+        f"(missing {', '.join(missing)})"
     )
 
 
@@ -95,9 +90,7 @@ def mint(env=None, urlopen=urllib.request.urlopen):
     what decides, not the status.
     """
     env = os.environ if env is None else env
-    transport, _reason = pick_transport(env)
-    if transport != "refresh":
-        raise ZohoAccessError("zoho-rest: cannot mint without the refresh trio (" + ", ".join(REFRESH_KEYS) + ")")
+    pick_transport(env)
     status, body = _post_form(
         accounts_domain(env) + "/oauth/v2/token",
         {
@@ -118,11 +111,7 @@ def mint(env=None, urlopen=urllib.request.urlopen):
 
 
 def access_token(env=None, urlopen=urllib.request.urlopen):
-    env = os.environ if env is None else env
-    transport, _reason = pick_transport(env)
-    if transport == "refresh":
-        return mint(env, urlopen)["access_token"]
-    return env["ZOHO_ACCESS_TOKEN"].strip()
+    return mint(env, urlopen)["access_token"]
 
 
 def resolve_url(url_or_path, env):

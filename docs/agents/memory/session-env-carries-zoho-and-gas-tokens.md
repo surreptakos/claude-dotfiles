@@ -12,10 +12,10 @@ Recorded 2026-09-18. A cloud container from the owner's environment starts with 
 set (names read from `env`; values never copied anywhere, and the repo's secret guard would refuse
 them):
 
-- **Zoho** — `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN` (the durable trio),
-  `ZOHO_ACCESS_TOKEN` (one access token, minted when the variables were set; Zoho access tokens
-  expire after one hour, so it is stale by the time it matters) and `ZOHO_API_DOMAIN`
-  (`https://www.zohoapis.com`, the US data centre, whose OAuth host is `accounts.zoho.com`).
+- **Zoho** — `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN` (the durable trio) and
+  `ZOHO_API_DOMAIN` (`https://www.zohoapis.com`, the US data centre, whose OAuth host is
+  `accounts.zoho.com`). A `ZOHO_ACCESS_TOKEN` was there too until 2026-09-18; Dan removed it
+  because an access token lives one hour, and the helper mints its own.
 - **`GAS_GITHUB_TOKEN`** — the GitHub token `gas seed` reads by default (`gas/cli/gas.js`), so a
   cloud session can seed an Apps Script project without `--github-token-env`.
 - Also present, origin unverified: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` and
@@ -28,7 +28,7 @@ and `Assert-NoSecrets` exist so a pull or a commit cannot carry them. What this 
 *names* and the code that turns them into a call.
 
 **How to use them:** `python3 tools/zoho-rest.py transport|probe|whoami|get <url-or-path>`. It
-mints a fresh access token from the trio on every run (the stored one is a fallback only), sends
+mints a fresh access token from the trio on every run, sends
 `Authorization: Zoho-oauthtoken …` (Zoho also accepts the `Bearer` prefix; both answered `200`
 on 2026-09-18), and prints no token: `probe` shows scope, `expires_in` and `api_domain`. Desk is on `desk.zoho.com`; pass it as
 a full URL. **Books is not in the grant** — `/books/v3/organizations` answers
@@ -58,8 +58,7 @@ scopes under that grant answer `{"error":"missing_org_info"}` with either `soid=
 or the CRM one, so Desk stays on the refresh trio. Desk calls need `orgId: 874367220` (the named org; the two `activealarmcompany17…` ids are
 sandbox-style duplicates, untested). `GAS_GITHUB_TOKEN` answers `/user` as `surreptakos` with an
 empty `X-OAuth-Scopes` header, so it is a fine-grained PAT, and it differs from the platform's
-`GH_TOKEN`. The stored `ZOHO_ACCESS_TOKEN` still answered `200` on the day it was set; do not
-expect that a week later. The auto-mode classifier refuses every call that puts one of these on the
+`GH_TOKEN`. The auto-mode classifier refuses every call that puts one of these on the
 wire (`Credential Exploration`), the helper included — verify from a session with auto mode off.
 The helper's own tests (`python3 tools/zoho-rest.test.py`) cover the picker, the token request
 and the header without a network. Related: [[caveman-base-url-stays-with-the-proxy]] for a
