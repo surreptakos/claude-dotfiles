@@ -5,8 +5,10 @@ Usage:
     python build_package.py "<job folder>" --facts    write a starter _facts.json
     python build_package.py "<job folder>" --no-verify
 
-One input, one command, three documents out: the Schedule of Equipment and
-Services, the master agreement, and the Rider for Additional Locations. Change a
+One input, one command, the package out: the Schedule of Equipment and
+Services, and the master agreement and Rider for Additional Locations when the
+situation row in references/CONTRACT-PACKAGE-RULES.md §2 calls for them (a
+commercial record names its situation in deal.package_situation). Change a
 fact and rebuild; nothing is edited by hand in three places.
 
 Bullet text lives in the skill's references/clarifications.json and nowhere else.
@@ -91,6 +93,35 @@ FIRE = {
     'cb_insp_fire': '.CheckBox13', 'cb_insp_refuge': '.CheckBox14',
     'cb_insp_wireless': '.CheckBox15', 'cb_ul': '.CheckBox16',
     'cb_in_lieu_of': '.CheckBox17',
+}
+
+# Package composition (issue #225, spec 215 stream B). Which documents make
+# up the package is governed by the situation rows of
+# references/CONTRACT-PACKAGE-RULES.md §2; which Contract family a System
+# belongs to is governed by the table in references/SOW-BASELINES.md §3.
+# This file cites those sections and reads their content at run time; it
+# does not carry their wording. The only thing encoded here is the builder's
+# own decision under each row: whether its master and rider generator runs.
+PACKAGE_RULES = 'CONTRACT-PACKAGE-RULES.md'
+SOW_BASELINES = 'SOW-BASELINES.md'
+# (commercial?, deal.package_situation) -> (section of PACKAGE_RULES, master+rider)
+PACKAGE_SECTIONS = {
+    (True, 'initial'):    ('2.2', True),
+    (True, 'subsequent'): ('2.3', False),
+    (False, None):        ('2.4', True),
+}
+# The note under the SOW_BASELINES §3 table collapses every System of a
+# residential Project into this one family; the table's column governs the
+# commercial side only.
+RESIDENTIAL_FAMILY = 'Residential Security'
+# The three documents this tool can generate, matched against the situation
+# row's bullets (case-insensitive prefix) so the handoff lists only what was
+# NOT written here. A bullet that matches nothing stays on the list, which
+# is the safe direction.
+_GENERATED_DOC_PREFIXES = {
+    'schedule': 'schedule of equipment',
+    'master':   'master agreement',
+    'rider':    'rider for additional locations',
 }
 
 # Canonical schedule-line-item names that populate the three RMR fields on
@@ -231,49 +262,191 @@ STARTER = {
 }
 
 
-def _flatten_v1(f):
-    """Normalise a v1.0 tree record into the flat working shape the
-    build_schedule / build_agreements / select_bullets code consumes.
-
-    Stream A (issue #217) lands the tree shape and the schema without
-    changing the single-Site single-System output layout; multi-Site,
-    multi-System composition ships in stream B (issue #218) which will
-    replace this normaliser with a walker over sites/systems.
-
-    Refuses a record with more than one Site or more than one System per
-    Site with a message naming the stream-B ticket, so the failure mode is
-    a clear pointer instead of a silent one-System build of a multi-System
-    packet.
-
-    Missing optional blocks default to empty (Q7 Resolved in
-    references/FACTS-SCHEMA.md); a missing kind tag on a service line is
-    left absent and the grouped-fill code warns and defaults to "new".
-    """
+def _tree_systems(f):
+    """Every (site, system) record of a v1.0 tree, in document order, or a
+    SystemExit naming the schema when the tree shape is missing."""
     if 'sites' not in f or not isinstance(f['sites'], list) or not f['sites']:
         raise SystemExit(
             '_facts.json is not a v1.0 tree record: "sites" list is missing '
             'or empty. See skill/aac-contract-package/references/FACTS-SCHEMA.md.'
         )
+    pairs = []
+    for site in f['sites']:
+        systems = site.get('systems') if isinstance(site, dict) else None
+        if not isinstance(systems, list) or not systems:
+            raise SystemExit(
+                f'_facts.json site {site.get("site_name", "?")!r} carries no '
+                'systems. See skill/aac-contract-package/references/FACTS-SCHEMA.md.'
+            )
+        pairs += [(site, s) for s in systems]
+    return pairs
+
+
+def system_families():
+    """Approved system name -> Contract family, read from the table in
+    references/SOW-BASELINES.md §3 at run time. The reference file is the
+    only copy of that table; a name Dan ratifies there is known here on the
+    next run without a code change."""
+    path = aac_paths.reference(SOW_BASELINES)
+    with open(path, encoding='utf8') as fh:
+        lines = fh.read().splitlines()
+    in_section, header, table = False, None, {}
+    for line in lines:
+        if line.startswith('## '):
+            in_section = line.startswith('## 3)')
+            continue
+        if not in_section or not line.lstrip().startswith('|'):
+            continue
+        cells = [c.strip() for c in line.strip().strip('|').split('|')]
+        if header is None:
+            header = cells
+            continue
+        if all(set(c) <= set('-: ') for c in cells):
+            continue  # markdown separator row
+        row = dict(zip(header, cells))
+        name = row.get('Approved', '')
+        family = next((v for k, v in row.items()
+                       if k.lower().startswith('contract family')), '')
+        if name and family:
+            table[name] = family
+    if not table:
+        raise SystemExit(
+            f'cannot read the Contract family column of {path} §3 '
+            '(Approved system type names); the package cannot be composed '
+            'without it.')
+    return table
+
+
+def package_rules_section(section):
+    """(heading, bullets) of one `### <section>` block of
+    references/CONTRACT-PACKAGE-RULES.md, read at run time so the handoff
+    can cite the row's own words instead of a copy."""
+    path = aac_paths.reference(PACKAGE_RULES)
+    with open(path, encoding='utf8') as fh:
+        lines = fh.read().splitlines()
+    heading, bullets, inside = None, [], False
+    unescape = lambda s: s.strip().replace('\\*', '*')  # the file's markdown escapes
+    for line in lines:
+        if line.startswith('#'):
+            if inside:
+                break
+            if line.startswith(f'### {section} '):
+                heading = unescape(line[len(f'### {section} '):])
+                inside = True
+            continue
+        if inside and line.startswith('- '):
+            bullets.append(unescape(line[2:]))
+    if heading is None or not bullets:
+        raise SystemExit(f'cannot find §{section} in {path}; the package '
+                         'composition cites it and cannot proceed without it.')
+    return heading, bullets
+
+
+def compose(record):
+    """Decide the package for a v1.0 tree record before anything is written.
+
+    Returns a dict: ``family`` (the Contract family every System maps to),
+    ``section`` (the situation row of references/CONTRACT-PACKAGE-RULES.md
+    that governs the package), ``situation`` (its heading, read from the
+    file), ``documents`` (that row's bullets, read from the file) and
+    ``agreements`` (whether the master and rider are part of this package).
+
+    Refuses with SystemExit, nothing written, when: ``deal.commercial`` is
+    not set (the composition turns on it and the standard names no
+    default); a commercial record has no ``deal.package_situation`` (no
+    default in either direction — spec 215 stream B); a System name is not
+    in the SOW-BASELINES §3 table, so its family cannot be derived; the
+    Systems span more than one Contract family (split instruction, one
+    Project per family, listing each System under its family). Residential
+    records collapse to one family per the §3 note, so the split never
+    fires for them and ``deal.package_situation`` is ignored
+    (references/FACTS-SCHEMA.md, ``deal`` block).
+    """
+    deal = record.get('deal') or {}
+    if not isinstance(deal, dict) or deal.get('commercial') is None:
+        raise SystemExit(
+            'deal.commercial is not set in _facts.json. The package is '
+            'composed from the commercial or residential situation row of '
+            f'skill/aac-contract-package/references/{PACKAGE_RULES} §2, and '
+            'nothing in that file or in FACTS-SCHEMA.md names a default. Set '
+            'deal.commercial to true or false.')
+    commercial = bool(deal['commercial'])
+    situation = deal.get('package_situation') if commercial else None
+    if (commercial, situation) not in PACKAGE_SECTIONS:
+        shown = 'missing' if situation is None else repr(situation)
+        raise SystemExit(
+            f'deal.package_situation is {shown} on a commercial record '
+            '(deal.commercial is true); it must be "initial" or "subsequent". '
+            'The commercial package differs between the two situation rows of '
+            f'skill/aac-contract-package/references/{PACKAGE_RULES} §2.2 and '
+            '§2.3, and the builder does not default either way. Set the field '
+            'in _facts.json (FACTS-SCHEMA.md, deal.package_situation).')
+    section, agreements = PACKAGE_SECTIONS[(commercial, situation)]
+
+    table = system_families()
+    by_family = {}
+    for site, sysrec in _tree_systems(record):
+        name = str(sysrec.get('system', '')).strip()
+        if name not in table:
+            raise SystemExit(
+                f'System {name!r} at site {site.get("site_name", "?")!r} is '
+                'not an approved system type name, so its Contract family '
+                'cannot be derived. Approved names and their families: '
+                f'skill/aac-contract-package/references/{SOW_BASELINES} §3. '
+                'Fix sites[].systems[].system in _facts.json.')
+        family = table[name] if commercial else RESIDENTIAL_FAMILY
+        by_family.setdefault(family, []).append(name)
+    if len(by_family) > 1:
+        listing = '\n'.join(f'  {fam}: {", ".join(names)}'
+                            for fam, names in by_family.items())
+        raise SystemExit(
+            f'the Systems in _facts.json span {len(by_family)} Contract '
+            'families and one package carries one family '
+            f'(skill/aac-contract-package/references/{SOW_BASELINES} §3; '
+            f'{PACKAGE_RULES} §2.8 for a combination fire-and-burglar '
+            'panel). Split the packet into one Project per family, each '
+            'with its own _facts.json:\n' + listing)
+    family = next(iter(by_family))
+
+    heading, bullets = package_rules_section(section)
+    return {'family': family, 'section': section, 'situation': heading,
+            'documents': bullets, 'agreements': agreements}
+
+
+def _flatten_v1(f):
+    """Normalise a v1.0 tree record into the flat working shape the
+    build_schedule / build_agreements / select_bullets code consumes.
+
+    Stream A (issue #217) lands the tree shape and the schema without
+    changing the single-Site single-System output layout; the multi-System
+    schedule (issue #226) and the multi-Site schedule (issue #227) will
+    replace this normaliser with a walker over sites/systems. Package
+    composition and the cross-family refusal (issue #225) run over the
+    whole tree in ``compose`` before this normaliser is reached.
+
+    Refuses a record with more than one Site or more than one System per
+    Site with a message naming the ticket, so the failure mode is a clear
+    pointer instead of a silent one-System build of a multi-System packet.
+
+    Missing optional blocks default to empty (Q7 Resolved in
+    references/FACTS-SCHEMA.md); a missing kind tag on a service line is
+    left absent and the grouped-fill code warns and defaults to "new".
+    """
+    pairs = _tree_systems(f)
     if len(f['sites']) > 1:
         raise SystemExit(
-            f'{len(f["sites"])} sites in _facts.json — multi-site builds '
-            'ship in stream B (issue #218). Split the packet into one '
-            '_facts.json per Site until then.'
+            f'{len(f["sites"])} sites in _facts.json — the multi-site '
+            'schedule is issue #227. Split the packet into one _facts.json '
+            'per Site until then.'
         )
     site = f['sites'][0]
-    if 'systems' not in site or not isinstance(site['systems'], list) or not site['systems']:
+    if len(pairs) > 1:
         raise SystemExit(
-            f'_facts.json site {site.get("site_name", "?")!r} carries no '
-            'systems. See skill/aac-contract-package/references/FACTS-SCHEMA.md.'
+            f'{len(pairs)} systems at site {site.get("site_name", "?")!r} — '
+            'the multi-system schedule is issue #226. Split the packet into '
+            'one _facts.json per System until then.'
         )
-    if len(site['systems']) > 1:
-        raise SystemExit(
-            f'{len(site["systems"])} systems at site '
-            f'{site.get("site_name", "?")!r} — multi-system builds ship in '
-            'stream B (issue #218). Split the packet into one _facts.json '
-            'per System until then.'
-        )
-    sysrec = site['systems'][0]
+    sysrec = pairs[0][1]
 
     cust = dict(f.get('customer') or {})
     cust['site_name'] = site['site_name']
@@ -307,13 +480,17 @@ def _flatten_v1(f):
     return flat
 
 
-def load(job):
+def read_record(job):
+    """The job folder's _facts.json as the v1.0 tree, unflattened."""
     p = os.path.join(job, '_facts.json')
     if not os.path.exists(p):
         raise SystemExit(f'no _facts.json in {job}\nRun with --facts to write a starter.')
     with open(p, encoding='utf8') as fh:
-        raw = json.load(fh)
-    return _flatten_v1(raw)
+        return json.load(fh)
+
+
+def load(job):
+    return _flatten_v1(read_record(job))
 
 
 def lib():
@@ -646,10 +823,13 @@ def main():
     R.require('schedule_template', 'jobs_root')
     if not os.path.exists(aac_paths.CLARIFICATIONS):
         raise SystemExit('bullet library missing from the skill: ' + aac_paths.CLARIFICATIONS)
-    f, L = load(job), lib()
+    raw = read_record(job)
+    plan = compose(raw)          # every refusal here lands before a byte is written
+    f, L = _flatten_v1(raw), lib()
     print('=' * 78)
     print('BUILD —', f['customer']['subscriber_name'], '|', f['deal']['system'],
-          '|', f['deal']['designation'])
+          '|', f['deal']['designation'], '|', plan['family'],
+          '|', f'{PACKAGE_RULES} §{plan["section"]}')
     print('=' * 78)
 
     sched, changed, nc, ne, dep = build_schedule(job, f, L, R)
@@ -657,12 +837,31 @@ def main():
     print('           zip parts changed:', ', '.join(changed))
     print(f'           {nc} clarifications, {ne} exclusions, deposit {dep:,.2f}')
 
-    mo, ro, why = build_agreements(job, f, R)
+    written = {'schedule'}
+    if plan['agreements']:
+        mo, ro, why = build_agreements(job, f, R)
+    else:
+        mo = ro = None
+        why = (f'not part of this package: {PACKAGE_RULES} §{plan["section"]} '
+               f'({plan["situation"]})')
     if why:
         print('agreements skipped:', why)
     else:
         print('master    ', os.path.basename(mo))
         print('rider     ', os.path.basename(ro))
+        written |= {'master', 'rider'}
+
+    # Handoff: the rest of the package for this situation, as the rules file
+    # lists it (read at run time), less the documents written above.
+    remaining = [d for d in plan['documents']
+                 if not any(d.lower().startswith(_GENERATED_DOC_PREFIXES[w])
+                            for w in written)]
+    print(f'\nHANDOFF — {PACKAGE_RULES} §{plan["section"]}: {plan["situation"]}')
+    print('  written by this build:', ', '.join(sorted(written)))
+    print('  still required for this situation, not generated by this tool:')
+    for d in remaining:
+        print('   -', d)
+    print(f'  standing notes {PACKAGE_RULES} §2.5–§2.8 apply to every package.')
 
     if f.get('held'):
         print('\nHELD, left unwritten until answered:')
