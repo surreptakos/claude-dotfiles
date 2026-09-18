@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-16T14:50:56Z"
-  previous-modified: "2026-09-16T03:54:16Z"
-  revision: "4"
-  content-sha: "f398f434658b"
+  modified: "2026-09-17T21:08:53Z"
+  previous-modified: "2026-09-17T20:45:25Z"
+  revision: "6"
+  content-sha: "ca5148f01281"
 ---
 
 # todoist-triage
@@ -61,14 +61,25 @@ Priority sorts within a ball, never sets it. The 10-item `do` cap in Current Wor
 
 Load the two prior run records first, then the exports, then the live tail.
 
-- **Prior run records.** Read the newest `aac-forgotten-tasks` run record and the previous `todoist-triage` run record before building the queue. Run, from the `aac-routines` checkout (the `Meta/aac-routines` project — the ledger commands resolve nowhere else):
+- **Prior run records.** Read the newest `aac-forgotten-tasks` run record and the previous `todoist-triage` run record before building the queue. Run, from the `aac-routines` checkout (the `Meta/aac-routines` project — the ledger commands resolve nowhere else).
+
+  **Pull the record store first.** The checkout is fresh and `state/run-ledger/` is git-ignored, so the ledger directory holds nothing until something fills it; the 2026-09-17 run skipped this and reported an empty store it had never looked at (aac-routines#461). The store is the Google Drive folder `aac-run-ledger`, beside the `aacx-inbox` exports. Resolve it with `mcp__Google-Drive__search_files` (`title contains 'aac-run-ledger' and mimeType = 'application/vnd.google-apps.folder'`), list it with `parentId = '<id>'`, fetch the newest `aac-forgotten-tasks-*.json` and `todoist-triage-*.json` with `mcp__Google-Drive__read_file_content` into `state/run-ledger/`, then stamp the pull — and only if it happened:
+
+  ```
+  python -m aac_routines.run_ledger remote                 # store, ledger dir, sync state
+  python -m aac_routines.run_ledger synced --count <files pulled>
+  ```
+
+  A machine that mounts the folder as its ledger directory sets `AAC_ROUTINES_RUN_LEDGER_LOCAL` instead and has nothing to pull; `remote` then says `local`. Everywhere else, no marker means not pulled — that is the default, and it is the honest one.
 
   ```
   python -m aac_routines.run_ledger prior --routine todoist-triage
   ```
 
-  It prints one line per routine, naming the record it found under `state/run-ledger/` (one JSON file per run, `<routine>-<YYYYMMDDTHHMMSSZ>.json`) with the time that run finished, or saying `none found`. Read the newest forgotten-tasks report alongside them: `state/forgotten-tasks-reports/forgotten-tasks-<date>.md`. Note each record's timestamp and filename; both lines go into the report in step 6 verbatim, and "none found" is a stated gap, never silence. Missing records are not a stop — they change what the run can rule on.
-- **Exports (primary source of source material).** Every ruling rests on the message and thread bodies exported to Google Drive by the `aac-forgotten-tasks` routine, not on live-connector snippets. In a cloud session, pull them with `mcp__Google_Drive__search_files` (query `name contains 'aac-forgotten-tasks' and mimeType != 'application/vnd.google-apps.folder'`, `orderBy: 'modifiedTime desc'`), then `mcp__Google_Drive__read_file_content` on the newest bundle. Record its modified time — that is the tail-window start.
+  Its first line names where the records came from; the rest name the record found for each routine, under `state/run-ledger/` (one JSON file per run, `<routine>-<YYYYMMDDTHHMMSSZ>.json`) with the time that run finished, or say it was missing. Read the newest forgotten-tasks report alongside them: `state/forgotten-tasks-reports/forgotten-tasks-<date>.md`. Note each record's timestamp and filename; every one of those lines goes into the report in step 6 verbatim, and a missing record is a stated gap, never silence. Mind which gap it is: `none found` is a claim about the store and only a run that reached the store may make it, so a run that did not pull says `not synced` instead. Missing records are not a stop — they change what the run can rule on.
+- **Exports (primary source of source material).** Every ruling rests on the message and thread bodies Power Automate exports to Google Drive, not on live-connector snippets. They live in the folder named by `folder_name` in `aac-routines`' `config/m365-exports.json` — today **`aacx-inbox`** — and each file is named for its **source**, never for the routine: `<source>__<key>__<YYYY-MM-DDTHHMM>.json`, so `outlook_inbox__inbox__2026-09-17T2016.json`, `outlook_sent__sent__...`, `teams__nick__...`, `calendar__global__...`. Searching for the routine's name finds nothing and is not evidence that the exports are missing — that error cost the 2026-09-17 run its primary reader.
+
+  In a cloud session: `mcp__Google-Drive__search_files` with `title contains 'aacx-inbox' and mimeType = 'application/vnd.google-apps.folder'` for the folder id, then `parentId = '<id>' and modifiedTime > '<recent>'` for its contents, newest stamp first. Two parameter traps, both hit on 2026-09-17: the tool takes no `orderBy`, so sort the returned `modifiedTime` values yourself; and the query field is `title`, never `name` — `name contains ...` is rejected outright as an unsupported field. Read the newest file per source with `mcp__Google-Drive__read_file_content`. Record the newest stamp — that is the tail-window start.
 - **Live tail (tail-fill only).** Fill the window "newest export stamp → now" from Gmail (`mcp__Gmail__search_threads`), Teams (`mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`), meeting notes (Granola), and Todoist history (`find-activity`). Never widen this window past the export stamp; never let the connectors stand in as the primary reader. Any connector that fails or returns no access is recorded and carried into step 6 as an unreachable surface.
 - **Todoist queue.** `find-tasks` on all three projects — Current Work, the backlog, and the Inbox project named by `inbox_project_id` in aac-routines' `config/task-capture.json` — `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link. An Inbox item is triaged where it sits; the router moves it, this skill does not.
 
@@ -115,7 +126,7 @@ Order: alarms, do, delegate, defer, delete, merge, with counts. One `AskUserQues
 Output contract, in this order:
 
 1. **Deadline-inside-24 h items first.** Every task with a deadline in the next 24 hours goes at the top, before any other section, so it is the first thing Dan reads.
-2. **Prior run records read.** Name the `aac-forgotten-tasks` run record and the previous `todoist-triage` run record that step 1 loaded — timestamp and filename each. For either that was missing, say "none found" plainly, so Dan sees the run built its queue without it.
+2. **Prior run records read.** Say where the records were read from, then name the `aac-forgotten-tasks` run record and the previous `todoist-triage` run record that step 1 loaded — timestamp and filename each. For either that was missing, say so plainly, so Dan sees the run built its queue without it: "none found" when the store was read and held nothing, and "the store was never read this run" when the pull did not happen. Never the first when it was the second.
 3. **Unreachable surfaces.** List every connector or export step 1 could not read this run. Beside each `unknown` ruling, name the surface it depended on. Every `unknown` from step 3 appears here, tied to the surface that was dark.
 4. **Left alone as not work.** Every Inbox item this run judged personal or non-work, by title, still sitting in the Inbox untouched, so Dan can deal with them himself. "None" when there were none.
 5. **Counts changed, what Dan declined, alarms still open, active-list count over cap.**
@@ -127,6 +138,8 @@ Vocabulary: plain English throughout. No internal names in the body — nothing 
 ```
 python -m aac_routines.run_ledger record --input <record.json>
 ```
+
+Then upload that file to the `aac-run-ledger` Drive folder with `mcp__Google-Drive__create_file` (`contentMimeType: application/json`, `disableConversionToGoogleType: true`, so Drive keeps it as JSON instead of converting it to a Doc). The local copy dies with the session, so a record that is not uploaded did not happen as far as tomorrow's run is concerned.
 
 The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task Dan put in Wontfix. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
 
