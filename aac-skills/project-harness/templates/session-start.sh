@@ -341,9 +341,12 @@ skill_names = sorted(
 #    and the command carries CLAUDE_PLUGIN_ROOT for the scripts that read it from the environment
 #    (global-rules.js, governance-reminder.js, session-gate.js) plus PLUGIN_HOOK_GUARD_DISABLE=1,
 #    because the payload's dedup guard exits silently whenever settings.json names the script -
-#    which is now exactly the case. Entries are also recognised by that path when a later
+#    which is now exactly the case. Entries are also recognised by their command when a later
 #    `claude plugin` command has stripped the _source tags (it rewrites settings.json without
-#    unknown keys), so a second run still replaces instead of appending.
+#    unknown keys): the payload path, the literal token a pre-v30 run left behind, or the echo
+#    marker text - nothing else in a container writes any of the three - so a second run still
+#    replaces instead of appending (seen live on 2026-09-19: 16 dead literal entries beside the
+#    16 seated ones after a plugin command had dropped the tags).
 MARKER = 'aac-bootstrap-plugin-hook'
 PLUGIN_ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'
 HOOK_MARKER_TEXT = 'AAC-SKILLS HOOK MARKER'
@@ -362,7 +365,7 @@ def is_ours(entry):
         return True
     for h in entry.get('hooks') or []:
         c = h.get('command', '') if isinstance(h, dict) else ''
-        if payload_abs in c or HOOK_MARKER_TEXT in c:
+        if payload_abs in c or PLUGIN_ROOT_TOKEN in c or HOOK_MARKER_TEXT in c:
             return True
     return False
 try:
