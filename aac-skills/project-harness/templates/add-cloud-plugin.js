@@ -24,6 +24,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
 
 const root = process.argv[2];
 if (!root) { console.error('usage: node add-cloud-plugin.js <repo-root>'); process.exit(2); }
@@ -114,10 +115,17 @@ if (readOrNull(sidecarPath) !== null) {
   hookRel = SIDECAR_REL;
   keptForeign = HOOK_REL;
 }
+// Wired as `bash "<path>"`, never as the bare path (harness v30, issue 614). The bare form made
+// the file's executable bit decide whether the bootstrap ran at all: `fs.chmodSync` below is
+// invisible to git on Windows (`core.fileMode=false`), the 2026-09-18 sweep committed the hook as
+// 100644 in every repo it touched, and each cloud session then died with exit 126 five
+// milliseconds into SessionStart — before the hook's own failure marker could say anything.
+// Quoted, because one harnessed repo lives under a path with a space.
+const HOOK_COMMAND = 'bash "$CLAUDE_PROJECT_DIR/' + hookRel + '"';
 const HOOK_ENTRY = {
   hooks: [{
     type: 'command',
-    command: '$CLAUDE_PROJECT_DIR/' + hookRel,
+    command: HOOK_COMMAND,
     timeout: 120,
     statusMessage: 'Cloud container: installing the aac-skills payload...',
   }],
@@ -137,12 +145,37 @@ if (keptForeign && hookAction === 'installed') {
 // Always ensure the executable bit: a copy landed by a tool that drops it never runs.
 try { fs.chmodSync(hookDest, 0o755); } catch (_e) { /* a filesystem with no mode bit to set */ }
 
+// The bit git COMMITS is a separate fact from the bit on disk (issue 614): with core.fileMode
+// false — every Windows checkout — `git add` records 100644 whatever chmod did, and the delivered
+// copy runs nowhere. Stage the file as 100755 when this is a git work tree and the index does not
+// already say so; outside git, or without git on PATH, there is nothing to stage.
+let indexModeAction = null;
+const git = (...args) => spawnSync('git', ['-C', root].concat(args), { encoding: 'utf8' });
+if (git('rev-parse', '--is-inside-work-tree').stdout?.trim() === 'true') {
+  const listed = git('ls-files', '-s', '--', hookRel).stdout || '';
+  if (!listed.startsWith('100755 ')) {
+    if (git('add', '--', hookRel).status === 0
+        && git('update-index', '--chmod=+x', '--', hookRel).status === 0) {
+      indexModeAction = 'staged ' + hookRel + ' as 100755 (git update-index --chmod=+x)';
+    }
+  }
+}
+
 settings.hooks = Object.assign({}, settings.hooks);
 const sessionStart = Array.isArray(settings.hooks.SessionStart) ? settings.hooks.SessionStart : [];
-const wired = sessionStart.some((group) => {
+// An entry naming the hook by path is ours whatever its spelling; the pre-v30 bare-path form is
+// rewritten to the `bash` form in place, keeping its position and everything else in the group.
+let wired = false;
+for (const group of sessionStart) {
   const inner = group && Array.isArray(group.hooks) ? group.hooks : [];
-  return inner.some((h) => h && typeof h.command === 'string' && h.command.includes(hookRel));
-});
+  for (const h of inner) {
+    if (!(h && typeof h.command === 'string' && h.command.includes(hookRel))) continue;
+    wired = true;
+    if (h.command !== HOOK_COMMAND && /^"?\$CLAUDE_PROJECT_DIR\//.test(h.command)) {
+      h.command = HOOK_COMMAND;
+    }
+  }
+}
 settings.hooks.SessionStart = wired ? sessionStart : [HOOK_ENTRY].concat(sessionStart);
 
 const settingsChanged = JSON.stringify(settings) !== before;
@@ -151,11 +184,12 @@ if (settingsChanged) {
   fs.writeFileSync(file, JSON.stringify(settings, null, 2).split('\n').join(EOL) + EOL);
 }
 
-if (!settingsChanged && hookAction === 'unchanged') {
+if (!settingsChanged && hookAction === 'unchanged' && !indexModeAction) {
   console.log('already delivered: bootstrap hook + plugin + posture in', file);
   process.exit(0);
 }
 console.log('bootstrap hook', hookAction + ':', hookDest);
+if (indexModeAction) console.log(indexModeAction);
 console.log(settingsChanged
   ? 'declared ' + PLUGIN + ' + posture (issue 543) + the SessionStart bootstrap hook in ' + file
   : 'settings already carried the plugin, the posture and the SessionStart hook: ' + file);

@@ -48,6 +48,15 @@
 # when the source fingerprint has not moved; hook merge de-duplicates by _source tag; the
 # marker overwrite is the whole point.
 #
+# Harness v30 (issue 614) fixed the two ways this file was silently not working. (1) The delivered
+# copy ran as `$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh`, so a Windows commit that lost
+# the executable bit (git core.fileMode=false ignores fs.chmod) gave every cloud session exit 126
+# in 5 ms, before this line: no marker, and "marker absent" already meant two other things.
+# The installer now wires `bash "<path>"` and stages the file 100755. (2) Step 4 copied the
+# manifest's commands verbatim, and Claude Code refuses `${CLAUDE_PLUGIN_ROOT}` in settings.json
+# ("not associated with a plugin"): 16 of 17 governance hooks failed on every event, and the one
+# plain echo among them printed "plugin hooks execute on this surface". See step 4.
+#
 # Env overrides for tests (leave unset in real runs):
 #   BOOTSTRAP_HOME       write everything under this HOME instead of $HOME (fake-container test)
 #   BOOTSTRAP_SOURCE     read the dotfiles tree from this local path instead of git-cloning
@@ -63,6 +72,9 @@ if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
 fi
 
 HOME_DIR="${BOOTSTRAP_HOME:-$HOME}"
+# This file's own path, for the STOP line's re-run instruction: the model's shell has no
+# $CLAUDE_PROJECT_DIR, so the line names the file as this run was invoked.
+HOOK_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 CLAUDE_DIR="$HOME_DIR/.claude"
 SKILLS_DIR="$CLAUDE_DIR/skills"
 STATE_DIR="$CLAUDE_DIR/hook-state/aac-bootstrap"
@@ -92,7 +104,7 @@ bootstrap_fail() {
   echo "aac-bootstrap: STOP - $stage failed: $reason" >&2
   BOOTSTRAP_FAIL_MARKER="$MARKER_FILE" BOOTSTRAP_FAIL_STAGE="$stage" BOOTSTRAP_FAIL_REASON="$reason" \
   BOOTSTRAP_FAIL_REPO="$DOTFILES_REPO" BOOTSTRAP_FAIL_REF="$DOTFILES_REF" \
-  BOOTSTRAP_FAIL_GH="$(command -v gh 2>/dev/null || echo missing)" \
+  BOOTSTRAP_FAIL_GH="$(command -v gh 2>/dev/null || echo missing)" BOOTSTRAP_FAIL_SELF="$HOOK_SELF" \
   python3 - <<'PYFAIL'
 import json, os, time
 e = os.environ
@@ -109,14 +121,22 @@ with open(marker, 'w') as f:
         'skills': [],
         'failed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }, f, indent=2)
+# The line is an instruction, not a report (issue 614): a session that reads it can repair the
+# container itself in two tool calls, and until claude-dotfiles is a source of the environment
+# every session has to. The three assertion tokens the clone-failure gate greps for stay:
+# `AAC-BOOTSTRAP STOP: <stage> failed`, `push_files`, `ANTHROPIC_BASE_URL`.
 msg = (
     f"AAC-BOOTSTRAP STOP: {e['BOOTSTRAP_FAIL_STAGE']} failed - {e['BOOTSTRAP_FAIL_REASON']};"
     f" no aac payload, skills or governance hooks landed in this container;"
-    f" gh={e['BOOTSTRAP_FAIL_GH']}; git push falls back to GitHub MCP push_files;"
-    f" if git cannot read a username for github.com, the dotfiles repo is not a source of this"
-    f" session (add {e['BOOTSTRAP_FAIL_REPO']} as a second source of the environment or Routine,"
-    f" aac-routines issue 489) or a caveman ANTHROPIC_BASE_URL stripped credential injection"
-    f" (`env | grep ANTHROPIC_BASE_URL`, issues 483, 519)"
+    f" gh={e['BOOTSTRAP_FAIL_GH']}; git push falls back to GitHub MCP push_files."
+    f" SELF-HEAL NOW, before any other work: if git could not read a username for github.com,"
+    f" the dotfiles repo is not a source of this session - call the Claude_Code_Remote add_repo"
+    f" tool (owner surreptakos, repo claude-dotfiles, access read), then re-run this hook with"
+    f" `bash \"{e['BOOTSTRAP_FAIL_SELF']}\"` and quote its AAC-BOOTSTRAP MARKER line; the"
+    f" durable fix is {e['BOOTSTRAP_FAIL_REPO']} as a second source of the environment"
+    f" (claude-dotfiles issue 614). If ANTHROPIC_BASE_URL is not https://api.anthropic.com, a"
+    f" caveman proxy URL stripped credential injection instead (`env | grep ANTHROPIC_BASE_URL`,"
+    f" issues 483, 519)"
 )
 print(json.dumps({'hookSpecificOutput': {'hookEventName': 'SessionStart', 'additionalContext': msg}}))
 PYFAIL
@@ -239,7 +259,7 @@ export BOOTSTRAP_DOTFILES_SRC="$DOTFILES_SRC"
 export BOOTSTRAP_GH_PATH="$(command -v gh 2>/dev/null || echo missing)"
 
 python3 <<'PY'
-import hashlib, json, os, shutil, sys, time
+import hashlib, json, os, shlex, shutil, sys, time
 
 def sha(data):
     h = hashlib.sha256()
@@ -309,8 +329,45 @@ skill_names = sorted(
     n for n in os.listdir(skills_src)
     if os.path.isfile(os.path.join(skills_src, n, 'SKILL.md')))
 
-# 4. merge plugin hooks manifest into user settings, tagged so a second run replaces its entries
+# 4. merge plugin hooks manifest into user settings, tagged so a second run replaces its entries.
+#    The manifest is written for a plugin Claude Code installed itself: its commands invoke the
+#    scripts through ${CLAUDE_PLUGIN_ROOT}, and Claude Code resolves that variable ONLY for hooks
+#    registered from a plugin's own hooks.json. Copied verbatim into settings.json (v27-v29), the
+#    16 entries that use it all failed on every event - "Hook command references
+#    ${CLAUDE_PLUGIN_ROOT} but the hook is not associated with a plugin", 114 times in one
+#    session's log on 2026-09-19 - while the one plain echo entry printed its "plugin hooks
+#    execute on this surface" marker and read as proof for the rest (issue 614). So each command
+#    is rewritten for the seat it runs from here: the token becomes the payload's absolute path,
+#    and the command carries CLAUDE_PLUGIN_ROOT for the scripts that read it from the environment
+#    (global-rules.js, governance-reminder.js, session-gate.js) plus PLUGIN_HOOK_GUARD_DISABLE=1,
+#    because the payload's dedup guard exits silently whenever settings.json names the script -
+#    which is now exactly the case. Entries are also recognised by their command when a later
+#    `claude plugin` command has stripped the _source tags (it rewrites settings.json without
+#    unknown keys): the payload path, the literal token a pre-v30 run left behind, or the echo
+#    marker text - nothing else in a container writes any of the three - so a second run still
+#    replaces instead of appending (seen live on 2026-09-19: 16 dead literal entries beside the
+#    16 seated ones after a plugin command had dropped the tags).
 MARKER = 'aac-bootstrap-plugin-hook'
+PLUGIN_ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'
+HOOK_MARKER_TEXT = 'AAC-SKILLS HOOK MARKER'
+payload_abs = os.path.abspath(payload)
+seat_prefix = 'CLAUDE_PLUGIN_ROOT=' + shlex.quote(payload_abs) + ' PLUGIN_HOOK_GUARD_DISABLE=1 '
+
+def seat_command(command):
+    if PLUGIN_ROOT_TOKEN not in command:
+        return command
+    return seat_prefix + command.replace(PLUGIN_ROOT_TOKEN, payload_abs)
+
+def is_ours(entry):
+    if not isinstance(entry, dict):
+        return False
+    if entry.get('_source') == MARKER:
+        return True
+    for h in entry.get('hooks') or []:
+        c = h.get('command', '') if isinstance(h, dict) else ''
+        if payload_abs in c or PLUGIN_ROOT_TOKEN in c or HOOK_MARKER_TEXT in c:
+            return True
+    return False
 try:
     with open(user_settings) as f:
         settings = json.load(f)
@@ -325,10 +382,12 @@ plugin_hooks = hooks_doc.get('hooks') or {}
 existing = settings.get('hooks') or {}
 merged_events = []
 for event, entries in plugin_hooks.items():
-    kept = [e for e in existing.get(event, []) if not (
-        isinstance(e, dict) and e.get('_source') == MARKER)]
+    kept = [e for e in existing.get(event, []) if not is_ours(e)]
     for entry in entries:
         e = json.loads(json.dumps(entry))
+        for h in e.get('hooks') or []:
+            if isinstance(h, dict) and isinstance(h.get('command'), str):
+                h['command'] = seat_command(h['command'])
         e['_source'] = MARKER
         kept.append(e)
     existing[event] = kept
@@ -348,6 +407,7 @@ with open(marker_file, 'w') as f:
         'skills': skill_names,
         'gh_path': gh_path,
         'hooks_events': merged_events,
+        'plugin_root': payload_abs,
         'dotfiles_source': os.environ.get('BOOTSTRAP_DOTFILES_SRC', ''),
         'installed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'copied_this_run': copied,

@@ -55,5 +55,12 @@ jobs:
             exit 1
           fi
           echo "the gate fails when the payload loses a hook entry, as it must"
+      - name: Fault injection — merged commands carrying the literal ${CLAUDE_PLUGIN_ROOT} must turn this red (issue 614)
+        run: |
+          if tests/bootstrap-test.sh --fault verbatim-plugin-root; then
+            echo "::error::the gate passed with the v27-v29 verbatim commands, which Claude Code refuses in settings.json"
+            exit 1
+          fi
+          echo "the gate fails when the merged commands are not seated for settings.json, as it must"
       - name: Clone failure — an unreachable dotfiles repo must leave a named STOP, not a missing marker (issue 483)
         run: tests/bootstrap-test.sh --scenario clone-failure

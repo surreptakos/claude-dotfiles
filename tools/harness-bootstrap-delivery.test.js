@@ -14,6 +14,11 @@
  *
  * Harness v29 (issue 543) adds a fourth: the rewrite re-emitting a CRLF settings file as LF. The
  * one repo this script runs against itself pins that file as a CRLF blob (issue 87).
+ *
+ * Harness v30 (issue 614) adds three more: the entry is `bash "<path>"`, so the executable bit
+ * no longer decides whether the bootstrap runs; a git work tree with core.fileMode=false (every
+ * Windows checkout) still ends with the hook staged as 100755; and a repo carrying the v27-v29
+ * bare-path entry has it rewritten in place, once, with a second run changing nothing.
  */
 'use strict';
 
@@ -72,7 +77,7 @@ test('a fresh repo gets the bootstrap hook, its SessionStart entry and the postu
   const entries = s.hooks.SessionStart;
   assert.strictEqual(entries.length, 1);
   assert.strictEqual(entries[0].hooks[0].command,
-                     '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh');
+                     'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"');
   assert.strictEqual(s.permissions.defaultMode, 'auto');
   assert.deepStrictEqual(s.permissions.allow, ['Bash(*)', 'Edit', 'Write', 'mcp__github__*']);
   assert.match(s.autoMode.allow[0], /issue 543/);
@@ -148,7 +153,7 @@ test('a foreign session-start.sh survives byte-for-byte; the bootstrap lands bes
   const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
   const commands = s.hooks.SessionStart.flatMap((g) => g.hooks.map((h) => h.command));
   assert.strictEqual(commands.length, 2, 'both hooks are wired');
-  assert.strictEqual(commands[0], '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-bootstrap.sh', 'bootstrap first');
+  assert.strictEqual(commands[0], 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-bootstrap.sh"', 'bootstrap first');
   assert.match(commands[1], /session-start\.sh"$/, 'the foreign entry survives, after it');
 
   // A second run is idempotent on the sidecar and never grows a second copy.
@@ -169,5 +174,64 @@ test('an older copy of the template under session-start.sh is overwritten in pla
                      fs.readFileSync(TARGET, 'utf8'));
   assert.ok(!fs.existsSync(path.join(root, '.claude', 'hooks', 'session-start-bootstrap.sh')), 'no sidecar');
   const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
-  assert.strictEqual(s.hooks.SessionStart[0].hooks[0].command, '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh');
+  assert.strictEqual(s.hooks.SessionStart[0].hooks[0].command, 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"');
+});
+
+// ---------------------------------------------------------------------------------- v30 ---------
+function gitRepo(root, fileMode) {
+  const r = spawnSync('git', ['-C', root, 'init', '-q'], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 0, 'git init: ' + r.stderr);
+  spawnSync('git', ['-C', root, 'config', 'core.fileMode', fileMode ? 'true' : 'false']);
+}
+function indexMode(root, rel) {
+  return (spawnSync('git', ['-C', root, 'ls-files', '-s', '--', rel], { encoding: 'utf8' }).stdout || '')
+    .split(' ')[0];
+}
+
+test('in a git work tree with core.fileMode=false the hook is staged as 100755 (issue 614)', () => {
+  // The Windows shape: fs.chmod is invisible to git, so without update-index the sweep commits
+  // 100644 and every cloud session exits 126 before the hook's first line.
+  const root = scratchRepo();
+  gitRepo(root, false);
+  const stdout = deliver(root);
+  assert.match(stdout, /staged \.claude\/hooks\/session-start\.sh as 100755/);
+  assert.strictEqual(indexMode(root, '.claude/hooks/session-start.sh'), '100755');
+  // Idempotent: the index already says 100755, so nothing is restaged and nothing is reported.
+  assert.match(deliver(root), /already delivered/);
+});
+
+test('a repo at v27-v29 has its bare-path entry rewritten to the bash form in place, once', () => {
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude', 'hooks'), { recursive: true });
+  fs.writeFileSync(path.join(root, '.claude', 'hooks', 'session-start.sh'), fs.readFileSync(TARGET, 'utf8'));
+  fs.writeFileSync(path.join(root, '.claude', 'settings.json'), JSON.stringify({
+    hooks: {
+      SessionStart: [
+        { hooks: [{ type: 'command', command: 'node "tools/first.js"' }] },
+        { hooks: [{ type: 'command', command: '$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh', timeout: 120,
+                    statusMessage: 'Cloud container: installing the aac-skills payload...' }] },
+      ],
+    },
+  }, null, 2) + '\n');
+  deliver(root);
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  const commands = s.hooks.SessionStart.flatMap((g) => g.hooks.map((h) => h.command));
+  assert.deepStrictEqual(commands, ['node "tools/first.js"', 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"'],
+    'rewritten in place: same position, no duplicate');
+  assert.strictEqual(s.hooks.SessionStart[1].hooks[0].timeout, 120, 'the rest of the entry survives');
+  const before = snapshot(root);
+  assert.match(deliver(root), /already delivered/);
+  assert.deepStrictEqual(snapshot(root), before);
+});
+
+test('the wired command never depends on the executable bit', () => {
+  const root = scratchRepo();
+  deliver(root);
+  const hook = path.join(root, '.claude', 'hooks', 'session-start.sh');
+  fs.chmodSync(hook, 0o644);
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  const command = s.hooks.SessionStart[0].hooks[0].command;
+  // A local session (no CLAUDE_CODE_REMOTE) exits 0 at once; the bare-path form exits 126 here.
+  const r = spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_PROJECT_DIR: root } });
+  assert.strictEqual(r.status, 0, 'a 644 hook must still run through the wired command: ' + r.stderr);
 });

@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { readMarker, verifySkills, compareToMaster } = require('./bootstrap-check');
+const { readMarker, verifySkills, compareToMaster, verifyPluginRoot } = require('./bootstrap-check');
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-check-'));
@@ -133,4 +133,24 @@ test('compareToMaster returns unknown when no manifest to read against', () => {
   const c = compareToMaster({ payload_version: '2026.9.151521' }, env(f));
   assert.equal(c.state, 'unknown');
   assert.equal(c.marker, '2026.9.151521');
+});
+
+test('verifyPluginRoot is ok when the recorded payload still carries hooks/scripts (issue 614)', () => {
+  const f = fixture();
+  fs.mkdirSync(path.join(f.dir, 'payload', 'hooks', 'scripts'), { recursive: true });
+  const r = verifyPluginRoot({ skills: [], plugin_root: path.join(f.dir, 'payload') });
+  assert.equal(r.state, 'ok');
+  assert.equal(r.root, path.join(f.dir, 'payload'));
+});
+
+test('verifyPluginRoot is absent when the payload the hooks were seated for is gone', () => {
+  const f = fixture();
+  const r = verifyPluginRoot({ skills: [], plugin_root: path.join(f.dir, 'no-such-payload') });
+  assert.equal(r.state, 'absent');
+  assert.equal(r.root, path.join(f.dir, 'no-such-payload'));
+});
+
+test('verifyPluginRoot is unrecorded on a pre-v30 marker with no plugin_root', () => {
+  assert.equal(verifyPluginRoot({ skills: [] }).state, 'unrecorded');
+  assert.equal(verifyPluginRoot({ skills: [], plugin_root: '' }).state, 'unrecorded');
 });

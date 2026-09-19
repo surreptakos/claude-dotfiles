@@ -1,8 +1,8 @@
 # Harness version
 
-    harness-version: 29
+    harness-version: 30
 
-Installed/upgraded: 2026-09-17 by the `project-harness` skill (v29: the auto-mode rule covers
+Installed/upgraded: 2026-09-19 by the `project-harness` skill (v30: the cloud bootstrap hook is wired as `bash "<path>"` and staged 100755 so a Windows commit cannot silence it, and the governance hooks it merges are seated for settings.json instead of carrying the `${CLAUDE_PLUGIN_ROOT}` Claude Code refuses there, issue 614; v29: the auto-mode rule covers
 attended cloud sessions and names every classifier category seen since the 245 ruling, and
 `add-cloud-plugin.js` reads that rule out of `templates/claude-settings.json` instead of repeating
 it, issue 543; v28: the bootstrap hook writes a FAILED marker and a STOP line on a clone or payload failure, gh installs before the clone, issue 483; v27: step 16 delivers the cloud
