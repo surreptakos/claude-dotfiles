@@ -11,33 +11,34 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 `node --test tools/repo-memory-load.test.js` fails when a note and this index drift apart.
 
 - account-enforcement-is-a-warning: warns only
-- agent-remote-isolation-runs-locally: ran on desktop
+- agent-remote-isolation-runs-locally: desktop
 - answer-yes-no-in-one-line: outcome, action, timing
-- bash-tool-collapses-backslashes: `\\` arrives as `\`
-- caveman-base-url-stays-with-the-proxy: not env, not synced
-- classifier-refusals-are-shape-not-action: retry once, then MCP
+- bash-tool-collapses-backslashes: `\\` -> `\`
+- caveman-base-url-stays-with-the-proxy: proxy-only
+- classifier-refusals-are-shape-not-action: retry, then MCP
 - cloud-containers-can-run-powershell: 7.4.6 tarball
 - cloud-only-criteria-stall-the-desktop-fleet: prove in cloud
-- cowork-runs-plugin-hooks: hooks run on host; shell is mcp__workspace__bash
+- cowork-runs-plugin-hooks: mcp__workspace__bash
 - cowork-scheduled-tasks-live-in-session-uploads: no registry
 - cowork-transcripts-not-local: server-side
 - desktop-scheduled-tasks-are-per-org: per org
 - environment-verification-log: log
-- fable-usage-is-rationed: weekly cap; keep pins
+- fable-usage-is-rationed: weekly cap
 - gate-declare-bare-command: nothing appended
-- leave-dates-token-rides-the-proxy: proxy-held; reader in aac-routines
+- hook-exit-126-is-the-mode-bit: diag log; seat PLUGIN_ROOT
+- leave-dates-token-rides-the-proxy: proxy-held
 - marketplace-is-the-distribution-spine: installs read it
 - msys-mangles-git-rev-colon-path: MSYS_NO_PATHCONV=1
 - personal-profile-parity: pull only
 - powershell-7-is-the-tool-engine: JSON indents 2
 - pr-merge-from-worktree-needs-manual-branch-delete: by hand
-- ps51-scripts-need-a-bom: Task Scheduler runs 5.1
-- restore-test-reads-live-skill-copies: live edit fails others
+- ps51-scripts-need-a-bom: Scheduler runs 5.1
+- restore-test-reads-live-skill-copies: live edit
 - scratchpad-path-too-long-for-git-clone: short root
 - sed-strips-crlf-in-this-repo: no sed -i on .ps1
 - session-env-carries-zoho-and-gas-tokens: names only
 - session-end-fixes-all-drift: every finding
-- state-a-standing-rule-once: one copy only
+- state-a-standing-rule-once: once
 - three-skill-channels: only local in repo
 - trust-dialog-fires-despite-accepted-flag: strip permissions.allow
 - user-scope-plugin-wins-over-project-scope: project loses

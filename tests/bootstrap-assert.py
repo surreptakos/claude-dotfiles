@@ -146,6 +146,32 @@ if settings is not None:
         pass_(f'all {len(REQUIRED_HOOKS)} governance hook entries merged into user settings, '
               f'tagged _source={SOURCE_TAG}')
 
+    # Seated for settings.json (issue 614). Claude Code refuses a settings.json hook whose command
+    # carries the literal ${CLAUDE_PLUGIN_ROOT} ("not associated with a plugin"), which is what
+    # every merged entry carried from v27 to v29 while this gate reported them present. A merged
+    # command that names a payload script must spell the payload's absolute path, export
+    # CLAUDE_PLUGIN_ROOT for the scripts that read it, and disable the payload's dedup guard,
+    # which otherwise exits silently because settings.json names the script.
+    payload_abs = os.path.abspath(PAYLOAD)
+    all_merged = [c for commands in merged.values() for c in commands]
+    literal = [c for c in all_merged if '${CLAUDE_PLUGIN_ROOT}' in c]
+    scripted = [c for c in all_merged if payload_abs + '/hooks/scripts/' in c]
+    unseated = [c for c in scripted
+                if not c.startswith('CLAUDE_PLUGIN_ROOT=') or 'PLUGIN_HOOK_GUARD_DISABLE=1 ' not in c]
+    if literal:
+        fail(f'{len(literal)} merged command(s) still carry the literal ${{CLAUDE_PLUGIN_ROOT}}, '
+             f'which Claude Code refuses in settings.json: {literal[0][:90]}')
+    elif not scripted:
+        fail(f'no merged command names a script under {payload_abs}/hooks/scripts/')
+    elif unseated:
+        fail(f'{len(unseated)} merged command(s) lack the CLAUDE_PLUGIN_ROOT=... '
+             f'PLUGIN_HOOK_GUARD_DISABLE=1 seat: {unseated[0][:90]}')
+    else:
+        pass_(f'{len(scripted)} merged commands spell {payload_abs} and carry the seat '
+              f'(CLAUDE_PLUGIN_ROOT + PLUGIN_HOOK_GUARD_DISABLE=1)')
+    if marker is not None and marker.get('plugin_root') != payload_abs:
+        fail(f"the marker records plugin_root={marker.get('plugin_root')!r}, not {payload_abs!r}")
+
     if untagged:
         fail(f'{len(untagged)} hook group(s) in user settings carry no {SOURCE_TAG} tag — a '
              'second bootstrap run would append duplicates instead of replacing them')
@@ -156,8 +182,8 @@ if settings is not None:
     dangling = set()
     for commands in merged.values():
         for command in commands:
-            for hit in re.findall(r'\$\{CLAUDE_PLUGIN_ROOT\}/([A-Za-z0-9_./-]+)', command):
-                if not os.path.isfile(os.path.join(PAYLOAD, hit)):
+            for hit in re.findall(re.escape(payload_abs) + r'/([A-Za-z0-9_./-]+)', command):
+                if not os.path.isfile(os.path.join(payload_abs, hit)):
                     dangling.add(hit)
     if dangling:
         fail('hook command(s) name scripts the payload does not carry: '

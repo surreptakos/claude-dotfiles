@@ -30,6 +30,7 @@
  *                                      reason?, stage? }
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
  *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker? }
+ *   verifyPluginRoot(marker)     -> { state: 'ok' | 'absent' | 'unrecorded', root? }
  */
 
 const fs = require('node:fs');
@@ -100,4 +101,19 @@ function compareToMaster(marker, env) {
   }
 }
 
-module.exports = { readMarker, verifySkills, compareToMaster, markerPath, skillsDir };
+/**
+ * The seat the governance hooks were merged for (harness v30, issue 614). The bootstrap rewrites
+ * every `${CLAUDE_PLUGIN_ROOT}` in the payload's hook commands to the payload's absolute path
+ * and records that path as `plugin_root`; settings.json entries then name scripts under it, and
+ * a payload that has since moved or been deleted leaves every governance hook failing on a path.
+ * A marker without the key is from a pre-v30 hook, whose merged entries could not run at all.
+ */
+function verifyPluginRoot(marker) {
+  const root = marker && typeof marker.plugin_root === 'string' ? marker.plugin_root : '';
+  if (!root) return { state: 'unrecorded' };
+  return fs.existsSync(path.join(root, 'hooks', 'scripts'))
+    ? { state: 'ok', root }
+    : { state: 'absent', root };
+}
+
+module.exports = { readMarker, verifySkills, compareToMaster, verifyPluginRoot, markerPath, skillsDir };

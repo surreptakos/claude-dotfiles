@@ -909,7 +909,7 @@ function bootstrapChecks() {
     stop(`aac-bootstrap ${r.stage} failed — ${r.reason}`);
     note(`marker ${r.path}${r.marker.failed_at ? ` written ${r.marker.failed_at}` : ''}; no aac payload, skills or governance hooks in this container`);
     if (r.stage === 'clone') {
-      note('if git could not read a username for github.com: the dotfiles repo is not a source of this session (add it as a second source of the environment or Routine, aac-routines issue 489), or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
+      note('if git could not read a username for github.com: the dotfiles repo is not a source of this session — self-heal now: call the Claude_Code_Remote add_repo tool for surreptakos/claude-dotfiles (read), then re-run the hook with `bash "<its path>"` (claude-dotfiles issue 614; the durable fix is the repo as a second source of the environment); or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
     }
     return;
   }
@@ -921,7 +921,17 @@ function bootstrapChecks() {
     if (v.missing.length > 8) note(`...and ${v.missing.length - 8} more`);
     return;
   }
+  // Issue 614: the merged governance hooks name scripts under the payload path the marker
+  // records. A payload that moved or was deleted since the bootstrap leaves every hook failing
+  // on a path — silently, since Claude Code only logs a failing settings hook.
+  const seat = bootstrap.verifyPluginRoot(marker);
+  if (seat.state === 'absent') {
+    stop(`the governance hooks merged into user settings name ${seat.root}/hooks/scripts, which is gone — re-run the bootstrap hook (\`bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"\`)`);
+    return;
+  }
   ok(`aac-bootstrap payload v${marker.payload_version} — ${marker.skills.length} skills, gh ${marker.gh_path && marker.gh_path !== 'missing' ? 'installed' : 'MISSING'}`);
+  if (seat.state === 'ok') note(`governance hooks seated at ${seat.root} (CLAUDE_PLUGIN_ROOT in settings.json resolved, issue 614)`);
+  else note('marker records no plugin_root: a pre-v30 bootstrap, whose merged governance hooks could not run (issue 614) — the next container picks up the current hook');
   const cmp = bootstrap.compareToMaster(marker, process.env);
   if (cmp.state === 'drift') note(`payload v${cmp.marker} loaded; master offers v${cmp.master} — next container will pick it up`);
   else if (cmp.state === 'same') note(`payload matches dotfiles master (v${cmp.master})`);

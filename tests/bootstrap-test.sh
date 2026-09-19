@@ -19,6 +19,10 @@
 #   5  gh is installed and reachable through the PATH the hook exported via $CLAUDE_ENV_FILE
 #   6  session-check — the copy the bootstrap installed — exits 0 and prints its payload-version
 #      line, which this script quotes
+#   7  every merged SessionStart and UserPromptSubmit command RUNS from the clean home and exits 0
+#      (issue 614: checks 3 and 5 passed for three harness versions while every merged command
+#      carried a literal ${CLAUDE_PLUGIN_ROOT} that Claude Code refuses in settings.json — a gate
+#      that only reads the entries cannot see that; this one executes them)
 #
 # WHY THE EXPECTATION IN CHECK 3 IS HARD-CODED HERE and not read out of the payload's
 # hooks.json: a gate that compares the merged settings against the manifest they were merged
@@ -30,6 +34,10 @@
 # USAGE
 #   tests/bootstrap-test.sh                          # the gate
 #   tests/bootstrap-test.sh --fault missing-hook-entry   # prove it can fail
+#   tests/bootstrap-test.sh --fault verbatim-plugin-root # issue 614: the v27-v29 shape - merged
+#                                                        # commands carrying the literal
+#                                                        # ${CLAUDE_PLUGIN_ROOT} - must turn checks
+#                                                        # 3 and 7 red
 #   tests/bootstrap-test.sh --scenario clone-failure     # issue 483: an unreachable dotfiles repo
 #                                                        # leaves a FAILED marker naming the cause,
 #                                                        # a STOP additionalContext line, and gh;
@@ -60,8 +68,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$FAULT" in
-  ""|missing-hook-entry) ;;
-  *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry)" >&2; exit 64 ;;
+  ""|missing-hook-entry|verbatim-plugin-root) ;;
+  *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root)" >&2; exit 64 ;;
 esac
 case "$SCENARIO" in
   ""|clone-failure) ;;
@@ -222,6 +230,28 @@ else
   fail "hook exited $hook_status; stderr: $(tail -5 "$hook_err" | tr '\n' ' ')"
 fi
 
+if [ "$FAULT" = "verbatim-plugin-root" ]; then
+  # Issue 614: what v27-v29 wrote. Un-seat every merged command after the hook has run - strip
+  # the CLAUDE_PLUGIN_ROOT=... PLUGIN_HOOK_GUARD_DISABLE=1 prefix and put the literal token back
+  # in place of the payload path - so the settings file is the shape three green gates accepted.
+  python3 - "$CLEAN_HOME/.claude/settings.json" "$SRC/marketplace/aac-skills" <<'PYFAULT'
+import json, os, re, sys
+p, payload = sys.argv[1], os.path.abspath(sys.argv[2])
+s = json.load(open(p))
+n = 0
+for groups in s.get('hooks', {}).values():
+    for g in groups:
+        for h in g.get('hooks', []):
+            c = h.get('command', '')
+            if payload in c:
+                c = re.sub(r"^CLAUDE_PLUGIN_ROOT=\S+ PLUGIN_HOOK_GUARD_DISABLE=1 ", '', c)
+                h['command'] = c.replace(payload, '${CLAUDE_PLUGIN_ROOT}')
+                n += 1
+json.dump(s, open(p, 'w'), indent=2)
+print(f"  fault injected: {n} merged commands un-seated back to the literal ${{CLAUDE_PLUGIN_ROOT}}")
+PYFAULT
+fi
+
 # ------------------------------------------------- 2-5. assert the installed state -------------
 BOOTSTRAP_TEST_HOME="$CLEAN_HOME" \
 BOOTSTRAP_TEST_PAYLOAD="$PAYLOAD" \
@@ -262,6 +292,46 @@ else
     fail "session-check printed no 'aac-bootstrap payload v$version' line"
     sed -n '1,40p' "$check_out" >&2
   fi
+fi
+
+# ------------------------------------------------- 7. the merged hooks actually execute ---------
+# Each merged SessionStart and UserPromptSubmit command, run the way Claude Code runs a settings
+# hook: `sh -c`, the hook event JSON on stdin, from the repo. The seat the bootstrap wrote
+# (CLAUDE_PLUGIN_ROOT=... PLUGIN_HOOK_GUARD_DISABLE=1, absolute script paths) is the whole
+# reason these exit 0 from an empty home; the v27-v29 verbatim copy could not start.
+merged_cmds="$SCRATCH/merged-commands.txt"
+python3 - "$CLEAN_HOME/.claude/settings.json" >"$merged_cmds" <<'PYLIST'
+import json, sys
+s = json.load(open(sys.argv[1]))
+for event in ('SessionStart', 'UserPromptSubmit'):
+    for group in s.get('hooks', {}).get(event, []):
+        if group.get('_source') != 'aac-bootstrap-plugin-hook':
+            continue
+        for h in group.get('hooks', []):
+            print(event + '\t' + h['command'])
+PYLIST
+ran=0; broke=0
+while IFS=$'\t' read -r event cmd; do
+  [ -n "$cmd" ] || continue
+  ran=$((ran + 1))
+  out="$SCRATCH/hook-run-$ran.txt"
+  ( cd "$FIXTURE" && printf '{"session_id":"ci-bootstrap-gate","hook_event_name":"%s","prompt":"gate","cwd":"%s"}' "$event" "$FIXTURE" \
+      | env -i PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" HOME="$CLEAN_HOME" \
+              CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate CLAUDE_PROJECT_DIR="$FIXTURE" \
+              timeout 120 sh -c "$cmd" ) >"$out" 2>&1
+  rc=$?
+  short="$(printf '%s' "$cmd" | sed -E 's#^CLAUDE_PLUGIN_ROOT=[^ ]+ PLUGIN_HOOK_GUARD_DISABLE=1 ##' | sed "s#$PAYLOAD/hooks/scripts/##" | cut -c1-70)"
+  if [ "$rc" -eq 0 ] && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$out"; then
+    pass "$event hook ran: $short"
+  else
+    broke=$((broke + 1))
+    fail "$event hook exited $rc: $short — $(head -c 160 "$out" | tr '\n' ' ')"
+  fi
+done <"$merged_cmds"
+if [ "$ran" -eq 0 ]; then
+  fail "no merged SessionStart/UserPromptSubmit command found to execute"
+elif [ "$broke" -eq 0 ]; then
+  pass "all $ran merged SessionStart/UserPromptSubmit hooks executed from the clean home"
 fi
 
 # ------------------------------------------------------------------- verdict --------------------

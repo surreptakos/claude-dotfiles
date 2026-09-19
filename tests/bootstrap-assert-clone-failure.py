@@ -65,6 +65,13 @@ else:
         pass_(f'additionalContext is the STOP line: {ctx[:100]}...')
     elif ctx:
         fail(f'additionalContext is not the STOP line: {ctx[:160]}')
+    # Issue 614: the line is the self-heal, not just the diagnosis - it names the add_repo call
+    # and the exact re-run command (this hook by its own path), since the session git proxy
+    # ignores credentials in a clone URL and only an attached source authenticates.
+    if 'add_repo' in ctx and 'claude-dotfiles' in ctx and 'bash "' in ctx and 'session-start' in ctx:
+        pass_('the STOP line carries the self-heal: add_repo claude-dotfiles, then re-run the hook by path')
+    elif ctx:
+        fail(f'the STOP line lacks the add_repo / re-run self-heal: {ctx[:200]}')
     if len(ctx) > 2000:
         fail(f'additionalContext is {len(ctx)} chars, over the 2KB cap')
 
