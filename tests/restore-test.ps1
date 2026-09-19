@@ -498,8 +498,8 @@ $pathToken = [regex]'__USERHOME(_JSON|_POSIX|_FWD|_LC)?__'
 $tokenLeft = @()
 $homeLeft  = @()
 $leakForms = @()
-foreach ($home in @($RealHome, $script:OwnerHome) | Select-Object -Unique) {
-    $forms = Get-HomeForms -UserHome $home
+foreach ($leakHome in @($RealHome, $script:OwnerHome) | Select-Object -Unique) {
+    $forms = Get-HomeForms -UserHome $leakHome
     $leakForms += @($forms.Json, $forms.Posix, $forms.Fwd, $forms.Raw, $forms.Lower)
 }
 foreach ($file in $scanFiles) {
