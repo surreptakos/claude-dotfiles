@@ -119,6 +119,9 @@ forward-slash `C:/Users/Dan`, the Git-Bash `/c/Users/Dan`, and the all-lowercase
 that Codex writes into `config.toml`'s project-trust keys (`__USERHOME_LC__` — the replacement is
 case-sensitive, so the other four spellings cannot catch it). Pull substitutes the local home back.
 A machine with the same username sees no difference; one with a different username still works.
+The skill tree is committed as written, owner's home and all (nothing tokenises it since sync push
+retired), so pull first folds that spelling — `$script:OwnerHome` in `lib/manifest.ps1` — into the
+same tokens, then substitutes. The restore test scans for both homes.
 
 ## Line endings are pinned
 

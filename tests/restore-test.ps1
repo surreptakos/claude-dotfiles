@@ -61,7 +61,8 @@ param(
     # Deliberate breakage, to watch a check fail:
     #   missing      a whitelisted file never made it into the repo   -> check 2
     #   crlf         the clone's bytes differ from the pushed bytes   -> check 0
-    #   home-leak    a file was copied without going through Copy-OneFile -> check 5
+    #   home-leak    a file was copied without going through Copy-OneFile -> check 5 (and 2:
+    #                the planted file is outside the whitelist)
     #   secret       a credential value reached the repo              -> check 8
     #   drift        a restored file does not round-trip              -> check 7
     #   broken-hook  a restored hook is present but not runnable      -> check 9
@@ -315,12 +316,6 @@ if ($Fault -eq 'crlf') {
     [System.IO.File]::WriteAllText($victim, $text, (New-Object System.Text.UTF8Encoding($false)))
     Note 'fault: flipped the line endings of a cloned file'
 }
-if ($Fault -eq 'home-leak') {
-    # What a copy that bypassed Copy-OneFile would leave behind: this machine's home, verbatim.
-    Set-Content -Path (Join-Path $Clone 'aac-skills\leak-probe.md') `
-                -Value ("Log at {0}\.claude\hook-state\probe.log" -f $RealHome) -Encoding utf8
-    Note 'fault: planted a raw real-home path in the repo'
-}
 if ($Fault -eq 'secret') {
     # Assembled rather than written out, because a literal credential pair in this file would
     # trip the repo's own secret guard on the next push - which is the guard working correctly.
@@ -420,6 +415,15 @@ if ($Fault -eq 'broken-hook') {
                 -Value 'throw new Error("restored hook is broken");' -Encoding utf8
     Note 'fault: a restored hook is present but not runnable'
 }
+if ($Fault -eq 'home-leak') {
+    # What a copy that bypassed Copy-OneFile would leave behind: this machine's home, verbatim.
+    # Planted AFTER the install, into the restored tree: planted in the clone it would go through
+    # Copy-OneFile, which since issue 582 folds the owner's home into the tokens, so on the
+    # owner's own desktop the plant would come out substituted and check 5 would stay green.
+    Set-Content -Path (Join-Path $FakeHome '.claude\skills\leak-probe.md') `
+                -Value ("Log at {0}\.claude\hook-state\probe.log" -f $RealHome) -Encoding utf8
+    Note 'fault: planted a raw real-home path in the restored tree'
+}
 
 # Pair every repo file with where it should have landed. Everything below reads this list, so a
 # path convention that changes only has to change here.
@@ -487,13 +491,21 @@ $scanFiles = @($textFiles + $personalText)
 # the substitution would fail the run on a correct restore, which is how a check gets ignored.
 $pathToken = [regex]'__USERHOME(_JSON|_POSIX|_FWD|_LC)?__'
 
+# Two homes are leaks: this machine's, and the owner's. On the owner's desktop they are one
+# spelling; on a CI runner (C:\Users\runneradmin) or any other machine they differ, and the
+# owner's is the one the skill tree names literally (issue 582). Scanning only $RealHome let
+# the Windows job pass while the desktop was red.
 $tokenLeft = @()
 $homeLeft  = @()
-$forms     = Get-HomeForms -UserHome $RealHome
+$leakForms = @()
+foreach ($home in @($RealHome, $script:OwnerHome) | Select-Object -Unique) {
+    $forms = Get-HomeForms -UserHome $home
+    $leakForms += @($forms.Json, $forms.Posix, $forms.Fwd, $forms.Raw, $forms.Lower)
+}
 foreach ($file in $scanFiles) {
     $content = [System.IO.File]::ReadAllText($file.FullName)
     if ($pathToken.IsMatch($content)) { $tokenLeft += $file.FullName }
-    foreach ($form in @($forms.Json, $forms.Posix, $forms.Fwd, $forms.Raw, $forms.Lower)) {
+    foreach ($form in $leakForms) {
         if ($content.Contains($form)) { $homeLeft += ("{0}  ({1})" -f $file.FullName, $form); break }
     }
 }
@@ -800,8 +812,11 @@ foreach ($pair in $pairs) {
     # Re-tokenizing the restored file with the FAKE home must reproduce the repo file exactly.
     # That is the whole round trip - detokenize on pull, tokenize on the next push - so a
     # mismatch here is a file that would come back different from the machine it was sent to.
+    # The repo side is tokenised with the OWNER's home first: a skill that names it literally
+    # (issue 582) is committed that way and restored substituted, and both spell the same token.
     $back = ConvertTo-Tokens -Text ([System.IO.File]::ReadAllText($pair.Local)) -UserHome $FakeHome
-    if (-not ($back -ceq [System.IO.File]::ReadAllText($pair.Repo))) { $drift += $pair.Local }
+    $want = ConvertTo-Tokens -Text ([System.IO.File]::ReadAllText($pair.Repo))  -UserHome $script:OwnerHome
+    if (-not ($back -ceq $want)) { $drift += $pair.Local }
 }
 Check ("all {0} files survive tokenize/detokenize byte-for-byte" -f $pairs.Count) ($drift.Count -eq 0) $drift
 

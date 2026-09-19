@@ -130,6 +130,14 @@ function Test-Excluded {
 
 # Absolute home paths are stored as tokens so a machine with a different username
 # still works. settings.json hard-codes C:\Users\<you>\... in five hook commands.
+#
+# The skill tree is the exception: aac-skills/ is hand-edited prose that names the owner's home
+# literally (a clasp-auth path, a --home argument), and since issue 214 retired sync push
+# nothing tokenises it before it is committed. Pull folds that spelling into the same tokens
+# before substituting the local home, so a restore under another username never carries it
+# (issue 582). Same constant as OWNER_HOME in tools/skill-stamps.py: the owner's home, never
+# the running user's.
+$script:OwnerHome = 'C:\Users\Dan'
 $script:TextExtensions = @(
     '.md', '.json', '.jsonl', '.js', '.mjs', '.cjs', '.ts', '.ps1', '.psm1',
     '.py', '.sh', '.cmd', '.bat', '.txt', '.yml', '.yaml', '.toml', '.css', '.html'
@@ -215,6 +223,7 @@ function Copy-OneFile {
         if ($Direction -eq 'Tokenize') {
             $text = ConvertTo-Tokens   -Text $text -UserHome $UserHome
         } else {
+            $text = ConvertTo-Tokens   -Text $text -UserHome $script:OwnerHome
             $text = ConvertFrom-Tokens -Text $text -UserHome $UserHome
         }
         [System.IO.File]::WriteAllText($Destination, $text, $script:Utf8NoBom)
