@@ -79,8 +79,10 @@ them. The `.gitignore` and the secret guard are backstops behind that choice, no
 
 **Home paths are tokens.** Hook commands in `settings.json` carry the owner's home path. The
 committed copy spells it `__USERHOME__` (one token per spelling that occurs; see
-`ConvertFrom-Tokens`) and pull substitutes the local home back. Any new script that copies a text
-file must go through `Copy-OneFile`, or it will bake one machine's paths into a restore.
+`ConvertFrom-Tokens`) and pull substitutes the local home back. Skills are committed naming the
+owner's home literally; pull folds `$script:OwnerHome` into the tokens first (issue 582). Any new
+script that copies a text file must go through `Copy-OneFile`, or it will bake one machine's paths
+into a restore.
 
 **Keep `.claude/session.json` and `.claude/settings.json` as CRLF blobs (issue 87).** `.gitattributes`
 pins them with `-text` so git does no EOL conversion, and the stored blob is CRLF so a Windows
