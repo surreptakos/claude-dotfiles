@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: "2026-09-21T00:35:51Z"
-  previous-modified: "2026-09-19T06:27:29Z"
-  revision: "30"
-  content-sha: "9434a89e05b3"
+  modified: "2026-09-21T20:09:20Z"
+  previous-modified: "2026-09-21T18:19:33Z"
+  revision: "32"
+  content-sha: "4d459b0db6bf"
 ---
 
 # Project Harness
@@ -82,7 +82,7 @@ cross-repo Projects board instead of per-repo (see step 6).
    - It needs the network and an authenticated `gh`, so it lives at the command line, optionally as a CI step (a separate workflow, or a job in `dashboard.yml` kept clear of the test job) — a commit gate that needs the network breaks committing offline, which keeps it out of `.githooks/pre-commit`.
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
    - In `claude-dotfiles` itself the template is **generated** from `tools/tracker-audit.js` by `tools/build-harness-tracker-audit.js`; never hand-edit `templates/tracker-audit.js` there. Fix the repo copy, re-run the generator, and `tools/tracker-audit-template.test.js` goes green (issue 336).
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 30.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139), so close an out-of-date harness before writing code — a repo without the v28 cloud bootstrap hook (v27 delivered it; v28 makes its failures loud, issue 483) or still carrying the narrow v19 auto-mode rule (v29 widened it to attended sessions and named every classifier category, issue 543) is exactly that state, and the STOP line is the only thing that says so.
+9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 32.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139), so close an out-of-date harness before writing code — a repo without the v28 cloud bootstrap hook (v27 delivered it; v28 makes its failures loud, issue 483) or still carrying the narrow v19 auto-mode rule (v29 widened it to attended sessions and named every classifier category, issue 543) is exactly that state, and the STOP line is the only thing that says so.
 10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
     - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
 11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.

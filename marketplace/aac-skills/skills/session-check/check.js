@@ -1095,6 +1095,14 @@ function bootstrapChecks() {
     }
     return;
   }
+  if (r.state === 'stale') {
+    // Issue 643: the hook did not run in THIS session, so everything below describes the
+    // container image rather than this container's bootstrap. A Routine-fired session whose
+    // project dir is not a harnessed repo never reaches the repo-anchored entry, and a home
+    // restored from a snapshot answers every question as though it had.
+    warn(`aac-bootstrap marker written ${r.writtenAt}, before this container booted (${r.bootedAt}) — the bootstrap hook did not run in this session; the payload, skills and governance hooks below are whatever the image carried`);
+    note('re-run it now: `bash ~/.claude/hooks/aac-bootstrap.sh` (the home-anchored seat, harness v31), or `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"` when this container predates that seat');
+  }
   const marker = r.marker;
   const v = bootstrap.verifySkills(marker, process.env);
   if (v.state === 'skills-missing') {
@@ -1111,8 +1119,15 @@ function bootstrapChecks() {
     stop(`the governance hooks merged into user settings name ${seat.root}/hooks/scripts, which is gone — re-run the bootstrap hook (\`bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"\`)`);
     return;
   }
+  // Issue 643: the seat that makes the next session bootstrap at all when its project dir is
+  // not a harnessed repo. A recorded path that is gone or unreadable is the failure returning.
+  const self = bootstrap.verifySelfHook(marker);
+  if (self.state === 'absent' || self.state === 'not-executable') {
+    warn(`the home-anchored bootstrap seat ${self.hook} is ${self.state === 'absent' ? 'gone' : 'not executable'} — a session whose project dir is not a harnessed repo will not bootstrap here`);
+  }
   ok(`aac-bootstrap payload v${marker.payload_version} — ${marker.skills.length} skills, gh ${marker.gh_path && marker.gh_path !== 'missing' ? 'installed' : 'MISSING'}`);
   if (seat.state === 'ok') note(`governance hooks seated at ${seat.root} (CLAUDE_PLUGIN_ROOT in settings.json resolved, issue 614)`);
+  if (self.state === 'ok') note(`bootstrap re-run seated at ${self.hook}, so a session on any project dir bootstraps (issue 643)`);
   else note('marker records no plugin_root: a pre-v30 bootstrap, whose merged governance hooks could not run (issue 614) — the next container picks up the current hook');
   const cmp = bootstrap.compareToMaster(marker, process.env);
   if (cmp.state === 'drift') note(`payload v${cmp.marker} loaded; master offers v${cmp.master} — next container will pick it up`);

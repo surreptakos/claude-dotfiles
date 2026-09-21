@@ -4,11 +4,15 @@ The committed memory for this repo: one file per note, `name` and `description` 
 the index below. Notes are owner rulings, environment quirks that cost real time, and pointers
 to external artifacts — never anything derivable from the repo or the tracker (global rules,
 "Memory governance"). The plugin's SessionStart hook (`tools/repo-memory-load.js`) injects the
-index lines below, so a cloud session and a desktop session start from the same memory.
+note names below, so a cloud session and a desktop session start from the same memory.
 
 Add one: write `docs/agents/memory/<name>.md`, add its line here, commit. That commit is the
 whole publish — there is no live `~/.claude` copy to keep in step (issue 210), and
 `node --test tools/repo-memory-load.test.js` fails when a note and this index drift apart.
+
+The hook after the colon is for whoever reads this file: the SessionStart injection carries the
+note NAME alone, about 35 bytes against a 1968-byte cap (issue 589). So write the hook for a human
+and give the note a name that says what it is — adding one costs its own line and nothing else.
 
 - account-enforcement-is-a-warning: warns only
 - agent-remote-isolation-runs-locally: desktop
@@ -17,6 +21,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - caveman-base-url-stays-with-the-proxy: proxy-only
 - classifier-refusals-are-shape-not-action: retry; MCP
 - cloud-containers-can-run-powershell: 7.4.6 tarball
+- cloud-home-snapshot: image state; seat the bootstrap in $HOME
 - cloud-only-criteria-stall-the-desktop-fleet: cloud proof
 - cowork-runs-plugin-hooks: mcp__workspace__bash
 - cowork-scheduled-tasks-live-in-session-uploads: uploads

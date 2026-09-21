@@ -7,14 +7,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.5 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.6 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.5 |
+| **Version** | 0.6 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -38,3 +38,4 @@ Company-wide editorial, correspondence, document layout, and controlled-writing 
 | 0.2 | 2026-09-09 | Editorial and layout refinements; see Appendix F. | Pending |
 | 0.3 | 2026-09-09 | Performance-review exception in Part I; decision register updated. | Pending |
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
+| 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
