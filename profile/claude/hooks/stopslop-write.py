@@ -30,9 +30,19 @@ LINT_EXTS = (".md", ".txt", ".markdown")
 
 def main():
     try:
-        data = json.load(sys.stdin)
-    except Exception:
-        return 0  # unparseable payload -> never block
+        import stopslop
+    except Exception as e:
+        # Linter missing/broken: fail open (don't wedge the session) but say so.
+        sys.stderr.write(f"stop-slop hook: could not load linter: {e}\n")
+        return 0
+
+    try:
+        data = stopslop.decode_payload(sys.stdin.buffer.read())
+    except Exception as e:
+        # Fail open, never in silence: an unreadable payload is why the gate
+        # passed everything for months (issue 620).
+        sys.stderr.write(f"stop-slop hook: {e}\n")
+        return 0
 
     tool_input = data.get("tool_input") or {}
     path = tool_input.get("file_path") or tool_input.get("filePath") or ""
@@ -47,13 +57,6 @@ def main():
         with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except OSError:
-        return 0
-
-    try:
-        import stopslop
-    except Exception as e:
-        # Linter missing/broken: fail open (don't wedge the session) but say so.
-        sys.stderr.write(f"stop-slop hook: could not load linter: {e}\n")
         return 0
 
     hits = stopslop.scan(text, technical=False)

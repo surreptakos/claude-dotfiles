@@ -18,7 +18,8 @@
 #   4  the global rules text file is in the payload and a UserPromptSubmit entry delivers it
 #   5  gh is installed and reachable through the PATH the hook exported via $CLAUDE_ENV_FILE
 #   6  session-check — the copy the bootstrap installed — exits 0 and prints its payload-version
-#      line, which this script quotes
+#      line, which this script quotes; and its --end mechanical gate (issue 622) STOPs on a
+#      settings file naming a hook script nothing provides
 #   7  every merged SessionStart and UserPromptSubmit command RUNS from the clean home and exits 0
 #      (issue 614: checks 3 and 5 passed for three harness versions while every merged command
 #      carried a literal ${CLAUDE_PLUGIN_ROOT} that Claude Code refuses in settings.json — a gate
@@ -291,6 +292,29 @@ else
   else
     fail "session-check printed no 'aac-bootstrap payload v$version' line"
     sed -n '1,40p' "$check_out" >&2
+  fi
+
+  # The --end mechanical gate (issue 622) ships in the payload, so the container has it too.
+  # Point its hook check at a fixture profile tree naming a hook script that is not there: it must
+  # STOP. A gate never seen to fail is not known to work, and "the file is missing" is the half
+  # that needs no Python on this PATH to decide.
+  gate_root="$SCRATCH/end-gate-fixture"
+  mkdir -p "$gate_root/profile/claude/hooks"
+  printf '{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"python3 \\"$HOME/.claude/hooks/gone.py\\""}]}]}}\n' \
+    > "$gate_root/profile/claude/settings.json"
+  gate_out="$SCRATCH/session-check-end-gate.txt"
+  ( cd "$FIXTURE" && env -i \
+      PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+      BOOTSTRAP_MASTER_MANIFEST="$PAYLOAD/.claude-plugin/plugin.json" \
+      SESSION_END_GATE_ROOT="$gate_root" \
+      node "$CHECK" --end ) >"$gate_out" 2>&1
+  if grep -q 'gone.py' "$gate_out" && grep -q 'not on disk' "$gate_out"; then
+    pass "the --end gate STOPs on a hook script the settings name and nothing provides"
+  else
+    fail "the --end gate did not report the missing hook script (issue 622)"
+    sed -n '1,40p' "$gate_out" >&2
   fi
 fi
 

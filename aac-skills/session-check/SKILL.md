@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-21T00:35:32Z"
-  previous-modified: "2026-09-19T06:22:06Z"
-  revision: "27"
-  content-sha: "07d98a4db89a"
+  modified: "2026-09-21T03:52:14Z"
+  previous-modified: "2026-09-21T03:47:01Z"
+  revision: "29"
+  content-sha: "9f01d1ec7dfb"
 ---
 
 # Session check (engine)
@@ -33,6 +33,16 @@ so does a head whose pre-commit gate was never in force: `core.hooksPath` not po
 `.githooks`, or a cloud container with no `aac-bootstrap` marker, where the gate is inert and the
 suite's dependencies are not installed.
 
+At `--end` an **End gate** section runs three checks nothing can talk past (issue 622), each
+skipped where the file it reads is absent, so only a repo carrying them pays for them:
+`tools/skill-stamps.py check aac-skills` (a skill edited without a re-stamp is a STOP);
+the files this branch touched against the credential patterns parsed out of `lib/manifest.ps1`
+— the same list `Assert-NoSecrets` uses, read rather than restated; and every hook script
+`profile/claude/settings.json` names that this repo carries (`~/.claude/hooks/…` →
+`profile/claude/hooks/…`), which must exist and, for a Python one, import cleanly. A command
+naming anything else is counted and said to be unchecked, never passed. `SESSION_END_GATE_ROOT`
+repoints the third check at a fixture tree — tests and demonstrations only.
+
 A `checks` entry may carry `"host": "desktop"` (or `"cloud"`). A check whose host is not this one
 is reported as `skipped (<host>-only)` and not run — a desktop-only sweep that can only exit 2 in a
 container is noise, and noise is what gets the whole report skimmed past.
@@ -42,7 +52,7 @@ owns which repo and desktop routine — and compares it with the account the ses
 (desktop: the host-session file's path; CLI: `oauthAccount` in the profile's `.claude.json`;
 cloud: unknown, so unchecked). Findings there carry warning severity by ruling.
 
-Regression tests live next to it: `node --test *.test.js` from this directory — all six files, and
+Regression tests live next to it: `node --test *.test.js` from this directory — all seven files, and
 they assume nothing about where this copy is installed (issue 300: two of them located "this repo"
 by counting three directories up, which is the home directory here, and they were red). CI runs
 the same files twice, from the claude-dotfiles mirror and from a copy outside any checkout:
