@@ -1208,3 +1208,34 @@ class Issue608CoworkShellTests(unittest.TestCase):
             read = self.run_gate("claude-pre-tool", {**event, "tool_name": "Read"}, state_dir)
             self.assertEqual(
                 json.loads(read.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+
+class DeclarationRunnerSpellingTests(unittest.TestCase):
+    """The declaration is whitelisted by an exact command match, so the interpreter spelling is
+    part of the contract. Accepting `python` alone denied `python3` — the only spelling a Linux
+    container ships, and the one the payload's own hooks.json uses on Unix — so a cloud session
+    could neither declare nor run any other tool. A probe spawned on 2026-09-21 reported
+    "deadlock: every tool blocked by safety gate; declaration itself requires Bash".
+    """
+
+    def _accepts(self, runner: str) -> bool:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        command = f'{runner} "{gate.SCRIPT}" declare-claude "s1" "n1" implement'
+        return gate._is_claude_declaration_command(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, "s1", "n1"
+        )
+
+    def test_every_real_interpreter_spelling_is_accepted(self) -> None:
+        for runner in ("python", "python3", "python3.11", "py -3",
+                       "/usr/local/bin/python3", "/usr/bin/python", "python.exe"):
+            with self.subTest(runner=runner):
+                self.assertTrue(self._accepts(runner), f"{runner} must reach the declaration")
+
+    def test_another_interpreter_is_still_refused(self) -> None:
+        for runner in ("node", "bash", "pythonx", "sh -c python3"):
+            with self.subTest(runner=runner):
+                self.assertFalse(self._accepts(runner))

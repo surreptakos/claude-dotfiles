@@ -258,6 +258,15 @@ def _deny(reason: str) -> dict[str, Any]:
     }
 
 
+# The runner spelling is the environment's, not ours. Accepting `python` alone denied `python3` --
+# the only spelling a Linux container ships, the one the payload's own hooks.json uses on Unix, and
+# therefore the one a cloud session reaches for first. The gate then refused the declaration AND
+# every tool it gates, leaving the session no way to satisfy it: a probe spawned on 2026-09-21
+# reported "deadlock: every tool blocked by safety gate; declaration itself requires Bash". An
+# absolute path to the interpreter (/usr/local/bin/python3) is the same story.
+DECLARE_RUNNER = r"(?:[\w./\\:+-]*\bpython(?:3(?:\.\d+)?)?(?:\.exe)?|py(?:\.exe)?\s+-3)"
+
+
 def _is_exact_declaration_command(command: str, turn_id: str) -> bool:
     if not isinstance(command, str):
         return False
@@ -266,7 +275,7 @@ def _is_exact_declaration_command(command: str, turn_id: str) -> bool:
         re.escape(path) for path in {str(SCRIPT), SCRIPT.as_posix()}
     )
     pattern = (
-        rf"\s*(?:python(?:\.exe)?|py(?:\.exe)?\s+-3)\s+"
+        rf"\s*{DECLARE_RUNNER}\s+"
         rf"[\"']?(?:{script_paths})[\"']?\s+declare\s+"
         rf"[\"']?{re.escape(turn_id)}[\"']?\s+(?:{flows})\s*"
     )
@@ -438,7 +447,7 @@ def _is_claude_declaration_command(
         re.escape(path) for path in {str(SCRIPT), SCRIPT.as_posix()}
     )
     pattern = (
-        rf"\s*(?:python(?:\.exe)?|py(?:\.exe)?\s+-3)\s+"
+        rf"\s*{DECLARE_RUNNER}\s+"
         rf"[\"']?(?:{script_paths})[\"']?\s+declare-claude\s+"
         rf"[\"']?{re.escape(session_id)}[\"']?\s+"
         rf"[\"']?{re.escape(nonce)}[\"']?\s+(?:{flows})"
