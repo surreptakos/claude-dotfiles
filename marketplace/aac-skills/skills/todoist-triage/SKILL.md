@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-21T16:08:38Z'
-  previous-modified: '2026-09-18T21:07:02Z'
-  revision: '8'
-  content-sha: cd9c13d7b87f
+  modified: '2026-09-21T18:12:10Z'
+  previous-modified: '2026-09-21T16:08:38Z'
+  revision: '9'
+  content-sha: 0f031efcc032
 ---
 
 # todoist-triage
@@ -35,7 +35,11 @@ Dates carry the calendar, and Todoist's two date fields mean different things. T
 
 `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a merge leaves nothing nested to label, because the duplicate's markers move onto the survivor as a comment and the duplicate is deleted. A task still carrying `merged` is a nested duplicate from an older pass — propose it as a merge like any other, so its markers land on its parent and the subtask goes.
 
-**Wontfix is a ruling, and it is Dan's to file.** A task-shaped ruling lives as the task itself sitting in the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`), not in any run record. One ruling covers both routines: this skill's queue and the `aac-forgotten-tasks` guard read Wontfix through the same matcher with the same evidence bound, so an item Dan has ruled out stays suppressed on both sides until evidence newer than the ruling arrives, and then it resurfaces. Neither routine writes to Wontfix. Never move, complete or delete a task there, and never propose a write into it — Dan puts an item in Wontfix and Dan takes it out.
+**Wontfix is a ruling, and it is the only place a task-shaped one sticks.** It lives as the task itself sitting in the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`), not in any run record. One ruling covers both routines: this skill's queue and the `aac-forgotten-tasks` guard read Wontfix through the same matcher with the same evidence bound, so an item Dan has ruled out stays suppressed on both sides until evidence newer than the ruling arrives, and then it resurfaces.
+
+**File one when Dan rules in session; never on your own initiative.** When he says an item is done, dead, not his, or to stop raising it, write it to Wontfix in that same turn — title, the ruling and its date, the `aac-topic` key, and the regenerating source to suppress, so the routine that keeps recreating it matches. Then delete the live task. Until 2026-09-21 this skill forbade the routine from writing there at all, which left a ruling given in conversation with no destination: Dan said the OSH SSA renewal was settled repeatedly across sessions, every run rebuilt the same queue from the same O3 note, and the 2026-09-21 run asked him to go find out whether it was still open. A ruling with nowhere to land is a ruling you will ask for again (ADR 0009 in the routine repository).
+
+Two limits hold regardless: never move, complete or delete a task **already** in Wontfix — that one is his to take out — and never file one because the item looks stale to you. Absent his word it stays in the queue.
 
 **Find the ball by reading the last move.** Open the source and read the most recent message. Whoever owes the next move holds the ball. A direct asking Dan three questions puts the ball on Dan (`do`), however much the topic looks like theirs. Dan's verbs (decide, approve, sign, show, answer, call counsel) put the ball on Dan. A direct's prep or scheduling around Dan's decision is a comment, not a label. `do` plus `to-NAME` together only when Dan rules and the direct then owns execution, rarely.
 
@@ -150,7 +154,9 @@ python -m aac_routines.run_ledger record --input <record.json>
 
 Then upload that file to the `aac-run-ledger` Drive folder with `mcp__Google-Drive__create_file` (`contentMimeType: application/json`, `disableConversionToGoogleType: true`, so Drive keeps it as JSON instead of converting it to a Doc). The local copy dies with the session, so a record that is not uploaded did not happen as far as tomorrow's run is concerned.
 
-The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task Dan put in Wontfix. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
+The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task in Wontfix.
+
+**Only `ruled-out` suppresses anything.** `noted` is a log line and changes nothing about tomorrow's queue. Use `ruled-out` whenever Dan has actually ruled on a topic; `record` refuses a `noted` ruling whose reason speaks a dismissal, and prints how many of the record's rulings suppress, so "the ruling is recorded" cannot mean "nothing is". The six records written 2026-09-17 to 2026-09-21 carried 30 rulings, every one of them `noted`, several saying "Delete proposed a third time" in the reason — Dan's ruling written down in prose and thrown away by the value, and the same items back in the queue every run. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
 
 Done when Dan can see the board state without opening Todoist, knows which surfaces were dark and which rulings that made unknown, and this run's record is appended.
 
