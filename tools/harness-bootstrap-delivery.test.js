@@ -79,7 +79,12 @@ test('a fresh repo gets the bootstrap hook, its SessionStart entry and the postu
   assert.strictEqual(entries[0].hooks[0].command,
                      'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"');
   assert.strictEqual(s.permissions.defaultMode, 'auto');
-  assert.deepStrictEqual(s.permissions.allow, ['Bash(*)', 'Edit', 'Write', 'mcp__github__*']);
+  // The last four are harness v32 (issue 651): an unattended Routine master parks on any tool
+  // the list does not name, because acceptEdits asks before the classifier is ever reached.
+  assert.deepStrictEqual(s.permissions.allow, [
+    'Bash(*)', 'Edit', 'Write', 'mcp__github__*',
+    'Workflow', 'Agent', 'Task', 'mcp__Claude_Code_Remote__*',
+  ]);
   assert.match(s.autoMode.allow[0], /issue 543/);
   assert.strictEqual(s.enabledPlugins['aac-skills@claude-dotfiles'], true);
 });
