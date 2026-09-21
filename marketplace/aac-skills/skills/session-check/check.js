@@ -20,6 +20,11 @@
  *                           tracker drift — read off that job's latest run for the default
  *                           branch's head, never audited here (issue 473)
  *   tools/canary.js         pre-release gate, run at --end
+ *   tools/skill-stamps.py, lib/manifest.ps1, profile/claude/settings.json
+ *                           the --end mechanical gate (issue 622): stale skill stamps, credential
+ *                           values in the files this branch touched, and hook scripts that are
+ *                           missing or will not import. Each half is skipped where its file is
+ *                           absent, so only the repo that has them pays for them.
  *   a GitHub remote         open tickets by label — via gh, or the GitHub REST API when gh is
  *                           missing (a cloud container gets gh from the bootstrap SessionStart
  *                           hook, and its egress proxy authenticates api.github.com — private
@@ -485,6 +490,183 @@ async function workChecks() {
       noteDiagnostics(r.out);
     }
   }
+}
+
+/* --------------------------------------------------------- end-of-session gate --------------- */
+
+/** Three deterministic checks at `--end` (issue 622). Every other gate in this flow is judgment
+ *  an agent can talk past; the stop-slop gate proved what that costs by sitting dead for weeks
+ *  with no review noticing, because no check ran that could fail. No model judgment here: a check
+ *  that needs prose read to decide belongs in a skill, not in this block.
+ *
+ *  Each check is gated on the file it reads, so a repo without these paths gets nothing — this is
+ *  the engine for every repo, not for claude-dotfiles. The parsing and resolving live in
+ *  `end-gate.js`; what is here is the spawning and the git question, which already live here. */
+const endGate = require('./end-gate');
+
+/** The home spelling the stamper hashes with, and the one CI checks — the owner's, never the
+ *  running user's (issue 492). It is also skill-stamps.py's own default; naming it is what keeps
+ *  this call and the two in CLAUDE.md the same command. */
+const OWNER_HOME = 'C:\\Users\\Dan';
+
+/** Import a Python hook the way the hook runner would, minus running it: execute the module with
+ *  its own directory on `sys.path` (these hooks import siblings), under a name that is not
+ *  `__main__`, so a `if __name__ == "__main__"` guard keeps the body from firing. A broken import
+ *  raises here; a working one exits 0. */
+const PY_IMPORT_PROBE = "import importlib.util as u,os,sys; p=sys.argv[1];"
+  + " sys.path.insert(0, os.path.dirname(os.path.abspath(p)));"
+  + " s=u.spec_from_file_location('_session_end_gate_hook', p); m=u.module_from_spec(s);"
+  + " s.loader.exec_module(m)";
+
+/** Whichever spelling of Python answers on this machine. Windows has `py -3` and often no
+ *  `python3`; the containers have `python3`. Null means none, which is "could not check". */
+function pythonCommand() {
+  for (const cand of [{ cmd: 'python3', pre: [] }, { cmd: 'py', pre: ['-3'] }, { cmd: 'python', pre: [] }]) {
+    if (tryRun(cand.cmd, cand.pre.concat(['--version']), { timeout: 10000 }) !== null) return cand;
+  }
+  return null;
+}
+
+/** Check 1. The stamper's own verdict, verbatim: a skill edited without a re-stamp fails
+ *  `skill-stamps.yml`, so catching it here is catching it before the branch goes red. */
+function stampGate(py) {
+  if (!py) { warn('skill stamps unchecked — no Python interpreter on PATH; that is not a pass'); return; }
+  const r = runReadingOutput(py.cmd,
+    py.pre.concat(['tools/skill-stamps.py', 'check', 'aac-skills', '--home', OWNER_HOME]),
+    { timeout: 120000 });
+  if (r.code === 0) { ok('every skill under aac-skills/ carries a current stamp'); return; }
+  if (r.code === null) {
+    warn('could not run the skill-stamp check — that is not a pass');
+    noteDiagnostics(r.out);
+    return;
+  }
+  stop('skill stamps are STALE — a skill was edited without a re-stamp');
+  const bad = r.out.split(/\r?\n/).map((l) => l.trim())
+    .filter((l) => l && !/^ok\s/.test(l) && !/^stamped\s/.test(l));
+  bad.slice(0, 12).forEach((l) => note(l));
+  note(`\`python3 tools/skill-stamps.py stamp aac-skills --home '${OWNER_HOME}'\``
+    + ` && \`python3 tools/build-cloud-plugin.py --home '${OWNER_HOME}'\``);
+}
+
+/** Everything this session could have put in front of the secret guard: the working tree's
+ *  changes, what is staged, new untracked files, and every file this branch changed against the
+ *  DEFAULT branch. A session boundary is not a thing git records, so "what this branch adds to
+ *  master, plus what is not committed yet" is the closest deterministic reading — and it is the
+ *  reading that survives a push. The branch's own upstream would be the obvious base and is the
+ *  wrong one: once the branch is pushed it equals HEAD, the diff is empty, and the check would
+ *  report a clean scan of nothing at exactly the moment the work is about to be merged. */
+function touchedFiles() {
+  const set = new Set();
+  const add = (text) => {
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const f = line.trim();
+      if (f) set.add(f);
+    }
+  };
+  add(tryRun('git', ['diff', '--name-only', 'HEAD']));
+  add(tryRun('git', ['diff', '--cached', '--name-only']));
+  add(tryRun('git', ['ls-files', '--others', '--exclude-standard']));
+  const base = defaultBranchHead() || GIT.upstream;
+  if (base) add(tryRun('git', ['diff', '--name-only', `${base}...HEAD`]));
+  return [...set];
+}
+
+/** Text of a repo-relative path for the secret scan, or null when there is nothing to scan: a
+ *  deleted path (every `git diff --name-only` names them), something too big to be a config file,
+ *  or a binary. A NUL byte is the binary test — the same judgement `Test-TextFile` makes. */
+function readTextForScan(rel) {
+  const abs = path.join(REPO, rel);
+  let st;
+  try { st = fs.statSync(abs); } catch (e) { return null; }
+  if (!st.isFile() || st.size > 2 * 1024 * 1024) return null;
+  let buf;
+  try { buf = fs.readFileSync(abs); } catch (e) { return null; }
+  if (buf.includes(0)) return null;
+  return buf.toString('utf8');
+}
+
+/** Check 2. The same patterns `Assert-NoSecrets` uses, read out of `lib/manifest.ps1` rather than
+ *  restated — one list, so the guard and this gate cannot drift apart. */
+function secretGate() {
+  let text;
+  try { text = fs.readFileSync(path.join(REPO, 'lib', 'manifest.ps1'), 'utf8'); }
+  catch (e) { warn(`could not read lib/manifest.ps1 for the secret patterns — that is not a pass (${e.message})`); return; }
+  const parsed = endGate.parseSecretPatterns(text);
+  if (parsed.error) {
+    warn(`could not read the secret-guard pattern list — that is not a pass (${parsed.error})`);
+    return;
+  }
+  const { compiled, uncompilable } = endGate.compileSecretPatterns(parsed.patterns);
+  const files = touchedFiles();
+  const hits = endGate.secretHits(files, compiled, readTextForScan);
+  if (hits.length) {
+    stop(`${hits.length} touched file(s) match the secret guard's credential patterns`);
+    hits.slice(0, 10).forEach((h) => note(`${h.file}  (${h.pattern})`));
+    note('remove the VALUES — the guard matches credential values, not the words — then re-run');
+  } else {
+    ok(`no credential values in the ${files.length} file(s) this branch touched `
+      + `(${compiled.length} pattern(s) from lib/manifest.ps1)`);
+  }
+  uncompilable.forEach((u) => note(`pattern not checked — JavaScript cannot compile it: ${u.source} (${u.reason})`));
+}
+
+/** Check 3. Every hook script `profile/claude/settings.json` names that this repo carries exists,
+ *  and a Python one imports cleanly. This is the check that would have caught the stop-slop
+ *  defect. `SESSION_END_GATE_ROOT` points the whole check at a fixture tree instead of this repo
+ *  — tests and demonstrations only; a real run never sets it. */
+function hookScriptGate(py) {
+  const root = process.env.SESSION_END_GATE_ROOT || REPO;
+  const settingsPath = path.join(root, 'profile', 'claude', 'settings.json');
+  let settings;
+  try { settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')); }
+  catch (e) {
+    stop(`profile/claude/settings.json is unreadable, so every hook it names is unverifiable — ${e.message}`);
+    return;
+  }
+  const { carried, external } = endGate.hookScriptTargets(settings);
+  const missing = [];
+  const broken = [];
+  let importsChecked = 0;
+  for (const t of carried) {
+    if (!fs.existsSync(path.join(root, t.rel))) { missing.push(t); continue; }
+    if (!/\.py$/i.test(t.rel)) continue;
+    if (!py) continue;
+    const r = runReadingOutput(py.cmd, py.pre.concat(['-c', PY_IMPORT_PROBE, path.join(root, t.rel)]),
+      { timeout: 30000 });
+    if (r.code === 0) { importsChecked++; continue; }
+    const why = String(r.out || '').trim().split(/\r?\n/).filter(Boolean).pop() || `exit ${r.code}`;
+    broken.push({ rel: t.rel, why });
+  }
+
+  if (missing.length || broken.length) {
+    stop(`${missing.length + broken.length} hook script(s) named in profile/claude/settings.json are dead`);
+    missing.forEach((t) => note(`${t.rel} — named by ${t.events.join(', ')}, not on disk`));
+    broken.forEach((b) => note(`${b.rel} — import fails: ${b.why}`));
+    note('a hook whose script is missing or unimportable is silently inert; Claude Code only logs it');
+  } else if (carried.length) {
+    ok(`${carried.length} hook script(s) named in profile/claude/settings.json exist`
+      + (importsChecked ? `, and the ${importsChecked} Python one(s) import cleanly` : ''));
+    if (!py) note('no Python interpreter on PATH — any Python hook above was checked for existence only');
+  } else {
+    ok('no hook in profile/claude/settings.json names a script this repo carries');
+  }
+  if (external.length) {
+    note(`${external.length} hook command(s) name nothing this repo carries (a plugin cache, an`
+      + ' installed binary) — outside the tree, so unchecked, not passed');
+  }
+}
+
+function endGateChecks() {
+  const wantStamps = has('tools/skill-stamps.py') && has('aac-skills');
+  const wantSecrets = has('lib/manifest.ps1');
+  const wantHooks = fs.existsSync(path.join(process.env.SESSION_END_GATE_ROOT || REPO,
+    'profile', 'claude', 'settings.json'));
+  if (!wantStamps && !wantSecrets && !wantHooks) return;
+  head('End gate');
+  const py = pythonCommand();
+  if (wantStamps) stampGate(py);
+  if (wantSecrets) secretGate();
+  if (wantHooks) hookScriptGate(py);
 }
 
 /* ---------------------------------------------------------- tracker audit -------------------- */
@@ -1013,6 +1195,7 @@ async function main() {
   await workChecks();
   ticketChecks();
   installedPluginChecks();
+  if (END) endGateChecks();
   if (END) cloudSkillChecks();
   if (CFG.note) { head('Note'); note(CFG.note); }
   console.log(out.join('\n'));

@@ -3,10 +3,10 @@ name: ask-matt
 description: Ask which skill or flow fits your situation. A router over the skills in this repo.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-08-25T22:33:19Z'
-  previous-modified: '2026-08-20T00:41:59Z'
-  revision: '1'
-  content-sha: b7d4607a031e
+  modified: '2026-09-21T03:42:11Z'
+  previous-modified: '2026-08-25T22:33:19Z'
+  revision: '2'
+  content-sha: cb38be0a8a7a
 ---
 
 # Ask Matt
@@ -19,7 +19,7 @@ A **flow** is a path through the skills. Most paths run along one **main flow**,
 
 The route most work travels. You have an idea and want it built.
 
-1. **`/grill-with-docs`** — sharpen the idea by interview. Start here when you **have a codebase**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No codebase? Use `/grill-me` — see Standalone. Both run the same `/grilling` primitive; `grill-with-docs` is the one that leaves a paper trail.)
+1. **`/grill-with-docs`** — sharpen the idea by interview. Start here when you **have a codebase**: it's stateful, retaining what it learns in `CONTEXT.md` and ADRs. (No codebase? Use `/grill-me` — see Standalone. Both run the same `/grilling` primitive; `grill-with-docs` is the one that leaves a paper trail, and the one that closes with a fresh-context sub-agent told to attack the settled plan before it reaches `/to-spec`.)
 2. **Branch — can you settle every question in conversation?** If a question needs a runnable answer (state, business logic, a UI you have to see), detour through a prototype, bridged by **`/handoff`** in both directions (see Crossing sessions):
    - **`/handoff`** out, then open a fresh session against that file,
    - **`/prototype`** to answer the question with throwaway code,
@@ -28,9 +28,9 @@ The route most work travels. You have an idea and want it built.
    - **Yes** → **`/to-spec`** (turn the thread into a spec), then **`/to-tickets`** to split it into tracer-bullet tickets, each declaring its **blocking edges**. On a local tracker that's one file per ticket under `.scratch/<feature>/issues/`, worked blockers-first by hand; on a real tracker the edges become native blocking links, so any ticket whose blockers are done can be grabbed — kick off **`/implement`** per ticket, **clearing context between each one**.
    - **No** → **`/implement`** right here, in the same context window.
 
-   Either way, **`/implement`** builds each issue by driving **`/tdd`** internally — one red-green slice at a time — then closes out by running **`/code-review`**, a two-axis review (Standards + Spec) of the diff, before committing. Reach for **`/tdd`** on its own when you just want to build a concrete behaviour test-first without a full spec, and **`/code-review`** on its own whenever you want to review a branch or PR against a fixed point.
+   Either way, **`/implement`** builds each issue by driving **`/tdd`** internally — one red-green slice at a time — then hands the diff to a **fresh-context reviewer sub-agent** rather than reviewing its own work: read-only tools (Read, Grep, Glob, Bash), prompted to refute, returning a verdict and findings that `/implement` acts on before committing. **`/code-review`** is the two-axis (Standards + Spec) read that reviewer runs. Reach for **`/tdd`** on its own when you just want to build a concrete behaviour test-first without a full spec, and **`/code-review`** on its own whenever you want to review a branch or PR against a fixed point.
 
-   After `/code-review` passes and before the PR merges, run **`/simplify`** on the same diff — a reuse/efficiency/altitude pass that cleans up what review confirmed correct. No bug hunt; that stays with `/code-review`.
+   After that review passes and before the PR merges, run **`/simplify`** on the same diff — a reuse/efficiency/altitude pass that cleans up what review confirmed correct. No bug hunt; that stays with `/code-review`.
 
 ### Repo-native beats marketplace
 

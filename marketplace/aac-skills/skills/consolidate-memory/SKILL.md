@@ -2,10 +2,10 @@
 name: consolidate-memory
 description: Full holistic pass over every memory file — merge duplicates, fix stale facts, prune the index. Never a delta sweep.
 metadata:
-  modified: '2026-09-18T18:36:19Z'
-  previous-modified: '2026-09-18T18:13:34Z'
-  revision: '3'
-  content-sha: c9bb91db0285
+  modified: '2026-09-21T03:33:08Z'
+  previous-modified: '2026-09-18T18:36:19Z'
+  revision: '4'
+  content-sha: 97cd5671198f
 ---
 
 # Memory Consolidation
@@ -36,6 +36,8 @@ Every invocation walks the complete memory set. Never restrict to files created 
 **Merge overlaps across the entire set.** Two files describing the same person, project, or preference combine into one. This applies to every pair in the directory, not only newly written files.
 
 **Fix time references.** Convert "next week", "this quarter", "by Friday" to absolute dates so they stay readable later. Every file, every run.
+
+**Ground-check what you rewrite.** Where the repo carries the checker (claude-dotfiles does), run `node tools/check-evidence.js <note.md>` on every note this pass edits before declaring it finished: each number, date and quote must appear verbatim in a source the note cites as a Markdown link or on a `Source:` line. Exit 1 names the line whose fact is missing; exit 3 means a source could not be read, and that is not a pass. A merge is exactly where a number drifts off its evidence.
 
 **Drop what's easy to re-find.** If a memory just restates something you could pull from the user's calendar, docs, or connected tools on demand, cut it. Keep what's hard to re-derive: stated preferences, context behind a decision, who to go to for what.
 
