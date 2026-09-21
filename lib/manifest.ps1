@@ -38,6 +38,10 @@ function Get-DotfileItems {
         # The governance hook scripts settings.json dispatches. Also the source the packager
         # copies into the plugin payload, so the desktop and a container run the same code.
         [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/hooks';                    Local = (Join-Path $claude 'hooks') }
+        # What those hook scripts import (issue 620). stopslop-write.py and stopslop-stop.py add
+        # ../tools to sys.path and `import stopslop`; without this entry the module never lands and
+        # both hooks fail open with one line on stderr, which is how the gate sat dead.
+        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/tools';                    Local = (Join-Path $claude 'tools') }
         # User-level subagent definitions (issue 86). Claude Code auto-discovers *.md files here
         # for the agent registry the Agent tool and Workflow's `agentType` share, so the
         # ticket-fleet's tool-restricted verifier reaches every repo the fleet runs in.
