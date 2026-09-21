@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-18T21:07:02Z'
-  previous-modified: '2026-09-17T21:08:53Z'
-  revision: '7'
-  content-sha: 04a7ab2708ec
+  modified: '2026-09-21T16:08:38Z'
+  previous-modified: '2026-09-18T21:07:02Z'
+  revision: '8'
+  content-sha: cd9c13d7b87f
 ---
 
 # todoist-triage
@@ -33,7 +33,7 @@ The project carries the week. Current Work = this week, capped around 10 `do`. B
 
 Dates carry the calendar, and Todoist's two date fields mean different things. The **do date** (Todoist's "due date" field) is Dan's plan: the day he intends to work it or look at it again; movable without penalty. A backlog `do` with a do date is deferred work that resurfaces on that day; without one it is an open pool the Friday pass draws from. The **deadline** (Todoist's "deadline" field) is the world's constraint: the day after which something bad happens (IDFPR, tax extension, lien). Dan does not move it; it moves him. Set a deadline only when the source names one.
 
-`claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` marks a routine-created duplicate nested under its survivor after a merge — its `aac-source`/`aac-topic` stays live in the description for the routine to match against, but the task itself carries no ball and is not re-triaged; the survivor holds the ball for both.
+`claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a merge leaves nothing nested to label, because the duplicate's markers move onto the survivor as a comment and the duplicate is deleted. A task still carrying `merged` is a nested duplicate from an older pass — propose it as a merge like any other, so its markers land on its parent and the subtask goes.
 
 **Wontfix is a ruling, and it is Dan's to file.** A task-shaped ruling lives as the task itself sitting in the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`), not in any run record. One ruling covers both routines: this skill's queue and the `aac-forgotten-tasks` guard read Wontfix through the same matcher with the same evidence bound, so an item Dan has ruled out stays suppressed on both sides until evidence newer than the ruling arrives, and then it resurfaces. Neither routine writes to Wontfix. Never move, complete or delete a task there, and never propose a write into it — Dan puts an item in Wontfix and Dan takes it out.
 
@@ -128,7 +128,7 @@ Order: alarms, do, delegate, defer, delete, merge, with counts. One `AskUserQues
 
 ### 5. Write
 
-`update-tasks` in batches of 25, touching only `labels` (full replacement, keep `claude` and other non-ball labels), `projectId` or `parentId` (one destination per call; never a `projectId` into or out of the Inbox — that move belongs to the router), `dueString` for the do date (non-recurring only; recurring tasks use `reschedule-tasks`), `deadlineDate` when the source names one, `priority` when approved. Merges: `add-comments` on the survivor, then `delete-object` on the dup. Summaries: `add-comments`, `notifyUsers: ["none"]`. Subtasks: `add-tasks` with `parentId`, only for a breakdown Dan dictated under a parent he owns; consolidation parents count as dictated when Dan asks to bundle. Titles and descriptions stay as written; descriptions carry the routine's `aac-source`/`aac-topic` dedupe markers. Routine-created duplicates nest under the survivor instead of being deleted, so the markers stay visible to the routine, and pick up a `merged` label (alongside `claude`) so a later pass can't mistake the nested duplicate for an untriaged queue item. Done when every approved line is applied and each failure is named.
+`update-tasks` in batches of 25, touching only `labels` (full replacement, keep `claude` and other non-ball labels), `projectId` (never into or out of the Inbox — that move belongs to the router), `dueString` for the do date (non-recurring only; recurring tasks use `reschedule-tasks`), `deadlineDate` when the source names one, `priority` when approved. Merges: `add-comments` on the survivor carrying the dup's unique text and the dup's `aac-source`/`aac-topic` markers copied verbatim (both routines match a marker as a plain substring of the comment, so a paraphrase breaks dedupe), then `delete-object` on the dup — every merge the same way, a routine-created duplicate included. **This skill never nests a task under another** (Dan, 2026-09-21): no `add-tasks` with `parentId`, no `parentId` in an `update-tasks` call, not for a merge and not for a breakdown. The markers live in a comment, which is the surface both routines read, so nesting a duplicate to keep them visible buys nothing a comment does not. A breakdown Dan dictates that is big enough to need tracking is proposed as its own Todoist project (`add-projects`, then `add-tasks` into it); anything smaller stays one task. Titles and descriptions stay as written; the routine's `aac-source`/`aac-topic` dedupe markers live in a task comment, and a task created before that ruling still carries them in its description. Done when every approved line is applied and each failure is named.
 
 ### 6. Report
 
