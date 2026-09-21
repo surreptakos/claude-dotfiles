@@ -14,7 +14,7 @@ Avoid subjects such as **Question, Update, FYI,** or **Important** without addit
 
 ## 101. Opening
 
-Start with the purpose of the email. A greeting is optional depending on context and relationship. Do not routinely open with filler such as **I hope this email finds you well**.
+Start with the purpose of the email. Open an internal request to a named colleague with a greeting. In external or transactional email a greeting is optional. Do not routinely open with filler such as **I hope this email finds you well**.
 
 ## 102. Long emails
 
@@ -30,7 +30,7 @@ Tina: Hold scheduling until the proposal is signed.
 
 ## 104. Deadlines
 
-Use a specific deadline when timing matters. Prefer **Friday, September 11, at 3 p.m.** to **ASAP**. Use **ASAP** only when immediate action is genuinely required and the timing cannot be stated more accurately.
+Use a specific deadline when timing matters. Prefer **Friday, September 11, at 3 p.m.** to **ASAP**. Use **ASAP** only when immediate action is genuinely required and the timing cannot be stated more accurately. When the sender controls the next step, a sequence may replace a clock deadline: **call him before Lynne sends the letter**.
 
 ## 105. To and Cc
 
@@ -44,7 +44,7 @@ Before sending, check whether the attachment is a clean issue or a review copy. 
 
 ## 107. Email closing
 
-Routine internal messages do not require a ceremonial closing. Formal external messages may use **Thank you, Regards,** or **Sincerely,** as appropriate. Do not use a closing that conflicts with the substance or tone of the message.
+Routine internal messages do not require a ceremonial closing. An email that delegates a task ends with how the sender will learn the task is done: **Please let me know when you have called him so we can send the letter.** That line is the loop closure, not a ceremonial closing. Formal external messages may use **Thank you, Regards,** or **Sincerely,** as appropriate. Do not use a closing that conflicts with the substance or tone of the message.
 
 ## 108. Email signature
 
