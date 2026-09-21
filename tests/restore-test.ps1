@@ -558,6 +558,25 @@ if ($null -ne $settings) {
         $mode = $settings.permissions.defaultMode
     }
     Check 'permissions.defaultMode carries bypassPermissions (issue 199)' ($mode -eq 'bypassPermissions') @($mode)
+
+    # Issue 620: the stop-slop gate. The two hook scripts shipped for months with nothing in
+    # settings.json dispatching them, so the gate passed every message. Assert the dispatch
+    # itself, not just that the scripts travelled - a settings.json rewrite that drops either
+    # entry puts the gate straight back to dead, silently.
+    $slopWrite = @($commands | Where-Object { $_ -like '*stopslop-write.py*' })
+    $slopStop  = @($commands | Where-Object { $_ -like '*stopslop-stop.py*' })
+    Check 'settings.json dispatches stopslop-write.py on PostToolUse for Write/Edit (issue 620)' `
+        (($slopWrite.Count -eq 1) -and
+         (@($settings.hooks.PostToolUse | Where-Object {
+             ($_.PSObject.Properties.Name -contains 'matcher') -and
+             ($_.matcher -match 'Write') -and ($_.matcher -match 'Edit')
+         }).Count -ge 1)) `
+        @("matching commands: $($slopWrite -join '; ')")
+    Check 'settings.json dispatches stopslop-stop.py on Stop (issue 620)' `
+        (($slopStop.Count -eq 1) -and
+         (@($settings.hooks.Stop | ForEach-Object { $_.hooks } |
+            Where-Object { $_.command -like '*stopslop-stop.py*' }).Count -eq 1)) `
+        @("matching commands: $($slopStop -join '; ')")
 }
 
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
@@ -850,6 +869,39 @@ $gateExit = $LASTEXITCODE
 Remove-Item Env:\GOVERNANCE_CLAUDE_HOME
 # 0 clean / 1 violations. A traceback is neither, and is what a broken restore looks like.
 Check 'restored ask_matt_gate.py runs the pre-send lint' ($gateExit -eq 0 -or $gateExit -eq 1) @($out | Select-Object -Last 10)
+
+# Issue 620: profile/claude/tools is a whitelist entry, so something has to assert it. The module
+# both stop-slop hooks `import stopslop` lands at ~/.claude/tools/stopslop.py; while it did not
+# exist the hooks caught the ImportError, wrote one line to stderr and returned 0, so the gate
+# passed every message. Drive the RESTORED Stop hook the way Claude Code does - a JSON payload on
+# stdin - rather than reading its source: exit 2 on slop, exit 0 on clean prose.
+$slopModule = Join-Path $FakeHome '.claude\tools\stopslop.py'
+$slopHook   = Join-Path $FakeHome '.claude\hooks\stopslop-stop.py'
+Check 'stop-slop linter module restored at ~/.claude/tools/stopslop.py (issue 620)' (Test-Path $slopModule)
+if ((Test-Path $slopModule) -and (Test-Path $slopHook)) {
+    $slopCases = @(
+        @{ Name = 'slop';  Want = 2; Text = "Here's the thing: experts agree this release marks a pivotal moment." },
+        @{ Name = 'clean'; Want = 0; Text = 'The panel failed the fire test on September 15. Mark will send the revised proposal to the AHJ on Monday.' }
+    )
+    foreach ($case in $slopCases) {
+        $payload = @{
+            hook_event_name        = 'Stop'
+            stop_hook_active       = $false
+            last_assistant_message = $case.Text
+        } | ConvertTo-Json -Compress
+        # The hook writes its findings to stderr; under $ErrorActionPreference = 'Stop' that
+        # becomes a terminating error and the suite dies instead of reporting.
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $slopOut  = $payload | & py -3 $slopHook 2>&1
+            $slopExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $prev }
+        Check ("restored stop-slop Stop hook exits {0} on a {1} message (issue 620)" -f $case.Want, $case.Name) `
+            ($slopExit -eq $case.Want) `
+            (@("exit $slopExit, wanted $($case.Want)") + @($slopOut | Select-Object -Last 8))
+    }
+}
 
 $check = Join-Path $FakeHome '.claude\skills\session-check\check.js'
 Push-Location $Clone
