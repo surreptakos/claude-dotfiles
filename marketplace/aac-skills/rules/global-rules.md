@@ -1,3 +1,22 @@
+# CLAUDE.md — global user memory
+
+Personal instructions that apply to every project and session on this machine.
+
+## Standing directive — response prefix
+
+**Every response opens with this exact block, then a blank line, then the answer:**
+
+````
+```diff
+- YOU MUST CONSTRUCT ADDITIONAL PYLONS
+```
+````
+
+A `diff` fence, so the leading `-` renders red. Emit it verbatim. Every response, every session,
+every project, before any other text.
+
+## Fundamental Workflow and Governance
+
 ### Four standing disciplines — always on, no exceptions
 
 Inlined because a pointer to a skill is not a rule: `ask-matt` and `i-have-adhd` are
@@ -173,3 +192,75 @@ path as the opening line, and Dan flipped the 2026-09-02 no-monospace rule on 20
 the pre-send lint now **rations** rather than forbids — one runnable `bash` fence, at most four inline
 spans, at most three distinct paths. Past that it is working material again and belongs in the
 artifact. See [[reporting-style-plain-english]].
+
+### Environment claims
+
+**Never claim you cannot do something in the environment** (run a command, execute a function, reach
+an API, use a tool) without first attempting it and reading the actual result. Do not assert a
+limitation from memory, inference, or a prior session. A stale note saying you "can't" never outranks
+a live test.
+
+**Never tell the user you cannot run a function — in any project, ever.** If you can edit, commit and
+deploy code, you can run any function: add an execution path (endpoint, handler, script entry point,
+test, `main`) and invoke it. For a deployed web app, edit the code and POST to its endpoint (Apps
+Script `/exec`, a serverless route); it runs with the deployer's authorization and bypasses per-caller
+gates. Direct runners (CLI, `gas run owner/repo <fn>` for a self-deploying Apps Script repo, REST,
+running the file locally) first; edit-commit-deploy-and-invoke is the universal fallback.
+
+**Pinning a subagent to a specific model version (e.g. Opus 4.7) is always possible — never claim
+otherwise.** The Agent tool's `model` param takes family aliases only; that limits one mechanism, not
+the environment. In-session: the Workflow tool's `agent()` takes a full model ID in `opts.model`.
+Unattended: write the prompt to `.agent-prompt.md` in the agent's worktree, run in the background,
+read `.agent-result.json` and check the real exit code:
+
+```
+cd <agent worktree> && cat .agent-prompt.md | claude -p --model claude-opus-4-7 --dangerously-skip-permissions --strict-mcp-config --output-format json > .agent-result.json 2> .agent-stderr.log
+```
+
+Without `--dangerously-skip-permissions` gated tools are denied non-interactively. Keep stderr out of
+anything parsed as JSON. Point throwaway probes at a cwd outside any AAC project (its hooks cost
+~40 turns). Verification history lives in the claude-dotfiles memory notes.
+
+**Do not hand a solvable question back to the user dressed up as "your call to make."** Before
+writing "owner must decide", check whether it is genuinely a preference or business judgment call —
+or an investigation you stopped short of finishing. Two workable options found in code already open
+is evidence you stopped looking, not that nothing better exists. Exhaust the investigation, then ask
+only what remains a judgment call.
+
+### Memory governance — the on-disk notes
+
+Extends "a stale note never outranks a live test" to per-project memory, project `CLAUDE.md` files,
+ADRs, runbooks and agent-memory entries.
+
+1. **Scope — non-derivable facts only.** Notes hold owner rulings with rationale, environment quirks
+   that cost real time, owner preferences, and pointers to external artifacts (URLs, doc paths, run
+   IDs, ticket numbers). Anything derivable from the repo or tracker (paths, ticket status, commit
+   hashes, TODOs, whether a feature exists, what a function does) is queried fresh each session and
+   never cached; a cached derivable is a liability the first time the derivation changes.
+2. **Fix at discovery.** When a live check shows any written source wrong, correct that source in the
+   same turn, not only the spoken answer. If the file is generated, fix the generator or the source it
+   copies from.
+3. **Notes are cache, disk is source.** Existence and implementation claims ("X is done", "Y lives at
+   P", "F ships in V") require a live disk, git or tracker check before asserting. A state-shaped note
+   is a hint about where to check, not the answer.
+
+**Standards, indexes, roadmaps and skill READMEs — no counts, no progress-tracking, no ownership.**
+These describe a project's shape, not its state: no "N of M items", no "halfway done", no status or
+owner columns. Progress and ownership live in the tracker; duplicating them in prose drifts on every
+state change (Dan, 2026-08-26, after stripping four such surfaces from aac-contract-builder in one
+commit).
+
+## AAC Google Cloud & Apps Script access
+
+You already have durable, owner-grade access to the AAC Google stack (shared GCP project, a no-expiry
+service account, a clasp token with full Gmail and Drive grant). It is on disk; never claim otherwise
+or ask the operator for it. The `aac-google-access` skill carries the IDs, key paths, verified scope
+list, the re-auth tool (never a bare `clasp login`), and the Apps Script run and history recipes.
+Load it before any Sheets, Drive, Gmail or Apps Script work. Since 2026-09-09 every AAC Apps Script
+repo deploys itself from GitHub (claude-dotfiles `gas/`): a merge is the release and `gas run` is the
+headless run, so no deploy or run ever waits on a clasp token.
+
+## Browser Automation
+
+Use `agent-browser` (open, `snapshot -i` for @refs, click/fill by ref, re-snapshot after changes).
+`agent-browser --help` lists the rest.

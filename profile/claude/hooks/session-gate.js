@@ -71,6 +71,34 @@ function repoRoot(from) {
   return path.resolve(start);
 }
 
+// Every repo this session's directory speaks for. Usually one: the checkout we are inside.
+// A cloud container with two sources opens their PARENT (/home/user holding aac-routines and
+// claude-dotfiles), where the walk up finds no .git at all and every check reported "not a git
+// repo" — the remote, the uncommitted work and the tickets all went unchecked. One level down
+// covers that layout; a repo nested deeper is a checkout someone opened directly, and then the
+// walk up wins.
+function repoRoots(from) {
+  const first = repoRoot(from);
+  if (fs.existsSync(path.join(first, '.git'))) return [first];
+  let entries = [];
+  try { entries = fs.readdirSync(first, { withFileTypes: true }); } catch (e) { entries = []; }
+  const children = entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => path.join(first, entry.name))
+    .filter((dir) => fs.existsSync(path.join(dir, '.git')))
+    .sort()
+    .slice(0, MAX_SIBLING_REPOS);
+  return children.length ? children : [first];
+}
+
+// One report per repo, and a container with a dozen checkouts is not a session layout worth
+// running a dozen test suites for.
+const MAX_SIBLING_REPOS = Number(process.env.SESSION_GATE_MAX_REPOS || 3);
+
+// With two repos in one report, each block has to say which repo it speaks for.
+const titleFor = (title, repo, repos) =>
+  (repos.length > 1 ? `${title} — ${path.basename(repo)}` : title);
+
 const key = (repo, kind) =>
   `${path.basename(repo)}-${crypto.createHash('sha1').update(repo).digest('hex').slice(0, 10)}-${kind}`;
 const metaPath = (repo, kind) => path.join(STATE_DIR, `${key(repo, kind)}.json`);
@@ -221,38 +249,52 @@ function modeStart(event) {
   // `compact` is the same session continuing — re-running the tests there would delay the resume
   // and inject a second copy of a report already in the compacted context.
   if (source === 'compact') { emit(null); return; }
-  const repo = repoRoot(event.cwd);
+  const repos = repoRoots(event.cwd);
   const sessionId = String(event.session_id || '');
+  const parts = [];
 
-  let meta = readMeta(repo, 'start');
-  if (!fresh(meta, TTL_MS)) meta = runCheck(repo, false);
-  if (meta.injected && meta.injected.includes(sessionId)) { emit(null); return; }
+  for (const repo of repos) {
+    let meta = readMeta(repo, 'start');
+    if (!fresh(meta, TTL_MS)) meta = runCheck(repo, false);
+    if (meta.injected && meta.injected.includes(sessionId)) continue;
+    meta.injected = (meta.injected || []).concat(sessionId).slice(-20);
+    writeMeta(repo, 'start', meta);
+    // The rules ride the first block only: they are about how to read a report, and two copies of
+    // them in one context window is the padding this hook exists to avoid.
+    parts.push(block(titleFor('session-check', repo, repos), meta, parts.length ? [] : START_RULES));
+  }
 
-  meta.injected = (meta.injected || []).concat(sessionId).slice(-20);
-  writeMeta(repo, 'start', meta);
+  if (!parts.length) { emit(null); return; }
   process.env.SESSION_GATE_EVENT = 'SessionStart';
-  emit(block('session-check', meta, START_RULES));
+  emit(parts.join('\n\n'));
 }
 
 function modePrompt(event) {
-  const repo = repoRoot(event.cwd);
+  const repos = repoRoots(event.cwd);
   const sessionId = String(event.session_id || '');
   const prompt = String(event.prompt || '');
   const parts = [];
 
   // A report produced by a SessionStart that could not inject (no session id yet, or the run
   // finished after the first turn) still reaches the model — exactly once.
-  const start = readMeta(repo, 'start');
-  if (fresh(start, TTL_MS) && !(start.injected || []).includes(sessionId)) {
-    start.injected = (start.injected || []).concat(sessionId).slice(-20);
-    writeMeta(repo, 'start', start);
-    parts.push(block('session-check', start, START_RULES));
+  for (const repo of repos) {
+    const start = readMeta(repo, 'start');
+    if (fresh(start, TTL_MS) && !(start.injected || []).includes(sessionId)) {
+      start.injected = (start.injected || []).concat(sessionId).slice(-20);
+      writeMeta(repo, 'start', start);
+      parts.push(block(titleFor('session-check', repo, repos), start, parts.length ? [] : START_RULES));
+    }
   }
 
   if (END_INTENT.test(prompt)) {
-    let end = readMeta(repo, 'end');
-    if (!fresh(end, END_COOLDOWN_MS)) end = runCheck(repo, true);
-    parts.push(block('session-check --end', end, END_RULES));
+    const before = parts.length;
+    for (const repo of repos) {
+      let end = readMeta(repo, 'end');
+      if (!fresh(end, END_COOLDOWN_MS)) end = runCheck(repo, true);
+      parts.push(block(
+        titleFor('session-check --end', repo, repos), end, parts.length > before ? [] : END_RULES,
+      ));
+    }
   }
 
   emit(parts.length ? parts.join('\n\n') : null);
@@ -261,34 +303,40 @@ function modePrompt(event) {
 function modeEnd(event) {
   // SessionEnd cannot block and cannot reach the model. Persist the result so the next session
   // opens knowing how the last one was left, and so an abrupt exit still leaves a record.
-  const repo = repoRoot(event.cwd);
-  const meta = runCheck(repo, true);
-  try {
-    fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.appendFileSync(
-      path.join(STATE_DIR, 'session-end.log'),
-      `${meta.ranAt}\t${repo}\treason=${event.reason || 'unknown'}\texit=${meta.exitCode}\t` +
-        `${meta.output.split('\n').filter((l) => /STOP|!!/.test(l)).join(' | ') || 'all clear'}\n`,
-      'utf8',
-    );
-  } catch (e) { /* an audit log must never wedge a shutdown */ }
+  for (const repo of repoRoots(event.cwd)) {
+    const meta = runCheck(repo, true);
+    try {
+      fs.mkdirSync(STATE_DIR, { recursive: true });
+      fs.appendFileSync(
+        path.join(STATE_DIR, 'session-end.log'),
+        `${meta.ranAt}\t${repo}\treason=${event.reason || 'unknown'}\texit=${meta.exitCode}\t` +
+          `${meta.output.split('\n').filter((l) => /STOP|!!/.test(l)).join(' | ') || 'all clear'}\n`,
+        'utf8',
+      );
+    } catch (e) { /* an audit log must never wedge a shutdown */ }
+  }
   emit(null);
 }
 
 function modeReport(argv) {
   const end = argv.includes('--end');
   const refresh = argv.includes('--refresh');
-  const repo = repoRoot(process.cwd());
+  const repos = repoRoots(process.cwd());
   const kind = end ? 'end' : 'start';
-  let meta = readMeta(repo, kind);
   const ttl = end ? END_COOLDOWN_MS : TTL_MS;
-  const reused = !refresh && fresh(meta, ttl);
-  if (!reused) meta = runCheck(repo, end);
-  process.stdout.write(`${meta.output}\n`);
-  process.stdout.write(reused
-    ? `\n(cached from ${meta.ranAt} — the hook already ran it; \`--refresh\` re-runs)\n`
-    : `\n(ran just now, ${meta.ranAt})\n`);
-  process.exitCode = meta.exitCode === 0 ? 0 : 1;
+  let worst = 0;
+  for (const repo of repos) {
+    let meta = readMeta(repo, kind);
+    const reused = !refresh && fresh(meta, ttl);
+    if (!reused) meta = runCheck(repo, end);
+    if (repos.length > 1) process.stdout.write(`\n=== ${path.basename(repo)} ===\n`);
+    process.stdout.write(`${meta.output}\n`);
+    process.stdout.write(reused
+      ? `\n(cached from ${meta.ranAt} — the hook already ran it; \`--refresh\` re-runs)\n`
+      : `\n(ran just now, ${meta.ranAt})\n`);
+    if (meta.exitCode !== 0) worst = 1;
+  }
+  process.exitCode = worst;
 }
 
 /* ------------------------------------------------------------------ entry ---------------------- */
