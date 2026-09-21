@@ -122,8 +122,11 @@ with open(marker, 'w') as f:
         'failed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }, f, indent=2)
 # The line is an instruction, not a report (issue 614): a session that reads it can repair the
-# container itself in two tool calls, and until claude-dotfiles is a source of the environment
-# every session has to. The three assertion tokens the clone-failure gate greps for stay:
+# container itself in two tool calls. Since 2026-09-21 claude-dotfiles is a PUBLIC repo, which is
+# why the clone works in a session that never attached it: the cloud GitHub proxy clones any public
+# repo, and private repos only when attached (add_repo). A cloud environment has no repository or
+# source list to configure, so "attach it as an environment source" was never a fix. The three
+# assertion tokens the clone-failure gate greps for stay:
 # `AAC-BOOTSTRAP STOP: <stage> failed`, `push_files`, `ANTHROPIC_BASE_URL`.
 msg = (
     f"AAC-BOOTSTRAP STOP: {e['BOOTSTRAP_FAIL_STAGE']} failed - {e['BOOTSTRAP_FAIL_REASON']};"
@@ -132,9 +135,11 @@ msg = (
     f" SELF-HEAL NOW, before any other work: if git could not read a username for github.com,"
     f" the dotfiles repo is not a source of this session - call the Claude_Code_Remote add_repo"
     f" tool (owner surreptakos, repo claude-dotfiles, access read), then re-run this hook with"
-    f" `bash \"{e['BOOTSTRAP_FAIL_SELF']}\"` and quote its AAC-BOOTSTRAP MARKER line; the"
-    f" durable fix is {e['BOOTSTRAP_FAIL_REPO']} as a second source of the environment"
-    f" (claude-dotfiles issue 614). If ANTHROPIC_BASE_URL is not https://api.anthropic.com, a"
+    f" `bash \"{e['BOOTSTRAP_FAIL_SELF']}\"` and quote its AAC-BOOTSTRAP MARKER line. That"
+    f" failure means {e['BOOTSTRAP_FAIL_REPO']} reads as private again: the cloud GitHub proxy"
+    f" clones any public repo without attaching it, and the repo was made public on 2026-09-21"
+    f" for exactly this (claude-dotfiles issue 614); tell the owner to check its visibility."
+    f" If ANTHROPIC_BASE_URL is not https://api.anthropic.com, a"
     f" caveman proxy URL stripped credential injection instead (`env | grep ANTHROPIC_BASE_URL`,"
     f" issues 483, 519)"
 )
