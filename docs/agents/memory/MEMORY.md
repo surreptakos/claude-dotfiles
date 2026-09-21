@@ -34,6 +34,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - dotfiles-public-for-cloud-clone: no env sources
 - leave-dates-token-rides-the-proxy: proxy-held
 - marketplace-is-the-distribution-spine: installs read it
+- never-point-dan-at-github: URL or contents
 - msys-mangles-git-rev-colon-path: MSYS_NO_PATHCONV=1
 - personal-profile-parity: pull only
 - powershell-7-is-the-tool-engine: JSON indents 2
