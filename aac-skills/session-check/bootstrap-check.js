@@ -35,6 +35,7 @@
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
  *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker? }
  *   verifyPluginRoot(marker)     -> { state: 'ok' | 'absent' | 'unrecorded', root? }
+ *   verifySelfHook(marker)       -> { state: 'ok' | 'absent' | 'not-executable' | 'unrecorded', hook? }
  */
 
 const fs = require('node:fs');
@@ -140,7 +141,26 @@ function verifyPluginRoot(marker) {
     : { state: 'absent', root };
 }
 
+/**
+ * The home-anchored seat (harness v31, issue 643). The bootstrap copies itself to
+ * ~/.claude/hooks/aac-bootstrap.sh, records that path as `self_hook`, and registers it as a
+ * SessionStart entry in user settings — the only entry a session whose project dir is not a
+ * harnessed repo ever reaches. A recorded path that is gone, or not executable, means the next
+ * such session bootstraps nothing and reads the image's state instead.
+ */
+function verifySelfHook(marker) {
+  const hook = marker && typeof marker.self_hook === 'string' ? marker.self_hook : '';
+  if (!hook) return { state: 'unrecorded' };
+  if (!fs.existsSync(hook)) return { state: 'absent', hook };
+  try {
+    fs.accessSync(hook, fs.constants.X_OK);
+  } catch {
+    return { state: 'not-executable', hook };
+  }
+  return { state: 'ok', hook };
+}
+
 module.exports = {
-  readMarker, verifySkills, compareToMaster, verifyPluginRoot, markerPath, skillsDir,
-  containerBootedAt,
+  readMarker, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
+  markerPath, skillsDir, containerBootedAt,
 };
