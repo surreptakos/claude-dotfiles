@@ -1035,6 +1035,14 @@ const LOG_FORMAT = '%h%x00%s%x00%B%x1e';
 function landedCommits(logText) {
   const CLOSING = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b/gi;
   const NAMED = /#(\d+)\b/g;
+  // A closing keyword inside a code span is prose ABOUT this check, not a claim by it. A commit
+  // in aac-routines explained an exemption with "a `Closes #497` or `Closes #501` in a future
+  // commit body would still be flagged" — and its own body then read as two closing claims, the
+  // one class the exemption door cannot silence, so that tracker stayed red on work nobody had
+  // started. GitHub does not close an issue from a fenced or inline-code keyword either.
+  const stripCode = (text) => String(text)
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ');
   const out = new Map();
   String(logText == null ? '' : logText).replace(/\r\n/g, '\n').split('\u001e').forEach((record) => {
     const parts = record.split('\u0000');
@@ -1044,7 +1052,7 @@ function landedCommits(logText) {
     const closing = new Set(), named = new Set();
     let m;
     CLOSING.lastIndex = 0;
-    while ((m = CLOSING.exec(message)) !== null) closing.add(Number(m[1]));
+    while ((m = CLOSING.exec(stripCode(message))) !== null) closing.add(Number(m[1]));
     NAMED.lastIndex = 0;
     while ((m = NAMED.exec(subject)) !== null) named.add(Number(m[1]));
     // One entry per commit per number: a subject naming #5 twice is still one commit. A closing keyword
