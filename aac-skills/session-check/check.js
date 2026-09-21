@@ -550,8 +550,11 @@ function stampGate(py) {
 
 /** Everything this session could have put in front of the secret guard: the working tree's
  *  changes, what is staged, new untracked files, and every file this branch changed against the
- *  remote. A session boundary is not a thing git records, so "what this branch has that the
- *  remote does not, plus what is not committed yet" is the closest deterministic reading. */
+ *  DEFAULT branch. A session boundary is not a thing git records, so "what this branch adds to
+ *  master, plus what is not committed yet" is the closest deterministic reading — and it is the
+ *  reading that survives a push. The branch's own upstream would be the obvious base and is the
+ *  wrong one: once the branch is pushed it equals HEAD, the diff is empty, and the check would
+ *  report a clean scan of nothing at exactly the moment the work is about to be merged. */
 function touchedFiles() {
   const set = new Set();
   const add = (text) => {
@@ -563,7 +566,7 @@ function touchedFiles() {
   add(tryRun('git', ['diff', '--name-only', 'HEAD']));
   add(tryRun('git', ['diff', '--cached', '--name-only']));
   add(tryRun('git', ['ls-files', '--others', '--exclude-standard']));
-  const base = GIT.upstream || defaultBranchHead();
+  const base = defaultBranchHead() || GIT.upstream;
   if (base) add(tryRun('git', ['diff', '--name-only', `${base}...HEAD`]));
   return [...set];
 }
