@@ -727,6 +727,15 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     # happened to be in flight when a new user prompt reset the state.
     if state and state.get("last_flow"):
         return {}
+    if not state:
+        # No state file at all means the UserPromptSubmit hook never ran for this session, so there
+        # is no nonce and the declaration this deny demands cannot be written — the gate refuses
+        # every tool call including the declaration itself, and nothing the session can do satisfies
+        # it. Seen 2026-09-21 in the master-zoho-source-of-truth Routine: the payload merged these
+        # hooks into live user settings mid-session, every subsequent call came back denied, and the
+        # master could not even send a notification. Fail open; the next prompt writes state and the
+        # gate resumes with full force.
+        return {}
     return _deny(
         "Ask Matt, Yes, and caveman ultra missing. Run exact declaration from prompt gate."
     )

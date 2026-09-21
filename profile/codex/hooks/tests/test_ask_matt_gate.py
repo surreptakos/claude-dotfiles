@@ -562,6 +562,28 @@ class AskMattGateTests(unittest.TestCase):
             self.assertTrue(final_state["yes"])
             self.assertEqual(final_state["caveman"], "ultra")
 
+    def test_claude_pre_tool_fails_open_when_the_session_has_no_state(self) -> None:
+        """Hooks installed mid-session leave no state and no nonce, so a deny here is
+        unsatisfiable — the declaration command is itself a tool call. Seen 2026-09-21 in the
+        master-zoho-source-of-truth Routine, which lost every tool including its notification."""
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            allowed = self.run_gate(
+                "claude-pre-tool",
+                {
+                    "session_id": "claude-session-no-prompt",
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": "README.md"},
+                },
+                state_dir,
+            )
+
+            self.assertEqual(json.loads(allowed.stdout), {})
+            self.assertFalse(
+                (state_dir / "claude--claude-session-no-prompt.json").exists()
+            )
+
     def test_claude_bootstrap_accepts_yes_exit_check_but_no_other_suffix(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
