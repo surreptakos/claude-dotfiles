@@ -110,10 +110,10 @@ function startContext(index) {
   if (text === null || alreadyCarried(text)) return null;
   const parts = splitParts(text, PART_BYTES);
   if (index < 1 || index > parts.length) return null;
-  const header = `GLOBAL RULES (part ${index} of ${parts.length} — the standing disciplines from `
-    + 'the owner\'s global CLAUDE.md, delivered from the plugin payload because a container has no '
-    + 'live tree. They apply to this session in full, and a short digest repeats the core of them '
-    + 'on every prompt):';
+  const header = `GLOBAL RULES (part ${index} of ${parts.length} — the owner's global CLAUDE.md `
+    + 'in full, delivered from the plugin payload because a container has no live tree. Every '
+    + 'standing directive in it applies to this session, and a short digest repeats the four '
+    + 'disciplines on every prompt):';
   return header + '\n' + parts[index - 1];
 }
 

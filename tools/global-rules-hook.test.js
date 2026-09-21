@@ -71,21 +71,19 @@ function entries(event) {
   return found;
 }
 
-test('the payload rules file is the CLAUDE.md section verbatim, not a hand copy', () => {
+test('the payload rules file is the whole CLAUDE.md verbatim, not a hand copy', () => {
+  // The payload used to carry the standing-disciplines section alone, so a container never saw
+  // the response-prefix directive, the environment-claims rules, memory governance or the Google
+  // access pointer — a cloud session ran a different rulebook from a desktop one.
   const md = fs.readFileSync(path.join(REPO, 'profile', 'claude', 'CLAUDE.md'), 'utf8').replace(/\r\n/g, '\n');
-  const lines = md.split(/(?<=\n)/);
-  const start = lines.findIndex((l) => l.startsWith('### Four standing disciplines'));
-  assert.ok(start >= 0, 'profile/claude/CLAUDE.md lost the standing-disciplines heading');
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (lines[i].startsWith('### ') || lines[i].startsWith('## ')) { end = i; break; }
-  }
-  const section = `${lines.slice(start, end).join('').trimEnd()}\n`;
+  const whole = `${md.trimEnd()}\n`;
   // The payload carries the owner's real home where the mirror holds __USERHOME__ (the packager's
   // --home substitution); re-tokenize so the comparison does not depend on whose home built it.
   const shipped = fs.readFileSync(RULES, 'utf8').replace(/[A-Za-z]:\\Users\\[^\\"]+/g, '__USERHOME__');
-  assert.equal(shipped, section,
+  assert.equal(shipped, whole,
     'marketplace/aac-skills/rules/global-rules.md drifted from profile/claude/CLAUDE.md — rerun the packager');
+  assert.ok(shipped.includes('### Four standing disciplines'),
+    'the disciplines heading is the contract the packager and the digest marks depend on');
 });
 
 test('the SessionStart parts concatenate back to the whole rules file', () => {

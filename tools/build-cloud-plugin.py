@@ -160,18 +160,23 @@ LINE_RE = re.compile(r"[^\n]*\n|[^\n]+")
 
 
 def extract_global_rules(text):
-    """The `### Four standing disciplines` section of a global CLAUDE.md, verbatim.
+    """The owner's global CLAUDE.md, verbatim and whole.
 
-    Ends at the next heading of the same or a higher level. Returns None when the heading is
-    absent, which is how a fixture repo with no CLAUDE.md mirror produces no rules file.
+    It used to be the `### Four standing disciplines` section alone, and the rest of the file --
+    the standing response-prefix directive, the environment-claims rules, memory governance, the
+    Google access pointer, browser automation -- never reached a container. A cloud session was
+    therefore running a different rulebook from a desktop one, which is the parity this payload
+    exists to give. The heading is still the contract: a source that lost it has been restructured
+    far enough that the digest marks cannot be trusted either, so the build fails loudly rather
+    than shipping rules nothing checked.
+
+    Returns None when the heading is absent, which is how a fixture repo with no CLAUDE.md mirror
+    produces no rules file.
     """
-    lines = LINE_RE.findall(text.replace("\r\n", "\n"))
-    start = next((i for i, l in enumerate(lines) if l.startswith(RULES_HEADING)), None)
-    if start is None:
+    body = text.replace("\r\n", "\n")
+    if not any(l.startswith(RULES_HEADING) for l in LINE_RE.findall(body)):
         return None
-    end = next((i for i in range(start + 1, len(lines))
-                if lines[i].startswith("### ") or lines[i].startswith("## ")), len(lines))
-    return "".join(lines[start:end]).rstrip() + "\n"
+    return body.rstrip() + "\n"
 
 
 def split_rules_parts(text, limit=RULES_PART_BYTES):

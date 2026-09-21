@@ -74,23 +74,36 @@ class AutonomousPublishGateTests(unittest.TestCase):
     def test_autonomous_master_files_a_second_issue_unasked(self) -> None:
         self.assertEqual(self._second_issue_create(autonomous=True), {})
 
-    def test_autonomous_master_still_needs_a_ticket_route(self) -> None:
-        session = "autonomous-route"
+    def _first_issue_create_under(self, flow: str) -> dict:
+        """Declare `flow`, then return the gate's answer to a `gh issue create` under it."""
+        session = f"autonomous-route-{flow}"
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
             env = self._env(state_dir, session, autonomous=True)
             prompt = self._run(["claude-prompt"], {"session_id": session, "hook_event_name": "UserPromptSubmit"}, env)
             self.assertEqual(prompt.returncode, 0, prompt.stderr)
             nonce = json.loads((state_dir / f"claude--{session}.json").read_text(encoding="utf-8"))["nonce"]
-            self._run(["declare-claude", session, nonce, "implement"], None, env)
-            out = json.loads(self._run(["claude-pre-tool"], {
+            declared = self._run(["declare-claude", session, nonce, flow], None, env)
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            return json.loads(self._run(["claude-pre-tool"], {
                 "session_id": session,
                 "hook_event_name": "PreToolUse",
                 "tool_name": "Bash",
                 "tool_input": {"command": ISSUE_CREATE},
             }, env).stdout)
-            self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
-            self.assertIn("route", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_autonomous_master_still_needs_a_ticket_route(self) -> None:
+        # Autonomy lifts the ticket-SET gate, never the route gate: a session that declared a route
+        # with no business filing tickets is refused whatever AAC_ORCHESTRATOR_AUTONOMOUS says.
+        out = self._first_issue_create_under("code-review")
+        self.assertEqual(out["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertIn("route", out["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_a_publishing_route_files_its_own_ticket(self) -> None:
+        # Issue 200: every route that creates issues BY DESIGN is a publishing route — implement
+        # records discoveries, diagnosing-bugs files the closure ticket — so the gate that exists
+        # for unasked ticket sets must not refuse the ticket the route was declared to produce.
+        self.assertEqual(self._first_issue_create_under("implement"), {})
 
 
 if __name__ == "__main__":

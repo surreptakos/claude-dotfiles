@@ -178,3 +178,27 @@ test('a broken cwd falls back instead of reporting a broken check', () => {
   });
   assert.match(context(j), /STUB START REPORT/);
 });
+
+test('a session opened on the PARENT of two checkouts checks both (issue 663)', () => {
+  const box = sandbox();
+  const second = path.join(box.dir, 'other-repo');
+  fs.mkdirSync(path.join(second, '.git'), { recursive: true });
+  const j = hook(box, 'start', { session_id: 's1', cwd: box.dir, source: 'startup' });
+  const text = context(j);
+  // One block per repo, each naming the repo it speaks for, and the reading rules only once.
+  assert.match(text, /session-check — other-repo/);
+  assert.match(text, /session-check — repo/);
+  assert.strictEqual(text.split('SESSION-START CHECKS').length - 1, 1);
+  assert.strictEqual(box.runs().length, 2);
+  // Injected once per session: the next prompt in the same session adds nothing.
+  const again = hook(box, 'prompt', { session_id: 's1', cwd: box.dir, prompt: 'carry on' });
+  assert.strictEqual(context(again), null);
+});
+
+test('SessionEnd on that parent records one line per repo (issue 663)', () => {
+  const box = sandbox();
+  fs.mkdirSync(path.join(box.dir, 'other-repo', '.git'), { recursive: true });
+  hook(box, 'end', { session_id: 's1', cwd: box.dir, reason: 'clear' });
+  const log = fs.readFileSync(path.join(box.env.SESSION_GATE_STATE_DIR, 'session-end.log'), 'utf8');
+  assert.strictEqual(log.trim().split('\n').length, 2);
+});
