@@ -649,6 +649,15 @@ def main():
     GOV_JS = ("governance-reminder.js", "session-gate.js",
               "state-rehydrate.js", "state-stash.js")
     GOV_PY = ("ask_matt_gate.py",)
+    # The stop-slop linter: a PostToolUse hook over written .md/.txt and a Stop hook over the
+    # final assistant message, both on the desktop since issue 620 and neither in a container, so
+    # a cloud session wrote prose nothing checked. They live beside the other hook scripts and
+    # `import stopslop` from ../tools relative to themselves, which is hooks/tools/ in the payload.
+    SLOP_PY = ("stopslop-write.py", "stopslop-stop.py")
+    SLOP_LIB = "stopslop.py"
+    slop_present = (
+        all((REPO / "profile" / "claude" / "hooks" / n).is_file() for n in SLOP_PY)
+        and (REPO / "profile" / "claude" / "tools" / SLOP_LIB).is_file())
     # If any source is missing (e.g. a fake-repo test fixture with no hooks mirror), emit only the
     # marker hook, matching the pre-issue-208 behaviour. Every-or-nothing avoids a half-populated
     # manifest that names a script the payload does not carry.
@@ -800,6 +809,22 @@ def main():
         text = _insert_after_python_prelude(text, py_guard_call)
         (scripts_dir / name).write_bytes(text.encode("utf-8"))
 
+    # The stop-slop hooks ride WITHOUT the dedup guard on purpose: unlike the governance scripts,
+    # a desktop dispatches these from settings.json by their ~/.claude path, and the guard's job is
+    # to stop a live-tree twin and the payload copy both firing. Here the two copies are the same
+    # file reached by two paths, so the guard would silence the payload copy on the one machine
+    # that also has the live one, and a container has no live tree to collide with either way.
+    if slop_present:
+        slop_tools = hooks_dir / "tools"
+        slop_tools.mkdir()
+        (slop_tools / SLOP_LIB).write_bytes(
+            (REPO / "profile" / "claude" / "tools" / SLOP_LIB)
+            .read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+        for name in SLOP_PY:
+            (scripts_dir / name).write_bytes(
+                (REPO / "profile" / "claude" / "hooks" / name)
+                .read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+
     # Repo memory loader (issue 210). Unlike the governance scripts this one has NO live-tree twin:
     # its source is tools/repo-memory-load.js in this repo, it is not mirrored into ~/.claude, and
     # nothing in settings.json dispatches it -- so it ships without the dedup guard and fires from
@@ -896,6 +921,17 @@ def main():
             ]},
         ],
     }
+
+    if slop_present:
+        # Same two events and the same matcher the desktop wires in settings.json, so prose written
+        # in a container faces the linter prose written on the PC has faced since issue 620.
+        governance_hooks["PostToolUse"].append({"matcher": "Write|Edit|MultiEdit", "hooks": [
+            _hook("python3", "py -3", "stopslop-write.py", [], 10,
+                  "Linting written prose..."),
+        ]})
+        governance_hooks["Stop"][0]["hooks"].append(
+            _hook("python3", "py -3", "stopslop-stop.py", [], 10,
+                  "Linting the final message..."))
 
     if memory_loader_present:
         # Its own SessionStart group: the memory injection must not wait on (or be skipped with)
