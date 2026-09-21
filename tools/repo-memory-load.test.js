@@ -51,8 +51,10 @@ function fakeRepo(lines, notes) {
 test('the real index injects every note as a bare name, well under the 2KB budget', () => {
   const context = contextFor(MEMORY_DIR);
   assert.ok(context, 'the repo index must produce a context block');
-  assert.ok(Buffer.byteLength(context) <= 1500,
-    `injected memory is ${Buffer.byteLength(context)} bytes, over 1500 (issue 589 acceptance)`);
+  // The hook drops lines past BUDGET - 80 (2048 - 80 = 1968). A fixed number below that is the
+  // landmine issue 589 removed, so the bar is the hook's own: fits, and no line was dropped.
+  assert.ok(Buffer.byteLength(context) <= 1968,
+    `injected memory is ${Buffer.byteLength(context)} bytes, over the hook's 1968-byte cap`);
   const lines = context.split('\n');
   assert.match(lines[0], /memory — \d+ committed notes, bodies in docs\/agents\/memory\/<name>\.md/);
   assert.ok(!/\(\+\d+ more/.test(context), 'the real index must fit without truncation');
