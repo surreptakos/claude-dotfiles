@@ -191,6 +191,44 @@ if settings is not None:
     else:
         pass_('every merged hook command names a script the payload carries')
 
+# ------------------------------------------ 3b. the home-anchored seat (issue 643) -------------
+# Delivery must not depend on which checkout Claude Code calls the project. The hook copies
+# itself to ~/.claude/hooks/aac-bootstrap.sh and seats THAT as a SessionStart entry in user
+# settings, so a session whose project dir is not a harnessed repo - a Routine-fired session with
+# two repository sources, or none - still bootstraps instead of running on whatever the container
+# image carried (2026-09-21: a Routine session read a 2026-09-19 clone-failure marker for two
+# days and said nothing).
+SELF_HOOK = os.path.join(HOME, '.claude', 'hooks', 'aac-bootstrap.sh')
+CANONICAL_HOOK = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                              '.claude', 'hooks', 'session-start.sh')
+if not os.path.isfile(SELF_HOOK):
+    fail(f'the hook seated no copy of itself at {SELF_HOOK}')
+elif not os.access(SELF_HOOK, os.X_OK):
+    fail(f'{SELF_HOOK} is not executable, so its settings.json entry cannot run it')
+else:
+    seated = open(SELF_HOOK, 'rb').read()
+    canonical = open(CANONICAL_HOOK, 'rb').read() if os.path.isfile(CANONICAL_HOOK) else b''
+    if canonical and seated != canonical:
+        fail(f'{SELF_HOOK} is not byte-identical to the hook that ran ({CANONICAL_HOOK})')
+    else:
+        pass_(f'the hook seated an executable copy of itself at {SELF_HOOK}')
+
+if settings is not None:
+    self_entries = [c for c in merged.get('SessionStart', []) if SELF_HOOK in c]
+    if not self_entries:
+        fail(f'no tagged SessionStart entry in {SETTINGS} runs {SELF_HOOK}, so a session whose '
+             'project dir is not a harnessed repo never bootstraps')
+    elif len(self_entries) > 1:
+        fail(f'{len(self_entries)} SessionStart entries run {SELF_HOOK}; a second run must '
+             'replace its own entry, not append another')
+    elif not self_entries[0].startswith('bash '):
+        fail(f'the seated entry does not invoke it through bash: {self_entries[0][:90]}')
+    else:
+        pass_(f'one tagged SessionStart entry runs the home-anchored copy: {self_entries[0]}')
+
+if marker is not None and marker.get('self_hook') != SELF_HOOK:
+    fail(f"the marker records self_hook={marker.get('self_hook')!r}, not {SELF_HOOK!r}")
+
 # ------------------------------------------------------------------ 4. the rules text ----------
 rules = os.path.join(PAYLOAD, 'rules', 'global-rules.md')
 if not os.path.isfile(rules) or os.path.getsize(rules) == 0:

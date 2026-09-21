@@ -19,7 +19,9 @@
 #      invocable regardless of the account marketplace being off in cloud;
 #   4. merge the plugin's hooks manifest into ~/.claude/settings.json under a source-tag so a
 #      second run replaces its own entries instead of appending duplicates (issue 166 double
-#      SessionStart);
+#      SessionStart), and seat a copy of this file there too, so the next session in this
+#      container bootstraps from $HOME even when its project dir is not a harnessed repo
+#      (issue 643);
 #   5. record the payload version + skills fingerprint at a stable marker path so session-check
 #      can STOP with a named reason when either is missing (spec #207 user story 7);
 #      a stage that fails (clone, payload) writes a failed marker naming its cause instead
@@ -57,6 +59,14 @@
 # ("not associated with a plugin"): 16 of 17 governance hooks failed on every event, and the one
 # plain echo among them printed "plugin hooks execute on this surface". See step 4.
 #
+# Harness v31 (issue 643) fixed the third way: delivery was anchored to the project directory
+# alone. A Routine-fired session with two repository sources read a container image carrying a
+# 2026-09-19 `failed: true` clone marker, and neither repo's SessionStart entry ran, so it worked
+# with no rules, no governance hooks and no skills while reporting nothing. Step 4 now also seats
+# this file at $HOME/.claude/hooks/aac-bootstrap.sh in user settings: user-settings hooks run in
+# every session in the container, so one successful bootstrap makes every later session retry,
+# and a failed marker can no longer be served out of a snapshot forever.
+#
 # Env overrides for tests (leave unset in real runs):
 #   BOOTSTRAP_HOME       write everything under this HOME instead of $HOME (fake-container test)
 #   BOOTSTRAP_SOURCE     read the dotfiles tree from this local path instead of git-cloning
@@ -86,9 +96,50 @@ DOTFILES_REPO="${BOOTSTRAP_DOTFILES_REPO:-https://github.com/surreptakos/claude-
 DOTFILES_REF="${BOOTSTRAP_DOTFILES_REF:-master}"
 GH_VERSION="${BOOTSTRAP_GH_VERSION:-2.86.0}"
 
-mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$STATE_DIR" "$BIN_DIR"
+mkdir -p "$CLAUDE_DIR" "$SKILLS_DIR" "$STATE_DIR" "$BIN_DIR" "$CLAUDE_DIR/hooks"
 SCRATCH_DIR="$(mktemp -d)"
-trap 'rm -rf "$SCRATCH_DIR"' EXIT
+
+# Delivery must not depend on which checkout Claude Code calls the project (issue 643). The
+# repo-anchored entry a harnessed repo registers - `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/
+# session-start.sh"` - runs only when the session's project dir IS that repo. A Routine-fired
+# session carrying two repository sources, or none, never reaches it; and because the container
+# home is snapshotted per environment, that session then runs on whatever the image carried,
+# including a `failed: true` marker from a day when the clone could not authenticate. Seen live
+# on 2026-09-21: a Routine session read a 2026-09-19 clone-failure marker, had no skills and no
+# governance hooks, while a web session on the same environment bootstrapped fine. So step 4
+# also seats a copy of THIS file at $HOME/.claude/hooks/aac-bootstrap.sh as a SessionStart entry
+# in USER settings, which every session in the container runs whatever its project dir is.
+SELF_HOOK="$CLAUDE_DIR/hooks/aac-bootstrap.sh"
+
+# Both entries fire on one SessionStart, and Claude Code may run them at the same time. The lock
+# makes the second a no-op instead of a second clone into the same directory. A lock older than
+# ten minutes is a dead run and is taken over.
+LOCK_DIR="$STATE_DIR/run.lock"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  if [ -z "$(find "$LOCK_DIR" -maxdepth 0 -mmin +10 2>/dev/null)" ]; then
+    rm -rf "$SCRATCH_DIR"
+    exit 0
+  fi
+  rm -rf "$LOCK_DIR"
+  mkdir -p "$LOCK_DIR"
+fi
+trap 'rm -rf "$SCRATCH_DIR" "$LOCK_DIR"' EXIT
+
+# Sequential second run in the same session: the marker is healthy and seconds old, so there is
+# nothing to install and a second additionalContext line would only repeat the first.
+if [ -f "$MARKER_FILE" ] && BOOTSTRAP_FRESH_MARKER="$MARKER_FILE" python3 - <<'PYFRESH'
+import json, os, sys, time
+p = os.environ['BOOTSTRAP_FRESH_MARKER']
+try:
+    marker = json.load(open(p))
+except Exception:
+    sys.exit(1)
+sys.exit(0 if marker.get('failed') is not True
+         and (time.time() - os.path.getmtime(p)) < 120 else 1)
+PYFRESH
+then
+  exit 0
+fi
 
 # A named failure is a marker too (issue 483). Before this, a clone that could not authenticate
 # (`fatal: could not read Username for 'https://github.com'`, every container of 2026-09-16/17
@@ -254,6 +305,15 @@ fi
 # from the hook's stdout on SessionStart), and writes the marker file. bash captures the JSON
 # and prints it as the hook's final output.
 # ---------------------------------------------------------------------------
+# The home-anchored copy step 4 registers. Copied from the file that is running, so the seated
+# entry is always the hook this payload ships, and re-copied every run so a payload that moved on
+# does not leave an old one behind. Skipped when this run IS the seated copy.
+if [ "$HOOK_SELF" != "$SELF_HOOK" ]; then
+  cp "$HOOK_SELF" "$SELF_HOOK"
+fi
+chmod 0755 "$SELF_HOOK"
+
+export BOOTSTRAP_SELF_HOOK="$SELF_HOOK"
 export BOOTSTRAP_PAYLOAD="$PAYLOAD"
 export BOOTSTRAP_SKILLS_DIR="$SKILLS_DIR"
 export BOOTSTRAP_MARKER_FILE="$MARKER_FILE"
@@ -356,6 +416,7 @@ MARKER = 'aac-bootstrap-plugin-hook'
 PLUGIN_ROOT_TOKEN = '${CLAUDE_PLUGIN_ROOT}'
 HOOK_MARKER_TEXT = 'AAC-SKILLS HOOK MARKER'
 payload_abs = os.path.abspath(payload)
+self_hook = os.environ.get('BOOTSTRAP_SELF_HOOK', '')
 seat_prefix = 'CLAUDE_PLUGIN_ROOT=' + shlex.quote(payload_abs) + ' PLUGIN_HOOK_GUARD_DISABLE=1 '
 
 def seat_command(command):
@@ -371,6 +432,8 @@ def is_ours(entry):
     for h in entry.get('hooks') or []:
         c = h.get('command', '') if isinstance(h, dict) else ''
         if payload_abs in c or PLUGIN_ROOT_TOKEN in c or HOOK_MARKER_TEXT in c:
+            return True
+        if self_hook and self_hook in c:
             return True
     return False
 try:
@@ -397,6 +460,25 @@ for event, entries in plugin_hooks.items():
         kept.append(e)
     existing[event] = kept
     merged_events.append(event)
+# The home-anchored re-run (issue 643). It goes into USER settings beside the payload's own
+# entries, so every session in this container starts by re-reading dotfiles master and re-seating
+# the payload - including a session whose project dir is not a harnessed repo, which is the only
+# state the repo-anchored entry cannot reach. is_ours() above recognises it by its path, so a
+# second run replaces it rather than appending another.
+if self_hook:
+    entries = existing.setdefault('SessionStart', [])
+    entries.append({
+        'hooks': [{
+            'type': 'command',
+            'command': 'bash ' + shlex.quote(self_hook),
+            'timeout': 120,
+            'statusMessage': 'Cloud container: checking the aac payload...',
+        }],
+        '_source': MARKER,
+    })
+    if 'SessionStart' not in merged_events:
+        merged_events.append('SessionStart')
+
 settings['hooks'] = existing
 os.makedirs(os.path.dirname(user_settings), exist_ok=True)
 with open(user_settings, 'w') as f:
@@ -413,6 +495,7 @@ with open(marker_file, 'w') as f:
         'gh_path': gh_path,
         'hooks_events': merged_events,
         'plugin_root': payload_abs,
+        'self_hook': self_hook,
         'dotfiles_source': os.environ.get('BOOTSTRAP_DOTFILES_SRC', ''),
         'installed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
         'copied_this_run': copied,

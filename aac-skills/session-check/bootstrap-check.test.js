@@ -92,6 +92,33 @@ test('readMarker returns ok with the parsed marker', () => {
   assert.equal(r.marker.payload_version, '2026.9.15');
 });
 
+test('readMarker returns stale when the marker predates this container (issue 643)', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    payload_version: '2026.9.15', skills: ['ticket-fleet'],
+    installed_at: '2026-09-19T14:02:16Z',
+  });
+  const r = readMarker(env(f));
+  assert.equal(r.state, 'stale');
+  assert.equal(r.writtenAt, '2026-09-19T14:02:16Z');
+  assert.equal(r.marker.payload_version, '2026.9.15');
+});
+
+test('readMarker is ok when the marker was written after this container booted', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    payload_version: '2026.9.15', skills: ['ticket-fleet'],
+    installed_at: new Date().toISOString(),
+  });
+  assert.equal(readMarker(env(f)).state, 'ok');
+});
+
+test('readMarker: a marker with no installed_at is ok, not stale — staleness needs a date', () => {
+  const f = fixture();
+  writeMarker(f.marker, { payload_version: '2026.9.15', skills: ['ticket-fleet'] });
+  assert.equal(readMarker(env(f)).state, 'ok');
+});
+
 test('verifySkills reports every named skill that has no SKILL.md on disk', () => {
   const f = fixture();
   writeSkill(f.skills, 'ticket-fleet');
