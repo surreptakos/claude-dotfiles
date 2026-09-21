@@ -4,7 +4,9 @@
  *
  * The SessionStart loader for this repo's committed memory notes (issue 210), and the one
  * invariant the notes themselves have to keep:
- *   - the real index injects as pointers, under the 2KB budget, with the hook line of every note
+ *   - the real index injects as pointers, under the 2KB budget: one BARE NAME per note (issue
+ *     589 — with the `: hook` suffixes the block sat ~96 bytes under its cap, so every new note
+ *     was paid for by shortening unrelated lines)
  *   - index and notes do not drift (a note with no line, a line with no note), and the two
  *     live-tree notes stay deleted
  *   - a note committed without its index line still reaches the next session
@@ -46,19 +48,40 @@ function fakeRepo(lines, notes) {
   return root;
 }
 
-test('the real index injects every note as a pointer line, under the 2KB budget', () => {
+test('the real index injects every note as a bare name, well under the 2KB budget', () => {
   const context = contextFor(MEMORY_DIR);
   assert.ok(context, 'the repo index must produce a context block');
-  assert.ok(Buffer.byteLength(context) <= 2048,
-    `injected memory is ${Buffer.byteLength(context)} bytes, over the 2048 budget - shorten hooks`);
+  assert.ok(Buffer.byteLength(context) <= 1500,
+    `injected memory is ${Buffer.byteLength(context)} bytes, over 1500 (issue 589 acceptance)`);
   const lines = context.split('\n');
   assert.match(lines[0], /memory — \d+ committed notes, bodies in docs\/agents\/memory\/<name>\.md/);
   assert.ok(!/\(\+\d+ more/.test(context), 'the real index must fit without truncation');
   for (const name of indexNames(MEMORY_DIR)) {
-    assert.ok(lines.some((line) => line.startsWith(`- ${name}: `)), `${name} has no hook line`);
+    assert.ok(lines.includes(`- ${name}`), `${name} has no pointer line`);
   }
-  // Pointers, not content: no line carries a paragraph of a note body.
-  for (const line of lines.slice(1)) assert.ok(line.length <= 90, `index line too long: ${line}`);
+  // Names only: an injected line carries no hook text, so a new note cannot push an unrelated
+  // line over the cap (issue 589).
+  for (const line of lines.slice(1)) {
+    assert.match(line, /^- [a-z0-9-]+$|^- not in the index yet: /, `not a bare pointer: ${line}`);
+  }
+});
+
+test('a new note costs its own line and nothing else (issue 589)', () => {
+  const before = contextFor(MEMORY_DIR).split('\n');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-memory-33-'));
+  const memory = path.join(dir, 'docs', 'agents', 'memory');
+  fs.mkdirSync(memory, { recursive: true });
+  for (const file of fs.readdirSync(MEMORY_DIR)) {
+    fs.copyFileSync(path.join(MEMORY_DIR, file), path.join(memory, file));
+  }
+  const hook = 'a sixty character hook line for the index, humans only!!';
+  fs.appendFileSync(path.join(memory, 'MEMORY.md'), `- zz-new-note: ${hook}\n`);
+  fs.writeFileSync(path.join(memory, 'zz-new-note.md'), 'body\n');
+  const after = contextFor(memory).split('\n');
+  assert.deepEqual(after.slice(1, -1), before.slice(1).map((l) => l),
+    'adding a note changed a line it has nothing to do with');
+  assert.equal(after[after.length - 1], '- zz-new-note');
+  assert.ok(!/\(\+\d+ more/.test(after.join('\n')), 'the 37th note must still fit');
 });
 
 test('the index and the note files do not drift, and the live-tree notes stay deleted', () => {
@@ -81,7 +104,7 @@ test('the index and the note files do not drift, and the live-tree notes stay de
 test('a note committed without its index line still reaches the next session', () => {
   const root = fakeRepo(['- alpha: first'], ['alpha', 'beta-added-in-a-cloud-session']);
   const context = contextFor(path.join(root, 'docs'));
-  assert.match(context, /- alpha: first/);
+  assert.match(context, /^- alpha$/m);
   assert.match(context, /- not in the index yet: beta-added-in-a-cloud-session/);
 });
 
@@ -99,7 +122,10 @@ test('the auto-memory link form `- [Title](name.md) — hook` counts as indexed'
 
 test('an over-budget index truncates and counts what it dropped', () => {
   const lines = [];
-  for (let i = 0; i < 80; i += 1) lines.push(`- note-number-${i}: a hook line that costs bytes`);
+  // Names only cost ~30 bytes each now (issue 589), so it takes more of them to reach the cap.
+  for (let i = 0; i < 80; i += 1) {
+    lines.push(`- note-number-${i}-with-a-name-long-enough-to-cost-real-bytes: hook`);
+  }
   const root = fakeRepo(lines, []);
   const context = contextFor(path.join(root, 'docs', 'agents', 'memory'));
   assert.ok(Buffer.byteLength(context) <= 2048);
@@ -125,5 +151,5 @@ test('the hook emits SessionStart additionalContext for this repo', () => {
   assert.equal(run.status, 0);
   const parsed = JSON.parse(run.stdout);
   assert.equal(parsed.hookSpecificOutput.hookEventName, 'SessionStart');
-  assert.match(parsed.hookSpecificOutput.additionalContext, /- state-a-standing-rule-once: /);
+  assert.match(parsed.hookSpecificOutput.additionalContext, /^- state-a-standing-rule-once$/m);
 });

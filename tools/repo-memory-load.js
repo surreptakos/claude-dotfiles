@@ -8,9 +8,15 @@
 // this hook reads the index of whichever repo the session opened. A note is published by an
 // ordinary commit; the next session — anywhere — reads it from the index.
 //
-// Injects POINTERS, not content: one line per note, capped at 2KB total, so the note bodies stay
+// Injects POINTERS, not content: one NAME per note, capped at 2KB total, so the note bodies stay
 // on disk and only the "there is a note about X" cue reaches the context window. A session that
 // wants the detail reads the file.
+//
+// The name alone, not the index's `: hook` suffix (issue 589). With the hooks injected, the block
+// sat ~96 bytes under its cap, so every new note had to be paid for by shortening unrelated lines
+// — five fleet implementers and two owner sessions hit that wall. The hook text stays in
+// MEMORY.md for a human reading the index; the injected block costs a name and a newline, so
+// adding a note never edits a line it has nothing to do with.
 //
 // Contract: reads the hook JSON on stdin (for `cwd`), writes one additionalContext JSON to stdout,
 // and ALWAYS exits 0. A repo with no docs/agents/memory/MEMORY.md prints nothing. A session start
@@ -47,13 +53,16 @@ function indexLines(text) {
 
 // Note files present on disk but missing from the index. A session that adds a note and forgets
 // the index line would otherwise be invisible to the next session; one line names them instead.
+// Two index line shapes are in use: `- name: hook` (this repo) and the auto-memory
+// `- [Title](name.md) — hook` (every other repo's index). Both name the note file, and the name is
+// the whole pointer: what gets injected, and what `unindexed` matches note files against.
+function noteName(line) {
+  const link = line.match(/\]\(([^)]+?)(?:\.md)?\)/);
+  return link ? link[1].trim() : line.slice(2).split(':')[0].trim();
+}
+
 function unindexed(indexPath, lines) {
-  // Two index line shapes are in use: `- name: hook` (this repo) and the auto-memory
-  // `- [Title](name.md) — hook` (every other repo's index). Both name the file.
-  const named = new Set(lines.map((line) => {
-    const link = line.match(/\]\(([^)]+?)(?:\.md)?\)/);
-    return link ? link[1].trim() : line.slice(2).split(':')[0].trim();
-  }));
+  const named = new Set(lines.map(noteName));
   let entries;
   try {
     entries = fs.readdirSync(path.dirname(indexPath));
@@ -70,12 +79,13 @@ function unindexed(indexPath, lines) {
 function build(indexPath, lines, missing, repoRoot) {
   const dir = path.relative(repoRoot, path.dirname(indexPath)).split(path.sep).join('/');
   const head = `${path.basename(repoRoot)} memory — ${lines.length} committed notes, `
-    + `bodies in ${dir}/<name>.md. Add one there, add its index line, commit: that commit `
-    + 'is the whole publish, there is no ~/.claude copy to keep in step.';
+    + `bodies in ${dir}/<name>.md, hooks beside them in MEMORY.md. Add one there, add its index `
+    + 'line, commit: that commit is the whole publish, there is no ~/.claude copy to keep in step.';
   const out = [head];
   let used = Buffer.byteLength(head) + 1;
   let dropped = 0;
-  for (const line of lines) {
+  for (const name of lines.map(noteName)) {
+    const line = `- ${name}`;
     const cost = Buffer.byteLength(line) + 1;
     // Keep room for the "+N more" tail so a truncated list never lies about being complete.
     if (used + cost > BUDGET - 80) { dropped += 1; continue; }
@@ -142,4 +152,4 @@ if (require.main === module) {
   setTimeout(() => { emit(startDirFrom(buf)); process.exit(0); }, 2000).unref();
 }
 
-module.exports = { contextFor, indexLines, unindexed };
+module.exports = { contextFor, indexLines, unindexed, noteName };
