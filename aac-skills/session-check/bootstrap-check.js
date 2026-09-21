@@ -7,6 +7,10 @@
  * skills it installed. This module asks:
  *
  *   - is the marker present at all? (STOP: hook never ran)
+ *   - was the marker written before this container booted? (the hook did not run in THIS
+ *     session: the marker, the skills and the seated governance hooks are whatever the container
+ *     image carried. Issue 643: a Routine-fired session read a two-day-old clone-failure marker
+ *     and reported nothing, because a hook that never runs writes nothing either)
  *   - does the marker record a failed stage? (STOP naming the stage and cause: the hook ran and
  *     could not clone dotfiles or find the payload — issue 483; before this the hook died under
  *     set -e with nothing written and the only signal was "marker absent")
@@ -26,8 +30,8 @@
  *                              override lets a test pin it)
  *
  * Exports:
- *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable' | 'failed', marker?, path,
- *                                      reason?, stage? }
+ *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable' | 'failed' | 'stale',
+ *                                      marker?, path, reason?, stage?, writtenAt?, bootedAt? }
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
  *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker? }
  *   verifyPluginRoot(marker)     -> { state: 'ok' | 'absent' | 'unrecorded', root? }
@@ -47,6 +51,16 @@ function skillsDir(env) {
     || path.join(env.HOME || os.homedir(), '.claude', 'skills');
 }
 
+/**
+ * When this container booted, as an ISO string and epoch ms. A cloud container's home is
+ * restored from a snapshot, so a marker older than the boot is one the image carried: the
+ * bootstrap hook did not run in this session (issue 643).
+ */
+function containerBootedAt() {
+  const ms = Date.now() - os.uptime() * 1000;
+  return { ms, iso: new Date(ms).toISOString() };
+}
+
 function readMarker(env) {
   const p = markerPath(env);
   if (!fs.existsSync(p)) return { state: 'missing', path: p };
@@ -63,6 +77,16 @@ function readMarker(env) {
     }
     if (!marker || typeof marker !== 'object' || !Array.isArray(marker.skills)) {
       return { state: 'unreadable', path: p, reason: 'marker JSON has no `skills` array' };
+    }
+    // Written before this container booted: whatever the image held, not what this session
+    // installed. The grace second covers a marker written while the clock was still settling.
+    const boot = containerBootedAt();
+    const written = Date.parse(marker.installed_at || '');
+    if (Number.isFinite(written) && written < boot.ms - 1000) {
+      return {
+        state: 'stale', marker, path: p,
+        writtenAt: marker.installed_at, bootedAt: boot.iso,
+      };
     }
     return { state: 'ok', marker, path: p };
   } catch (e) {
@@ -116,4 +140,7 @@ function verifyPluginRoot(marker) {
     : { state: 'absent', root };
 }
 
-module.exports = { readMarker, verifySkills, compareToMaster, verifyPluginRoot, markerPath, skillsDir };
+module.exports = {
+  readMarker, verifySkills, compareToMaster, verifyPluginRoot, markerPath, skillsDir,
+  containerBootedAt,
+};

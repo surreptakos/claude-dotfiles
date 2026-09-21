@@ -1095,6 +1095,14 @@ function bootstrapChecks() {
     }
     return;
   }
+  if (r.state === 'stale') {
+    // Issue 643: the hook did not run in THIS session, so everything below describes the
+    // container image rather than this container's bootstrap. A Routine-fired session whose
+    // project dir is not a harnessed repo never reaches the repo-anchored entry, and a home
+    // restored from a snapshot answers every question as though it had.
+    warn(`aac-bootstrap marker written ${r.writtenAt}, before this container booted (${r.bootedAt}) — the bootstrap hook did not run in this session; the payload, skills and governance hooks below are whatever the image carried`);
+    note('re-run it now: `bash ~/.claude/hooks/aac-bootstrap.sh` (the home-anchored seat, harness v31), or `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"` when this container predates that seat');
+  }
   const marker = r.marker;
   const v = bootstrap.verifySkills(marker, process.env);
   if (v.state === 'skills-missing') {

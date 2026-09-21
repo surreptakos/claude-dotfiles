@@ -262,6 +262,65 @@ python3 "$REPO/tests/bootstrap-assert.py"
 assert_status=$?
 [ "$assert_status" -eq 0 ] || fails=$((fails + 1))
 
+# ------------------------------- 5b. the home-anchored seat repairs a failed marker (issue 643) --
+# The state the fix exists for: a container image carrying a `failed: true` marker, and a session
+# whose project dir is not a harnessed repo, so the repo-anchored entry never runs. Only the copy
+# the bootstrap seated in user settings can repair that, so run THAT copy - by the path a
+# settings.json entry would - and require a healthy marker afterwards.
+SELF_HOOK="$CLEAN_HOME/.claude/hooks/aac-bootstrap.sh"
+MARKER_FILE="$CLEAN_HOME/.claude/hook-state/aac-bootstrap/state.json"
+if [ ! -x "$SELF_HOOK" ]; then
+  fail "no executable home-anchored hook at $SELF_HOOK to re-run"
+else
+  python3 - "$MARKER_FILE" <<'PYFAILED'
+import json, sys
+json.dump({'failed': True, 'stage': 'clone', 'skills': [],
+           'reason': "could not read Username for 'https://github.com'",
+           'failed_at': '2026-09-19T14:02:16Z'}, open(sys.argv[1], 'w'), indent=2)
+PYFAILED
+  reboot_out="$SCRATCH/self-hook-stdout.json"
+  reboot_err="$SCRATCH/self-hook-stderr.txt"
+  env -i \
+    PATH="$PATH_SHIM" \
+    HOME="$CLEAN_HOME" \
+    CLAUDE_CODE_REMOTE=true \
+    BOOTSTRAP_HOME="$CLEAN_HOME" \
+    BOOTSTRAP_SOURCE="$SRC" \
+    CLAUDE_ENV_FILE="$ENV_FILE" \
+    ${passthrough[@]+"${passthrough[@]}"} \
+    bash "$SELF_HOOK" >"$reboot_out" 2>"$reboot_err"
+  reboot_status=$?
+  if [ "$reboot_status" -ne 0 ]; then
+    fail "the home-anchored hook exited $reboot_status; stderr: $(tail -3 "$reboot_err" | tr '\n' ' ')"
+  elif python3 -c "import json,sys; m=json.load(open(sys.argv[1])); sys.exit(0 if m.get('failed') is not True and m.get('skills') else 1)" "$MARKER_FILE"; then
+    pass "the home-anchored copy re-bootstrapped over a failed marker without any project dir"
+  else
+    fail "the home-anchored copy left the failed marker in place at $MARKER_FILE"
+  fi
+  if grep -q 'AAC-BOOTSTRAP MARKER' "$reboot_out"; then
+    pass "its run printed the SessionStart marker line the model reads on prompt 1"
+  else
+    fail "its run printed no AAC-BOOTSTRAP MARKER line: $(head -c 160 "$reboot_out")"
+  fi
+  # Idempotence: a marker seconds old means a second entry firing in the same session has
+  # nothing to do, and must not print a second additionalContext line.
+  second_out="$SCRATCH/self-hook-second.json"
+  env -i \
+    PATH="$PATH_SHIM" \
+    HOME="$CLEAN_HOME" \
+    CLAUDE_CODE_REMOTE=true \
+    BOOTSTRAP_HOME="$CLEAN_HOME" \
+    BOOTSTRAP_SOURCE="$SRC" \
+    CLAUDE_ENV_FILE="$ENV_FILE" \
+    ${passthrough[@]+"${passthrough[@]}"} \
+    bash "$SELF_HOOK" >"$second_out" 2>/dev/null
+  if [ -s "$second_out" ]; then
+    fail "a second run over a fresh marker printed a duplicate line: $(head -c 120 "$second_out")"
+  else
+    pass "a second run over a fresh marker is a silent no-op"
+  fi
+fi
+
 # ------------------------------------------------------------ 6. session-check ------------------
 # The copy the bootstrap installed, run against a minimal fixture repo: the subject is the
 # cloud-bootstrap block, not this checkout's git state, tests or tracker.
