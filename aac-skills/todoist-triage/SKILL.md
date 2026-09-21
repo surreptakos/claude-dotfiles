@@ -2,15 +2,15 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-21T16:08:38Z"
-  previous-modified: "2026-09-18T21:07:02Z"
-  revision: "8"
-  content-sha: "cd9c13d7b87f"
+  modified: "2026-09-21T20:30:52Z"
+  previous-modified: "2026-09-21T20:24:01Z"
+  revision: "13"
+  content-sha: "3c2d6a98f3e9"
 ---
 
 # todoist-triage
 
-Dan rules; the skill reads, proposes, and writes once after approval. aac-routines (live) is intake only and never touches a task after creating it; this skill picks up from there. Labels are rulings, applied once, changed only when Dan says.
+Dan rules the judgment calls; the skill clears the rest on its own. It applies a settled delete or an exact-duplicate merge without asking, asks him about the few that need a person, and tells him the rest. aac-routines (live) is intake only and never touches a task after creating it; this skill picks up from there. Labels are rulings, applied once, changed only when Dan says.
 
 ## Scope
 
@@ -35,7 +35,11 @@ Dates carry the calendar, and Todoist's two date fields mean different things. T
 
 `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a merge leaves nothing nested to label, because the duplicate's markers move onto the survivor as a comment and the duplicate is deleted. A task still carrying `merged` is a nested duplicate from an older pass — propose it as a merge like any other, so its markers land on its parent and the subtask goes.
 
-**Wontfix is a ruling, and it is Dan's to file.** A task-shaped ruling lives as the task itself sitting in the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`), not in any run record. One ruling covers both routines: this skill's queue and the `aac-forgotten-tasks` guard read Wontfix through the same matcher with the same evidence bound, so an item Dan has ruled out stays suppressed on both sides until evidence newer than the ruling arrives, and then it resurfaces. Neither routine writes to Wontfix. Never move, complete or delete a task there, and never propose a write into it — Dan puts an item in Wontfix and Dan takes it out.
+**Wontfix is a ruling, and it is the only place a task-shaped one sticks.** It lives as the task itself sitting in the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`), not in any run record. One ruling covers both routines: this skill's queue and the `aac-forgotten-tasks` guard read Wontfix through the same matcher with the same evidence bound, so an item Dan has ruled out stays suppressed on both sides until evidence newer than the ruling arrives, and then it resurfaces.
+
+**File one when Dan rules in session; never on your own initiative.** When he says an item is done, dead, not his, or to stop raising it, write it to Wontfix in that same turn — title, the ruling and its date, the `aac-topic` key, and the regenerating source to suppress, so the routine that keeps recreating it matches. Then delete the live task. Until 2026-09-21 this skill forbade the routine from writing there at all, which left a ruling given in conversation with no destination: Dan said the OSH SSA renewal was settled repeatedly across sessions, every run rebuilt the same queue from the same O3 note, and the 2026-09-21 run asked him to go find out whether it was still open. A ruling with nowhere to land is a ruling you will ask for again (ADR 0009 in the routine repository).
+
+Two limits hold regardless: never move, complete or delete a task **already** in Wontfix — that one is his to take out — and never file one because the item looks stale to you. Absent his word it stays in the queue.
 
 **Find the ball by reading the last move.** Open the source and read the most recent message. Whoever owes the next move holds the ball. A direct asking Dan three questions puts the ball on Dan (`do`), however much the topic looks like theirs. Dan's verbs (decide, approve, sign, show, answer, call counsel) put the ball on Dan. A direct's prep or scheduling around Dan's decision is a comment, not a label. `do` plus `to-NAME` together only when Dan rules and the direct then owns execution, rarely.
 
@@ -120,27 +124,61 @@ Worked example (2026-09-15 miss): Dan reversed the "short O3 agenda" decision. A
 
 If a surface the item depends on could not be read (a connector failed, the export is missing, or the thread predates the export window and the tail connector for it is unreachable), do not assert a ruling. Mark it `unknown`, name the missing surface, and carry it into step 6 so Dan sees exactly which surface was dark.
 
-One line per queue item: title, ball label, project (Current Work if this week, else backlog), do date if Dan should see it again on a day, deadline if the source names one, one-clause reason. Ask the four questions in order and stop at the first that fires: delete (done, superseded, informational, RECORD, recruiter pitch, or 90+ days old with no date, no source, no owner); delegate (ball on a direct; non-directs route to their manager, Palm/Chris/Art/Freeman to Rob, Amanda to Mark); defer (`do`, backlog, do date for the resurface); do (`do`, Current Work). Propose a priority change only for a deadline inside 7 days at p2 or lower. Every `to-NAME` proposal on a link-only title carries a "Summary for handoff" comment in the same batch: what the source said, who said it and when, the ask for that direct, and any file that needs re-sharing to them. Duplicates are merge proposals: survivor named, dup's unique text quoted. Done when every queue item and alarm has a line, and every `unknown` names the unreachable surface it depended on.
+One line per queue item: title, ball label, project (Current Work if this week, else backlog), do date if Dan should see it again on a day, deadline if the source names one, one-clause reason. Ask the four questions in order and stop at the first that fires: delete (done, superseded, informational, RECORD, recruiter pitch, or 90+ days old with no date, no source, no owner); delegate (ball on a direct; non-directs route to their manager, Palm/Chris/Art/Freeman to Rob, Amanda to Mark); defer (`do`, backlog, do date for the resurface); do (`do`, Current Work). Propose a priority change only for a deadline inside 7 days at p2 or lower. Every `to-NAME` proposal on a link-only title carries a "Summary for handoff" comment in the same batch: what the source said, who said it and when, the ask for that direct, and any file that needs re-sharing to them. Duplicates are merge proposals: survivor named, dup's unique text quoted.
 
-### 4. Ask
+**Then give every line a tier** by the rules in step 4, and record on the tier-1 lines which of the two kinds it is and what proves it — the message read to its last message, the prior ruling, or the system row that contradicts the premise. A tier-1 line whose proof cannot be named in one clause is tier 2; that sentence is the whole safety of applying without asking.
 
-Order: alarms, do, delegate, defer, delete, merge, with counts. One `AskUserQuestion`: apply all, apply all except (Dan lists), rulings only. Dan's edits are literal and final. When a ruling rested on a premise the source contradicts, say so and propose the correction. Done when Dan has answered.
+Done when every queue item and alarm has a line and a tier, every tier-1 line names its proof, and every `unknown` names the unreachable surface it depended on.
+
+### 4. Sort into three tiers, then ask about one of them
+
+**Dan's ruling, 2026-09-21.** Four runs in a row proposed twelve items and applied none. Eleven of the twelve needed no judgment — a man was arriving with donuts, three were exact duplicates of tasks that already carried a ball and a date, one was a password Dan reset a week earlier and had already ruled out. Meanwhile the two that did need him, a renewal call with a Wednesday cliff and a lien deadline seven days blown, sat at the same weight as the donuts. A routine whose output nobody applies is a daily report Dan has learned to ignore. So it stops asking permission per item.
+
+Every ruling from step 3 lands in exactly one tier.
+
+**Tier 1 — apply, do not ask.** Two kinds of ruling only:
+
+- **A delete the source proves.** The thread read to its last message shows the thing happened or is settled; or Dan already ruled the topic out and this is a stray copy made since; or the system of record contradicts the task's premise (a Leave Dates row that does not exist, a ticket the portal shows closed).
+- **An exact-duplicate merge.** Same topic or normalized title as a survivor that already carries a ball and, where the work is dated, a date — and the duplicate adds no fact the survivor lacks beyond text the merge comment carries over verbatim.
+
+Nothing else is ever tier 1. Not a label that names a person, not a task carrying a deadline, not a delete resting on a title, an absence of evidence, or age alone. A ruling that *nearly* qualifies is tier 2; the tier is not a judgment call to be talked into.
+
+**Tier 2 — ask, all of them, in the same turn as the status.** Anything needing a human: whose ball it is when a name is involved, anything carrying a deadline, evidence that contradicts a label the task already has, and every `unknown`.
+
+**Never park a question (Dan, 2026-09-21).** Deliver the status, then raise every tier-2 item in that same turn. Not "five this run and the rest tomorrow" — a question held for a later run is the silent backlog this whole redesign exists to kill, and deferring one costs exactly what asking it would have. Rank by consequence so anything with a date on it is answered first. In a scheduled run nobody is at the keyboard, so the questions wait in the session; the notification is what brings Dan to them, and they are still asked, not deferred.
+
+**Ask in numbered prose (Dan, 2026-09-21).** No picker tool — a structured-question tool was tried and dropped, because it is missing from whole session types with no error and no signal (anthropics/claude-code#40644, closed as not planned; absent from this repository's own scheduled cloud runs), and a skill that reaches for it silently asks nothing in exactly the sessions that matter. Plain numbered questions, which work everywhere and leave Dan room to answer in his own words.
+
+The shape matters more than the medium, because the shape is what failed before: each question names the item, the one-clause reason, and **substantive rulings** to choose between — the ball on a named person, the date, delete, defer — never a bare approve/skip pair. Approve-or-skip was tried on 2026-09-21 and failed for the reason that matters: a skip carries no reason, so the item returns tomorrow with the identical proposal, which is how Dan came to repeat the same ruling to this routine thirty times. His reason is the valuable half of the answer, so leave him somewhere to put it.
+
+**A "no" always lands somewhere durable.** When Dan rejects a proposal or rules an item out, write it before the run ends: the task into Wontfix when it is task-shaped, `ruled-out` in the run record when the topic never became a task. A ruling that only appears in this session's transcript did not happen.
+
+**Tier 3 — tell, never ask.** Deadlines, past-due counts, the cap, coverage. These are not decisions and never belong in a queue. They go in the status (step 6).
+
+Done when every ruling carries a tier, tier 1 is applied, and Dan has answered the tier-2 questions.
 
 ### 5. Write
 
+Tier 1 is written without asking — that is what the tier is. Tier 2 is written after Dan answers, his edits literal and final. Everything written lands in Todoist's own history, so a tier-1 write is visible and reversible; that, not a confirmation prompt, is what makes applying without asking safe.
+
 `update-tasks` in batches of 25, touching only `labels` (full replacement, keep `claude` and other non-ball labels), `projectId` (never into or out of the Inbox — that move belongs to the router), `dueString` for the do date (non-recurring only; recurring tasks use `reschedule-tasks`), `deadlineDate` when the source names one, `priority` when approved. Merges: `add-comments` on the survivor carrying the dup's unique text and the dup's `aac-source`/`aac-topic` markers copied verbatim (both routines match a marker as a plain substring of the comment, so a paraphrase breaks dedupe), then `delete-object` on the dup — every merge the same way, a routine-created duplicate included. **This skill never nests a task under another** (Dan, 2026-09-21): no `add-tasks` with `parentId`, no `parentId` in an `update-tasks` call, not for a merge and not for a breakdown. The markers live in a comment, which is the surface both routines read, so nesting a duplicate to keep them visible buys nothing a comment does not. A breakdown Dan dictates that is big enough to need tracking is proposed as its own Todoist project (`add-projects`, then `add-tasks` into it); anything smaller stays one task. Titles and descriptions stay as written; the routine's `aac-source`/`aac-topic` dedupe markers live in a task comment, and a task created before that ruling still carries them in its description. Done when every approved line is applied and each failure is named.
 
-### 6. Report
+### 6. Status
 
-Output contract, in this order:
+**Dan will not read a status that is not shaped for him (2026-09-21), so this is a contract, not a preference.** Six lines at most, the first one the thing he would act on today. No preamble, no recap, no closing question. Numbers in concrete units, never "several" or "a few". If reading only the first line and the last tells him what needs him and what changed, it is shaped right; if it does not, cut until it does.
 
-1. **Deadline-inside-24 h items first.** Every task with a deadline in the next 24 hours goes at the top, before any other section, so it is the first thing Dan reads.
-2. **Prior run records read.** Say where the records were read from, then name the `aac-forgotten-tasks` run record and the previous `todoist-triage` run record that step 1 loaded — timestamp and filename each. For either that was missing, say so plainly, so Dan sees the run built its queue without it: "none found" when the store was read and held nothing, and "the store was never read this run" when the pull did not happen. Never the first when it was the second.
-3. **Unreachable surfaces.** List every connector or export step 1 could not read this run. Beside each `unknown` ruling, name the surface it depended on. Every `unknown` from step 3 appears here, tied to the surface that was dark.
-4. **Left alone as not work.** Every Inbox item this run judged personal or non-work, by title, still sitting in the Inbox untouched, so Dan can deal with them himself. "None" when there were none.
-5. **Counts changed, what Dan declined, alarms still open, active-list count over cap.**
+The order, and nothing else above it:
 
-Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `merged`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. The prior-run-records line is the one exception: it may spell the record filenames so Dan can go find them.
+1. **What needs him today**, or "nothing today" in those words. A deadline inside 24 hours goes here and nowhere else. One line.
+2. **What was applied without asking**, by count and kind: "deleted 3 settled items, merged 2 duplicates." He can open Todoist history if he wants the detail; do not list twelve titles at him.
+3. **What is about to be asked** — the count and what the questions are about, in one line. The status comes first and the questions follow it in the same turn, so this line is what tells him how many are coming. Never a count of questions held back; there are none.
+4. **What is coming**, ranked, at most three: deadlines inside 14 days and past do dates, each with its number of days. This is the tier-3 material and it is the only place it appears.
+5. **What was dark**, one line, only when a surface failed: which one, and which ruling it made `unknown`. Omit the line entirely on a clean run rather than printing "none".
+6. **Where the run records came from**, one line naming the two files or saying plainly which was missing — "none found" only when the store was read and held nothing, "the store was never read this run" when the pull did not happen. Never the first when it was the second.
+
+Inbox items judged personal are named on line 2's tail, by title, as left alone.
+
+Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. Line 6 is the one exception: it may spell the record filenames so he can go find them.
 
 **Then append this run's record.** After the report, from the `aac-routines` checkout:
 
@@ -150,13 +188,15 @@ python -m aac_routines.run_ledger record --input <record.json>
 
 Then upload that file to the `aac-run-ledger` Drive folder with `mcp__Google-Drive__create_file` (`contentMimeType: application/json`, `disableConversionToGoogleType: true`, so Drive keeps it as JSON instead of converting it to a Doc). The local copy dies with the session, so a record that is not uploaded did not happen as far as tomorrow's run is concerned.
 
-The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task Dan put in Wontfix. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
+The record names `todoist-triage` as its routine and holds only what happened this run — `sources_read`, `sources_unreachable`, `prior_records_consumed`, `coverage_gaps`, and `rulings` on topics that never became tasks. It is append-only and carries no task state: a filename that already exists is refused, and so is a record silent about the prior records, which must either list them in `prior_records_consumed` or carry the matching "none found" line in `coverage_gaps`. A task-shaped ruling never goes in it; that one is the task in Wontfix.
+
+**Only `ruled-out` suppresses anything.** `noted` is a log line and changes nothing about tomorrow's queue. Use `ruled-out` whenever Dan has actually ruled on a topic; `record` refuses a `noted` ruling whose reason speaks a dismissal, and prints how many of the record's rulings suppress, so "the ruling is recorded" cannot mean "nothing is". The six records written 2026-09-17 to 2026-09-21 carried 30 rulings, every one of them `noted`, several saying "Delete proposed a third time" in the reason — Dan's ruling written down in prose and thrown away by the value, and the same items back in the queue every run. These commands and their JSON are the skill's plumbing, not report text — the vocabulary rule above governs what Dan reads.
 
 Done when Dan can see the board state without opening Todoist, knows which surfaces were dark and which rulings that made unknown, and this run's record is appended.
 
 ## Cadence
 
-On demand, plus the scheduled proposal (steps 1 through 3 only; no writes) weekdays at 8:00 AM. Writes happen only in a live session after step 4. The Friday run also proposes which backlog `do` items move up for the coming week.
+On demand, plus the scheduled run weekdays at 8:00 AM. The scheduled run **applies tier 1, sends the status, then raises every tier-2 question** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. Nobody is at the keyboard, so the questions wait in the session until Dan arrives; the notification is what brings him, and he answers them there. Waiting in an open question is not the same as being parked for tomorrow. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
 
 ## Filters (exist in Todoist, favorited)
 
