@@ -26,3 +26,10 @@ goes with the worktree.
 a manual `git push origin --delete` then fails with `remote ref does not exist`. Check
 `git ls-remote --heads origin <branch>` before deleting by hand. The manual step still
 applies in repos without that setting.
+
+**Update 2026-09-21 (issue 637):** a cloud container cannot delete a remote branch at all. The
+proxy refuses both instruments: `git push origin --delete <branch>` fails with
+`error: RPC failed; HTTP 403`, and `gh api -X DELETE repos/<owner>/<repo>/git/refs/heads/<branch>`
+answers `Write access to this GitHub API path is not permitted through this proxy.` Merging still
+deletes the head branch, because `delete_branch_on_merge` is on; it is only a branch with no merge
+behind it, such as an abandoned fleet attempt, that a container has to leave for the desktop.
