@@ -29,6 +29,7 @@ const path = require('path');
 const INDEX_RELATIVE = path.join('docs', 'agents', 'memory', 'MEMORY.md');
 const BUDGET = Number(process.env.REPO_MEMORY_BUDGET || 2048);
 const MAX_WALK_UP = 12;
+const MAX_SIBLING_REPOS = 4;
 
 // The session's directory may be a subdirectory of the checkout (or a worktree), so walk up until
 // the index shows up. The index file itself is the marker: no dependence on .git, which a worktree
@@ -43,6 +44,27 @@ function findIndex(startDir) {
     dir = parent;
   }
   return null;
+}
+
+// A cloud session with two sources opens their PARENT (/home/user holds aac-routines and
+// claude-dotfiles), so the walk up finds nothing and the session starts with no memory at all —
+// which is how a session re-learns by hand what a committed note already says. One level down
+// covers that layout; deeper is a file tree, not a checkout root.
+function findIndexes(startDir) {
+  const found = findIndex(startDir);
+  if (found) return [found];
+  let entries;
+  try {
+    entries = fs.readdirSync(path.resolve(startDir), { withFileTypes: true });
+  } catch (e) {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.'))
+    .map((entry) => path.join(path.resolve(startDir), entry.name, INDEX_RELATIVE))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort()
+    .slice(0, MAX_SIBLING_REPOS);
 }
 
 function indexLines(text) {
@@ -101,8 +123,11 @@ function build(indexPath, lines, missing, repoRoot) {
 }
 
 function contextFor(startDir) {
-  const indexPath = findIndex(startDir);
-  if (!indexPath) return null;
+  const blocks = findIndexes(startDir).map(blockFor).filter(Boolean);
+  return blocks.length ? blocks.join('\n\n') : null;
+}
+
+function blockFor(indexPath) {
   let text;
   try {
     text = fs.readFileSync(indexPath, 'utf8');

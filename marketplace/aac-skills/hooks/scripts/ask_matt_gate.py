@@ -382,7 +382,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     pending_lint = (previous or {}).get("pending_lint") or []
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
-        f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>`. "
+        f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>` — as the ONLY "
+        "command in that shell call, nothing chained after it, or the call is denied. "
         "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
         "Broken behavior: diagnosing-bugs. Raw issues: triage. "
         "Large foggy effort (publishes a map and ticket set): wayfinder. Review: code-review. Research: research. "
@@ -762,8 +763,12 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
             return {}
         current["unknown_tool_denied"] = tool_name
         _write_state("claude", session_id, current)
+    # The wording names the two ways a first call fails: no declaration yet, or a declaration with
+    # a command chained onto it. A session that chained `; ls` onto its declaration read the old
+    # text as "the declaration failed" and retried the same shape, losing two turns to the gate.
     return _deny(
-        "Ask Matt, Yes, and caveman ultra missing. Run exact declaration from prompt gate."
+        "Ask Matt, Yes, and caveman ultra missing. Run the exact declaration from the prompt gate "
+        "as the ONLY command in the call — a chained command after it denies the whole call."
     )
 
 

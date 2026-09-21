@@ -162,6 +162,41 @@ test('compareToMaster returns unknown when no manifest to read against', () => {
   assert.equal(c.marker, '2026.9.151521');
 });
 
+// The version master offers comes off the REMOTE. Reading it from the bootstrap's own clone —
+// the tree the payload was cut from — made 'same' unfalsifiable: on 2026-09-21 that clone was 11
+// commits behind and the check still reported a match.
+function cloneFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-clone-'));
+  fs.mkdirSync(path.join(dir, '.aac-dotfiles', '.git'), { recursive: true });
+  const stale = path.join(dir, '.aac-dotfiles', 'marketplace', 'aac-skills', '.claude-plugin');
+  fs.mkdirSync(stale, { recursive: true });
+  fs.writeFileSync(path.join(stale, 'plugin.json'), JSON.stringify({ version: '2026.9.211608' }));
+  return dir;
+}
+
+test('compareToMaster reads the version master offers from the remote, not the local clone', () => {
+  const home = cloneFixture();
+  const calls = [];
+  const run = (cmd, args) => {
+    calls.push(args.join(' '));
+    return args.includes('show')
+      ? { status: 0, stdout: JSON.stringify({ version: '2026.9.212113' }) }
+      : { status: 0, stdout: '' };
+  };
+  const c = compareToMaster({ payload_version: '2026.9.211608' }, { HOME: home }, run);
+  assert.equal(c.state, 'drift');
+  assert.equal(c.master, '2026.9.212113');
+  assert.ok(calls.some((a) => a.includes('fetch --depth 1 origin master')), calls.join(' | '));
+});
+
+test('compareToMaster says unknown when the remote cannot be read — never the clone\'s own answer', () => {
+  const home = cloneFixture();
+  const run = () => ({ status: 128, stdout: '' });
+  const c = compareToMaster({ payload_version: '2026.9.211608' }, { HOME: home }, run);
+  assert.equal(c.state, 'unknown');
+  assert.equal(c.marker, '2026.9.211608');
+});
+
 test('verifyPluginRoot is ok when the recorded payload still carries hooks/scripts (issue 614)', () => {
   const f = fixture();
   fs.mkdirSync(path.join(f.dir, 'payload', 'hooks', 'scripts'), { recursive: true });
