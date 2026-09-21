@@ -41,3 +41,12 @@ The manifest does NOT distinguish org-scoped from personal — every uploaded sk
 from `~/.claude/skills` alone — list channel 3 for both orgs first. The org UUIDs come from each
 profile's `.claude.json` (`oauthAccount.organizationUuid`).
 
+**Update 2026-09-21 (issue 631):** a cloud container's skill list differs from `aac-skills/` in
+both directions, and all of it is by design. Ten source skills never reach the payload: they are
+named in `DEAD_LOAD_DROPPED` in `tools/build-cloud-plugin.py`, one written reason each, decided in
+issue 530 — the seven design skills, `ux-copy`, `to-issues`, `to-prd`. Twenty-one container skills
+are not in this repo at all: the caveman CLI installs twenty (thirteen `caveman-*`, `cavecrew`, and
+the six task-contract policies `investigate-first`, `lean-build`, `migration`, `safe-refactor`,
+`surgical-patch`, `verify-and-stop`, all of which its per-prompt hook names), `session-start-hook`
+comes with Claude Code, and `synced/` is channel 3's account cache. Before calling any of that
+drift, check those four sources: `comm` over two listings proves a difference, not a fault.
