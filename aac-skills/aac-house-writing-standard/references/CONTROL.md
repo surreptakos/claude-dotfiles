@@ -98,6 +98,8 @@ Once the company makes a recurring editorial decision, add it to this standard t
 
 ☐ Lists are parallel, and independent numbering restarts at 1.
 
+☐ No list item repeats a statement already made in the prose.
+
 ☐ Acronyms fit the audience.
 
 ☐ Capitalization follows this standard.

@@ -70,6 +70,8 @@ For decision-oriented or action-oriented writing, state the principal point befo
 
 Long emails should use a bottom-line-first opening.
 
+Exception for delegation. When an email delegates a task the recipient must carry out live, such as a customer call or a negotiation, state the goal and the concern behind the request before the instruction. The recipient needs the reason to handle what the script does not cover.
+
 Preferred: Please approve the attached $38,500 proposal by Thursday at 3 p.m. so we can release the equipment order Friday.
 
 Do not make the reader search through history to determine why the message was sent.

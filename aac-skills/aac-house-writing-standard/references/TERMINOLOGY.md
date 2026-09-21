@@ -80,6 +80,7 @@ Table F1. House decision register
 | 23 | Em dash cut by default; one rare exception allowed in longer narrative drafts; none in formal documents. | Amends the v0.1 hard avoidance to match Part XXV. Formal documents keep the hard rule. | 0.5 |
 | 153–166; G; H | Draft-quality and AI-tell rules adopted as a snapshot of stop-slop PR #66 (commit 8e2130b, unmerged). | Third-party proposal, MIT licensed. Re-verify against upstream when the PR merges or closes. | 0.5 |
 | 53; D | U.S. telephone numbers use hyphens, without parentheses. | Concurrent draft, Rule 53. Standardizes the displayed number. | 0.4 |
+| 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
 
 # References
 

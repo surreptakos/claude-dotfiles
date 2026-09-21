@@ -18,14 +18,14 @@
  *
  * Exit: 0 clean, 1 findings at error severity, 2 could not read a file.
  *
- * Pinned to AAC-WR-001 v0.5. Ship this file under the same tag as the
+ * Pinned to AAC-WR-001 v0.6. Ship this file under the same tag as the
  * standard; a lint rule and the text it enforces must not drift apart.
  */
 
 const fs = require("fs");
 const path = require("path");
 
-const STANDARD_VERSION = "0.5";
+const STANDARD_VERSION = "0.6";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;

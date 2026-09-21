@@ -2,11 +2,11 @@
 name: aac-house-writing-standard
 description: 'AAC-WR-001, the controlled copy of AAC''s house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit.'
 metadata:
-  standard-version: '0.5'
-  modified: '2026-09-12T03:21:56Z'
-  previous-modified: '2026-09-11T22:21:29Z'
-  revision: '3'
-  content-sha: 0cabe6164554
+  standard-version: '0.6'
+  modified: '2026-09-21T19:34:18Z'
+  previous-modified: '2026-09-12T03:21:56Z'
+  revision: '4'
+  content-sha: 473e86d18318
 ---
 
 # AAC house writing standard
@@ -49,11 +49,15 @@ would settle it.
 
 ## Regenerating after a revision of the standard
 
+The master is `docs/standards/AAC-WR-001.md` at the repo root. Edit it, never
+the files under `references/`, then from this directory:
+
 ```
-python3 scripts/build_references.py <AAC-WR-001.md> references/
+python3 scripts/build_references.py ../../docs/standards/AAC-WR-001.md references/
 ```
 
-It prints a new `content-sha`. Put it in this file's `metadata`, raise
-`revision`, and move `modified` to `previous-modified`. The script exits
-non-zero if any section of the source lands in no file, so a new Part cannot go
-missing.
+The script exits non-zero if any section of the source lands in no file, so a
+new Part cannot go missing. Then set `standard-version` in this file's
+`metadata` and `STANDARD_VERSION` in `scripts/wr001-lint.js` to the new
+version. The other four metadata keys belong to `tools/skill-stamps.py`; the
+repo's stamp-and-build commands rotate them.
