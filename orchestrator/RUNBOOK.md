@@ -91,6 +91,24 @@ its own layer: the scout returning zero eligible `ready-for-agent` tickets exits
 any implementer starts, so an empty pass that reaches dispatch still costs nothing beyond the
 scout. The Routines UI's pause switch is the kill switch for everything else.
 
+## Two repos, one session
+
+The served repo arrives as the Routine's source. `claude-dotfiles` arrives twice over, and neither
+copy is a source:
+
+- **This runbook** comes from the shallow clone the SessionStart bootstrap hook makes at
+  `$HOME/.aac-dotfiles`, whole-repo, from master. Reading it needs no attachment; the cloud proxy
+  clones a public repo the session never attached (issue 614).
+- **The state issue** is a GitHub write, and that is the part attachment governs. Every REST call
+  whose target repo is not attached to the session answers HTTP 403 `not enabled for this session`
+  (`docs/agents/issue-tracker.md`). A master that cannot write `surreptakos/claude-dotfiles#<N>`
+  cannot clear the venue or leave a `Pass complete` line, which is the whole record of the pass.
+
+**So the Routine carries `surreptakos/claude-dotfiles` as a second source** wherever the Routines
+UI accepts more than one. Where it does not, the master's first act is to attach it with the
+repo-attach tool, before the boot reads — and that attach is classifier-gated, so a refusal there
+ends the pass with a comment rather than silently skipping the record.
+
 ## Dispatch
 
 Everything runs in-session from the Routine's fresh session. The session already has the repo

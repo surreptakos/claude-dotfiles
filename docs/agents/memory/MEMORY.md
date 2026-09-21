@@ -15,8 +15,9 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - answer-yes-no-in-one-line: outcome, action, timing
 - bash-tool-collapses-backslashes: `\\` -> `\`
 - caveman-base-url-stays-with-the-proxy: proxy-only
-- classifier-refusals-are-shape-not-action: retry; MCP
+- classifier-refusals-are-shape-not-action: retry
 - cloud-containers-can-run-powershell: 7.4.6 tarball
+- cloud-home-snapshot: seat in $HOME
 - cloud-only-criteria-stall-the-desktop-fleet: cloud proof
 - cowork-runs-plugin-hooks: mcp__workspace__bash
 - cowork-scheduled-tasks-live-in-session-uploads: uploads
@@ -25,7 +26,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - environment-verification-log: log
 - fable-usage-is-rationed: weekly cap
 - gate-declare-bare-command: nothing appended
-- hook-exit-126-is-the-mode-bit: diag log; seat PLUGIN_ROOT
+- hook-exit-126-is-the-mode-bit: diag log; seat root
 - dotfiles-public-for-cloud-clone: no env sources
 - leave-dates-token-rides-the-proxy: proxy-held
 - marketplace-is-the-distribution-spine: installs read it
@@ -37,11 +38,11 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 - restore-test-reads-live-skill-copies: live edit
 - scratchpad-path-too-long-for-git-clone: short root
 - sed-strips-crlf-in-this-repo: no sed -i on .ps1
-- session-env-carries-zoho-and-gas-tokens: names only
+- session-env-carries-zoho-and-gas-tokens: names
 - session-end-fixes-all-drift: every finding
 - state-a-standing-rule-once: once
 - three-skill-channels: only local in repo
 - trust-dialog-fires-despite-accepted-flag: strip allow
 - user-scope-plugin-wins-over-project-scope: user wins
-- verify-before-filing-a-sweep-ticket: re-list first
+- verify-before-filing-a-sweep-ticket: re-list
 - workflow-runtime-quirks: scriptPath; no Date.now; LF
