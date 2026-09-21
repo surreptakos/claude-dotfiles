@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-21T20:07:42Z"
-  previous-modified: "2026-09-21T19:48:57Z"
-  revision: "11"
-  content-sha: "e24cab76faff"
+  modified: "2026-09-21T20:24:01Z"
+  previous-modified: "2026-09-21T20:07:42Z"
+  revision: "12"
+  content-sha: "b42c614829bc"
 ---
 
 # todoist-triage
@@ -145,9 +145,11 @@ Nothing else is ever tier 1. Not a label that names a person, not a task carryin
 
 **Tier 2 — ask, all of them, in the same turn as the status.** Anything needing a human: whose ball it is when a name is involved, anything carrying a deadline, evidence that contradicts a label the task already has, and every `unknown`.
 
-**Never park a question (Dan, 2026-09-21).** Deliver the status, then raise every tier-2 item through `AskUserQuestion` in that same turn. Not "five this run and the rest tomorrow" — a question held for a later run is the silent backlog this whole redesign exists to kill, and deferring one costs exactly what asking it would have. Batch them into as few calls as the tool takes, ranked by consequence so the one with a date on it is answered first; read the tool's own schema for how many questions and options a single call accepts rather than trusting a number written here. In a scheduled run nobody is at the keyboard, so the questions simply wait in the session — the notification is what brings Dan to them, and they are still asked, not deferred.
+**Never park a question (Dan, 2026-09-21).** Deliver the status, then raise every tier-2 item in that same turn. Not "five this run and the rest tomorrow" — a question held for a later run is the silent backlog this whole redesign exists to kill, and deferring one costs exactly what asking it would have. Rank by consequence so anything with a date on it is answered first. In a scheduled run nobody is at the keyboard, so the questions wait in the session; the notification is what brings Dan to them, and they are still asked, not deferred.
 
-**Every question goes through `AskUserQuestion` (Dan, 2026-09-21).** Never a question in prose he has to answer by typing a paragraph back. Each one carries the item, the one-clause reason, and the options as **substantive rulings** — the ball on a named person, the date, delete, defer — never a bare approve/skip pair. Approve-or-skip was tried on 2026-09-21 and failed for the reason that matters: a skip carries no reason, so the item returns tomorrow with the identical proposal, which is how Dan came to repeat the same ruling to this routine thirty times. The free-text option is where his reason goes, and it is the valuable half of the answer.
+**`AskUserQuestion` when it exists, numbered prose when it does not.** Prefer the tool — a picker beats typing. But it is missing from whole session types with no error and no signal (anthropics/claude-code#40644, closed as not planned; absent from this repository's own scheduled cloud runs), so a skill that requires it silently asks nothing in exactly the sessions that matter. Check for it, use it when present, and otherwise ask in numbered prose. Never let its absence become a reason to skip or defer.
+
+Either way the shape is the same, because the shape is what failed before: each question names the item, the one-clause reason, and **substantive rulings** to choose between — the ball on a named person, the date, delete, defer — never a bare approve/skip pair. Approve-or-skip was tried on 2026-09-21 and failed for the reason that matters: a skip carries no reason, so the item returns tomorrow with the identical proposal, which is how Dan came to repeat the same ruling to this routine thirty times. His reason is the valuable half of the answer, so leave him somewhere to put it.
 
 **A "no" always lands somewhere durable.** When Dan rejects a proposal or rules an item out, write it before the run ends: the task into Wontfix when it is task-shaped, `ruled-out` in the run record when the topic never became a task. A ruling that only appears in this session's transcript did not happen.
 
