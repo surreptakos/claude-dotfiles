@@ -62,8 +62,17 @@ def text_from_transcript(path):
 
 def main():
     try:
-        data = json.load(sys.stdin)
-    except Exception:
+        import stopslop
+    except Exception as e:
+        sys.stderr.write(f"stop-slop hook: could not load linter: {e}\n")
+        return 0
+
+    try:
+        data = stopslop.decode_payload(sys.stdin.buffer.read())
+    except Exception as e:
+        # Never silent: a payload this hook cannot read is why the gate passed
+        # every message for months (issue 620).
+        sys.stderr.write(f"stop-slop hook: {e}\n")
         return 0
 
     # Loop guard: if we already forced one revision this turn, let it finish.
@@ -76,12 +85,9 @@ def main():
         if transcript:
             msg = text_from_transcript(transcript)
     if not msg.strip():
-        return 0
-
-    try:
-        import stopslop
-    except Exception as e:
-        sys.stderr.write(f"stop-slop hook: could not load linter: {e}\n")
+        sys.stderr.write(
+            "stop-slop hook: payload carried no assistant message "
+            f"(keys: {', '.join(sorted(data))})\n")
         return 0
 
     hits = stopslop.scan(msg, technical=False)

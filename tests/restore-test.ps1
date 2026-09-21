@@ -901,6 +901,33 @@ if ((Test-Path $slopModule) -and (Test-Path $slopHook)) {
             ($slopExit -eq $case.Want) `
             (@("exit $slopExit, wanted $($case.Want)") + @($slopOut | Select-Object -Last 8))
     }
+
+    # The first Windows run of this check failed at exit 0 while the same hook exited 2 in a
+    # Linux container: PowerShell 5.1 hands a native command its stdin in the console encoding
+    # and may prefix a byte-order mark or send UTF-16, and `json.load(sys.stdin)` raises on both,
+    # which the hook answered by returning 0 in silence. Feed it both shapes from a file, so the
+    # decoder is asserted rather than whatever encoding this host's pipe happens to use.
+    $slopText = "Here's the thing: experts agree this release marks a pivotal moment."
+    $slopJson = @{ hook_event_name = 'Stop'; stop_hook_active = $false
+                   last_assistant_message = $slopText } | ConvertTo-Json -Compress
+    $encodings = @(
+        @{ Name = 'a UTF-8 payload with a byte-order mark'; Enc = (New-Object System.Text.UTF8Encoding $true) },
+        @{ Name = 'a UTF-16 payload';                       Enc = (New-Object System.Text.UnicodeEncoding $false, $true) }
+    )
+    foreach ($e in $encodings) {
+        $payloadFile = Join-Path $FakeRoot ("slop-{0}.json" -f ([guid]::NewGuid().ToString('N').Substring(0, 6)))
+        [System.IO.File]::WriteAllText($payloadFile, $slopJson, $e.Enc)
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $encOut  = & cmd /c "py -3 `"$slopHook`" < `"$payloadFile`" 2>&1"
+            $encExit = $LASTEXITCODE
+        } finally { $ErrorActionPreference = $prev }
+        Remove-Item $payloadFile -Force -ErrorAction SilentlyContinue
+        Check ("restored stop-slop Stop hook exits 2 on {0} (issue 620)" -f $e.Name) `
+            ($encExit -eq 2) `
+            (@("exit $encExit, wanted 2") + @($encOut | Select-Object -Last 8))
+    }
 }
 
 $check = Join-Path $FakeHome '.claude\skills\session-check\check.js'

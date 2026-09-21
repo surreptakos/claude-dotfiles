@@ -704,6 +704,43 @@ def scan(text, technical=False):
     return hits
 
 
+
+def decode_payload(raw):
+    """Decode a Claude Code hook payload read as bytes from stdin.
+
+    A hook is fed its JSON payload on stdin by whatever shell the host uses.
+    Windows PowerShell 5.1 hands a native command text in the console encoding
+    and can prefix a byte-order mark or send UTF-16, and `json.load(sys.stdin)`
+    raises on both. The two stop-slop hooks then returned 0, so the gate passed
+    every message on the owner's own machine while passing its tests in a Linux
+    container (issue 620, caught by the Windows restore test).
+
+    Returns the parsed object. Raises ValueError with the reason, so the caller
+    reports it instead of failing open in silence.
+    """
+    import json as _json
+
+    if not raw:
+        raise ValueError("empty payload on stdin")
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff") or (len(raw) > 1 and raw[1] == 0):
+        encodings = ("utf-16", "utf-8-sig", "utf-8")
+    else:
+        encodings = ("utf-8-sig", "utf-8", "utf-16")
+    last = None
+    for enc in encodings:
+        try:
+            text = raw.decode(enc)
+        except Exception as e:  # noqa: BLE001 - reported, not swallowed
+            last = e
+            continue
+        try:
+            return _json.loads(text)
+        except Exception as e:  # noqa: BLE001 - reported, not swallowed
+            last = e
+    raise ValueError("%d bytes on stdin are not JSON in any of %s: %s"
+                     % (len(raw), ", ".join(encodings), last))
+
+
 def _main(argv):
     technical = "--technical" in argv
     paths = [a for a in argv if not a.startswith("--")]
