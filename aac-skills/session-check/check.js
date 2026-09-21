@@ -909,7 +909,7 @@ function bootstrapChecks() {
     stop(`aac-bootstrap ${r.stage} failed — ${r.reason}`);
     note(`marker ${r.path}${r.marker.failed_at ? ` written ${r.marker.failed_at}` : ''}; no aac payload, skills or governance hooks in this container`);
     if (r.stage === 'clone') {
-      note('if git could not read a username for github.com: the dotfiles repo is not a source of this session — self-heal now: call the Claude_Code_Remote add_repo tool for surreptakos/claude-dotfiles (read), then re-run the hook with `bash "<its path>"` (claude-dotfiles issue 614; the durable fix is the repo as a second source of the environment); or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
+      note('if git could not read a username for github.com: the dotfiles repo is not a source of this session — self-heal now: call the Claude_Code_Remote add_repo tool for surreptakos/claude-dotfiles (read), then re-run the hook with `bash "<its path>"` (claude-dotfiles issue 614; the repo is public since 2026-09-21 precisely so the proxy clones it unattached, so a username failure means it reads as private again — tell the owner to check its visibility); or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
     }
     return;
   }
