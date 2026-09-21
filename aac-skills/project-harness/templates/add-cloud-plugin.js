@@ -42,7 +42,16 @@ const PLUGIN = 'aac-skills@claude-dotfiles';
 // 245 text) alongside this one — they are elaboration, not gates.
 const AUTOMODE_ALLOW_RULING =
   JSON.parse(fs.readFileSync(path.join(__dirname, 'claude-settings.json'), 'utf8')).autoMode.allow[0];
-const PERMISSIONS_ALLOW = ['Bash(*)', 'Edit', 'Write', 'mcp__github__*'];
+// `Workflow`, `Agent`, `Task` and the session tools are what a Routine master actually dispatches
+// with, and none of them were listed: on 2026-09-21 the master-contract-builder wake parked on a
+// `Workflow` approval prompt for ticket-fleet.js and held its venue claim until the 90-minute
+// guard expired, because auto mode sends an unlisted tool to the classifier and an unattended
+// session has nobody to answer it. The autoMode.allow ruling below sanctions the action; only a
+// permissions.allow entry removes the decision point.
+const PERMISSIONS_ALLOW = [
+  'Bash(*)', 'Edit', 'Write', 'mcp__github__*',
+  'Workflow', 'Agent', 'Task', 'mcp__Claude_Code_Remote__*',
+];
 
 let settings = {};
 let rawBefore = null;
