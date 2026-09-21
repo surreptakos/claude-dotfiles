@@ -1130,7 +1130,7 @@ function bootstrapChecks() {
   if (self.state === 'ok') note(`bootstrap re-run seated at ${self.hook}, so a session on any project dir bootstraps (issue 643)`);
   else note('marker records no plugin_root: a pre-v30 bootstrap, whose merged governance hooks could not run (issue 614) — the next container picks up the current hook');
   const cmp = bootstrap.compareToMaster(marker, process.env);
-  if (cmp.state === 'drift') note(`payload v${cmp.marker} loaded; master offers v${cmp.master} — next container will pick it up`);
+  if (cmp.state === 'drift') note(`payload v${cmp.marker} loaded; master offers v${cmp.master} — this session is running the older skills, hooks and rules; take master now with \`bash ~/.claude/hooks/aac-bootstrap.sh\` (the home-anchored seat), or \`bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"\` when this container predates it`);
   else if (cmp.state === 'same') note(`payload matches dotfiles master (v${cmp.master})`);
   else note(`payload v${cmp.marker} loaded; master version could not be read here`);
 }

@@ -41,6 +41,22 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+
+const MANIFEST_IN_REPO = 'marketplace/aac-skills/.claude-plugin/plugin.json';
+
+// A session start waits on this, so it is bounded and never throws: a git that hangs, fails or is
+// absent is 'could not read', not a broken check.
+function execGit(command, args) {
+  try {
+    const stdout = execFileSync(command, args, {
+      encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return { status: 0, stdout };
+  } catch (e) {
+    return { status: e.status == null ? 1 : e.status, stdout: '' };
+  }
+}
 
 function markerPath(env) {
   return env.BOOTSTRAP_MARKER_FILE
@@ -106,24 +122,47 @@ function verifySkills(marker, env) {
 }
 
 /**
- * Compare the marker's payload_version to what master offers today. The manifest lives in the
- * clone the bootstrap made under ~/.aac-dotfiles; the test override points to another file.
- * A missing manifest is 'unknown', not 'drift' — the answer requires evidence.
+ * Compare the marker's payload_version to what master offers today.
+ *
+ * "Today" has to come off the REMOTE. The version used to be read from the manifest inside the
+ * bootstrap's own clone — the very tree the payload was cut from — so the answer was 'same' by
+ * construction and the line "payload matches dotfiles master" could never be false. Seen
+ * 2026-09-21: the clone was 11 commits behind master, the payload was missing a skill
+ * description that had merged 10 minutes before the session opened, and the check reported a
+ * match. A shallow `git fetch` of the ref, then `git show <ref>:…plugin.json`, reads the version
+ * master actually offers; the clone's own manifest is never a fallback, because its answer is
+ * the bug. No remote, no answer: 'unknown', which check.js already prints honestly.
+ *
+ * `run` is injected for tests; in a real session it is a bounded execFileSync.
  */
-function compareToMaster(marker, env) {
-  const manifest = env.BOOTSTRAP_MASTER_MANIFEST
-    || path.join(env.HOME || os.homedir(), '.aac-dotfiles', 'marketplace', 'aac-skills',
-                 '.claude-plugin', 'plugin.json');
-  if (!fs.existsSync(manifest)) return { state: 'unknown', marker: marker.payload_version };
+function gitVersionAtRemote(clone, ref, run) {
+  const git = (...args) => run('git', ['-C', clone, ...args]);
+  if (git('fetch', '--depth', '1', 'origin', ref).status !== 0) return null;
+  const shown = git('show', `FETCH_HEAD:${MANIFEST_IN_REPO}`);
+  if (shown.status !== 0) return null;
+  const version = JSON.parse(shown.stdout).version;
+  return version || null;
+}
+
+function compareToMaster(marker, env, run = execGit) {
+  const unknown = (reason) => ({ state: 'unknown', marker: marker.payload_version, reason });
+  let master = null;
   try {
-    const master = JSON.parse(fs.readFileSync(manifest, 'utf8')).version;
-    if (!master) return { state: 'unknown', marker: marker.payload_version };
-    return master === marker.payload_version
-      ? { state: 'same', master, marker: marker.payload_version }
-      : { state: 'drift', master, marker: marker.payload_version };
+    if (env.BOOTSTRAP_MASTER_MANIFEST) {
+      if (!fs.existsSync(env.BOOTSTRAP_MASTER_MANIFEST)) return unknown('no manifest to read');
+      master = JSON.parse(fs.readFileSync(env.BOOTSTRAP_MASTER_MANIFEST, 'utf8')).version || null;
+    } else {
+      const clone = path.join(env.HOME || os.homedir(), '.aac-dotfiles');
+      if (!fs.existsSync(path.join(clone, '.git'))) return unknown('no dotfiles clone to fetch in');
+      master = gitVersionAtRemote(clone, env.BOOTSTRAP_DOTFILES_REF || 'master', run);
+    }
   } catch (e) {
-    return { state: 'unknown', marker: marker.payload_version, reason: e.message };
+    return unknown(e.message);
   }
+  if (!master) return unknown('master version could not be read from the remote');
+  return master === marker.payload_version
+    ? { state: 'same', master, marker: marker.payload_version }
+    : { state: 'drift', master, marker: marker.payload_version };
 }
 
 /**

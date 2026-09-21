@@ -145,6 +145,22 @@ test('a repo with no index gets nothing and the hook exits 0', () => {
   assert.equal(run.stdout.trim(), '');
 });
 
+test('a session opened on the PARENT of two checkouts gets both repos\' notes', () => {
+  // The cloud container with two sources: /home/user holds aac-routines and claude-dotfiles, and
+  // the walk up from there finds no index at all, so the session used to start with no memory.
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-memory-parent-'));
+  for (const [repo, note] of [['alpha', 'alpha-note'], ['beta', 'beta-note']]) {
+    const dir = path.join(parent, repo, 'docs', 'agents', 'memory');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'MEMORY.md'), `- ${note}: why it matters\n`);
+  }
+  const context = contextFor(parent);
+  assert.match(context, /^- alpha-note$/m);
+  assert.match(context, /^- beta-note$/m);
+  assert.match(context, /alpha memory —/);
+  assert.match(context, /beta memory —/);
+});
+
 test('the hook emits SessionStart additionalContext for this repo', () => {
   const run = spawnSync(process.execPath, [CLI], {
     input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: MEMORY_DIR }),

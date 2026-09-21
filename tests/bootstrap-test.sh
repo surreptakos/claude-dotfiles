@@ -353,6 +353,25 @@ else
     sed -n '1,40p' "$check_out" >&2
   fi
 
+  # Without the pinned manifest the version master offers has to come off the REMOTE. Reading it
+  # from the bootstrap's own clone — the tree the payload was cut from — made "payload matches
+  # dotfiles master" unfalsifiable: on 2026-09-21 the clone sat 11 commits behind and the line
+  # still claimed a match, so a container ran an older payload invisibly for hours. The payload
+  # under test is built from this worktree, so a real read says drift or says it could not read.
+  # Either is honest; the match line is the one answer it cannot truthfully give here.
+  drift_out="$SCRATCH/session-check-drift.out"
+  ( cd "$CLEAN_HOME" && \
+    PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" \
+    HOME="$CLEAN_HOME" \
+    CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+    node "$CHECK" ) >"$drift_out" 2>&1
+  if grep -qF 'payload matches dotfiles master' "$drift_out"; then
+    fail "session-check claimed a master match while reading the bootstrap's own clone"
+    grep -F 'payload' "$drift_out" | sed -n '1,5p' >&2
+  else
+    pass "session-check does not claim a master match it cannot prove: $(grep -Ec 'master offers|master version could not be read' "$drift_out") honest line(s)"
+  fi
+
   # The --end mechanical gate (issue 622) ships in the payload, so the container has it too.
   # Point its hook check at a fixture profile tree naming a hook script that is not there: it must
   # STOP. A gate never seen to fail is not known to work, and "the file is missing" is the half
