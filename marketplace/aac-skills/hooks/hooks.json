@@ -161,6 +161,18 @@
             "statusMessage": "Counting failures for the YES escalation ladder..."
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stopslop-write.py\"",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stopslop-write.py\"",
+            "timeout": 10,
+            "statusMessage": "Linting written prose..."
+          }
+        ]
       }
     ],
     "Stop": [
@@ -172,6 +184,13 @@
             "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/ask_matt_gate.py\" claude-stop",
             "timeout": 5,
             "statusMessage": "Verifying governance gate..."
+          },
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stopslop-stop.py\"",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stopslop-stop.py\"",
+            "timeout": 10,
+            "statusMessage": "Linting the final message..."
           }
         ]
       }

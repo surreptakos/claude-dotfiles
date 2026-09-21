@@ -489,6 +489,28 @@ class PluginHooksManifest(unittest.TestCase):
         self.assertEqual(counts.get("ask_matt_gate.py"), 4,
                          "ask_matt_gate.py should fire on prompt, pre-tool, post-tool and stop")
 
+    def test_the_stop_slop_linter_rides_the_payload_like_it_rides_the_desktop(self):
+        # The PC has lint on written prose (PostToolUse over Write|Edit|MultiEdit) and on the final
+        # assistant message (Stop) since issue 620; a container had neither, so prose written in
+        # the cloud faced no check at all. Both hooks and the module they import ship here.
+        counts = {}
+        matchers = {}
+        for event, entries in (self.manifest.get("hooks") or {}).items():
+            for group in entries:
+                for hook in group.get("hooks", []):
+                    for m in _SCRIPT_PATH_RE.finditer(hook.get("command", "")):
+                        counts[m.group(1)] = counts.get(m.group(1), 0) + 1
+                        matchers.setdefault(m.group(1), []).append(
+                            (event, group.get("matcher")))
+        self.assertEqual(counts.get("stopslop-write.py"), 1)
+        self.assertEqual(counts.get("stopslop-stop.py"), 1)
+        self.assertEqual(matchers["stopslop-write.py"], [("PostToolUse", "Write|Edit|MultiEdit")])
+        self.assertEqual(matchers["stopslop-stop.py"], [("Stop", None)])
+        # Both scripts add ../tools to sys.path and `import stopslop`; from hooks/scripts/ that is
+        # hooks/tools/, so the module has to sit there or every lint run dies on the import.
+        self.assertTrue((self.scripts_dir.parent / "tools" / "stopslop.py").is_file(),
+                        "stopslop.py must ship at hooks/tools/ or the hooks cannot import it")
+
     def test_repo_memory_loader_is_a_sessionstart_hook_in_the_payload(self):
         # Issue 210: the loader that injects this repo's committed memory notes rides the same
         # manifest as the governance hooks, in its own SessionStart group (so the gate's 200s
