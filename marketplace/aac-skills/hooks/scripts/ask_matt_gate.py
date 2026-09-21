@@ -372,6 +372,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         "last_flow": (previous or {}).get("flow") or (previous or {}).get("last_flow"),
         "yes": True,
         "caveman": mode,
+        # Issue 608: the once-per-session release for a shell-less surface survives the turn.
+        "unknown_tool_denied": (previous or {}).get("unknown_tool_denied"),
     }
     _write_state("claude", session_id, state)
     # Style violations from the previous turn are carried here rather than blocked at Stop. A Stop
@@ -420,10 +422,20 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Issue 608: Cowork's shell is `mcp__workspace__bash`, not `Bash`, so a name check that knows
+# only Claude Code's two shells denied the declaration itself and every later call with it. A
+# shell tool is any of the two, or an MCP shell (`mcp__<server>__bash|shell|powershell`).
+SHELL_TOOL_PATTERN = re.compile(r"^(?:Bash|PowerShell|mcp__[^_].*__(?:bash|shell|powershell))$")
+
+
+def _is_shell_tool(tool_name: Any) -> bool:
+    return SHELL_TOOL_PATTERN.match(str(tool_name or "")) is not None
+
+
 def _is_claude_declaration_command(
     event: dict[str, Any], session_id: str, nonce: str
 ) -> bool:
-    if str(event.get("tool_name") or "") not in {"Bash", "PowerShell"}:
+    if not _is_shell_tool(event.get("tool_name")):
         return False
     tool_input = event.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
@@ -438,7 +450,7 @@ def _is_claude_declaration_command(
         rf"[\"']?(?:{script_paths})[\"']?\s+declare-claude\s+"
         rf"[\"']?{re.escape(session_id)}[\"']?\s+"
         rf"[\"']?{re.escape(nonce)}[\"']?\s+(?:{flows})"
-        rf"(?:\s+2>&1;\s*echo\s+[\"']EXIT=\$\?[\"'])?\s*"
+        rf"(?:\s+2>&1)?(?:\s*;\s*echo\s+[\"']?exit=\$\?[\"']?)?\s*"
     )
     return re.fullmatch(pattern, command, flags=re.IGNORECASE) is not None
 
@@ -491,7 +503,7 @@ def _command_segments(command: str) -> list[str]:
 
 
 def _command_of(event: dict[str, Any]) -> str:
-    if str(event.get("tool_name") or "") not in {"Bash", "PowerShell"}:
+    if not _is_shell_tool(event.get("tool_name")):
         return ""
     tool_input = event.get("tool_input")
     command = tool_input.get("command") if isinstance(tool_input, dict) else None
@@ -736,6 +748,20 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
         # master could not even send a notification. Fail open; the next prompt writes state and the
         # gate resumes with full force.
         return {}
+    # Issue 608 item 3: a surface whose tools are neither Claude Code's nor an MCP shell can never
+    # run the declaration, so an unconditional deny is a permanent deadlock. Refuse ONCE per
+    # session for such a tool name, record it, then let the calls through with the turn marked
+    # undeclared (the issue 499 shape on the Stop side).
+    tool_name = str(event.get("tool_name") or "")
+    if state and not _is_shell_tool(tool_name) and tool_name not in READ_CLASS_TOOLS:
+        current = dict(state)
+        if current.get("unknown_tool_denied"):
+            _log_governance(
+                session_id, f"tool {tool_name} allowed undeclared: no shell tool to declare with"
+            )
+            return {}
+        current["unknown_tool_denied"] = tool_name
+        _write_state("claude", session_id, current)
     return _deny(
         "Ask Matt, Yes, and caveman ultra missing. Run exact declaration from prompt gate."
     )
@@ -1284,7 +1310,7 @@ ESCALATION = {
 
 def _claude_post_tool(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
-    if str(event.get("tool_name") or "") not in {"Bash", "PowerShell"} or not session_id:
+    if not _is_shell_tool(event.get("tool_name")) or not session_id:
         return {}
     # The pre-send lint exits 1 by design until the draft is clean; rewriting a draft is not a
     # debugging failure and must not climb the ladder (it did, twice, on 2026-09-03).

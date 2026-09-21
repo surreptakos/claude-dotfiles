@@ -1143,3 +1143,61 @@ class AskMattGateTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class Issue608CoworkShellTests(unittest.TestCase):
+    run_gate = AskMattGateTests.run_gate
+    set_caveman = AskMattGateTests.set_caveman
+
+    """Issue 608: Cowork's shell is `mcp__workspace__bash`; the declaration must be exempted from
+    it, with the exit-echo suffix the model appends by habit, and a surface with no shell at all
+    is refused once per session, not forever."""
+
+    def _prompt(self, state_dir: Path, session: str) -> str:
+        prompt = self.run_gate(
+            "claude-prompt", {"session_id": session, "hook_event_name": "UserPromptSubmit"},
+            state_dir,
+        )
+        self.assertEqual(prompt.returncode, 0, prompt.stderr)
+        return json.loads((state_dir / f"claude--{session}.json").read_text(encoding="utf-8"))["nonce"]
+
+    def test_declaration_through_an_mcp_shell_is_exempted(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            nonce = self._prompt(state_dir, "cowork-1")
+            base = f'python "{SCRIPT}" declare-claude "cowork-1" "{nonce}" direct-answer'
+            for command in (base, base + '; echo "exit=$?"', base + " 2>&1; echo 'EXIT=$?'"):
+                with self.subTest(command=command):
+                    out = self.run_gate("claude-pre-tool", {
+                        "session_id": "cowork-1", "hook_event_name": "PreToolUse",
+                        "tool_name": "mcp__workspace__bash", "tool_input": {"command": command},
+                    }, state_dir)
+                    self.assertEqual(json.loads(out.stdout), {}, out.stdout)
+            # Any other command through that shell is still refused until the route is declared.
+            other = self.run_gate("claude-pre-tool", {
+                "session_id": "cowork-1", "hook_event_name": "PreToolUse",
+                "tool_name": "mcp__workspace__bash", "tool_input": {"command": "ls"},
+            }, state_dir)
+            self.assertEqual(
+                json.loads(other.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_a_surface_with_no_shell_is_refused_once_then_released(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._prompt(state_dir, "noshell-1")
+            event = {
+                "session_id": "noshell-1", "hook_event_name": "PreToolUse",
+                "tool_name": "mcp__memory__read", "tool_input": {"path": "/x"},
+            }
+            first = self.run_gate("claude-pre-tool", event, state_dir)
+            second = self.run_gate("claude-pre-tool", event, state_dir)
+            self.assertEqual(
+                json.loads(first.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertEqual(json.loads(second.stdout), {}, second.stdout)
+            # The release is per session: a new prompt does not re-arm the deny.
+            self._prompt(state_dir, "noshell-1")
+            third = self.run_gate("claude-pre-tool", event, state_dir)
+            self.assertEqual(json.loads(third.stdout), {}, third.stdout)
+            # A Claude Code read-class tool gets no such release: Bash exists there to declare with.
+            read = self.run_gate("claude-pre-tool", {**event, "tool_name": "Read"}, state_dir)
+            self.assertEqual(
+                json.loads(read.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")

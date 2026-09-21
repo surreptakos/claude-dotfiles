@@ -22,6 +22,8 @@ any hook that exempts a command by tool name `Bash`/`PowerShell`, or tells the m
 path with `py -3`, deadlocks there: the gate's declare exemption never matches `mcp__workspace__bash`,
 so no tool call can satisfy it (claude-dotfiles issue #608).
 
+**Fixed 2026-09-21 (issue 608):** the gate now takes the declaration from any shell tool, `Bash`, `PowerShell` or `mcp__<server>__bash`, tolerates a trailing `; echo "exit=$?"`, and refuses a surface with no shell at all once per session instead of forever.
+
 **How to apply:** treat Cowork as a hooked surface with a Linux shell. A hook that gates tool calls
 must recognise `mcp__workspace__bash` and print a command the sandbox can run (`python3` on the
 plugin-root path, never `py -3` on a Windows path). Keep the text-only rules in the global CLAUDE.md
