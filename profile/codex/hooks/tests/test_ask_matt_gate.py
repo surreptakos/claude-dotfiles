@@ -10,13 +10,19 @@ import unittest
 
 
 SCRIPT = Path(__file__).parents[1] / "ask_matt_gate.py"
-HOOKS_CONFIG = Path.home() / ".codex" / "hooks.json"
-CLAUDE_SETTINGS = Path.home() / ".claude" / "settings.json"
-PLUGIN_HOOKS = (Path.home() / ".claude" / "plugins" / "marketplaces" / "claude-dotfiles"
-                / "marketplace" / "aac-skills" / "hooks" / "hooks.json")
-CLAUDE_INSTRUCTIONS = Path.home() / ".claude" / "CLAUDE.md"
-CODEX_INSTRUCTIONS = Path.home() / ".codex" / "AGENTS.md"
-CLAUDE_REMINDER = Path.home() / ".claude" / "hooks" / "governance-reminder.js"
+# The REPO, not a restored home. These assertions are about the wiring this repo ships; whether a
+# restore lays it down in the right place is the restore suite's job (tests/restore-test.ps1), and
+# pointing them at ~/.codex and ~/.claude made them fail on every machine that is not the owner's
+# desktop — a cloud container has no such tree, so four checks of the governance wiring were red
+# there for reasons that said nothing about the wiring.
+REPO = Path(__file__).resolve().parents[4]
+HOOKS_CONFIG = REPO / "profile" / "codex" / "hooks.json"
+CLAUDE_SETTINGS = REPO / "profile" / "claude" / "settings.json"
+PLUGIN_HOOKS = REPO / "marketplace" / "aac-skills" / "hooks" / "hooks.json"
+CLAUDE_INSTRUCTIONS = REPO / "profile" / "claude" / "CLAUDE.md"
+CODEX_INSTRUCTIONS = REPO / "profile" / "codex" / "AGENTS.md"
+CLAUDE_REMINDER = REPO / "profile" / "claude" / "hooks" / "governance-reminder.js"
+CAVEMAN_PLUGIN_CONFIG = REPO / "aac-skills" / "project-harness" / "templates" / "caveman.json"
 
 
 class AskMattGateTests(unittest.TestCase):
@@ -677,10 +683,11 @@ class AskMattGateTests(unittest.TestCase):
         self.assertNotIn("cannot be disabled inside a session", claude_text)
         self.assertIn("CAVEMAN ULTRA", reminder_text)
         self.assertIn(".caveman-active", reminder_text)
-        # Default level for a fresh session comes from the plugin's user config, not from any hook.
-        plugin_config = Path(os.environ.get("APPDATA", "")) / "caveman" / "config.json"
+        # Default level for a fresh session comes from the caveman plugin's config, not from any
+        # hook. The copy this repo ships is what a machine gets; %APPDATA% is where it lands.
         self.assertEqual(
-            json.loads(plugin_config.read_text(encoding="utf-8")).get("defaultMode"), "ultra"
+            json.loads(CAVEMAN_PLUGIN_CONFIG.read_text(encoding="utf-8")).get("defaultMode"),
+            "ultra",
         )
 
     def test_reminder_hook_follows_the_caveman_flag(self) -> None:
