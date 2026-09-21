@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-21T19:48:57Z"
-  previous-modified: "2026-09-21T18:12:10Z"
-  revision: "10"
-  content-sha: "fd5bb7877362"
+  modified: "2026-09-21T20:07:42Z"
+  previous-modified: "2026-09-21T19:48:57Z"
+  revision: "11"
+  content-sha: "e24cab76faff"
 ---
 
 # todoist-triage
@@ -143,7 +143,9 @@ Every ruling from step 3 lands in exactly one tier.
 
 Nothing else is ever tier 1. Not a label that names a person, not a task carrying a deadline, not a delete resting on a title, an absence of evidence, or age alone. A ruling that *nearly* qualifies is tier 2; the tier is not a judgment call to be talked into.
 
-**Tier 2 — ask, one `AskUserQuestion` per item.** Anything needing a human: whose ball it is when a name is involved, anything carrying a deadline, evidence that contradicts a label the task already has, and every `unknown`. Cap it at five questions a run (Dan reads five, not twelve); rank by consequence and say in the status how many were not asked, so a sixth is visibly deferred rather than quietly dropped.
+**Tier 2 — ask, all of them, in the same turn as the status.** Anything needing a human: whose ball it is when a name is involved, anything carrying a deadline, evidence that contradicts a label the task already has, and every `unknown`.
+
+**Never park a question (Dan, 2026-09-21).** Deliver the status, then raise every tier-2 item through `AskUserQuestion` in that same turn. Not "five this run and the rest tomorrow" — a question held for a later run is the silent backlog this whole redesign exists to kill, and deferring one costs exactly what asking it would have. Batch them into as few calls as the tool takes, ranked by consequence so the one with a date on it is answered first; read the tool's own schema for how many questions and options a single call accepts rather than trusting a number written here. In a scheduled run nobody is at the keyboard, so the questions simply wait in the session — the notification is what brings Dan to them, and they are still asked, not deferred.
 
 **Every question goes through `AskUserQuestion` (Dan, 2026-09-21).** Never a question in prose he has to answer by typing a paragraph back. Each one carries the item, the one-clause reason, and the options as **substantive rulings** — the ball on a named person, the date, delete, defer — never a bare approve/skip pair. Approve-or-skip was tried on 2026-09-21 and failed for the reason that matters: a skip carries no reason, so the item returns tomorrow with the identical proposal, which is how Dan came to repeat the same ruling to this routine thirty times. The free-text option is where his reason goes, and it is the valuable half of the answer.
 
@@ -167,7 +169,7 @@ The order, and nothing else above it:
 
 1. **What needs him today**, or "nothing today" in those words. A deadline inside 24 hours goes here and nowhere else. One line.
 2. **What was applied without asking**, by count and kind: "deleted 3 settled items, merged 2 duplicates." He can open Todoist history if he wants the detail; do not list twelve titles at him.
-3. **What he was asked and what he answered** — one line, plus the count not asked this run when the cap bit.
+3. **What is about to be asked** — the count and what the questions are about, in one line. The status comes first and the questions follow it in the same turn, so this line is what tells him how many are coming. Never a count of questions held back; there are none.
 4. **What is coming**, ranked, at most three: deadlines inside 14 days and past do dates, each with its number of days. This is the tier-3 material and it is the only place it appears.
 5. **What was dark**, one line, only when a surface failed: which one, and which ruling it made `unknown`. Omit the line entirely on a clean run rather than printing "none".
 6. **Where the run records came from**, one line naming the two files or saying plainly which was missing — "none found" only when the store was read and held nothing, "the store was never read this run" when the pull did not happen. Never the first when it was the second.
@@ -192,7 +194,7 @@ Done when Dan can see the board state without opening Todoist, knows which surfa
 
 ## Cadence
 
-On demand, plus the scheduled run weekdays at 8:00 AM. The scheduled run **applies tier 1 and sends the status** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. It cannot ask, because nobody is there: tier 2 is held for the next live session and the status says how many are waiting, so a question is visibly parked rather than silently skipped. The Friday run also proposes which backlog `do` items move up for the coming week — a tier-2 question like any other.
+On demand, plus the scheduled run weekdays at 8:00 AM. The scheduled run **applies tier 1, sends the status, then raises every tier-2 question** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. Nobody is at the keyboard, so the questions wait in the session until Dan arrives; the notification is what brings him, and he answers them there. Waiting in an open question is not the same as being parked for tomorrow. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
 
 ## Filters (exist in Todoist, favorited)
 
