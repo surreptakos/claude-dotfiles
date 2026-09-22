@@ -370,6 +370,34 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Dan, 2026-09-22: every correction he makes is a defect in the system, not in one answer. Four in
+# one session (a tick reported as done, a stale task description read as the thread, a guessed
+# connector name, a design built without opening the skill that ruled it out) shared one class:
+# a stand-in read in place of the primary source. A reply that patches the instance leaves the
+# class to recur, so a correction turn must change a durable file, and Stop records one that
+# did not. Phrases are Dan's own from that session; a false positive costs one reminder.
+CORRECTION_PATTERN = re.compile(
+    r"\b(?:wrong|incorrect|you missed|missed the|not done yet|where did (?:this|that) come from"
+    r"|should have|shouldn't have|you forgot|that's not (?:right|true|what)|not what i"
+    r"|you didn't|why did you|i correct(?:ed)? you|needs to be in)\b",
+    re.IGNORECASE,
+)
+CORRECTION_CONTEXT = (
+    " CORRECTION DETECTED — this is a system defect, not a one-off. Before replying: (1) fix the "
+    "instance; (2) name the stand-in you relied on (summary, task text, tick, run record, memory "
+    "of a name/id/schema, a skill you did not open) and the primary source you skipped; (3) name "
+    "the general class; (4) change a durable file this turn — the owning skill, rule, hook, test "
+    "or schema — so the class cannot recur, and say which. Stop records a correction turn that "
+    "edited no file."
+)
+# Edits that count as a system change. A board or database write fixes the instance only.
+SYSTEM_CHANGE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+
+
+def _is_correction(prompt: str) -> bool:
+    return CORRECTION_PATTERN.search(prompt or "") is not None
+
+
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
     if not session_id:
@@ -391,7 +419,11 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         # Issue 608: the once-per-session release for a shell-less surface survives the turn.
         "unknown_tool_denied": (previous or {}).get("unknown_tool_denied"),
     }
+    correction = _is_correction(str(event.get("prompt") or ""))
+    if correction:
+        state["correction_nonce"] = nonce
     _write_state("claude", session_id, state)
+    pending_correction = (previous or {}).get("pending_correction")
     # Style violations from the previous turn are carried here rather than blocked at Stop. A Stop
     # block cannot retract the message it is judging — it only makes the model emit a second one —
     # so the correction lands where it can still change the output: before the next message.
@@ -424,6 +456,10 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         "without data, no characterising unread sources) plus the caveman level. Skipping this is "
         "recorded at Stop and reported back to you next turn."
     )
+    if correction:
+        context += CORRECTION_CONTEXT
+    if pending_correction:
+        context += " " + pending_correction
     if pending_lint:
         context += (
             " CAVEMAN VIOLATION IN YOUR LAST MESSAGE — fix in this one, do not repeat it: "
@@ -809,6 +845,9 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "last_flow": state.get("last_flow"),
             "yes": True,
             "caveman": mode,
+            # The correction flag is the prompt's finding about this turn; declaring a route
+            # must not erase it, or the Stop audit never sees a correction turn.
+            "correction_nonce": state.get("correction_nonce"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
@@ -1432,8 +1471,15 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     # turn whose transcript is unreadable, or whose final message is clean, can still have skipped the
     # lint, and those are exactly the turns where skipping goes unnoticed.
     violations = _presend_audit(session_id, _read_state("claude", session_id))
+    transcript_path = str(event.get("transcript_path") or "")
+    miss = _correction_audit(_read_state("claude", session_id), transcript_path)
+    if miss:
+        current = _read_state("claude", session_id) or {}
+        current["pending_correction"] = miss
+        _write_state("claude", session_id, current)
+        _log_governance(session_id, "correction turn ended with no system change")
+        notes.append(miss)
     try:
-        transcript_path = str(event.get("transcript_path") or "")
         final_text = _last_assistant_text(transcript_path) if transcript_path else ""
         if final_text.strip():
             violations = violations + _yes_lint(final_text, _turn_tool_names(transcript_path))
@@ -1456,6 +1502,25 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         + f". Logged to {_lint_log_path()}; enforced on your next message."
     )
     return {"systemMessage": " ".join(notes)}
+
+
+def _correction_audit(state: dict[str, Any] | None, transcript_path: str) -> str:
+    """A correction turn that edited no durable file. Returns the note to carry, or "".
+
+    Unreadable transcripts are not audited: inventing a miss from missing data would train the
+    reader to ignore this note, the same reasoning as `_presend_audit`.
+    """
+    state = state or {}
+    if not state.get("nonce") or state.get("correction_nonce") != state.get("nonce"):
+        return ""
+    tools = _turn_tool_names(transcript_path)
+    if tools is None or tools & SYSTEM_CHANGE_TOOLS:
+        return ""
+    return (
+        "CORRECTION NOT CLOSED: Dan's last message corrected you and the turn changed no file. "
+        "The instance may be fixed; the class is not. Land the durable fix (skill, rule, hook, "
+        "test or schema) this turn and name it."
+    )
 
 
 def _presend_audit(session_id: str, state: dict[str, Any] | None) -> list[str]:

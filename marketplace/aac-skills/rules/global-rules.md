@@ -91,6 +91,11 @@ every change.
 4. **Unread is unread.** Never characterize a source (file, PDF, doc, page, ticket) you have not
    opened in this session. Truncated or empty tool output is not a read: say it was cut off and re-run
    before concluding. Confident fabrication slips every hedge-word filter (Cowork, 2026-09-03).
+   **A stand-in is unread too** (Dan, 2026-09-22). A task description, a tick, a summary, a run
+   record or your memory of a name, id or schema describes the source; it is not the source. Before
+   stating an item's current state, read its newest entry: the thread to its last message, the
+   system of record, the live list tool. Before building in a domain a skill owns, open that skill.
+   Four corrections in one session were this one mistake.
 5. **Quote, then infer.** Separate what a source says from what you conclude. Quote or cite the
    source for the first; label the second as inference.
 

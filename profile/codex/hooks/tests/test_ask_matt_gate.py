@@ -858,6 +858,49 @@ class AskMattGateTests(unittest.TestCase):
             )["hookSpecificOutput"]["additionalContext"]
             self.assertNotIn("CAVEMAN VIOLATION IN YOUR LAST MESSAGE", again)
 
+    def _correction_turn(self, state_dir: Path, sid: str, prompt: str, tools: list[str]) -> dict:
+        ctx = json.loads(
+            self.run_gate("claude-prompt", {"session_id": sid, "prompt": prompt}, state_dir).stdout
+        )["hookSpecificOutput"]["additionalContext"]
+        nonce = self._state(state_dir, sid)["nonce"]
+        self.run_claude_declare(sid, nonce, "implement", state_dir)
+        transcript = self._transcript_with_tools(state_dir, tools, "Card fixed.")
+        self.run_gate(
+            "claude-stop", {"session_id": sid, "transcript_path": transcript}, state_dir
+        )
+        return {"context": ctx, "state": self._state(state_dir, sid)}
+
+    def test_a_correction_injects_the_system_fix_protocol(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(
+                Path(folder), "s-corr", "Somehow you missed the end of this email chain", ["Edit"]
+            )
+            self.assertIn("CORRECTION DETECTED", turn["context"])
+            self.assertNotIn("pending_correction", turn["state"])  # an Edit closes it
+
+    def test_a_correction_turn_with_no_file_change_is_carried_to_the_next_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._correction_turn(
+                state_dir, "s-open", "Wrong, you should have put the OSH bid first", ["Bash"]
+            )
+            self.assertIn("CORRECTION NOT CLOSED", turn["state"]["pending_correction"])
+            nxt = json.loads(
+                self.run_gate("claude-prompt", {"session_id": "s-open", "prompt": "ok"}, state_dir).stdout
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertIn("CORRECTION NOT CLOSED", nxt)
+            self.assertNotIn("CORRECTION DETECTED", nxt)
+            again = json.loads(
+                self.run_gate("claude-prompt", {"session_id": "s-open", "prompt": "ok"}, state_dir).stdout
+            )["hookSpecificOutput"]["additionalContext"]
+            self.assertNotIn("CORRECTION NOT CLOSED", again)  # consumed once
+
+    def test_an_ordinary_prompt_is_not_a_correction(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(Path(folder), "s-plain", "do them all", ["Bash"])
+            self.assertNotIn("CORRECTION DETECTED", turn["context"])
+            self.assertNotIn("pending_correction", turn["state"])
+
     def test_clean_final_message_carries_no_lint(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)

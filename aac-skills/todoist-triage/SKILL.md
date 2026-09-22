@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate."
 metadata:
-  modified: "2026-09-22T21:16:07Z"
-  previous-modified: "2026-09-21T20:30:52Z"
-  revision: "14"
-  content-sha: "d6accfc8cc5d"
+  modified: "2026-09-22T21:38:03Z"
+  previous-modified: "2026-09-22T21:16:07Z"
+  revision: "15"
+  content-sha: "4e9a82597ab6"
 ---
 
 # todoist-triage
@@ -157,7 +157,7 @@ The shape matters more than the medium, because the shape is what failed before:
 **Publish to the Day Board, then ask.** After tier 1 is applied and before the status, write the run onto the board in one `ArtifactData` `batch`:
 
 - `triage_meta/latest` (`set`): `runId` (this record's stamp), `finishedAt` (ISO), `alarms` (the tier-3 lines, at most five plain sentences), `appliedCount` (tier-1 writes applied).
-- `triage/<taskId>` (`set`), one per tier-2 question: `runId`, `taskId`, `title`, `question` (the one-clause reason), `status: "open"`, and `options` — the same substantive rulings the numbered question offers, each `{label, labels?, projectId?, dueString?, deadlineDate?, priority?, delete?, mergeInto?, mergeComment?}` in `update-tasks` vocabulary. The board adds Rule out (moves to Wontfix) and the reason box itself; never add them.
+- `triage/<taskId>` (`set`), one per tier-2 question: `runId`, `taskId`, `title`, `question` (the one-clause reason), `source` (`{lastFrom, lastAt, quote}` — the thread's newest message as read this run, never the task description; the board flags a card without it), `status: "open"`, and `options` — the same substantive rulings the numbered question offers, each `{label, labels?, projectId?, dueString?, deadlineDate?, priority?, delete?, mergeInto?, mergeComment?}` in `update-tasks` vocabulary, `content` included when the ruling retitles a stale task. The board adds Rule out (moves to Wontfix) and the reason box itself; never add them.
 
 The board is a second place to answer, not a replacement for the session questions. `ArtifactData` unavailable is an unreachable surface for step 6, never a stop.
 
