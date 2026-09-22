@@ -870,6 +870,13 @@ Remove-Item Env:\GOVERNANCE_CLAUDE_HOME
 # 0 clean / 1 violations. A traceback is neither, and is what a broken restore looks like.
 Check 'restored ask_matt_gate.py runs the pre-send lint' ($gateExit -eq 0 -or $gateExit -eq 1) @($out | Select-Object -Last 10)
 
+# The i-have-adhd plugin's always-on opt-in is a whitelist entry, so something has to assert it.
+# Its SessionStart hook tests only that ~/.claude/.i-have-adhd-always exists; while it did not,
+# the plugin injected nothing and the skill loaded only on /i-have-adhd. Existence is the whole
+# contract - the hook never reads the contents - so assert the restored path, not its text.
+$adhdFlag = Join-Path $FakeHome '.claude\.i-have-adhd-always'
+Check 'i-have-adhd always-on flag restored at ~/.claude/.i-have-adhd-always' (Test-Path $adhdFlag)
+
 # Issue 620: profile/claude/tools is a whitelist entry, so something has to assert it. The module
 # both stop-slop hooks `import stopslop` lands at ~/.claude/tools/stopslop.py; while it did not
 # exist the hooks caught the ImportError, wrote one line to stderr and returned 0, so the gate
