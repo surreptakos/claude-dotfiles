@@ -6,7 +6,7 @@ metadata:
 ---
 
 Fable 5.1 weekly usage on Dan's account is limited. Fleet and orchestrator worker model pins
-(`implModel: claude-opus-5` since #259 on 2026-09-15, `verifyModel: claude-sonnet-5`, Haiku for
+(`implModel: claude-opus-5-5` since 2026-09-22, Opus 5 from #259 on 2026-09-15 until then, `verifyModel: claude-sonnet-5`, Haiku for
 deliver/report) stay as they are, even though the Fable prompting guide says Fable at `medium` or `low` is cheaper per task.
 
 **Why:** Dan declined the pin swap on 2026-09-01 ("leave the fleet models alone, I have limited
