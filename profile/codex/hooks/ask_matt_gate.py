@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -267,6 +268,21 @@ def _deny(reason: str) -> dict[str, Any]:
 DECLARE_RUNNER = r"(?:[\w./\\:+-]*\bpython(?:3(?:\.\d+)?)?(?:\.exe)?|py(?:\.exe)?\s+-3)"
 
 
+# What the gate PRINTS has to be a runner the session can actually execute. The accept pattern
+# above is deliberately tolerant, but a printed `python` is a dead command on an image that ships
+# only `python3`, and a printed `py -3` is dead on every POSIX image -- measured 2026-09-22 in a
+# claude.ai/code container, where the printed lint command returned `py: command not found`. A turn
+# that cannot run its declaration is a turn with every tool denied, so the spelling is resolved
+# from the environment the hook runs in rather than hardcoded.
+def _runner_spelling() -> str:
+    if os.name == "nt":
+        return "py -3"
+    for name in ("python3", "python"):
+        if shutil.which(name):
+            return name
+    return sys.executable or "python3"
+
+
 def _is_exact_declaration_command(command: str, turn_id: str) -> bool:
     if not isinstance(command, str):
         return False
@@ -321,7 +337,7 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         "caveman": "ultra",
     }
     _write_state(session_id, turn_id, governance)
-    declaration = f'py -3 "{SCRIPT.as_posix()}" declare "{turn_id}" <flow>'
+    declaration = f'{_runner_spelling()} "{SCRIPT.as_posix()}" declare "{turn_id}" <flow>'
     code_declaration = (
         "text(await tools.shell_command({command:'"
         f'{declaration}'
@@ -329,7 +345,7 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
     )
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route in commentary, then run "
-        f"`python \"{SCRIPT}\" declare \"{turn_id}\" <flow>`. "
+        f"`{_runner_spelling()} \"{SCRIPT}\" declare \"{turn_id}\" <flow>`. "
         f"In code mode, the only permitted bootstrap is exactly `{code_declaration}`. "
         "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
         "Broken behavior: diagnosing-bugs. Raw issues: triage. "
@@ -382,7 +398,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     pending_lint = (previous or {}).get("pending_lint") or []
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
-        f"`python \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>` — as the ONLY "
+        f"`{_runner_spelling()} \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>` — as the ONLY "
         "command in that shell call, nothing chained after it, or the call is denied. "
         "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
         "Broken behavior: diagnosing-bugs. Raw issues: triage. "
@@ -403,7 +419,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     # event sees assistant text before the user does.
     context += (
         "PRE-SEND LINT REQUIRED, EVERY REPLY: write your final reply to a file, run "
-        f"`py -3 \"{SCRIPT}\" lint <file> \"{session_id}\"`, and rewrite until it exits 0. Send "
+        f"`{_runner_spelling()} \"{SCRIPT}\" lint <file> \"{session_id}\"`, and rewrite until it exits 0. Send "
         "only the linted text. It checks YES (no deflection, no unverified claims, no conclusions "
         "without data, no characterising unread sources) plus the caveman level. Skipping this is "
         "recorded at Stop and reported back to you next turn."
@@ -1472,7 +1488,7 @@ def _pre_tool(event: dict[str, Any]) -> dict[str, Any]:
         if _is_declaration_command(event):
             return {}
         return _deny(
-            f"Ask Matt route missing. Run: python \"{SCRIPT}\" declare \"{turn_id}\" <flow>"
+            f"Ask Matt route missing. Run: {_runner_spelling()} \"{SCRIPT}\" declare \"{turn_id}\" <flow>"
         )
     return {}
 
@@ -1510,7 +1526,7 @@ def _stop(event: dict[str, Any]) -> dict[str, Any]:
         "decision": "block",
         "reason": (
             "Ask Matt route still missing. Name the route, then run: "
-            f"python \"{SCRIPT}\" declare \"{turn_id}\" <flow>"
+            f"{_runner_spelling()} \"{SCRIPT}\" declare \"{turn_id}\" <flow>"
         ),
     }
 
