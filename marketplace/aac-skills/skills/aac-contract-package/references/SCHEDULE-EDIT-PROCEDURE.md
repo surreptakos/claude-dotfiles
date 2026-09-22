@@ -63,6 +63,8 @@ The Clarifications and Exclusions block is one cell containing four runs: bold h
 
 Line breaks inside these cells are `\r\n`, not `\n`. Bullets are `• `.
 
+Run 1 (the Clarifications body) ends with an empty line, `\r\n\r\n`, so one blank line separates the last clarification from the bold Exclusions header (SCHEDULE-GENERATION-PROCEDURE §11a). A replacement body run keeps it. The builder writes it; a hand edit is where it gets lost (Z-4260, 2026-09-22).
+
 ## Procedure
 1. **Back up.** Copy the schedule to `_to_delete\<job> BACKUP pre-edit.xlsx` before touching it. If an edit goes wrong, rebuild from the backup rather than editing an already-edited file.
 2. **Read the target cells** and confirm each is what you think it is. `set_text` on a rich-text cell raises rather than flattening it; let it.
