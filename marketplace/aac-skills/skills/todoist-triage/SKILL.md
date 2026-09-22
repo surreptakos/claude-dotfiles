@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-22T21:38:03Z'
-  previous-modified: '2026-09-22T21:16:07Z'
-  revision: '15'
-  content-sha: 4e9a82597ab6
+  modified: '2026-09-22T21:44:42Z'
+  previous-modified: '2026-09-22T21:38:03Z'
+  revision: '16'
+  content-sha: 47b2783619f0
 ---
 
 # todoist-triage
@@ -95,7 +95,7 @@ Load the two prior run records first, then the exports, then the live tail.
 - **Leave Dates (API, never mail).** Before any leave item is ruled on, run `python -m aac_routines.leave_dates pending` (and `out` when the week's absences matter). A `hello@leavedates.com` mail with no matching `awaiting_me` row is filed; exit 2 makes Leave Dates an unreachable surface for step 6.
 - **Live tail (tail-fill only).** Fill the window "newest export stamp → now" from Gmail (`mcp__Gmail__search_threads`), Teams (`mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`), meeting notes (Granola), and Todoist history (`find-activity`). Never widen this window past the export stamp; never let the connectors stand in as the primary reader. Any connector that fails or returns no access is recorded and carried into step 6 as an unreachable surface.
 - **Todoist queue.** `find-tasks` on all three projects — Current Work, the backlog, and the Inbox project named by `inbox_project_id` in aac-routines' `config/task-capture.json` — `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link. An Inbox item is triaged where it sits; the router moves it, this skill does not.
-- **Board answers.** Query Dan's Day Board (`https://claude.ai/artifact/SQcwMLBKKrtdEPBHtJfGMi`) with the `ArtifactData` tool: `query` on collection `triage` where `status == "answered"`. Each is a tier-2 answer Dan gave on the board since the last run; its Todoist write is already done. Carry each into this run's record — `ruled-out` when `choice` is `Rule out`, else `noted` — with his `note` as the reason, and never re-ask it. A `Note only` answer carries no write: act on the note as if he typed it in the session. Then `delete` each consumed document so the next run does not read it twice.
+- **Board answers.** Query Dan's Day Board (`https://claude.ai/artifact/SQcwMLBKKrtdEPBHtJfGMi`) with the `ArtifactData` tool: `query` on collection `triage` where `status == "answered"`. Each is a tier-2 answer Dan gave on the board since the last run, and its Todoist write is already done: `Rule out` moved the task into Wontfix, which both routines read, so it needs nothing more. Every board item is a task, so none of them goes in the run record. Name the count on status line 2. A `Note only` answer carries no write: act on the note as if he typed it in the session. Then `delete` each consumed document so the next run does not read it twice.
 
 Done when both run records are located or their absence recorded, the newest export is read, the tail window is fetched from every reachable connector (and every failure is logged), all three projects are exhausted, and every link-only title has its source read.
 
@@ -159,7 +159,7 @@ The shape matters more than the medium, because the shape is what failed before:
 - `triage_meta/latest` (`set`): `runId` (this record's stamp), `finishedAt` (ISO), `alarms` (the tier-3 lines, at most five plain sentences), `appliedCount` (tier-1 writes applied).
 - `triage/<taskId>` (`set`), one per tier-2 question: `runId`, `taskId`, `title`, `question` (the one-clause reason), `source` (`{lastFrom, lastAt, quote}` — the thread's newest message as read this run, never the task description; the board flags a card without it), `status: "open"`, and `options` — the same substantive rulings the numbered question offers, each `{label, labels?, projectId?, dueString?, deadlineDate?, priority?, delete?, mergeInto?, mergeComment?}` in `update-tasks` vocabulary, `content` included when the ruling retitles a stale task. The board adds Rule out (moves to Wontfix) and the reason box itself; never add them.
 
-The board is a second place to answer, not a replacement for the session questions. `ArtifactData` unavailable is an unreachable surface for step 6, never a stop.
+The board is a second place to answer, not a replacement for the session questions. A task the forgotten-tasks guard created overnight arrives carrying only `claude`, so it is in this queue; its ask also sits in the board's `waiting` collection under the same `todoistId`, and the board shows it once, as your question. `ArtifactData` unavailable is an unreachable surface for step 6, never a stop.
 
 **Tier 3 — tell, never ask.** Deadlines, past-due counts, the cap, coverage. These are not decisions and never belong in a queue. They go in the status (step 6).
 
