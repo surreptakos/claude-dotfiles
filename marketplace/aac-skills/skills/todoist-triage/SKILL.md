@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-22T21:44:42Z'
-  previous-modified: '2026-09-22T21:38:03Z'
-  revision: '16'
-  content-sha: 47b2783619f0
+  modified: '2026-09-22T22:06:23Z'
+  previous-modified: '2026-09-22T21:44:42Z'
+  revision: '17'
+  content-sha: 12c1bea6baf6
 ---
 
 # todoist-triage
@@ -159,7 +159,9 @@ The shape matters more than the medium, because the shape is what failed before:
 - `triage_meta/latest` (`set`): `runId` (this record's stamp), `finishedAt` (ISO), `alarms` (the tier-3 lines, at most five plain sentences), `appliedCount` (tier-1 writes applied).
 - `triage/<taskId>` (`set`), one per tier-2 question: `runId`, `taskId`, `title`, `question` (the one-clause reason), `source` (`{lastFrom, lastAt, quote}` — the thread's newest message as read this run, never the task description; the board flags a card without it), `status: "open"`, and `options` — the same substantive rulings the numbered question offers, each `{label, labels?, projectId?, dueString?, deadlineDate?, priority?, delete?, mergeInto?, mergeComment?}` in `update-tasks` vocabulary, `content` included when the ruling retitles a stale task. The board adds Rule out (moves to Wontfix) and the reason box itself; never add them.
 
-The board is a second place to answer, not a replacement for the session questions. A task the forgotten-tasks guard created overnight arrives carrying only `claude`, so it is in this queue; its ask also sits in the board's `waiting` collection under the same `todoistId`, and the board shows it once, as your question. `ArtifactData` unavailable is an unreachable surface for step 6, never a stop.
+The board is a second place to answer, not a replacement for the session questions. `ArtifactData` unavailable is an unreachable surface for step 6, never a stop.
+
+**This run also owns the board's "Waiting on you" list.** The forgotten-tasks routine runs on Dan's desktop without board access; the task it creates overnight carries only `claude`, so it is in this queue, and it is the handoff. In the same batch, for every open task whose source thread (read to its last message in step 3) ends with a named person asking Dan for something he has not answered, `set` `waiting/<taskId>`: `from` (that person), `subject` (the thread subject), `receivedAt` (that last message's date), `link` (the thread URL), `ask` (one clause), `todoistId` (the task id), `status: "open"`. Read `waiting` first: skip a row Dan marked `done` unless the thread has a message newer than its `doneAt`, and `update` to `done` any open row whose task is gone or whose thread now ends with Dan. The board shows a row whose task is also an open question once, as the question.
 
 **Tier 3 — tell, never ask.** Deadlines, past-due counts, the cap, coverage. These are not decisions and never belong in a queue. They go in the status (step 6).
 
