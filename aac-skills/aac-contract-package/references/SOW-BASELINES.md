@@ -201,6 +201,18 @@ On a licensing-only deal (no hardware installed), the opening verb string reduce
 
 The approved name is **Audio/Visual** — never "Sound system" (§3).
 
+### 7.13 Services-only (recurring services on a system installed under a separate agreement)
+
+Ratified by Dan 2026-09-22 from the Z-4260 review: a Subscriber who buys no equipment on this schedule and pays only RMR for a system Active Alarm Company installed under a separate agreement with another party (a landlord or general contractor). The Equipment and Labor section reads `N/A`; the Purchase Price is $0.00. The canonical verb string does not apply; "provide the recurring services listed in the Services section" replaces it. One labelled paragraph per system, then one Repair Service paragraph for all systems.
+
+> Access Control: Active Alarm Company will provide the recurring services listed in the Services section for the [PLATFORM] access control system installed at the site listed above under Active Alarm Company's separate installation agreement with [INSTALLING PARTY]. The system secures [N] openings. The [PLATFORM] access control subscription and Remote Technical Support begin at system commissioning. Remote Technical Support covers remote assistance with system operation, user administration, credential management, basic configuration, and troubleshooting; work requiring an onsite service visit is not Remote Technical Support.
+>
+> Video Surveillance: Active Alarm Company will provide the recurring services listed in the Services section for the [PLATFORM] video surveillance system installed at the site listed above under the same installation agreement. The system consists of [N] cameras. The video subscriptions include [N] days of cloud video retention. The [PLATFORM] video subscription begins at system commissioning.
+>
+> Repair Service for both systems covers the equipment listed on the attached Addendum of Covered Equipment and begins upon expiration of Active Alarm Company's one (1) year parts and labor warranty under the installation agreement. The monthly amount is $[X] for one year following installation completion and $[Y] per month thereafter.
+
+Clarifications on a services-only schedule keep only what fits a services deal, the same rule BASELINES.md applies to Elevator Monitoring: validity (as "Pricing is valid for 30 days." with the Repair Service hours sentence as its own bullet, no work-hours clause), payments, training at system commissioning, warranty running under the installation agreement, network, software licensing, recording start, and the Repair Service basis. Exclusions: onsite visits and additions beyond the Services section, periodic inspection, and the catch-all. Installation bullets (labor and materials, access, permits, site conditions, prevailing wage, change-order closer, cosmetic, electrical, core drilling, backing, debris, existing removal, AHJ fees) come out.
+
 ## 8) Worked example — CPD Fosco Park, Z-4184
 > Active Alarm Company will furnish, install, program, and test an addition to the existing video surveillance system at the site listed above, as itemized in the Equipment and Labor section. The system consists of four (4) cameras covering the north exterior elevation along W. 13th Street and the adjacent grounds, the basketball court, and the indoor pool area. The four cameras will be added to the park district's existing Avigilon Alta video system. The existing analog cameras at the basketball court and the indoor pool will be removed by Active Alarm Company.
 >
