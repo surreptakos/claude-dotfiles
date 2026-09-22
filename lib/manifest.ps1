@@ -35,6 +35,11 @@ function Get-DotfileItems {
         # Which Claude account owns which repo and routine (issue 103). Read by the session check
         # in every repo; hand-written, uuids and one email, no secrets.
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/accounts.json';            Local = (Join-Path $claude 'accounts.json') }
+        # The i-have-adhd plugin's always-on opt-in. Its SessionStart hook injects the whole
+        # ruleset only when ~/.claude/.i-have-adhd-always exists, so without this entry a restored
+        # machine gets the skill on /i-have-adhd and nowhere else. Contents are never read; the
+        # off-switch is ~/.claude/.adhd-off, which the ask-matt gate reads.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/i-have-adhd-always';      Local = (Join-Path $claude '.i-have-adhd-always') }
         # The governance hook scripts settings.json dispatches. Also the source the packager
         # copies into the plugin payload, so the desktop and a container run the same code.
         [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/hooks';                    Local = (Join-Path $claude 'hooks') }

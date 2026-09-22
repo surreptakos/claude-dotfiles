@@ -1,0 +1,10 @@
+Presence of this file at ~/.claude/.i-have-adhd-always is the i-have-adhd plugin's always-on
+opt-in. Its SessionStart hook (hooks/always-on.mjs in the plugin cache) tests only that the path
+exists, then injects the whole skill body into every session; without the file it injects nothing
+and the skill loads only when someone types /i-have-adhd.
+
+The contents are never read. This text is here so the file is not a mystery on a restored machine.
+
+Turning it off: create ~/.claude/.adhd-off. The ask-matt gate reads that flag and drops the
+per-turn ADHD clause and the pre-send ADHD lint checks, leaving YES and caveman alone. Deleting
+this file stops the plugin's session-start injection as well.
