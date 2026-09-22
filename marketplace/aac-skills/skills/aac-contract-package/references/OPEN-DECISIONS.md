@@ -35,7 +35,7 @@ Everything else below is resolved, and where execution was pending it is recorde
 
 **7. The 1% Repair Service basis.** ~~§3a leaves it open.~~ **Resolved 2026-08-19** (wayfinder ticket #7): estimating-owned, out of contract-package scope. The drafter never derives a Repair Service price, so no basis ruling is needed for package work. The open basis question (equipment cost versus full WU cost) is flagged in `ESTIMATING-APPENDIX.md` §2 for the estimating build.
 
-**8. Repair Service start date.** ~~Cutover or month 13, after the one-year parts-and-labor warranty.~~ **Resolved 2026-08-19** (wayfinder ticket #7): **cutover.** Dan ratified Mark's CUSTOMER-14 position as the written rule — the customer pays through year one and is covered for calls the warranty does not reach. Rule recorded in MAPPING-APPENDIX §3a.
+**8. Repair Service start date.** ~~Cutover or month 13, after the one-year parts-and-labor warranty.~~ **Resolved 2026-08-19** (wayfinder ticket #7): **cutover.** Dan ratified Mark's CUSTOMER-14 position as the written rule — the customer pays through year one and is covered for calls the warranty does not reach. Rule recorded in MAPPING-APPENDIX §3a. **Reversed 2026-09-22, item 24.**
 
 **9. The permit fee overlap in BASELINES.** ~~Keep both or drop the exclusion.~~ **Resolved 2026-08-19** (wayfinder ticket #8): **keep both.** Dan ruled the permit-fee restatement deliberate; the exclusion's bracket note now records the ratification so §0 Rule 1 sweeps stop flagging the pair.
 
@@ -81,6 +81,8 @@ Everything else below is resolved, and where execution was pending it is recorde
 
 
 **22. Subcontractor pass-through markup tiers.** Opened and **resolved 2026-08-27** (Dan, in-session ruling, Clearbrook Commons-Krause lockwork review): sub furnish-and-install scope is priced by placement — 20–25% inside base sections, 10–15% when broken out as a separable or optional section. The 64% standard stays on self-performed scope; blended markup is not the health metric on mixed jobs. Rule recorded in ESTIMATING-APPENDIX.md §6, which is live policy despite the appendix's parked status. **Open remainder:** the gross-profit-per-crew-day floor awaits P&L review; until it is computed, 64% on self-performed scope is the working standard.
+
+**24. Repair Service start date, reversed.** Opened and **resolved 2026-09-22** (Dan, in-session ruling, Premier Eye Care Z-4260 services-only review): **month 13.** Reading Commercial Security ¶7 against ¶12, the warranty already covers parts and labor on defects for a year and both paragraphs exclude the same damage classes, so year-one Repair Service adds only no-defect labor calls. Item 8 is reversed; MAPPING-APPENDIX §3a rewritten with the schedule and master presentation (full price with "(begins month 13)", SOW states both monthly amounts).
 
 ---
 
