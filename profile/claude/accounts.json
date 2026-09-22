@@ -43,7 +43,7 @@
     "surreptakos/aac-bill-intake":        { "owner": "Dan" },
     "surreptakos/zoho-source-of-truth":   { "owner": "Dan" },
     "surreptakos/aac-sales-cockpit":      { "owner": "Dan" },
-    "surreptakos/aac-contract-builder":   { "owner": "Dan" }
+    "surreptakos/aac-contract-builder":   { "owner": "Dan-AAC" }
   },
   "routines": {
     "daily-forgotten-tasks": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
