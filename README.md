@@ -152,21 +152,20 @@ support, and user-scope plugin installs don't transfer. The only account-wide me
 sync: a plugin enabled on the claude.ai account downloads into every cloud session as
 `<name>@synced`, whatever repo it runs against.
 
-Cowork is different and this paragraph used to lump it in wrongly (corrected 2026-09-03). The
-memory docs state that "in Cowork sessions on your desktop" Claude Code loads `~/.claude/CLAUDE.md`,
-skipping only imports and symlinked rules that resolve outside the session's working directory. So
-the global instructions DO reach Cowork; hooks are another matter — Cowork runs its agent in a VM
-(`%APPDATA%\Claude\logs\cowork_vm_node.log`), the docs say nothing about hook execution there, and a
-hook command pointing at a Windows path cannot run inside it. A plugin's own `hooks.json` does NOT
-reach the model there either, on the evidence so far (2026-09-03): the aac-skills SessionStart hook
-echoes an `AAC-SKILLS HOOK MARKER` sentence carrying the hostname and a UTC timestamp, and a fresh
-Cowork session with the plugin's skills listed reported no such sentence anywhere in its context.
-An earlier Cowork session had "quoted" the marker — that quote matched the hook file verbatim and
-carried none of the runtime values, so it was a file read or a fabrication, and this paragraph
-briefly claimed the opposite on its strength. Cowork's own explanation: project chats are not
-Claude Code sessions, so hooks do not run. What does reach Cowork is text: the global `CLAUDE.md`,
-the plugin's skill descriptions and bodies, and Cowork's own memory. The marker hook stays in the
-plugin as a standing probe (harmless one-liner) so a future surface change is noticed.
+Cowork is different, and this paragraph has been wrong in both directions. The global
+instructions reach it: Claude Code loads `~/.claude/CLAUDE.md` there, skipping only imports and
+symlinked rules that resolve outside the session's working directory. So do the plugin's hooks —
+proved 2026-09-18 on issue #228, when a Cowork session quoted the aac-skills SessionStart marker
+with its own runtime values (`os=MINGW64_NT-10.0-26200 ... host=Dan-Inspiron15`) and its export
+showed the PreToolUse gate denying tool calls. The hooks run on the Windows host from the desktop
+app's plugin directory; the model's shell is a Linux sandbox exposed as `mcp__workspace__bash`,
+not `Bash`. A 2026-09-03 test on an older build found no marker, and this paragraph said hooks do
+not run there until 2026-09-18.
+
+What that costs: any hook that exempts a command by the tool name `Bash` or `PowerShell`, or that
+prints a Windows path to run with `py -3`, deadlocks in Cowork. The ask-matt gate was fixed for
+this on 2026-09-21 (issue #608) and now takes its declaration from any shell tool. The marker hook
+stays in the plugin as a standing probe so a future surface change is noticed.
 
 `tools/build-cloud-plugin.py` packages the repo's `aac-skills/` tree into that shape:
 
