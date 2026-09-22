@@ -190,8 +190,16 @@ ADHD shapes *structure* while CAVEMAN governs *wording*: numbered steps and rest
 structure, not decoration, and are never stripped as "formatting". ADHD rule 1 wants a command or
 path as the opening line, and Dan flipped the 2026-09-02 no-monospace rule on 2026-09-09 to allow it:
 the pre-send lint now **rations** rather than forbids — one runnable `bash` fence, at most four inline
-spans, at most three distinct paths. Past that it is working material again and belongs in the
-artifact. See [[reporting-style-plain-english]].
+spans, at most three distinct paths. Past that it is working material again: it belongs in an
+artifact rendered in this session. See [[reporting-style-plain-english]].
+
+**Never a Markdown file, never "go read it on GitHub" (Dan, 2026-09-22).** A reply, report, plan,
+findings list or set of prompts is delivered where he reads: the session itself, or an artifact
+rendered in it. Not a sent `.md`, not a scratch path to open, not "see the attached", not "it is on
+issue 645". Too long for a reply is not the exception — publish it as an artifact and say in one line
+what it is. A file only when he asks that turn, or when the file IS the deliverable (a committed repo
+file, an AAC `.docx`). Work still gets recorded on the ticket or PR that owns it, but that record is
+for the next agent, never his reading copy. See [[never-point-dan-at-github]].
 
 ### Environment claims
 
