@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -373,6 +374,34 @@ class AskMattGateTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("Ask Matt gate rejected hook input", result.stderr)
             self.assertNotIn("Traceback", result.stderr)
+
+    def test_claude_prompt_prints_a_runner_this_machine_can_execute(self) -> None:
+        # A printed `py -3` is a dead command on a POSIX image and a printed `python` is dead on an
+        # image that ships only python3; either way the turn cannot declare and every tool stays
+        # denied. Both the declare line and the lint line must name a runner that resolves here.
+        with tempfile.TemporaryDirectory() as folder:
+            result = self.run_gate(
+                "claude-prompt",
+                {
+                    "session_id": "runner-session",
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": "make one",
+                },
+                Path(folder),
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+            for marker in ('declare-claude "runner-session"', 'lint <file> "runner-session"'):
+                printed = context.split(marker)[0].rsplit("`", 1)[-1]
+                runner = printed.split('"', 1)[0].strip()
+                self.assertTrue(runner, f"no runner printed before {marker}")
+                if runner == "py -3":
+                    self.assertEqual(os.name, "nt", "py -3 printed off Windows")
+                else:
+                    self.assertTrue(
+                        shutil.which(runner) or Path(runner).is_file(),
+                        f"printed runner {runner!r} does not resolve for {marker}")
 
     def test_claude_prompt_enforces_all_disciplines_and_reads_the_caveman_flag(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
