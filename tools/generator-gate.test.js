@@ -38,10 +38,16 @@ const GENERATORS = [
   },
 ];
 
-/** Copy the generator and its two files into a scratch repo, so the probe never writes here. */
+/** Copy the generator and every file it reads or writes into a scratch repo, so the probe never
+ *  writes here. A generator with more than one output exports OUTPUTS (issue 675); staging only
+ *  SOURCE/TARGET would leave the others missing and `--check` would die on ENOENT rather than
+ *  answering the question this gate asks. */
 function stageRepo(dir, script) {
-  const { SOURCE, TARGET } = require(path.join(ROOT, script));
-  for (const file of [path.join(ROOT, script), SOURCE, TARGET]) {
+  const generator = require(path.join(ROOT, script));
+  const { SOURCE, TARGET, OUTPUTS } = generator;
+  const files = new Set([path.join(ROOT, script), SOURCE, TARGET]);
+  for (const out of OUTPUTS || []) { files.add(out.source); files.add(out.target); }
+  for (const file of files) {
     const dest = path.join(dir, path.relative(ROOT, file));
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(file, dest);
