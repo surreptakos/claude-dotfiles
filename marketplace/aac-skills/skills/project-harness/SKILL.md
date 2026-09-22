@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-22T16:29:07Z'
-  previous-modified: '2026-09-21T22:18:55Z'
-  revision: '34'
-  content-sha: cbb3e0cc8bb7
+  modified: '2026-09-22T18:01:52Z'
+  previous-modified: '2026-09-22T16:29:07Z'
+  revision: '35'
+  content-sha: 78ea08be3f96
 ---
 
 # Project Harness
@@ -87,7 +87,7 @@ cross-repo Projects board instead of per-repo (see step 6).
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
    - In `claude-dotfiles` itself the template is **generated** from `tools/tracker-audit.js` by `tools/build-harness-tracker-audit.js`; never hand-edit `templates/tracker-audit.js` there. Fix the repo copy, re-run the generator, and `tools/tracker-audit-template.test.js` goes green (issue 336).
 8b. **The job that runs it** — copy `templates/tracker-audit.yml` to `.github/workflows/tracker-audit.yml`, `templates/tracker-audit-job.js` to `tools/tracker-audit-job.js`, and `templates/tracker-audit-job.test.js` to `tools/tracker-audit-job.test.js`. Until v33 the harness shipped the auditor and not the job, so a repo could hold `tools/tracker-audit.js` for weeks with nothing running it: `session-check` reads the workflow's latest run for the default-branch head, and with no workflow it prints `no .github/workflows/tracker-audit.yml` at both ends of every session (aac-sales-cockpit#645, zoho-source-of-truth#134 — the only `!!` standing between those repos and `Ready to archive`).
-   - **One substitution, and it fails silently.** `branches: [DEFAULT_BRANCH]` in the workflow's `push` trigger: read the real one from `git symbolic-ref refs/remotes/origin/HEAD` (`main` on most repos, `master` here). The installed `tracker-audit-job.test.js` asserts a branch is named and that the placeholder is gone, so an un-substituted copy fails the repo's own suite rather than quietly never firing.
+   - **One substitution, and it fails silently.** `branches: [DEFAULT_BRANCH]` in the workflow's `push` trigger: read the real one from `git symbolic-ref refs/remotes/origin/HEAD` (`main` on most repos, `master` here; a cloud clone may have no `origin/HEAD`, so fall back to `git remote show origin`). The installed `tracker-audit-job.test.js` asserts a branch is named and that the placeholder is gone, and the workflow's first step runs it, so an un-substituted copy turns every issue-event run red rather than quietly never firing. It fails the repo's own suite only where that suite runs `tools/*.test.js`: aac-sales-cockpit's `tests/run-all.js` does not, so run `node --test tools/tracker-audit-job.test.js` by hand after substituting.
    - **Do not rename the workflow file.** `TRACKER_AUDIT_WORKFLOW` in `aac-skills/session-check/check.js` names `tracker-audit.yml`; a different name reads as no job at all.
    - The runner needs no substitution — it spawns the repo's own `tools/tracker-audit.js` and propagates its exit code (0 clean, 1 drift, 2 could not audit; both non-zero codes fail the run).
    - All three files are **generated** in `claude-dotfiles` by `tools/build-harness-tracker-audit.js` except the workflow, which differs from this repo's copy by the `proof` job (issue 473's one-time acceptance evidence) and the branch placeholder. `tools/tracker-audit-template.test.js` pins both halves.
