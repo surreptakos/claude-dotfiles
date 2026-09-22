@@ -655,6 +655,14 @@ def verify(job):
                 f'Exclusion count within {EXCL_RANGE[0]}-{EXCL_RANGE[1]}', str(ne))
         else:
             rec('WARN', 'Exclusions section present', 'no "Exclusions" header in the block')
+        if excl:
+            # SCHEDULE-GENERATION-PROCEDURE §11a: one blank line between the
+            # Clarifications block and the bold Exclusions header. The builder
+            # writes it; a hand edit of run 1 drops it (Z-4260, 2026-09-22).
+            tail = clar.replace('\r\n', '\n').rstrip(' \t')
+            blank = tail.endswith('\n\n')
+            rec('PASS' if blank else 'WARN', 'Blank line before the Exclusions header',
+                '' if blank else 'the Clarifications run ends without an empty line')
         body = clar + excl
         rec('PASS' if 'Pricing is valid for 30 days' in body else 'FAIL',
             'Validity bullet opens "Pricing is valid for 30 days"',
