@@ -32,7 +32,27 @@ each Routine serves its own repo independently.
 
 ## Boot
 
-At session start, before anything else:
+**First, check you were bootstrapped at all.** A Routine-fired session only reaches
+`.claude/hooks/session-start.sh` when the Routine carries a source repo. One created from inside a
+session carries none (`mcp__Claude_Code_Remote__create_trigger` has no `sources` field), and the
+home-anchored seat at `~/.claude/hooks/aac-bootstrap.sh` is written *by* that hook — so in a fresh
+container neither exists and nothing installs the payload. Measured 2026-09-22 on a Routine fired
+for the purpose: no skills, no governance hooks, no rules text, no `~/.claude/settings.json`, and
+`~/.claude/hooks` absent entirely (claude-dotfiles issue 649).
+
+`ls ~/.claude/skills/session-check/check.js` answers it. If it is missing, self-heal before
+anything else — the repo is public, so this needs no credential:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/.claude/hooks/session-start.sh -o /tmp/aac-bootstrap.sh && bash /tmp/aac-bootstrap.sh
+```
+
+It installs the payload, the skills, the merged governance hooks and the home-anchored seat, and it
+runs with no project directory. Verified from a bare `HOME`: 54 skills and
+`payload matches dotfiles master`. The seat it leaves makes every later session in that container
+bootstrap on its own.
+
+Then, before anything else:
 
 1. Read the per-repo state issue in `surreptakos/claude-dotfiles` — bill-intake #74,
    contract-builder #75, sales-cockpit #76, zoho-source-of-truth #77. Issue #44 is the shared

@@ -42,6 +42,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - ps51-scripts-need-a-bom: Scheduler runs 5.1
 - restore-test-reads-live-skill-copies: live edit
 - routine-sessions-run-acceptedits: allow-list every tool
+- routine-without-source-has-no-payload: curl the public hook
 - scratchpad-path-too-long-for-git-clone: short root
 - sed-strips-crlf-in-this-repo: no sed -i on .ps1
 - session-env-carries-zoho-and-gas-tokens: names only
