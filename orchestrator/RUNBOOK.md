@@ -1,7 +1,7 @@
 # Master orchestrator runbook (cloud, per-repo Routine)
 
-The master orchestrator runs as four hourly Routines Dan created in the claude.ai Routines UI —
-one per repo, each with that repo as source and the connectors ticked. Every Routine wake is a
+Until 2026-09-23 the master orchestrator ran as four hourly Routines Dan created in the claude.ai
+Routines UI — one per repo, each with that repo as source and the connectors ticked. Every Routine wake is a
 FRESH cloud session. It boots from the repo's per-repo state issue, claims the venue, dispatches
 triage / to-tickets / fleet in-session, does the merge pass, writes `Pass complete`, and ends.
 Continuity lives in the state issue; nothing else outlives the run. Rewritten 2026-09-15 for the

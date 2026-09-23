@@ -295,7 +295,7 @@ with `/Enable`. Ctrl+C in a launched master window stops that pass; close the wi
 watchdog moves to the next repo on its next slot.
 
 **Editing the watchdog on a branch.** The task runs the script at its checkout path, so while the
-checkout sits on a feature branch the task runs THAT branch's script every 30 minutes. Disable the
+checkout sits on a feature branch the task runs THAT branch's script every 10 minutes. Disable the
 task before editing the script (`schtasks /Change /Disable`), re-enable after the merge lands and
 the checkout is back on master. The script is saved with a UTF-8 BOM: Windows PowerShell 5.1 reads
 a BOM-less file as ANSI, and an em dash inside a string then breaks the parse (seen 2026-09-02).
