@@ -52,4 +52,4 @@ and give the note a name that says what it is — adding one costs its own line 
 - trust-dialog-fires-despite-accepted-flag: strip allow
 - user-scope-plugin-wins-over-project-scope: user wins
 - verify-before-filing-a-sweep-ticket: re-list first
-- workflow-runtime-quirks: scriptPath; no Date.now; LF
+- workflow-runtime-quirks: scriptPath; no Date.now; LF; absolute scriptPath, cwd stale

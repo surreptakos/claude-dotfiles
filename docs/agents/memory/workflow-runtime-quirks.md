@@ -1,6 +1,6 @@
 ---
 name: workflow-runtime-quirks
-description: Workflow tool traps - named workflows are session-start snapshots (launch by scriptPath), scripts cannot call Date.now()/Math.random() (fleet needs args.runId), and scriptPath refuses a CRLF file (2026-09-15)
+description: Workflow tool traps - named workflows are session-start snapshots (launch by scriptPath), scripts cannot call Date.now()/Math.random() (fleet needs args.runId), scriptPath refuses a CRLF file (2026-09-15), and the tool call uses the session's cwd AT CALL TIME, not the served repo (2026-09-23)
 metadata:
   type: project
 ---
@@ -22,10 +22,28 @@ Two Workflow-tool behaviours that cost a fleet launch each on 2026-09-01:
    hidden in the approval dialog`. Copy the file with `tr -d ''` into the scratchpad and pass
    that path; the run itself is unaffected.
 
+4. **The `Workflow` tool call resolves `scriptPath` relative to the harness's cwd at the moment of
+   the call, and that cwd is asynchronous** — a background "Primary working directory" update from
+   an earlier `Bash` `cd` or environment event can still be `/home/user` when `Workflow` fires, even
+   though the served repo's clone sits at `/home/user/<repo>`. Measured 2026-09-23 on an
+   `aac-bill-intake` orchestrator pass: `Workflow({scriptPath: '.claude/workflows/ticket-fleet.js'})`
+   launched with cwd `/home/user` (not a git repo) failed all 3 implementers identically with
+   `Cannot create agent worktree: not in a git repository and no WorktreeCreate hooks are
+   configured` — 0 delivered, no branches created, nothing to resume. Relaunching with an ABSOLUTE
+   `scriptPath` (`/home/user/<repo>/.claude/workflows/ticket-fleet.js`) after confirming
+   `git rev-parse --is-inside-work-tree` is `true` at the served repo's path ran clean. Always pass
+   an absolute `scriptPath` for a per-repo fleet launch, and verify the repo path is a git worktree
+   with a direct `Bash` check immediately before the `Workflow` call — do not trust the
+   "Primary working directory" environment line alone, since it can be stale relative to the actual
+   call.
+
 **Why:** the `workflow-authoring` skill documents rule 2 and it was dismissed as stale on the strength
-of one successful run. A live launch settled it. Rule 1 is documented nowhere.
+of one successful run. A live launch settled it. Rule 1 is documented nowhere. Rule 4 is undocumented
+in `orchestrator/RUNBOOK.md`'s dispatch section, which names only a relative
+`scriptPath = .claude/workflows/ticket-fleet.js`.
 
 **How to apply:** after editing any workflow script, launch via `scriptPath`, from an LF copy when
 the source is CRLF. Every fleet launch
 (local, `orchestrator/worker-cycle.md`, `LOCAL-RUNBOOK.md`) passes `runId`. See
-[[fable-usage-is-rationed]] for the model pins the fleet keeps.
+[[fable-usage-is-rationed]] for the model pins the fleet keeps. For a cloud-Routine master, use an
+absolute `scriptPath` and confirm the repo cwd right before the call (rule 4).
