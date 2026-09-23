@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-22T22:06:23Z'
-  previous-modified: '2026-09-22T21:44:42Z'
-  revision: '17'
-  content-sha: 12c1bea6baf6
+  modified: '2026-09-23T15:18:11Z'
+  previous-modified: '2026-09-22T22:06:23Z'
+  revision: '18'
+  content-sha: 339ebc6bcb42
 ---
 
 # todoist-triage
@@ -188,7 +188,9 @@ The order, and nothing else above it:
 
 Inbox items judged personal are named on line 2's tail, by title, as left alone.
 
-Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. Line 6 is the one exception: it may spell the record filenames so he can go find them.
+**End every run with the Day Board link (Dan, 2026-09-23).** The last line of the run's output, after the tier-2 questions, is the board's URL, `https://claude.ai/artifact/SQcwMLBKKrtdEPBHtJfGMi`, so he can open it in one tap; the notification carries the same URL as its last line. A run whose board write failed still links it, beside the line naming the board dark.
+
+Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. Line 6 and the closing board link are the exceptions: line 6 may spell the record filenames so he can go find them.
 
 **Then append this run's record.** After the report, from the `aac-routines` checkout:
 
