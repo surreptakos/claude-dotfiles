@@ -40,7 +40,6 @@ that works:
 - a probe or measurement with no decision waiting on it
 - a discovery-triage chore (triaging a fleet run's bullets) — the bullets are speculative by
   construction; a real failure files its own ticket
-- Windows-only or PC-only work while the PC is retiring as a venue
 - consolidation or hygiene with no user-visible change
 
 **Close as not planned** — the ticket is moot, not merely cautious:
@@ -57,6 +56,9 @@ that works:
 - anything labelled `ready-for-human`, `orchestrator` or `wayfinder:map` (rulings and state
   containers are never the reaper's)
 - anything Dan pulled back out of Maybe Someday (an issue event shows the milestone change)
+- Windows-only or PC-only work: the desktop is the live venue for the master orchestrators
+  again (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`), so PC work is
+  judged like any other ticket
 
 ## Land it
 
