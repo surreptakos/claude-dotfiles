@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-23T18:26:45Z'
-  previous-modified: '2026-09-23T15:18:11Z'
-  revision: '19'
-  content-sha: d76d6c8fd5b6
+  modified: '2026-09-23T18:31:02Z'
+  previous-modified: '2026-09-23T18:26:45Z'
+  revision: '20'
+  content-sha: 7deef8ccc15b
 ---
 
 # todoist-triage
@@ -208,7 +208,7 @@ Done when Dan can see the board state without opening Todoist, knows which surfa
 
 ## Cadence
 
-On demand, plus the scheduled run weekdays at 6:00 AM America/Chicago, a desktop scheduled task since 2026-09-23 (the cloud Routine is paused; never run both). At 6:00 the newest Power Automate export is the previous evening's, so the live tail covers the overnight window. The scheduled run **applies tier 1, sends the status, then raises every tier-2 question** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. Nobody is at the keyboard, so the questions wait in the session until Dan arrives; the notification is what brings him, and he answers them there. Waiting in an open question is not the same as being parked for tomorrow. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
+On demand, plus the scheduled run weekdays at 8:30 AM America/Chicago, a desktop scheduled task since 2026-09-23 (the cloud Routine is paused; never run both). 8:30 is the earliest slot that catches the day's first Power Automate export (08:15 CT, landing 08:16), whose 48-hour mail window carries the overnight mail; an earlier run leaves the night to the live tail. The scheduled run **applies tier 1, sends the status, then raises every tier-2 question** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. Nobody is at the keyboard, so the questions wait in the session until Dan arrives; the notification is what brings him, and he answers them there. Waiting in an open question is not the same as being parked for tomorrow. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
 
 ## Filters (exist in Todoist, favorited)
 
