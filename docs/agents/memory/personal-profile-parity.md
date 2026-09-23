@@ -15,12 +15,13 @@ HOOKS KEY ONLY with the `\.claude\` → `\.claude-personal\` rewrite (personal p
 project memories union-merged (newer mtime wins, MEMORY.md unioned by pointer-line target,
 personal-only files never deleted). Idempotent; overwrites are backed up to
 `~/.claude-personal-refresh-backup-<stamp>`; a machine without the profile is skipped, never
-created. The restore test seeds a fake personal profile and asserts all of this (checks 29 total).
+created. The restore test seeds a fake personal profile and asserts all of this.
 The manual procedure below is history, kept for the how and the why.
 
 REVERSE MEMORY SYNC: DECLINED BY DEFAULT 2026-08-19 (issue #9 decision b, privacy-preserving).
 The 31 personal-only memories (aac-cockpit 26, task-management 4, bill-intake 1) never flow into
-the work profile or the claude-dotfiles repo — push reads only `~/.claude`. Flipping this requires
+the work profile or the claude-dotfiles repo — nothing in the repo reads `~/.claude-personal` (and
+push itself retired with issue 214). Flipping this requires
 an explicit owner instruction.
 
 `~/.claude-personal` (djgatsakos@gmail.com, launched via the `claude-personal` shim) was a stale
@@ -43,4 +44,4 @@ WORK credentials. Any new hook that touches profile state must follow the same
 Work project memories now DO flow into the personal profile (issue #9 decision a superseded the
 earlier hold-off): the union merge above copies them in on every pull. What stays out, per
 decision b, is the reverse direction — personal-session content never enters the work account's
-context. See also [[two-claude-profiles-work-and-personal]].
+context.

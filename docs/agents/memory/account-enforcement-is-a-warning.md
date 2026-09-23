@@ -11,11 +11,16 @@ metadata:
 Account-to-repo and account-to-routine enforcement is a **warning, never a hard gate** (Dan,
 2026-09-09, issue 103). The registry is `~/.claude/accounts.json` (whitelisted, travels with the
 dotfiles): Dan-AAC (desktop app) owns claude-dotfiles, aac-routines, aac-message-board,
-aac-sales-commissions and the six desktop routines; Dan (CLI, mobile, web, Task Scheduler) owns
-aac-bill-intake, zoho-source-of-truth, aac-sales-cockpit, aac-contract-builder and the watchdog
-masters; Active Alarm (Cowork, cloud routines) owns Todoist Triage, a cloud routine (Cowork scheduled
-task `todoist-triage-friday`, weekdays 8 AM), and leaves nothing on this laptop (Dan's ruling
-2026-09-10; recovery path in [[cowork-scheduled-tasks-live-in-session-uploads]]).
+aac-sales-commissions and the desktop routines the registry's `routines` map lists; Dan (CLI,
+mobile, web, Task Scheduler) owns aac-bill-intake, zoho-source-of-truth, aac-sales-cockpit and
+aac-contract-builder. Which account the desktop watchdog masters run as is open (issue 714: the CLI
+on the PC is signed in as Dan-AAC, and every watchdog tick warns).
+
+**Todoist Triage moved twice.** Ruled Active Alarm's Cowork task `todoist-triage-friday` on
+2026-09-10; a claude.ai/code routine from 2026-09-11; since 2026-09-23 the desktop task
+`todoist-triage-local` under Dan-AAC/team, weekdays 8:30 AM Central, with the cloud Routine paused
+(issue 707). The registry's cloud `todoist-triage` entry was removed 2026-09-23 (issue 526).
+History in [[cowork-scheduled-tasks-live-in-session-uploads]].
 
 **Why:** the owner kept losing track of which account did what, and a stale desktop registry had
 six routines enabled under the wrong account. A block would fire on every deliberate cross-account

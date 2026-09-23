@@ -151,8 +151,11 @@ dialog is a separate, unsolved stall: "Accessing workspace ... This folder pre-a
 permissions in .claude/settings.json and .claude/settings.local.json ... Yes, I trust this folder"
 rendered on an interactive launch in the contract-builder clone on 2026-09-02 even though
 `hasTrustDialogAccepted` was already true for that path in `~/.claude.json` (reproduced through
-winpty, captured verbatim). Until that is fixed a fresh master can sit on it until someone clicks;
-the watchdog log shows the launch, the state issue shows no Heartbeat 1.
+winpty, captured verbatim). Fixed by issue 199 (`tools/settings-invariants.ps1` pre-trusts the four
+clone paths, `defaultMode: bypassPermissions` in the profile): on 2026-09-18 an interactive launch in
+the zoho and bill-intake clones reached the first prompt with no trust or permission dialog. If it
+comes back, the watchdog log shows the launch and the state issue shows no Heartbeat 1; the repair
+steps are `docs/runbooks/issue-199-desktop-verify.md`, section 4.
 
 Stated plainly: with bypass permissions on, an unattended master can merge, push, delete branches,
 edit issues and run any shell command with no prompt and nobody watching. The merge bar in

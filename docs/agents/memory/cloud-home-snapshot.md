@@ -1,6 +1,6 @@
 ---
 name: cloud-home-snapshot
-description: "A cloud container's ~/.claude comes from an environment snapshot, so a failed bootstrap is served to later sessions until one re-runs it; a session whose project dir is not a harnessed repo never reaches the repo-anchored hook (2026-09-21, issue 643)"
+description: "A cloud container's ~/.claude comes from an environment snapshot, so a failed bootstrap is served to later sessions; a session whose project dir is not a harnessed repo never reaches the repo-anchored hook, and a session-minted Routine gets no payload (curl the public hook) (issue 643)"
 metadata:
   node_type: memory
   type: feedback
@@ -31,3 +31,25 @@ by an agent (`fire_trigger` refuses: "agents can only fire routines they created
 is hard to reproduce from a session. Harness v31 seats a copy of the hook at
 `~/.claude/hooks/aac-bootstrap.sh` in USER settings, which every session in the container runs
 whatever its project dir is; one good bootstrap in an environment makes every later session retry.
+
+**A Routine minted from a session gets no payload at all** (merged 2026-09-23 from the retired
+`routine-without-source-has-no-payload` note). `mcp__Claude_Code_Remote__create_trigger` has no
+`sources` field, so neither the repo-anchored hook nor the home seat exists in its container.
+Measured 2026-09-22 by firing one and having it report through the Todoist REST API:
+
+```
+ROUTINE PROBE: declaration=refused payload=none match=no seat=absent skills=2 stopslop=0 pylons=no
+```
+
+`~/.claude/hooks` and `~/.claude/settings.json` were absent and `session-check/check.js` was
+`MODULE_NOT_FOUND`. Self-heal needs no credential, since the repo is public:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/.claude/hooks/session-start.sh -o /tmp/aac-bootstrap.sh && bash /tmp/aac-bootstrap.sh
+```
+
+Verified from a bare `HOME`: 54 skills, `payload matches dotfiles master`, the home seat left behind.
+A Routine that must run under AAC governance is created in the Routines UI or the HTTP API with a
+source repo; one minted from a session puts that line first in its prompt. (The four `master-*`
+Routines had sources; they are disabled since 2026-09-23, ADR 0001.) Related:
+[[dotfiles-public-for-cloud-clone]], [[routine-sessions-run-acceptedits]].
