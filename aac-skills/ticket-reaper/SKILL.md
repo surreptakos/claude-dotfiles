@@ -2,10 +2,10 @@
 name: ticket-reaper
 description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs weekly from a cloud Routine and as step 0 of /maintain-repo.
 metadata:
-  modified: "2026-09-18T06:25:28Z"
-  previous-modified: "2026-09-18T06:17:04Z"
-  revision: "4"
-  content-sha: "de6485952fb6"
+  modified: "2026-09-23T15:12:08Z"
+  previous-modified: "2026-09-18T06:25:28Z"
+  revision: "5"
+  content-sha: "7cb9a2078bee"
 ---
 
 # Ticket reaper

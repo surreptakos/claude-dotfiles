@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker — edges as text in one file per ticket locally, or native blocking links on a real tracker.
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-18T17:22:56Z"
-  previous-modified: "2026-09-14T22:40:36Z"
-  revision: "3"
-  content-sha: "1d0a9cb1fce3"
+  modified: "2026-09-23T15:12:36Z"
+  previous-modified: "2026-09-18T17:22:56Z"
+  revision: "4"
+  content-sha: "4914284a858a"
 ---
 
 # To Tickets
