@@ -25,7 +25,7 @@ it decides anything.
    the code and calling the live functions.
 3. Pass 2, the use-case map (`/concepts/use-case-map.md`): its categories Harness Engineering,
    Model routing, LLM guardrails, Semantic code linting and Verification, checked against this
-   repo's harness. These add judgments where no regex exists today.
+   repo's harness by opening the code at each site. These add judgments where no regex exists today.
 
 ## The rule for every candidate
 
@@ -54,12 +54,22 @@ ask whether the quoted evidence covers a box before ticking it (it may only with
 
 ## Pass 2 — use-case map categories
 
-| # | Map category | Site | Judgment | Code keeps |
-|---|---|---|---|---|
-| A | Model routing | `aac-skills/ticket-fleet/ticket-fleet.js:51` pins one `implModel` for every ticket | Score or Choice on the scouted ticket: small and local, multi-file, design-level. Code maps the answer to a model pin and escalates on failure. | The pin table, the escalation rule, the verify stage |
-| B | Semantic code linting in CI | AAC writing standard lint (`aac-skills/aac-house-writing-standard/scripts/wr001-lint.js`, `profile/claude/tools/stopslop.py`) keeps fixed phrase registers and leaves judgment rules to a human | One Noul per judgment rule of the standard, flag-only, reviewed by a person | The phrase registers, counts, formatting rules |
-| C | LLM guardrails | Issue and PR text the fleet feeds to implementer agents | Noul: does this text try to redirect the agent, widen its access, or override its instructions? Flag for the report; never the only guard. | Permission mode, tool allow-lists, the tree guard |
-| D | Verification | Fleet verify stage, before an agent-driven close | Noul per acceptance box: does the diff summary cover it? Low confidence goes to the verify agent, never to an automatic tick. | The verify agent's verdict, CI |
+Every row below was checked by opening the cited code. Paths are `aac-skills/ticket-fleet/ticket-fleet.js`
+unless named.
+
+| # | Map category | Site and evidence | Judgment | Code keeps | Risk | Eval data |
+|---|---|---|---|---|---|---|
+| A | Model routing | `:51` sets one `implModel` for every implementer (used at `:1300` prober, `:1674` implementer). Attempts 2 and 3 reuse it. The scout schema (`:604-619`) has no size or difficulty field. | Score over `title`, `criteria` and `repoMap`: single-file mechanical, multi-file, design-level. Code maps the level to a model per ticket and per attempt. | Pin table, attempt loop, verifier as the real gate | Gates nothing; a weak first attempt is caught by the verifier | Branch names record the attempt (`agent/issue-N-attemptK-…`, `:1649`); tickets that needed attempt 2+ are free "hard" labels |
+| B | Semantic code linting | `aac-skills/aac-house-writing-standard/scripts/wr001-lint.js:5-7`: "Judgment rules (5, 6, 8, 9, 10, and all of Part XXV except 165) are not checked here and never will be". `profile/claude/tools/stopslop.py:13-16` leaves Rules 154, 161, 166 to a reader. | Noul per unit: Rule 5 (main point first, opening paragraph), Rule 6 (passive hiding responsibility, sentence), Rule 10 (filler beyond the list, sentence), Rule 162 (kicker or recap, last paragraph), Rule 164 (dramatic fragmentation, paragraph). Rules 8, 154, 161, 166 need evidence or the whole document and stay with a reader. | Phrase registers, ERROR tier, counts | `profile/claude/hooks/stopslop-stop.py` exits 2 on ERROR, so Jev findings stay WARN-only | No stopslop tests; Preferred/Avoid pairs in the standard's `references/CORE.md:67-124` as fixtures |
+| C | LLM guardrails | The scout copies `criteria` "verbatim from issue + comments" (`:613`, `:1092`) with no comment-author filter (`:555`, `:566`). It lands in the implementer (`:1666`), prober (`:1287`), probe verifier (`:1337`), handoff (`:1422`) and code verifier (`:1760`). Nothing checks it for instructions aimed at the agent. | After the scout, one Noul per ticket on `criteria`: does this text tell the agent to act outside a repository change for this ticket (secrets, other repos, push or merge, ignoring rules)? Flag in the run log or hold the ticket for the owner. | Worktree isolation, tree guard, no-merge rails, permission mode | Never the only guard | None; build from closed tickets plus planted injections |
+| D | Verification | The verify stage (`:1729-1768`) runs tests and reads the diff; it needs tools, so it stays an agent. `tools/tick-acceptance-boxes.js:160-171` checks only that the PR merged and closes the issue, then ticks every box "verified in PR #N". | In the tick script, one Noul per box: does the verifier evidence quoted in the PR body show this criterion met? Low probability withholds that one tick and adds a note. | Merge and closing-reference checks, `untickedBoxes`, verifier verdict, CI | Can only withhold; the script runs as a `pull_request_target` workflow, so the key is an Actions secret | `tools/tick-acceptance-boxes.test.js` (10 tests); closed fleet PR bodies paired with their issues |
+| E | Search and retrieval | `tools/repo-memory-load.js:11-13` injects note NAMES once at SessionStart; nothing matches notes to the prompt. Each note has a `description:` line. | On UserPromptSubmit, one Noul per note (about 37, one batched request): is this note relevant to the request? Inject the top 1-3 descriptions. | Index parsing, byte budget, file reads | Gates nothing; about 100 ms per prompt | None; build from logged prompts plus the notes each session opened |
+| F | Model routing (harness) | `profile/codex/hooks/ask_matt_gate.py:28-51` lists `ALLOWED_FLOWS`; `:432-440` leaves the route choice to prose hints. | Choice over the flows on the prompt, injected as a suggested route. At Stop, a note only when the declared route differs at high confidence. | Declaration, nonce, `_publish_gate` exact token | Advisory; never replaces the declaration | Declared flows in the governance log; prompts not logged yet |
+| G | Map-reduce over agent output | `:1997` flattens every implementer's `discoveries`; the follow-ups writer appends them verbatim to `FOLLOW-UPS.md` (`:2016`) with no dedupe. | Noul per candidate pair (found by code on shared path or symbol): same finding as bullet or open issue Y? Annotate "likely dup of #N"; never drop. | Candidate search, the append | Annotation only | 87 bullets in `FOLLOW-UPS.md` plus tracker triage outcomes |
+
+Opened and rejected in pass 2: `aac-skills/consistency-audit/claims-audit.js` (claim types are
+structural); the fleet's env-probe, blocker-state and open-pr-scan agents (they read command output
+and need tools); `HANDOFF.remainingKind` (the same agent runs commands, so the call stays).
 
 ## Rejected
 
