@@ -213,5 +213,9 @@ Write-Host 'Personal profile (~/.claude-personal)'
 Update-PersonalProfile -UserHome $UserHome -DryRun:$DryRun
 
 Write-Host ''
-Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)
+if ($DryRun) {
+    Write-Host ("{0} files would be written. Dry run: nothing written, no backup made." -f $total)
+} else {
+    Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)
+}
 exit 0
