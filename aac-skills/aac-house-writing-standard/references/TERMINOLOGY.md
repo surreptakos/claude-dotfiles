@@ -81,6 +81,7 @@ Table F1. House decision register
 | 153–166; G; H | Draft-quality and AI-tell rules adopted as a snapshot of stop-slop PR #66 (commit 8e2130b, unmerged). | Third-party proposal, MIT licensed. Re-verify against upstream when the PR merges or closes. | 0.5 |
 | 53; D | U.S. telephone numbers use hyphens, without parentheses. | Concurrent draft, Rule 53. Standardizes the displayed number. | 0.4 |
 | 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
+| 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
 
 # References
 

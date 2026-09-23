@@ -7,22 +7,22 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.6 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.7 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.6 |
+| **Version** | 0.7 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
 | **Primary reference** | The Gregg Reference Manual, 11th U.S. edition |
 
-**Control statement.** The approved electronic master is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
+The approved electronic master of this standard is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
 
-**Purpose of draft status.** Version 0.4 is formatted as a controlled document but does not become company policy until approved by the designated approver.
+This draft is formatted as a controlled document, but it does not become company policy until the designated approver approves it.
 
 **Approval**
 
@@ -39,3 +39,4 @@ Company-wide editorial, correspondence, document layout, and controlled-writing 
 | 0.3 | 2026-09-09 | Performance-review exception in Part I; decision register updated. | Pending |
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
+| 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |

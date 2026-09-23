@@ -25,7 +25,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const STANDARD_VERSION = "0.6";
+const STANDARD_VERSION = "0.7";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
