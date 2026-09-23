@@ -53,6 +53,8 @@
     "o3-prep-mark":          { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-lynne":         { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "weekly-maintain-repo":  { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "todoist-triage-local":  { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "brazil-flights-garden-local": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "todoist-triage":        { "owner": "Active Alarm", "org": "", "surface": "cloud", "taskId": "todoist-triage-friday" }
   },
   "auditRepo": "surreptakos/claude-dotfiles"
