@@ -1,11 +1,11 @@
 ---
 name: ticket-reaper
-description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs weekly from a cloud Routine and as step 0 of /maintain-repo.
+description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs as step 0 of the weekly /maintain-repo; a standalone weekly Routine is not created yet (issue 664).
 metadata:
-  modified: "2026-09-23T15:12:08Z"
-  previous-modified: "2026-09-18T06:25:28Z"
-  revision: "5"
-  content-sha: "7cb9a2078bee"
+  modified: "2026-09-23T22:38:28Z"
+  previous-modified: "2026-09-23T15:12:08Z"
+  revision: "6"
+  content-sha: "a5278eef78e6"
 ---
 
 # Ticket reaper
@@ -74,7 +74,7 @@ that works:
   The label is what the audit exempts; the annotated boxes are what a reader sees.
 - Digest: one comment on the digest issue, three lists (parked, closed, left with a one-clause
   reason where the call was close), counts at the top. A run that changes nothing still posts a
-  one-line digest, so a silent week reads differently from a week the Routine did not run.
+  one-line digest, so a silent week reads differently from a week the sweep did not run.
 
 ## Rails
 

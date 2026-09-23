@@ -126,9 +126,13 @@ test('readWanted: rejects a non-array, a missing title and a duplicate title', (
   assert.deepEqual(readWanted(tmpFile([{ title: ' A ' }])), [{ title: 'A', description: '' }]);
 });
 
-test('the committed file parses and names the two parity milestones', () => {
+test('the committed file parses, names the open milestones and never a closed one', () => {
   const wanted = readWanted(path.join(__dirname, '..', 'docs', 'agents', 'milestones.json'));
   const titles = wanted.map((w) => w.title);
-  assert.ok(titles.includes('M1 cloud parity: claude-dotfiles'));
-  assert.ok(titles.includes('M2 cloud parity: all repos'));
+  assert.ok(titles.includes('Backlog'));
+  assert.ok(titles.includes('Maybe Someday'));
+  // M1 and M2 were closed by hand (2026-09-20, 2026-09-23, ADR 0001). plan() reopens any closed
+  // milestone the file names, so listing them would undo that on the next push to this file.
+  assert.ok(!titles.includes('M1 cloud parity: claude-dotfiles'));
+  assert.ok(!titles.includes('M2 cloud parity: all repos'));
 });

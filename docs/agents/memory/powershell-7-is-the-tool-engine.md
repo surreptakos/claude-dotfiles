@@ -17,10 +17,10 @@ Two things that cost time to establish:
   pwsh mid-session flipped `$PSVersionTable.PSVersion` from `5.1.26100.9168` to `7.6.5` in the same
   session, with no restart. Do not tell the owner to restart for the interpreter. `CLAUDE_CODE_USE_POWERSHELL_TOOL`
   is different — that one is read at launch.
-- `ConvertTo-Json` indents 4 spaces on 5.1 and 2 spaces on 7. `Write-SkillLinks` in `lib/manifest.ps1`
-  generates `claude/skill-links.json` with it, so a push from a 5.1 window and a push from pwsh 7
-  produce whole-file diffs of identical content. `git diff -w` is empty when this is the cause.
-  The 2-space form landed in commit `5c0e270`. Pinning the indent was offered and not yet done.
+- `ConvertTo-Json` indents 4 spaces on 5.1 and 2 spaces on 7, so a file written by both engines
+  shows whole-file diffs of identical content; `git diff -w` is empty when this is the cause. It bit
+  `claude/skill-links.json` (commit `5c0e270`), which retired with issue 214 along with the push
+  that wrote it.
 
 winget cannot deliver this: `Microsoft.PowerShell` ships an msixbundle only, which deploys under
 `WindowsApps` and is invisible to that fixed list. The MSI from the GitHub release is the only route,

@@ -34,4 +34,4 @@ reads each registry at org init, so file edits take effect on the next switch or
 
 **How to apply:** diagnose "my routine did not run" by checking `[CCDScheduledTasks]` lines in
 `%LOCALAPPDATA%\Claude\Logs\main.log` and the org-specific registry, not the SKILL.md dirs. See
-[[fable-usage-is-rationed]] for why routines pin `claude-opus-4-7`.
+[[fable-usage-is-rationed]] for why routines and fleet workers stay off Fable.

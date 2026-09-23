@@ -33,3 +33,11 @@ So the allow list has to name every tool an unattended master uses, not just `Ba
 Read a parked wake from the session record, not from the state issue: the issue shows a venue
 claim, which is what a live run looks like too. `get_session` on the `venueSessionId` names the
 tool in `pending_action`. See #651.
+
+**2026-09-23:** this is the first of the three blockers ADR 0001
+(`docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`) cites for moving the masters back to
+the desktop; the four `master-*` Routines are disabled, not deleted.
+
+**2026-09-23:** this is the first of the three blockers ADR 0001
+(`docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`) cites for moving the masters back to
+the desktop; the four `master-*` Routines are disabled, not deleted.

@@ -65,10 +65,11 @@ never from an intermediate one, so `previous-modified` names the published versi
 - `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before
   writing, and never deletes. `-Mode push` prints why it is retired and exits 2. On a fresh
   machine `install.ps1 [-DryRun]` wraps it: prerequisites, pull, then the manual list.
-- `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md`, `worker-cycle.md`. The fleet
-  itself is served by the `aac-skills` plugin at `aac-skills/ticket-fleet/ticket-fleet.js`, one
-  script for local and cloud sessions (it picks between `gh` and the GitHub MCP tools at run
-  time). The master session reads the runbook from this repo.
+- `orchestrator/` — the master orchestrators. `LOCAL-RUNBOOK.md` is live (desktop, under
+  `master-watchdog.ps1`); `RUNBOOK.md` holds the shared rules and the paused cloud venue (ADR
+  0001). The fleet itself is served by the `aac-skills` plugin at
+  `aac-skills/ticket-fleet/ticket-fleet.js`, one script for local and cloud sessions (it picks
+  between `gh` and the GitHub MCP tools at run time). The master reads the runbooks from this repo.
 
 ## Two invariants worth keeping
 

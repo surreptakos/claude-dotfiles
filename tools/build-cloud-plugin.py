@@ -6,7 +6,7 @@ claude/skills and aac-skills mirrors retired, and every skill they carried moved
 here, so a branch is the only way a skill changes and merge is the release), rewrites
 each SKILL.md so its frontmatter carries only the six keys the claude.ai upload
 validator accepts (name, description, allowed-tools, license, metadata,
-compatibility), and emits dist/dan-skills/ plus dist/dan-skills.zip ready for
+compatibility), and emits dist/aac-skills/ plus dist/aac-skills.zip ready for
 claude.ai -> Customize -> Plugins -> Add -> Upload plugin.
 
 Disallowed keys (disable-model-invocation, argument-hint, hidden, ...) are not
@@ -17,7 +17,7 @@ with disable-model-invocation is NOT gated in the payload. The payload's own gat
 is to leave the skill out: see DEAD_LOAD_DROPPED / DEAD_LOAD_KEPT (issue 530),
 which carry a per-skill decision for the skills nobody invokes.
 
-Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and writes
+Also emits the same payload unzipped into <repo>/marketplace/aac-skills/ and writes
 <repo>/.claude-plugin/marketplace.json, which makes the repo itself an installable Claude
 plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
 remains for the claude.ai org-Skills surface, which only takes uploads.

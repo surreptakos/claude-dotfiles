@@ -1,6 +1,6 @@
 ---
 name: fable-usage-is-rationed
-description: Dan's Fable 5.1 usage is capped per week; never move fleet or subagent workers onto Fable, keep the Opus 5 / Sonnet 5 / Haiku pins
+description: Dan's Fable 5.1 usage is capped per week; never move fleet or subagent workers onto Fable, keep the Opus 5.5 / Sonnet 5 / Haiku pins
 metadata:
   type: feedback
 ---

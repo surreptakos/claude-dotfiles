@@ -17,7 +17,8 @@
  *   - description drift -> refresh (PATCH description)
  *   - same              -> nothing
  * Milestones in the repo that the file does not name are left alone: the file lists what must
- * exist, not everything that may.
+ * exist, not everything that may. So a milestone closed by hand leaves the file in the same change,
+ * or the next run reopens it (M1 and M2 left on 2026-09-23, ADR 0001).
  *
  * Idempotent: a second run over a matched repo writes nothing. `plan` is pure and under
  * `node --test tools/ensure-milestones.test.js`, which the workflow runs before applying.

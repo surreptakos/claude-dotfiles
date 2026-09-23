@@ -151,8 +151,11 @@ dialog is a separate, unsolved stall: "Accessing workspace ... This folder pre-a
 permissions in .claude/settings.json and .claude/settings.local.json ... Yes, I trust this folder"
 rendered on an interactive launch in the contract-builder clone on 2026-09-02 even though
 `hasTrustDialogAccepted` was already true for that path in `~/.claude.json` (reproduced through
-winpty, captured verbatim). Until that is fixed a fresh master can sit on it until someone clicks;
-the watchdog log shows the launch, the state issue shows no Heartbeat 1.
+winpty, captured verbatim). Fixed by issue 199 (`tools/settings-invariants.ps1` pre-trusts the four
+clone paths, `defaultMode: bypassPermissions` in the profile): on 2026-09-18 an interactive launch in
+the zoho and bill-intake clones reached the first prompt with no trust or permission dialog. If it
+comes back, the watchdog log shows the launch and the state issue shows no Heartbeat 1; the repair
+steps are `docs/runbooks/issue-199-desktop-verify.md`, section 4.
 
 Stated plainly: with bypass permissions on, an unattended master can merge, push, delete branches,
 edit issues and run any shell command with no prompt and nobody watching. The merge bar in
@@ -295,7 +298,7 @@ with `/Enable`. Ctrl+C in a launched master window stops that pass; close the wi
 watchdog moves to the next repo on its next slot.
 
 **Editing the watchdog on a branch.** The task runs the script at its checkout path, so while the
-checkout sits on a feature branch the task runs THAT branch's script every 30 minutes. Disable the
+checkout sits on a feature branch the task runs THAT branch's script every 10 minutes. Disable the
 task before editing the script (`schtasks /Change /Disable`), re-enable after the merge lands and
 the checkout is back on master. The script is saved with a UTF-8 BOM: Windows PowerShell 5.1 reads
 a BOM-less file as ANSI, and an em dash inside a string then breaks the parse (seen 2026-09-02).
