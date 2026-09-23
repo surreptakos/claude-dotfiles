@@ -84,10 +84,17 @@
         "source": "github",
         "repo": "surreptakos/claude-dotfiles"
       }
+    },
+    "typesafe-ai": {
+      "source": {
+        "source": "github",
+        "repo": "typesafe-ai/skills"
+      }
     }
   },
   "enabledPlugins": {
-    "aac-skills@claude-dotfiles": true
+    "aac-skills@claude-dotfiles": true,
+    "typesafe@typesafe-ai": true
   },
   "hooks": {
     "SessionStart": [
