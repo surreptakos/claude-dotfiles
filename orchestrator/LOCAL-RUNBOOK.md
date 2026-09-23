@@ -1,12 +1,16 @@
-# Local master orchestrator (PC variant) — RETIRED
+# Local master orchestrator (PC variant) — LIVE
 
-> **RETIRED 2026-09-15 (issue 217, parent spec #207).** The PC venue is being decommissioned as
-> the four per-repo cloud Routines cut over. `RUNBOOK.md` is the live runbook; this file is kept
-> for history only — it describes the watchdog + long-lived interactive sessions the cloud
-> Routines replaced. Do not launch a new local master from here, do not extend it, and do not
-> treat any decision recorded below as still binding unless the current `RUNBOOK.md` restates it.
-> The watchdog scheduled task, `master-watchdog.ps1`, `install-watchdog-task.ps1` and the PID
-> guard are all part of what is retiring with this venue.
+> **LIVE again from 2026-09-23 (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`;
+> spec issue 693).** The 2026-09-15 retirement (issue 217) is reversed: cloud Routine sessions cannot
+> run a pass unattended (acceptEdits prompts, the Workflow confirmation, the auto-mode classifier,
+> no bypass mode), so the masters run here under the watchdog with `--dangerously-skip-permissions`.
+> The cloud master Routines are paused, not deleted.
+>
+> **Precedence.** This file overrides `RUNBOOK.md`, which still carries the shared rules: the venue
+> guard (with `local-pc` as the venue value), the empty-pass skip, dispatch, the merge policy, the
+> typed-user-turn rule and the cross-repo reference rule. `RUNBOOK.md`'s cloud-only parts do not
+> apply here: the bootstrap self-heal in Boot, "Two repos, one session", and the cloud Routine
+> boot prompt.
 
 The same orchestrator as `RUNBOOK.md` was, run as long-lived interactive Claude Code sessions on
 Dan's always-on PC instead of a cloud session + Routine. Everything not stated here follows
@@ -44,7 +48,8 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   `RUNBOOK.md` — verifier evidence + green CI + no conflict + no human changes-requested, via
   `gh pr merge`; the CI-never-ran clause and the keep-open rule are there too) and performs the
   takeover-guard check. The fleet (Workflow tool with
-  `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` — the plugin-served
+  `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`, or the repo's own
+  `.claude/workflows/ticket-fleet.js` fork where it keeps one (aac-sales-cockpit, aac-routines) — the plugin-served
   copy that picks the tracker instrument at run time; `gh` exists here, so it uses REST; pass
   `contractVersion: 2`, `runId` and `invocationId` in `args` - `runId` minted with
   `printf %x $(date +%s)` and held across a resume, `invocationId` re-minted on every launch with

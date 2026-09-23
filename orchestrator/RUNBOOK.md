@@ -5,10 +5,16 @@ one per repo, each with that repo as source and the connectors ticked. Every Rou
 FRESH cloud session. It boots from the repo's per-repo state issue, claims the venue, dispatches
 triage / to-tickets / fleet in-session, does the merge pass, writes `Pass complete`, and ends.
 Continuity lives in the state issue; nothing else outlives the run. Rewritten 2026-09-15 for the
-per-repo Routine model (issue 217, parent #207); the retired PC-venue variant lives on in
-`LOCAL-RUNBOOK.md` for history.
+per-repo Routine model (issue 217, parent #207).
 
-**Venue:** this file describes the CLOUD Routine masters, the only supported venue after cutover.
+> **Cloud venue paused 2026-09-23 (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`).**
+> The masters run on the desktop again under `LOCAL-RUNBOOK.md`, which overrides this file. The
+> shared rules here still bind a local master: the guard (venue value `local-pc`), the empty-pass
+> skip, dispatch, the merge policy, the typed-user-turn rule and cross-repo references. The
+> cloud-only parts are kept so un-pausing the Routines is a toggle: bootstrap self-heal, "Two repos,
+> one session" and the Routine boot prompt.
+
+**Venue:** this file describes the CLOUD Routine masters. That venue is paused (see above).
 One venue per repo — a Routine that finds a live `cloud-routine` venue younger than 90 minutes on
 its own state issue exits at boot without dispatching anything.
 
