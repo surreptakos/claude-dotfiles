@@ -42,7 +42,7 @@ Do not change contract language, statutory language, quotations, manufacturer te
 
 A document-specific standard or template may override a house rule only through an explicit, approved exception that identifies its scope. Its owner must record the exception in the decision log. Other provisions of this standard continue to apply; a template does not authorize changes to legal obligations or technical requirements.
 
-**Performance-review exception.** Performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and “AAC House Layout Standard (Gregg-based).” Where these documents conflict with WR-001, they control for that material. If the two specialized standards conflict, the AAC performance review standards control.
+As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and “AAC House Layout Standard (Gregg-based).” Where these documents conflict with WR-001, they control for that material. If the two specialized standards conflict, the AAC performance review standards control.
 
 This exception includes Rule 16 (serial comma), Rule 37 (headings and titles), Rule 3’s treatment of “should,” and Rule 66 (e.g. and i.e.), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other WR-001 requirements remain in force. The higher authorities listed above still control.
 
@@ -70,7 +70,7 @@ For decision-oriented or action-oriented writing, state the principal point befo
 
 Long emails should use a bottom-line-first opening.
 
-Exception for delegation. When an email delegates a task the recipient must carry out live, such as a customer call or a negotiation, state the goal and the concern behind the request before the instruction. The recipient needs the reason to handle what the script does not cover.
+Delegation emails are an exception. When an email delegates a task the recipient must carry out live, such as a customer call or a negotiation, state the goal and the concern behind the request before the instruction. The recipient needs the reason to handle what the script does not cover.
 
 Preferred: Please approve the attached $38,500 proposal by Thursday at 3 p.m. so we can release the equipment order Friday.
 
@@ -304,7 +304,7 @@ Capitalize formal titles such as **National Electrical Code** and **Americans wi
 
 ## 37. Headings and titles
 
-Use sentence case for headings within documents, including Part headings, numbered rules, subheadings, table column headings, form prompts, UI labels, and email headings. Capitalize the first word and any proper names or acronyms. Reserve headline-style capitalization for document titles and official document names. Do not add a period to a standalone heading; end a run-in heading with a period.
+Use sentence case for headings within documents, including Part headings, numbered rules, subheadings, table column headings, form prompts, UI labels, and email headings. Capitalize the first word and any proper names or acronyms. Reserve headline-style capitalization for document titles and official document names. Do not add a period to a standalone heading. Use run-in headings only in legal documents, and end each run-in heading with a colon.
 
 # Part V - Numbers, dates, time, money, and measurement
 
