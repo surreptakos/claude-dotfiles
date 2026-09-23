@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker — edges as text in one file per ticket locally, or native blocking links on a real tracker.
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-23T15:12:36Z'
-  previous-modified: '2026-09-18T17:22:56Z'
-  revision: '4'
-  content-sha: 4914284a858a
+  modified: '2026-09-23T15:56:34Z'
+  previous-modified: '2026-09-23T15:12:36Z'
+  revision: '5'
+  content-sha: 8b5794e054de
 ---
 
 # To Tickets
@@ -65,6 +65,8 @@ Ask the user:
 - Of the would-be-reaped group, which (if any) to publish anyway — and why. The reason is an observed failure or a live dependency, and it goes into that ticket's body so the next reaper run reads it as evidence rather than caution.
 
 A would-be-reaped ticket with a blocker or dependant in the passing group is flagged: dropping it breaks an edge, so either the user promotes it or the dependant's edge is rewritten. Iterate until the user approves the breakdown. Only the approved set is published; the rest is named in the session summary as "not filed, would be reaped" with its clause, so it is a decision on record and not a leftover.
+
+**Called from `/session-end`: no quiz.** Typing `/session-end` is the approval (Dan, 2026-09-23). Show the breakdown in the reply, then publish every ticket, the would-be-reaped group included; the weekly reaper parks what should not have been filed.
 
 ### 5. Publish the tickets to the configured tracker
 
