@@ -183,6 +183,22 @@ function Merge-PluginRecords {
     }
 }
 
+# Issue 735: the commit this pull installed from, so session-check (pull-nudge.js) can compare a
+# later merge against ONLY the whitelist above and nudge a pull just when it moved, rather than by
+# habit. Read by node ($UserHome\.claude\hook-state\dotfiles-pull\state.json — the same
+# .claude/hook-state/<feature>/state.json shape the other machine-wide checks use), written here
+# in PowerShell so the record exists even on a machine with no node on PATH.
+function Write-PullStamp {
+    param([Parameter(Mandatory = $true)][string]$UserHome)
+    $sha = (git -C $RepoRoot rev-parse HEAD 2>$null)
+    if (-not $sha) { return }
+    $sha = $sha.Trim()
+    $stateDir = Join-Path $UserHome '.claude\hook-state\dotfiles-pull'
+    if (-not (Test-Path $stateDir)) { New-Item -ItemType Directory -Path $stateDir -Force | Out-Null }
+    $stamp = [ordered]@{ sha = $sha; pulledAt = (Get-Date).ToUniversalTime().ToString('o') }
+    ($stamp | ConvertTo-Json) | Set-Content -LiteralPath (Join-Path $stateDir 'state.json') -Encoding UTF8
+}
+
 # ------------------------------------------------------------------------ pull
 
 $backup = Backup-LocalTargets
@@ -253,5 +269,11 @@ if ($DryRun) {
     Write-Host ("{0} files would be written. Dry run: nothing written, no backup made." -f $total)
 } else {
     Write-Host ("{0} files written. Backup of what was there: {1}" -f $total, $backup)
+    # Issue 735: record the commit this pull installed from, so a later session check can nudge a
+    # pull only when a merge since then touched a path still on the whitelist above, instead of by
+    # habit. Best-effort and last: a failure here must not turn a real pull into a reported failure.
+    try { Write-PullStamp -UserHome $UserHome } catch {
+        Write-Host ("  could not record the pull stamp: {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    }
 }
 exit 0
