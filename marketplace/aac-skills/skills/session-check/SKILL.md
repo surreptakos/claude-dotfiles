@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-24T04:36:46Z'
-  previous-modified: '2026-09-24T04:02:42Z'
-  revision: '35'
-  content-sha: b431f4377992
+  modified: '2026-09-24T13:49:18Z'
+  previous-modified: '2026-09-24T13:23:02Z'
+  revision: '37'
+  content-sha: 5d2491b675e2
 ---
 
 # Session check (engine)
@@ -56,7 +56,13 @@ owns which repo and desktop routine — and compares it with the account the ses
 (desktop: the host-session file's path; CLI: `oauthAccount` in the profile's `.claude.json`;
 cloud: unknown, so unchecked). Findings there carry warning severity by ruling.
 
-Regression tests live next to it: `node --test *.test.js` from this directory — all seven files, and
+In a claude-dotfiles checkout, on a desktop, a silent **pull nudge** (`pull-nudge.js`, issue 735)
+compares `sync.ps1 -Mode pull`'s last recorded commit against the default branch, restricted to the
+whitelist `lib/manifest.ps1`'s `Get-DotfileItems` names, and prints one line naming the pull command
+only when a merge since then touched a whitelisted path — quiet on a merge that only moved
+plugin-carried content, and quiet in every other repo.
+
+Regression tests live next to it: `node --test *.test.js` from this directory — all eight files, and
 they assume nothing about where this copy is installed (issue 300: two of them located "this repo"
 by counting three directories up, which is the home directory here, and they were red). CI runs
 the same files twice, from the claude-dotfiles mirror and from a copy outside any checkout:

@@ -158,6 +158,87 @@ test('harnessState: a stamp past the canonical number is still ahead — the mar
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
+// Issue 674: in a cloud container the loaded skill copy is copied from the bootstrap's dotfiles
+// clone, so that clone's template always carries the same number and cannot be the canonical one.
+// These tests leave HARNESS_CANONICAL_FILE unset and drive the real path, with git injected: the
+// clone only names the remote, and the template is fetched into a scratch repo and read there.
+const REMOTE_URL = 'https://example.invalid/claude-dotfiles.git';
+
+function staleCloneHome(dir, cloneVersion) {
+  const home = path.join(dir, 'home');
+  const clone = path.join(home, '.aac-dotfiles');
+  fs.mkdirSync(path.join(clone, '.git'), { recursive: true });
+  const tmpl = path.join(clone, 'marketplace', 'aac-skills', 'skills', 'project-harness', 'templates');
+  fs.mkdirSync(tmpl, { recursive: true });
+  fs.writeFileSync(path.join(tmpl, 'harness-version.md'), `    harness-version: ${cloneVersion}\n`);
+  return home;
+}
+
+// A git whose remote offers `version` (null: the fetch fails, as with no network).
+function remoteAt(version, calls) {
+  return (cmd, args) => {
+    if (calls) calls.push(args);
+    if (args.includes('config')) return { status: 0, stdout: `${REMOTE_URL}\n` };
+    if (args.includes('fetch') && version === null) return { status: 128, stdout: '' };
+    if (args.includes('show')) return { status: 0, stdout: `# Harness version\n\n    harness-version: ${version}\n` };
+    return { status: 0, stdout: '' };
+  };
+}
+
+// Container on a v31 payload (loaded copy and clone agree), repo stamped v32 from master at v32.
+function assertStaleCopyAgainstMaster(r) {
+  assert.deepEqual(r, { state: 'stale-skill-copy', current: 31, repo: 32, canonical: 32 });
+}
+
+test('harnessState: a stamp above the loaded copy but at master reads stale-skill-copy off the remote (issue 674)', () => {
+  const tmp = mkTmp();
+  const skillDir = writeSkill(tmp, 31, 31);
+  const repo = writeRepo(tmp, { stampVersion: 32 });
+  const home = staleCloneHome(tmp, 31);
+  const clone = path.join(home, '.aac-dotfiles');
+  const calls = [];
+  assertStaleCopyAgainstMaster(harnessState(repo, skillDir, { HOME: home }, remoteAt(32, calls)));
+  const line = calls.map((a) => a.join(' '));
+  assert.ok(line.some((a) => a.endsWith(`fetch -q --depth 1 --filter=blob:none origin master`)), line.join(' | '));
+  assert.ok(line.some((a) => a.includes(`remote add origin ${REMOTE_URL}`)), line.join(' | '));
+  assert.ok(line.some((a) => a.endsWith(
+    'show FETCH_HEAD:marketplace/aac-skills/skills/project-harness/templates/harness-version.md')), line.join(' | '));
+  // The clone is read for its remote URL and nothing else: no fetch, no write lands in it.
+  assert.deepEqual(calls.filter((a) => a.includes(clone)), [['-C', clone, 'config', '--get', 'remote.origin.url']]);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('fault: reading the canonical number from the stale clone fails the issue-674 assertion', () => {
+  // The pre-fix reading, reproduced: the canonical number taken from the clone's own template.
+  // The assertion above must reject it, or it could not have caught the bug.
+  const tmp = mkTmp();
+  const skillDir = writeSkill(tmp, 31, 31);
+  const repo = writeRepo(tmp, { stampVersion: 32 });
+  const home = staleCloneHome(tmp, 31);
+  const cloneTemplate = path.join(home, '.aac-dotfiles', 'marketplace', 'aac-skills', 'skills',
+    'project-harness', 'templates', 'harness-version.md');
+  const r = harnessState(repo, skillDir, { HOME: home, HARNESS_CANONICAL_FILE: cloneTemplate }, remoteAt(32));
+  assert.equal(r.state, 'ahead');
+  assert.throws(() => assertStaleCopyAgainstMaster(r), assert.AssertionError);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('harnessState: an unreachable remote leaves the ahead reading unchanged, never the clone\'s number', () => {
+  const tmp = mkTmp();
+  const skillDir = writeSkill(tmp, 31, 31);
+  const repo = writeRepo(tmp, { stampVersion: 32 });
+  // The clone claims v40, which would fabricate stale-skill-copy if it were ever a fallback.
+  const home = staleCloneHome(tmp, 40);
+  assert.deepEqual(harnessState(repo, skillDir, { HOME: home }, remoteAt(null)),
+    { state: 'ahead', current: 31, repo: 32 });
+  // No clone to name a remote at all (a desktop): the same prior reading, and git never runs.
+  const calls = [];
+  assert.deepEqual(harnessState(repo, skillDir, { HOME: path.join(tmp, 'empty-home') }, remoteAt(40, calls)),
+    { state: 'ahead', current: 31, repo: 32 });
+  assert.deepEqual(calls, []);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
 test('harnessState: skill-missing when the skill directory is null', () => {
   const tmp = mkTmp();
   const repo = writeRepo(tmp, { stampVersion: 17 });

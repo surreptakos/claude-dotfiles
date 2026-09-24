@@ -19,11 +19,11 @@ script or the global rules text is edited here, on a branch, and merging to mast
 
 | Path | Restores to | Why it matters |
 |---|---|---|
-| `aac-skills/` | `~/.claude/skills/` | every skill, one hand-edited tree; also what the plugin payload is built from |
+| `aac-skills/` | — (not restored) | every skill, one hand-edited tree; what the plugin payload is built from. A desktop gets the skills from the aac-skills plugin, as `aac-skills:<name>`, like a container; pull stopped writing `~/.claude/skills` (issue 734) |
 | `profile/claude/CLAUDE.md` | — (not restored) | global governance — caveman, YES, ask-matt, the AAC Google access notes. The one source the payload's rules text is copied from; a desktop gets it from the aac-skills plugin's global-rules hook, like a container (issue 732) |
 | `profile/claude/global-pointer.md` | `~/.claude/CLAUDE.md` | a short pointer: rules arrive via the plugin, their source is the file above, then a heading for machine-local notes. It must never carry the rules file's first line, because the hook stays silent when the global CLAUDE.md does |
-| `profile/claude/settings.json` | `~/.claude/settings.json` | hook wiring, plugin marketplaces, status line |
-| `profile/claude/hooks/` | `~/.claude/hooks/` | `session-gate.js`, `governance-reminder.js`, the stop-slop pair — and the source the packager copies into the plugin |
+| `profile/claude/settings.json` | `~/.claude/settings.json` | third-party hook wiring (the caveman proxy and shrink hook), plugin marketplaces, status line. No governance hook entry: the plugin dispatches those, and an entry here would silence or double its copy (issue 733) |
+| `profile/claude/hooks/`, `profile/claude/tools/` | — (not restored) | `session-gate.js`, `governance-reminder.js`, the stop-slop pair and `stopslop.py`: the source the packager copies into the plugin. A desktop runs the plugin's copies, as a container does (issue 733) |
 | `profile/claude/agents/` | `~/.claude/agents/` | user-level subagent definitions, including the fleet's tool-restricted verifier |
 | `profile/claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache. Merged, not copied: a newer live entry wins (issue 717) |
 | `profile/claude/accounts.json` | `~/.claude/accounts.json` | which Claude account owns which repo and routine (issue 103) |
@@ -149,9 +149,19 @@ past them **without an error**: the repo carried 13 of 37 skills for its first e
 nothing said so.
 
 That arrangement existed because the machine was the source. It no longer is. `aac-skills/` is one
-hand-edited tree, the packager builds the plugin from it, and pull writes it back as real
-directories under `~/.claude/skills`. A machine restored before the cut still has junctions there;
-`lib/personal.ps1` keeps the two readers it needs for them.
+hand-edited tree and the packager builds the plugin from it. Pull wrote it back under
+`~/.claude/skills` until issue 734, which listed every skill twice in a desktop session - bare from
+that copy and `aac-skills:<name>` from the plugin - so pull no longer writes it, and never deletes
+the copy an older pull left. To move that copy aside, from this checkout's root (only the names
+`aac-skills/` carries, because `~/.claude/skills` also holds Claude Code's own `synced/` bucket):
+
+```powershell
+md -Force ~\.claude\skills.pre-734 >$null; ls aac-skills | % { mv ~\.claude\skills\$($_.Name) ~\.claude\skills.pre-734\ -ErrorAction SilentlyContinue }
+```
+
+Rollback: `ls ~\.claude\skills.pre-734 | % { mv $_.FullName ~\.claude\skills\ }`. A machine
+restored before issue 214 still has junctions there; `lib/personal.ps1` keeps the two readers it
+needs for them.
 
 ## Cloud sessions load the skills as an uploaded plugin
 
@@ -222,16 +232,20 @@ still parses and every path in it points at a file that exists; `codex/config.to
 and every user-profile path in it — the lowercased trust keys included — points inside the fake
 home; every skill restored with a readable `SKILL.md`; every file survives the round trip
 byte-for-byte; nothing credential-shaped came
-along; two overlapping runs each keep their own scratch directory; and the restored hooks and
-skills **run** from the new home — `session-gate.js` passes its own test suite there,
-`ask_matt_gate.py` lints, `session-check` reports on a repo. That last group is the difference
-between proving bytes moved and proving the machine would work.
+along; two overlapping runs each keep their own scratch directory; `settings.json` names no
+script the plugin ships and pull wrote no `~/.claude/hooks` or `~/.claude/tools` (issue 733); no
+skill tree was written under `~/.claude/skills`, a seeded older one was left in place, and every
+aac skill the global rules name by short name ships in the plugin payload (issue 734); and
+the restored hooks and skills **run** from the new home — `ask_matt_gate.py` lints,
+`session-check` reports on a repo — alongside the plugin's stop-slop hook and the
+`session-gate.js` suite, run from the clone because the plugin, not pull, carries them. That last
+group is the difference between proving bytes moved and proving the machine would work.
 
 The personal-profile refresh is proven too: the test seeds a minimal `~/.claude-personal` in the
-fake home — a personal pref and a stale hooks key — and asserts after the install that the hooks
-are byte-equal to the work profile's, the settings keep the personal prefs with every hook command
-rewritten onto `.claude-personal` paths that resolve, and every work skill was overlaid into the
-personal profile byte for byte.
+fake home — a personal pref and a stale hooks key — and asserts after the install that the
+settings keep the personal prefs with every hook command rewritten onto `.claude-personal` paths
+that resolve and none naming a script the plugin ships (so the plugin fires there too, once), and
+every work skill was overlaid into the personal profile byte for byte.
 
 A failing run also writes its failure detail to `%TEMP%\restore-test-failures\<stamp>-<pid>.log`.
 The session hooks run the suite through `execFileSync` and report only `tests FAIL`, so without
@@ -249,7 +263,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade|rules-copy`
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade|rules-copy|governance-entry|hooks-dir|tools-dir|skill-tree`
 breaks one thing on purpose so the matching check can be watched going red. A check that has only
 ever passed is not yet a check — the retired `dead-link` fault passed on its first attempt because
 it deleted a directory nothing linked to.

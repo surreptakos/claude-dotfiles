@@ -26,6 +26,7 @@ const {
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
   classifyBranchLookup, classifyDelivery,
+  LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -441,7 +442,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} verifier prompt still runs the live-tree 
 // re-reports the false breach or quietly widens the hole.
 test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state from the live-tree sweep (issue 334)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
+  assert.match(liveTreeFindCommand('T'), /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
     `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/projects (tool-results, transcripts) as well as hook-state`);
   assert.match(src, /~\/\.claude\/projects holds this session's transcripts, tool-results\/\*\.txt/,
     `${FLEET_SCRIPT_REL} must state the exclusion and why in the prompt so the verifier does not re-derive it`);
@@ -457,10 +458,53 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state fr
 // to wave it through.
 test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from the live-tree sweep (issue 489)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
+  assert.match(liveTreeFindCommand('T'), /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
     `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/sessions alongside hook-state and projects`);
   assert.match(src, /~\/\.claude\/sessions\/<pid>\.json is the CLI's own process registry, heartbeat-rewritten/,
     `${FLEET_SCRIPT_REL} must state why ~/.claude/sessions is excluded so the verifier does not re-derive it`);
+});
+
+// Issue 677: ~/.claude/skills/synced/<id>/manifest.json is the CLI's skills-sync catalogue, rewritten
+// by the verifying session's own Skill and ToolSearch loads. Run the generated find against a fake
+// home: the bookkeeping paths stay quiet and a real implementer write under ~/.claude still fires.
+test('live-tree find skips the CLI skills-sync manifest but still catches an implementer write (issue 677)', (t) => {
+  // The rail runs in a Linux container. On a Windows runner Git Bash's `find` prints POSIX paths
+  // (/c/Users/...) for a HOME the test created with a drive letter, so path.relative() cannot pair
+  // them and the assertion below fails on the path spelling, not on the exclusions: the restore
+  // suite went red on master at 1c250885 for exactly that. The Linux gate keeps the case live.
+  if (process.platform === 'win32') { t.skip('bash find prints POSIX paths for a Windows HOME; covered by the Linux gate'); return; }
+  const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'fleet-677-'));
+  try {
+    const quiet = ['.claude/skills/synced/abc_def/manifest.json', '.claude/sessions/42.json',
+      '.claude/projects/p/s.jsonl', '.claude/hook-state/x/state.json'];
+    const loud = ['.claude/skills/foo/SKILL.md', '.claude/settings.json', '.codex/config.toml', '.agents/a.md'];
+    for (const rel of [...quiet, ...loud]) {
+      fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+      fs.writeFileSync(path.join(home, rel), 'x');
+    }
+    const r = spawnSync('bash', ['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
+      { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+    assert.strictEqual(r.status, 0, r.stderr);
+    const hits = r.stdout.split('\n').filter(Boolean).map((f) => path.relative(home, f)).sort();
+    assert.deepStrictEqual(hits, [...loud].sort());
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} builds the live-tree exclusions from one list (issue 677)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const handWritten = src.slice(0, src.indexOf('// [FLEET-GENERATED-START]'))
+    + src.slice(src.indexOf('// [FLEET-GENERATED-END]'));
+  for (const e of LIVE_TREE_EXCLUSIONS) {
+    assert.ok(!handWritten.includes(e.path),
+      `${FLEET_SCRIPT_REL} must not spell exclusion ${e.path} outside the generated LIVE_TREE_EXCLUSIONS`);
+  }
+  assert.ok(handWritten.includes("${liveTreeFindCommand('<that time>')}") && handWritten.includes('${liveTreeExclusionNote()}'),
+    `${FLEET_SCRIPT_REL} verifier prompt must take the rail's find command and reasons from the generated helpers`);
+  assert.ok(LIVE_TREE_EXCLUSIONS.some((e) => e.path === '*/.claude/skills/synced/*'));
+  assert.match(liveTreeExclusionNote(), /add none of your own, do not re-derive them/,
+    'the prompt must still forbid the verifier inventing its own exclusions');
 });
 
 // ---- Three-copies gone (issue 138) ----
@@ -2172,4 +2216,147 @@ test(`${FLEET_SCRIPT_REL} spells no push instruction as a bare \`git push\` lite
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const bare = src.split('\n').filter((l) => /(?<![/\w])git push (?!--force)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
   assert.deepEqual(bare, [], 'a push instruction must go through gitSpelling, which carries the spelling the guard accepts');
+});
+
+// ---------------------------------------------------------------------------
+// Issue 562: every sub-agent below is FRESH and starts wherever the orchestrating session's shell
+// cwd happens to be at the moment it is launched - not wherever it was when this run started. A
+// `cfg.orchestratorCwd` default of '.' is only ever correct until the parent session's shell `cd`s
+// away, which silently turns the guard off (or, worse, points it at whatever other repo now sits
+// there) and sends the tip-check agents a ref they resolve against the wrong tree. The fix is a
+// one-time absolute-path measurement at Setup, baked into every later prompt as a literal string.
+// ---------------------------------------------------------------------------
+
+// The one Setup-time measurement the fix depends on, plus the guard baseline/check block that
+// consumes it. Extracted from the real source (not re-described) so drift is caught here.
+function treeGuardSetupBody(src) {
+  return [
+    extractMarked(src, 'FLEET-TREE-GUARD-DEFS'),
+    extractMarked(src, 'FLEET-TREE-GUARD-SETUP'),
+    extractMarked(src, 'FLEET-TREE-GUARD-CHECK'),
+  ].join('\n');
+}
+
+test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without the Setup-measured absolute path (issue 562)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const guardBody = treeGuardSetupBody(src);
+
+  // The default is still relative - only the caller's own explicit override skips measurement.
+  assert.match(guardBody, /let orchestratorCwd = cfg\.orchestratorCwd/,
+    'orchestratorCwd must start from the cfg default so an explicit caller override is honoured');
+  assert.match(guardBody, /if \(orchestratorCwd === '\.'\)/,
+    'measurement must run precisely when the default (relative) path was not overridden');
+  // The measurement is its own one-command Setup agent, in the same "run exactly this and report
+  // it" shape the guard and tip agents already use - nothing is left to an agent's judgement.
+  assert.match(guardBody, /label: 'orchestrator-cwd'/, 'the cwd measurement must be its own labelled Setup agent');
+  assert.match(guardBody, /phase: 'Setup'/, 'the measurement must run in the Setup phase, before any checkpoint needs it');
+  assert.match(guardBody, /'pwd'|`pwd`/, 'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
+  assert.match(guardBody, /measured\.cwd\[0\] !== '\/'/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
+
+  // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
+  // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
+  const cwdFlags = guardBody.match(/--cwd \$\{orchestratorCwd\}/g) || [];
+  assert.equal(cwdFlags.length, 2, `expected the baseline and the check command to both pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
+  assert.ok(!guardBody.includes('--cwd .'), 'no guard command may hardcode the relative default');
+  assert.ok(!guardBody.includes('--cwd ${cfg.orchestratorCwd}'), 'no guard command may read cfg.orchestratorCwd directly - only the measured orchestratorCwd');
+  assert.match(guardBody, /\$\{GUARD_CMD\} baseline --cwd \$\{orchestratorCwd\}/, 'tree-guard:baseline must run node tools/orchestrator-tree-guard.js with the absolute path');
+  assert.match(guardBody, /\$\{GUARD_CMD\} check --cwd \$\{orchestratorCwd\}/, 'every tree-guard:<label> check must run node tools/orchestrator-tree-guard.js with the absolute path');
+
+  // The tip agent (revParse, `tip:#<ticket>`) reads a ref from the orchestrator's own checkout too,
+  // and is exactly as exposed to a mid-run `cd` as the guard - it must carry the same absolute path.
+  assert.match(src, /git -C \$\{orchestratorCwd\} rev-parse \$\{ref\}/,
+    'the tip-check agent (revParse) must run `git -C <absolute path> rev-parse`, never a bare `git rev-parse` that trusts the ambient shell cwd');
+  assert.ok(!src.includes('git rev-parse ${ref}'), 'no bare, unqualified `git rev-parse ${ref}` may remain');
+
+  // Every scratch-worktree prompt built against the orchestrator's own checkout (the probe and code
+  // verify lanes, and the Report phase's discoveries worktree) must use the same absolute path.
+  const worktreeAddCwd = (src.match(/git -C \$\{orchestratorCwd\} worktree add/g) || []).length;
+  assert.ok(worktreeAddCwd >= 3,
+    `expected at least 3 \`git -C \${orchestratorCwd} worktree add\` prompts (probe verify, code verify, Report), found ${worktreeAddCwd}`);
+  assert.ok(!/(?<!-C \$\{orchestratorCwd\} )git worktree add \$\{scratchFile/.test(src),
+    'no scratch-worktree `git worktree add` built from scratchFile() may omit the absolute -C path');
+});
+
+// Behavioral half: drive the REAL treeGuardCheck (not a stub, unlike the code-lane tests above,
+// which inject a recording checkpoint precisely so the lane body under test does not depend on
+// this mechanism's internals). A mocked agent stands in for both the one-time cwd measurement and
+// every later guard command, and records the exact command string each checkpoint sent - proving
+// that a parent session's `cd` after Setup (simulated by never letting anything downstream
+// re-consult cfg.orchestratorCwd or a live cwd) cannot misdirect a later checkpoint, because the
+// absolute path was already baked into the command as a literal string at Setup.
+async function driveTreeGuard(agentMock, cfgOverrides = {}) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const body = treeGuardSetupBody(src);
+  const logs = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn treeGuardCheck;\n}`);
+  const treeGuardCheck = await wrapper(laneScope({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    cfg: Object.assign({
+      treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js',
+      treeGuardStateDir: '.git/orchestrator-tree-guard', reportModel: 'r', orchestratorCwd: '.',
+    }, cfgOverrides),
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+  return { treeGuardCheck, logs };
+}
+
+const MEASURED_ORCHESTRATOR_CWD = '/home/runner/work/measured-checkout';
+
+test('treeGuardCheck: a parent cd after Setup cannot misdirect a later checkpoint (issue 562)', async () => {
+  const commands = []; // { label, cmd } for every real guard command (baseline + each check)
+  let cwdMeasurements = 0;
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') {
+      cwdMeasurements++;
+      // However many times a later checkpoint runs, the measurement itself must happen once, at
+      // Setup - simulating the parent `cd`ing away right after this call returns.
+      return { cwd: MEASURED_ORCHESTRATOR_CWD };
+    }
+    if (opts.label === 'tree-guard:baseline') {
+      commands.push({ label: opts.label, prompt });
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: `${MEASURED_ORCHESTRATOR_CWD}/.git/orchestrator-tree-guard/state.json`, baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) {
+      commands.push({ label: opts.label, prompt });
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label in treeGuardCheck test: ${opts.label}`);
+  };
+
+  const { treeGuardCheck } = await driveTreeGuard(agentMock);
+  // Two checkpoints, standing in for the Implement and Verify checkpoints of one ticket's chain -
+  // the parent session is free to have `cd`d anywhere between them; nothing here re-measures.
+  await treeGuardCheck('implement-attempt1', 42);
+  await treeGuardCheck('verify-attempt1', 42);
+
+  assert.equal(cwdMeasurements, 1, 'the absolute path must be measured exactly once, at Setup - never re-queried per checkpoint');
+  assert.equal(commands.length, 3, 'expected the baseline plus two checks');
+  for (const { label, prompt } of commands) {
+    assert.match(prompt, new RegExp(`--cwd ${MEASURED_ORCHESTRATOR_CWD.replace(/\//g, '\\/')}(?!\\S)`),
+      `${label} must carry the Setup-measured absolute path verbatim`);
+    assert.ok(!prompt.includes('--cwd .'), `${label} must never fall back to the relative default`);
+  }
+  assert.match(commands[1].prompt, /--label implement-attempt1 --ticket 42/);
+  assert.match(commands[2].prompt, /--label verify-attempt1 --ticket 42/);
+});
+
+test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and is used as-is (issue 562)', async () => {
+  const commands = [];
+  const agentMock = async (prompt, opts) => {
+    assert.notEqual(opts.label, 'orchestrator-cwd', 'an already-absolute caller override must not trigger a measurement agent');
+    if (opts.label === 'tree-guard:baseline') {
+      commands.push(prompt);
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/caller/given/path/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) {
+      commands.push(prompt);
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  const { treeGuardCheck } = await driveTreeGuard(agentMock, { orchestratorCwd: '/caller/given/path' });
+  await treeGuardCheck('implement-attempt1', 7);
+  assert.equal(commands.length, 2, 'expected the baseline plus one check');
+  for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
 });

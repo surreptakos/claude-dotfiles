@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T05:30:04Z'
-  previous-modified: '2026-09-24T05:11:29Z'
-  revision: '40'
-  content-sha: 19d0ddc1e7ab
+  modified: '2026-09-24T14:05:53Z'
+  previous-modified: '2026-09-24T05:30:04Z'
+  revision: '41'
+  content-sha: e36b0c308438
 ---
 
 # ticket-fleet
@@ -535,6 +535,20 @@ where it was produced and not for what it concluded", so the re-run is not read 
 change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
 and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
 log says the cross-check was skipped: a guess is not a rejection.
+
+That `rev-parse` agent, the tree-guard baseline and every later checkpoint, and the editable-install
+guard all spawn a FRESH sub-agent, and a fresh sub-agent's shell starts wherever the orchestrating
+session's shell cwd happens to be the moment it is launched - not wherever it was when the run
+started. Passing each of them the relative `cfg.orchestratorCwd` default (`.`) is only correct until
+the parent session's shell `cd`s to another repository mid-run, which was silently misdirecting the
+tree guard (a missing guard script there turns `treeGuard:'auto'` off with no error) and sending the
+tip agent a ref it resolved against the wrong tree (claude-dotfiles issue 562). The fix measures the
+orchestrator's absolute checkout path exactly once, with a one-command `pwd` agent at Setup, right
+after the fleet-refresh step and before anything needs it, and bakes that literal string into every
+later guard, tip and scratch-worktree command; a `cd` by the parent afterwards cannot touch a string
+already written into a prompt. A caller that already knows the absolute path - or wants the guard to
+audit a different tree on purpose - can still pass `orchestratorCwd` itself; only the `.` default
+triggers the measurement.
 
 ## The scratchpad is one per run, not one per worker
 

@@ -590,6 +590,34 @@ function classifyBranchLookup(lookups) {
   return 'undetermined';
 }
 
+/**
+ * The live-tree hard rail's exclusions (issues 334, 489, 677): paths under the live roots the
+ * harness and the CLI rewrite by themselves during every run, so a `find -newermt` hit there says
+ * nothing about the implementer. This is the ONE list - the verifier prompt's find flags and the
+ * reasons it quotes are both generated from it. The verifier is told to add none of its own: a
+ * rail whose verdict turns on how each agent reads "bookkeeping" refused two branches and passed a
+ * third on the same file (issue 677). Add an entry here, with its why, or not at all.
+ */
+const LIVE_TREE_ROOTS = '~/.claude ~/.codex ~/.agents';
+const LIVE_TREE_EXCLUSIONS = Object.freeze([
+  Object.freeze({ path: '*/hook-state/*', why: '~/.claude/hook-state is hook bookkeeping' }),
+  Object.freeze({ path: '*/.claude/projects/*', why: "~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes" }),
+  Object.freeze({ path: '*/.claude/sessions/*', why: "~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489)" }),
+  Object.freeze({ path: '*/.claude/skills/synced/*', why: "~/.claude/skills/synced/<id>/manifest.json is the CLI's cross-session skills-sync catalogue, rewritten by the verifying session's own Skill and ToolSearch loads (issue 677)" }),
+]);
+
+/** The rail's find command, every exclusion from LIVE_TREE_EXCLUSIONS and nothing else. */
+function liveTreeFindCommand(since) {
+  const excludes = LIVE_TREE_EXCLUSIONS.map((e) => `-not -path '${e.path}'`).join(' ');
+  return `find ${LIVE_TREE_ROOTS} -type f -newermt "${since}" ${excludes}`;
+}
+
+/** Why each exclusion is there, and the order not to invent more - quoted in the verifier prompt. */
+function liveTreeExclusionNote() {
+  const n = LIVE_TREE_EXCLUSIONS.length;
+  return `Those ${n} exclusions are the harness's and the CLI's own bookkeeping, not implementer output: ${LIVE_TREE_EXCLUSIONS.map((e) => e.why).join('; ')} - keep all ${n} exclusions exactly as given, add none of your own, do not re-derive them and do not count their contents as a breach.`;
+}
+
 // A blockedReason that says the branch itself could not be found, as opposed to a merge conflict
 // or a failing test tail. Run 6ab1884a's read "Branch <b> not found on origin or locally".
 const BRANCH_NOT_FOUND_RE = /\b(?:branch|ref|refs)\b[^\n]*?\b(?:not found|does not exist|doesn't exist|is missing|no matching)\b|\bno matching (?:refs|branches)\b|\bnot found on origin\b/i;
@@ -684,4 +712,5 @@ module.exports = {
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
+  LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
 };
