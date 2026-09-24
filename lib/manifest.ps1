@@ -28,7 +28,12 @@ function Get-DotfileItems {
         # reads the source copy, which keeps this machine's paths rather than the plugin root.
         [pscustomobject]@{ Type = 'Dir';  Repo = 'aac-skills';                              Local = (Join-Path $claude 'skills') }
 
-        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/CLAUDE.md';                Local = (Join-Path $claude 'CLAUDE.md') }
+        # The global CLAUDE.md is a POINTER (issue 732), not the rules text. The rules reach a desktop
+        # the way they reach a container - the aac-skills plugin's global-rules hook - so a rules
+        # change lands with a plugin update instead of waiting on a pull. profile/claude/CLAUDE.md
+        # stays the one source the packager copies from. The pointer must never carry that file's
+        # first line: the hook stays silent when the global CLAUDE.md does.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/global-pointer.md';        Local = (Join-Path $claude 'CLAUDE.md') }
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/settings.json';            Local = (Join-Path $claude 'settings.json') }
         # Claude Code's own plugin records (issue 717). A fresh machine needs them to register the
         # marketplaces and name what to install, but `claude plugin update` rewrites them live, so
