@@ -1,0 +1,1056 @@
+<!doctype html>
+<!--
+Dan's Day Board: https://claude.ai/artifact/PSr7LzYZqhtF8QHAyX8FGq
+Source of record for the artifact. Edit here, then republish to that URL with these capabilities:
+{"db": {}, "sample": {}, "mcp": {"servers": [
+  {"server": "Microsoft 365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search"]},
+  {"server": "ms365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search"]},
+  {"server": "Todoist", "tools": ["find-tasks", "fetch-object", "find-comments", "add-comments", "add-tasks", "update-tasks", "delete-object", "complete-tasks", "uncomplete-tasks", "find-activity"]},
+  {"server": "Granola", "tools": ["query_granola_meetings"]},
+  {"server": "Google Drive", "tools": ["search_files", "read_file_content"]}]}}
+Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
+-->
+<html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Dan&#39;s Day Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  --ground:#EEF1F4; --panel:#FFFFFF; --ink:#16202B; --muted:#5B6878; --line:#D5DCE4;
+  --accent:#B86E0A; --accent-soft:#F6E7CF;
+  --crit:#B42318; --crit-soft:#FBE3E0; --ok:#1F7A4D; --ok-soft:#DDF1E6;
+  --deleg:#2F5E9E; --deleg-soft:#E1EAF6; --chase:#6B4FA0; --chase-soft:#ECE6F6;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --ground:#10161D; --panel:#18212B; --ink:#E6ECF2; --muted:#93A1B1; --line:#2A3643;
+    --accent:#E6A23C; --accent-soft:#3A2C16;
+    --crit:#F0877C; --crit-soft:#3A1D1A; --ok:#6CCB98; --ok-soft:#17311F;
+    --deleg:#8DB4EA; --deleg-soft:#1C2A3E; --chase:#B9A3E6; --chase-soft:#2A2340;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --ground:#10161D; --panel:#18212B; --ink:#E6ECF2; --muted:#93A1B1; --line:#2A3643;
+  --accent:#E6A23C; --accent-soft:#3A2C16;
+  --crit:#F0877C; --crit-soft:#3A1D1A; --ok:#6CCB98; --ok-soft:#17311F;
+  --deleg:#8DB4EA; --deleg-soft:#1C2A3E; --chase:#B9A3E6; --chase-soft:#2A2340;
+}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.45;padding:0 16px;}
+.wrap{max-width:1100px;margin:0 auto;padding-block:20px 40px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:10px}
+h1{font-size:22px;font-weight:600;margin:0;letter-spacing:-.01em;text-wrap:balance}
+.date{font-family:var(--mono);color:var(--muted);font-size:13px}
+.statusbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);display:inline-flex;align-items:center;gap:6px;background:var(--panel)}
+.chip .led{width:7px;height:7px;border-radius:50%;background:var(--muted)}
+.chip.live .led{background:var(--ok)} .chip.live{color:var(--ok)}
+.chip.err .led{background:var(--crit)} .chip.err{color:var(--crit)}
+button.refresh{font:inherit;font-size:13px;padding:5px 12px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:6px;cursor:pointer}
+button.refresh:hover{border-color:var(--accent)} button:focus-visible,a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+section.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin:0;color:var(--muted);font-weight:600}
+.src{font-family:var(--mono);font-size:11.5px;color:var(--muted)}
+.banner{font-size:13px;padding:8px 10px;border-radius:6px;background:var(--crit-soft);color:var(--crit);border:1px solid var(--crit)}
+.banner.info{background:var(--accent-soft);color:var(--ink);border-color:var(--accent)}
+.summary{display:flex;gap:18px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column}
+.stat b{font-size:26px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.1}
+.stat span{font-size:12px;color:var(--muted)}
+.stat.crit b{color:var(--crit)} .stat.acc b{color:var(--accent)}
+.dayhead{font-family:var(--mono);font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:4px;border-bottom:1px solid var(--line);padding-bottom:4px;display:flex;justify-content:space-between;gap:8px}
+.dayhead .n{font-variant-numeric:tabular-nums}
+.allday{display:flex;flex-wrap:wrap;gap:6px}
+.allday span{font-size:12.5px;padding:2px 8px;border-radius:4px;background:var(--accent-soft);color:var(--ink)}
+ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column}
+li.ev{display:grid;grid-template-columns:96px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+li.ev:last-child{border-bottom:0}
+li.ev.now{background:linear-gradient(90deg,var(--accent-soft),transparent 70%);margin:0 -8px;padding-inline:8px;border-radius:4px}
+li.ev.past{opacity:.55}
+.t{font-family:var(--mono);font-size:13px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.ttl{font-weight:500;overflow-wrap:anywhere}
+.ttl a{color:inherit;text-decoration:none} .ttl a:hover{text-decoration:underline}
+.meta{font-size:12.5px;color:var(--muted);overflow-wrap:anywhere;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;margin-top:2px}
+li.task{display:grid;grid-template-columns:34px 1fr;gap:10px;padding:8px 0;border-bottom:1px solid var(--line)}
+li.task:last-child{border-bottom:0}
+.pri{font-family:var(--mono);font-size:11.5px;font-weight:500;text-align:center;border-radius:4px;padding:1px 0;height:fit-content;border:1px solid var(--line);color:var(--muted)}
+.pri.p1{background:var(--crit);color:#fff;border-color:var(--crit)} .pri.p2{color:var(--accent);border-color:var(--accent)}
+.late{font-family:var(--mono);font-size:11.5px;color:var(--crit);background:var(--crit-soft);padding:0 6px;border-radius:3px;white-space:nowrap}
+.dl{font-family:var(--mono);font-size:11.5px;font-weight:500;color:#fff;background:var(--crit);padding:0 6px;border-radius:3px;white-space:nowrap}
+.dl.far{background:transparent;color:var(--crit);border:1px solid var(--crit)}
+.proj{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.ball{font-family:var(--mono);font-size:11px;font-weight:500;padding:0 6px;border-radius:3px;white-space:nowrap}
+.ball.do{background:var(--accent-soft);color:var(--accent)}
+.ball.to{background:var(--deleg-soft);color:var(--deleg)}
+.ball.chase{background:var(--chase-soft);color:var(--chase)}
+.ball.none{border:1px dashed var(--muted);color:var(--muted)}
+.empty{color:var(--muted);font-size:14px;padding:8px 0}
+section.panel.huddle{border-left:4px solid var(--accent)}
+.hud-actions{display:flex;gap:8px;flex-wrap:wrap}
+button.refresh.primary{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600}
+button.refresh:disabled{opacity:.6;cursor:default}
+.hud-status{font-size:13.5px;color:var(--muted)}
+.hud-status.err{color:var(--crit)}
+.hud-post{background:var(--ground);border:1px solid var(--line);border-radius:6px;padding:12px 14px;max-width:70ch;display:flex;flex-direction:column;gap:6px}
+.hud-post h3{font-size:14.5px;margin:6px 0 0;font-weight:600}
+.hud-post h3:first-child{margin-top:0}
+.hud-post ul{list-style:disc;padding-left:20px;gap:3px}
+.hud-post li{padding:0}
+.hud-ev summary{cursor:pointer;font-size:13px;color:var(--muted)}
+.hud-ev .evsec{font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:10px 0 4px}
+.hud-ev .evrow{font-size:13px;padding:4px 0;border-bottom:1px solid var(--line)}
+.hud-ev .evrow b{font-weight:500}
+.hud-ev .evrow span{display:block;color:var(--muted);font-size:12.5px}
+.docs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+a.doc{font-size:12.5px;font-weight:500;text-decoration:none;padding:2px 10px;border-radius:4px;border:1px solid var(--accent);color:var(--accent)}
+a.doc.prep{background:var(--accent);color:var(--panel)}
+a.doc:hover{filter:brightness(1.08)}
+.docs-note{font-size:12px;color:var(--muted);font-style:italic}
+section.panel.later{background:transparent;border-style:dashed}
+.col{display:flex;flex-direction:column;gap:18px;min-width:0}
+.health{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12.5px;padding:8px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.hl-title{font-family:var(--mono);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.hl-item{display:inline-flex;align-items:center;gap:6px;color:var(--ink)}
+.hl-item .led{width:8px;height:8px;border-radius:50%;background:var(--muted);flex:none}
+.hl-item.ok .led{background:var(--ok)} .hl-item.warn .led{background:var(--accent)} .hl-item.bad .led{background:var(--crit)}
+.hl-item small{color:var(--muted);font-size:12px}
+.blk{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:14px}
+.blk:last-child{border-bottom:0}
+.blk .who{font-weight:600;white-space:nowrap}
+.blk .you{font-family:var(--mono);font-size:11px;color:var(--accent);margin-left:6px}
+.prop{display:flex;flex-direction:column;gap:6px;padding:10px 0;border-bottom:1px solid var(--line)}
+.prop:last-child{border-bottom:0}
+.prop.done{opacity:.8}
+.prop .ttl a{color:inherit}
+.prop .why{font-size:12.5px;color:var(--muted)}
+.prop .acts{display:flex;flex-wrap:wrap;gap:6px}
+.prop .acts button{font:inherit;font-size:12.5px;padding:3px 10px;border-radius:5px;border:1px solid var(--accent);background:var(--panel);color:var(--ink);cursor:pointer}
+.prop .acts button.no{border-color:var(--crit);color:var(--crit)}
+.prop .acts button:disabled,.prop textarea:disabled{opacity:.5;cursor:default}
+.prop textarea{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:var(--ground);color:var(--ink);resize:vertical;width:100%;box-sizing:border-box}
+.prop .err{font-size:12.5px;color:var(--crit)}
+.bucket{font-family:var(--mono);font-size:11px;font-weight:500;padding:0 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.04em;background:var(--accent-soft);color:var(--accent)}
+.bucket.delegate{background:var(--deleg-soft);color:var(--deleg)}
+.bucket.delete{background:var(--crit-soft);color:var(--crit)}
+.bucket.merge,.bucket.defer{background:var(--chase-soft);color:var(--chase)}
+.alarm{font-size:13px;padding:5px 8px;border-radius:5px;background:var(--crit-soft);color:var(--ink);border-left:3px solid var(--crit)}
+.wait{display:grid;grid-template-columns:1fr auto;gap:4px 12px;padding:8px 0;border-bottom:1px solid var(--line);align-items:start}
+.wait:last-child{border-bottom:0}
+.wait .why{font-size:12.5px;color:var(--muted);margin-top:2px}
+.wait .age{font-family:var(--mono);font-size:11.5px;color:var(--crit);background:var(--crit-soft);padding:0 6px;border-radius:3px;white-space:nowrap}
+.wait button{font:inherit;font-size:12.5px;padding:3px 10px;border-radius:5px;border:1px solid var(--line);background:var(--panel);color:var(--ink);cursor:pointer}
+@media (max-width:760px){.col{display:contents} .panel.cal{order:1} .panel.team{order:2} .panel.triage{order:3} .panel.waiting{order:4} .panel.tasks{order:5} .panel.huddle{order:6} .panel.later{order:7}}
+section.panel.later .ttl{font-weight:400}
+footer{font-size:12px;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Dan's Day Board</h1>
+      <div class="date" id="today"></div>
+    </div>
+    <div class="statusbar">
+      <span class="chip" id="chip-cal"><span class="led"></span>Outlook calendar · connecting</span>
+      <span class="chip" id="chip-task"><span class="led"></span>Todoist · connecting</span>
+      <button class="refresh" id="refresh" type="button">Refresh now</button>
+    </div>
+  </header>
+
+  <div class="health" id="health" aria-label="Routine health"><span class="hl-title">Routines</span><span class="hl-item">checking…</span></div>
+
+  <div class="grid">
+    <div class="col">
+        <section class="panel cal" aria-labelledby="cal-h">
+          <div class="ph"><h2 id="cal-h">Calendar · today</h2><span class="src">Outlook via ms365</span></div>
+          <div id="cal-banner" hidden></div>
+          <div class="summary" id="cal-sum"></div>
+          <div id="cal-body"><div class="empty">Loading your calendar…</div></div>
+        </section>
+
+          <section class="panel huddle" aria-labelledby="hud-h">
+            <div class="ph">
+              <h2 id="hud-h">Huddle post · draft</h2>
+              <div class="hud-actions">
+                <button class="refresh primary" id="hud-go" type="button">Draft today's post</button>
+                <button class="refresh" id="hud-stop" type="button" hidden>Stop</button>
+                <button class="refresh" id="hud-copy" type="button" hidden>Copy post</button>
+              </div>
+            </div>
+            <div class="hud-status" id="hud-status">Reads your last huddle post, what you finished and sent since, and your meeting notes — then drafts the three sections. You post it; this page never does.</div>
+            <div class="hud-post" id="hud-post" hidden></div>
+            <details class="hud-ev" id="hud-ev" hidden><summary>What each line rests on</summary><div id="hud-ev-body"></div></details>
+          </section>
+
+          <section class="panel later" aria-labelledby="tmr-h">
+            <div class="ph"><h2 id="tmr-h">Tomorrow · looking ahead</h2><span class="src" id="tmr-date"></span></div>
+            <div id="tmr-body"><div class="empty">Loading tomorrow…</div></div>
+          </section>
+    </div>
+
+    <div class="col">
+      <section class="panel team" aria-labelledby="team-h">
+        <div class="ph"><h2 id="team-h">From your team · today</h2><span class="src">Huddle channel</span></div>
+        <div id="team-body"><div class="empty">Reading this morning's huddle posts…</div></div>
+      </section>
+
+      <section class="panel triage" aria-labelledby="tri-h">
+        <div class="ph"><h2 id="tri-h">Triage · questions for you</h2><div class="hud-actions"><span class="src" id="tri-src"></span></div></div>
+        <div id="tri-banner" hidden></div>
+        <div id="tri-body"><div class="empty">Loading proposals…</div></div>
+      </section>
+
+      <section class="panel waiting" aria-labelledby="wait-h">
+        <div class="ph"><h2 id="wait-h">Waiting on you · unanswered</h2><span class="src" id="wait-src"></span></div>
+        <div id="wait-body"><div class="empty">Loading…</div></div>
+      </section>
+
+      <section class="panel tasks" aria-labelledby="task-h">
+        <div class="ph"><h2 id="task-h">Work tasks · deadlines, overdue, today</h2><span class="src">Current Work + backlog</span></div>
+        <div id="task-banner" hidden></div>
+        <div class="summary" id="task-sum"></div>
+        <div id="task-body"><div class="empty">Loading your work tasks…</div></div>
+      </section>
+    </div>
+  </div>
+  <footer>Refreshes every 5 minutes while open, and on every open. Work projects only — personal and Inbox tasks stay off this board. Times in your local time zone.</footer>
+</div>
+
+<script>
+(function(){
+  const REFRESH_MS = 5*60*1000;
+  const CAL = {server:"ms365", tool:"outlook_calendar_search"};
+  // The Microsoft connector has shown up under two names ("Microsoft 365" on claude.ai, "ms365" in a
+  // cloud session). Each call tries the name that last worked, falls back to the other, and remembers.
+  const MS_NAMES = ["Microsoft 365", "ms365"];
+  let msName = MS_NAMES[0];
+  const SWITCH = new Set(["server_not_connected","not_in_manifest","selection_required","server_not_found"]);
+  async function call(server, tool, input, opts){
+    if (server !== "ms365") return mcp.callTool(server, tool, input, opts);
+    try { return await mcp.callTool(msName, tool, input, opts); }
+    catch(err){
+      if (!(err && SWITCH.has(err.code))) throw err;
+      const other = MS_NAMES.find(n => n !== msName);
+      const res = await mcp.callTool(other, tool, input, opts);
+      msName = other;
+      return res;
+    }
+  }
+  const DOCS = {server:"ms365", tool:"sharepoint_search", folder:"O3 Prep"};
+  const isO3 = subject => /\bO3\b/i.test(subject || "");
+  // O3 prep/agenda files by day: {"2026-09-22": {files:[{person, kind, url}], error:null}}
+  const prepDocs = {};
+  const TODO = {server:"Todoist", tool:"find-tasks"};
+  const PROJECTS = [
+    {id:"6JHrw6mXXgrrWqxG", tag:"This week"},
+    {id:"6XMPVX96VgH6vwHR", tag:"Backlog"}
+  ];
+  const CURRENT_WORK = "6JHrw6mXXgrrWqxG";
+  const DO_CAP = 10;
+  const DEADLINE_WINDOW_DAYS = 14;
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const pad = n => String(n).padStart(2,"0");
+  const ymd = d => d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
+  const fmtTime = d => d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+  const fmtStamp = d => d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+  const dayDiff = (a, b) => Math.round((new Date(a+"T00:00:00") - new Date(b+"T00:00:00")) / 86400000);
+
+  function dayBounds(){
+    const s = new Date(); s.setHours(0,0,0,0);
+    const e = new Date(s); e.setDate(e.getDate()+2);
+    return {s, e};
+  }
+  $("today").textContent = new Date().toLocaleDateString([], {weekday:"long", month:"long", day:"numeric", year:"numeric"});
+
+  // A connector result can arrive as several text blocks (one event each), one JSON block,
+  // or structured content. Collect every JSON object in it, in order.
+  function objectsOf(result){
+    const out = [];
+    const visit = v => {
+      if (v == null) return;
+      if (typeof v === "string"){ try { visit(JSON.parse(v)); } catch(e){} return; }
+      if (Array.isArray(v)){ v.forEach(visit); return; }
+      if (typeof v === "object") out.push(v);
+    };
+    if (result && Array.isArray(result.content) && result.content.length){
+      result.content.forEach(c => { if (c && c.type === "text") visit(c.text); });
+      if (!out.length && result.structuredContent) visit(result.structuredContent);
+    } else if (result && result.payload !== undefined){
+      visit(result.payload);
+    } else {
+      visit(result);
+    }
+    return out;
+  }
+
+  // ---------- status ----------
+  function setChip(id, label, state, when){
+    const el = $(id);
+    el.className = "chip " + state;
+    const txt = state === "live" ? label + " · live · " + fmtStamp(when || new Date())
+              : state === "err" ? label + " · not connected"
+              : label + " · connecting";
+    el.innerHTML = '<span class="led"></span>' + esc(txt);
+  }
+  function setBanner(id, msg, info){
+    const el = $(id);
+    if (!msg){ el.hidden = true; return; }
+    el.hidden = false; el.className = "banner" + (info ? " info" : ""); el.textContent = msg;
+  }
+  // One message per error code: each has a different fix.
+  function explain(err, server){
+    const code = err && err.code;
+    const s = (err && err.server) || server;
+    switch (code){
+      case "server_not_connected": return "No connector named " + s + " on this account. Add it in claude.ai Settings → Connectors, then refresh.";
+      case "needs_reauth": return s + " needs signing in again. Reconnect it in claude.ai Settings → Connectors.";
+      case "selection_required": return "You have more than one " + s + " connector. Pick one in the prompt claude.ai shows, then refresh.";
+      case "not_in_manifest": return "This page is not allowed to use " + s + " in this view. Allow the connector for this page, then refresh.";
+      case "blocked_by_policy": return "Your organization blocks this " + s + " call.";
+      case "approval_required": return "Your organization requires approval for each " + s + " call, which pages cannot request yet.";
+      case "not_granted":
+      case "capability_disabled":
+      case "capability_removed": return "Connectors are not available in this view. Open the page on claude.ai.";
+      case "server_unavailable": return s + " did not answer. It will try again on the next refresh.";
+      case "tool_error": return s + " reported a problem: " + ((err && err.message) || "no detail");
+      default: return s + " call failed (" + (code || "unknown") + "): " + ((err && err.message) || "no detail");
+    }
+  }
+  const RETRACT = new Set(["needs_reauth","server_not_connected","not_in_manifest","blocked_by_policy","approval_required","selection_required"]);
+
+  // ---------- CALENDAR ----------
+  function parseWhen(o){
+    if (!o) return null;
+    const dt = o.dateTime || o;
+    if (typeof dt !== "string") return null;
+    const utc = !o.timeZone || /^(UTC|Etc\/UTC|GMT)$/i.test(o.timeZone);
+    return new Date(utc && !/[zZ]|[+-]\d\d:?\d\d$/.test(dt) ? dt + "Z" : dt);
+  }
+  // Links to the O3 routine's own files for this meeting's person and day.
+  function prepLinks(e, dayKey){
+    if (!isO3(e.subject)) return "";
+    const got = prepDocs[dayKey];
+    if (!got) return '<div class="docs"><span class="docs-note">Looking for prep…</span></div>';
+    if (got.error) return '<div class="docs"><span class="docs-note">Prep links unavailable: ' + esc(got.error) + '</span></div>';
+    const subj = e.subject.toLowerCase();
+    const mine = got.files.filter(f => subj.includes(f.person.toLowerCase()) || subj.includes(f.person.split(" ")[0].toLowerCase()));
+    if (!mine.length) return '<div class="docs"><span class="docs-note">No prep file for this day yet</span></div>';
+    const order = {Prep:0, Agenda:1};
+    mine.sort((a,b) => order[a.kind] - order[b.kind]);
+    return '<div class="docs">' + mine.map(f =>
+      '<a class="doc ' + f.kind.toLowerCase() + '" href="' + esc(f.url) + '" target="_blank" rel="noopener">' + (f.kind === "Prep" ? "My prep" : "Agenda") + '</a>'
+    ).join("") + '</div>';
+  }
+
+  let lastEvents = [];
+  function renderCal(items){
+    lastEvents = items;
+    const {s} = dayBounds();
+    const now = new Date();
+    const tmr = new Date(s); tmr.setDate(tmr.getDate()+1);
+    const days = [{d:s, label:"Today", all:[], timed:[]},{d:tmr, label:"Tomorrow", all:[], timed:[]}];
+    items.filter(e => e && e.subject !== undefined && e.start && !e.isCancelled).forEach(e => {
+      if (e.isAllDay){
+        const key = String(e.start.dateTime || "").slice(0,10);
+        const day = days.find(x => ymd(x.d) === key); if (day) day.all.push(e);
+      } else {
+        const st = parseWhen(e.start), en = parseWhen(e.end);
+        if (!st || isNaN(st)) return;
+        const day = days.find(x => ymd(x.d) === ymd(st)); if (day) day.timed.push({e, st, en});
+      }
+    });
+    days.forEach(d => d.timed.sort((a,b) => a.st - b.st));
+    const today = days[0];
+    const left = today.timed.filter(x => (x.en || x.st) > now);
+    const next = left[0];
+    const busyMin = today.timed.reduce((m,x) => m + (x.en ? (x.en - x.st)/60000 : 0), 0);
+    $("cal-sum").innerHTML =
+      '<div class="stat acc"><b>' + left.length + '</b><span>meetings left today</span></div>' +
+      '<div class="stat"><b>' + (Math.round(busyMin/6)/10) + 'h</b><span>booked today</span></div>' +
+      '<div class="stat"><b>' + (next ? esc(fmtTime(next.st)) : "—") + '</b><span>' + (next ? "next: " + esc(next.e.subject) : "nothing else today") + '</span></div>';
+    const dayHtml = d => {
+      let h = "";
+      if (d.all.length) h += '<div class="allday">' + d.all.map(e => '<span>' + esc(e.subject) + '</span>').join("") + '</div>';
+      if (!d.timed.length) return h + '<div class="empty">No timed meetings.</div>';
+      h += '<ul>' + d.timed.map(x => {
+        const cls = x.en && x.en < now ? "past" : (x.st <= now && x.en && x.en > now ? "now" : "");
+        const title = x.e.webLink ? '<a href="' + esc(x.e.webLink) + '" target="_blank" rel="noopener">' + esc(x.e.subject) + '</a>' : esc(x.e.subject);
+        const who = (x.e.attendees || []).filter(a => !/dgatsakos@/i.test(a)).slice(0,3).join(", ");
+        const meta = [x.e.location, who].filter(Boolean).join(" · ");
+        return '<li class="ev ' + cls + '"><div class="t">' + esc(fmtTime(x.st)) + (x.en ? "–" + esc(fmtTime(x.en)) : "") + '</div><div><div class="ttl">' + title + '</div>' + (meta ? '<div class="meta">' + esc(meta) + '</div>' : "") + prepLinks(x.e, ymd(x.st)) + '</div></li>';
+      }).join("") + '</ul>';
+      return h;
+    };
+    $("cal-body").innerHTML = dayHtml(days[0]);
+    $("tmr-date").textContent = days[1].d.toLocaleDateString([], {weekday:"long", month:"short", day:"numeric"});
+    $("tmr-body").innerHTML = dayHtml(days[1]);
+  }
+
+  // ---------- TASKS ----------
+  // Whose ball: exactly one of do / to-NAME / chase, or none yet.
+  function ballOf(t){
+    const l = t.labels || [];
+    if (l.includes("do")) return {key:"do", text:"yours"};
+    const to = l.find(x => /^to-/.test(x));
+    if (to) return {key:"to", text:to.replace(/^to-/, "→ ")};
+    if (l.includes("chase")) return {key:"chase", text:"chasing"};
+    return {key:"none", text:"no owner yet"};
+  }
+  const GROUPS = [
+    {key:"do", title:"Yours"},
+    {key:"to", title:"With your directs"},
+    {key:"chase", title:"Waiting on outside parties"},
+    {key:"none", title:"Not triaged"}
+  ];
+  function renderTasks(all){
+    const todayKey = ymd(new Date());
+    const tagOf = pid => (PROJECTS.find(p => p.id === pid) || {}).tag || "";
+    const tasks = all.filter(t => t && t.content !== undefined && !t.checked)
+      .filter(t => !(t.labels || []).some(l => l === "no-sweep" || l === "merged"))
+      .map(t => Object.assign({}, t, {
+        _due: String(t.dueDate || "").slice(0,10),
+        _dl: String(t.deadlineDate || "").slice(0,10),
+        _ball: ballOf(t)
+      }));
+    const rank = p => ({p1:1,p2:2,p3:3,p4:4})[p] || 4;
+
+    const deadlines = tasks.filter(t => t._dl && dayDiff(t._dl, todayKey) <= DEADLINE_WINDOW_DAYS)
+      .sort((a,b) => a._dl.localeCompare(b._dl));
+    const active = tasks.filter(t => t._due && t._due <= todayKey)
+      .sort((a,b) => rank(a.priority) - rank(b.priority) || a._due.localeCompare(b._due));
+    const overdue = active.filter(t => t._due < todayKey);
+    const dueToday = active.filter(t => t._due === todayKey);
+    const doThisWeek = tasks.filter(t => t.projectId === CURRENT_WORK && t._ball.key === "do").length;
+
+    $("task-sum").innerHTML =
+      '<div class="stat' + (deadlines.length ? ' crit' : '') + '"><b>' + deadlines.length + '</b><span>deadlines ≤ ' + DEADLINE_WINDOW_DAYS + ' days</span></div>' +
+      '<div class="stat crit"><b>' + overdue.length + '</b><span>overdue</span></div>' +
+      '<div class="stat acc"><b>' + dueToday.length + '</b><span>due today</span></div>' +
+      '<div class="stat' + (doThisWeek > DO_CAP ? ' crit' : '') + '"><b>' + doThisWeek + '/' + DO_CAP + '</b><span>yours this week</span></div>';
+
+    const deadlineChip = t => {
+      if (!t._dl) return "";
+      const d = dayDiff(t._dl, todayKey);
+      const label = d < 0 ? "deadline passed " + (-d) + "d ago" : d === 0 ? "deadline today" : d === 1 ? "deadline tomorrow" : "deadline in " + d + "d";
+      return '<span class="dl' + (d > 2 ? ' far' : '') + '">' + esc(label) + '</span>';
+    };
+    const row = t => {
+      const p = typeof t.priority === "string" ? t.priority : "p4";
+      const title = t.id ? '<a href="https://app.todoist.com/app/task/' + encodeURIComponent(t.id) + '" target="_blank" rel="noopener">' + esc(t.content) + '</a>' : esc(t.content);
+      const late = t._due && t._due < todayKey ? '<span class="late">' + dayDiff(todayKey, t._due) + 'd late</span>' : "";
+      const meta = '<span class="ball ' + t._ball.key + '">' + esc(t._ball.text) + '</span>' + deadlineChip(t) + late + '<span class="proj">' + esc(tagOf(t.projectId)) + '</span>';
+      return '<li class="task"><div class="pri ' + esc(p) + '">' + esc(p.toUpperCase()) + '</div><div><div class="ttl">' + title + '</div><div class="meta">' + meta + '</div></div></li>';
+    };
+
+    let h = '<div class="dayhead"><span>Hard deadlines · next ' + DEADLINE_WINDOW_DAYS + ' days</span><span class="n">' + deadlines.length + '</span></div>';
+    h += deadlines.length ? '<ul>' + deadlines.map(row).join("") + '</ul>' : '<div class="empty">No deadlines in the next ' + DEADLINE_WINDOW_DAYS + ' days.</div>';
+    GROUPS.forEach(g => {
+      const items = active.filter(t => t._ball.key === g.key);
+      if (!items.length && g.key !== "do") return;
+      h += '<div class="dayhead" style="margin-top:10px"><span>' + g.title + ' · overdue + today</span><span class="n">' + items.length + '</span></div>';
+      h += items.length ? '<ul>' + items.map(row).join("") + '</ul>' : '<div class="empty">Nothing of yours is overdue or due today.</div>';
+    });
+    $("task-body").innerHTML = h;
+  }
+
+  // ---------- live wiring ----------
+  let mcp = null;
+  const got = {cal:false, task:false};
+
+  function fail(key, err){
+    const chip = key === "cal" ? "chip-cal" : "chip-task";
+    const label = key === "cal" ? "Outlook calendar" : "Todoist";
+    const server = key === "cal" ? CAL.server : TODO.server;
+    const msg = explain(err, server);
+    setChip(chip, label, "err");
+    if (got[key] && !RETRACT.has(err && err.code)){
+      setBanner(key + "-banner", "Last refresh failed. Showing earlier data. " + msg, true);
+    } else {
+      got[key] = false;
+      setBanner(key + "-banner", msg);
+      $(key === "cal" ? "cal-body" : "task-body").innerHTML = "";
+      $(key === "cal" ? "cal-sum" : "task-sum").innerHTML = "";
+      if (key === "cal") $("tmr-body").innerHTML = '<div class="empty">Calendar not connected — see the message above.</div>';
+    }
+  }
+
+  async function pullCal(){
+    const {s, e} = dayBounds();
+    const events = [];
+    let offset = 0, stamp = null;
+    for (let page = 0; page < 4; page++){
+      const res = await call(CAL.server, CAL.tool,
+        {query:"*", afterDateTime:s.toISOString(), beforeDateTime:e.toISOString(), order:"oldest", limit:25, offset});
+      if (res && res.cache && res.cache.storedAt && !stamp) stamp = new Date(res.cache.storedAt);
+      let nextOffset = null;
+      objectsOf(res).forEach(o => {
+        if (Array.isArray(o.value)) o.value.forEach(v => events.push(v));
+        else if (Array.isArray(o.events)) o.events.forEach(v => events.push(v));
+        else if (o.subject !== undefined) events.push(o);
+        if (o.moreResults && typeof o.nextOffset === "number") nextOffset = o.nextOffset;
+      });
+      if (nextOffset == null) break;
+      offset = nextOffset;
+    }
+    return {events, stamp};
+  }
+
+  async function pullTasks(){
+    const tasks = [];
+    let stamp = null;
+    for (const p of PROJECTS){
+      let cursor;
+      for (let page = 0; page < 6; page++){
+        const input = {projectId:p.id, responsibleUserFiltering:"all", limit:100};
+        if (cursor) input.cursor = cursor;
+        const res = await call(TODO.server, TODO.tool, input);
+        if (res && res.cache && res.cache.storedAt && !stamp) stamp = new Date(res.cache.storedAt);
+        const body = objectsOf(res).find(o => Array.isArray(o.tasks)) || {tasks:[]};
+        body.tasks.forEach(t => tasks.push(t));
+        if (!body.hasMore || !body.nextCursor) break;
+        cursor = body.nextCursor;
+      }
+    }
+    return {tasks, stamp};
+  }
+
+  // Files are named "<Full Name> - O3 Prep YYYY-MM-DD.docx" / "... - O3 Agenda ...".
+  async function pullPreps(dayKey){
+    const res = await call(DOCS.server, DOCS.tool, {query:"O3 " + dayKey, folderName:DOCS.folder, limit:25});
+    const files = [];
+    objectsOf(res).forEach(o => {
+      const name = String(o.name || ""), url = String(o.webUrl || "");
+      if (!url.includes("/" + DOCS.folder + "/") || !/\.docx$/i.test(name) || !name.includes(dayKey)) return;
+      const m = name.match(/^(.+?) - O3 (Prep|Agenda)\b/);
+      if (m && !files.some(f => f.person === m[1] && f.kind === m[2])) files.push({person:m[1], kind:m[2], url});
+    });
+    return files;
+  }
+  async function refreshPreps(events){
+    const days = [...new Set(events.filter(e => e && !e.isCancelled && !e.isAllDay && isO3(e.subject))
+      .map(e => { const st = parseWhen(e.start); return st && !isNaN(st) ? ymd(st) : null; })
+      .filter(Boolean))];
+    await Promise.all(days.map(async d => {
+      try { prepDocs[d] = {files: await pullPreps(d), error: null}; }
+      catch(err){ if (!prepDocs[d] || prepDocs[d].error) prepDocs[d] = {files: [], error: (err && err.code) || "failed"}; }
+    }));
+  }
+
+  async function refreshCal(){
+    try {
+      const {events, stamp} = await pullCal();
+      got.cal = true; setBanner("cal-banner", null);
+      renderCal(events); setChip("chip-cal", "Outlook calendar", "live", stamp);
+    } catch(err){ fail("cal", err); return; }
+    // Prep links are a second, independent call: a failure here never hides the calendar.
+    await refreshPreps(lastEvents);
+    renderCal(lastEvents);
+  }
+  async function refreshTasks(){
+    try {
+      const {tasks, stamp} = await pullTasks();
+      got.task = true; setBanner("task-banner", null);
+      lastTasks = tasks;
+      renderTasks(tasks); setChip("chip-task", "Todoist", "live", stamp);
+    } catch(err){ fail("task", err); }
+  }
+  let busy = false;
+  async function refreshAll(){
+    if (!mcp || busy) return;
+    busy = true;
+    try { await Promise.all([refreshCal(), refreshTasks(), refreshTeam(), refreshHealth()]); } finally { busy = false; }
+  }
+
+  async function start(){
+    try { mcp = window.claude && window.claude.use ? await window.claude.use("mcp") : null; } catch(e){ mcp = null; }
+    if (!mcp){
+      const msg = "Connectors are not available in this view. Open the page on claude.ai to see your live calendar and tasks.";
+      ["cal","task"].forEach(k => { setChip(k === "cal" ? "chip-cal" : "chip-task", k === "cal" ? "Outlook calendar" : "Todoist", "err"); setBanner(k + "-banner", msg); $(k + "-body").innerHTML = ""; });
+      $("tmr-body").innerHTML = "";
+      return;
+    }
+    try { db = window.claude.use ? await window.claude.use("db") : null; } catch(e){ db = null; }
+    watchTriage(); watchWaiting();
+    await refreshAll();
+    setInterval(refreshAll, REFRESH_MS);
+    document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAll(); });
+  }
+
+  // ---------- FROM YOUR TEAM (today's huddle posts) ----------
+  // Deterministic: the Risks/Blockers lines of each direct's post today, plus any line naming Dan.
+  function linesOfPost(html){
+    const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const els = [...doc.body.querySelectorAll("p,li,h1,h2,h3,h4")];
+    const risks = [], mentions = [];
+    let inRisks = false;
+    els.forEach(el => {
+      if (el.querySelector("p,li")) return;               // containers: their children are visited
+      const t = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!t) return;
+      if (t.length < 40 && /risks?\s*\/?\s*blockers?/i.test(t)){ inRisks = true; return; }
+      if (t.length < 40 && /^(yesterday|today)/i.test(t)){ inRisks = false; return; }
+      if (inRisks){ if (!/^(none|n\/a|no|nothing)\.?$/i.test(t)) risks.push(t); return; }
+      if (/\bDan\b/.test(t) && !/^Dan\b.*\|/.test(t)) mentions.push(t);
+    });
+    return {risks, mentions};
+  }
+  async function refreshTeam(){
+    try {
+      const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:25});
+      const todayKey = ymd(new Date());
+      const posts = objectsOf(res).filter(o => o.from && o.from.userId && o.from.userId !== HUDDLE.danId && o.createdDateTime && ymd(new Date(o.createdDateTime)) === todayKey);
+      const rows = [];
+      posts.sort((a,b) => String(a.createdDateTime).localeCompare(String(b.createdDateTime))).forEach(o => {
+        const who = String(o.from.displayName || "Someone").split(" ")[0];
+        const {risks, mentions} = linesOfPost(o.bodyPreview);
+        risks.forEach(t => rows.push({who, t, you:/\bDan\b/.test(t)}));
+        mentions.forEach(t => rows.push({who, t, you:true}));
+      });
+      const names = [...new Set(posts.map(o => String(o.from.displayName || "").split(" ")[0]))].filter(Boolean);
+      $("team-body").innerHTML = rows.length
+        ? rows.map(r => '<div class="blk"><span class="who">' + esc(r.who) + '</span><span>' + esc(r.t) + (r.you ? '<span class="you">names you</span>' : '') + '</span></div>').join("")
+        : '<div class="empty">' + (posts.length ? "No blockers in today's posts from " + esc(names.join(", ")) + "." : "No posts from your team yet today.") + '</div>';
+    } catch(err){
+      $("team-body").innerHTML = '<div class="empty">' + esc(explain(err, "ms365")) + '</div>';
+    }
+  }
+
+  // ---------- ROUTINE HEALTH ----------
+  const LEDGER_FOLDER = "11T-cYdfuim9SmXt4TpKoLjKSjB9vJefV";
+  const EXPORT_FOLDER = "1ZSqv0g3JcomibZ3aFHT84eq0FVlGAXTP";
+  const ROUTINES = [
+    {prefix:"todoist-triage", label:"Triage", maxHours:30},
+    {prefix:"aac-forgotten-tasks", label:"Forgotten tasks", maxHours:30}
+  ];
+  const stampOf = title => { const m = String(title).match(/(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z/); return m ? new Date(Date.UTC(+m[1], m[2]-1, +m[3], +m[4], +m[5], +m[6])) : null; };
+  const ago = d => { const h = (Date.now() - d.getTime()) / 3600000; return h < 1 ? Math.max(1, Math.round(h*60)) + " min ago" : h < 48 ? Math.round(h) + " h ago" : Math.round(h/24) + " days ago"; };
+  function filesOf(res){ const o = objectsOf(res).find(x => Array.isArray(x.files)); return o ? o.files : []; }
+  async function recordGaps(fileId){
+    const res = await call("Google Drive", "read_file_content", {fileId});
+    const o = objectsOf(res).find(x => typeof x.fileContent === "string");
+    if (!o) return null;
+    const txt = o.fileContent.replace(/\\([_\[\]!#*`])/g, "$1");
+    try { const j = JSON.parse(txt); return (j.sources_unreachable || []).length; } catch(e){ return null; }
+  }
+  async function refreshHealth(){
+    const items = [];
+    const item = (state, label, detail) => '<span class="hl-item ' + state + '"><span class="led"></span>' + esc(label) + ' <small>' + esc(detail) + '</small></span>';
+    try {
+      const files = filesOf(await call("Google Drive", "search_files", {query:"parentId = '" + LEDGER_FOLDER + "'", excludeContentSnippets:true, pageSize:100}));
+      for (const r of ROUTINES){
+        const newest = files.filter(f => String(f.title).startsWith(r.prefix + "-")).map(f => ({f, at: stampOf(f.title)})).filter(x => x.at).sort((a,b) => b.at - a.at)[0];
+        if (!newest){ items.push(item("bad", r.label, "no run record")); continue; }
+        const hours = (Date.now() - newest.at.getTime()) / 3600000;
+        let gaps = null; try { gaps = await recordGaps(newest.f.id); } catch(e){}
+        const detail = "ran " + ago(newest.at) + (gaps === null ? " · record unreadable" : gaps ? " · " + gaps + " source" + (gaps > 1 ? "s" : "") + " dark" : " · all sources read");
+        items.push(item(hours > r.maxHours ? "bad" : (gaps ? "warn" : "ok"), r.label, detail));
+      }
+    } catch(err){ items.push(item("bad", "Run records", explain(err, "Google Drive"))); }
+    try {
+      const since = new Date(Date.now() - 3*3600000).toISOString().replace(/\.\d+Z$/, "Z");
+      const ex = filesOf(await call("Google Drive", "search_files", {query:"parentId = '" + EXPORT_FOLDER + "' and modifiedTime > '" + since + "'", excludeContentSnippets:true, pageSize:100}));
+      const newest = ex.map(f => new Date(f.modifiedTime)).filter(d => !isNaN(d)).sort((a,b) => b - a)[0];
+      items.push(newest ? item((Date.now() - newest) > 2*3600000 ? "warn" : "ok", "Mail and Teams exports", "last " + ago(newest)) : item("bad", "Mail and Teams exports", "nothing in 3 h"));
+    } catch(err){ items.push(item("bad", "Mail and Teams exports", explain(err, "Google Drive"))); }
+    $("health").innerHTML = '<span class="hl-title">Routines</span>' + items.join("");
+  }
+
+  // ---------- TRIAGE QUESTIONS (tier 2, written by the triage routine, answered here) ----------
+  // Dan's rule (todoist-triage, 2026-09-21): each question offers substantive rulings and room for his reason,
+  // never a bare approve/skip; a "no" lands in Wontfix; tier 1 was already applied by the run.
+  const WONTFIX = "6hW9X6Jppm26FX4m";
+  let db = null, triMeta = null, triDocs = [];
+  function watchTriage(){
+    if (!db){ $("tri-body").innerHTML = '<div class="empty">Board storage is not available in this view.</div>'; return; }
+    const bad = e => { $("tri-body").innerHTML = '<div class="empty">Questions unavailable (' + esc(e.code) + ').</div>'; };
+    db.doc("triage_meta/latest").onSnapshot(s => { triMeta = s.exists ? s.data() : null; renderTriage(); }, bad);
+    db.collection("triage").onSnapshot(q => { triDocs = q.docs.map(d => Object.assign({_id: d.id}, d.data())); renderTriage(); renderWaiting(); }, bad);
+  }
+  function renderTriage(){
+    // Focus stays in a half-typed reason: skip a repaint while Dan is typing in this panel.
+    if (document.activeElement && document.activeElement.closest && document.activeElement.closest("#tri-body textarea")) return;
+    const runId = triMeta && triMeta.runId;
+    const mine = triDocs.filter(p => p.runId === runId);
+    const open = mine.filter(p => p.status === "open");
+    const answered = mine.filter(p => p.status === "answered").length;
+    $("tri-src").textContent = triMeta && triMeta.finishedAt ? "run " + ago(new Date(triMeta.finishedAt)) : "";
+    const alarms = (triMeta && Array.isArray(triMeta.alarms) ? triMeta.alarms : []).slice(0, 5);
+    let h = alarms.map(a => '<div class="alarm">' + esc(a) + '</div>').join("");
+    if (triMeta && triMeta.appliedCount) h += '<div class="src">' + triMeta.appliedCount + ' sure-thing deletes and merges applied by the run without asking.</div>';
+    if (!triMeta) h += '<div class="empty">No triage run has written here yet. The next scheduled run fills this panel.</div>';
+    else if (!open.length) h += '<div class="empty">No questions waiting' + (answered ? " — " + answered + " answered from this run." : ".") + '</div>';
+    h += open.map(p => {
+      const opts = (Array.isArray(p.options) ? p.options : []).map((o, i) => '<button type="button" data-opt="' + i + '">' + esc(o.label) + '</button>').join("");
+      return '<div class="prop" data-id="' + esc(p._id) + '"><div class="ttl">' + (p.taskId ? '<a href="https://app.todoist.com/app/task/' + encodeURIComponent(p.taskId) + '" target="_blank" rel="noopener">' + esc(p.title) + '</a>' : esc(p.title)) + '</div>' +
+        '<div class="why">' + esc(p.question || "") + '</div>' +
+        (p.source && p.source.lastAt ? '<div class="src">Last message: ' + esc(p.source.lastFrom || "") + ', ' + esc(String(p.source.lastAt).slice(0, 10)) + (p.source.quote ? ' — “' + esc(p.source.quote) + '”' : '') + '</div>'
+          : '<div class="err">Source not read — built from the task text alone. Check the thread before ruling.</div>') +
+        '<div class="acts">' + opts + '<button type="button" data-opt="wontfix" class="no">Rule out</button></div>' +
+        '<textarea rows="1" placeholder="Why, or a different ruling (optional — the next run reads it)"></textarea>' +
+        '<div class="acts"><button type="button" data-opt="note">Send note only</button></div>' +
+        (p.error ? '<div class="err">Last attempt failed: ' + esc(p.error) + '</div>' : '') + '</div>';
+    }).join("");
+    const done = mine.filter(p => p.status === "answered").sort((a,b) => String(b.answeredAt || "").localeCompare(String(a.answeredAt || "")));
+    if (done.length){
+      h += '<div class="dayhead" style="margin-top:6px"><span>Answered · Undo puts the task back</span><span class="n">' + done.length + '</span></div>';
+      h += done.map(p => {
+        const label = p.choice || (p.answer && p.answer.label) || "answered";
+        const note = p.note || (p.answer && p.answer.reason) || "";
+        return '<div class="prop done" data-id="' + esc(p._id) + '"><div class="ttl">' + esc(p.title) + '</div>' +
+          '<div class="why">You chose: ' + esc(label) + (note ? ' — “' + esc(note) + '”' : '') + '</div>' +
+          '<div class="acts">' + (p.undo ? '<button type="button" data-undo="1">Undo</button>' : '<span class="src">Answered before Undo existed — change it in Todoist.</span>') + '</div>' +
+          (p.error ? '<div class="err">Undo failed: ' + esc(p.error) + '</div>' : '') + '</div>';
+      }).join("");
+    }
+    $("tri-body").innerHTML = h;
+  }
+  async function undoAnswer(row){
+    const p = triDocs.find(x => x._id === row.dataset.id);
+    if (!p || !db || !p.undo) return;
+    row.querySelectorAll("button").forEach(b => b.disabled = true);
+    try {
+      const taskId = await undoRuling(p);
+      await db.doc("triage/" + p._id).update({status:"open", taskId, choice:null, note:"", answeredAt:null, undo:null, error:null, undoneAt:new Date().toISOString()});
+      refreshTasks();
+    } catch(err){
+      const msg = (err && (err.message || err.code)) || "failed";
+      try { await db.doc("triage/" + p._id).update({error: msg}); } catch(e){}
+      row.querySelectorAll("button").forEach(b => b.disabled = false);
+    }
+  }
+  // Every Todoist write happens here, only after a click.
+  async function snapshotTask(id){
+    const res = await call("Todoist", "fetch-object", {type:"task", id}, {cache:false});
+    const o = objectsOf(res).map(x => x.object || x).find(x => x && x.id === id);
+    if (!o) throw {code:"tool_error", message:"could not read the task before changing it, so nothing was changed"};
+    let comments = [];
+    try {
+      const c = await call("Todoist", "find-comments", {taskId:id, limit:10}, {cache:false});
+      comments = objectsOf(c).flatMap(x => Array.isArray(x.comments) ? x.comments.map(k => String(k.content || "")) : []);
+    } catch(e){}
+    return {content:o.content || "", description:o.description || "", labels:o.labels || [], projectId:o.projectId || "",
+            dueDate:String(o.dueDate || "").slice(0,10), deadlineDate:o.deadlineDate || "", priority:o.priority || "p4",
+            recurring:!!o.recurring, comments};
+  }
+  const addedIds = res => objectsOf(res).flatMap(x => Array.isArray(x.addedCommentIds) ? x.addedCommentIds : []);
+  // Applies one ruling and returns the undo record stored on the question.
+  async function applyRuling(p, o){
+    const T = "Todoist";
+    const prev = await snapshotTask(p.taskId);
+    if (o.delete){ await call(T, "delete-object", {type:"task", id:p.taskId}); return {kind:"delete", prev}; }
+    if (o.mergeInto){
+      if (!o.mergeComment) throw {code:"bad_request", message:"merge ruling is missing its comment"};
+      // The dup's aac-source/aac-topic markers must land on the survivor verbatim, or the forgotten-tasks
+      // guard stops recognising the topic and recreates the task (triage skill, step 5). If they cannot
+      // be read, the dup is not deleted.
+      const found = await call(T, "find-comments", {taskId:p.taskId, limit:10});
+      const texts = objectsOf(found).flatMap(o => Array.isArray(o.comments) ? o.comments.map(c => String(c.content || "")) : []);
+      const task = lastTasks.find(t => t.id === p.taskId);
+      if (task) texts.push(String(task.description || ""));
+      const markers = [...new Set(texts.join("\n").split("\n").map(l => l.trim()).filter(l => /^aac-(source|topic):\S+$/.test(l)))];
+      const content = o.mergeComment + (markers.length ? "\n" + markers.join("\n") : "");
+      const added = await call(T, "add-comments", {comments:[{taskId:o.mergeInto, content, notifyUsers:["none"]}]});
+      await call(T, "delete-object", {type:"task", id:p.taskId});
+      return {kind:"delete", prev, commentIds:addedIds(added)};
+    }
+    const u = {id:p.taskId};
+    if (o.content) u.content = o.content;
+    if (Array.isArray(o.labels)) u.labels = o.labels;
+    if (o.projectId && (o.projectId === WONTFIX || PROJECTS.some(x => x.id === o.projectId))) u.projectId = o.projectId;
+    if (o.dueString) u.dueString = o.dueString;
+    if (o.deadlineDate) u.deadlineDate = o.deadlineDate;
+    if (o.priority) u.priority = o.priority;
+    if (Object.keys(u).length === 1) return {kind:"none"};
+    const res = await call(T, "update-tasks", {tasks:[u]});
+    const body = objectsOf(res).find(o => Array.isArray(o.failures));
+    if (body && body.failures.length) throw {code:"tool_error", message: JSON.stringify(body.failures[0]).slice(0, 200)};
+    return {kind:"update", prev, changed:Object.keys(u).filter(k => k !== "id")};
+  }
+  // Reverses one ruling. A deleted task comes back as a new task carrying its old fields and comments.
+  async function undoRuling(p){
+    const T = "Todoist", u = p.undo || {}, prev = u.prev || {};
+    let taskId = p.taskId;
+    for (const id of (u.commentIds || [])){ try { await call(T, "delete-object", {type:"comment", id}); } catch(e){} }
+    if (u.kind === "update"){
+      const r = {id:p.taskId};
+      const ch = new Set(u.changed || []);
+      if (ch.has("content")) r.content = prev.content;
+      if (ch.has("labels")) r.labels = prev.labels;
+      if (ch.has("projectId") && prev.projectId) r.projectId = prev.projectId;
+      if (ch.has("dueString") && !prev.recurring) r.dueString = prev.dueDate || "remove";
+      if (ch.has("deadlineDate")) r.deadlineDate = prev.deadlineDate || "remove";
+      if (ch.has("priority")) r.priority = prev.priority;
+      if (Object.keys(r).length > 1){
+        const res = await call(T, "update-tasks", {tasks:[r]});
+        const body = objectsOf(res).find(o => Array.isArray(o.failures));
+        if (body && body.failures.length) throw {code:"tool_error", message: JSON.stringify(body.failures[0]).slice(0, 200)};
+      }
+    } else if (u.kind === "delete"){
+      const t = {content:prev.content, labels:prev.labels, priority:prev.priority};
+      if (prev.description) t.description = prev.description;
+      if (prev.projectId) t.projectId = prev.projectId;
+      if (prev.dueDate) t.dueString = prev.dueDate;
+      if (prev.deadlineDate) t.deadlineDate = prev.deadlineDate;
+      const res = await call(T, "add-tasks", {tasks:[t]});
+      const made = objectsOf(res).flatMap(x => Array.isArray(x.tasks) ? x.tasks : (x.id && x.content !== undefined ? [x] : []))[0];
+      if (!made || !made.id) throw {code:"tool_error", message:"task re-created but its new id did not come back; check Todoist"};
+      taskId = made.id;
+      const keep = (prev.comments || []).filter(Boolean);
+      if (keep.length) await call(T, "add-comments", {comments: keep.map(c => ({taskId, content:c, notifyUsers:["none"]}))});
+    }
+    return taskId;
+  }
+  async function answer(row, key){
+    const p = triDocs.find(x => x._id === row.dataset.id);
+    if (!p || !db) return;
+    const note = row.querySelector("textarea").value.trim();
+    const o = key === "wontfix" ? {label:"Rule out", projectId:WONTFIX} : key === "note" ? {label:"Note only"} : (p.options || [])[+key];
+    if (!o) return;
+    if (key === "note" && !note){ row.querySelector("textarea").focus(); return; }
+    row.querySelectorAll("button,textarea").forEach(b => b.disabled = true);
+    try {
+      let undo = {kind:"none"};
+      if (p.taskId && key !== "note") undo = await applyRuling(p, o);
+      if (note && p.taskId && key !== "note"){
+        const target = o.mergeInto || (o.delete ? null : p.taskId);
+        if (target){
+          const r = await call("Todoist", "add-comments", {comments:[{taskId: target, content:"Dan's ruling (" + o.label + "): " + note, notifyUsers:["none"]}]}).catch(() => null);
+          if (r) undo.commentIds = (undo.commentIds || []).concat(addedIds(r));
+        }
+      }
+      await db.doc("triage/" + p._id).update({status:"answered", choice:o.label, note, answeredAt:new Date().toISOString(), error:null, undo});
+      if (key !== "note") refreshTasks();
+    } catch(err){
+      const msg = (err && (err.message || err.code)) || "failed";
+      try { await db.doc("triage/" + p._id).update({error: msg}); } catch(e){}
+      row.querySelectorAll("button,textarea").forEach(b => b.disabled = false);
+    }
+  }
+  $("tri-body").addEventListener("click", e => {
+    const u = e.target.closest("button[data-undo]"); if (u){ const r = u.closest(".prop"); if (r) undoAnswer(r); return; }
+    const b = e.target.closest("button[data-opt]"); if (!b) return;
+    const row = b.closest(".prop"); if (row) answer(row, b.dataset.opt);
+  });
+
+  // ---------- WAITING ON YOU (written by the forgotten-tasks routine) ----------
+  let waitDocs = [];
+  function watchWaiting(){
+    if (!db){ $("wait-body").innerHTML = '<div class="empty">Board storage is not available in this view.</div>'; return; }
+    db.collection("waiting").onSnapshot(q => { waitDocs = q.docs.map(d => Object.assign({_id: d.id}, d.data())); renderWaiting(); },
+      e => { $("wait-body").innerHTML = '<div class="empty">Unavailable (' + esc(e.code) + ').</div>'; });
+  }
+  function renderWaiting(){
+    // An ask the guard turned into a task is also a triage question while that question is open: show it once, there.
+    const asked = new Set(triDocs.filter(p => p.status === "open" && triMeta && p.runId === triMeta.runId).map(p => p.taskId));
+    const dayAgo = Date.now() - 86400000;
+    const recent = waitDocs.filter(w => w.status === "done" && w.doneAt && new Date(w.doneAt).getTime() > dayAgo);
+    const rows = waitDocs.filter(w => w.status === "open" && !(w.todoistId && asked.has(w.todoistId))).sort((a,b) => String(a.receivedAt).localeCompare(String(b.receivedAt)));
+    $("wait-src").textContent = rows.length ? rows.length + " open" : "";
+    $("wait-body").innerHTML = rows.length ? rows.map(w => {
+      const days = w.receivedAt ? Math.max(0, Math.floor((Date.now() - new Date(w.receivedAt)) / 86400000)) : null;
+      const subj = w.link ? '<a href="' + esc(w.link) + '" target="_blank" rel="noopener">' + esc(w.subject) + '</a>' : esc(w.subject);
+      return '<div class="wait" data-id="' + esc(w._id) + '"><div><div class="ttl">' + subj + '</div><div class="meta"><span>' + esc(w.from || "") + '</span>' + (days !== null ? '<span class="age">' + days + (days === 1 ? " day" : " days") + '</span>' : '') + '</div>' + (w.ask ? '<div class="why">' + esc(w.ask) + '</div>' : '') + '</div><button type="button" data-act="done">' + (w.todoistId ? "Replied — close task" : "Handled") + '</button></div>';
+    }).join("") : '<div class="empty">Nothing unanswered on record. The forgotten-tasks run fills this.</div>';
+    if (recent.length) $("wait-body").innerHTML += '<div class="dayhead" style="margin-top:8px"><span>Closed in the last day</span><span class="n">' + recent.length + '</span></div>' +
+      recent.map(w => '<div class="wait" data-id="' + esc(w._id) + '"><div><div class="ttl">' + esc(w.subject) + '</div><div class="meta"><span>' + esc(w.from || "") + '</span></div></div><button type="button" data-act="undo">Undo</button></div>').join("");
+  }
+  $("wait-body").addEventListener("click", async e => {
+    const b = e.target.closest("button[data-act]"); if (!b || !db) return;
+    const row = b.closest(".wait"); b.disabled = true;
+    const w = waitDocs.find(x => x._id === row.dataset.id);
+    if (b.dataset.act === "undo"){
+      try {
+        if (w && w.todoistId && w.closedTask && mcp) await call("Todoist", "uncomplete-tasks", {ids:[w.todoistId]});
+        await db.doc("waiting/" + row.dataset.id).update({status:"open", doneAt:null, closedTask:null});
+        if (w && w.todoistId) refreshTasks();
+      } catch(err){ b.disabled = false; }
+      return;
+    }
+    try {
+      // Completing the task is what the forgotten-tasks guard reads as done, so it is not recreated.
+      if (w && w.todoistId && mcp) await call("Todoist", "complete-tasks", {ids:[w.todoistId]});
+      await db.doc("waiting/" + row.dataset.id).update({status:"done", doneAt:new Date().toISOString(), closedTask: !!(w && w.todoistId)});
+      if (w && w.todoistId) refreshTasks();
+    } catch(err){ b.disabled = false; }
+  });
+
+  // ---------- HUDDLE DRAFT ----------
+  // Read-only: gathers evidence, asks Claude for a draft, shows it. Nothing here posts anywhere.
+  let lastTasks = [];
+  const HUDDLE = {teamId:"f89a6fe7-79e3-4005-9c30-dc02d810843b", channelId:"19:5f4687999d5b4b15b4f47802c9bd5a2a@thread.skype", danId:"1f852985-a2e6-4b7e-afca-ce8a099e9b2f"};
+  const stripHtml = h => { const d = new DOMParser().parseFromString(String(h || "").replace(/<\/(p|li|h\d)>/gi, "\n").replace(/<br\s*\/?>/gi, "\n"), "text/html"); return (d.body.textContent || "").replace(/\n{3,}/g, "\n\n").trim(); };
+  const clip = (s, n) => { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; };
+  let hudCtl = null, hudText = "";
+
+  function hudStatus(msg, isErr){ const el = $("hud-status"); el.textContent = msg; el.className = "hud-status" + (isErr ? " err" : ""); }
+
+  async function lastOwnPost(){
+    const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:40});
+    const mine = objectsOf(res).filter(o => o.from && o.from.userId === HUDDLE.danId && o.createdDateTime && o.messageType !== "systemEventMessage");
+    mine.sort((a,b) => String(b.createdDateTime).localeCompare(String(a.createdDateTime)));
+    const last = mine[0];
+    return last ? {at: new Date(last.createdDateTime), text: stripHtml(last.bodyPreview)} : null;
+  }
+
+  // A tick is evidence only when it is not part of a bulk clear-out and not a subtask under an open parent.
+  async function completionsSince(since){
+    const openIds = new Set(lastTasks.filter(t => !t.checked).map(t => t.id));
+    const evs = [];
+    for (const p of PROJECTS){
+      const res = await call("Todoist", "find-activity", {objectType:"task", eventType:"completed", projectId:p.id, dateFrom:since.toISOString(), limit:100});
+      (objectsOf(res).find(o => Array.isArray(o.events)) || {events:[]}).events.forEach(e => evs.push(e));
+    }
+    const times = evs.map(e => new Date(e.eventDate).getTime());
+    const seen = new Set();
+    return evs.filter((e, i) => {
+      const x = e.extraData || {};
+      if (seen.has(e.objectId)) return false; seen.add(e.objectId);
+      if ((x.labels || []).includes("merged")) return false;
+      if (x.parentId && openIds.has(x.parentId)) return false;
+      const burst = times.filter(t => Math.abs(t - times[i]) <= 10*60*1000).length;
+      return burst < 5;
+    }).map(e => ({task: (e.extraData || {}).content, done: e.eventDate}));
+  }
+
+  async function sentSince(since){
+    const res = await call("ms365", "outlook_email_search", {folderName:"Sent Items", afterDateTime:since.toISOString(), limit:25});
+    return objectsOf(res).filter(o => o.subject !== undefined).map(o => ({subject:o.subject, sent:o.sentDateTime || o.receivedDateTime, gist: clip(o.summary, 200)}));
+  }
+
+  async function notesSince(since){
+    const res = await call("Granola", "query_granola_meetings", {query:"Since " + ymd(since) + ": what did Dan decide, delegate, assign or complete in his meetings? List each item with the meeting name and date. Include delegations to Rob, Nick, Mark, Steffi or Lynne."});
+    const blocks = (res && Array.isArray(res.content)) ? res.content.filter(c => c && c.type === "text").map(c => c.text) : [];
+    return clip(blocks.join("\n") || (typeof (res && res.payload) === "string" ? res.payload : ""), 6000);
+  }
+
+  function hudPrompt(ctx){
+    const todayKey = ymd(new Date());
+    const cw = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK)
+      .map(t => ({task:t.content, labels:(t.labels||[]).join(","), due:t.dueDate || "", deadline:t.deadlineDate || "", priority:t.priority}));
+    const meetings = lastEvents.filter(e => e && !e.isCancelled && !e.isAllDay && e.start)
+      .filter(e => { const st = parseWhen(e.start); return st && ymd(st) === todayKey; })
+      .map(e => e.subject);
+    const gapDays = ctx.last ? Math.round((new Date().setHours(0,0,0,0) - new Date(ctx.last.at).setHours(0,0,0,0)) / 86400000) : 99;
+    return [
+      "Draft Dan Gatsakos's daily huddle post for his team channel. Dan posts it himself. Today is " + todayKey + ".",
+      "",
+      "RULES (Dan's own; follow exactly):",
+      "- Three sections only, no name/date header: report, focus, risks.",
+      "- Report heading: \"Yesterday's report\" if his last post was the previous business day, else \"Yesterday's (& earlier) report\". Gap in calendar days since last post: " + gapDays + ".",
+      "- Report = outcomes, not activity, in his verbs: Sent X to Y. Decided X. Completed X and sent to Y. Delegated X to Y. Booked X. A meeting with no decision or assignment is not a line.",
+      "- A completed task alone is NOT evidence. Use it only when a sent mail or a meeting note corroborates it; merge the task and its mail into one line. Otherwise drop it.",
+      "- Outcomes from meeting notes that his last post never claimed DO count, even if they happened before the last post. Never re-report what the last post already claimed.",
+      "- Four to seven report bullets when the evidence supports it; fewer is fine; never invent.",
+      "- Focus = one to three items, ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\"). Order: deadline first, then what blocks someone else, then priority.",
+      "- Risks = margin or capacity pressure, and anything that blocks another person, each naming what slips. A date alone is not a risk. If nothing real, the single line \"None today.\"",
+      "- Continuity: each item in his last post's focus is done (report), continued (focus), or a risk. None disappears silently.",
+      "- Plain, blunt, short lines. No filler.",
+      "",
+      "HIS LAST POST (" + (ctx.last ? ctx.last.at.toISOString() : "none found") + "):",
+      ctx.last ? clip(ctx.last.text, 2500) : "(none)",
+      "",
+      "TASKS COMPLETED SINCE (bulk clear-outs and duplicate subtasks already removed):",
+      JSON.stringify(ctx.done).slice(0, 8000),
+      "",
+      "MAIL HE SENT SINCE:",
+      JSON.stringify(ctx.sent).slice(0, 12000),
+      "",
+      "MEETING NOTES (Granola) SINCE:",
+      ctx.notes || "(none)",
+      "",
+      "CURRENT WORK TASKS (the only task source for focus):",
+      JSON.stringify(cw).slice(0, 8000),
+      "",
+      "TODAY'S MEETINGS:",
+      JSON.stringify(meetings),
+      "",
+      "SURFACES THAT FAILED THIS RUN: " + (ctx.gaps.length ? ctx.gaps.join("; ") : "none"),
+      "",
+      'Reply with only JSON: {"reportHeading": string, "report": [{"text": string, "evidence": string}], "focus": [{"text": string, "evidence": string}], "risks": [{"text": string, "evidence": string}], "dropped": [{"text": string, "why": string}]}',
+      'Each "evidence" names the source: mail subject and date, meeting note, task name, or post line.'
+    ].join("\n");
+  }
+
+  function renderHuddle(d){
+    const sec = (h, items) => h + "\n" + (items.length ? items.map(i => "• " + i.text).join("\n") : "• None today.");
+    const report = Array.isArray(d.report) ? d.report : [], focus = Array.isArray(d.focus) ? d.focus : [], risks = Array.isArray(d.risks) ? d.risks : [];
+    const heading = String(d.reportHeading || "Yesterday's report");
+    hudText = [sec(heading, report), sec("Today's focus", focus), sec("Risks/Blockers", risks)].join("\n\n");
+    const list = items => '<ul>' + (items.length ? items.map(i => '<li>' + esc(i.text) + '</li>').join("") : '<li>None today.</li>') + '</ul>';
+    $("hud-post").innerHTML = '<h3>' + esc(heading) + '</h3>' + list(report) + '<h3>Today\'s focus</h3>' + list(focus) + '<h3>Risks/Blockers</h3>' + list(risks);
+    $("hud-post").hidden = false;
+    const evSec = (title, items, key) => items.length ? '<div class="evsec">' + title + '</div>' + items.map(i => '<div class="evrow"><b>' + esc(i.text) + '</b><span>' + esc(i[key] || "") + '</span></div>').join("") : "";
+    const dropped = Array.isArray(d.dropped) ? d.dropped : [];
+    $("hud-ev-body").innerHTML = evSec(heading, report, "evidence") + evSec("Today's focus", focus, "evidence") + evSec("Risks/Blockers", risks, "evidence") + evSec("Left out", dropped, "why");
+    $("hud-ev").hidden = false;
+    $("hud-copy").hidden = false;
+  }
+
+  const SAMPLE_COPY = {
+    not_granted: "This page is not allowed to ask Claude. Allow it when claude.ai asks, then try again.",
+    sampling_disabled: "Claude is not available to this account for pages.",
+    rate_limited: "Too many requests right now. Try again in a few minutes.",
+    session_expired: "Sign in to claude.ai again, then try again.",
+    invalid_json: "The draft came back in the wrong shape. Try again.",
+    refused: "Claude declined this request.",
+    upstream_error: "The request failed on the way. Try again."
+  };
+
+  async function draftHuddle(){
+    const go = $("hud-go"), stop = $("hud-stop");
+    if (!mcp){ hudStatus("Connectors are not available in this view. Open the page on claude.ai.", true); return; }
+    const sample = window.claude && window.claude.use ? await window.claude.use("sample").catch(() => null) : null;
+    if (!sample){ hudStatus("Claude is not available in this view, so the page cannot draft. Open it on claude.ai.", true); return; }
+    go.disabled = true; stop.hidden = false; $("hud-copy").hidden = true;
+    hudCtl = new AbortController();
+    const gaps = [];
+    try {
+      hudStatus("Reading your last huddle post…");
+      let last = null;
+      try { last = await lastOwnPost(); } catch(e){ gaps.push("huddle channel: " + (e.code || "failed")); }
+      const since = last ? last.at : new Date(Date.now() - 3*86400000);
+      hudStatus("Reading what you finished, sent and decided since " + since.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"}) + "…");
+      const [done, sent, notes] = await Promise.all([
+        completionsSince(since).catch(e => { gaps.push("Todoist completions: " + (e.code || "failed")); return []; }),
+        sentSince(since).catch(e => { gaps.push("sent mail: " + (e.code || "failed")); return []; }),
+        notesSince(since).catch(e => { gaps.push("meeting notes: " + (e.code || "failed")); return ""; })
+      ]);
+      hudStatus("Drafting… (usually 20–60 seconds)");
+      const d = await sample.json(hudPrompt({last, done, sent, notes, gaps}), {signal: hudCtl.signal, cache: false});
+      renderHuddle(d || {});
+      hudStatus("Draft ready. Edit before you post" + (gaps.length ? ". Could not read: " + gaps.join("; ") + "." : " — every source answered."), gaps.length > 0);
+    } catch(e){
+      if (e && e.code === "cancelled"){ hudStatus("Stopped."); }
+      else hudStatus(SAMPLE_COPY[e && e.code] || ("Draft failed: " + ((e && (e.code || e.message)) || "unknown") + ". Try again."), true);
+    } finally {
+      go.disabled = false; stop.hidden = true; hudCtl = null;
+    }
+  }
+  $("hud-go").addEventListener("click", draftHuddle);
+  $("hud-stop").addEventListener("click", () => { if (hudCtl) hudCtl.abort(); });
+  $("hud-copy").addEventListener("click", async () => {
+    // Rich copy keeps bold headings and bullets when pasted into Teams; plain text is the fallback.
+    const html = $("hud-post").innerHTML.replace(/<h3>/g, "<p><strong>").replace(/<\/h3>/g, "</strong></p>");
+    try {
+      if (window.ClipboardItem && navigator.clipboard.write){
+        await navigator.clipboard.write([new ClipboardItem({"text/html": new Blob([html], {type:"text/html"}), "text/plain": new Blob([hudText], {type:"text/plain"})})]);
+      } else { await navigator.clipboard.writeText(hudText); }
+      $("hud-copy").textContent = "Copied"; setTimeout(() => { $("hud-copy").textContent = "Copy post"; }, 1500); }
+    catch(e){ const r = document.createRange(); r.selectNodeContents($("hud-post")); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); hudStatus("Copy blocked here — the post is selected; press Ctrl+C."); }
+  });
+
+  $("refresh").addEventListener("click", refreshAll);
+  start();
+})();
+</script>
+
+</body></html>
