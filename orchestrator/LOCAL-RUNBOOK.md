@@ -1,12 +1,16 @@
-# Local master orchestrator (PC variant) — RETIRED
+# Local master orchestrator (PC variant) — LIVE
 
-> **RETIRED 2026-09-15 (issue 217, parent spec #207).** The PC venue is being decommissioned as
-> the four per-repo cloud Routines cut over. `RUNBOOK.md` is the live runbook; this file is kept
-> for history only — it describes the watchdog + long-lived interactive sessions the cloud
-> Routines replaced. Do not launch a new local master from here, do not extend it, and do not
-> treat any decision recorded below as still binding unless the current `RUNBOOK.md` restates it.
-> The watchdog scheduled task, `master-watchdog.ps1`, `install-watchdog-task.ps1` and the PID
-> guard are all part of what is retiring with this venue.
+> **LIVE again from 2026-09-23 (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`;
+> spec issue 693).** The 2026-09-15 retirement (issue 217) is reversed: cloud Routine sessions cannot
+> run a pass unattended (acceptEdits prompts, the Workflow confirmation, the auto-mode classifier,
+> no bypass mode), so the masters run here under the watchdog with `--dangerously-skip-permissions`.
+> The cloud master Routines are paused, not deleted.
+>
+> **Precedence.** This file overrides `RUNBOOK.md`, which still carries the shared rules: the venue
+> guard (with `local-pc` as the venue value), the empty-pass skip, dispatch, the merge policy, the
+> typed-user-turn rule and the cross-repo reference rule. `RUNBOOK.md`'s cloud-only parts do not
+> apply here: the bootstrap self-heal in Boot, "Two repos, one session", and the cloud Routine
+> boot prompt.
 
 The same orchestrator as `RUNBOOK.md` was, run as long-lived interactive Claude Code sessions on
 Dan's always-on PC instead of a cloud session + Routine. Everything not stated here follows
@@ -44,7 +48,8 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   `RUNBOOK.md` — verifier evidence + green CI + no conflict + no human changes-requested, via
   `gh pr merge`; the CI-never-ran clause and the keep-open rule are there too) and performs the
   takeover-guard check. The fleet (Workflow tool with
-  `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` — the plugin-served
+  `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`, or the repo's own
+  `.claude/workflows/ticket-fleet.js` fork where it keeps one (aac-sales-cockpit, aac-routines) — the plugin-served
   copy that picks the tracker instrument at run time; `gh` exists here, so it uses REST; pass
   `contractVersion: 2`, `runId` and `invocationId` in `args` - `runId` minted with
   `printf %x $(date +%s)` and held across a resume, `invocationId` re-minted on every launch with
@@ -59,7 +64,7 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   of reading SKILL.md files out of a clone.
 - **Pacing: one pass, then stop. No `/loop`.** Serve the repo until nothing is actionable or a cap
   is hit, heartbeating the state issue as you go. Then clear the venue, write
-  `**Pass complete — YYYY-MM-DD HH:MM UTC**` (current UTC) at the top of the heartbeat section of
+  `**Pass complete — YYYY-MM-DD HH:MM UTC**` at the top of the heartbeat section of
   the state issue, say "pass complete", and end the turn. The watchdog closes this window once the
   marker is newer than the process start, no Heartbeat line is newer than the marker, and the
   session transcript has been untouched for five minutes; then it launches the next repo's master.
@@ -71,6 +76,11 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   fleet launch: its marker was from 22:20, Dan had typed into the window at 22:27, and the kill
   rule only compared the marker with the process start (ticket #82). Finish the reopened work,
   then write Pass complete again.
+- **Every marker's time comes from `date -u +'%Y-%m-%d %H:%M'`, run at the moment you write the
+  line** — `Heartbeat` and `Pass complete` alike, never a time from memory or an estimate. On
+  2026-09-23 the zoho master stamped a heartbeat two minutes ahead of the clock; a stamp ahead of a
+  later `Pass complete` reads as a reopened pass. The watchdog clamps any future marker to now,
+  logs `marker in the future (+Nm)`, and never lets a clamped heartbeat reopen a pass (issue 711).
 - **Nobody is at the keyboard (Dan, 2026-09-02, verbatim: "I should not ever be asked to
   approve-tickets. I am not at the computer. This is meant to be a completely autonomous run").**
   Never call `AskUserQuestion`; never wait for a typed approval. Anything that needs Dan becomes a
@@ -146,8 +156,11 @@ dialog is a separate, unsolved stall: "Accessing workspace ... This folder pre-a
 permissions in .claude/settings.json and .claude/settings.local.json ... Yes, I trust this folder"
 rendered on an interactive launch in the contract-builder clone on 2026-09-02 even though
 `hasTrustDialogAccepted` was already true for that path in `~/.claude.json` (reproduced through
-winpty, captured verbatim). Until that is fixed a fresh master can sit on it until someone clicks;
-the watchdog log shows the launch, the state issue shows no Heartbeat 1.
+winpty, captured verbatim). Fixed by issue 199 (`tools/settings-invariants.ps1` pre-trusts the four
+clone paths, `defaultMode: bypassPermissions` in the profile): on 2026-09-18 an interactive launch in
+the zoho and bill-intake clones reached the first prompt with no trust or permission dialog. If it
+comes back, the watchdog log shows the launch and the state issue shows no Heartbeat 1; the repair
+steps are `docs/runbooks/issue-199-desktop-verify.md`, section 4.
 
 Stated plainly: with bypass permissions on, an unattended master can merge, push, delete branches,
 edit issues and run any shell command with no prompt and nobody watching. The merge bar in
@@ -185,9 +198,11 @@ but cannot merge.
 > and that no other master serves `<owner/repo>`; claim venue local-pc there. Then run ONE pass, no
 > `/loop`: serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When
 > the pass is done, clear the venue, write a line `**Pass complete - YYYY-MM-DD HH:MM UTC**`
-> (current UTC) at the top of your state issue's heartbeat section, say pass complete, and stop;
-> the watchdog closes this window and starts the next repo. My messages in this terminal override
-> everything.
+> at the top of your state issue's heartbeat section, say pass complete, and stop;
+> the watchdog closes this window and starts the next repo. Take the time on every Heartbeat and
+> Pass complete line from running `date -u` at the moment you write it (format in
+> LOCAL-RUNBOOK.md), never from memory or an estimate (issue 711). My messages in this terminal
+> override everything.
 
 The remote-control session name is `master-<slug>` (`master-bill-intake`, `master-contract-builder`,
 `master-sales-cockpit`, `master-zoho`), which is also what the watchdog's alive check and the
@@ -290,7 +305,7 @@ with `/Enable`. Ctrl+C in a launched master window stops that pass; close the wi
 watchdog moves to the next repo on its next slot.
 
 **Editing the watchdog on a branch.** The task runs the script at its checkout path, so while the
-checkout sits on a feature branch the task runs THAT branch's script every 30 minutes. Disable the
+checkout sits on a feature branch the task runs THAT branch's script every 10 minutes. Disable the
 task before editing the script (`schtasks /Change /Disable`), re-enable after the merge lands and
 the checkout is back on master. The script is saved with a UTF-8 BOM: Windows PowerShell 5.1 reads
 a BOM-less file as ANSI, and an em dash inside a string then breaks the parse (seen 2026-09-02).

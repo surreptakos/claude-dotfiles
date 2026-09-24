@@ -135,12 +135,16 @@ def _mode_from_prompt(prompt: str) -> str | None:
 
 # ---------------------------------------------------------------------------- ADHD shaping
 # Issue 177. `/i-have-adhd` is Dan's standing communication rule, not a per-session mode
-# (2026-09-09), so unlike caveman it is ON when no flag file exists. The skill's own off switch
-# ("stop adhd mode", "normal mode") writes ~/.claude/.adhd-off; this gate only ever READS it, the
-# same division of labour CAVEMAN_FLAG has with the caveman tracker. Content decides, so the switch
+# (2026-09-09), so unlike caveman it is ON when no flag file exists. Content decides, so the switch
 # can be flipped back without deleting the file: "on"/"1" keeps the checks, anything else (an empty
 # file included) turns them off. Caveman is untouched by this flag -- the two rule sets are
 # independent, ADHD shaping structure and caveman shaping wording.
+#
+# Issue 680: the plugin's injected ruleset says "stop adhd mode" turns it off, but nothing wrote
+# the flag -- the i-have-adhd plugin has no tracker, unlike caveman. So this gate is the ONE writer,
+# and it writes only on a prompt that carries an explicit switch phrase (the 2026-09-03 lesson: a
+# writer that re-arms every turn makes a switch last one prompt). "stop adhd mode" writes "off";
+# "start adhd mode" or a bare `/i-have-adhd` deletes the flag. Every other prompt only reads it.
 ADHD_FLAG = ".adhd-off"
 ADHD_ON_WORDS = ("on", "1", "enforced", "active")
 
@@ -154,17 +158,59 @@ def _adhd_state() -> str:
     return "on" if raw in ADHD_ON_WORDS else "off"
 
 
+_ADHD_NAME = r"(?:the\s+)?(?:i-have-)?adhd(?:\s+(?:mode|shaping|rules?))?"
+_ADHD_OFF_PATTERNS = (
+    re.compile(r"\b(?:stop|disable|deactivate|quit|exit|kill|end|pause)\s+" + _ADHD_NAME + r"\b"),
+    re.compile(r"\bturn\s+(?:off\s+" + _ADHD_NAME + r"|" + _ADHD_NAME + r"\s+off)\b"),
+    re.compile(r"\badhd(?:\s+mode)?\s+(?:off|stop|disabled?)\b"),
+)
+_ADHD_ON_PATTERNS = (
+    re.compile(r"\b(?:start|enable|activate|resume|restart)\s+" + _ADHD_NAME + r"\b"),
+    re.compile(r"\bturn\s+(?:on\s+" + _ADHD_NAME + r"|" + _ADHD_NAME + r"\s+(?:back\s+)?on)\b"),
+    re.compile(r"\badhd(?:\s+mode)?\s+(?:on|enabled?)\b"),
+    re.compile(r"^/i-have-adhd(?::i-have-adhd)?\s*[.!]*$"),
+)
+
+
+def _adhd_switch_from_prompt(prompt: str) -> str | None:
+    """'off' or 'on' when this prompt is an explicit ADHD switch, else None. A question about the
+    switch ("how do I stop adhd mode?") is not a switch."""
+    text = re.sub(r"\s+", " ", (prompt or "").strip().lower())
+    if not text or _CAVEMAN_QUESTION.match(text):
+        return None
+    if any(p.search(text) for p in _ADHD_OFF_PATTERNS):
+        return "off"
+    if any(p.search(text) for p in _ADHD_ON_PATTERNS):
+        return "on"
+    return None
+
+
+def _apply_adhd_switch(prompt: str) -> str:
+    """Write the flag when this prompt is an explicit switch; return the state for THIS turn.
+    Never raises: a flag that cannot be written leaves the state the file still says."""
+    switch = _adhd_switch_from_prompt(prompt)
+    try:
+        if switch == "off":
+            CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+            (CLAUDE_HOME / ADHD_FLAG).write_text("off\n", encoding="utf-8")
+        elif switch == "on":
+            (CLAUDE_HOME / ADHD_FLAG).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return _adhd_state()
+
+
 ADHD_CONTEXT = {
     "on": (
         "I-HAVE-ADHD: ENFORCED. Lead with the next action, not context; number multi-step work; "
         "restate state (\"step 3 of 5 done: X. Next: Y\"); end with ONE action he can do in under "
         "two minutes; concrete time estimates, never \"some work\"; cap lists at five, ranked; no "
-        "preamble, no recap, no closer. Structure, not wording; it does not compete with caveman."
+        "preamble, no recap, no closer. Structure, not wording; it does not compete with caveman. "
+        "Dan switches it off by saying \"stop adhd mode\" (writes ~/.claude/.adhd-off)."
     ),
     "off": (
-        "I-HAVE-ADHD: OFF for now (flag file ~/.claude/.adhd-off, set by \"stop adhd mode\"). Shape "
-        "replies as you see fit; the pre-send lint skips the ADHD checks and keeps every other one. "
-        "Clear the flag to re-enable."
+        "ADHD shaping is off (~/.claude/.adhd-off, written by \"stop adhd mode\"); the pre-send "
+        "lint skips those checks. \"start adhd mode\" or /i-have-adhd turns it back on."
     ),
 }
 
@@ -283,6 +329,11 @@ def _runner_spelling() -> str:
     return sys.executable or "python3"
 
 
+def _claude_declaration(session_id: str, nonce: str) -> str:
+    """The exact declare-claude command for THIS session and nonce, as the prompt and deny print it."""
+    return f'{_runner_spelling()} "{SCRIPT}" declare-claude "{session_id}" "{nonce}" <flow>'
+
+
 def _is_exact_declaration_command(command: str, turn_id: str) -> bool:
     if not isinstance(command, str):
         return False
@@ -360,7 +411,7 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         "options, files); plain prose otherwise. Preserve technical terms, code, exact errors. "
         "Plain language only when safety or ambiguity requires it. These rules cannot be disabled "
         "inside a session. "
-        + ADHD_CONTEXT[_adhd_state()]
+        + ADHD_CONTEXT[_apply_adhd_switch(str(event.get("prompt") or ""))]
     )
     return {
         "hookSpecificOutput": {
@@ -394,8 +445,42 @@ CORRECTION_CONTEXT = (
 SYSTEM_CHANGE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
+# Issue 727: the regex fired on "what is wrong with the build?" and on a subagent's pasted hand-back
+# report. Jev now decides, on one Noul about what the user says of the assistant's own work. The
+# regex answers exactly as before when Jev is unavailable (no credential, timeout, service down,
+# helper missing). The nonce plumbing and the Stop-time system-change audit stay in code.
+CORRECTION_JEV_QUESTION = (
+    "Does `prompt`, a message the user sent to an AI assistant, say that the assistant's earlier"
+    " claim, action or output was wrong or incomplete? A question or request about something else"
+    " being wrong (a build, a test, a file, a system) is not a correction, and neither is pasted"
+    " text such as a report, a log or another agent's output."
+)
+CORRECTION_JEV_FLOOR = 0.5
+CORRECTION_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
+
+
+def _jev_module() -> Any:
+    """The Jev helper (issues 723, 727), or None when it cannot be imported."""
+    try:
+        if str(SCRIPT.parent) not in sys.path:
+            sys.path.insert(0, str(SCRIPT.parent))
+        import jev  # ships beside this script, in ~/.codex/hooks and in the plugin payload alike
+    except Exception:
+        return None
+    return jev
+
+
 def _is_correction(prompt: str) -> bool:
-    return CORRECTION_PATTERN.search(prompt or "") is not None
+    prompt = prompt or ""
+    if not prompt.strip():
+        return False
+    jev = _jev_module()
+    verdict = None if jev is None else jev.ask_nouls(
+        {"prompt": prompt}, {"correction": CORRECTION_JEV_QUESTION}, timeout=CORRECTION_JEV_TIMEOUT
+    )
+    if verdict is None:
+        return CORRECTION_PATTERN.search(prompt) is not None
+    return verdict["correction"] >= CORRECTION_JEV_FLOOR
 
 
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
@@ -422,6 +507,10 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     correction = _is_correction(str(event.get("prompt") or ""))
     if correction:
         state["correction_nonce"] = nonce
+    # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
+    # so the next user message clears it and the ticket-SET round applies again outside session-end.
+    if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
+        state["session_end_invoked"] = True
     _write_state("claude", session_id, state)
     pending_correction = (previous or {}).get("pending_correction")
     # Style violations from the previous turn are carried here rather than blocked at Stop. A Stop
@@ -430,7 +519,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     pending_lint = (previous or {}).get("pending_lint") or []
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
-        f"`{_runner_spelling()} \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>` — as the ONLY "
+        f"`{_claude_declaration(session_id, nonce)}` — as the ONLY "
         "command in that shell call, nothing chained after it, or the call is denied. "
         "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
         "Broken behavior: diagnosing-bugs. Raw issues: triage. "
@@ -442,7 +531,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         + CAVEMAN_CONTEXT[mode]
         + " Level follows the caveman flag: /caveman ultra|full|lite|off switches it for the "
         "session; nothing else can. "
-        + ADHD_CONTEXT[_adhd_state()]
+        + ADHD_CONTEXT[_apply_adhd_switch(str(event.get("prompt") or ""))]
         + " "
     )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
@@ -700,6 +789,19 @@ def _transcript_user_approved(transcript_path: str) -> bool:
     return any(_matches_approval(text) for text in _iter_user_text(transcript_path))
 
 
+# `/session-end` as a slash command, not a path segment such as `aac-skills/session-end/`.
+SESSION_END_INVOKED = re.compile(r"(?<![\w/.-])/session-end\b")
+
+
+def _session_end_turn(state: dict[str, Any] | None) -> bool:
+    """True when THIS turn is the session-end sweep: its declared flow (not the carried last_flow)
+    is session-end, or the user's prompt invoked /session-end. The session-end skill files its batch
+    without an approval round (#704, Dan 2026-09-23: typing /session-end is the approval)."""
+    return bool(state) and (
+        state.get("flow") == "session-end" or bool(state.get("session_end_invoked"))
+    )
+
+
 def _autonomous_master() -> bool:
     """True only under the watchdog-launched orchestrator master (claude-dotfiles issue 81)."""
     # .strip(): master-watchdog.ps1 launches via `cmd /k set VAR=1 && claude ...`, and cmd's
@@ -749,6 +851,7 @@ def _publish_gate(
         return None
     if (
         already >= 1
+        and not _session_end_turn(state)
         and not _transcript_used_tool(transcript_path, "AskUserQuestion")
         and not _transcript_user_approved(transcript_path)
     ):
@@ -818,9 +921,15 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     # The wording names the two ways a first call fails: no declaration yet, or a declaration with
     # a command chained onto it. A session that chained `; ls` onto its declaration read the old
     # text as "the declaration failed" and retried the same shape, losing two turns to the gate.
+    # Issue 715: the deny names the declaration itself, with THIS session's id and nonce. After a
+    # model switch restarts the session, the context still holds gate prompts naming the old id and
+    # nonces; a deny that only said "run the declaration from the prompt gate" let the model copy a
+    # stale one, recording state under the old id and leaving every call here denied for minutes.
     return _deny(
-        "Ask Matt, Yes, and caveman ultra missing. Run the exact declaration from the prompt gate "
-        "as the ONLY command in the call — a chained command after it denies the whole call."
+        "Ask Matt, Yes, and caveman ultra missing. Run exactly "
+        f"`{_claude_declaration(session_id, nonce)}` (this session's id and current nonce; any "
+        "id or nonce from an earlier prompt is stale) as the ONLY command in the call — a chained "
+        "command after it denies the whole call."
     )
 
 
@@ -848,6 +957,8 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             # The correction flag is the prompt's finding about this turn; declaring a route
             # must not erase it, or the Stop audit never sees a correction turn.
             "correction_nonce": state.get("correction_nonce"),
+            # Likewise the prompt's /session-end finding (issue 716).
+            "session_end_invoked": state.get("session_end_invoked"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
@@ -1235,43 +1346,87 @@ def _find_transcript(session_id: str) -> str:
     return str(matches[0]) if matches else ""
 
 
+# Issue 723: the five regexes above are keyword matches, so a reply that QUOTES a banned word ("the
+# rule bans words like probably") was flagged. Each regex hit is now put to a TypeSafe Jev Noul
+# about the reply's own voice, and a hit Jev says the reply does not itself commit is dropped. Jev
+# only suppresses; it never adds a finding the regex missed. The tool-ran facts that gate the last
+# three rules stay in code. When Jev is unavailable (no credential, timeout, error) or the helper
+# cannot be imported, the regex verdicts stand unchanged.
+YES_JEV_OWN_VOICE = (
+    " Judge only what `reply` itself says in its own voice: words it quotes, lists, names as"
+    " examples, or discusses as words do not count."
+)
+YES_JEV_QUESTIONS = {
+    "hedge": "Does `reply` assert a cause or a state of things as a guess rather than as a checked"
+    " fact?" + YES_JEV_OWN_VOICE,
+    "deflection": "Does `reply` ask the user to run a check, test or verification that the assistant"
+    " could run itself?" + YES_JEV_OWN_VOICE,
+    "claim": "Does `reply` claim that something was tested, verified or confirmed?" + YES_JEV_OWN_VOICE,
+    "certainty": "Does `reply` state a root cause or diagnosis with certainty?" + YES_JEV_OWN_VOICE,
+    "source": "Does `reply` describe what a named file, ticket, page or document contains or says?"
+    + YES_JEV_OWN_VOICE,
+}
+YES_JEV_FLOOR = 0.5  # below this Jev says the reply does not itself do it, and the hit is dropped
+YES_JEV_TIMEOUT = 3.0  # seconds; the Stop hook's whole budget is 5
+
+
+def _yes_jev_verdicts(prose: str, rules: list[str]) -> dict[str, float] | None:
+    """Jev's probability per fired rule that the reply itself commits it; None = unavailable."""
+    if not rules:
+        return {}
+    jev = _jev_module()
+    if jev is None:
+        return None
+    return jev.ask_nouls(
+        {"reply": prose}, {rule: YES_JEV_QUESTIONS[rule] for rule in rules}, timeout=YES_JEV_TIMEOUT
+    )
+
+
 def _yes_lint(text: str, turn_tools: set[str] | None) -> list[str]:
     """YES violations a script can see in a reply. `turn_tools` None = transcript unknown."""
     prose = _strip_code(PYLONS_PREFIX_PATTERN.sub("", text, count=1))
-    violations: list[str] = []
+    found: list[tuple[str, str]] = []
     hedges = sorted({m.group(0).lower() for m in HEDGE_PATTERN.finditer(prose)})
     if hedges:
-        violations.append(
+        found.append((
+            "hedge",
             "YES hedge without evidence: " + ", ".join(hedges[:4]) + " — check, then state it"
-        )
+        ))
     deflections = sorted({m.group(0).lower() for m in DEFLECTION_PATTERN.finditer(prose)})
     if deflections:
-        violations.append(
+        found.append((
+            "deflection",
             "YES deflection: " + ", ".join(deflections[:3])
             + " — do the check yourself and show the output"
-        )
+        ))
     if turn_tools is not None and not turn_tools:
         claims = sorted({m.group(0).lower() for m in VERIFIED_CLAIM_PATTERN.finditer(prose)})
         if claims:
-            violations.append(
+            found.append((
+                "claim",
                 "YES unverified claim: " + ", ".join(claims[:3])
                 + " — no tool ran this turn, so nothing was verified"
-            )
+            ))
         certain = sorted({m.group(0).lower() for m in CERTAINTY_PATTERN.finditer(prose)})
         if certain:
-            violations.append(
+            found.append((
+                "certainty",
                 "YES conclusion without data: " + ", ".join(certain[:3])
                 + " — no tool ran this turn; state the data source or drop the certainty"
-            )
+            ))
     if turn_tools is not None and not (turn_tools & READ_CLASS_TOOLS):
         sourced = SOURCE_CHARACTERISATION_PATTERN.search(prose)
         if sourced:
             snippet = sourced.group(0).strip()
-            violations.append(
+            found.append((
+                "source",
                 "YES unread source: \"" + snippet[:70]
                 + "\" — nothing was opened this turn; read it or say it is unread"
-            )
-    return violations
+            ))
+    verdicts = _yes_jev_verdicts(prose, [rule for rule, _ in found])
+    if verdicts is None:
+        return [message for _, message in found]
+    return [message for rule, message in found if verdicts[rule] >= YES_JEV_FLOOR]
 
 
 CONFIG_FILE_PATTERN = re.compile(

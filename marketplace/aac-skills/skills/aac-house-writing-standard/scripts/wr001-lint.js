@@ -2,9 +2,14 @@
 /**
  * wr001-lint - deterministic checks for AAC-WR-001.
  *
- * Covers only rules a regex can decide with high precision. Judgment rules
- * (5, 6, 8, 9, 10, and all of Part XXV except 165) are not checked here and
- * never will be; those need the fetched standard and a reader.
+ * Covers the rules a regex can decide with high precision. Five judgment
+ * rules that are yes/no on a single unit get a TypeSafe Jev Noul each (issue
+ * 731): Rule 5 on the opening paragraph, Rules 6 and 10 per sentence, Rule 162
+ * on the last paragraph, Rule 164 per paragraph. Those findings are WARN only
+ * and never change the exit code. With Jev unavailable (no credential, a
+ * timeout, the service down) the output is exactly the regex-only output.
+ * Rules 8, 9, 154, 161, 166 and the rest of Part XXV need the evidence or the
+ * whole document and stay with a reader.
  *
  * Usage:
  *   node wr001-lint.js <file...> [--formal] [--prose] [--json] [--quiet]
@@ -24,8 +29,9 @@
 
 const fs = require("fs");
 const path = require("path");
+const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.6";
+const STANDARD_VERSION = "0.7";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
@@ -206,8 +212,140 @@ function lintFile(file, opts) {
   return { file, formal, findings, lines: lines.length };
 }
 
-function main() {
-  const argv = process.argv.slice(2);
+// --- Jev judgment rules (issue 731) -------------------------------------
+// A unit is flagged when Jev's probability of "yes, this breaks the rule" is at
+// least JEV_FLOOR. Every finding here is WARN: the stopslop Stop hook forces a
+// rewrite on ERROR, and a model's judgment never earns that.
+const JEV_FLOOR = 0.8;
+const JEV_BATCH = 40;
+const JEV_MAX_SENTENCES = 150;
+
+const noul = (instructions, yes, no) =>
+  ({ type: "noul", instructions, criteria: { true: yes, false: no } });
+
+const JEV_RULES = {
+  5: {
+    msg: "main point not first (Jev); open with the decision or action needed",
+    q: (i) => noul(
+      `Rule 5 of a business writing standard: in decision-oriented or action-oriented writing, state the principal point (the decision or action needed, who owns it, the deadline) before supporting detail, so the reader does not search through history to learn why the message was sent. \`paragraphs\` is the whole document in order. Does the opening paragraph \`paragraphs[${i}]\` give background, history or preamble while the document's request, decision or conclusion appears only in a later paragraph?`,
+      "The opening paragraph is background, history or preamble, and the request, decision or conclusion comes later in the document.",
+      "The opening paragraph states the main point first, or the writing is not decision- or action-oriented."),
+  },
+  6: {
+    msg: "passive voice hides who is responsible (Jev); name the actor",
+    q: (i) => noul(
+      `Rule 6 of a business writing standard: name the person, role, company or party responsible for an action; do not use passive voice to hide responsibility. Does sentence \`sentences[${i}]\` use passive voice that leaves out who is responsible for an action?`,
+      "Passive voice where responsibility matters and the actor is left unnamed, such as 'The revised proposal will be sent.' or 'Power to be provided by others.'",
+      "The actor is named, the sentence is not passive, or the actor is unknown, irrelevant or intentionally omitted, such as 'Mark will send the revised proposal.'"),
+  },
+  10: {
+    msg: "filler that adds no information (Jev); delete it",
+    q: (i) => noul(
+      `Rule 10 of a business writing standard: delete phrases that add no information, such as 'I am writing to inform you that', 'Please be advised that', 'It should be noted that', 'As you are aware', 'At this time', 'In order to', 'With regard to'. Does sentence \`sentences[${i}]\` contain such a filler phrase, so that it says the same thing with the phrase deleted?`,
+      "The sentence carries a phrase that adds no information, such as 'Please be advised that the inspection is currently scheduled to take place on September 15.'",
+      "Every phrase in the sentence carries information, such as 'The inspection is scheduled for September 15.'"),
+  },
+  162: {
+    msg: "closing kicker or recap (Jev); end on the last real point",
+    q: (i) => noul(
+      `Rule 162 of a business writing standard: do not end on a manufactured resonance, and do not close by restating what the reader has already read. Is the last paragraph \`paragraphs[${i}]\` a kicker or a recap?`,
+      "The last paragraph is a pull-quote or oracle line such as 'And that changes everything.' or 'Nothing else matters.', or it restates points the earlier paragraphs already made.",
+      "The last paragraph carries new content: a real point, a request, a fact, or a next step."),
+  },
+  164: {
+    msg: "dramatic fragmentation (Jev); use complete sentences",
+    q: (i) => noul(
+      `Rule 164 of a business writing standard forbids dramatic fragmentation: sentence fragments used for emphasis. Does paragraph \`paragraphs[${i}]\` use dramatic fragmentation?`,
+      "Fragments for emphasis, such as '[Noun]. That's it. That's the [thing].', staccato 'X. And Y. And Z.', or 'This unlocks something. [Word].'",
+      "Complete sentences, including short complete sentences that carry information."),
+  },
+};
+
+// Prose units from the raw lines. Paragraphs are runs of prose lines; headings,
+// list items, fenced code, block quotes and tables are not paragraphs.
+function proseUnits(lines) {
+  const body = stripUncheckable(lines);
+  const paragraphs = [];
+  let cur = null;
+  lines.forEach((raw, i) => {
+    const l = body[i];
+    if (!l.trim() || /^\s*#/.test(raw) || /^\s*(\d+\.|[-*+])\s+/.test(raw)) { cur = null; return; }
+    if (!cur) { cur = { line: i + 1, parts: [] }; paragraphs.push(cur); }
+    cur.parts.push({ line: i + 1, text: l.trim() });
+  });
+
+  const sentences = [];
+  for (const p of paragraphs) {
+    let text = "";
+    const marks = [];
+    for (const part of p.parts) {
+      if (text) text += " ";
+      marks.push([text.length, part.line]);
+      text += part.text;
+    }
+    p.text = text;
+    const lineAt = (off) => marks.filter(([o]) => o <= off).pop()[1];
+    const re = /[.!?]["')\]]*\s+(?=[A-Z"'(])/g;
+    let start = 0, m;
+    while ((m = re.exec(text)) !== null) {
+      sentences.push({ line: lineAt(start), text: text.slice(start, m.index + m[0].trimEnd().length) });
+      start = m.index + m[0].length;
+    }
+    if (start < text.length) sentences.push({ line: lineAt(start), text: text.slice(start) });
+  }
+  return { paragraphs, sentences: sentences.slice(0, JEV_MAX_SENTENCES) };
+}
+
+// Resolves to WARN findings, or to [] when Jev is unavailable or any batch
+// fails: all or nothing, so an outage leaves the output exactly as it was.
+async function jevFindings(lines, ask) {
+  const { paragraphs, sentences } = proseUnits(lines);
+  if (paragraphs.length === 0) return [];
+
+  const questions = {};
+  const units = {};
+  const add = (rule, idx, unit) => {
+    const id = `r${rule}_${Object.keys(questions).length}`;
+    questions[id] = JEV_RULES[rule].q(idx);
+    units[id] = { rule, unit };
+  };
+  add(5, 0, paragraphs[0]);
+  if (paragraphs.length > 1) add(162, paragraphs.length - 1, paragraphs[paragraphs.length - 1]);
+  paragraphs.forEach((p, i) => add(164, i, p));
+  sentences.forEach((s, i) => { add(6, i, s); add(10, i, s); });
+
+  const state = { paragraphs: paragraphs.map((p) => p.text), sentences: sentences.map((s) => s.text) };
+  const ids = Object.keys(questions);
+  const batches = [];
+  for (let i = 0; i < ids.length; i += JEV_BATCH) {
+    batches.push(Object.fromEntries(ids.slice(i, i + JEV_BATCH).map((id) => [id, questions[id]])));
+  }
+
+  let answers;
+  try {
+    answers = await Promise.all(batches.map((qs) => ask(state, qs)));
+  } catch {
+    return [];
+  }
+  if (answers.some((a) => !a || typeof a !== "object")) return [];
+  const merged = Object.assign({}, ...answers);
+
+  const out = [];
+  for (const id of ids) {
+    const a = merged[id];
+    if (!a || typeof a.noul !== "number" || !(a.noul >= JEV_FLOOR)) continue;
+    const { rule, unit } = units[id];
+    out.push({ line: unit.line, col: 1, rule, sev: "warn", msg: JEV_RULES[rule].msg, text: unit.text.trim() });
+  }
+  return out;
+}
+
+// io.ask is the Jev call (null skips Jev); io.log and io.error are the output
+// sinks. Resolves to the exit code.
+async function run(argv, io = {}) {
+  const log = io.log || console.log;
+  const error = io.error || console.error;
+  const ask = "ask" in io ? io.ask : createJev();
   const opts = {
     formal: argv.includes("--formal"),
     prose: argv.includes("--prose"),
@@ -217,37 +355,48 @@ function main() {
   const files = argv.filter((a) => !a.startsWith("--"));
 
   if (files.length === 0) {
-    console.error("usage: node wr001-lint.js <file...> [--formal] [--prose] [--json] [--quiet]");
-    process.exit(2);
+    error("usage: node wr001-lint.js <file...> [--formal] [--prose] [--json] [--quiet]");
+    return 2;
   }
 
   const results = files.map((f) => lintFile(f, opts));
 
+  if (ask) {
+    await Promise.all(results.filter((r) => !r.unreadable).map(async (r) => {
+      const lines = fs.readFileSync(r.file, "utf8").split(/\r?\n/);
+      r.findings.push(...(await jevFindings(lines, ask)));
+    }));
+  }
+
   if (opts.json) {
-    console.log(JSON.stringify({ standard: STANDARD_VERSION, results }, null, 2));
+    log(JSON.stringify({ standard: STANDARD_VERSION, results }, null, 2));
   } else {
     for (const r of results) {
       if (r.unreadable) {
-        console.error(`${r.file}: ${r.unreadable}`);
+        error(`${r.file}: ${r.unreadable}`);
         continue;
       }
       for (const f of r.findings.sort((a, b) => a.line - b.line || a.col - b.col)) {
         const loc = f.line === 0 ? `${r.file}` : `${r.file}:${f.line}:${f.col}`;
         const snip = f.text ? `  "${f.text.slice(0, 40)}"` : "";
-        console.log(`${loc}  ${f.sev.toUpperCase()}  Rule ${f.rule}  ${f.msg}${snip}`);
+        log(`${loc}  ${f.sev.toUpperCase()}  Rule ${f.rule}  ${f.msg}${snip}`);
       }
       if (!opts.quiet) {
         const e = r.findings.filter((f) => f.sev === "error").length;
         const w = r.findings.length - e;
-        console.log(
+        log(
           `${r.file}: ${e} error, ${w} warn  [${r.formal ? "formal" : "narrative"}, WR-001 v${STANDARD_VERSION}]`
         );
       }
     }
   }
 
-  if (results.some((r) => r.unreadable)) process.exit(2);
-  process.exit(results.some((r) => r.findings.some((f) => f.sev === "error")) ? 1 : 0);
+  if (results.some((r) => r.unreadable)) return 2;
+  return results.some((r) => r.findings.some((f) => f.sev === "error")) ? 1 : 0;
 }
 
-main();
+module.exports = { lintFile, proseUnits, jevFindings, run, JEV_FLOOR };
+
+if (require.main === module) {
+  run(process.argv.slice(2)).then((code) => process.exit(code));
+}

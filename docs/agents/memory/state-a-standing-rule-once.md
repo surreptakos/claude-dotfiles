@@ -17,7 +17,8 @@ mention it anywhere except one time in Claude.md."
 be unmissable (`YOU MUST CONSTRUCT ADDITIONAL PYLONS` in a `diff` fence, red), so defending it
 against being mistaken for a pleasantry was solving a problem he had already designed away.
 
-**How to apply:** one statement, at the top of the global `~/.claude/CLAUDE.md`, then push the mirror.
+**How to apply:** one statement, at the top of the global rules (`profile/claude/CLAUDE.md` in
+claude-dotfiles, edited on a branch and merged; the mirror push retired with issue 214).
 Do not echo it into skills, hooks or per-project CLAUDE.md files — global memory loads in every
 session of every project already, and it loads once per session rather than per turn, so one mention
 is the whole cost. If drift feels likely, say so and let him decide rather than pre-installing a

@@ -20,11 +20,12 @@ script or the global rules text is edited here, on a branch, and merging to mast
 | Path | Restores to | Why it matters |
 |---|---|---|
 | `aac-skills/` | `~/.claude/skills/` | every skill, one hand-edited tree; also what the plugin payload is built from |
-| `profile/claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | global governance — caveman, YES, ask-matt, the AAC Google access notes. The payload's rules text is copied from this file |
+| `profile/claude/CLAUDE.md` | — (not restored) | global governance — caveman, YES, ask-matt, the AAC Google access notes. The one source the payload's rules text is copied from; a desktop gets it from the aac-skills plugin's global-rules hook, like a container (issue 732) |
+| `profile/claude/global-pointer.md` | `~/.claude/CLAUDE.md` | a short pointer: rules arrive via the plugin, their source is the file above, then a heading for machine-local notes. It must never carry the rules file's first line, because the hook stays silent when the global CLAUDE.md does |
 | `profile/claude/settings.json` | `~/.claude/settings.json` | hook wiring, plugin marketplaces, status line |
 | `profile/claude/hooks/` | `~/.claude/hooks/` | `session-gate.js`, `governance-reminder.js`, the stop-slop pair — and the source the packager copies into the plugin |
 | `profile/claude/agents/` | `~/.claude/agents/` | user-level subagent definitions, including the fleet's tool-restricted verifier |
-| `profile/claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache |
+| `profile/claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache. Merged, not copied: a newer live entry wins (issue 717) |
 | `profile/claude/accounts.json` | `~/.claude/accounts.json` | which Claude account owns which repo and routine (issue 103) |
 | `profile/codex/hooks/` | `~/.codex/hooks/` | `ask_matt_gate.py`, which the pre-send lint and the governance gate both call |
 | `profile/codex/hooks.json` | `~/.codex/hooks.json` | the wiring that calls it — without this the script above is inert |
@@ -90,9 +91,16 @@ Issue #9 decisions, 2026-08-19:
   mechanical path rewrite `\.claude\` → `\.claude-personal\` (`.codex` paths untouched) — the
   personal model, plugins, statusLine and prefs are preserved; project memories union-merge (work
   files copy in, newer mtime wins, `MEMORY.md` unions by pointer-line target).
-- **(b) Declined** — reverse memory sync. Personal-only memories never flow into the work profile
-  or into this repo: nothing here ever reads `~/.claude-personal`. Declined by default 2026-08-19;
-  flipping it requires an explicit owner instruction.
+- **(b) Superseded 2026-09-23** — declined on 2026-08-19, then flipped by owner instruction ("I
+  want two way sync between claude-personal and claude"). `profile/claude/tools/link-personal-profile.ps1`
+  merges personal-only content into `~/.claude`, then replaces `projects`, `agents`, `hooks`,
+  `tools`, `plans` and `file-history` in `~/.claude-personal` with junctions to their `~/.claude`
+  twins. Both accounts then read and write one copy: memories, transcripts (`/resume` spans both)
+  and file history. Personal-only memories come in only when born in a personal session, so work
+  memories that consolidation pruned stay pruned. Skills stay per profile by owner choice. Each
+  replaced folder is kept as `<dir>.pre-link-<stamp>` for rollback. Run it once, with no
+  personal-profile session open; a re-run reports "already linked". Once linked, the refresh
+  above is a no-op for those folders (its copies land on the same files).
 
 The refresh never deletes anything personal and never touches `.credentials.json`, `.claude.json`
 or any account state in either profile. On a machine without `~/.claude-personal` it does nothing
@@ -241,7 +249,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity`
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade|rules-copy`
 breaks one thing on purpose so the matching check can be watched going red. A check that has only
 ever passed is not yet a check — the retired `dead-link` fault passed on its first attempt because
 it deleted a directory nothing linked to.
@@ -265,7 +273,6 @@ Switching *accounts* on one machine is a different problem, solved separately in
 profile. This repo is where the work profile is authored, and a pull refreshes the personal profile
 *from* what it restores.
 
-Reverse memory sync is also deliberately unsolved: the personal-only memories in
-`~/.claude-personal/projects/*/memory` never flow back into `~/.claude` or into this repo. That is
-a privacy default (declined 2026-08-19), not an oversight — nothing here ever reads
-`~/.claude-personal`, and flipping the direction requires an explicit owner instruction.
+Personal memories reach this repo only through the shared `~/.claude` tree once the profiles
+are linked (issue #9 decision (b) superseded 2026-09-23, see above); `sync.ps1` itself still
+never reads `~/.claude-personal`.

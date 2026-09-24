@@ -20,7 +20,9 @@ cache, because a cached value is stale until Excel reopens the file.
 Covers the mechanical items only. Designation, which conditional clarifications
 a job earns, BASELINES section 0 merges and print layout stay human. The
 registry entity-name check (section A') is advisory: it WARNs on a mismatch and
-the rep-confirmed name governs (OPEN-DECISIONS item 19).
+the rep-confirmed name governs (OPEN-DECISIONS item 19). The Zoho
+cross-checks (zoho_crosscheck.py) are advisory too: WARN or PASS, SKIP without
+a credential.
 """
 import sys, os, re, fnmatch, warnings
 warnings.filterwarnings('ignore')
@@ -40,6 +42,10 @@ SYSTEMS = ('Intrusion Alarm', 'Video Surveillance', 'Access Control', 'Fire Alar
            'Network', 'Standalone Intercom', 'Visitor Management',
            'Standalone Environmental Monitoring')
 SVC_GROUPS = ('New Services', 'Replacement Services', 'Existing Services')
+# Elevator Monitoring Agreement field shape (issue 335): 15 text fields,
+# no leading dot (unlike the Fire form's widgets), no checkboxes. Used to
+# tell this form apart from the Fire master and from an unmapped form.
+ELEVATOR_MASTER_FIELDS = {f'Text{i}' for i in range(1, 16)}
 
 ENTITY = re.compile(r"\b[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,5}\s*,?\s*"
                     r"(?:Inc\.?|LLC|L\.L\.C\.|Corp\.?|Corporation|Company|Co\.|Ltd\.?"
@@ -59,6 +65,35 @@ def money(v):
     m = re.search(r'[\d,]+\.?\d*', str(v))
     return float(m.group(0).replace(',', '')) if m else None
 
+_DATE_FORMATS = ('%m/%d/%Y', '%m/%d/%y', '%m-%d-%Y', '%Y-%m-%d',
+                 '%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y')
+
+def parse_date(v):
+    """A date from a cell value or a form-field string; None when it is not one."""
+    import datetime as _dt
+    if isinstance(v, _dt.datetime): return v.date()
+    if isinstance(v, _dt.date): return v
+    t = re.sub(r'\s+', ' ', str(v or '')).strip()
+    for fmt in _DATE_FORMATS:
+        try: return _dt.datetime.strptime(t, fmt).date()
+        except ValueError: pass
+    return None
+
+def schedule_date(S, end_row):
+    """(date, where) for the schedule header's Date cell: column G on the
+    first column-E 'Date' label above end_row. The template ships that cell
+    as =TODAY(), which shows the day the schedule is opened, so it reads as
+    today; a literal date reads as itself. (None, reason) otherwise."""
+    import datetime as _dt
+    r = S.row_where('E', lambda x: x.rstrip(':').strip().lower() == 'date', end=end_row)
+    if not r:
+        return None, 'no Date label in the schedule header'
+    raw = S.ws[f'G{r}'].value
+    if isinstance(raw, str) and re.fullmatch(r'=\s*TODAY\(\s*\)', raw.strip(), re.I):
+        return _dt.date.today(), f'G{r} =TODAY()'
+    d = parse_date(raw) or parse_date(S.v(f'G{r}'))
+    return (d, f'G{r}') if d else (None, f'G{r} holds no date')
+
 def parts_in(s):
     out = []
     for tok in re.findall(r'[A-Za-z0-9./+-]+', s or ''):
@@ -73,6 +108,13 @@ def parts_in(s):
 # live here (2026-08-24 portfolio diag: 15 jobs with only "Old docs" drafts).
 SKIP_DIRS = ('old', 'old docs', 'old documents', 'archive', 'archived',
              'superseded', 'backup', 'backups')
+
+# Drafted-schedule name patterns. '*Svc Schedule.xlsx' catches the Sales Admin
+# form '<customer>_<site> - <systems> Svc Schedule.xlsx', which carries no
+# "Equip &" token (issue 302).
+SCHED_PATTERNS = ['*Equip & Svc Schedule*.xlsx', '*Equip & Services*.xlsx',
+                  '*Equip & Svc*.xlsx', '*Equip*Sv*Schedule*.xlsx',
+                  '*Service Schedule*.xlsx', '*Svc Schedule.xlsx']
 
 def find_files(job, patterns, exclude=()):
     hits = []
@@ -244,6 +286,10 @@ _WU_EXCLUDE = ('template', 'equip & s', 'schedule', 'agreement',
                'proposal', 'master', 'rider', 'covered equipment', 'fsi')
 _WU_INCLUDE = ('workup', 'work up', 'work-up', 'wu-', ' wu ', 'wu ',
                '- wu', 'wu.', 'fire-lite', 'fire lite')
+# A job's working copy of the master WU template: '<date>-Master WU Template
+# <anything> rev<N>.xlsx'. The rev suffix separates it from the pristine
+# template, which carries none (issue 302).
+_WU_TEMPLATE_COPY = re.compile(r'master wu template.*rev\s*\d+\.xls[xm]$')
 
 
 def _find_workup(job):
@@ -267,10 +313,11 @@ def _find_workup(job):
             ext = os.path.splitext(f)[1].lower()
             if ext not in ('.xlsx', '.xlsm'):
                 continue
-            if not any(k in low for k in _WU_INCLUDE):
-                continue
-            if any(k in low for k in _WU_EXCLUDE):
-                continue
+            if not _WU_TEMPLATE_COPY.search(low):
+                if not any(k in low for k in _WU_INCLUDE):
+                    continue
+                if any(k in low for k in _WU_EXCLUDE):
+                    continue
             hits.append(os.path.join(dirpath, f))
     return sorted(set(hits), key=os.path.getmtime, reverse=True)
 
@@ -355,12 +402,21 @@ def _outgoing_pdfs(job):
             and 'lease agreement' not in os.path.basename(p).lower()]
 
 
-def _foreign_entities(text, sub_name):
+def _entity_norm(s):
+    return re.sub(r'\s+', ' ', str(s or '')).strip().strip('.,').strip().lower()
+
+
+def _foreign_entities(text, sub_name, known_parties=()):
     """Extract entity-shaped names from ``text`` that are neither the
     subscriber nor Active Alarm. Case-insensitive substring check against
     the subscriber name is enough to swallow "Acme Corp" when the
     subscriber is "Acme Corporation, Inc." — the ENTITY regex fires on
-    both forms."""
+    both forms.
+
+    ``known_parties`` are other parties this schedule names on purpose (the
+    installing party of a services-only schedule, issue 303); an entity that
+    matches one of them is not foreign."""
+    known = [k for k in (_entity_norm(p) for p in known_parties) if len(k) >= 4]
     out = set()
     for mm in ENTITY.finditer(text or ''):
         nm = mm.group(0).strip()
@@ -368,8 +424,53 @@ def _foreign_entities(text, sub_name):
             continue
         if 'Active Alarm' in nm:
             continue
+        n = _entity_norm(nm)
+        if any(n == k or n in k or k in n for k in known):
+            continue
         out.add(nm)
     return out
+
+
+# ---- services-only schedules (issue 303) ----
+# Governing text: references/SOW-BASELINES.md §7.13 (the services-only
+# template and its signals) and references/MAPPING-APPENDIX.md §3a "Repair
+# Service start date" (the two-amount presentation). The strings below are
+# the literal tokens the verifier searches for; the rules stay in those files.
+SERVICES_ONLY_OPENER = 'will provide the recurring services listed in the Services section'
+INSTALLING_PARTY = re.compile(
+    r'installation agreement with\s+(.+?)(?:\.(?=\s|$)|$)', re.I | re.S)
+RS_START_SUFFIX = '(begins one year from installation completion date)'
+RS_TWO_AMOUNTS = re.compile(
+    r'\$\s?([\d,]+(?:\.\d+)?)\s+for one year following installation completion'
+    r'\s+and\s+\$\s?([\d,]+(?:\.\d+)?)\s+per month thereafter', re.I)
+SERVICES_ONLY_REF = 'SOW-BASELINES.md §7.13'
+
+
+def _services_only_signals(S, sow, eq_hdr, eq_lbl, pp_row, price):
+    """Return ``{signal_name: bool}`` for the three services-only signals
+    named in SOW-BASELINES.md §7.13: the Equipment and Labor block reads
+    N/A, the Purchase Price is zero, and the SOW carries the services-only
+    opener. The caller treats the schedule as services-only only when all
+    three hold."""
+    start = (eq_hdr or eq_lbl) + 1
+    texts = [S.col('B', r).strip() for r in range(start, pp_row)]
+    texts = [t for t in texts if t and not t.startswith(('Site:', 'System:'))]
+    if not texts:
+        texts = [S.col('A', r).strip() for r in range(start, pp_row)
+                 if S.col('A', r).strip()]
+    eq_na = bool(texts) and all(t.upper() == 'N/A' for t in texts)
+    return {
+        'equipment block reads N/A': eq_na,
+        'Purchase Price is 0': price is not None and abs(price) < 0.01,
+        'SOW carries the services-only opener': SERVICES_ONLY_OPENER.lower() in (sow or '').lower(),
+    }
+
+
+def _installing_parties(sow):
+    """Names following "installation agreement with" in a services-only SOW
+    (SOW-BASELINES.md §7.13)."""
+    return [m.group(1).strip() for m in INSTALLING_PARTY.finditer(sow or '')
+            if m.group(1).strip()]
 
 
 _SUM_RE = re.compile(r'^=SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)$')
@@ -480,9 +581,7 @@ def verify(job):
     global _pdftotext_missing_warned
     _pdftotext_missing_warned = False
     job = job.rstrip('\\/')
-    scheds = find_files(job, ['*Equip & Svc Schedule*.xlsx', '*Equip & Services*.xlsx',
-                              '*Equip & Svc*.xlsx', '*Equip*Sv*Schedule*.xlsx',
-                              '*Service Schedule*.xlsx'], exclude=['Template', 'BACKUP'])
+    scheds = find_files(job, SCHED_PATTERNS, exclude=['Template', 'BACKUP'])
     if not scheds:
         pdfs = find_files(job, ['*Equip & Svc*.pdf', '*Equip & Services*.pdf'], exclude=['Template'])
         rec('N/A', 'Drafted schedule present',
@@ -558,15 +657,58 @@ def verify(job):
                 f'schedule "{sub_name}" vs registry "{legal}" ({tag}); '
                 f'rep-confirmed name governs (see DRAFTER-PRESEND-CHECKLIST A.1)')
 
+    # ---- Zoho cross-checks (advisory WARN/SKIP only; issue 229) ----
+    # Hard rule 5: Zoho is validated against the package, never trusted, and
+    # nothing read from Zoho is written anywhere. See zoho_crosscheck.py.
+    try:
+        import zoho_crosscheck
+        mt_val = S.resolve(f'G{mt_row}')[0] if mt_row else None
+        zoho_crosscheck.run(
+            job, rec,
+            prospect=S.col('G', pro_row).strip() if pro_row else '',
+            subscriber=sub_name,
+            site=site.splitlines()[0].strip() if site else '',
+            monthly_total=mt_val,
+            workups=_find_workup(job))
+    except Exception as e:
+        rec('SKIP', 'Zoho cross-checks ran', f'{type(e).__name__}: {e}')
+
     # ---------------- B) scope of work ----------------
     sow = ' '.join(S.col('A', r) for r in range(sow_lbl + 1, min(sow_lbl + 4, eq_lbl))).strip()
-    if not sow or sow.lower().rstrip() in ('active alarm company will', 'active alarm company will '):
+
+    # Services-only recognition (SOW-BASELINES.md §7.13, issue 303). All three
+    # signals must hold; a partial set WARNs and the ordinary checks run.
+    eq_hdr = next((r for r in qty_hdrs if r > eq_lbl), None)
+    price, psrc = S.resolve(f'G{pp_row}')
+    so_signals = _services_only_signals(S, sow, eq_hdr, eq_lbl, pp_row, price)
+    services_only = all(so_signals.values())
+    installing = _installing_parties(sow) if services_only else []
+    if services_only:
+        rec('PASS', 'Services-only schedule recognised',
+            f'{SERVICES_ONLY_REF}; ' + ', '.join(so_signals)
+            + (f'; installing party: {"; ".join(installing)}' if installing else ''))
+    elif any(so_signals.values()):
+        rec('WARN', 'Services-only schedule recognised',
+            f'{SERVICES_ONLY_REF}; only some signals present — has: '
+            + ', '.join(k for k, v in so_signals.items() if v)
+            + '; lacks: ' + ', '.join(k for k, v in so_signals.items() if not v))
+    so_skip = f'services-only schedule ({SERVICES_ONLY_REF}): no equipment is sold on it'
+
+    sow_written = bool(sow) and sow.lower().rstrip() != 'active alarm company will'
+    if not sow_written:
         rec('FAIL', 'Scope of work written', '(empty or stub)')
+    elif services_only:
+        rec('PASS' if CANON[0] in sow else 'WARN', f'SOW carries "{CANON[0][:38]}"')
+        rec('PASS', 'SOW opens with the services-only opener',
+            f'{SERVICES_ONLY_REF}; replaces "{CANON[1][:38]}"')
+        rec('PASS', 'SOW designation token present',
+            f'{SERVICES_ONLY_REF}: the services-only template carries no designation token')
     else:
         for frag in CANON:
             rec('PASS' if frag in sow else 'WARN', f'SOW carries "{frag[:38]}"')
         rec('PASS' if any(f' {d} ' in sow.lower() for d in DESIGNATIONS) else 'WARN',
             'SOW designation token present', '/'.join(DESIGNATIONS))
+    if sow_written:
         rec('FAIL' if re.search(r'\bproposal\b', sow, re.I) else 'PASS', 'SOW does not say "proposal"')
         for tok in ('[', ']', 'TBD'):
             rec('FAIL' if tok in sow else 'PASS', f'No "{tok}" in the SOW')
@@ -574,9 +716,12 @@ def verify(job):
         rec('FAIL' if pn else 'PASS', 'No part numbers in the SOW', ', '.join(pn[:4]))
 
     # ---------------- C) equipment block ----------------
-    eq_hdr = next((r for r in qty_hdrs if r > eq_lbl), None)
     eq_end = pp_row - 1
-    if not eq_hdr:
+    if services_only:
+        rec('PASS', 'Equipment and Labor section reads N/A', SERVICES_ONLY_REF)
+        rec('SKIP', 'Equipment line checks', so_skip)
+        eq_items = []
+    elif not eq_hdr:
         rec('SKIP', 'Equipment line checks', 'no Qty/Description header after the EQUIPMENT heading')
         eq_items = []
     else:
@@ -603,8 +748,10 @@ def verify(job):
     pp_match = _match_sum_range(f_pp)
     rec('PASS' if pp_match and pp_match[0] == 'G' else 'WARN',
         'Purchase Price is a SUM over the equipment rows', f_pp or '(empty)')
-    price, psrc = S.resolve(f'G{pp_row}')
-    rec('PASS' if price else 'FAIL', 'Purchase Price non-zero', f'{price} ({psrc})')
+    if services_only:
+        rec('SKIP', 'Purchase Price non-zero', f'{so_skip}; Purchase Price {price} ({psrc})')
+    else:
+        rec('PASS' if price else 'FAIL', 'Purchase Price non-zero', f'{price} ({psrc})')
     dep = money(S.v(f'G{dep_row}')) if dep_row else None
     if bal_row:
         fb = S.col('G', bal_row).replace(' ', '')
@@ -642,15 +789,51 @@ def verify(job):
     else:
         rec('SKIP', 'Services block checks', 'no SERVICES header or Monthly Total label')
 
+    # ---- Repair Service two-amount presentation (MAPPING-APPENDIX.md §3a) ----
+    # Checked on services-only schedules (issue 303); how it applies to other
+    # schedules is left to the ordinary review.
+    if services_only:
+        item = 'Repair Service two-amount presentation (MAPPING-APPENDIX.md §3a)'
+        rs_rows = [r for r in svc_items if 'repair service' in S.col('B', r).lower()]
+        if not rs_rows:
+            rec('SKIP', item, 'no Repair Service line in the Services section')
+        else:
+            probs = [f'B{r} does not end "{RS_START_SUFFIX}"' for r in rs_rows
+                     if not S.col('B', r).strip().endswith(RS_START_SUFFIX)]
+            mt, _ = S.resolve(f'G{mt_row}') if mt_row else (None, '')
+            m = RS_TWO_AMOUNTS.search(sow or '')
+            if not m:
+                probs.append('SOW does not state both monthly amounts')
+            else:
+                first, second = money(m.group(1)), money(m.group(2))
+                if mt is None or abs(second - mt) >= 0.01:
+                    probs.append(f'SOW second amount {second:,.2f} vs Monthly Total '
+                                 f'{mt if mt is None else f"{mt:,.2f}"}')
+            if probs:
+                rec('FAIL', item, '; '.join(probs))
+            else:
+                rec('PASS', item,
+                    f'{len(rs_rows)} Repair Service line(s) carry the start-date suffix; '
+                    f'SOW states {first:,.2f} then {second:,.2f} = Monthly Total')
+
     # ---------------- F) clarifications and exclusions ----------------
     clar, excl, cell = S.clarifications()
+    so_clar = (f'services-only schedule ({SERVICES_ONLY_REF} sets which bullets it keeps; '
+               f'no count range is ratified for it)')
     if not clar:
         rec('SKIP', 'Clarifications block', 'not located')
     else:
         nc, ne = clar.count('•'), excl.count('•')
-        rec('PASS' if CLAR_RANGE[0] <= nc <= CLAR_RANGE[1] else 'WARN',
-            f'Clarification count within {CLAR_RANGE[0]}-{CLAR_RANGE[1]}', f'{nc} (cell {cell})')
-        if excl:
+        if services_only:
+            rec('SKIP', f'Clarification count within {CLAR_RANGE[0]}-{CLAR_RANGE[1]}',
+                f'{so_clar}; {nc} (cell {cell})')
+        else:
+            rec('PASS' if CLAR_RANGE[0] <= nc <= CLAR_RANGE[1] else 'WARN',
+                f'Clarification count within {CLAR_RANGE[0]}-{CLAR_RANGE[1]}', f'{nc} (cell {cell})')
+        if excl and services_only:
+            rec('SKIP', f'Exclusion count within {EXCL_RANGE[0]}-{EXCL_RANGE[1]}',
+                f'{so_clar}; {ne}')
+        elif excl:
             rec('PASS' if EXCL_RANGE[0] <= ne <= EXCL_RANGE[1] else 'WARN',
                 f'Exclusion count within {EXCL_RANGE[0]}-{EXCL_RANGE[1]}', str(ne))
         else:
@@ -675,8 +858,12 @@ def verify(job):
                and not re.search(r'permit fee|fees,|fees and|fees assessed', b.lower())]
         rec('FAIL' if bad else 'PASS', 'No exclusion excludes permit procurement',
             bad[0].strip()[:70] if bad else '')
-        rec('PASS' if 'procure the permits' in body else 'WARN',
-            'Permit procurement clarification present')
+        if services_only:
+            rec('SKIP', 'Permit procurement clarification present',
+                f'services-only schedule ({SERVICES_ONLY_REF}): installation bullets come out')
+        else:
+            rec('PASS' if 'procure the permits' in body else 'WARN',
+                'Permit procurement clarification present')
         if price:
             has = '50% deposit' in body or '50 % deposit' in body
             if price > DEPOSIT_THRESHOLD:
@@ -691,7 +878,11 @@ def verify(job):
 
     # ---------------- G) proposal reconciliation ----------------
     props = find_files(job, ['*Proposal*.pdf'], exclude=['Old'])
-    if not props:
+    if services_only:
+        rec('SKIP', 'Purchase Price equals the proposal total',
+            f'{so_skip}; any installation proposal belongs to the installing '
+            f'party\'s deal')
+    elif not props:
         rec('SKIP', 'Purchase Price equals the proposal total', 'no proposal PDF in folder')
     else:
         pt = pdf_text(props[0])
@@ -714,7 +905,8 @@ def verify(job):
                 f'schedule {price} vs proposal {pv} ({pname})')
 
     # ---------------- H) master agreement and rider ----------------
-    masters = find_files(job, ['*Master Agreement*.pdf', '*All in One*.pdf', '*Agreements*.pdf'],
+    masters = find_files(job, ['*Master Agreement*.pdf', '*All in One*.pdf', '*Agreements*.pdf',
+                              '*Elevator Monitoring Agreement*.pdf'],
                          exclude=['Old', 'Rider', 'LEASE AGREEMENT'])
     riders = find_files(job, ['*Rider*.pdf'], exclude=['Old'])
     if not masters:
@@ -723,15 +915,44 @@ def verify(job):
     else:
         mf = pdf_fields(masters[0])
         known_fire = any(k.startswith('.Text') for k in mf) and any(k.startswith('.CheckBox') for k in mf)
-        if mf and not known_fire:
+        known_elevator = bool(mf) and set(mf) == ELEVATOR_MASTER_FIELDS
+        if mf and not known_fire and not known_elevator:
             rec('SKIP', 'Master agreement field checks',
-                f'{os.path.basename(masters[0])} is not the mapped Commercial Fire form '
+                f'{os.path.basename(masters[0])} is not a mapped form '
                 f'({len(mf)} fields); residential and commercial security forms use a different map')
             mf = {}
             mterm = None
         if not mf:
             rec('SKIP', 'Master agreement checks',
                 f'{os.path.basename(masters[0])} has no form fields (flattened or signed)')
+            mterm = None
+        elif known_elevator:
+            # Elevator Monitoring Agreement (issue 335): 15 text fields, no
+            # checkboxes, term fixed in §5 clause text rather than a field.
+            mname = str(mf.get('Text3') or '').strip()
+            rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
+                'Elevator Monitoring Agreement Subscriber name matches the schedule',
+                f'master "{mname}" vs schedule "{sub_name}"'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 3')
+            # Filled and equal to the schedule date; reconciling a mismatch is
+            # the human's (DRAFTER-PRESEND-CHECKLIST.md item 5).
+            mdate_raw = str(mf.get('Text1') or '').strip()
+            mdate = parse_date(mdate_raw)
+            sdate, how = schedule_date(S, sow_lbl)
+            rec('PASS' if mdate and sdate and mdate == sdate else 'FAIL',
+                'Elevator Monitoring Agreement date matches the schedule date',
+                f'master "{mdate_raw or "(empty)"}"'
+                + (' (not a date)' if mdate_raw and not mdate else '')
+                + f' vs schedule {sdate.isoformat() if sdate else "(none)"} ({how})'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 5')
+            mamt = money(mf.get('Text14'))
+            sched_mt = S.resolve(f'G{mt_row}')[0] if mt_row else None
+            rec('PASS' if (mamt is not None and sched_mt is not None
+                          and abs(mamt - sched_mt) < 0.01) else 'FAIL',
+                'Elevator Monitoring Agreement monthly amount matches the schedule',
+                f'master {mamt if mamt is not None else "(empty)"} vs schedule '
+                f'Monthly Total {sched_mt if sched_mt is not None else "(empty)"}'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 11; MAPPING-APPENDIX.md §3')
             mterm = None
         else:
             mtext = ' '.join(str(v) for v in mf.values())
@@ -800,7 +1021,10 @@ def verify(job):
             wu_total = None
 
     # J-22: Schedule Purchase Price equals the work-up total.
-    if not wus:
+    if services_only:
+        rec('SKIP', 'Schedule Purchase Price equals the work-up total',
+            f'{_cite(22)}; {so_skip}')
+    elif not wus:
         rec('SKIP', 'Schedule Purchase Price equals the work-up total',
             f'{_cite(22)}; no work-up workbook in the folder')
     elif wu_total is None:
@@ -1028,7 +1252,9 @@ def verify(job):
     # addenda / disclosure / other PDFs going out. The issued proposal is
     # explicitly excluded per the checklist item 32 note.
     doc_foreign = {}
-    sched_foreign = _foreign_entities(sched_all_text, sub_name)
+    # A services-only SOW names its installing party on purpose
+    # (SOW-BASELINES.md §7.13, issue 303); that name is not foreign.
+    sched_foreign = _foreign_entities(sched_all_text, sub_name, installing)
     if sched_foreign:
         doc_foreign[os.path.basename(sched)] = sched_foreign
     for doc in _outgoing_pdfs(job):
@@ -1036,7 +1262,7 @@ def verify(job):
         text = ' '.join(str(v) for v in fields.values() if v is not None)
         if not text.strip():
             text = pdf_text(doc)
-        found = _foreign_entities(text, sub_name)
+        found = _foreign_entities(text, sub_name, installing)
         if found:
             doc_foreign[os.path.basename(doc)] = found
     if doc_foreign:
@@ -1046,7 +1272,9 @@ def verify(job):
             f'{_cite(32)}; {detail}')
     else:
         rec('PASS', 'No other customer name in any outgoing document',
-            f'{_cite(32)}; every outgoing document names only this subscriber')
+            f'{_cite(32)}; every outgoing document names only this subscriber'
+            + (f' (installing party named per {SERVICES_ONLY_REF}: '
+               f'{"; ".join(installing)})' if installing else ''))
 
     # J-33: Required attachments present.
     # Trigger set: drawings/placement plans are always expected on the
@@ -1088,12 +1316,23 @@ def verify(job):
              'drawings/placement plans present; no RMR triggers attendance of addenda'))
 
     # ---------------- I) filename ----------------
-    fn = os.path.basename(sched)
+    fn = os.path.basename(sched).replace('_', ' ')
     sysnames = [s for s in SYSTEMS if any(s in S.col('B', r) for r in range(1, S.maxr + 1))]
-    if sysnames:
-        miss = [s for s in sysnames if s.split()[0].lower() not in fn.lower()]
+    # A system whose first word holds a character Windows forbids in a file
+    # name (Audio/Visual) cannot appear in the file name as written, and
+    # references/ gives no file-name spelling for it. Leave it unchecked and
+    # point at the open question rather than invent a spelling (issue 322).
+    unspelled = [s for s in sysnames if set(s.split()[0]) & set('\\/:*?"<>|')]
+    checkable = [s for s in sysnames if s not in unspelled]
+    note = (f'{", ".join(unspelled)} not checked: references/ gives no '
+            f'file-name spelling (docs/GAP-REPORT.md §6)') if unspelled else ''
+    if checkable:
+        miss = [s for s in checkable if s.split()[0].lower() not in fn.lower()]
         rec('PASS' if not miss else 'WARN', 'Filename names every system sold',
-            ('missing ' + ', '.join(miss)) if miss else ', '.join(sysnames))
+            (('missing ' + ', '.join(miss)) if miss else ', '.join(checkable))
+            + (f'; {note}' if note else ''))
+    elif unspelled:
+        rec('SKIP', 'Filename names every system sold', note)
 
 
 def sweep(root, jobs=16):

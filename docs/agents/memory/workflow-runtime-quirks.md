@@ -19,7 +19,7 @@ Two Workflow-tool behaviours that cost a fleet launch each on 2026-09-01:
 3. **`scriptPath` refuses a CRLF script.** Pointing `scriptPath` at the plugin's
    `ticket-fleet.js` (37 KB, 443 CR bytes, as installed under the desktop plugin cache on
    2026-09-15) fails before launch with `script contains control characters that would be
-   hidden in the approval dialog`. Copy the file with `tr -d ''` into the scratchpad and pass
+   hidden in the approval dialog`. Copy the file with `tr -d '\r'` into the scratchpad and pass
    that path; the run itself is unaffected.
 
 4. **The `Workflow` tool call resolves `scriptPath` relative to the harness's cwd at the moment of
@@ -44,6 +44,6 @@ in `orchestrator/RUNBOOK.md`'s dispatch section, which names only a relative
 
 **How to apply:** after editing any workflow script, launch via `scriptPath`, from an LF copy when
 the source is CRLF. Every fleet launch
-(local, `orchestrator/worker-cycle.md`, `LOCAL-RUNBOOK.md`) passes `runId`. See
+(`orchestrator/LOCAL-RUNBOOK.md`, `orchestrator/RUNBOOK.md`, a hand launch) passes `runId`. See
 [[fable-usage-is-rationed]] for the model pins the fleet keeps. For a cloud-Routine master, use an
 absolute `scriptPath` and confirm the repo cwd right before the call (rule 4).

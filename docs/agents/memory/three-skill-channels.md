@@ -10,10 +10,17 @@ metadata:
 
 A skill offered in a session came from one of three places, and they are not interchangeable:
 
-1. **Local** — `~/.claude/skills` plus `~/.agents/skills` junctions. Mirrored by `sync.ps1`,
-   fingerprinted by `cloud-plugin-sweep.js`, restored on a fresh machine.
-2. **Account Plugins** — the `dan-skills` zip. Namespaced `dan-skills:`. Not under
-   `~/.claude/plugins`; `installed_plugins.json` never lists it.
+1. **Local** — `~/.claude/skills`, restored by `sync.ps1 -Mode pull` from the repo's one
+   `aac-skills/` tree (since issue 214; the `~/.agents/skills` junctions and the push that
+   mirrored them retired), fingerprinted by `cloud-plugin-sweep.js`.
+2. **Account Plugins** — an uploaded plugin zip (`dan-skills` on 2026-08-31, `aac-skills` since).
+   Not under `~/.claude/plugins`; `installed_plugins.json` never lists it. The marketplace install
+   of the same plugin is a separate route: [[marketplace-is-the-distribution-spine]].
+   On disk it lives at `%APPDATA%\Claude\local-agent-mode-sessions\<org>\<account>\rpm\plugin_<id>\`,
+   listed in that folder's `manifest.json`. Measured 2026-09-23: the desktop app's Code tab ran the
+   governance hooks from this copy, while `claude plugin list` in a terminal showed it as
+   `aac-skills@synced` "not loaded" because the marketplace install of the same name wins there.
+   Uninstalling the marketplace copy removed its user and every project-scope record at once.
 3. **Account Skills** — skills uploaded individually at claude.ai, cached at
    `%APPDATA%\Claude\local-agent-mode-sessions\skills-plugin\<orgUuid>\<accountUuid>\skills\`
    next to a `manifest.json`. The namespace is the **org's display name**, which is why

@@ -165,3 +165,18 @@ test('a session whose global CLAUDE.md already carries the rules gets no second 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Issue 732: a desktop's global CLAUDE.md is the pointer pull writes, so the plugin hook is what
+// delivers the rules there - at startup and again on the compact source, the same command.
+test('a desktop whose global CLAUDE.md is the pulled pointer gets the rules from the hook', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'global-rules-'));
+  try {
+    const pointer = path.join(REPO, 'profile', 'claude', 'global-pointer.md');
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), fs.readFileSync(pointer));
+    const ctx = startContext(1, { CLAUDE_CONFIG_DIR: dir, GLOBAL_RULES_HOOK_FORCE: '0' });
+    assert.ok(ctx && ctx.includes(fs.readFileSync(RULES, 'utf8').split('\n', 1)[0]),
+      'the hook stayed silent behind the pointer - the desktop would get no rules at all');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

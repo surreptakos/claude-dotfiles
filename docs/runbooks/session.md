@@ -75,23 +75,22 @@ could not audit, which is not a pass.
 
 ## Releasing
 
-Nothing here deploys to a server. The release is the push to `origin/master`, because that is what a
-new machine clones and restores from. In order, no skipping:
+Nothing here deploys to a server. The release is the merge to `origin/master`, because that is what
+a cloud container installs at session start and what a desktop takes with `.\sync.ps1 -Mode pull`.
+In order, no skipping:
+
+1. Edit `aac-skills/` or `profile/` on a branch. After any change under `aac-skills/`, run
+   `python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'` and then
+   `python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'`, and commit the rebuilt
+   `marketplace/` with the source.
+2. Merge the branch to master.
+3. Run the restore test against `origin`, not against your working tree. The question is whether
+   what you merged restores:
 
 ```powershell
-.\sync.ps1 -Mode push -Commit "chore: sync"
 powershell -ExecutionPolicy Bypass -File tests\restore-test.ps1 -From origin
 ```
 
-`-Commit` rather than your own `git commit`: a non-zero exit does not stop the next statement in a
-PowerShell chain, so `sync.ps1 ; git commit` commits even when the secret guard failed.
-
-Push from the **main checkout**. A worktree publishes that tree, not master.
-
-**After any merge, regenerate before pushing.** `claude/`, `codex/`, `agents/` and `memory/` are
-generated. Git will line-merge two machine snapshots into a file matching neither, and nothing fails
-— the next machine simply restores something that was never on any machine. Run `sync.ps1 -Mode push`
-on top of the merge and diff before committing.
-
-Then run the restore test against `origin`, not against your working tree. The question is whether
-what you pushed restores.
+`sync.ps1 -Mode push` and the generated `claude/`, `codex/` and `memory/` mirrors retired with
+issue 214 (updated 2026-09-23): push prints why and exits 2, and nothing in the repo is regenerated
+from a live `~/.claude` tree any more.

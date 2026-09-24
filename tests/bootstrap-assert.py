@@ -191,6 +191,17 @@ if settings is not None:
     else:
         pass_('every merged hook command names a script the payload carries')
 
+    # ask_matt_gate.py imports jev.py from its own directory (issue 723). No hook command names
+    # the library, so the check above cannot see it missing; without it the gate's YES lint
+    # silently falls back to the regexes in every cloud session.
+    jev_lib = os.path.join(payload_abs, 'hooks', 'scripts', 'jev.py')
+    if not os.path.isfile(jev_lib):
+        fail(f'the payload carries no Jev helper beside ask_matt_gate.py at {jev_lib}')
+    elif b'_plugin_hook_guard' in open(jev_lib, 'rb').read():
+        fail(f'{jev_lib} carries the dedup guard: it is a library, not a governance hook')
+    else:
+        pass_('the Jev helper ships beside ask_matt_gate.py as a library (issue 723)')
+
 # ------------------------------------------ 3b. the home-anchored seat (issue 643) -------------
 # Delivery must not depend on which checkout Claude Code calls the project. The hook copies
 # itself to ~/.claude/hooks/aac-bootstrap.sh and seats THAT as a SessionStart entry in user
@@ -236,6 +247,14 @@ if not os.path.isfile(rules) or os.path.getsize(rules) == 0:
 else:
     first = open(rules, encoding='utf-8').readline().strip()
     pass_(f'rules text present ({os.path.getsize(rules)} bytes), first line: {first!r}')
+    # Issue 680: the ADHD off switch has to be named where a container session reads it.
+    reminder = os.path.join(PAYLOAD, 'hooks', 'scripts', 'governance-reminder.js')
+    unnamed = [p for p in (rules, reminder) if not os.path.isfile(p)
+               or '"stop adhd mode"' not in open(p, encoding='utf-8').read()]
+    if unnamed:
+        fail('the ADHD off switch ("stop adhd mode") is not named in: ' + ', '.join(unnamed))
+    else:
+        pass_('the rules text and the per-turn reminder name the ADHD off switch (issue 680)')
 
 # The per-prompt digest (issue 533). Without it every prompt would go back to carrying the whole
 # rulebook, or -- worse -- carry nothing, since the UserPromptSubmit entry now asks for the digest.

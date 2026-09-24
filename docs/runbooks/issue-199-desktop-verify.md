@@ -71,9 +71,9 @@ survive rebase into the ticket comment thread.
 
 ## 4. If a clone still stalls on a dialog
 
-- **Permission dialog reappears** - the mirror rebuild dropped `permissions.defaultMode` from
-  `claude/settings.json`, or a later hand edit did. Check the current mirror, re-push if needed,
-  re-pull, re-run step 1.
+- **Permission dialog reappears** - `profile/claude/settings.json` lost `permissions.defaultMode`
+  (the `claude/` mirror this step used to name retired with issue 214). Restore it there on a
+  branch, merge, re-pull, re-run step 1.
 - **Folder-trust dialog reappears** - the four paths in `tools/settings-invariants.ps1` no
   longer match this machine's clone layout (a clone moved, or the four names are stale). Fix
   the path list in the tool, re-pull, re-run step 2.

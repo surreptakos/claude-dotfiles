@@ -4,9 +4,11 @@
 # Issue #9 decisions (2026-08-19):
 #   (a) ADOPTED  - pull refreshes ~/.claude-personal from the same source as ~/.claude, so the
 #       personal profile stops drifting back into a stale snapshot.
-#   (b) DECLINED - reverse memory sync. Personal-only memories never flow into the work profile
-#       or this repo (push reads only ~/.claude). Declined by default 2026-08-19; flipping this
-#       requires an explicit owner instruction.
+#   (b) DECLINED 2026-08-19, SUPERSEDED 2026-09-23 by owner instruction ("I want two way sync
+#       between claude-personal and claude"). profile/claude/tools/link-personal-profile.ps1
+#       junctions projects/agents/hooks/tools/plans/file-history in ~/.claude-personal to
+#       ~/.claude. Over a junctioned folder the overlay below copies files onto themselves and
+#       writes nothing; skills stay per profile and keep the overlay.
 #
 # The refresh is a one-way overlay, and the work profile is the source of truth:
 #   - hooks, agents: copied verbatim (byte-equal; both profiles' hooks are profile-aware via

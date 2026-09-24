@@ -18,6 +18,7 @@
     "typescript-lsp@claude-plugins-official": true,
     "caveman@caveman": true,
     "i-have-adhd@i-have-adhd": true,
+    "typesafe@typesafe-ai": true,
     "aac-skills@claude-dotfiles": true,
     "yes@sstklen": true,
     "travel-hacker@borski": true
@@ -51,6 +52,12 @@
       "source": {
         "source": "github",
         "repo": "ayghri/i-have-adhd"
+      }
+    },
+    "typesafe-ai": {
+      "source": {
+        "source": "github",
+        "repo": "typesafe-ai/skills"
       }
     },
     "claude-dotfiles": {

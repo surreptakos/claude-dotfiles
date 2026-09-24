@@ -29,8 +29,13 @@ while hunting it after it vanished:
 **Superseded for Todoist Triage, 2026-09-11.** The `RemoteTrigger list` bullet above is true as of
 2026-09-10 and no longer describes today. A claude.ai/code routine "Todoist Triage Routine Dan-AAC"
 (`trig_01WgTYXvzFQQUFGFZgKQAa5m`, weekdays 13:00 UTC) was created 2026-09-11T14:06Z and is the
-runner now; `list_triggers` returns it. Todoist Triage is no longer a Cowork scheduled task. The
-recovery lesson below still stands for any task that *is* one.
+runner from then; `list_triggers` returned it. Todoist Triage is no longer a Cowork scheduled task.
+The recovery lesson below still stands for any task that *is* one.
+
+**Superseded again, 2026-09-23 (issue 707).** The scheduled run is now the desktop task
+`todoist-triage-local` (Dan-AAC, team org, weekdays 8:30 AM Central). On 2026-09-23 `list_triggers`
+on the personal account no longer listed `trig_01WgTYXvzFQQUFGFZgKQAa5m`, and the "Todoist Triage
+Backup" routine there (`trig_01UNw9JGoisuePaMC4kSv3Tb`) read `enabled: false`.
 
 Two further facts about routines, verified 2026-09-17 and worth knowing before planning one:
 a routine cannot carry environment variables (the trigger API rejects `environment_variables`

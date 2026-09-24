@@ -28,10 +28,19 @@ function Get-DotfileItems {
         # reads the source copy, which keeps this machine's paths rather than the plugin root.
         [pscustomobject]@{ Type = 'Dir';  Repo = 'aac-skills';                              Local = (Join-Path $claude 'skills') }
 
-        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/CLAUDE.md';                Local = (Join-Path $claude 'CLAUDE.md') }
+        # The global CLAUDE.md is a POINTER (issue 732), not the rules text. The rules reach a desktop
+        # the way they reach a container - the aac-skills plugin's global-rules hook - so a rules
+        # change lands with a plugin update instead of waiting on a pull. profile/claude/CLAUDE.md
+        # stays the one source the packager copies from. The pointer must never carry that file's
+        # first line: the hook stays silent when the global CLAUDE.md does.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/global-pointer.md';        Local = (Join-Path $claude 'CLAUDE.md') }
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/settings.json';            Local = (Join-Path $claude 'settings.json') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json') }
+        # Claude Code's own plugin records (issue 717). A fresh machine needs them to register the
+        # marketplaces and name what to install, but `claude plugin update` rewrites them live, so
+        # pull MERGES rather than copies (tools/plugin-records-merge.js): a live entry newer than
+        # the committed snapshot is kept. Merge names the merger's kind.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/plugins/installed_plugins.json';  Local = (Join-Path $claude 'plugins\installed_plugins.json');  Merge = 'installed' }
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/plugins/known_marketplaces.json'; Local = (Join-Path $claude 'plugins\known_marketplaces.json'); Merge = 'marketplaces' }
         # Which Claude account owns which repo and routine (issue 103). Read by the session check
         # in every repo; hand-written, uuids and one email, no secrets.
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/accounts.json';            Local = (Join-Path $claude 'accounts.json') }

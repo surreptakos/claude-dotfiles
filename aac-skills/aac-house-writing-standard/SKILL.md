@@ -2,11 +2,11 @@
 name: aac-house-writing-standard
 description: "AAC-WR-001, the controlled copy of AAC's house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit."
 metadata:
-  standard-version: '0.6'
-  modified: "2026-09-21T21:13:46Z"
-  previous-modified: "2026-09-21T19:34:18Z"
-  revision: "5"
-  content-sha: "c8b61aabd52a"
+  standard-version: '0.7'
+  modified: "2026-09-24T00:53:50Z"
+  previous-modified: "2026-09-23T19:55:57Z"
+  revision: "8"
+  content-sha: "53a8e53c5bd7"
 ---
 
 # AAC house writing standard
@@ -34,10 +34,16 @@ wins. Say so rather than picking.
    describes the mechanical check.
 2. Read `references/CORE.md`, then the files the index names.
 3. Run the mechanical check on anything already written, as the index describes.
-4. Draft or review against the rules you read, citing each by number: "Rule 23
+4. When the deliverable answers someone, list every question they asked before
+   drafting. Each one gets an answer at the depth they asked: asked how a number
+   was reached, show the arithmetic with its inputs labeled. A request to shorten
+   cuts framing and repetition, never an answer. A fact you inferred, such as why
+   a record changed, is written as inference, with who can confirm it (Rule 8).
+   The terse style of your own session replies never carries into the deliverable.
+5. Draft or review against the rules you read, citing each by number: "Rule 23
    prohibits em dashes in company writing."
-5. Confirm the result against Rule 166, item by item. Every condition it names
-   is answered before release.
+6. Confirm the result against Rule 166, item by item. Every condition it names
+   is answered before release, and so is every question listed in step 4.
 
 ## What stays human
 

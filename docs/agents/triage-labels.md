@@ -12,6 +12,8 @@ The skills speak in terms of five canonical triage roles. This file maps those r
 
 When a skill mentions a role (e.g. "apply the AFK-ready triage label"), use the corresponding label string from this table.
 
+This repo adds a sixth state the upstream table lacks: `ready-for-local-agent`, work a desktop session can do with no person in the loop but a cloud container cannot. `docs/agents/issue-tracker.md` (Triage states) defines it.
+
 Edit the right-hand column to match whatever vocabulary you actually use.
 
 ## PRDs are first-class, not just a label

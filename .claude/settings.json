@@ -35,7 +35,7 @@
     "and exfiltration classifications that parked Routine sessions on ~/.claude",
     "reads and hook edits in probe cse_01RQ89qFjEiXXmd1hgooqFBV. Desktop keeps",
     "bypass (~/.claude/settings.json's permissions.defaultMode bypassPermissions,",
-    "skipDangerousModePermissionPrompt true) until the PC is decommissioned.",
+    "skipDangerousModePermissionPrompt true); the desktop is the live master venue (ADR 0001).",
     "",
     "autoMode.allow WIDENED per Dan's ruling (2026-09-15, issue 245): every",
     "action an unattended session takes is sanctioned, destructive and",
@@ -67,7 +67,11 @@
       "Bash(*)",
       "Edit",
       "Write",
-      "mcp__github__*"
+      "mcp__github__*",
+      "Workflow",
+      "Agent",
+      "Task",
+      "mcp__Claude_Code_Remote__*"
     ]
   },
   "autoMode": {
@@ -84,10 +88,17 @@
         "source": "github",
         "repo": "surreptakos/claude-dotfiles"
       }
+    },
+    "typesafe-ai": {
+      "source": {
+        "source": "github",
+        "repo": "typesafe-ai/skills"
+      }
     }
   },
   "enabledPlugins": {
-    "aac-skills@claude-dotfiles": true
+    "aac-skills@claude-dotfiles": true,
+    "typesafe@typesafe-ai": true
   },
   "hooks": {
     "SessionStart": [

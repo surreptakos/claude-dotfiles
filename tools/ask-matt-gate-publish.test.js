@@ -176,3 +176,59 @@ test('prompt-mode hint (claude) names session-end and project-harness', () => {
   assert.match(context, /\bsession-end\b/, `claude hint missing session-end: ${context}`);
   assert.match(context, /\bproject-harness\b/, `claude hint missing project-harness: ${context}`);
 });
+
+// Issue 716: /session-end files its ticket batch without an approval round (#704). The gate lets a
+// second `gh issue create` through when this turn's declared flow is session-end or the prompt
+// invoked /session-end, and still asks for the round under any other publishing route.
+function writePublishCount(stateDir, sessionId, count) {
+  const safe = sessionId.replace(/[^A-Za-z0-9_.-]/g, '_');
+  fs.writeFileSync(path.join(stateDir, `${safe}--published.json`),
+    JSON.stringify({ issues_created: count }), 'utf-8');
+}
+
+function permissionOf(stdout) {
+  return (stdout.trim() ? JSON.parse(stdout) : {})?.hookSpecificOutput?.permissionDecision;
+}
+
+test('session-end: the second gh issue create passes with no approval token', () => {
+  const stateDir = scratchStateDir('session-end-batch');
+  const sid = 'sess-session-end-batch';
+  writeSessionState(stateDir, sid, { nonce: 'n', flow: 'session-end', yes: true, caveman: 'ultra' });
+  writePublishCount(stateDir, sid, 2);
+  const { stdout, status } = runGate('claude-pre-tool', makeEvent(sid, ISSUE_CREATE_CMD), { stateDir });
+  assert.strictEqual(status, 0, `gate exited non-zero: ${stdout}`);
+  assert.notStrictEqual(permissionOf(stdout), 'deny', `session-end batch was denied: ${stdout}`);
+});
+
+test('a prompt invoking /session-end lets the batch through before and after the declaration', () => {
+  const stateDir = scratchStateDir('session-end-prompt');
+  const sid = 'sess-session-end-prompt';
+  // Previous turn declared to-tickets; this turn's prompt is `publish /session-end`.
+  writeSessionState(stateDir, sid, { nonce: 'old', flow: 'to-tickets', yes: true, caveman: 'ultra' });
+  runGate('claude-prompt', { session_id: sid, prompt: 'publish /session-end' }, { stateDir });
+  writePublishCount(stateDir, sid, 1);
+  let res = runGate('claude-pre-tool', makeEvent(sid, ISSUE_CREATE_CMD), { stateDir });
+  assert.notStrictEqual(permissionOf(res.stdout), 'deny', `denied before declaring: ${res.stdout}`);
+  // Declaring the route rewrites the turn state; the prompt's finding must survive it.
+  const safe = sid.replace(/[^A-Za-z0-9_.-]/g, '_');
+  const { nonce } = JSON.parse(fs.readFileSync(path.join(stateDir, `claude--${safe}.json`), 'utf-8'));
+  const [bin, base] = pyCmd();
+  const declared = spawnSync(bin, [...base, 'declare-claude', sid, nonce, 'to-tickets'], {
+    encoding: 'utf-8', env: { ...process.env, ASK_MATT_GATE_STATE_DIR: stateDir },
+  });
+  assert.strictEqual(declared.status, 0, `declare-claude failed: ${declared.stderr}`);
+  res = runGate('claude-pre-tool', makeEvent(sid, ISSUE_CREATE_CMD), { stateDir });
+  assert.notStrictEqual(permissionOf(res.stdout), 'deny', `denied after declaring: ${res.stdout}`);
+});
+
+test('outside session-end the second gh issue create still asks for approval', () => {
+  const stateDir = scratchStateDir('to-tickets-batch');
+  const sid = 'sess-to-tickets-batch';
+  // A session-end from an earlier turn (last_flow) does not carry the exemption into this one.
+  writeSessionState(stateDir, sid,
+    { nonce: 'n', flow: 'to-tickets', last_flow: 'session-end', yes: true, caveman: 'ultra' });
+  writePublishCount(stateDir, sid, 1);
+  const { stdout } = runGate('claude-pre-tool', makeEvent(sid, ISSUE_CREATE_CMD), { stateDir });
+  assert.strictEqual(permissionOf(stdout), 'deny', `to-tickets batch was not gated: ${stdout}`);
+  assert.match(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason, /ticket SET/);
+});

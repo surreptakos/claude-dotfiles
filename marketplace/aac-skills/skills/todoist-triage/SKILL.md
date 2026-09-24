@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-22T22:06:23Z'
-  previous-modified: '2026-09-22T21:44:42Z'
-  revision: '17'
-  content-sha: 12c1bea6baf6
+  modified: '2026-09-23T18:31:02Z'
+  previous-modified: '2026-09-23T18:26:45Z'
+  revision: '20'
+  content-sha: 7deef8ccc15b
 ---
 
 # todoist-triage
@@ -188,7 +188,9 @@ The order, and nothing else above it:
 
 Inbox items judged personal are named on line 2's tail, by title, as left alone.
 
-Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. Line 6 is the one exception: it may spell the record filenames so he can go find them.
+**End every run with the Day Board link (Dan, 2026-09-23).** The last line of the run's output, after the tier-2 questions, is the board's URL, `https://claude.ai/artifact/SQcwMLBKKrtdEPBHtJfGMi`, so he can open it in one tap; the notification carries the same URL as its last line. A run whose board write failed still links it, beside the line naming the board dark.
+
+Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. Line 6 and the closing board link are the exceptions: line 6 may spell the record filenames so he can go find them.
 
 **Then append this run's record.** After the report, from the `aac-routines` checkout:
 
@@ -206,7 +208,7 @@ Done when Dan can see the board state without opening Todoist, knows which surfa
 
 ## Cadence
 
-On demand, plus the scheduled run weekdays at 8:00 AM. The scheduled run **applies tier 1, sends the status, then raises every tier-2 question** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. Nobody is at the keyboard, so the questions wait in the session until Dan arrives; the notification is what brings him, and he answers them there. Waiting in an open question is not the same as being parked for tomorrow. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
+On demand, plus the scheduled run weekdays at 8:30 AM America/Chicago, a desktop scheduled task since 2026-09-23 (the cloud Routine is paused; never run both). 8:30 is the earliest slot that catches the day's first Power Automate export (08:15 CT, landing 08:16), whose 48-hour mail window carries the overnight mail; an earlier run leaves the night to the live tail. The scheduled run **applies tier 1, sends the status, then raises every tier-2 question** — that is the whole point of the tier, and a scheduled run that only proposes is the four-runs-nothing-applied failure by another name. Nobody is at the keyboard, so the questions wait in the session until Dan arrives; the notification is what brings him, and he answers them there. Waiting in an open question is not the same as being parked for tomorrow. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
 
 ## Filters (exist in Todoist, favorited)
 

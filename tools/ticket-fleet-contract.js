@@ -45,7 +45,7 @@ const TICKET_REQUIRED = ['number', 'title', 'criteria', 'blockedBy', 'keepOpen',
  */
 const FORKS = [
   { repo: 'surreptakos/aac-routines', path: '.claude/workflows/ticket-fleet.js', keeps: 'Setup phase (sub-session auth, issue 83) and the no-cleanup history' },
-  { repo: 'surreptakos/aac-cockpit', path: '.claude/workflows/ticket-fleet.js', keeps: 'PROMPT_CONTRACT' },
+  { repo: 'surreptakos/aac-sales-cockpit', path: '.claude/workflows/ticket-fleet.js', keeps: 'PROMPT_CONTRACT' },
 ];
 
 const RUNBOOKS = [

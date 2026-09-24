@@ -1,14 +1,20 @@
 # Master orchestrator runbook (cloud, per-repo Routine)
 
-The master orchestrator runs as four hourly Routines Dan created in the claude.ai Routines UI —
-one per repo, each with that repo as source and the connectors ticked. Every Routine wake is a
+Until 2026-09-23 the master orchestrator ran as four hourly Routines Dan created in the claude.ai
+Routines UI — one per repo, each with that repo as source and the connectors ticked. Every Routine wake is a
 FRESH cloud session. It boots from the repo's per-repo state issue, claims the venue, dispatches
 triage / to-tickets / fleet in-session, does the merge pass, writes `Pass complete`, and ends.
 Continuity lives in the state issue; nothing else outlives the run. Rewritten 2026-09-15 for the
-per-repo Routine model (issue 217, parent #207); the retired PC-venue variant lives on in
-`LOCAL-RUNBOOK.md` for history.
+per-repo Routine model (issue 217, parent #207).
 
-**Venue:** this file describes the CLOUD Routine masters, the only supported venue after cutover.
+> **Cloud venue paused 2026-09-23 (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`).**
+> The masters run on the desktop again under `LOCAL-RUNBOOK.md`, which overrides this file. The
+> shared rules here still bind a local master: the guard (venue value `local-pc`), the empty-pass
+> skip, dispatch, the merge policy, the typed-user-turn rule and cross-repo references. The
+> cloud-only parts are kept so un-pausing the Routines is a toggle: bootstrap self-heal, "Two repos,
+> one session" and the Routine boot prompt.
+
+**Venue:** this file describes the CLOUD Routine masters. That venue is paused (see above).
 One venue per repo — a Routine that finds a live `cloud-routine` venue younger than 90 minutes on
 its own state issue exits at boot without dispatching anything.
 
@@ -202,7 +208,8 @@ In this order:
    issue, written `owner/repo#N`, so the run survives the container. A repo without
    `tools/fleet-run-record.js` has nothing to run — say so in the heartbeat and move on.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
-   append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
+   append a `**Heartbeat N — <UTC>**` line to the heartbeat section, the time taken from
+   `date -u +'%Y-%m-%d %H:%M'` at write time, never from memory (issue 711). Ground truth is the tracker
    and PR list — never a subagent self-report.
 
 ## Merge
@@ -229,6 +236,14 @@ PR body says:
   `ready-for-agent`) so the next scout does not re-implement it and the grill phase surfaces it.
 
 A PR that fails the bar stays open and is the next pass's first work item.
+
+**A fleet PR merges itself (issue 770).** The deliver stage's STEP D waits for CI on the PR it
+opened, applies the bar above, squash-merges with `expectedHeadSha`, re-runs its pre-push merge
+once when the default branch moved under it, and stops on a red check or a changes-requested
+review; the run log says `MERGED <sha>` or `open, not merged: <why>` per ticket. The pass above is
+the backstop for a PR older than one cycle, never the first merger. The same holds for a session's
+own PR: the session that opened it is the only party that knows the draft is finished, so it marks
+it ready and merges it, same bar, before the session ends.
 
 **The discoveries PR.** The fleet's Report phase opens one PR per run from
 `agent/fleet-discoveries-wf_<runId>`, carrying only the run's `FOLLOW-UPS.md` bullets (issue 360).

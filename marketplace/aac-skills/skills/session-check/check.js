@@ -1065,16 +1065,27 @@ function harnessChecks() {
  *  ~/.claude/hook-state/aac-bootstrap/state.json, and STOP with a named reason when the marker
  *  is missing, its JSON is unreadable, or the skills it recorded are not on disk.
  *
- *  The comparison to master's payload version is informational (`on vX, master offers vY`);
- *  master will overtake a session's cached copy and re-cloning is the next session's job. That
+ *  A payload behind master's (read off the remote at check time) is a WARNING naming both
+ *  versions and the stale skills (issue 703), not a STOP: re-running the bootstrap fixes it. That
  *  line replaces the dotfiles-freshness loop's "N commits behind" reading on the cloud path.
  *  Local runs skip the whole block: the desktop machine IS where the payload is authored, and
  *  the check would false-STOP on every clean local session. */
 const bootstrap = require('./bootstrap-check');
+// Issue 669: read once, before any check, after waiting out a bootstrap still running in this
+// SessionStart, so the whole report describes the post-bootstrap container (main sets it).
+let bootRead = null;
 function bootstrapChecks() {
   if (!IS_CLOUD) return;
   head('Cloud bootstrap');
-  const r = bootstrap.readMarker(process.env);
+  const r = bootRead || bootstrap.readMarker(process.env);
+  if (r.state === 'pending') {
+    // Issue 669: the deadline passed with the bootstrap's lock still held. What the marker says
+    // now is what the bootstrap is replacing, so this block describes nothing else.
+    warn(`aac-bootstrap still running when this report was taken — waited ${Math.round(r.waitedMs / 1000)}s on its lock ${r.lock}; this report was taken before the bootstrap finished, so it quotes no payload, skills or governance hooks`);
+    note('re-read it once the bootstrap finishes: `/session-start --refresh` — do not re-run the bootstrap, it is running');
+    return;
+  }
+  if (r.waitedMs) note(`waited ${Math.round(r.waitedMs / 1000)}s for this session's bootstrap to finish before reading its marker (issue 669)`);
   if (r.state === 'missing') {
     stop(`aac-bootstrap marker absent at ${r.path} — the SessionStart bootstrap hook did not run`);
     note('the hook is `.claude/hooks/session-start.sh` (or `session-start-bootstrap.sh` beside a repo\'s own hook, issue 542) in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true');
@@ -1130,8 +1141,21 @@ function bootstrapChecks() {
   if (self.state === 'ok') note(`bootstrap re-run seated at ${self.hook}, so a session on any project dir bootstraps (issue 643)`);
   else note('marker records no plugin_root: a pre-v30 bootstrap, whose merged governance hooks could not run (issue 614) — the next container picks up the current hook');
   const cmp = bootstrap.compareToMaster(marker, process.env);
-  if (cmp.state === 'drift') note(`payload v${cmp.marker} loaded; master offers v${cmp.master} — this session is running the older skills, hooks and rules; take master now with \`bash ~/.claude/hooks/aac-bootstrap.sh\` (the home-anchored seat), or \`bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"\` when this container predates it`);
-  else if (cmp.state === 'same') note(`payload matches dotfiles master (v${cmp.master})`);
+  if (cmp.state === 'drift') {
+    // Issue 703: a Routine ran an old todoist-triage while this line was a dim note (and, before
+    // issue 674, a false "matches master"). A served payload behind master is a warning, and it
+    // names the skills the Skill tool would serve stale.
+    warn(`payload v${cmp.marker} served; origin/master offers v${cmp.master} — this session is running the older skills, hooks and rules`);
+    if (Array.isArray(cmp.stale) && cmp.stale.length) {
+      const shown = cmp.stale.slice(0, 12).map((s) => `${s.name} ${s.local ? `r${s.local}` : 'absent'} -> r${s.master}`);
+      note(`stale skills (installed -> master): ${shown.join(', ')}${cmp.stale.length > 12 ? `, ...and ${cmp.stale.length - 12} more` : ''}`);
+    } else if (Array.isArray(cmp.stale)) {
+      note('no skill revision differs; the drift is in hooks, rules or manifest');
+    } else {
+      note('which skills are stale could not be listed here');
+    }
+    note('take master now with `bash ~/.claude/hooks/aac-bootstrap.sh` (the home-anchored seat), or `bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"` when this container predates it');
+  } else if (cmp.state === 'same') note(`payload matches dotfiles master (v${cmp.master})`);
   else note(`payload v${cmp.marker} loaded; master version could not be read here`);
 }
 
@@ -1202,6 +1226,7 @@ function accountChecks() {
 async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
+  if (IS_CLOUD) bootRead = bootstrap.awaitBootstrap(process.env);
   gitChecks();
   harnessChecks();
   bootstrapChecks();

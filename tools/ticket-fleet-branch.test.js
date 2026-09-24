@@ -23,8 +23,9 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
-  stableJson, stableText, stableList, priorFindingsBlock,
+  stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
+  classifyBranchLookup, classifyDelivery,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -544,7 +545,7 @@ function generatedBlock(scriptPath = FLEET_SCRIPT) {
 // Evaluated out of the script's generated block so the lane body below resolves them.
 function loadStableHelpers(scriptPath) {
   // eslint-disable-next-line no-new-func
-  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
+  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf };`)();
 }
 
 // Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
@@ -583,6 +584,8 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     // module's worktreeMismatch - the very function the generated block carries (issue 486) - so
     // the decision under test is the real one.
     revParse: async () => null,
+    // Issue 654: the Deliver-result classifier is the module's own, the one the generated block carries.
+    classifyDelivery,
   }, stubs)));
 }
 
@@ -603,6 +606,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+    unmetCriteriaOf: helpers.unmetCriteriaOf,
     worktreeMismatch,
     treeGuardCheck,
   }, stubOverrides), scriptPath);
@@ -1094,7 +1098,7 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(prompt, /mcp__github__create_pull_request/,
       'a refused PR call has the MCP route as its fallback (issue 245 evidence), so the refusal cannot end the delivery either');
     const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /enum: \['clean', 'resolved', 'blocked', 'unmerged-by-classifier'\]/,
+    assert.match(src, /enum: \['clean', 'resolved', 'blocked', 'unmerged-by-classifier'[,\]]/,
       'the DELIVERED schema must accept the status the prompt asks for, or the deliverer cannot return it');
   });
 
@@ -1492,6 +1496,61 @@ function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
 
 const TICKET_42 = { number: 42, title: 'a ticket', criteria: '- do the thing', keepOpen: false };
 
+// ---- The verdict decides Closes vs Refs (issue 699) ----
+// aac-bill-intake#682 was closed by a PR whose verifier had passed a branch that stopped short of
+// the ticket. A passing verdict that names any criterion unmet now makes the PR say Refs #N and
+// list those criteria; a verdict with none still says Closes #N.
+
+async function deliverPromptFor(verdict) {
+  const calls = [];
+  const agentMock = async (prompt, opts) => {
+    calls.push({ label: opts.label, prompt });
+    if (opts.label === 'impl:#42.1') {
+      return { branch: 'agent/issue-42-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    }
+    if (opts.label === 'verify:#42.1') return verdict;
+    if (opts.label === 'deliver:#42') return { pushed: true, prUrl: 'https://github.com/x/y/pull/9', mergeStatus: 'clean', conflictPaths: [] };
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, TICKET_42, 0);
+  const deliver = calls.find((c) => c.label === 'deliver:#42');
+  assert.ok(deliver, 'a passing verdict must reach the deliver stage');
+  return deliver.prompt;
+}
+
+test('a passing verdict that marks criteria unmet delivers Refs #N, no closing keyword, and lists them (issue 699)', async () => {
+  const prompt = await deliverPromptFor({
+    pass: true, evidence: 'doc-only change; suite exit 0', failures: [],
+    unmetCriteria: ['- [ ] remove the fallback once the owner rules', '  ', '- [ ] migrate the 5 work orders'],
+  });
+  assert.match(prompt, /"Refs #42"/, 'an unmet criterion must turn the PR reference into Refs #N');
+  assert.doesNotMatch(prompt, /"Closes #42"/, 'no closing keyword may be offered while a criterion is unmet');
+  assert.match(prompt, /never write Closes, Fixes or Resolves/);
+  assert.match(prompt, /Acceptance criteria not met by this PR/, 'the PR body must carry a section for the unmet criteria');
+  assert.match(prompt, /- - \[ \] remove the fallback once the owner rules\n\s+- - \[ \] migrate the 5 work orders/,
+    'each unmet criterion must be listed by its text, blank entries dropped');
+});
+
+test('a passing verdict with every criterion met still delivers Closes #N (issue 699)', async () => {
+  for (const verdict of [
+    { pass: true, evidence: 'suite exit 0', failures: [], unmetCriteria: [] },
+    { pass: true, evidence: 'suite exit 0' },
+  ]) {
+    const prompt = await deliverPromptFor(verdict);
+    assert.match(prompt, /"Closes #42"/, 'a verdict naming no unmet criterion must close the ticket');
+    assert.doesNotMatch(prompt, /"Refs #42"/);
+    assert.doesNotMatch(prompt, /Acceptance criteria not met by this PR/);
+  }
+});
+
+test('unmetCriteriaOf in the fleet script matches tools/ticket-fleet-branch.js (issue 699)', () => {
+  const inlined = loadStableHelpers(FLEET_SCRIPT);
+  for (const v of [null, {}, { unmetCriteria: [] }, { unmetCriteria: ['a', ' ', null, 'b\r\n'] }, { unmetCriteria: 'one' }]) {
+    assert.deepEqual(inlined.unmetCriteriaOf(v), unmetCriteriaOf(v));
+  }
+  assert.deepEqual(unmetCriteriaOf({ unmetCriteria: ['a', ' ', null, 'b\r\n'] }), ['a', 'b']);
+});
+
 test('resume-stable helpers inlined in the fleet script match tools/ticket-fleet-branch.js', () => {
   const inlined = loadStableHelpers(FLEET_SCRIPT);
   const verdict = { evidence: 'ran it', pass: false, failures: ['one', '  two  ', '', null, 3, { b: 1, a: 2 }] };
@@ -1711,6 +1770,7 @@ async function driveFinish(scriptPath, agentMock, journal, cfgOverrides = {}) {
     stableList: helpers.stableList,
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     treeGuardCheck: async (label, ticketNumber) => { checkpoints.push(`${label}#${ticketNumber}`); },
+    classifyDelivery,
     DELIVERED: {},
     DISCOVERY_REPORT: {},
   }));
@@ -1783,4 +1843,265 @@ test(`${FLEET_SCRIPT_REL} finish mode is reached from args.finishRunId without a
   assert.ok(finishIdx > 0 && scoutIdx > finishIdx,
     'the finish branch must return before the scout agent is ever started');
   assert.match(src, /label: `journal-read:\$\{finishRunId\}`/, 'finish mode must read the dead run journal through its own agent');
+});
+
+// ---- "Could not tell" is not "absent" (issue 654) ----
+// Run 6ab1884a: the implementer pushed, the verifier passed, and the deliverer returned
+// {mergeStatus:"blocked", conflictPaths:[], blockedReason:"Branch ... not found on origin or locally"}
+// while the ref sat on origin. The ticket was listed under `failed`, as if nothing were to deliver.
+test('classifyBranchLookup calls a branch absent only on two authoritative exit-2 lookups (issue 654)', () => {
+  assert.equal(classifyBranchLookup([]), 'undetermined', 'no lookup at all says nothing');
+  assert.equal(classifyBranchLookup([{ exitCode: 0, output: '' }]), 'undetermined', 'an exit 0 that printed nothing is not an answer');
+  assert.equal(classifyBranchLookup([{ exitCode: 128, output: 'fatal: could not read from remote repository' }]), 'undetermined');
+  assert.equal(classifyBranchLookup([{ exitCode: 2, output: '' }]), 'undetermined', 'one lookup is never enough to call a branch absent');
+  assert.equal(classifyBranchLookup([{ exitCode: 2, output: '' }, { exitCode: 2, output: '' }]), 'absent');
+  assert.equal(classifyBranchLookup([{ exitCode: 128, output: '' }, { exitCode: 0, output: 'c4065bcc\trefs/heads/agent/issue-629-attempt1-wf_6ab1884a-w1' }]), 'present',
+    'a later lookup that prints the ref wins over an earlier failed one');
+});
+
+function lane654Mock(branch, { implPushed, pushBack, delivery }) {
+  const calls = [];
+  const agentMock = async (_prompt, opts) => {
+    calls.push(opts.label);
+    if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: implPushed, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label.startsWith('push:')) return pushBack;
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (opts.label.startsWith('deliver:')) return delivery;
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  return { calls, agentMock };
+}
+
+test(`${FLEET_SCRIPT_REL} a deliverer whose first ls-remote comes back empty does not conclude the branch is missing (issue 654)`, async () => {
+  const branch = 'agent/issue-629-attempt1-wf_testrun-w0';
+  const { agentMock } = lane654Mock(branch, {
+    implPushed: false,
+    pushBack: { pushed: false, output: 'fatal: unable to access origin' },
+    delivery: { pushed: false, prUrl: '', mergeStatus: 'branch-unconfirmed', conflictPaths: [], branchLookup: [{ exitCode: 128, output: '' }], blockedReason: 'fatal: unable to access origin' },
+  });
+  const { result } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 629, title: 't', criteria: '' }, 0);
+  assert.equal(result.mergeStatus, 'branch-unconfirmed');
+  assert.deepEqual(result.conflictPaths, [], 'a lookup failure is not a merge conflict');
+  assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'a lookup that could not tell must not be reported as a blocked merge');
+  assert.match(result.deliveryFailure, /could not determine whether branch agent\/issue-629-attempt1-wf_testrun-w0 is on origin/);
+  assert.doesNotMatch(result.deliveryFailure, /is not on origin/, 'one failed ls-remote must never read as "the branch is missing"');
+  assert.equal(result.inconsistency, null, 'the run never recorded this branch as pushed, so this is not an inconsistency');
+  const prompt = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-DELIVER-PROMPT');
+  assert.match(prompt, /git ls-remote --exit-code --heads origin \$\{branch\}/, 'the deliverer must run the lookup whose exit code tells absent from unknown');
+  assert.match(prompt, /mergeStatus:"branch-unconfirmed"/, 'and return an unseen branch under its own status');
+  assert.match(prompt, /never mergeStatus "blocked"/, 'never as a blocked merge');
+});
+
+test(`${FLEET_SCRIPT_REL} a pushed, verified branch the deliverer cannot find is an inconsistency naming the branch (issue 654)`, async () => {
+  const branch = 'agent/issue-629-attempt1-wf_testrun-w0';
+  const { calls, agentMock } = lane654Mock(branch, {
+    implPushed: true,
+    delivery: {
+      pushed: false, prUrl: '', mergeStatus: 'blocked', conflictPaths: [], branchLookup: [{ exitCode: 0, output: '' }],
+      blockedReason: `Branch ${branch} not found on origin or locally; git ls-remote --heads origin returned no matching refs`,
+    },
+  });
+  const { result, logs } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 629, title: 't', criteria: '' }, 0);
+  assert.deepEqual(calls, ['impl:#629.1', 'verify:#629.1', 'deliver:#629']);
+  assert.deepEqual(result.inconsistency && result.inconsistency.branch, branch, 'the inconsistency must name the branch');
+  assert.match(result.inconsistency.detail, /^INCONSISTENCY: branch agent\/issue-629-attempt1-wf_testrun-w0 is recorded pushed:true with a verifier pass:true/);
+  assert.match(result.inconsistency.detail, /manual delivery/, 'it must say the branch may need delivering by hand');
+  assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'it is not a blocked merge, whatever mergeStatus the deliverer chose');
+  assert.ok(logs.some((m) => /INCONSISTENCY/.test(m)), 'the inconsistency must be logged loudly');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\)/,
+    'the run result must keep an inconsistent ticket out of `failed`');
+  assert.match(src, /inconsistent: clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent`');
+});
+
+test(`${FLEET_SCRIPT_REL} finish mode reports a journal-pushed branch the deliverer cannot find as inconsistent (issue 654)`, async () => {
+  const branch = 'agent/issue-324-attempt1-wf_dead-w1';
+  const journal = Object.assign({}, DEAD_RUN_JOURNAL, {
+    tickets: [Object.assign({}, DEAD_RUN_JOURNAL.tickets[1], { pushed: true })],
+  });
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label.startsWith('deliver:')) {
+      return { pushed: false, prUrl: '', mergeStatus: 'branch-unconfirmed', conflictPaths: [], branchLookup: [{ exitCode: 128, output: 'fatal' }, { exitCode: 2, output: '' }], blockedReason: 'fatal' };
+    }
+    if (opts.label === 'followups-writer') return { branch: 'b', sha: 's', prUrl: '', appended: 1 };
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  const { result } = await driveFinish(FLEET_SCRIPT, agentMock, journal);
+  assert.deepEqual(result.failed, [], 'an inconsistency is not an ordinary failure');
+  assert.equal(result.inconsistent.length, 1);
+  assert.equal(result.inconsistent[0].branch, branch);
+  assert.match(result.inconsistent[0].detail, /INCONSISTENCY: branch agent\/issue-324-attempt1-wf_dead-w1/);
+});
+
+// ---- Implementer model per ticket from a Jev difficulty Score (issue 725) ----
+// Jev is stubbed throughout: the `difficulty` agent is the only thing that talks to the service,
+// so a mocked agent returning Jev-shaped bodies is the whole service boundary.
+const DIFF_CFG = { implModel: 'heavy', implPins: { mechanical: 'light', 'multi-file': 'mid', design: null }, deliverModel: 'd' };
+function jevBody(scores) {
+  const answers = {};
+  for (const [n, score] of Object.entries(scores)) answers[`ticket-${n}`] = { type: 'score', score, confidence: 0.9 };
+  return JSON.stringify({ model: 'jev-1.13.0', answers });
+}
+function generatedPickImplModel() {
+  // eslint-disable-next-line no-new-func
+  return new Function(`${generatedBlock()}\nreturn pickImplModel;`)();
+}
+async function driveScoreDifficulty(agentMock, tickets, cfgOverrides = {}) {
+  const logs = [];
+  const body = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-DIFFICULTY');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${generatedBlock()}\n${body}\nreturn scoreDifficulty;\n}`);
+  const scoreDifficulty = await wrapper(laneScope({
+    agent: agentMock, log: (m) => logs.push(m), wave: [], cfg: Object.assign({}, DIFF_CFG, cfgOverrides),
+    scout: { repoMap: 'tools/ holds the scripts' }, scratchRoot: '/tmp/fleet-t', scratchFile: (n) => `/tmp/fleet-t/${n}`,
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+  return { levels: await scoreDifficulty(tickets), logs };
+}
+const DIFF_TICKETS = [
+  { number: 1, title: 'fix a typo', criteria: '- [ ] typo gone', kind: 'code' },
+  { number: 2, title: 'add a flag and its tests', criteria: '- [ ] flag', kind: 'code' },
+  { number: 3, title: 'design a new contract', criteria: '- [ ] contract', kind: 'code' },
+];
+
+test('stubbed Jev: each of the three levels maps to its own attempt-1 pin, retries to the heaviest', async () => {
+  let prompt = null;
+  const { levels } = await driveScoreDifficulty(async (p, opts) => {
+    assert.equal(opts.label, 'difficulty');
+    prompt = p;
+    return { status: 'ok', body: jevBody({ 1: 0.1, 2: 1.2, 3: 1.8 }) };
+  }, DIFF_TICKETS.concat([{ number: 4, title: 'probe', criteria: '', kind: 'probe' }]));
+  assert.deepEqual(Object.fromEntries(Object.entries(levels).map(([n, d]) => [n, d.level])),
+    { 1: 'mechanical', 2: 'multi-file', 3: 'design' }, 'probe tickets are not scored');
+  assert.match(prompt, /"ticket-1":\{"type":"score"/, 'the agent posts one Score per code ticket');
+  assert.doesNotMatch(prompt, /"ticket-4"/);
+  const pickImplModel = generatedPickImplModel();
+  assert.deepEqual(['mechanical', 'multi-file', 'design'].map(l => pickImplModel(l, 1, DIFF_CFG)), ['light', 'mid', 'heavy']);
+  assert.deepEqual(['mechanical', 'multi-file', 'design'].map(l => pickImplModel(l, 2, DIFF_CFG)), ['heavy', 'heavy', 'heavy'],
+    'a retry after a failed verify takes the heaviest pin');
+});
+
+test('stubbed Jev unavailable: no levels, so every ticket and attempt runs on implModel', async () => {
+  const pickImplModel = generatedPickImplModel();
+  const shapes = [
+    async () => ({ status: 'unavailable', body: '', detail: 'curl exit 28 (timeout)' }),
+    async () => ({ status: 'ok', body: '<html>502</html>' }),
+    async () => { throw new Error('agent died'); },
+    async () => null,
+  ];
+  for (const mock of shapes) {
+    const { levels, logs } = await driveScoreDifficulty(mock, DIFF_TICKETS);
+    assert.deepEqual(levels, {});
+    assert.ok(logs.some(l => /implModel/.test(l)), 'the fallback is logged');
+    for (const attempt of [1, 2, 3]) assert.equal(pickImplModel(null, attempt, DIFF_CFG), 'heavy');
+  }
+  const off = await driveScoreDifficulty(async () => { throw new Error('must not be called'); }, DIFF_TICKETS, { difficulty: false });
+  assert.deepEqual(off.levels, {}, 'difficulty:false skips the call');
+});
+
+test('runCodeLane runs attempt 1 on the level pin, the retry on the heaviest, and records both', async () => {
+  const pickImplModel = generatedPickImplModel();
+  for (const [difficulty, expected] of [['mechanical', ['light', 'heavy']], [null, ['heavy', 'heavy']]]) {
+    const models = [];
+    let verifies = 0;
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('impl:')) { models.push(opts.model); return { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] }; }
+      if (opts.label.startsWith('verify:')) return ++verifies === 1 ? { pass: false, evidence: 'x', failures: ['criterion 2 unmet'] } : { pass: true, evidence: 'ok', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/1' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 725, title: 't', criteria: '', difficulty }, 0,
+      DIFF_CFG, 'inv1', null, { pickImplModel });
+    assert.deepEqual(models, expected);
+    assert.equal(result.difficulty, difficulty);
+    assert.deepEqual(result.implModels, expected.map((model, i) => ({ attempt: i + 1, model })), 'the run record names the model per attempt');
+  }
+  assert.match(fs.readFileSync(FLEET_SCRIPT, 'utf8'), /implModels: clean\.filter\(r => r\.kind === 'code'\)\.map\(r => \(\{ ticket: r\.ticket, difficulty:/,
+    'the run result names the level and models per ticket');
+});
+
+test('difficultyEvalSet labels a ticket "hard" when a fleet branch shows attempt 2 or later', () => {
+  const { difficultyEvalSet } = require('./ticket-fleet-branch.js');
+  assert.deepEqual(difficultyEvalSet([
+    'agent/issue-12-attempt1-wf_a-w0', 'agent/issue-12-attempt2-wf_a-w0',
+    'agent/issue-7-attempt1-wf_b-w1', 'feat/other', 'agent/fleet-discoveries-wf_a',
+  ]), [{ number: 7, label: null, maxAttempt: 1 }, { number: 12, label: 'hard', maxAttempt: 2 }]);
+});
+
+// Issue 757: every MCP tool the fleet calls takes owner and repo as arguments. A prompt that never
+// named them left the open-pr-scan agent to guess ("Dan-AAC"), and its fallback call stalled run
+// 6ab4840f for 106 minutes. Every MCP tracker rule, and the open-pr-scan MCP steps, name the source.
+test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come from (issue 757)`, () => {
+  const rules = loadTrackerRules(FLEET_SCRIPT, 'mcp');
+  const texts = {
+    scoutList: rules.scoutList('ready-for-agent'),
+    scoutExplicit: rules.scoutExplicit([1]),
+    handoffRead: rules.handoffRead(1),
+    commentPost: rules.commentPost('/tmp/x'),
+    labelSwap: rules.labelSwap(1),
+    blockerState: rules.blockerState([1]),
+    prCreate: rules.prCreate('/tmp/x'),
+    prComment: rules.prComment('/tmp/x'),
+  };
+  for (const [name, text] of Object.entries(texts)) {
+    assert.match(text, /git remote get-url origin/, `mcp rule ${name} does not say where owner/repo come from`);
+  }
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const fn = src.slice(src.indexOf('async function dropTicketsWithOpenPr'), src.indexOf("found = await agent(", src.indexOf('async function dropTicketsWithOpenPr')));
+  assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
+});
+
+// Issue 770: the deliverer merges the PR it opened, in the instrument the rest of the stage uses.
+test(`${FLEET_SCRIPT_REL} deliver rules carry the PR merge in both instruments (issue 770)`, () => {
+  const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
+  const gh = loadTrackerRules(FLEET_SCRIPT, 'gh');
+  for (const [name, rules] of [['mcp', mcp], ['gh', gh]]) {
+    for (const fn of ['prState', 'prChecks', 'prReviews', 'prMerge', 'issueState', 'issueClose']) {
+      assert.equal(typeof rules[fn], 'function', `${name} rules lack ${fn}`);
+    }
+    assert.match(rules.prMerge(7, 'fix: x (#7)'), /squash/, `${name} prMerge must squash`);
+    assert.match(rules.prChecks(7), /check.runs/, `${name} prChecks must read the head's check runs`);
+  }
+  assert.match(mcp.prMerge(7, 'fix: x (#7)'), /mcp__github__merge_pull_request/);
+  assert.match(mcp.prMerge(7, 'fix: x (#7)'), /expectedHeadSha/);
+  assert.match(gh.prMerge(7, 'fix: x (#7)'), /gh api --method PUT repos\/\{owner\}\/\{repo\}\/pulls\/7\/merge/);
+  assert.match(gh.prMerge(7, 'fix: x (#7)'), /-f sha=/);
+  assert.doesNotMatch(gh.prMerge(7, 'fix: x (#7)').split('(never')[0], /gh pr merge/, 'gh prMerge must not run gh pr merge');
+  assert.match(gh.prState(7), /never `gh pr view`/);
+});
+
+test(`${FLEET_SCRIPT_REL} deliver prompt runs STEP D: wait for CI, the runbook bar, merge, then the ticket (issue 770)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const prompt = src.slice(src.indexOf('function deliverPrompt('), src.indexOf('// [FLEET-DELIVER-PROMPT-END]'));
+  assert.match(prompt, /STEP D - merge the PR you opened/, 'STEP D missing');
+  assert.match(prompt, /at most 20 minutes/, 'the CI wait must name its bound');
+  assert.match(prompt, /\$\{rules\.prChecks\(/, 'D1 must read check runs through the instrument rule');
+  assert.match(prompt, /\$\{rules\.prMerge\(/, 'D4 must merge through the instrument rule');
+  assert.match(prompt, /never merge a head with a red check/);
+  assert.match(prompt, /\$\{rules\.labelSwap\(t\.number\)\}/, 'a keep-open ticket is relabelled ready-for-human after the merge');
+  assert.match(prompt, /\$\{rules\.issueClose\(t\.number/, 'a Closes ticket still open after the merge is closed citing the PR');
+  assert.doesNotMatch(prompt, /Do NOT merge the PR/, 'the old prohibition would contradict STEP D');
+  const delivered = src.slice(src.indexOf('const DELIVERED = '), src.indexOf('const COMMENTED = '));
+  for (const key of ['merged', 'mergeSha', 'prState']) {
+    assert.match(delivered, new RegExp(`required: \\[[^\\]]*'${key}'`), `DELIVERED must require ${key}`);
+  }
+});
+
+// Issue 770: every run refreshes the served repo's copy of this script from claude-dotfiles master,
+// except the forks the contract names.
+test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles master, forks excepted (issue 770)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const block = extractBetween(src, 'FLEET-REFRESH');
+  assert.match(block, /https:\/\/raw\.githubusercontent\.com\/surreptakos\/claude-dotfiles\/master\/aac-skills\/ticket-fleet/);
+  assert.match(block, /label: 'fleet-refresh', phase: 'Setup'/);
+  assert.match(block, /sha256sum/, 'a copy that already matches must not be rewritten');
+  assert.match(block, /git commit -m "chore\(fleet\): refresh ticket-fleet script from claude-dotfiles master \(issue 770\)"/);
+  assert.match(block, /never created/, 'a repo with no copy launches from the plugin path and gets none');
+  const forks = /const FLEET_FORKS = \[([^\]]*)\]/.exec(block);
+  assert.ok(forks, 'FLEET_FORKS missing');
+  const listed = forks[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean).sort();
+  const contract = require(path.join(REPO_ROOT, 'tools', 'ticket-fleet-contract.js'));
+  assert.deepEqual(listed, contract.FORKS.map((f) => f.repo).sort(), 'the inlined fork list must equal the contract FORKS');
+  const setupIdx = src.indexOf("phase('Setup')");
+  assert.ok(src.indexOf('[FLEET-REFRESH-START]') > setupIdx && src.indexOf('[FLEET-REFRESH-END]') < src.indexOf('if (treeGuardOn) {', setupIdx),
+    'the refresh runs first in Setup, before the tree-guard baseline, so its commit is inside the baseline');
 });

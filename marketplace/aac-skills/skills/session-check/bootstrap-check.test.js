@@ -6,7 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { readMarker, verifySkills, compareToMaster, verifyPluginRoot } = require('./bootstrap-check');
+const { spawn } = require('node:child_process');
+const {
+  readMarker, awaitBootstrap, lockPath, verifySkills, compareToMaster, verifyPluginRoot,
+} = require('./bootstrap-check');
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-check-'));
@@ -92,15 +95,18 @@ test('readMarker returns ok with the parsed marker', () => {
   assert.equal(r.marker.payload_version, '2026.9.15');
 });
 
+// The date is taken an hour before this machine's boot, never a fixed one: a fixed date reads
+// as stale only on a machine booted after it, so a long-running desktop went red (issue 681).
 test('readMarker returns stale when the marker predates this container (issue 643)', () => {
   const f = fixture();
+  const beforeBoot = new Date(Date.now() - os.uptime() * 1000 - 3600 * 1000).toISOString();
   writeMarker(f.marker, {
     payload_version: '2026.9.15', skills: ['ticket-fleet'],
-    installed_at: '2026-09-19T14:02:16Z',
+    installed_at: beforeBoot,
   });
   const r = readMarker(env(f));
   assert.equal(r.state, 'stale');
-  assert.equal(r.writtenAt, '2026-09-19T14:02:16Z');
+  assert.equal(r.writtenAt, beforeBoot);
   assert.equal(r.marker.payload_version, '2026.9.15');
 });
 
@@ -117,6 +123,39 @@ test('readMarker: a marker with no installed_at is ok, not stale — staleness n
   const f = fixture();
   writeMarker(f.marker, { payload_version: '2026.9.15', skills: ['ticket-fleet'] });
   assert.equal(readMarker(env(f)).state, 'ok');
+});
+
+// Issue 669: the gate read the image's marker while this session's bootstrap was still
+// installing, and quoted a stale line and an old payload version fifteen seconds out of date.
+test('awaitBootstrap waits out a held lock and returns the marker the bootstrap wrote', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    payload_version: '2026.9.212207', skills: ['ticket-fleet'], installed_at: '2026-09-21T22:13:24Z',
+  });
+  const e = env(f);
+  fs.mkdirSync(lockPath(e));
+  const fresh = JSON.stringify({ payload_version: '2026.9.212227', skills: ['ticket-fleet'], installed_at: new Date().toISOString() });
+  // A separate process, as the real bootstrap is: awaitBootstrap blocks this one while it waits.
+  spawn(process.execPath, ['-e', `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(f.marker)}, ${JSON.stringify(fresh)}); require('fs').rmdirSync(${JSON.stringify(lockPath(e))}); }, 600)`], { stdio: 'ignore' }).unref();
+  const r = awaitBootstrap({ ...e, BOOTSTRAP_WAIT_MS: '20000' }, 50);
+  assert.equal(r.state, 'ok');
+  assert.equal(r.marker.payload_version, '2026.9.212227');
+  assert.ok(r.waitedMs > 0);
+});
+
+test('awaitBootstrap says pending, not stale, when the bootstrap still holds its lock at the deadline', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    payload_version: '2026.9.212207', skills: ['ticket-fleet'], installed_at: '2026-09-21T22:13:24Z',
+  });
+  const e = env(f, { BOOTSTRAP_WAIT_MS: '200' });
+  fs.mkdirSync(lockPath(e));
+  const r = awaitBootstrap(e, 50);
+  assert.equal(r.state, 'pending');
+  assert.equal(r.lock, lockPath(e));
+  // A lock the image carried (older than this boot) is no bootstrap of this session's.
+  fs.utimesSync(lockPath(e), new Date('2020-01-01'), new Date('2020-01-01'));
+  assert.equal(awaitBootstrap(e, 50).state, 'stale');
 });
 
 test('verifySkills reports every named skill that has no SKILL.md on disk', () => {
@@ -187,6 +226,32 @@ test('compareToMaster reads the version master offers from the remote, not the l
   assert.equal(c.state, 'drift');
   assert.equal(c.master, '2026.9.212113');
   assert.ok(calls.some((a) => a.includes('fetch --depth 1 origin master')), calls.join(' | '));
+});
+
+// Issue 703: a drift names the skills whose installed revision is not master's, so a Routine
+// never runs an old skill silently.
+test('compareToMaster on drift names each skill whose revision differs from master', () => {
+  const home = cloneFixture();
+  const skills = path.join(home, '.claude', 'skills');
+  for (const [name, rev] of [['todoist-triage', '8'], ['caveman', '3']]) {
+    fs.mkdirSync(path.join(skills, name), { recursive: true });
+    fs.writeFileSync(path.join(skills, name, 'SKILL.md'), `---\nmetadata:\n  revision: '${rev}'\n---\n`);
+  }
+  const master = { 'todoist-triage': '17', caveman: '3', 'new-skill': '1' };
+  const run = (cmd, args) => {
+    const spec = args[args.length - 1];
+    if (args.includes('ls-tree')) return { status: 0, stdout: Object.keys(master).join('\n') + '\n' };
+    if (spec.endsWith('plugin.json')) return { status: 0, stdout: JSON.stringify({ version: '2026.9.222215' }) };
+    const name = (/skills\/([^/]+)\/SKILL\.md$/.exec(spec) || [])[1];
+    if (name) return { status: 0, stdout: `---\nmetadata:\n  revision: '${master[name]}'\n---\n` };
+    return { status: 0, stdout: '' };
+  };
+  const c = compareToMaster({ payload_version: '2026.9.211608' }, { HOME: home }, run);
+  assert.equal(c.state, 'drift');
+  assert.deepEqual(c.stale, [
+    { name: 'todoist-triage', local: '8', master: '17' },
+    { name: 'new-skill', local: null, master: '1' },
+  ]);
 });
 
 test('compareToMaster says unknown when the remote cannot be read — never the clone\'s own answer', () => {

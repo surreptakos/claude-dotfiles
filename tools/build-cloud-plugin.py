@@ -6,7 +6,7 @@ claude/skills and aac-skills mirrors retired, and every skill they carried moved
 here, so a branch is the only way a skill changes and merge is the release), rewrites
 each SKILL.md so its frontmatter carries only the six keys the claude.ai upload
 validator accepts (name, description, allowed-tools, license, metadata,
-compatibility), and emits dist/dan-skills/ plus dist/dan-skills.zip ready for
+compatibility), and emits dist/aac-skills/ plus dist/aac-skills.zip ready for
 claude.ai -> Customize -> Plugins -> Add -> Upload plugin.
 
 Disallowed keys (disable-model-invocation, argument-hint, hidden, ...) are not
@@ -17,7 +17,7 @@ with disable-model-invocation is NOT gated in the payload. The payload's own gat
 is to leave the skill out: see DEAD_LOAD_DROPPED / DEAD_LOAD_KEPT (issue 530),
 which carry a per-skill decision for the skills nobody invokes.
 
-Also emits the same payload unzipped into <repo>/marketplace/dan-skills/ and writes
+Also emits the same payload unzipped into <repo>/marketplace/aac-skills/ and writes
 <repo>/.claude-plugin/marketplace.json, which makes the repo itself an installable Claude
 plugin marketplace (claude plugin marketplace add surreptakos/claude-dotfiles). The zip
 remains for the claude.ai org-Skills surface, which only takes uploads.
@@ -649,6 +649,9 @@ def main():
     GOV_JS = ("governance-reminder.js", "session-gate.js",
               "state-rehydrate.js", "state-stash.js")
     GOV_PY = ("ask_matt_gate.py",)
+    # What ask_matt_gate.py imports from its own directory (issue 723). A library, not a hook: it
+    # is copied beside the gate as-is, WITHOUT the dedup guard GOV_PY scripts get prepended.
+    GOV_PY_LIB = ("jev.py",)
     # The stop-slop linter: a PostToolUse hook over written .md/.txt and a Stop hook over the
     # final assistant message, both on the desktop since issue 620 and neither in a container, so
     # a cloud session wrote prose nothing checked. They live beside the other hook scripts and
@@ -808,6 +811,12 @@ def main():
         text = src_file.read_text(encoding="utf-8").replace("\r\n", "\n")
         text = _insert_after_python_prelude(text, py_guard_call)
         (scripts_dir / name).write_bytes(text.encode("utf-8"))
+    for name in GOV_PY_LIB:
+        src_file = REPO / "profile" / "codex" / "hooks" / name
+        if not (gov_sources_present and src_file.is_file()):
+            continue
+        (scripts_dir / name).write_bytes(
+            src_file.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
 
     # The stop-slop hooks ride WITHOUT the dedup guard on purpose: unlike the governance scripts,
     # a desktop dispatches these from settings.json by their ~/.claude path, and the guard's job is

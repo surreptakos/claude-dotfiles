@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: "2026-09-22T18:01:52Z"
-  previous-modified: "2026-09-22T16:29:07Z"
-  revision: "35"
-  content-sha: "78ea08be3f96"
+  modified: "2026-09-24T04:09:49Z"
+  previous-modified: "2026-09-24T00:59:39Z"
+  revision: "37"
+  content-sha: "1ebe7b1bb66d"
 ---
 
 # Project Harness
@@ -313,11 +313,20 @@ A repo harnessed at an older version does not get new capabilities by itself. Th
        -not -path '*/.claude/worktrees/*' -print0 |
     while IFS= read -r -d '' f; do
       r=$(dirname "$(dirname "$f")")
-      [ -f "$r/docs/agents/issue-tracker.md" ] && echo "$r"
+      [ -f "$r/docs/agents/issue-tracker.md" ] || continue
+      if [ "$(cd "$r" && gh repo view --json isArchived -q .isArchived)" = true ]; then
+        echo "skip $r: archived on GitHub - read-only, the upgrade's push would be refused" >&2
+        continue
+      fi
+      echo "$r"
     done
   ```
 - **Agent worktrees.** `.claude/worktrees/*` holds full copies of the repo, so an unfiltered sweep
   returns dozens of hits for two repos. Exclude them and upgrade the primary checkout only.
+- **Archived repos.** A local clone does not know its GitHub repo was archived, so it still looks
+  harnessed and behind. The loop above asks `gh repo view --json isArchived` and skips a `true`
+  with the reason on stderr: upgrading it is work its push throws away. Unarchiving is the owner's
+  call, so name each skipped repo at handoff rather than dropping it silently.
 
 **2. Read the version.** `cat docs/agents/harness-version.md` → `harness-version: N`. **File absent
 means version 1** (pre-marker), not "unharnessed".
@@ -334,6 +343,39 @@ version whenever a template changes materially, not only when a step is added. A
 repo sits at the current version holding an old file, which is the exact drift the marker exists to
 stop.
 
+**An extended copy takes a three-way merge, not a re-copy.** When the repo's copy differs from the
+template it last received (the diff below), let git carry the template's delta onto it. The base is
+the template blob at the repo's version: the file as it stood just before the template marker first
+moved past the repo's number. Run from a pulled claude-dotfiles clone, `$r` the repo:
+
+```sh
+f=tracker-audit.js     # any template the repo carries under tools/ or scripts/
+n=$(sed -n 's/^ *harness-version: *//p' "$r/docs/agents/harness-version.md" | head -1)
+tpl() { git show "$1:aac-skills/project-harness/templates/$2" 2>/dev/null ||
+        git show "$1:agents/skills/project-harness/templates/$2"; }   # path before issue 214
+bump=                  # the commit that took the template marker past $n
+for c in $(git log --first-parent --format=%H origin/master -- '*/project-harness/templates/harness-version.md'); do
+  v=$(tpl "$c" harness-version.md | sed -n 's/^ *harness-version: *//p' | head -1)
+  [ "${v:-0}" -le "$n" ] && break
+  bump=$c
+done
+w=$(mktemp -d)
+tpl "$bump^" "$f" > "$w/base"          # the template as the repo last received it
+tpl origin/master "$f" > "$w/theirs"   # the template now
+cp "$r/tools/$f" "$w/ours"
+git merge-file -L "repo" -L "template v$n" -L "template now" "$w/ours" "$w/base" "$w/theirs"
+echo "conflicts: $?"                   # 0 = clean; N = N conflict hunks; negative = error
+cp "$w/ours" "$r/tools/$f"
+```
+
+An empty `$bump` means the repo is already at the template's version: nothing to merge. Resolve
+every `<<<<<<<` hunk keeping BOTH sides — the repo's extension and the template's addition — then
+`node --check` and run the repo's own tests, which pin the extensions. The usual conflict sites in
+`tracker-audit.js` are the ones every added check touches: the header comment (the v20 generated
+banner against the repo's own notes), the `module.exports` list under `require.main !== module`
+(the repo exports its own helpers to its tests), the `ORDER` array of finding kinds before the
+report (resolve as the union), and the `NOTE:` blind-spot blocks after it.
+
 ### Changing a template means sweeping, in the same session
 
 **A version bump is not propagation.** Bumping the marker records that older installs are behind; it
@@ -347,7 +389,8 @@ assert on (the sweep's re-copy broke its pre-push suite, which is the only reaso
 and aac-bill-intake carries a load-bearing Open-PRs section born from a real incident, which the
 same sweep silently deleted and pushed (2026-08-21, restored same day). Before re-copying into any
 repo, diff the repo copy against the PREVIOUS template revision — if anything beyond CONFIG and the
-changed region differs, hand-apply the delta to the repo's copy instead of re-copying. The v11 sweep
+changed region differs, merge the delta into the repo's copy (the `git merge-file` recipe in
+step 3 above) instead of re-copying. The v11 sweep
 measured how normal divergence is: FIVE of nine repos carried hand-extended `tracker-audit.js`
 bodies (aac-bill-intake, aac-routines, aac-task-management, aac-cockpit, zoho-source-of-truth) —
 "this template has no CONFIG so it copies verbatim" was already false for the majority. And **pull

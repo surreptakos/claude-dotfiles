@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-22T21:53:23Z'
-  previous-modified: '2026-09-18T04:53:57Z'
-  revision: '31'
-  content-sha: 524321ceef61
+  modified: '2026-09-24T05:11:29Z'
+  previous-modified: '2026-09-24T05:07:51Z'
+  revision: '39'
+  content-sha: 10956c7a6d13
 ---
 
 # ticket-fleet
@@ -157,9 +157,21 @@ Workflow({
 })
 ```
 
-On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
-edited in place; on every other repo the copy stays a byte-identical mirror of the plugin
-source and is refreshed by re-running the `cp` above whenever the plugin bumps.
+On a fork (aac-routines' auth/cleanup phases, aac-sales-cockpit's `PROMPT_CONTRACT`) the copy is
+edited in place. On every other repo the copy is a mirror of claude-dotfiles master, and **the run
+refreshes it itself** (issue 770): the first Setup agent, `fleet-refresh`, downloads
+`aac-skills/ticket-fleet/ticket-fleet.js` and `editable-install-guard.js` from master, overwrites
+each `.claude/workflows/` copy whose sha256 differs (and `tools/editable-install-guard.js` when
+present), and commits them as `chore(fleet): refresh ticket-fleet script from claude-dotfiles
+master (issue 770)` on the current branch - no push. The running script is still the old copy;
+the next launch runs the refreshed one, so a fix merged here reaches every fleeted repo one run
+later with no `cp` by hand. The fork list it skips is `FORKS` in `tools/ticket-fleet-contract.js`.
+
+**The deliverer merges its own PR (issue 770).** STEP D of the Deliver prompt waits for CI on the
+PR head (20 minutes at most), applies the runbook merge bar, squash-merges with the head sha the
+checks ran on, re-runs the pre-push merge once if the default branch moved under it, and stops on
+a red check or a changes-requested review. The result carries `merged`, `mergeSha`, `prState` and
+`ticketState`; the run log says `MERGED <sha>` or `open, not merged: <prState>` per ticket.
 
 On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
 prompts before letting the fleet push branches and open PRs. Full args list:
@@ -181,6 +193,15 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `scoutModel` / `implModel` / `verifyModel` / `deliverModel` / `reportModel`: per-stage
   model pins. Defaults: Sonnet 5 for scout and verify, Opus 5.5 for implement, Haiku 4.5
   for deliver and report.
+- `implPins` (object, default `{mechanical: Haiku 4.5, multi-file: Sonnet 5, design: null}`)
+  and `difficulty` (boolean, default true), issue 725: after the scout, one `difficulty` agent
+  asks TypeSafe Jev one Score per code ticket (single-file mechanical, multi-file, design-level).
+  Attempt 1 runs on that level's pin; a level with no pin uses `implModel`, and every retry
+  after a failed verify uses the heaviest pin (`design`, default `implModel`). With Jev
+  unavailable, or `difficulty: false`, every attempt runs on `implModel`. The result's
+  `implModels` names each code ticket's level and the model of each attempt. Eval data:
+  `node tools/fleet-difficulty-eval.js --score` labels tickets that needed attempt 2+ "hard"
+  (`docs/agents/evals/fleet-difficulty.json`).
 - `maxAttempts` (integer, default 3): Ralph-style bounded retry, fresh context each attempt.
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
   resolution comment.
@@ -326,7 +347,7 @@ Copies this repo does not rebuild, all of which move when the contract does:
 | Where | What | Keeps its own edits |
 | --- | --- | --- |
 | `surreptakos/aac-routines` | `.claude/workflows/ticket-fleet.js` | Setup phase (sub-session auth, issue 83) and the no-cleanup history |
-| `surreptakos/aac-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
+| `surreptakos/aac-sales-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
 | `claude-dotfiles` | `orchestrator/RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | this page |

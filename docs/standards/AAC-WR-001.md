@@ -5,22 +5,22 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.6 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.7 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.6 |
+| **Version** | 0.7 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
 | **Primary reference** | The Gregg Reference Manual, 11th U.S. edition |
 
-**Control statement.** The approved electronic master is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
+The approved electronic master of this standard is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
 
-**Purpose of draft status.** Version 0.4 is formatted as a controlled document but does not become company policy until approved by the designated approver.
+This draft is formatted as a controlled document, but it does not become company policy until the designated approver approves it.
 
 **Approval**
 
@@ -37,6 +37,7 @@ Company-wide editorial, correspondence, document layout, and controlled-writing 
 | 0.3 | 2026-09-09 | Performance-review exception in Part I; decision register updated. | Pending |
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
+| 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 
 # How to use this standard
 
@@ -80,7 +81,7 @@ Do not change contract language, statutory language, quotations, manufacturer te
 
 A document-specific standard or template may override a house rule only through an explicit, approved exception that identifies its scope. Its owner must record the exception in the decision log. Other provisions of this standard continue to apply; a template does not authorize changes to legal obligations or technical requirements.
 
-**Performance-review exception.** Performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and “AAC House Layout Standard (Gregg-based).” Where these documents conflict with WR-001, they control for that material. If the two specialized standards conflict, the AAC performance review standards control.
+As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and “AAC House Layout Standard (Gregg-based).” Where these documents conflict with WR-001, they control for that material. If the two specialized standards conflict, the AAC performance review standards control.
 
 This exception includes Rule 16 (serial comma), Rule 37 (headings and titles), Rule 3’s treatment of “should,” and Rule 66 (e.g. and i.e.), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other WR-001 requirements remain in force. The higher authorities listed above still control.
 
@@ -108,7 +109,7 @@ For decision-oriented or action-oriented writing, state the principal point befo
 
 Long emails should use a bottom-line-first opening.
 
-Exception for delegation. When an email delegates a task the recipient must carry out live, such as a customer call or a negotiation, state the goal and the concern behind the request before the instruction. The recipient needs the reason to handle what the script does not cover.
+Delegation emails are an exception. When an email delegates a task the recipient must carry out live, such as a customer call or a negotiation, state the goal and the concern behind the request before the instruction. The recipient needs the reason to handle what the script does not cover.
 
 Preferred: Please approve the attached $38,500 proposal by Thursday at 3 p.m. so we can release the equipment order Friday.
 
@@ -342,7 +343,7 @@ Capitalize formal titles such as **National Electrical Code** and **Americans wi
 
 ## 37. Headings and titles
 
-Use sentence case for headings within documents, including Part headings, numbered rules, subheadings, table column headings, form prompts, UI labels, and email headings. Capitalize the first word and any proper names or acronyms. Reserve headline-style capitalization for document titles and official document names. Do not add a period to a standalone heading; end a run-in heading with a period.
+Use sentence case for headings within documents, including Part headings, numbered rules, subheadings, table column headings, form prompts, UI labels, and email headings. Capitalize the first word and any proper names or acronyms. Reserve headline-style capitalization for document titles and official document names. Do not add a period to a standalone heading. Use run-in headings only in legal documents, and end each run-in heading with a colon.
 
 # Part V - Numbers, dates, time, money, and measurement
 
@@ -1245,6 +1246,7 @@ Table F1. House decision register
 | 153–166; G; H | Draft-quality and AI-tell rules adopted as a snapshot of stop-slop PR #66 (commit 8e2130b, unmerged). | Third-party proposal, MIT licensed. Re-verify against upstream when the PR merges or closes. | 0.5 |
 | 53; D | U.S. telephone numbers use hyphens, without parentheses. | Concurrent draft, Rule 53. Standardizes the displayed number. | 0.4 |
 | 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
+| 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
 
 # Appendix G - Phrase register
 

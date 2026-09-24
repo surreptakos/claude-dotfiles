@@ -58,17 +58,20 @@ never from an intermediate one, so `previous-modified` names the published versi
 - `aac-skills/` — every skill, one tree, hand-edited. The packager builds the plugin payload from
   it and pull restores it as `~/.claude/skills`.
 - `profile/` — what a desktop consumer needs beyond the skills: `profile/claude/CLAUDE.md` (the
-  global rules, and the one source the payload's rules text is copied from), `settings.json`,
+  global rules, and the one source the payload's rules text is copied from; pull does not restore
+  it - a desktop gets the rules from the plugin hook and pull writes `global-pointer.md` to
+  `~/.claude/CLAUDE.md`, which must never carry the rules' first line, issue 732), `settings.json`,
   `hooks/`, `agents/`, the plugin manifests, and `profile/codex/`.
 - `lib/manifest.ps1` — the whitelist of what pull writes, the exclusions, the path templating, the
   secret guard. Adding something to the setup means adding it to `Get-DotfileItems` here.
 - `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before
   writing, and never deletes. `-Mode push` prints why it is retired and exits 2. On a fresh
   machine `install.ps1 [-DryRun]` wraps it: prerequisites, pull, then the manual list.
-- `orchestrator/` — the cloud master orchestrator: `RUNBOOK.md`, `worker-cycle.md`. The fleet
-  itself is served by the `aac-skills` plugin at `aac-skills/ticket-fleet/ticket-fleet.js`, one
-  script for local and cloud sessions (it picks between `gh` and the GitHub MCP tools at run
-  time). The master session reads the runbook from this repo.
+- `orchestrator/` — the master orchestrators. `LOCAL-RUNBOOK.md` is live (desktop, under
+  `master-watchdog.ps1`); `RUNBOOK.md` holds the shared rules and the paused cloud venue (ADR
+  0001). The fleet itself is served by the `aac-skills` plugin at
+  `aac-skills/ticket-fleet/ticket-fleet.js`, one script for local and cloud sessions (it picks
+  between `gh` and the GitHub MCP tools at run time). The master reads the runbooks from this repo.
 
 ## Two invariants worth keeping
 

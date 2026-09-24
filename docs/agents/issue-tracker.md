@@ -18,9 +18,11 @@ Infer the repo from `git remote -v` — `gh` does this automatically when run in
 `docs/agents/milestones.json` is the source of truth; `.github/workflows/milestones.yml` writes it
 into the tracker (`tools/ensure-milestones.js`: create, reopen, refresh a description, never close
 or delete) on every push to `master` that touches the file and on dispatch. Change a milestone by
-editing the file on a branch. A container cannot create one directly: no GitHub credential for git
-or curl (issue 483), no milestone tool in the GitHub MCP. Every open issue carries a milestone
-(`Backlog` for work off the parity path): with more than one open milestone the issue metadata
+editing the file on a branch; a milestone closed by hand leaves the file in the same change, or
+the job reopens it (M1 and M2 left on 2026-09-23, ADR 0001). A container cannot create one
+directly: no GitHub credential for git or curl (issue 483), no milestone tool in the GitHub MCP.
+Every open issue carries a milestone (`Backlog` for live work, `Maybe Someday` for what the ticket
+reaper parked): with more than one open milestone the issue metadata
 audit comments on each unmilestoned issue, and the tracker audit reports `unmilestoned` drift.
 Assign one with `gh issue edit <n> --milestone "<title>"` or the MCP `issue_write` milestone field.
 
@@ -279,8 +281,8 @@ One state label per open issue: `needs-triage`, `needs-info`, `ready-for-agent`,
 `ready-for-local-agent`, `ready-for-human`, `wontfix`.
 
 `ready-for-local-agent` marks work a cloud container cannot do but a desktop session can, with no
-person in the loop: an edit to the live `~/.claude` or `~/.codex` tree followed by
-`sync.ps1 -Mode push`, a remote branch delete the session proxy refuses, or an
+person in the loop: a change to the live `~/.claude` or `~/.codex` tree (a `sync.ps1 -Mode pull`,
+a desktop scheduled-task registry), a remote branch delete the session proxy refuses, or an
 edit the auto-mode classifier blocks in a container (a project-board sweep is no longer one: the
 Board sweep job runs it, claude-dotfiles issue 216).
 `ready-for-human` is reserved for a person's judgment, credential or sign-off. A step a local

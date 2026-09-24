@@ -350,7 +350,8 @@ test('cloud bootstrap: ok line reports the payload version and reports drift vs 
     }) });
     assert.match(output, /ok\s+aac-bootstrap payload v2026\.9\.15/);
     assert.match(output, /gh installed/);
-    assert.match(output, /master offers v2026\.9\.16/);
+    // Issue 703: drift is a `!!` warning naming both versions, not a dim note.
+    assert.match(output, /!!\s+payload v2026\.9\.15 served; origin\/master offers v2026\.9\.16/);
     assert.doesNotMatch(output, /STOP/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

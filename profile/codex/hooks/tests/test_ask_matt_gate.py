@@ -24,6 +24,9 @@ CLAUDE_INSTRUCTIONS = REPO / "profile" / "claude" / "CLAUDE.md"
 CODEX_INSTRUCTIONS = REPO / "profile" / "codex" / "AGENTS.md"
 CLAUDE_REMINDER = REPO / "profile" / "claude" / "hooks" / "governance-reminder.js"
 CAVEMAN_PLUGIN_CONFIG = REPO / "aac-skills" / "project-harness" / "templates" / "caveman.json"
+# The YES rules put regex hits to TypeSafe Jev (issue 723). Tests never touch the network: every
+# spawned gate inherits "off" (Jev unavailable, regex verdicts stand) unless a test stubs answers.
+os.environ["TYPESAFE_JEV_STUB"] = "off"
 
 
 class AskMattGateTests(unittest.TestCase):
@@ -619,6 +622,30 @@ class AskMattGateTests(unittest.TestCase):
                 (state_dir / "claude--claude-session-no-prompt.json").exists()
             )
 
+    def test_claude_deny_names_this_sessions_declaration_after_a_restart(self) -> None:
+        """Issue 715: a model switch restarts the session as B with A's history. B's state has a
+        nonce and no flow, and the model copied A's stale declaration; the deny must name B's."""
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            (state_dir / "claude--session-A.json").write_text(
+                json.dumps({"nonce": "aaaaaaaaaaaaaaaa", "flow": "implement", "yes": True,
+                            "caveman": "ultra"}), encoding="utf-8")
+            (state_dir / "claude--session-B.json").write_text(
+                json.dumps({"nonce": "bbbbbbbbbbbbbbbb", "flow": None, "last_flow": None,
+                            "yes": True, "caveman": "ultra"}), encoding="utf-8")
+            denied = self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "session-B", "hook_event_name": "PreToolUse",
+                 "tool_name": "Bash", "tool_input": {"command": "ls"}},
+                state_dir,
+            )
+
+            decision = json.loads(denied.stdout)["hookSpecificOutput"]
+            self.assertEqual(decision["permissionDecision"], "deny")
+            reason = decision["permissionDecisionReason"]
+            self.assertIn('declare-claude "session-B" "bbbbbbbbbbbbbbbb" <flow>', reason)
+            self.assertNotIn("session-A", reason)
+
     def test_claude_bootstrap_accepts_yes_exit_check_but_no_other_suffix(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
@@ -900,6 +927,63 @@ class AskMattGateTests(unittest.TestCase):
             turn = self._correction_turn(Path(folder), "s-plain", "do them all", ["Bash"])
             self.assertNotIn("CORRECTION DETECTED", turn["context"])
             self.assertNotIn("pending_correction", turn["state"])
+
+    # Issue 727: Jev decides; the regex answers only when Jev is unavailable.
+    FALSE_FIRES = ("what is wrong with the build?", "the test output looks wrong, dig in")
+
+    def _with_jev(self, stub: str) -> None:
+        os.environ["TYPESAFE_JEV_STUB"] = stub
+        self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+
+    def test_the_observed_false_fires_are_not_corrections_when_jev_says_no(self) -> None:
+        self._with_jev('{"correction": 0.04}')
+        for n, prompt in enumerate(self.FALSE_FIRES):
+            with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as folder:
+                turn = self._correction_turn(Path(folder), f"s-ff{n}", prompt, ["Bash"])
+                self.assertNotIn("CORRECTION DETECTED", turn["context"])
+                self.assertNotIn("pending_correction", turn["state"])
+
+    def test_a_real_correction_still_fires_when_jev_says_yes(self) -> None:
+        self._with_jev('{"correction": 0.97}')
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(
+                Path(folder), "s-real", "that's wrong, you said X but it is Y", ["Bash"]
+            )
+            self.assertIn("CORRECTION DETECTED", turn["context"])
+            self.assertIn("CORRECTION NOT CLOSED", turn["state"]["pending_correction"])
+
+    def test_jev_unavailable_detection_is_exactly_the_regex(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test_corr", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        prompts = [*self.FALSE_FIRES, "that's wrong, you said X but it is Y", "do them all",
+                   "Somehow you missed the end of this email chain", "", "   "]
+        expected = [gate.CORRECTION_PATTERN.search(p) is not None for p in prompts]
+        self.assertEqual(expected, [True, True, True, False, True, False, False])
+        for stub in ("off", '{"hedge": 0.1}', "{not json"):
+            os.environ["TYPESAFE_JEV_STUB"] = stub
+            with self.subTest(stub=stub):
+                self.assertEqual([gate._is_correction(p) for p in prompts], expected)
+        os.environ["TYPESAFE_JEV_STUB"] = "off"
+        # The real client against a refused loopback port: the service-down path.
+        import socket
+
+        os.environ.pop("TYPESAFE_JEV_STUB")
+        self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+        import jev
+
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        saved = jev.ENDPOINT
+        jev.ENDPOINT = f"http://127.0.0.1:{port}/v1/systemone"
+        try:
+            self.assertEqual([gate._is_correction(p) for p in prompts], expected)
+        finally:
+            jev.ENDPOINT = saved
 
     def test_clean_final_message_carries_no_lint(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
@@ -1311,3 +1395,82 @@ class DeclarationRunnerSpellingTests(unittest.TestCase):
         for runner in ("node", "bash", "pythonx", "sh -c python3"):
             with self.subTest(runner=runner):
                 self.assertFalse(self._accepts(runner))
+
+
+class YesLintJevTests(unittest.TestCase):
+    """Issue 723: a regex hit is put to Jev about the reply's own voice, so quoting a banned word
+    no longer fires; with Jev unavailable the regex verdicts stand exactly. Jev is stubbed through
+    TYPESAFE_JEV_STUB; nothing here reaches the network."""
+
+    QUOTED = "Fixed the lint.\nThe rule bans words like probably and should be.\nNext: merge PR 9."
+    GUESS = "The build probably failed on the Windows runner."
+
+    def setUp(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test_jev", SCRIPT)
+        self.gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.gate)
+        self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+
+    def lint(self, stub: str, draft: str) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ, TYPESAFE_JEV_STUB=stub)
+        with tempfile.TemporaryDirectory() as folder:
+            env["ASK_MATT_GATE_STATE_DIR"] = folder
+            env["GOVERNANCE_CLAUDE_HOME"] = str(Path(folder) / "claude-home")
+            return subprocess.run(
+                [sys.executable, str(SCRIPT), "lint", "-"], input=draft, text=True,
+                capture_output=True, env=env, check=False,
+            )
+
+    def test_a_quoted_banned_word_lints_clean_when_jev_says_the_reply_does_not_guess(self) -> None:
+        self.assertIn("YES hedge", self.lint("off", self.QUOTED).stdout)  # today's regex fires
+        result = self.lint('{"hedge": 0.12}', self.QUOTED)
+        self.assertNotIn("YES", result.stdout.replace("YES rules pass", ""))
+        self.assertEqual(result.returncode, 0)
+        self.assertIn("YES rules pass", result.stdout)
+
+    def test_a_guess_in_the_replys_own_voice_still_fails(self) -> None:
+        result = self.lint('{"hedge": 0.96}', self.GUESS)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("YES hedge without evidence: probably", result.stdout)
+
+    def test_jev_unavailable_returns_exactly_the_regex_verdicts(self) -> None:
+        import socket
+
+        drafts = [
+            self.QUOTED,
+            "Fixed. Please check it works on your side.",
+            "Tests pass. Deploy confirmed. The culprit is the relay.",
+            "The Manager Tools PDF contains no sample prose for the body sections.",
+        ]
+        os.environ["TYPESAFE_JEV_STUB"] = "off"
+        baseline = [self.gate._yes_lint(d, set()) for d in drafts]
+        self.assertTrue(all(baseline))
+        # A stub that does not answer every fired rule, or is not JSON, is unavailable too.
+        for stub in ('{"other": 0.1}', "{not json"):
+            os.environ["TYPESAFE_JEV_STUB"] = stub
+            with self.subTest(stub=stub):
+                self.assertEqual([self.gate._yes_lint(d, set()) for d in drafts], baseline)
+        # The real client: a refused connection and a server that never answers (timeout), both on
+        # loopback. No credential in a container surfaces as an HTTP error, the same path.
+        os.environ.pop("TYPESAFE_JEV_STUB")
+        import jev  # the gate's lazy import put the hooks dir on sys.path
+
+        silent = socket.socket()
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(1)
+        self.addCleanup(silent.close)
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        refused_port = closed.getsockname()[1]
+        closed.close()
+        for endpoint in (f"http://127.0.0.1:{refused_port}/v1/systemone",
+                         f"http://127.0.0.1:{silent.getsockname()[1]}/v1/systemone"):
+            with self.subTest(endpoint=endpoint):
+                saved = (jev.ENDPOINT, self.gate.YES_JEV_TIMEOUT)
+                jev.ENDPOINT, self.gate.YES_JEV_TIMEOUT = endpoint, 0.3
+                try:
+                    self.assertEqual([self.gate._yes_lint(d, set()) for d in drafts], baseline)
+                finally:
+                    jev.ENDPOINT, self.gate.YES_JEV_TIMEOUT = saved

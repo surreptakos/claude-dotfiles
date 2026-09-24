@@ -17,8 +17,8 @@
  *   - does the marker name a skills directory that actually still holds those skills? (STOP:
  *     the skills tree was wiped or never copied)
  *   - is the payload version the marker records the same as what dotfiles master offers today?
- *     (informational: "on v2026.9.151521, master v2026.9.161010" — a drift is not a stop, the
- *     next session will re-clone)
+ *     (a WARNING naming both versions and the skills whose revision differs, issue 703 — not a
+ *     stop: re-running the bootstrap takes master)
  *
  * The marker lives at ~/.claude/hook-state/aac-bootstrap/state.json; a bootstrap that ran
  * anywhere in this container writes it. Env overrides are for tests only.
@@ -28,12 +28,19 @@
  *   BOOTSTRAP_MASTER_MANIFEST  absolute path to a plugin.json to compare the marker's version
  *                              against (in real runs the check fetches this from git; the env
  *                              override lets a test pin it)
+ *   BOOTSTRAP_WAIT_MS          longest awaitBootstrap waits on a running bootstrap (default 90000)
+ *   BOOTSTRAP_START_GRACE_MS   how long a young container's stale or missing marker is given for
+ *                              a bootstrap to take its lock (default 10000)
  *
  * Exports:
  *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable' | 'failed' | 'stale',
  *                                      marker?, path, reason?, stage?, writtenAt?, bootedAt? }
+ *   awaitBootstrap(env)          -> readMarker's answer once no bootstrap is running (plus
+ *                                      waitedMs when it had to wait), or { state: 'pending', path,
+ *                                      lock, waitedMs } when one still held its lock at the deadline
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
- *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker? }
+ *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker?,
+ *                                      stale?: [{ name, local, master }] | null }
  *   verifyPluginRoot(marker)     -> { state: 'ok' | 'absent' | 'unrecorded', root? }
  *   verifySelfHook(marker)       -> { state: 'ok' | 'absent' | 'not-executable' | 'unrecorded', hook? }
  */
@@ -111,6 +118,68 @@ function readMarker(env) {
   }
 }
 
+/**
+ * The gate and the bootstrap are two SessionStart groups nothing orders (issue 669). A check that
+ * read the marker while the bootstrap was still installing quoted the image's marker — a `!!`
+ * stale line and a payload version that were both false fifteen seconds later, when the model
+ * read them. So the start report waits for the bootstrap before it reads: while the hook's
+ * `run.lock` is held, and, in a container booted under two minutes ago whose marker is stale or
+ * missing, for a short grace in which a hook that has not reached its `mkdir` yet can take it.
+ * A lock older than the boot is one the image carried and a lock older than ten minutes is a dead
+ * run (the hook takes those over too); neither is waited on. Past the deadline with the lock
+ * still held the answer is 'pending': the report says it was taken before the bootstrap finished
+ * rather than describing the state the bootstrap is replacing.
+ */
+const LOCK_DEAD_MS = 10 * 60 * 1000;
+const YOUNG_CONTAINER_MS = 2 * 60 * 1000;
+
+function lockPath(env) {
+  return path.join(path.dirname(markerPath(env)), 'run.lock');
+}
+
+function bootstrapRunning(env, boot) {
+  try {
+    const taken = fs.statSync(lockPath(env)).mtimeMs;
+    return taken >= boot.ms - 1000 && Date.now() - taken < LOCK_DEAD_MS;
+  } catch {
+    return false;
+  }
+}
+
+function envMs(value, fallback) {
+  const n = Number(value);
+  return value !== undefined && value !== '' && Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function awaitBootstrap(env, pollMs = 250) {
+  const waitMs = envMs(env.BOOTSTRAP_WAIT_MS, 90000);
+  const graceMs = envMs(env.BOOTSTRAP_START_GRACE_MS, 10000);
+  const started = Date.now();
+  const boot = containerBootedAt();
+  const young = started - boot.ms < YOUNG_CONTAINER_MS;
+  let slept = false;
+  for (;;) {
+    const running = bootstrapRunning(env, boot);
+    const r = readMarker(env);
+    const waited = Date.now() - started;
+    const unsettled = r.state === 'stale' || r.state === 'missing';
+    const inGrace = !running && unsettled && young && waited < Math.min(graceMs, waitMs);
+    if (!running && !inGrace) {
+      if (slept) r.waitedMs = waited;
+      return r;
+    }
+    if (waited >= waitMs) {
+      return { state: 'pending', path: r.path, lock: lockPath(env), waitedMs: waited };
+    }
+    sleepMs(pollMs);
+    slept = true;
+  }
+}
+
 function verifySkills(marker, env) {
   const dir = skillsDir(env);
   const missing = [];
@@ -144,15 +213,49 @@ function gitVersionAtRemote(clone, ref, run) {
   return version || null;
 }
 
+const SKILLS_IN_REPO = 'marketplace/aac-skills/skills';
+
+function skillRevision(text) {
+  const m = /^\s*revision:\s*['"]?(\d+)['"]?\s*$/m.exec(text || '');
+  return m ? m[1] : null;
+}
+
+/**
+ * Which installed skills differ from the ones master offers (issue 703: a Routine's Skill tool
+ * served todoist-triage revision 8 while master had 17). Run straight after the fetch in
+ * gitVersionAtRemote, so FETCH_HEAD is master's tree. A skill whose `revision` stamp differs
+ * from the installed copy's, or that master has and this container lacks, is one the Skill tool
+ * would serve stale. Entries are { name, local, master }, `local` null when absent. Null when
+ * master's skill list cannot be read.
+ */
+function staleSkillsAtRemote(clone, localSkills, run) {
+  const git = (...args) => run('git', ['-C', clone, ...args]);
+  const listed = git('ls-tree', '--name-only', `FETCH_HEAD:${SKILLS_IN_REPO}`);
+  if (listed.status !== 0) return null;
+  const stale = [];
+  for (const name of listed.stdout.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const shown = git('show', `FETCH_HEAD:${SKILLS_IN_REPO}/${name}/SKILL.md`);
+    if (shown.status !== 0) continue;
+    const master = skillRevision(shown.stdout);
+    let local = null;
+    try {
+      local = skillRevision(fs.readFileSync(path.join(localSkills, name, 'SKILL.md'), 'utf8'));
+    } catch { /* not installed */ }
+    if (local !== master) stale.push({ name, local, master });
+  }
+  return stale;
+}
+
 function compareToMaster(marker, env, run = execGit) {
   const unknown = (reason) => ({ state: 'unknown', marker: marker.payload_version, reason });
   let master = null;
+  let clone = null;
   try {
     if (env.BOOTSTRAP_MASTER_MANIFEST) {
       if (!fs.existsSync(env.BOOTSTRAP_MASTER_MANIFEST)) return unknown('no manifest to read');
       master = JSON.parse(fs.readFileSync(env.BOOTSTRAP_MASTER_MANIFEST, 'utf8')).version || null;
     } else {
-      const clone = path.join(env.HOME || os.homedir(), '.aac-dotfiles');
+      clone = path.join(env.HOME || os.homedir(), '.aac-dotfiles');
       if (!fs.existsSync(path.join(clone, '.git'))) return unknown('no dotfiles clone to fetch in');
       master = gitVersionAtRemote(clone, env.BOOTSTRAP_DOTFILES_REF || 'master', run);
     }
@@ -160,9 +263,12 @@ function compareToMaster(marker, env, run = execGit) {
     return unknown(e.message);
   }
   if (!master) return unknown('master version could not be read from the remote');
-  return master === marker.payload_version
-    ? { state: 'same', master, marker: marker.payload_version }
-    : { state: 'drift', master, marker: marker.payload_version };
+  if (master === marker.payload_version) return { state: 'same', master, marker: marker.payload_version };
+  const drift = { state: 'drift', master, marker: marker.payload_version };
+  if (clone) {
+    try { drift.stale = staleSkillsAtRemote(clone, skillsDir(env), run); } catch { /* unlisted */ }
+  }
+  return drift;
 }
 
 /**
@@ -200,6 +306,6 @@ function verifySelfHook(marker) {
 }
 
 module.exports = {
-  readMarker, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
-  markerPath, skillsDir, containerBootedAt,
+  readMarker, awaitBootstrap, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
+  staleSkillsAtRemote, markerPath, lockPath, skillsDir, containerBootedAt,
 };

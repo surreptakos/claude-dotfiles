@@ -406,6 +406,8 @@ if (require.main !== module) {
     landedCommits,
     landedFindings,
     stalePremiseFindings,
+    citingSentences,
+    jevCitationClassifier,
     isExampleCitation,
     EXAMPLE_CITATION_PATTERNS,
     stalePremiseIgnores,
@@ -1099,16 +1101,88 @@ function landedFindings(allIssues, landed, ref) {
   return out;
 }
 
+/** The sentences of a body that cite #n in prose (code masked, as citedIssueNumbers reads it), in
+ *  order, at most `max` (default 3), each capped at 400 characters. What Jev reads for one citation.
+ *  Pure; exported for the test suite. */
+function citingSentences(body, n, max) {
+  const text = String(body || '').replace(/\r\n/g, '\n');
+  const prose = maskCodeRegions(text);
+  const rx = new RegExp('(?<![\\w/])(?<!\\w:)#' + n + '(?!\\w)', 'g');
+  const out = [];
+  let m;
+  while ((m = rx.exec(prose)) && out.length < (max || 3)) {
+    let start = m.index;
+    while (start > 0 && text[start - 1] !== '\n' && !/[.!?]\s/.test(text.slice(start - 2, start))) start--;
+    let end = m.index;
+    while (end < text.length && text[end] !== '\n' && !/^[.!?](\s|$)/.test(text.slice(end, end + 2))) end++;
+    const sentence = text.slice(start, end + 1).trim().slice(0, 400);
+    if (sentence && !out.includes(sentence)) out.push(sentence);
+  }
+  return out;
+}
+
+/** The Choice Jev answers per cited closed issue (issue 724). Only `premise` raises stale-premise?.
+ *  A function, not a const: the test-only export above runs before a const here would initialize. */
+function stalePremiseRoles() {
+  return {
+  premise: 'The open issue asserts behaviour that the closed issue changed as if it were still ' +
+           'current: it rests on a fact the closed issue settled or disproved.',
+  background: 'History: the citation explains how things got here, or what was tried or decided before.',
+  example: 'Precedent or example: the citation names the closed issue as an instance, a duplicate, a ' +
+           'pattern to follow or avoid, or quoted material, not as a claim about the present.',
+  'follow-up': 'The open issue is follow-up work of the closed issue: it exists because that work shipped.',
+  none: 'None of the above, or only a passing mention.',
+  };
+}
+
+/** The stale-premise? classifier over a Jev client (tools/jev.js askJevSync, or a test stub).
+ *  classify(issue, items) takes [{ number, title, sentences }] for one open issue's candidate
+ *  citations and returns a Map of number to role, or null when Jev did not answer. The first null
+ *  marks Jev down for the rest of the run, so an outage costs one timeout, not one per issue. */
+function jevCitationClassifier(ask) {
+  const roles = stalePremiseRoles();
+  let down = typeof ask !== 'function';
+  return function classify(issue, items) {
+    if (down || !items.length) return null;
+    const citations = {};
+    const questions = {};
+    items.forEach((it) => {
+      const key = 'c' + it.number;
+      citations[key] = { closed_issue: { number: it.number, title: it.title }, citing_sentences: it.sentences };
+      questions[key] = {
+        type: 'choice',
+        instructions: 'The open issue titled `open_issue.title` cites closed issue #' + it.number +
+          ' (`citations.' + key + '.closed_issue`) in the sentences `citations.' + key +
+          '.citing_sentences`. What role does that citation of #' + it.number + ' play in the open issue?',
+        criteria: roles,
+      };
+    });
+    let answers = null;
+    try { answers = ask({ open_issue: { title: issue.title }, citations }, questions); } catch (e) { answers = null; }
+    if (!answers || typeof answers !== 'object') { down = true; return null; }
+    const got = new Map();
+    items.forEach((it) => {
+      const a = answers['c' + it.number];
+      if (a && Object.prototype.hasOwnProperty.call(roles, a.choice)) got.set(it.number, a.choice);
+    });
+    return got;
+  };
+}
+
 /** OPEN issues asserting something a closed issue settled, as findings.
  *
- *  The weakest check here, and deliberately advisory: it cannot read meaning, only proximity. It
- *  fires when an open issue cites a CLOSED issue in prose without any nearby hedge, because the
- *  drift that prompted this tool was #23 asserting a behaviour #25 had just disproved.
+ *  Deliberately advisory. It fires when an open issue cites a CLOSED issue as a premise, because
+ *  the drift that prompted this tool was #23 asserting a behaviour #25 had just disproved. Whether
+ *  a citation IS a premise is a question about meaning: when `opts.classify`
+ *  (jevCitationClassifier) answers for a citation, only `premise` raises (issue 724, after 374 and
+ *  274). When it does not — no credential, a timeout, the service down — the proximity rule
+ *  answers exactly as it did before Jev: no nearby hedge word and no example wording raises.
  *
  *  Pure — it takes all issues and the number index and filters to open itself, so each narrowing
  *  below is testable without the network, and "a closed issue produces no finding" is a property of
  *  this function rather than of whatever the caller passed. */
-function stalePremiseFindings(allIssues, byNumber) {
+function stalePremiseFindings(allIssues, byNumber, opts) {
+  const classify = (opts || {}).classify;
   const out = [];
   (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
     // A PRD is a container: it enumerates its own sub-issues, and those closing is the PRD working,
@@ -1136,21 +1210,36 @@ function stalePremiseFindings(allIssues, byNumber) {
       (byNumber.get(n).closedByPullRequestsReferences || []).map((r) => r.number))));
     const bodyIsFollowUp = citedClosed.some((n) => isFollowUpAcknowledgment(body, n, closerPrsUnion));
     if (bodyIsFollowUp) return;
-    citedClosed.forEach((n) => {
-      if (ignored.numbers.has(n)) return;
-      const other = byNumber.get(n);
+    const candidates = citedClosed.filter((n) => {
+      if (ignored.numbers.has(n)) return false;
       // First citation as a token: `body.indexOf('#' + n)` would land on `#730` or `repo#73` first.
       const idx = cited.get(n);
       // A citation on a checkbox line is a task list — a sub-issue roster, not an assertion about it.
       const lineStart = body.lastIndexOf('\n', idx) + 1;
-      if (/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx))) return;
-      const around = body.slice(Math.max(0, idx - 220), idx + 220);
-      if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
-      // A citation the surrounding prose presents as an example is about that issue, not this one.
-      if (isExampleCitation(around)) return;
+      return !/^\s*[-*]\s*\[[ x]\]/.test(body.slice(lineStart, idx));
+    });
+    // One Jev request per issue, one Choice per candidate citation. null means Jev did not answer.
+    const roles = classify && candidates.length ? classify(i, candidates.map((n) => ({
+      number: n, title: byNumber.get(n).title, sentences: citingSentences(body, n) }))) : null;
+    candidates.forEach((n) => {
+      const other = byNumber.get(n);
+      const role = roles ? roles.get(n) : undefined;
+      if (role) {
+        // Jev read the citation: background, example, follow-up and none are not drift.
+        if (role !== 'premise') return;
+      } else {
+        // Jev unavailable: the proximity rule, unchanged. It cannot read meaning, only nearby words.
+        const idx = cited.get(n);
+        const around = body.slice(Math.max(0, idx - 220), idx + 220);
+        if (/\b(closed|resolved|superseded|settled|confirmed|verified|per|see|split from|carried from|note from|update from|part of|tracked by|sub-issue|child)\b/i.test(around)) return;
+        // A citation the surrounding prose presents as an example is about that issue, not this one.
+        if (isExampleCitation(around)) return;
+      }
       out.push({ kind: 'stale-premise?', issue: i, detail:
-        'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') with no wording that acknowledges ' +
-        'it is settled. Check this issue still describes reality. If the citation is deliberate, ' +
+        'cites closed #' + n + ' (' + other.title.slice(0, 50) + ') ' + (role
+          ? 'as a premise: Jev reads it as asserting what #' + n + ' changed as still current'
+          : 'with no wording that acknowledges it is settled') +
+        '. Check this issue still describes reality. If the citation is deliberate, ' +
         'say so in the body (`see #' + n + '`, "for example") or add ' +
         '`<!-- tracker-audit-ignore: stale-premise #' + n + ' -->`. Advisory only.' });
     });
@@ -1248,7 +1337,12 @@ open.forEach((i) => {
 // ---- 5. An open issue asserting something a closed issue settled -------------------------------
 // The classification lives in stalePremiseFindings above, pure, so its narrowings are pinned by the
 // test suite rather than by a live run against whatever the tracker holds today.
-stalePremiseFindings(issues, byNumber).forEach((f) => report(f.kind, f.issue, f.detail));
+// Jev reads what each citation means when it can (issue 724). tools/jev.js is optional: a harnessed
+// repo's copy of this file may not carry it, and then the proximity rule answers as before.
+let askJevSync = null;
+try { askJevSync = require('./jev.js').askJevSync; } catch (e) { askJevSync = null; }
+stalePremiseFindings(issues, byNumber, { classify: jevCitationClassifier(askJevSync) })
+  .forEach((f) => report(f.kind, f.issue, f.detail));
 
 // ---- 6. The Projects board is a THIRD record of state, and it drifts ---------------------------
 // This repo deliberately has no `done` label, because a second answer to "is this finished" always
