@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T05:03:32Z'
-  previous-modified: '2026-09-24T04:41:03Z'
-  revision: '35'
-  content-sha: d97f08e39cf0
+  modified: '2026-09-24T05:09:19Z'
+  previous-modified: '2026-09-24T05:03:32Z'
+  revision: '36'
+  content-sha: 57aa5c6bc5e8
 ---
 
 # ticket-fleet
@@ -158,8 +158,20 @@ Workflow({
 ```
 
 On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
-edited in place; on every other repo the copy stays a byte-identical mirror of the plugin
-source and is refreshed by re-running the `cp` above whenever the plugin bumps.
+edited in place. On every other repo the copy is a mirror of claude-dotfiles master, and **the run
+refreshes it itself** (issue 770): the first Setup agent, `fleet-refresh`, downloads
+`aac-skills/ticket-fleet/ticket-fleet.js` and `editable-install-guard.js` from master, overwrites
+each `.claude/workflows/` copy whose sha256 differs (and `tools/editable-install-guard.js` when
+present), and commits them as `chore(fleet): refresh ticket-fleet script from claude-dotfiles
+master (issue 770)` on the current branch - no push. The running script is still the old copy;
+the next launch runs the refreshed one, so a fix merged here reaches every fleeted repo one run
+later with no `cp` by hand. The fork list it skips is `FORKS` in `tools/ticket-fleet-contract.js`.
+
+**The deliverer merges its own PR (issue 770).** STEP D of the Deliver prompt waits for CI on the
+PR head (20 minutes at most), applies the runbook merge bar, squash-merges with the head sha the
+checks ran on, re-runs the pre-push merge once if the default branch moved under it, and stops on
+a red check or a changes-requested review. The result carries `merged`, `mergeSha`, `prState` and
+`ticketState`; the run log says `MERGED <sha>` or `open, not merged: <prState>` per ticket.
 
 On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
 prompts before letting the fleet push branches and open PRs. Full args list:
