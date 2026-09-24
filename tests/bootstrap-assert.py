@@ -191,6 +191,17 @@ if settings is not None:
     else:
         pass_('every merged hook command names a script the payload carries')
 
+    # ask_matt_gate.py imports jev.py from its own directory (issue 723). No hook command names
+    # the library, so the check above cannot see it missing; without it the gate's YES lint
+    # silently falls back to the regexes in every cloud session.
+    jev_lib = os.path.join(payload_abs, 'hooks', 'scripts', 'jev.py')
+    if not os.path.isfile(jev_lib):
+        fail(f'the payload carries no Jev helper beside ask_matt_gate.py at {jev_lib}')
+    elif b'_plugin_hook_guard' in open(jev_lib, 'rb').read():
+        fail(f'{jev_lib} carries the dedup guard: it is a library, not a governance hook')
+    else:
+        pass_('the Jev helper ships beside ask_matt_gate.py as a library (issue 723)')
+
 # ------------------------------------------ 3b. the home-anchored seat (issue 643) -------------
 # Delivery must not depend on which checkout Claude Code calls the project. The hook copies
 # itself to ~/.claude/hooks/aac-bootstrap.sh and seats THAT as a SessionStart entry in user

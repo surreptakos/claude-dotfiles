@@ -26,6 +26,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
+// The YES rules put regex hits to TypeSafe Jev (issue 723); tests never touch the network, so
+// every spawned gate sees Jev as unavailable and the regex verdicts stand.
+process.env.TYPESAFE_JEV_STUB = 'off';
+
 const REPO = path.resolve(__dirname, '..');
 const GATE = path.join(REPO, 'profile', 'codex', 'hooks', 'ask_matt_gate.py');
 

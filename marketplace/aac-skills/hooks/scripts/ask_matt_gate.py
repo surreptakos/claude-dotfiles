@@ -1244,43 +1244,90 @@ def _find_transcript(session_id: str) -> str:
     return str(matches[0]) if matches else ""
 
 
+# Issue 723: the five regexes above are keyword matches, so a reply that QUOTES a banned word ("the
+# rule bans words like probably") was flagged. Each regex hit is now put to a TypeSafe Jev Noul
+# about the reply's own voice, and a hit Jev says the reply does not itself commit is dropped. Jev
+# only suppresses; it never adds a finding the regex missed. The tool-ran facts that gate the last
+# three rules stay in code. When Jev is unavailable (no credential, timeout, error) or the helper
+# cannot be imported, the regex verdicts stand unchanged.
+YES_JEV_OWN_VOICE = (
+    " Judge only what `reply` itself says in its own voice: words it quotes, lists, names as"
+    " examples, or discusses as words do not count."
+)
+YES_JEV_QUESTIONS = {
+    "hedge": "Does `reply` assert a cause or a state of things as a guess rather than as a checked"
+    " fact?" + YES_JEV_OWN_VOICE,
+    "deflection": "Does `reply` ask the user to run a check, test or verification that the assistant"
+    " could run itself?" + YES_JEV_OWN_VOICE,
+    "claim": "Does `reply` claim that something was tested, verified or confirmed?" + YES_JEV_OWN_VOICE,
+    "certainty": "Does `reply` state a root cause or diagnosis with certainty?" + YES_JEV_OWN_VOICE,
+    "source": "Does `reply` describe what a named file, ticket, page or document contains or says?"
+    + YES_JEV_OWN_VOICE,
+}
+YES_JEV_FLOOR = 0.5  # below this Jev says the reply does not itself do it, and the hit is dropped
+YES_JEV_TIMEOUT = 3.0  # seconds; the Stop hook's whole budget is 5
+
+
+def _yes_jev_verdicts(prose: str, rules: list[str]) -> dict[str, float] | None:
+    """Jev's probability per fired rule that the reply itself commits it; None = unavailable."""
+    if not rules:
+        return {}
+    try:
+        if str(SCRIPT.parent) not in sys.path:
+            sys.path.insert(0, str(SCRIPT.parent))
+        import jev  # ships beside this script, in ~/.codex/hooks and in the plugin payload alike
+    except Exception:
+        return None
+    return jev.ask_nouls(
+        {"reply": prose}, {rule: YES_JEV_QUESTIONS[rule] for rule in rules}, timeout=YES_JEV_TIMEOUT
+    )
+
+
 def _yes_lint(text: str, turn_tools: set[str] | None) -> list[str]:
     """YES violations a script can see in a reply. `turn_tools` None = transcript unknown."""
     prose = _strip_code(PYLONS_PREFIX_PATTERN.sub("", text, count=1))
-    violations: list[str] = []
+    found: list[tuple[str, str]] = []
     hedges = sorted({m.group(0).lower() for m in HEDGE_PATTERN.finditer(prose)})
     if hedges:
-        violations.append(
+        found.append((
+            "hedge",
             "YES hedge without evidence: " + ", ".join(hedges[:4]) + " — check, then state it"
-        )
+        ))
     deflections = sorted({m.group(0).lower() for m in DEFLECTION_PATTERN.finditer(prose)})
     if deflections:
-        violations.append(
+        found.append((
+            "deflection",
             "YES deflection: " + ", ".join(deflections[:3])
             + " — do the check yourself and show the output"
-        )
+        ))
     if turn_tools is not None and not turn_tools:
         claims = sorted({m.group(0).lower() for m in VERIFIED_CLAIM_PATTERN.finditer(prose)})
         if claims:
-            violations.append(
+            found.append((
+                "claim",
                 "YES unverified claim: " + ", ".join(claims[:3])
                 + " — no tool ran this turn, so nothing was verified"
-            )
+            ))
         certain = sorted({m.group(0).lower() for m in CERTAINTY_PATTERN.finditer(prose)})
         if certain:
-            violations.append(
+            found.append((
+                "certainty",
                 "YES conclusion without data: " + ", ".join(certain[:3])
                 + " — no tool ran this turn; state the data source or drop the certainty"
-            )
+            ))
     if turn_tools is not None and not (turn_tools & READ_CLASS_TOOLS):
         sourced = SOURCE_CHARACTERISATION_PATTERN.search(prose)
         if sourced:
             snippet = sourced.group(0).strip()
-            violations.append(
+            found.append((
+                "source",
                 "YES unread source: \"" + snippet[:70]
                 + "\" — nothing was opened this turn; read it or say it is unread"
-            )
-    return violations
+            ))
+    verdicts = _yes_jev_verdicts(prose, [rule for rule, _ in found])
+    if verdicts is None:
+        return [message for _, message in found]
+    return [message for rule, message in found if verdicts[rule] >= YES_JEV_FLOOR]
 
 
 CONFIG_FILE_PATTERN = re.compile(
