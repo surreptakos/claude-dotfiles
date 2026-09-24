@@ -156,7 +156,7 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
     // Issue 435: the probe lane's verifier re-runs whatever commands a probe ticket named, and
     // unlike the prober it is NOT worktree-isolated - an install it ran would land in the
     // orchestrator's own checkout. It carries the same rail now.
-    ['You are an independent verifier for a probe ticket', 'Clean up your scratch worktree (git worktree remove) when done. Make no repository changes'],
+    ['You are an independent verifier for a probe ticket', 'when done. Make no repository changes, no commits, no pushes'],
   ]) {
     const body = sliceBetween(src, prompt, tail, `the "${prompt}" prompt in the fleet script`);
     assert.ok(body.includes('${PYTHON_RAIL}'), `the "${prompt}" prompt must carry the rail`);
@@ -176,7 +176,7 @@ test("the probe lane's verifier carries the orchestrator-tree rail (issue 493)",
   assert.match(rail[0], /aac-routines issue 192, non-negotiable/, 'the rail must name the issue it comes from');
   assert.match(rail[0], /you are NOT worktree-isolated/, 'the rail must say the tree it starts in is the orchestrator\'s own');
   for (const [prompt, tail] of [
-    ['You are an independent verifier for a probe ticket', 'Clean up your scratch worktree (git worktree remove) when done. Make no repository changes'],
+    ['You are an independent verifier for a probe ticket', 'when done. Make no repository changes, no commits, no pushes'],
     ['You are an independent verifier. Your job', '{ label: verifyLabel, phase: \'Verify\''],
   ]) {
     const start = src.indexOf(prompt);

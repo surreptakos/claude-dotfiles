@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T04:58:11Z"
-  previous-modified: "2026-09-24T04:43:33Z"
-  revision: "37"
-  content-sha: "086d5700e7b7"
+  modified: "2026-09-24T05:19:09Z"
+  previous-modified: "2026-09-24T04:58:11Z"
+  revision: "38"
+  content-sha: "7f0812eb9067"
 ---
 
 # ticket-fleet
@@ -523,6 +523,23 @@ script and the drift guards in `tools/ticket-fleet-branch.test.js`). Two concurr
 against the same ticket therefore produce distinct branches; two runs of the same worker
 still add `-attempt<A>` so a re-implement after a failed verify does not overwrite its own
 predecessor.
+
+## Isolation guard: do not change directory while a run is live
+
+**The orchestrating session must not `cd` into another repository while a run is live** - and a
+background command that resets its shell counts too. Every sub-agent's shell starts wherever the
+orchestrator's Bash tool last stood, so on 2026-09-17 aac-routines run `6aac426c` failed four verify
+checkpoints, an implement checkpoint and the pre-report checkpoint with `Cannot find module
+'/home/user/claude-dotfiles/tools/orchestrator-tree-guard.js'` after the session moved to fix
+claude-dotfiles mid-run, and on 2026-09-22 run `6ab29e44` lost #511's whole lane after an ordinary
+parent command left the cwd at `/home/user` (issue 562). A relative `--cwd .` is worse than a
+crash: where the guard also exists, it audits the wrong repository and passes. So the first agent
+of Setup, `checkout-probe`, measures the checkout once (`git rev-parse --show-toplevel`, from
+`orchestratorCwd`), and every guard command, `tip:` read, push, verifier, deliver and discoveries
+worktree after it names that absolute path (`cd '<checkout>'` or `git -C '<checkout>'`); a run
+whose probe cannot measure it stops in Setup. That covers the fleet's own agents, not the rest of
+your turn: a `cd` elsewhere still moves the directory the next launch measures, so stay put until
+the run returns.
 
 ## Where a verdict is allowed to come from
 

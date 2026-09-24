@@ -530,6 +530,15 @@ function laneScope(stubs) {
   });
 }
 
+// Issue 562: what the Setup checkout-probe measured, in the spellings the prompts splice in. A path
+// no cfg default could produce, so a prompt that shows it got it from the measurement.
+const MEASURED_CHECKOUT = '/work/orch-checkout';
+const MEASURED_CHECKOUT_STUBS = {
+  orchestratorCheckout: MEASURED_CHECKOUT,
+  CHECKOUT: `'${MEASURED_CHECKOUT}'`,
+  CHECKOUT_RAIL: `Orchestrator checkout (issue 562): cd '${MEASURED_CHECKOUT}' first.`,
+};
+
 // The runCodeLane body — the const runCodeLane = async (...) => { ... }.
 function extractCodeLane(src) { return extractMarked(src, 'FLEET-CODE-LANE'); }
 
@@ -586,6 +595,8 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     revParse: async () => null,
     // Issue 654: the Deliver-result classifier is the module's own, the one the generated block carries.
     classifyDelivery,
+    // Issue 562: the orchestrator checkout Setup measured, as the lane prompts splice it in.
+    ...MEASURED_CHECKOUT_STUBS,
   }, stubs)));
 }
 
@@ -643,6 +654,7 @@ async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
     rules: new Proxy({}, { get: () => () => 'gh pr create' }),
     instrument: 'gh',
     DISCOVERY_REPORT: {},
+    ...MEASURED_CHECKOUT_STUBS,
   }));
   // The writer takes the default branch as an argument since issue 405: the finish mode calls it
   // with the branch its journal names, long before a scout would have run.
@@ -1032,7 +1044,8 @@ for (const file of RESUME_GUARD_PAIR) {
         return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
       }
       if (opts.label.startsWith('push:')) {
-        assert.ok(prompt.includes(`git push -u origin ${branch}`), 'the push agent must be given the exact command');
+        assert.ok(prompt.includes(`git -C '${MEASURED_CHECKOUT}' push -u origin ${branch}`),
+          'the push agent must be given the exact command, naming the measured checkout (issue 562)');
         origin.add(branch);
         return { pushed: true, output: `branch '${branch}' set up to track 'origin/${branch}'` };
       }
@@ -1773,6 +1786,7 @@ async function driveFinish(scriptPath, agentMock, journal, cfgOverrides = {}) {
     classifyDelivery,
     DELIVERED: {},
     DISCOVERY_REPORT: {},
+    ...MEASURED_CHECKOUT_STUBS,
   }));
   return { result: await runFinish(journal), logs, checkpoints };
 }
@@ -2104,4 +2118,230 @@ test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles 
   const setupIdx = src.indexOf("phase('Setup')");
   assert.ok(src.indexOf('[FLEET-REFRESH-START]') > setupIdx && src.indexOf('[FLEET-REFRESH-END]') < src.indexOf('if (treeGuardOn) {', setupIdx),
     'the refresh runs first in Setup, before the tree-guard baseline, so its commit is inside the baseline');
+});
+
+// ---- Issue 562: every prompt names the checkout Setup measured, never the parent's current dir ----
+// A sub-agent's shell starts wherever the orchestrating session's shell last stood, and that moves
+// mid-run: aac-routines run 6aac426c lost six checkpoints to "Cannot find module
+// '/home/user/claude-dotfiles/tools/orchestrator-tree-guard.js'" after the parent moved to fix
+// claude-dotfiles, and run 6ab29e44 lost a lane after a parent command reset the cwd to /home/user.
+
+// Any `git rev-parse <arg>` / `git worktree add <arg>`, with the directory it names via -C (if any).
+// Prose that only lists a command (`git worktree add`, in the rail) has no argument and is not a run.
+const PATH_SENSITIVE_GIT = /git\s+(?:-C\s+(\S+)\s+)?(rev-parse|worktree\s+add)\s+[^\s`,]/g;
+
+function codeLines(src) {
+  return src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*\*)/.test(l));
+}
+
+test(`${FLEET_SCRIPT_REL} runs no tree guard, rev-parse or worktree add without the measured absolute checkout (issue 562)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const checkoutBlock = extractMarked(src, 'FLEET-CHECKOUT');
+  const outside = src.replace(checkoutBlock, '');
+  const offenders = [];
+  for (const line of codeLines(outside)) {
+    for (const m of line.matchAll(PATH_SENSITIVE_GIT)) {
+      // The checkout itself, or a scratch worktree this run names by its absolute /tmp/fleet-<run>/ path.
+      // `<that worktree>` is the VERDICT schema's description of the verifier's own scratch worktree.
+      if (!['${CHECKOUT}', '${verifyTree}', '<that'].includes(m[1])) offenders.push(line.trim().slice(0, 160));
+    }
+  }
+  assert.deepEqual(offenders, [], 'every rev-parse / worktree add a prompt runs must name its directory by absolute path');
+
+  // The guard: its script and its --cwd are the measured checkout, and the shell changes into it first.
+  assert.match(src, /^const GUARD_SCRIPT = inCheckout\(cfg\.treeGuardScript\)$/m);
+  assert.match(src, /^const GUARD_CMD = `node \$\{shq\(GUARD_SCRIPT\)\}`$/m);
+  const guardRuns = codeLines(src).filter((l) => l.includes('${GUARD_CMD}'));
+  assert.equal(guardRuns.length, 2, 'the baseline and the check are the two guard commands');
+  for (const l of guardRuns) {
+    assert.match(l, /`cd \$\{CHECKOUT\} \|\| exit 2; .*\$\{GUARD_CMD\} (baseline|check) --cwd \$\{CHECKOUT\} /,
+      `a guard command must cd into the measured checkout and audit it by path: ${l.trim()}`);
+  }
+  assert.deepEqual(codeLines(src).filter((l) => l.includes('orchestrator-tree-guard.js') && !/^\s*treeGuardScript:/.test(l)), [],
+    'the repo-relative guard path appears only as the cfg default the measurement is joined to');
+
+  // The path comes from the Setup measurement, never from cfg defaults.
+  assert.deepEqual(codeLines(outside).filter((l) => /cfg\.orchestratorCwd/.test(l)), [],
+    'cfg.orchestratorCwd is only where the checkout-probe measures from - no later prompt may read it');
+  for (const key of ['treeGuardScript', 'treeGuardStateDir']) {
+    for (const l of codeLines(src).filter((x) => x.includes(`cfg.${key}`))) {
+      assert.match(l, new RegExp(`inCheckout\\(cfg\\.${key}\\)`), `cfg.${key} must be joined to the measured checkout: ${l.trim()}`);
+    }
+  }
+  assert.match(checkoutBlock, /label: 'checkout-probe', phase: 'Setup'/);
+  assert.match(checkoutBlock, /^const orchestratorCheckout = measuredCheckout$/m, 'the checkout is the measured value, nothing else');
+  assert.match(checkoutBlock, /^const CHECKOUT = shq\(orchestratorCheckout\)$/m);
+  const setupIdx = src.indexOf("phase('Setup')");
+  const probeIdx = src.indexOf("label: 'checkout-probe'");
+  assert.ok(probeIdx > setupIdx && probeIdx < src.indexOf("label: 'fleet-refresh'") && probeIdx < src.indexOf("label: 'tree-guard:baseline'"),
+    'the measurement is the first agent of Setup, before the parent has had time to move');
+  // The unisolated agents carry the rule, not just the commands.
+  for (const anchor of ['Scout this repository', 'Deliver verified branch', 'Append this ticket-fleet run', 'Refresh this repository']) {
+    const start = src.indexOf(anchor);
+    assert.ok(start > 0, `prompt "${anchor}" is gone`);
+    assert.ok(src.slice(start, start + 1200).includes('${CHECKOUT_RAIL}'), `the "${anchor}" prompt must carry the checkout rail`);
+  }
+  assert.match(src, /^const orchestratorTreeRail = \(leakExample\) => `\$\{CHECKOUT_RAIL\}$/m, 'both verifiers carry it through the tree rail');
+});
+
+// A shell that behaves like the orchestrating session's: its cwd is whatever the parent last did.
+// Only the commands the Setup and guard agents are given are modelled, and every node invocation
+// records which script it loaded and which tree it audited.
+function simulatedShell(checkout, otherRepo) {
+  const files = new Set([
+    `${checkout}/tools/orchestrator-tree-guard.js`,
+    // The worse case the issue names: the repo the parent moved to serves the guard too, so a
+    // relative spelling would not crash - it would audit the wrong repository and pass.
+    `${otherRepo}/tools/orchestrator-tree-guard.js`,
+  ]);
+  const shell = { cwd: checkout, audits: [], commands: [] };
+  const resolve = (p) => (p.startsWith('/') ? path.posix.normalize(p) : path.posix.join(shell.cwdNow, p));
+  const words = (s) => [...s.matchAll(/'([^']*)'|(\S+)/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]));
+  const repoOf = (dir) => [checkout, otherRepo].find((r) => dir === r || dir.startsWith(r + '/')) || null;
+  shell.run = (command) => {
+    shell.commands.push(command);
+    shell.cwdNow = shell.cwd;
+    for (const stmt of command.split(/;\s*/).filter(Boolean)) {
+      const [lhs, rhs] = stmt.split(/\s*\|\|\s*/);
+      const w = words(lhs);
+      let ok = true;
+      if (w[0] === 'cd') { const d = resolve(w[1]); if (repoOf(d)) shell.cwdNow = d; else ok = false; }
+      else if (w[0] === '[' && w[1] === '-f') ok = files.has(resolve(w[2]));
+      else if (w[0] === 'exit') return { exitCode: Number(w[1]), stdout: '', stderr: '' };
+      else if (w[0] === 'git' && w[1] === '-C' && w[3] === 'rev-parse') {
+        const repo = repoOf(resolve(w[2]));
+        if (!repo) return { exitCode: 128, stdout: '', stderr: `fatal: not a git repository: ${w[2]}` };
+        return { exitCode: 0, stdout: (w[4] === '--show-toplevel' ? repo : 'a'.repeat(40)) + '\n', stderr: '' };
+      } else if (w[0] === 'node') {
+        const script = resolve(w[1]);
+        if (!files.has(script)) return { exitCode: 1, stdout: '', stderr: `Error: Cannot find module '${script}'` };
+        const opt = (name) => { const i = w.indexOf(name); return i === -1 ? null : w[i + 1]; };
+        const audited = resolve(opt('--cwd'));
+        shell.audits.push({ script, audited });
+        if (w[2] === 'baseline') {
+          files.add(path.posix.join(audited, '.git/orchestrator-tree-guard/state.json'));
+          // Relative on purpose: the check must still find it after the parent has moved.
+          return { exitCode: 0, stdout: JSON.stringify({ statePath: '.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+        }
+        if (!files.has(resolve(opt('--state')))) return { exitCode: 2, stdout: '', stderr: `no baseline at ${opt('--state')}` };
+        return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+      } else throw new Error(`simulated shell: unmodelled statement ${stmt}`);
+      if (!ok) {
+        const exit = /^exit (\d+)$/.exec(rhs || '');
+        return { exitCode: exit ? Number(exit[1]) : 1, stdout: '', stderr: `${w[0]} failed` };
+      }
+    }
+    return { exitCode: 0, stdout: '', stderr: '' };
+  };
+  return shell;
+}
+
+// Evaluates Setup (checkout-probe, fleet-refresh, tree-guard baseline) exactly as the script runs it,
+// with the tip reader beside it, and returns the checkpoint and the tip reader.
+async function driveSetup(agentMock, cfgOverrides = {}) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const body = [extractMarked(src, 'FLEET-TIP'), extractMarked(src, 'FLEET-TREE-GUARD')].join('\n');
+  const logs = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, revParse, orchestratorCheckout };\n}`);
+  const out = await wrapper(laneScope({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    phase: () => {},
+    cfg: Object.assign({
+      treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js', orchestratorCwd: '.',
+      treeGuardStateDir: '.git/orchestrator-tree-guard', reportModel: 'r', deliverModel: 'd',
+    }, cfgOverrides),
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+  return Object.assign(out, { logs });
+}
+
+const commandIn = (prompt) => /\n\n(.+)\n\n/.exec(prompt)[1];
+
+test('a run whose parent session cds to another repository after Setup still passes every checkpoint (issue 562)', async () => {
+  const checkout = '/work/aac-routines';
+  const other = '/work/claude-dotfiles';
+  const shell = simulatedShell(checkout, other);
+  const labels = [];
+  const agentMock = async (prompt, opts) => {
+    labels.push(opts.label);
+    if (opts.label === 'fleet-refresh') {
+      return { servedRepo: 'o/r', skipped: 'fork keeps its own edits', refreshed: [], unchanged: [], commit: '', errors: [] };
+    }
+    const res = shell.run(commandIn(prompt));
+    // The parent session moves to fix another repository the moment Setup has measured its own.
+    if (opts.label === 'checkout-probe') shell.cwd = other;
+    return res;
+  };
+  const { treeGuardCheck, revParse, orchestratorCheckout, logs } = await driveSetup(agentMock);
+  assert.equal(orchestratorCheckout, checkout, 'Setup records the checkout the run was launched in');
+  assert.ok(logs.some((m) => m.includes('baseline taken')), `the baseline must be taken in the checkout: ${logs.join(' | ')}`);
+
+  for (const [label, n] of [['implement-attempt1', 7], ['verify-attempt1', 7], ['deliver', 7], ['probe-verify-attempt1', 8], ['finish-deliver', 9], ['pre-report', 0]]) {
+    await treeGuardCheck(label, n); // throws on could-not-audit
+  }
+  assert.equal(await revParse('origin/main', 'tip:#7.1'), 'a'.repeat(40), 'the tip agent answers about the checkout, not the parent\'s cwd');
+  assert.deepEqual(labels.slice(0, 3), ['checkout-probe', 'fleet-refresh', 'tree-guard:baseline']);
+  assert.equal(shell.audits.length, 7, 'one baseline and six checks');
+  for (const a of shell.audits) {
+    assert.deepEqual(a, { script: `${checkout}/tools/orchestrator-tree-guard.js`, audited: checkout },
+      'every guard run loads the checkout\'s guard and audits the checkout, with the parent elsewhere');
+  }
+  for (const c of shell.commands.slice(1)) {
+    assert.ok(c.includes(`'${checkout}'`), `every command after the measurement names the absolute checkout: ${c}`);
+  }
+
+  // Control: the pre-562 spelling, run from where the parent now stands, audits the other repository.
+  shell.audits.length = 0;
+  shell.run('node tools/orchestrator-tree-guard.js check --cwd . --state .git/orchestrator-tree-guard/state.json');
+  assert.deepEqual(shell.audits, [{ script: `${other}/tools/orchestrator-tree-guard.js`, audited: other }],
+    'the simulated shell must reproduce the incident, or the passes above prove nothing');
+});
+
+test('a Setup that cannot measure the checkout aborts instead of falling back to cfg.orchestratorCwd (issue 562)', async () => {
+  const labels = [];
+  const agentMock = async (_prompt, opts) => {
+    labels.push(opts.label);
+    return { exitCode: 128, stdout: '', stderr: 'fatal: not a git repository (or any of the parent directories): .git' };
+  };
+  await assert.rejects(driveSetup(agentMock), /could not measure the orchestrator checkout \(issue 562\)/);
+  assert.deepEqual(labels, ['checkout-probe'], 'no refresh, baseline or checkpoint may run against an unmeasured tree');
+});
+
+test('the lane, deliver and report prompts name the measured checkout in every rev-parse and worktree add (issue 562)', async () => {
+  const prompts = [];
+  const branch = 'agent/issue-562-attempt1-wf_testrun-w0';
+  const agentMock = async (prompt, opts) => {
+    prompts.push([opts.label, prompt]);
+    if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: ['d1'] };
+    if (opts.label.startsWith('push:')) return { pushed: true, output: 'ok' };
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/562', mergeStatus: 'clean', conflictPaths: [] };
+    return { branch: 'b', sha: 's', prUrl: '', appended: 1 };
+  };
+  const scratch = { scratchFile: (n) => `/tmp/fleet-testrun/${n}` };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 562, title: 't', criteria: '' }, 0, {}, 'inv1', null, scratch);
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${extractMarked(src, 'FLEET-REPORT')}\nreturn runReport;\n}`);
+  const runReport = await wrapper(laneScope(Object.assign({
+    agent: agentMock, cfg: { deliver: true, reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' }, runId: 'testrun',
+    rules: new Proxy({}, { get: () => () => 'gh pr create' }), instrument: 'gh', DISCOVERY_REPORT: {},
+  }, MEASURED_CHECKOUT_STUBS, scratch)));
+  await runReport(['finding'], 'main');
+
+  const seen = new Set();
+  for (const [label, prompt] of prompts) {
+    assert.doesNotMatch(prompt, /git -C\s{2}/, `${label}: a -C with no directory`);
+    for (const m of prompt.matchAll(PATH_SENSITIVE_GIT)) {
+      seen.add(`${label.split(/[:#]/)[0]} ${m[2]}`);
+      assert.ok(m[1] === `'${MEASURED_CHECKOUT}'` || (m[1] || '').startsWith('/tmp/fleet-testrun/'),
+        `${label} runs \`${m[0]}\` without the measured checkout or an absolute scratch worktree`);
+    }
+  }
+  for (const want of ['verify worktree add', 'verify rev-parse', 'deliver worktree add', 'deliver rev-parse', 'followups-writer worktree add']) {
+    assert.ok(seen.has(want), `expected the ${want} command to be checked; saw ${[...seen].join(', ')}`);
+  }
+  const writer = prompts.find(([l]) => l === 'followups-writer')[1];
+  assert.match(writer, new RegExp(`git -C /tmp/fleet-testrun/discoveries diff --numstat HEAD~1 HEAD -- FOLLOW-UPS\\.md\` must print 0`),
+    'the writer must prove its commit deleted nothing from the follow-ups file before it pushes (folded-in issue 376)');
 });
