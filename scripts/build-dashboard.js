@@ -16,7 +16,14 @@ const CONFIG = {
   // -From worktree, not origin: this repo is private, so a clone from inside a CI runner has no
   // credential, and a gate that cloned HEAD would report on the previous commit rather than the
   // one being made. worktree copies what git currently sees. ~13s.
-  testCommand: 'powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree',
+  // No testCommand here (issue 452): the dashboard no longer runs the suite. It spawned the Windows
+  // restore suite on windows-latest (2x billing) on every push and issue event -- 1381 runs in
+  // 2026-09-09..09-16, ~3370 billable minutes a week -- to re-derive a verdict the Windows restore
+  // job already records. testWorkflow reads that job's verdict instead: the conclusion of its latest
+  // completed run on testBranch, with the sha it ran at, so the line says which commit it vouches for.
+  testCommand: null,
+  testWorkflow: 'windows-restore-test.yml',
+  testBranch: 'master',
   adrDir: null,                     // no ADRs here
   deployWorkflow: null              // nothing deploys; sync.ps1 is the release path and it is local
 };
@@ -40,6 +47,30 @@ function esc(s) { return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g,
 // Absolute dates are stable: only real content changes produce a diff, so CI's "commit if changed"
 // step can be the only thing that ever advances the artifact and the daily safety cron is redundant.
 function ymd(iso) { return String(iso || '').slice(0, 10); }
+
+/** The latest completed run of `workflow` on `branch`, `null` when there is none, `undefined`
+ *  when gh could not be read. Completed, not merely latest: the restore job and this one start on
+ *  the same push, so the newest run is usually still in progress and has no conclusion yet. */
+function latestCompletedRun(workflow, branch) {
+  const runs = ghJson('gh run list --workflow ' + workflow + ' --branch ' + branch +
+    ' --status completed --limit 1 --json conclusion,headSha,updatedAt,url');
+  return runs ? (runs[0] || null) : undefined;
+}
+
+/** The health line for a test verdict read from an Actions run rather than from a local test run.
+ *  `ok` is false for anything but `success`: a cancelled or timed-out run vouches for nothing. */
+function workflowVerdict(run, workflow, branch) {
+  const where = '`' + workflow + '` on `' + branch + '`';
+  if (run === undefined) return { ok: false, text: 'unknown — could not read the runs of ' + where };
+  if (!run) return { ok: false, text: 'unknown — no completed run of ' + where };
+  const at = ' at `' + String(run.headSha || '').slice(0, 7) + '` (' + ymd(run.updatedAt) + ') — [run](' + run.url + ')';
+  if (run.conclusion === 'success') return { ok: true, text: 'passing' + at };
+  const bad = ['failure', 'timed_out', 'startup_failure'].includes(run.conclusion);
+  return { ok: false, text: (bad ? 'FAILING' : String(run.conclusion || 'no conclusion')) + at };
+}
+
+module.exports = { CONFIG, testSummary, workflowVerdict };
+if (require.main !== module) return;
 
 const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
 const issues = ghJson('gh issue list --state open --limit 500 --json number,title,labels,assignees,updatedAt,url,body,subIssuesSummary,parent') || [];
@@ -136,14 +167,19 @@ function testSummary(out) {
   return (text.trim().split('\n').pop() || '').trim();
 }
 
-let tests = null;
-if (CONFIG.testCommand) {
+let tests = null, testsOk = true;
+if (CONFIG.testWorkflow) {
+  const v = workflowVerdict(latestCompletedRun(CONFIG.testWorkflow, CONFIG.testBranch), CONFIG.testWorkflow, CONFIG.testBranch);
+  tests = v.text; testsOk = v.ok;
+} else if (CONFIG.testCommand) {
   try {
     tests = testSummary(sh(CONFIG.testCommand));
   } catch (e) {
     tests = 'FAILING — ' + testSummary(String((e.stdout || '') + (e.stderr || '')));
   }
+  testsOk = !/FAILING/.test(tests);
 }
+const testsLabel = CONFIG.testWorkflow ? 'Test suite (latest `' + CONFIG.testWorkflow + '` run on `' + CONFIG.testBranch + '`)' : 'Test suite at this commit';
 
 // sha and generation-time timestamp used to head every DASHBOARD.md. Both drifted on every rerun
 // against unchanged inputs — the timestamp always, the sha whenever HEAD moved for unrelated reasons
@@ -178,7 +214,7 @@ if (CONFIG.deployWorkflow) {
   else if (deploy.status !== 'completed' || deploy.conclusion !== 'success')
     attention.push('- **Deploy is ' + (deploy.conclusion || deploy.status) + '** — [run](' + deploy.url + ') at `' + deploy.headSha.slice(0, 7) + '`.');
 }
-if (tests && /FAILING/.test(tests)) attention.push('- **Test suite failing at this commit:** ' + tests);
+if (tests && !testsOk) attention.push('- **' + testsLabel + ' is not green:** ' + tests);
 ['needs-triage', 'needs-info', 'ready-for-human'].forEach(k => {
   issues.filter(i => i.triage === k).forEach(i =>
     attention.push('- **' + k + ':** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ymd(i.updatedAt) + ')_'));
@@ -194,7 +230,7 @@ const rest = issues.filter(i => i.type !== 'prd');
 
 const health = [];
 if (CONFIG.deployWorkflow) health.push('- **Deploy (`' + CONFIG.deployWorkflow + '`):** ' + (deploy ? (deploy.conclusion || deploy.status) + ' at `' + deploy.headSha.slice(0, 7) + '` (' + ymd(deploy.updatedAt) + ') — [run](' + deploy.url + ')' : 'no runs found'));
-if (tests) health.push('- **Test suite at this commit:** ' + tests);
+if (tests) health.push('- **' + testsLabel + ':** ' + tests);
 
 const md = [
   '# ' + CONFIG.title + ' — working dashboard',
