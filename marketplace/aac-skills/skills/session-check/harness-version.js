@@ -19,7 +19,8 @@
  *   'stale-skill-copy' repo stamp is newer than the skill's number, but the CANONICAL
  *                     project-harness copy is newer still and the stamp does not pass it —
  *                     the marker is fine, the skill copy this session loaded is behind the
- *                     published one (a cloud container on a stale plugin payload, issue 412)
+ *                     published one (a cloud container on a stale plugin payload, issue 412;
+ *                     the published number is read off the dotfiles remote, issue 674)
  *   'not-harnessed'   docs/agents/harness-version.md absent AND scripts/build-dashboard.js absent
  *   'v1-implicit'     folded into 'behind' when template > 1 — the skill's own rule,
  *                     "File absent means version 1 (pre-marker), not unharnessed"
@@ -115,36 +116,56 @@ function readRepoVersion(repoRoot) {
   return { absent: true };
 }
 
-/**
- * Where the CANONICAL project-harness version lives — the number the published plugin payload
- * offers today, independent of the copy this session happens to have loaded. In a cloud container
- * that is the dotfiles clone the bootstrap hook makes under `~/.aac-dotfiles` (the same clone
- * bootstrap-check.js reads the payload version from). `HARNESS_CANONICAL_FILE` overrides it; an
- * empty string means "no canonical copy here", which reads the same as unreadable.
- */
-function canonicalPath(env) {
-  const e = env || process.env;
-  if (typeof e.HARNESS_CANONICAL_FILE === 'string') return e.HARNESS_CANONICAL_FILE || null;
-  return path.join(e.HOME || os.homedir(), '.aac-dotfiles', 'marketplace', 'aac-skills',
-                   'skills', 'project-harness', 'templates', 'harness-version.md');
-}
+const TEMPLATE_IN_REPO = 'marketplace/aac-skills/skills/project-harness/templates/harness-version.md';
 
-/** `{ version }` when the canonical template can be read and parsed, `{ error }` otherwise. */
-function readCanonicalVersion(env) {
-  const p = canonicalPath(env);
-  if (!p) return { error: 'no canonical project-harness copy configured' };
+/**
+ * The CANONICAL project-harness version — the number the published plugin payload offers today,
+ * independent of the copy this session happens to have loaded.
+ *
+ * It has to come off the REMOTE (issue 674). It used to be read from the template inside the
+ * bootstrap's dotfiles clone under `~/.aac-dotfiles`, but the loaded skill copy is copied from
+ * that same clone, so in a container the two numbers were equal by construction and a repo
+ * stamped forward from master always fell through to 'ahead'. Same shape as bootstrap-check.js's
+ * compareToMaster (issue 662): a shallow `git fetch` of the ref in that clone, then
+ * `git show FETCH_HEAD:<template>`. The clone's own template is never a fallback, because its
+ * answer is the bug; no clone or no remote is `{ error }`, which leaves the prior reading alone.
+ *
+ * `HARNESS_CANONICAL_FILE` pins the number to a file for tests; an empty string means "no
+ * canonical copy here". `BOOTSTRAP_DOTFILES_REF` names the ref (default master). `run` is
+ * injected for tests; in a real session it is bootstrap-check's bounded, never-throwing git.
+ */
+function readCanonicalVersion(env, run) {
+  const e = env || process.env;
   let text;
-  try { text = fs.readFileSync(p, 'utf8'); }
-  catch (e) { return { error: `cannot read ${p}: ${e.message}` }; }
-  const m = text.match(TEMPLATE_RE);
-  if (!m) return { error: `no harness-version line in ${p}` };
+  let where;
+  if (typeof e.HARNESS_CANONICAL_FILE === 'string') {
+    where = e.HARNESS_CANONICAL_FILE;
+    if (!where) return { error: 'no canonical project-harness copy configured' };
+    try { text = fs.readFileSync(where, 'utf8'); }
+    catch (err) { return { error: `cannot read ${where}: ${err.message}` }; }
+  } else {
+    const clone = path.join(e.HOME || os.homedir(), '.aac-dotfiles');
+    if (!fs.existsSync(path.join(clone, '.git'))) return { error: 'no dotfiles clone to fetch in' };
+    const exec = run || require('./bootstrap-check').execGit;
+    const git = (...args) => exec('git', ['-C', clone, ...args]);
+    const ref = e.BOOTSTRAP_DOTFILES_REF || 'master';
+    if (git('fetch', '--depth', '1', 'origin', ref).status !== 0) {
+      return { error: `cannot fetch ${ref} from the dotfiles remote` };
+    }
+    const shown = git('show', `FETCH_HEAD:${TEMPLATE_IN_REPO}`);
+    if (shown.status !== 0) return { error: `cannot read ${TEMPLATE_IN_REPO} at ${ref}` };
+    text = shown.stdout;
+    where = `${ref}:${TEMPLATE_IN_REPO}`;
+  }
+  const m = String(text).match(TEMPLATE_RE);
+  if (!m) return { error: `no harness-version line in ${where}` };
   return { version: Number(m[1]) };
 }
 
 /**
  * Compare a repo's harness stamp against the skill's own current version.
  */
-function harnessState(repoRoot, skillDir, env) {
+function harnessState(repoRoot, skillDir, env, run) {
   const s = readSkillVersion(skillDir);
   if (s.error === 'template and SKILL.md disagree') {
     return { state: 'stamp-mismatch', template: s.template, skill: s.skill };
@@ -164,7 +185,7 @@ function harnessState(repoRoot, skillDir, env) {
   // loaded is itself behind the published one: a stale plugin payload makes every correctly
   // stamped repo look edited (issue 412). Only the canonical number can tell the two apart, and
   // only when it is readable — an unreadable canonical leaves the original reading in place.
-  const c = readCanonicalVersion(env);
+  const c = readCanonicalVersion(env, run);
   if (typeof c.version === 'number' && c.version > current && repoVersion <= c.version) {
     return { state: 'stale-skill-copy', current, repo: repoVersion, canonical: c.version };
   }
@@ -176,6 +197,5 @@ module.exports = {
   readSkillVersion,
   readRepoVersion,
   readCanonicalVersion,
-  canonicalPath,
   harnessState,
 };
