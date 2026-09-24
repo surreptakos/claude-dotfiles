@@ -36,7 +36,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - marketplace-is-the-distribution-spine: installs read it
 - msys-mangles-git-rev-colon-path: MSYS_NO_PATHCONV=1
 - never-point-dan-at-github: URL or contents
-- personal-profile-parity: pull only
+- personal-profile-parity: junctions, two-way
 - powershell-7-is-the-tool-engine: JSON indents 2
 - pr-merge-from-worktree-needs-manual-branch-delete: manual
 - ps51-scripts-need-a-bom: BOM or ASCII-only strings
