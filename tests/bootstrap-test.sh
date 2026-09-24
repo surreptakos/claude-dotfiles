@@ -17,6 +17,8 @@
 #      tagged, and points at a script the payload actually carries
 #   4  the global rules text file is in the payload and a UserPromptSubmit entry delivers it
 #   5  gh is installed and reachable through the PATH the hook exported via $CLAUDE_ENV_FILE
+#   5c session-check started while the bootstrap is still installing reports the post-bootstrap
+#      payload, with no `!!` stale-marker line (issue 669: the two SessionStart groups race)
 #   6  session-check — the copy the bootstrap installed — exits 0 and prints its payload-version
 #      line, which this script quotes; and its --end mechanical gate (issue 622) STOPs on a
 #      settings file naming a hook script nothing provides
@@ -42,7 +44,10 @@
 #   tests/bootstrap-test.sh --fault stale-payload        # issue 703: the remote master offers a
 #                                                        # newer payload than the one served;
 #                                                        # session-check's `!!` must turn check 6 red
-#   tests/bootstrap-test.sh --scenario clone-failure     # issue 483: an unreachable dotfiles repo
+#   tests/bootstrap-test.sh --fault gate-before-bootstrap # issue 669: session-check reads the
+#                                                        # marker without waiting on a bootstrap
+#                                                        # still running; check 5c must turn red
+#   tests/bootstrap-test.sh --scenario clone-failure    # issue 483: an unreachable dotfiles repo
 #                                                        # leaves a FAILED marker naming the cause,
 #                                                        # a STOP additionalContext line, and gh;
 #                                                        # session-check STOPs on the cause. Exits 0
@@ -72,8 +77,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$FAULT" in
-  ""|missing-hook-entry|verbatim-plugin-root|stale-payload) ;;
-  *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root, stale-payload)" >&2; exit 64 ;;
+  ""|missing-hook-entry|verbatim-plugin-root|stale-payload|gate-before-bootstrap) ;;
+  *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root, stale-payload, gate-before-bootstrap)" >&2; exit 64 ;;
 esac
 case "$SCENARIO" in
   ""|clone-failure) ;;
@@ -321,6 +326,71 @@ PYFAILED
     fail "a second run over a fresh marker printed a duplicate line: $(head -c 120 "$second_out")"
   else
     pass "a second run over a fresh marker is a silent no-op"
+  fi
+fi
+
+# ------------------------------- 5c. the start report waits for the bootstrap (issue 669) ------
+# The gate's SessionStart group and the bootstrap's are unordered. Seen twice live: check.js read
+# the image's marker mid-bootstrap and printed a `!!` stale-marker line and the image's payload
+# version, both false by the time the model read them. Reproduce it: age the marker to what an
+# image carries, start the home-anchored bootstrap slowed down (every python3 it runs sleeps
+# first), and once it holds its lock start session-check. The report has to quote the version
+# the bootstrap installs and no stale line. `--fault gate-before-bootstrap` strips the wait from
+# the installed check, which is the unordered gate of before, and must turn this red.
+RACE_CHECK="$CLEAN_HOME/.claude/skills/session-check/check.js"
+RACE_LOCK="$CLEAN_HOME/.claude/hook-state/aac-bootstrap/run.lock"
+if [ ! -x "$SELF_HOOK" ] || [ ! -f "$RACE_CHECK" ]; then
+  fail "no home-anchored hook or installed session-check to race"
+else
+  race_version="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['version'])" "$PAYLOAD/.claude-plugin/plugin.json")"
+  python3 - "$MARKER_FILE" <<'PYAGE'
+import json, sys
+m = json.load(open(sys.argv[1]))
+m['payload_version'] = '2020.1.100'
+m['installed_at'] = '2020-01-01T00:00:00Z'
+json.dump(m, open(sys.argv[1], 'w'), indent=2)
+PYAGE
+  touch -d '2020-01-01 00:00:00' "$MARKER_FILE"
+  SLOW_BIN="$SCRATCH/slow-bin"
+  mkdir -p "$SLOW_BIN"
+  printf '#!/bin/sh\nsleep 1\nexec "%s" "$@"\n' "$(PATH="$PATH_SHIM" command -v python3)" > "$SLOW_BIN/python3"
+  chmod +x "$SLOW_BIN/python3"
+  if [ "$FAULT" = "gate-before-bootstrap" ]; then
+    sed -i 's/^function awaitBootstrap(env, pollMs = 250) {$/&\n  return readMarker(env);/' \
+      "$CLEAN_HOME/.claude/skills/session-check/bootstrap-check.js"
+    echo "  fault injected: the installed session-check reads the marker without waiting on the bootstrap"
+  fi
+  env -i \
+    PATH="$SLOW_BIN:$PATH_SHIM" \
+    HOME="$CLEAN_HOME" \
+    CLAUDE_CODE_REMOTE=true \
+    BOOTSTRAP_HOME="$CLEAN_HOME" \
+    BOOTSTRAP_SOURCE="$SRC" \
+    CLAUDE_ENV_FILE="$ENV_FILE" \
+    ${passthrough[@]+"${passthrough[@]}"} \
+    bash "$SELF_HOOK" >"$SCRATCH/race-hook.out" 2>&1 &
+  race_pid=$!
+  for _i in $(seq 1 100); do [ -d "$RACE_LOCK" ] && break; sleep 0.1; done
+  lock_seen=no; [ -d "$RACE_LOCK" ] && lock_seen=yes
+  mkdir -p "$FIXTURE/.git" "$FIXTURE/.claude"
+  echo '{"harness": false}' > "$FIXTURE/.claude/session.json"
+  race_out="$SCRATCH/session-check-race.txt"
+  ( cd "$FIXTURE" && env -i \
+      PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+      BOOTSTRAP_MASTER_MANIFEST="$PAYLOAD/.claude-plugin/plugin.json" \
+      node "$RACE_CHECK" ) >"$race_out" 2>&1
+  wait "$race_pid"
+  if [ "$lock_seen" != yes ]; then
+    fail "the slowed bootstrap never took its lock, so there was no race to observe"
+  elif grep -q 'before this container booted' "$race_out"; then
+    fail "session-check printed the stale-marker line for a bootstrap running in this session: $(grep 'before this container booted' "$race_out" | sed 's/^ *//' | cut -c1-120)"
+  elif grep -qF "aac-bootstrap payload v$race_version" "$race_out" && ! grep -qF 'v2020.1.100' "$race_out"; then
+    pass "session-check started mid-bootstrap reports the post-bootstrap payload v$race_version: $(grep -F 'for this session' "$race_out" | sed 's/^ *//')"
+  else
+    fail "session-check started mid-bootstrap did not report the post-bootstrap payload v$race_version"
+    grep -n 'aac-bootstrap\|payload' "$race_out" | head -8 >&2
   fi
 fi
 

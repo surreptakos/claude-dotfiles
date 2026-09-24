@@ -6,7 +6,10 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const { readMarker, verifySkills, compareToMaster, verifyPluginRoot } = require('./bootstrap-check');
+const { spawn } = require('node:child_process');
+const {
+  readMarker, awaitBootstrap, lockPath, verifySkills, compareToMaster, verifyPluginRoot,
+} = require('./bootstrap-check');
 
 function fixture() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bootstrap-check-'));
@@ -120,6 +123,39 @@ test('readMarker: a marker with no installed_at is ok, not stale — staleness n
   const f = fixture();
   writeMarker(f.marker, { payload_version: '2026.9.15', skills: ['ticket-fleet'] });
   assert.equal(readMarker(env(f)).state, 'ok');
+});
+
+// Issue 669: the gate read the image's marker while this session's bootstrap was still
+// installing, and quoted a stale line and an old payload version fifteen seconds out of date.
+test('awaitBootstrap waits out a held lock and returns the marker the bootstrap wrote', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    payload_version: '2026.9.212207', skills: ['ticket-fleet'], installed_at: '2026-09-21T22:13:24Z',
+  });
+  const e = env(f);
+  fs.mkdirSync(lockPath(e));
+  const fresh = JSON.stringify({ payload_version: '2026.9.212227', skills: ['ticket-fleet'], installed_at: new Date().toISOString() });
+  // A separate process, as the real bootstrap is: awaitBootstrap blocks this one while it waits.
+  spawn(process.execPath, ['-e', `setTimeout(() => { require('fs').writeFileSync(${JSON.stringify(f.marker)}, ${JSON.stringify(fresh)}); require('fs').rmdirSync(${JSON.stringify(lockPath(e))}); }, 600)`], { stdio: 'ignore' }).unref();
+  const r = awaitBootstrap({ ...e, BOOTSTRAP_WAIT_MS: '20000' }, 50);
+  assert.equal(r.state, 'ok');
+  assert.equal(r.marker.payload_version, '2026.9.212227');
+  assert.ok(r.waitedMs > 0);
+});
+
+test('awaitBootstrap says pending, not stale, when the bootstrap still holds its lock at the deadline', () => {
+  const f = fixture();
+  writeMarker(f.marker, {
+    payload_version: '2026.9.212207', skills: ['ticket-fleet'], installed_at: '2026-09-21T22:13:24Z',
+  });
+  const e = env(f, { BOOTSTRAP_WAIT_MS: '200' });
+  fs.mkdirSync(lockPath(e));
+  const r = awaitBootstrap(e, 50);
+  assert.equal(r.state, 'pending');
+  assert.equal(r.lock, lockPath(e));
+  // A lock the image carried (older than this boot) is no bootstrap of this session's.
+  fs.utimesSync(lockPath(e), new Date('2020-01-01'), new Date('2020-01-01'));
+  assert.equal(awaitBootstrap(e, 50).state, 'stale');
 });
 
 test('verifySkills reports every named skill that has no SKILL.md on disk', () => {
