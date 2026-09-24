@@ -218,6 +218,27 @@ def verify(path):
                     f'— if a lower section priced this, its cost is stranded')
 
 
+# A job's working copy of the master WU template: '<date>-Master WU Template
+# <anything> rev<N>.xlsx'. The rev suffix separates it from the pristine
+# template, which carries none (issue 302).
+_WU_TEMPLATE_COPY = re.compile(r'master wu template.*rev\s*\d+\.xls[xm]$')
+# Same archive folders verify_package.SKIP_DIRS prunes, plus '_' / '.'
+# prefixed folders; a work-up under any of them is never chosen (issue 323).
+_SKIP_DIRS = ('old', 'old docs', 'old documents', 'archive', 'archived',
+              'superseded', 'backup', 'backups')
+
+
+def _in_skipped_dir(path, job):
+    if os.path.normcase(os.path.dirname(path)) == os.path.normcase(job):
+        return False
+    parent = os.path.basename(os.path.dirname(path)).lower()
+    return parent in _SKIP_DIRS or parent.startswith(('_', '.'))
+
+
+def _template_copy(path):
+    return bool(_WU_TEMPLATE_COPY.search(os.path.basename(path).lower()))
+
+
 def find_workup(job):
     hits = []
     for pat in ('*Work*Up*.xls*', '*Workup*.xls*', '*work up*.xls*', '*WU*.xls*'):
@@ -226,7 +247,8 @@ def find_workup(job):
     hits = [h for h in sorted(set(hits), key=os.path.getmtime, reverse=True)
             if not os.path.basename(h).startswith('~$')
             and os.path.splitext(h)[1].lower() in ('.xlsx', '.xlsm', '.xltx')
-            and 'template' not in os.path.basename(h).lower()
+            and not _in_skipped_dir(h, job)
+            and ('template' not in os.path.basename(h).lower() or _template_copy(h))
             and 'equip & s' not in os.path.basename(h).lower()
             and not any(p in ('_extract', '_to_delete') for p in h.split(os.sep))]
     return hits

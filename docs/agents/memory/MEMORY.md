@@ -29,7 +29,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - desktop-scheduled-tasks-are-per-org: per org
 - dotfiles-public-for-cloud-clone: no env sources
 - environment-verification-log: log
-- fable-usage-is-rationed: weekly cap
+- fable-usage-is-rationed: weekly cap; workers stay pinned, orchestrator runs Fable high
 - gate-declare-bare-command: nothing appended
 - hook-exit-126-is-the-mode-bit: diag log; seat PLUGIN_ROOT
 - leave-dates-token-rides-the-proxy: proxy-held
