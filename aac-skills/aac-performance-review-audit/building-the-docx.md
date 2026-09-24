@@ -8,7 +8,7 @@ body = [
 P("Hey Mark,"),
 P("This is a much better draft. [what passed]. However, there are five format fixes needed before I review the content:"),
 L(0, "Header: dates covered end 6/30/26; must end 7/23/2026.", "99"),
-L(0, "S5: no date, figure, or named account or person; must contain one.", "99"),
+L(0, "S5: 3 sentences; must be two (Sum-Ex) or four (SEER).", "99"),
 P("See the standards below:"),
 LB("Strengths and Weaknesses.", " Each is two sentences (Sum-Ex) or four sentences (SEER). ..."),
 L(1, "sub-point under a standard, if any"),
@@ -25,4 +25,4 @@ P("Thanks,"),
 python3 review_gate_tools.py build body.py "Erich Rojek 2026 - Audit of Rev 2 (paste into Outlook).docx"
 ```
 
-Render to PDF (`soffice --headless --convert-to pdf`) and look at it before delivering. Dan opens the docx in Word, selects all, copies, pastes into Outlook. Never build a docx from scratch; HTML and Outlook connector drafts lose the list formatting. `python3 review_gate_tools.py template` writes the embedded template to disk if Dan needs the file itself. If the script reports "embedded template corrupt," pass `--template` with "Format Rejection Template.docx" from the project folder.
+Before building, lint the body text through the release gate in SKILL.md; the docx carries the same words. Render to PDF (`soffice --headless --convert-to pdf`) and look at it before delivering. Dan opens the docx in Word, selects all, copies, pastes into Outlook. Never build a docx from scratch; HTML and Outlook connector drafts lose the list formatting. `python3 review_gate_tools.py template` writes the embedded template to disk if Dan needs the file itself. If the script reports "embedded template corrupt," pass `--template` with "Format Rejection Template.docx" from the project folder.
