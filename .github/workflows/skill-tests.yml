@@ -1,5 +1,7 @@
 name: skill tests
 
+# Two jobs: session-check (below) and repo-tests, the tests/ + tools/ suites as a set (issue 672).
+#
 # The session-check skill ships its own regression suite next to the engine it covers
 # (aac-skills/session-check/*.test.js). Nothing ran it when this workflow was written: the repo
 # test command in .claude/session.json named tools/*.test.js and a single file out of tests/, and
@@ -48,3 +50,28 @@ jobs:
           cp -r aac-skills/session-check aac-skills/project-harness "$dest/"
           cd "$dest/session-check"
           node --test *.test.js
+
+  # The repo's own suites, as a set (issue 672). Several tools/*.test.js files run inside the job
+  # that owns their tool (board-sweep, tracker-audit, ...), but most had no job at all: a red
+  # assertion in one of them sat on master until someone ran the session test command by hand.
+  # This is that command's Node half, on every pull request and every push, master included.
+  repo-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: tests/*.test.js and tools/*.test.js
+        run: node --test tests/*.test.js tools/*.test.js
+      # A gate never seen to fail is not known to work: plant one broken assertion and require the
+      # same command to go red, then put the file back.
+      - name: Fault - a broken assertion in a tools test must fail the set
+        run: |
+          f=tools/harness-bootstrap-delivery.test.js
+          printf "\ntest('fault: planted by skill-tests.yml', () => { assert.equal(1, 2); });\n" >> "$f"
+          if node --test tests/*.test.js tools/*.test.js > "$RUNNER_TEMP/fault.log" 2>&1; then
+            echo "::error::the set passed with a broken assertion in $f"; exit 1
+          fi
+          grep -q "^not ok .* - fault: planted by skill-tests.yml" "$RUNNER_TEMP/fault.log"
+          git checkout -- "$f"
