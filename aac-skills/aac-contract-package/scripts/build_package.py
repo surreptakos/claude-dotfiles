@@ -1668,6 +1668,22 @@ def main():
         print('wrote', p)
         return
 
+    # Pre-build gate first (issue 224, spec 215 stream C): a record the
+    # standards would reject stops here, before anything is resolved or written.
+    # With no record at all, the prerequisite and read_record messages below
+    # say what is missing.
+    import prebuild_gate
+    has_record = os.path.exists(os.path.join(job, '_facts.json'))
+    code, findings = prebuild_gate.run(job) if has_record else (0, [])
+    if code:
+        raise SystemExit('pre-build gate refused the record; nothing written '
+                         f'(prebuild_gate.py exit {code}):\n' + '\n'.join(
+                             f'  {st}  {item}  —  {detail}'
+                             for st, item, detail in findings
+                             if st in ('REFUSE', 'BAD')))
+    for _, item, detail in (x for x in findings if x[0] == 'WARN'):
+        print(f'gate WARN  {item}  —  {detail}')
+
     R = aac_paths.for_job(job)
     R.require('schedule_template', 'jobs_root')
     if not os.path.exists(aac_paths.CLARIFICATIONS):
