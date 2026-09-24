@@ -490,6 +490,9 @@ for (const rel of REMOVED_COPIES) {
 const RESUME_GUARD_PAIR = [FLEET_SCRIPT];
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+// Issue 755: every push instruction in the fleet's prompts goes through gitSpelling, so the
+// source anchor for "the push" is that call, not a bare `git push` literal.
+const PUSH_ANCHOR = 'gitSpelling(instrument, `push -u origin ${branch}`)';
 
 function extractMarked(src, name) {
   // Everything between the markers (exclusive); a marker that moved is a named failure (issue 488).
@@ -545,7 +548,7 @@ function generatedBlock(scriptPath = FLEET_SCRIPT) {
 // Evaluated out of the script's generated block so the lane body below resolves them.
 function loadStableHelpers(scriptPath) {
   // eslint-disable-next-line no-new-func
-  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf };`)();
+  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf, gitSpelling };`)();
 }
 
 // Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
@@ -607,6 +610,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
     unmetCriteriaOf: helpers.unmetCriteriaOf,
+    gitSpelling: helpers.gitSpelling,
     worktreeMismatch,
     treeGuardCheck,
   }, stubOverrides), scriptPath);
@@ -632,10 +636,11 @@ test('lane harness resolves a module-scope binding it does not model (issue 340)
 // default branch rather than appending them into whatever branch the session sits on. Drive the
 // marked block with a mocked `agent` so the branch choice and the returned sha are behavior,
 // not prompt-text trivia. Same proxy scope as the lanes, so an unmodelled binding is inert.
-async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
+async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides, stubs = {}) {
   const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-REPORT');
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runReport;\n}`);
   const runReport = await wrapper(laneScope({
+    gitSpelling: loadStableHelpers(scriptPath).gitSpelling,
     agent: agentMock,
     cfg: Object.assign({ deliver: true, reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' }, cfgOverrides || {}),
     runId: 'testrun',
@@ -643,6 +648,7 @@ async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
     rules: new Proxy({}, { get: () => () => 'gh pr create' }),
     instrument: 'gh',
     DISCOVERY_REPORT: {},
+    ...stubs,
   }));
   // The writer takes the default branch as an argument since issue 405: the finish mode calls it
   // with the branch its journal names, long before a scout would have run.
@@ -880,7 +886,7 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(src, /git merge --abort/,
       'a conflict outside the two classes must abort the merge rather than guess');
     const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
-    const pushIdx = src.indexOf('git push -u origin ${branch}');
+    const pushIdx = src.indexOf(PUSH_ANCHOR);
     assert.ok(deliverIdx > 0 && pushIdx > deliverIdx,
       'the merge instructions must precede the push in the deliver prompt');
   });
@@ -895,7 +901,7 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(prompt, /git grep -l -e '\^<<<<<<< ' -e '\^>>>>>>> ' HEAD/,
       'deliver must scan the merge result for committed conflict markers, by the exact command');
     const scanIdx = prompt.indexOf('git grep -l -e');
-    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    const pushIdx = prompt.indexOf(PUSH_ANCHOR);
     assert.ok(scanIdx > 0 && pushIdx > scanIdx,
       'the marker scan must come before the push: the gate that ran before the bad commit did not catch it');
     assert.match(prompt, /runs on EVERY path through STEP A, a clean merge included/,
@@ -918,7 +924,7 @@ for (const file of RESUME_GUARD_PAIR) {
       "A5's first half must run the repo's configured stamps check");
     const regenIdx = prompt.indexOf('${regenNote}');
     const checkIdx = prompt.indexOf('${regenCheckNote}');
-    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    const pushIdx = prompt.indexOf(PUSH_ANCHOR);
     assert.ok(regenIdx > 0 && checkIdx > regenIdx && pushIdx > checkIdx,
       'the stamps check must sit between A4 regenerate and the STEP B push, in that order');
     assert.match(prompt, /Do NOT hand-edit a stamp to make this pass/,
@@ -1057,7 +1063,7 @@ for (const file of RESUME_GUARD_PAIR) {
 
   test(`${rel} deliver prompt pushes the branch and fails loudly rather than calling it missing (issue 405)`, () => {
     const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
-    assert.match(prompt, /git push -u origin \$\{branch\}/,
+    assert.ok(prompt.includes(PUSH_ANCHOR),
       'the deliverer must be told to push the branch, by the exact command');
     assert.match(prompt, /never conclude that the branch, or the issue, does not exist/,
       "the deliverer must never report the branch missing: #356's deliverer did exactly that without ever pushing");
@@ -2104,4 +2110,66 @@ test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles 
   const setupIdx = src.indexOf("phase('Setup')");
   assert.ok(src.indexOf('[FLEET-REFRESH-START]') > setupIdx && src.indexOf('[FLEET-REFRESH-END]') < src.indexOf('if (treeGuardOn) {', setupIdx),
     'the refresh runs first in Setup, before the tree-guard baseline, so its commit is inside the baseline');
+});
+
+// Issue 755: in a cloud container a hook wraps a bare `git ...` in caveman and the worktree guard
+// refuses it ("runs caveman with a git command among its operands"), while /usr/bin/git is accepted
+// every time. Run 6ab47219 lost two workers' pushes to prompts that named only the bare spelling.
+// Every push instruction now carries the accepted spelling; the bare one survives only where it is
+// the one that runs, the Windows desktop (no /usr/bin/git), and there the absolute path is the retry.
+const { gitSpelling } = require('./ticket-fleet-branch.js');
+const BARE_PUSH_RE = /(?<![/\w])git push (?!--force)/g;
+
+function assertAcceptedPush(prompt, args, instrument, who) {
+  const absolute = `/usr/bin/git ${args}`;
+  assert.ok(prompt.includes(`\`${absolute}\``), `${who} (${instrument}) must name the spelling the guard accepts: ${absolute}`);
+  const bare = (prompt.match(BARE_PUSH_RE) || []).length;
+  const accepted = (prompt.match(/\/usr\/bin\/git push /g) || []).length;
+  assert.ok(bare <= accepted, `${who} (${instrument}): every bare \`git push\` must be paired with /usr/bin/git (${bare} bare, ${accepted} absolute)`);
+  if (instrument === 'mcp') {
+    assert.ok(prompt.indexOf(absolute) < prompt.indexOf(`\`git ${args}\``),
+      `${who}: in a cloud container the absolute path must lead, the bare spelling is only the fallback`);
+  } else {
+    assert.ok(prompt.includes(`\`git ${args}\``), `${who}: the desktop, where /usr/bin/git does not exist, must keep the bare spelling`);
+  }
+}
+
+test('gitSpelling names both spellings and leads with the one each instrument runs (issue 755)', () => {
+  const cloud = gitSpelling('mcp', 'push -u origin b');
+  assert.ok(cloud.startsWith('`/usr/bin/git push -u origin b`'), cloud);
+  assert.match(cloud, /only where \/usr\/bin\/git does not exist, run `git push -u origin b`/);
+  const desktop = gitSpelling('gh', 'push -u origin b');
+  assert.ok(desktop.startsWith('`git push -u origin b`'), desktop);
+  assert.match(desktop, /runs caveman with a git command among its operands", run `\/usr\/bin\/git push -u origin b` instead/);
+});
+
+for (const instrument of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} push instructions in the generated prompts use the accepted spelling under ${instrument} (issue 755)`, async () => {
+    const branch = 'agent/issue-755-attempt1-wf_testrun-w0';
+    const prompts = {};
+    const agentMock = async (prompt, opts) => {
+      prompts[opts.label.split(':')[0]] = prompt;
+      if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('push:')) return { pushed: true, output: 'ok' };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/755', mergeStatus: 'clean', conflictPaths: [] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 755, title: 't', criteria: '' }, 0, {}, 'inv1', null, { instrument });
+    assert.deepEqual(Object.keys(prompts).sort(), ['deliver', 'impl', 'push', 'verify']);
+    assertAcceptedPush(prompts.impl, `push -u origin ${branch}`, instrument, 'implementer');
+    assertAcceptedPush(prompts.push, `push -u origin ${branch}`, instrument, 'push agent');
+    assertAcceptedPush(prompts.deliver, `push -u origin ${branch}`, instrument, 'deliverer B1');
+    assertAcceptedPush(prompts.deliver, `push origin ${branch}`, instrument, 'deliverer C4/D3');
+    const report = [];
+    await driveReport(FLEET_SCRIPT, async (p) => { report.push(p); return { branch: 'b', sha: 's', prUrl: '', appended: 1 }; },
+      ['finding'], { deliver: true }, { instrument });
+    assertAcceptedPush(report[0], 'push -u origin agent/fleet-discoveries-wf_testrun', instrument, 'report writer');
+  });
+}
+
+test(`${FLEET_SCRIPT_REL} spells no push instruction as a bare \`git push\` literal (issue 755)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const bare = src.split('\n').filter((l) => /(?<![/\w])git push (?!--force)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
+  assert.deepEqual(bare, [], 'a push instruction must go through gitSpelling, which carries the spelling the guard accepts');
 });
