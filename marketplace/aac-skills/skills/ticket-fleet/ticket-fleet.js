@@ -545,6 +545,20 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 /**
+ * The acceptance criteria a PASSING verdict still names as unmet, by their text (issue 699).
+ *
+ * A verifier can rightly pass a branch that stops short of the ticket - a doc-only change whose
+ * code half waits on an owner decision filed as its own ticket - and the deliver stage used to
+ * write `Closes #N` on it anyway, so the merge closed aac-bill-intake#682 with three of its four
+ * boxes unticked. The verdict's `unmetCriteria` is what the closing keyword now follows: any entry
+ * makes the PR say `Refs #N` and list them. Absent, null or blank entries read as none.
+ */
+function unmetCriteriaOf(verdict) {
+  if (!verdict) return [];
+  return stableList(verdict.unmetCriteria);
+}
+
+/**
  * Implementer model per ticket from a TypeSafe Jev difficulty Score (issue 725).
  *
  * One `implModel` used to be pinned for every implementer, so a one-line mechanical ticket paid
@@ -621,6 +635,73 @@ function pickImplModel(level, attempt, cfg) {
   if (!level || DIFFICULTY_LEVELS.indexOf(level) < 0) return c.implModel;
   if (Number(attempt) > 1) return pins.design || c.implModel;
   return pins[level] || c.implModel;
+}
+
+/**
+ * Pure (issue 654): what a deliverer's `git ls-remote --exit-code --heads origin <branch>` runs say
+ * about the branch - `lookups` is [{exitCode, output}] in the order they ran. "Could not tell" is
+ * not "absent": run 6ab1884a's deliverer read a lookup that printed nothing as a missing branch
+ * while the ref sat on origin.
+ *   'present'      - some run exited 0 and printed a refs/heads/ line.
+ *   'absent'       - at least two runs, every one exited 2 (git's own "no matching refs" answer
+ *                    under --exit-code) with no output. One run is never enough.
+ *   'undetermined' - anything else: no runs, a lone run, any other non-zero exit (network, auth,
+ *                    a cwd whose origin is another repo), or an exit 0 that printed nothing.
+ */
+function classifyBranchLookup(lookups) {
+  const runs = (Array.isArray(lookups) ? lookups : []).filter((l) => l && typeof l === 'object');
+  const code = (l) => (l.exitCode === null || l.exitCode === undefined || l.exitCode === '' ? NaN : Number(l.exitCode));
+  const out = (l) => String(l.output == null ? '' : l.output).trim();
+  if (runs.some((l) => code(l) === 0 && /refs\/heads\//.test(out(l)))) return 'present';
+  if (runs.length >= 2 && runs.every((l) => code(l) === 2 && !out(l))) return 'absent';
+  return 'undetermined';
+}
+
+// A blockedReason that says the branch itself could not be found, as opposed to a merge conflict
+// or a failing test tail. Run 6ab1884a's read "Branch <b> not found on origin or locally".
+const BRANCH_NOT_FOUND_RE = /\b(?:branch|ref|refs)\b[^\n]*?\b(?:not found|does not exist|doesn't exist|is missing|no matching)\b|\bno matching (?:refs|branches)\b|\bnot found on origin\b/i;
+
+/**
+ * Pure (issue 654): the outcome of one Deliver result, so a deliverer that could not SEE the
+ * branch is never filed as a blocked merge. `facts` is {branch, pushed, verified}: what the run
+ * itself recorded - the implementer's (or the push agent's) pushed:true, and a verifier pass.
+ * Returns {kind, lookup, message}; kind is one of
+ *   'delivered'     - a PR (or comment) URL came back.
+ *   'merge-blocked' - the pre-push merge conflicted or broke the tests (issues 318, 514).
+ *   'inconsistency' - the run recorded pushed:true AND a verifier pass, yet the deliverer could not
+ *                     find the branch: the record and git disagree, and the branch may need
+ *                     manual delivery. Never an ordinary failure.
+ *   'undetermined'  - the deliverer could not tell whether the branch is on origin.
+ *   'absent'        - git authoritatively reported no such ref (classifyBranchLookup 'absent').
+ *   'undelivered'   - anything else with no URL (the caller keeps its own message for it).
+ */
+function classifyDelivery(delivery, facts) {
+  const f = facts || {};
+  const branch = String(f.branch || '');
+  const d = delivery && typeof delivery === 'object' ? delivery : null;
+  if (!d) return { kind: 'undelivered', lookup: null, message: null };
+  if (d.prUrl || d.commentUrl) return { kind: 'delivered', lookup: null, message: null };
+  const conflictPaths = Array.isArray(d.conflictPaths) ? d.conflictPaths : [];
+  const reason = String(d.blockedReason || '');
+  const lookupRuns = Array.isArray(d.branchLookup) ? d.branchLookup : [];
+  const lookup = classifyBranchLookup(lookupRuns);
+  const branchUnseen = d.pushed !== true && !conflictPaths.length && lookup !== 'present'
+    && (d.mergeStatus === 'branch-unconfirmed' || lookupRuns.length > 0 || BRANCH_NOT_FOUND_RE.test(reason));
+  if (branchUnseen) {
+    const said = reason ? ` Deliverer said: ${reason}` : '';
+    const runs = lookupRuns.length
+      ? ` ls-remote exit codes: ${lookupRuns.map((l) => (l && l.exitCode != null ? String(l.exitCode) : '?')).join(', ')}.`
+      : ' No ls-remote result was reported.';
+    if (f.pushed === true && f.verified === true) {
+      return { kind: 'inconsistency', lookup, message: `INCONSISTENCY: branch ${branch} is recorded pushed:true with a verifier pass:true, but the deliverer could not find it (lookup: ${lookup}).${runs}${said} This is not a blocked merge and not an ordinary failure: check \`git ls-remote --heads origin ${branch}\` yourself - the branch may need manual delivery (a finishRunId pass, or a PR opened from the journal).` };
+    }
+    if (lookup === 'absent') {
+      return { kind: 'absent', lookup, message: `branch ${branch} is not on origin: two \`git ls-remote --exit-code\` runs exited 2 (no matching ref).${said}` };
+    }
+    return { kind: 'undetermined', lookup, message: `could not determine whether branch ${branch} is on origin - not a blocked merge and not proof the branch is missing.${runs}${said}` };
+  }
+  if (d.mergeStatus === 'blocked' || conflictPaths.length) return { kind: 'merge-blocked', lookup: null, message: null };
+  return { kind: 'undelivered', lookup: null, message: null };
 }
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
@@ -758,6 +839,7 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
   pass: { type: 'boolean' },
   evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
   failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
+  unmetCriteria: { type: 'array', items: { type: 'string' }, description: 'every acceptance criterion the branch does NOT satisfy as it stands, quoted by its own text - on a pass too, when the branch rightly stops short (a precondition not met, an owner decision still pending, work split to another ticket). Leave out delivery-stage criteria (PR, merge, presence on the default branch). Send [] or omit when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).' },
   worktree: { type: 'object', required: ['path', 'head'], description: 'where you actually ran: the scratch worktree you created, never the repository you started in', properties: {
     path: { type: 'string', description: 'absolute path of the scratch worktree every command above ran inside' },
     head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed INSIDE that worktree, copied verbatim - not abbreviated, not from memory' },
@@ -766,8 +848,9 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
-  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked', 'unmerged-by-classifier'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened; unmerged-by-classifier = the auto-mode classifier refused the merge command itself twice, so the branch was pushed and the PR opened WITHOUT the merge (issue 544) - the branch is verified, pushed is true, prUrl is real, and blockedReason carries the refusal text for the orchestrator to merge the default branch itself' },
+  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked', 'unmerged-by-classifier', 'branch-unconfirmed'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: branch-unconfirmed = the branch could not be SEEN on origin, so no merge ran - branchLookup carries every ls-remote run and the run decides whether that is "absent", "could not determine" or an inconsistency (issue 654), never a blocked merge; clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened; unmerged-by-classifier = the auto-mode classifier refused the merge command itself twice, so the branch was pushed and the PR opened WITHOUT the merge (issue 544) - the branch is verified, pushed is true, prUrl is real, and blockedReason carries the refusal text for the orchestrator to merge the default branch itself' },
   conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp resolver refused, and any path the pre-push marker scan found conflict markers in; empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
+  branchLookup: { type: 'array', items: { type: 'object', required: ['exitCode', 'output'], properties: { exitCode: { type: 'integer', description: 'REAL exit code of `git ls-remote --exit-code --heads origin <branch>`, not a pipeline\'s' }, output: { type: 'string', description: 'its stdout and stderr, verbatim' } } }, description: 'issue 654: every `git ls-remote --exit-code --heads origin <branch>` this stage ran, in order; [] when it never had to look. Exit 2 is git\'s own "no matching ref"; any other non-zero, or an exit 0 that printed nothing, means "could not tell", not "absent"' },
   blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed' },
 } }
 
@@ -796,7 +879,9 @@ const JOURNAL = { type: 'object', required: ['journalPath', 'defaultBranch', 'ti
     kind: { type: 'string', enum: ['code', 'probe', 'human'], description: 'the lane the scout result put this ticket in' },
     branch: { type: 'string', description: "the branch of the attempt whose verifier passed, from that attempt's impl result; '' when no attempt passed or the journal records no branch" },
     verified: { type: 'boolean', description: 'true ONLY when a verify:#<N>.<attempt> result in the journal has pass true' },
+    pushed: { type: 'boolean', description: "true ONLY when THAT passing attempt's impl result, or its push:#<N>.<attempt> result, recorded pushed true (issue 654)" },
     evidence: { type: 'string', description: "that passing verdict's evidence, verbatim; '' when there is none" },
+    unmetCriteria: { type: 'array', items: { type: 'string' }, description: "that passing verdict's unmetCriteria, verbatim; [] when it has none (issue 699)" },
     keepOpen: { type: 'boolean', description: "the scout result's keepOpen for this ticket" },
     criteria: { type: 'string', description: "the scout result's criteria for this ticket, verbatim" },
     delivered: { type: 'boolean', description: 'true when a deliver:#<N> result in the journal recorded a non-empty prUrl or commentUrl' },
@@ -1133,8 +1218,8 @@ if (cfg.finishRunId) {
     `Read the ticket-fleet run journal for run ${finishRunId} and report what each of that run's tickets reached. You are reading a record, not making one: every field below is copied out of the journal or left empty.
 1. Find the journal. The workflow runtime writes one JSONL file per run at ~/.claude/projects/<project slug>/<session id>/subagents/workflows/<workflow run id>/journal.jsonl. List them newest first (\`ls -t ~/.claude/projects/*/*/subagents/workflows/*/journal.jsonl\`) and take the one whose workflow-run directory contains "${finishRunId}". If none does, the id is the caller-minted runId the branch names embed instead: take the newest file that \`grep -l "${finishRunId}" <each journal>\` matches. Report the path you read as journalPath; if nothing matches, return tickets: [] and say so in journalPath.
 2. Parse it with a JSON reader (python3 or jq), never by eye. Two line shapes matter: {"type":"started","agentId":...,"label":"<stage>:#<N>.<attempt>","phase":...} and {"type":"result","agentId":...,"result":{...}}. Pair them by agentId - the result carrying a started line's agentId is that label's structured output.
-3. The \`scout\` label's result gives defaultBranch, testCommand and, per ticket, {number, title, criteria, keepOpen, kind}. The per-ticket labels are impl:#<N>.<attempt> ({branch, committed, pushed, discoveries}), verify:#<N>.<attempt> ({pass, evidence}) and deliver:#<N> ({prUrl} in the code lane, {commentUrl} in the probe and human lanes).
-4. Per ticket the scout returned, report: verified true ONLY when some verify:#<N>.<attempt> result has pass true; branch = the branch from THAT attempt's impl result ("" when there is none); evidence = that passing verdict's evidence verbatim; delivered true when a deliver:#<N> result recorded a non-empty prUrl or commentUrl, with deliveryRef that url ("" otherwise).
+3. The \`scout\` label's result gives defaultBranch, testCommand and, per ticket, {number, title, criteria, keepOpen, kind}. The per-ticket labels are impl:#<N>.<attempt> ({branch, committed, pushed, discoveries}), verify:#<N>.<attempt> ({pass, evidence, unmetCriteria}) and deliver:#<N> ({prUrl} in the code lane, {commentUrl} in the probe and human lanes).
+4. Per ticket the scout returned, report: verified true ONLY when some verify:#<N>.<attempt> result has pass true; branch = the branch from THAT attempt's impl result ("" when there is none); evidence = that passing verdict's evidence verbatim; unmetCriteria = that passing verdict's unmetCriteria verbatim ([] when it has none); pushed true ONLY when THAT attempt's impl result or its push:#<N>.<attempt> result has pushed true; delivered true when a deliver:#<N> result recorded a non-empty prUrl or commentUrl, with deliveryRef that url ("" otherwise).
 5. discoveries = every string in every impl/probe result's discoveries array, in journal order.
 Never invent a ticket, a branch, a URL or a verdict, and never infer one from a prompt or a log line: a field the journal does not hold is "" or false. Make no repository change, no commit, no push, no PR, no comment - reading only. Return structured output only.`,
     { label: `journal-read:${finishRunId}`, phase: 'Deliver', schema: JOURNAL, model: cfg.scoutModel, effort: 'low' }
@@ -1153,18 +1238,19 @@ Never invent a ticket, a branch, a URL or a verdict, and never infer one from a 
   log(`finish mode: journal ${journal.journalPath || '(path not reported)'} holds ${journal.tickets.length} ticket(s) from run ${finishRunId}.`)
   const finished = await runFinish(journal)
   const finishFollowupsError = (finished.discoveryReport && finished.discoveryReport.error) || null
-  log(`finish mode: ${finished.delivered.length} delivered, ${finished.skippedDelivered.length} already delivered, ${finished.skippedUnverified.length} unverified, ${finished.failed.length} failed.`)
+  log(`finish mode: ${finished.delivered.length} delivered, ${finished.skippedDelivered.length} already delivered, ${finished.skippedUnverified.length} unverified, ${finished.failed.length} failed, ${finished.inconsistent.length} inconsistent.`)
   log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the served repo from THIS session before the container is gone.`)
   return {
     mode: 'finish',
     finishedRun: finishRunId,
     journalPath: journal.journalPath || null,
     instrument,
-    ran: finished.delivered.length + finished.failed.length,
+    ran: finished.delivered.length + finished.failed.length + finished.inconsistent.length,
     delivered: finished.delivered,
     skippedDelivered: finished.skippedDelivered,
     skippedUnverified: finished.skippedUnverified,
     failed: finished.failed,
+    inconsistent: finished.inconsistent,
     discoveryReport: finished.discoveryReport,
     followupsError: finishFollowupsError,
     recordCommand: RECORD_COMMAND,
@@ -1635,15 +1721,21 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 function classifierCategoriesSeen() {
   return '"Modify Shared Resources", "Interfere With Workloads", "External System Writes", "Instruction Poisoning" and "Self-Modification"'
 }
-function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resumed }) {
+function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
   // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
   // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
   // commit messages say.
   const keepOpen = t.keepOpen === true || /\b(?:leave|keep|stay|remain)s?\s+(?:this\s+|the\s+|it\s+)?(?:ticket\s+|issue\s+)?open\b/i.test(t.criteria || '')
+  // So does the verdict (issue 699): a pass that names any criterion unmet is a branch that stops
+  // short of the ticket, and Closes on it closed aac-bill-intake#682 with three boxes unticked.
+  const unmet = stableList(unmetCriteria)
   const issueRef = keepOpen
     ? `"Refs #${t.number}" (this ticket stays OPEN by its own instruction; never write Closes, Fixes or Resolves)`
-    : `"Closes #${t.number}"`
-  const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."' : ''
+    : unmet.length
+      ? `"Refs #${t.number}" (the verifier marked acceptance criteria unmet, so this PR must not close the ticket; never write Closes, Fixes or Resolves), and a section headed "Acceptance criteria not met by this PR" listing each of these verbatim, one bullet each:\n${unmet.map(c => '   - ' + c).join('\n')}\n  `
+      : `"Closes #${t.number}"`
+  const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."'
+    : unmet.length ? ` and the sentence "Ticket left open: the verifier marked ${unmet.length} acceptance criteri${unmet.length === 1 ? 'on' : 'a'} unmet, listed in the PR."` : ''
   const prToolNote = instrument === 'mcp'
     ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
     : ''
@@ -1673,7 +1765,8 @@ This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
 A0. A CLASSIFIER REFUSAL IS NOT A RULE VIOLATION (issue 544). In a container the auto-mode classifier sometimes refuses a command of this stage on the shape of its text rather than on what it would do, and the refusals are not deterministic - run 6aaafad4 found that re-issuing the byte-identical command usually succeeded on the next try. The categories this fleet has been refused under so far are ${classifierCategoriesSeen()}. An unattended session is sanctioned to run every command this stage needs (the 2026-09-15 cloud permission ruling), so read a refusal as a flaky gate, never as a sign that you are doing something forbidden and never as a reason to stop the delivery. Whenever a command below is REFUSED (as opposed to running and failing): re-issue it ONCE, byte-identical. If that retry is refused too, take the fallback the step names - A8 for the merge, B1 for the push, B2 for the PR. NEVER end this stage with {pushed:false, prUrl:""} while the branch is verified: a verified branch always reaches origin and a PR, and the refusal text becomes a note on that PR rather than a substitute for it.
-A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
+AL. FINDING ${branch} ON ORIGIN (issue 654) - "could not tell" is never "absent". Run 6ab1884a's deliverer reported a verified, pushed branch "not found on origin or locally" while \`git ls-remote\` from the orchestrator printed its ref minutes later, and the ticket was filed as a failure. Whenever this stage needs to know whether ${branch} is on origin - A1's fetch of it failed, B1's push failed, or anything else makes it look missing: (1) \`git rev-parse --show-toplevel\` and \`git remote get-url origin\` - you must be in a checkout of the served repository, and an origin naming any other repository makes every answer below worthless, so say so; (2) \`git ls-remote --exit-code --heads origin ${branch}\`; (3) \`git fetch origin\`, then that same ls-remote again. Record EVERY ls-remote in branchLookup as {exitCode: its REAL exit code, output: verbatim}. Exit 0 printing a refs/heads/ line means the branch IS on origin: fetch it and carry on. Exit 2 is git's own "no matching ref"; any other exit, and an exit 0 that printed nothing, means you could not tell. When no lookup printed the ref, stop this ticket and return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed", conflictPaths:[], branchLookup:[every run], blockedReason:"<the git output of every command above, VERBATIM>"} - never mergeStatus "blocked", which means a merge that conflicted or broke the tests, and never "not found" or "does not exist" as your own conclusion: the run reads the exit codes and decides.
+A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
 A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`aac-skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - run A5(i)'s stamps check on the merge result before going on, because a clean merge that folded this branch's skill edit into the default branch's leaves the stamp stale with no conflict to resolve (issue 553), and if it fails do A4's regenerate, \`git add -A\`, commit it and run the check again. Then go to STEP A7, which runs on this path too.
 A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly three classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
@@ -1689,7 +1782,7 @@ A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, 
 A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(d), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
 
 STEP B - push and open the PR (only when STEP A ended clean, resolved, or unmerged-by-classifier):
-B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run \`git ls-remote --heads origin ${branch}\` and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the classifier REFUSES is not a failed push: re-issue it byte-identical once (A0), and if that retry is refused too, read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. Only when the remote tip is missing or behind does a twice-refused push come back as {pushed:false, ...}.
+B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run AL's lookups and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed" when no lookup printed the ref ("blocked" when one did - the push itself failed), conflictPaths:[], branchLookup:[every run], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the classifier REFUSES is not a failed push: re-issue it byte-identical once (A0), and if that retry is refused too, read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. Only when the remote tip is missing or behind does a twice-refused push come back as {pushed:false, ...}.
 B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused, re-issue it byte-identical once, and if that retry is refused too open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
 B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean", "resolved", or "unmerged-by-classifier" with blockedReason holding the refusal text).
@@ -1719,7 +1812,7 @@ async function runFinish(journal) {
   const entries = Array.isArray(journal && journal.tickets) ? journal.tickets : []
   const defaultBranch = stableText(journal && journal.defaultBranch) || 'main'
   const finishTestCommand = cfg.testCommand ? String(cfg.testCommand) : (stableText(journal && journal.testCommand) || '')
-  const delivered = [], skippedDelivered = [], skippedUnverified = [], failed = []
+  const delivered = [], skippedDelivered = [], skippedUnverified = [], failed = [], inconsistent = []
   for (const e of entries) {
     const number = parseInt(e && e.number, 10)
     if (!(number > 0)) continue
@@ -1744,25 +1837,31 @@ async function runFinish(journal) {
     let delivery = null, deliveryFailure = null
     try {
       delivery = await agent(
-      deliverPrompt({ t, branch, evidence: e.evidence, defaultBranch, testCommand: finishTestCommand, resumed: true }),
+      deliverPrompt({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch, testCommand: finishTestCommand, resumed: true }),
       { label: `deliver:#${number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
       deliveryFailure = unusableReason(`deliver:#${number}`, (err && err.message) || err)
       delivery = null
     }
-    if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
+    // Issue 654: the same classification as the code lane - a branch the journal records as pushed
+    // and verified that the deliverer cannot find is an inconsistency, not a failure.
+    const outcome = delivery ? classifyDelivery(delivery, { branch, pushed: e.pushed === true, verified: true }) : null
+    if (!deliveryFailure && outcome && outcome.message) {
+      deliveryFailure = `deliver:#${number}: ${outcome.message}`
+    } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
     }
     log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
+    else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
     // Same checkpoint the code lane takes after Deliver (aac-routines issue 270): this stage runs
     // unisolated in the orchestrator's own checkout.
     await treeGuardCheck('finish-deliver', number)
   }
   const discoveryReport = await runReport(stableList(journal && journal.discoveries), defaultBranch)
-  return { delivered, skippedDelivered, skippedUnverified, failed, discoveryReport }
+  return { delivered, skippedDelivered, skippedUnverified, failed, inconsistent, discoveryReport }
 }
 // [FLEET-FINISH-END]
 
@@ -1777,6 +1876,9 @@ const runCodeLane = async (t, workerIndex) => {
   // was dropped in the Scout phase, before wave selection, so this lane only ever runs tickets
   // that have no PR. The guard's freshness rule (issue 291) moved with it.
   let lastVerdict = null, impl = null, branch = null
+  // Issue 654: what the run itself recorded about the branch reaching origin - the implementer's
+  // pushed:true, or the push agent's. A deliverer that then cannot find it is an inconsistency.
+  let branchPushed = false
   // Issue 725: the implementer pin per attempt, from the ticket's Jev difficulty level (null when
   // Jev was unavailable or the ticket unscored - then every attempt is implModel). Recorded per
   // attempt so the run record names the level and the model each implementer ran on.
@@ -1845,6 +1947,7 @@ Return structured output only.`,
     // embedding it would tie the verifier's cache key to that result's serialization (issue 271),
     // and a wrong self-report would point the verifier at a branch nobody asked for. The
     // instructed branch is what gets verified and delivered; a mismatch is logged, loudly.
+    branchPushed = impl.pushed === true
     if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Push the branch NOW, before the verifier, not at Deliver (issue 405). Three losses on
@@ -1873,6 +1976,7 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
         log(`${unusableReason(`push:#${t.number}.${attempt}`, (err && err.message) || err)} - ${branch} may exist only in this container until Deliver pushes it.`)
         pushBack = null
       }
+      if (pushBack && pushBack.pushed) branchPushed = true
       if (pushBack && pushBack.pushed) log(`#${t.number}.${attempt}: ${branch} is on origin before verification (issue 405) - the implementer did not push it, the run did.`)
       else log(`#${t.number}.${attempt}: ${branch} could NOT be pushed to origin - ${stableText(pushBack && pushBack.output) || 'no git output reported'}. The branch is local only until Deliver pushes it; a container death before then loses it.`)
     }
@@ -1908,7 +2012,7 @@ ${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
 In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
-2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
+2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*' -not -path '*/.claude/sessions/*'\`. Those three exclusions are the harness's own bookkeeping, not implementer output: ~/.claude/hook-state is hook bookkeeping; ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes; and ~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489) - keep all three exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
@@ -1945,6 +2049,8 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
   let delivery = null
   let deliveryFailure = null
+  // Issue 654: the classified Deliver result, and the message when it is an inconsistency.
+  let outcome = null, inconsistency = null
   if (done && cfg.deliver) {
     // Nothing gets pushed once any ticket in the wave has breached isolation (aac-routines issue
     // 192): the tree the verifier judged from is no longer trustworthy.
@@ -1955,14 +2061,21 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // carries a named deliveryFailure into the run report instead of disappearing from it.
     try {
       delivery = await agent(
-      deliverPrompt({ t, branch, evidence: lastVerdict.evidence, defaultBranch: scout.defaultBranch, testCommand }),
+      deliverPrompt({ t, branch, evidence: lastVerdict.evidence, unmetCriteria: unmetCriteriaOf(lastVerdict), defaultBranch: scout.defaultBranch, testCommand }),
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
     }
-    if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
+    // Issue 654: a deliverer that could not SEE the branch is never a blocked merge. "Could not
+    // tell" and "absent" are told apart by the ls-remote exit codes it reports, and a branch the
+    // run itself recorded as pushed and verified is an inconsistency, reported on its own.
+    outcome = delivery ? classifyDelivery(delivery, { branch, pushed: branchPushed, verified: done }) : null
+    if (!deliveryFailure && outcome && outcome.message) {
+      deliveryFailure = `deliver:#${t.number}: ${outcome.message}`
+      if (outcome.kind === 'inconsistency') inconsistency = outcome.message
+    } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${t.number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${impl.branch} is verified but has no PR.`
     }
     // Log before the checkpoint below: a Deliver-phase breach throws out of this stage, and the PR
@@ -1984,8 +2097,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
   }
   // A blocked pre-push merge is a delivery failure, not a silent no-op: the ticket lands in the
   // run result's `failed` list with the conflicting paths, and no PR exists to review.
-  const mergeBlocked = !!(delivery && (delivery.mergeStatus === 'blocked'
-    || (!delivery.prUrl && Array.isArray(delivery.conflictPaths) && delivery.conflictPaths.length)))
+  const mergeBlocked = !!(outcome && outcome.kind === 'merge-blocked')
   const conflictPaths = mergeBlocked ? (delivery.conflictPaths || []) : []
   if (mergeBlocked) log(`#${t.number}: delivery stopped - merging origin/${scout.defaultBranch} conflicts outside the resolvable classes (${conflictPaths.join(', ') || 'paths not reported'}); no PR opened.`)
   const mergeFailure = mergeBlocked
@@ -2004,6 +2116,9 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       ? `opened without the pre-push merge - the classifier refused \`git merge origin/${scout.defaultBranch}\` twice: ${delivery.blockedReason || 'refusal text not reported'}`
       : null,
     conflictPaths, discoveries: (impl && impl.discoveries) || [],
+    // Issue 654: non-null when the run recorded this branch pushed and verified but the deliverer
+    // could not find it; the run result lists it under `inconsistent`, not `failed`.
+    inconsistency: inconsistency ? { branch, detail: inconsistency } : null,
   }
 }
 // [FLEET-CODE-LANE-END]
@@ -2214,11 +2329,17 @@ return {
   })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
-  failed: clean.filter(r => !r.done || r.deliveryFailure).map(r => ({
+  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency).map(r => ({
     ticket: r.ticket,
     kind: r.kind,
     failures: (r.done ? [] : failuresOf(r.verdict)).concat(r.deliveryFailure ? [r.deliveryFailure] : []),
     conflictPaths: r.conflictPaths || [],
+  })),
+  // Issue 654: verified, recorded as pushed, and still undelivered because the deliverer could not
+  // find the branch. Not a failure - the work may be sitting on origin with no PR, invisible to a
+  // merge pass and re-implemented by the next wave unless someone delivers it by hand.
+  inconsistent: clean.filter(r => r.inconsistency).map(r => ({
+    ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
   })),
   discoveries: allDiscoveries.length,
   // Where the bullets actually live, so a triage chore filed for them can name the commit and
