@@ -201,8 +201,10 @@ Run `node scripts/build-dashboard.js` locally to check your changes, then discar
 committing a local copy collides with the bot's on the dashboard branch and turns the next push
 into a rebase conflict on a file nobody authored.
 
-The workflow runs on `windows-latest`. The test command is a PowerShell script that restores a
-Windows profile; nothing about it runs on Linux.
+The workflow runs on `ubuntu-latest` and runs no tests (issue 452). Its health line is the
+conclusion of the latest completed `windows-restore-test.yml` run on `master`
+(`CONFIG.testWorkflow` in the script): that job proves the Windows restore suite, and re-running
+the suite per dashboard event on a 2x-billed Windows runner was this repo's largest Actions cost.
 
 ## Before trusting the tracker
 
