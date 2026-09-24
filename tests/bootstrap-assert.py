@@ -247,6 +247,14 @@ if not os.path.isfile(rules) or os.path.getsize(rules) == 0:
 else:
     first = open(rules, encoding='utf-8').readline().strip()
     pass_(f'rules text present ({os.path.getsize(rules)} bytes), first line: {first!r}')
+    # Issue 680: the ADHD off switch has to be named where a container session reads it.
+    reminder = os.path.join(PAYLOAD, 'hooks', 'scripts', 'governance-reminder.js')
+    unnamed = [p for p in (rules, reminder) if not os.path.isfile(p)
+               or '"stop adhd mode"' not in open(p, encoding='utf-8').read()]
+    if unnamed:
+        fail('the ADHD off switch ("stop adhd mode") is not named in: ' + ', '.join(unnamed))
+    else:
+        pass_('the rules text and the per-turn reminder name the ADHD off switch (issue 680)')
 
 # The per-prompt digest (issue 533). Without it every prompt would go back to carrying the whole
 # rulebook, or -- worse -- carry nothing, since the UserPromptSubmit entry now asks for the digest.

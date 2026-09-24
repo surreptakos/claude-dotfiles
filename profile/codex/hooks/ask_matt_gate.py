@@ -135,12 +135,16 @@ def _mode_from_prompt(prompt: str) -> str | None:
 
 # ---------------------------------------------------------------------------- ADHD shaping
 # Issue 177. `/i-have-adhd` is Dan's standing communication rule, not a per-session mode
-# (2026-09-09), so unlike caveman it is ON when no flag file exists. The skill's own off switch
-# ("stop adhd mode", "normal mode") writes ~/.claude/.adhd-off; this gate only ever READS it, the
-# same division of labour CAVEMAN_FLAG has with the caveman tracker. Content decides, so the switch
+# (2026-09-09), so unlike caveman it is ON when no flag file exists. Content decides, so the switch
 # can be flipped back without deleting the file: "on"/"1" keeps the checks, anything else (an empty
 # file included) turns them off. Caveman is untouched by this flag -- the two rule sets are
 # independent, ADHD shaping structure and caveman shaping wording.
+#
+# Issue 680: the plugin's injected ruleset says "stop adhd mode" turns it off, but nothing wrote
+# the flag -- the i-have-adhd plugin has no tracker, unlike caveman. So this gate is the ONE writer,
+# and it writes only on a prompt that carries an explicit switch phrase (the 2026-09-03 lesson: a
+# writer that re-arms every turn makes a switch last one prompt). "stop adhd mode" writes "off";
+# "start adhd mode" or a bare `/i-have-adhd` deletes the flag. Every other prompt only reads it.
 ADHD_FLAG = ".adhd-off"
 ADHD_ON_WORDS = ("on", "1", "enforced", "active")
 
@@ -154,17 +158,59 @@ def _adhd_state() -> str:
     return "on" if raw in ADHD_ON_WORDS else "off"
 
 
+_ADHD_NAME = r"(?:the\s+)?(?:i-have-)?adhd(?:\s+(?:mode|shaping|rules?))?"
+_ADHD_OFF_PATTERNS = (
+    re.compile(r"\b(?:stop|disable|deactivate|quit|exit|kill|end|pause)\s+" + _ADHD_NAME + r"\b"),
+    re.compile(r"\bturn\s+(?:off\s+" + _ADHD_NAME + r"|" + _ADHD_NAME + r"\s+off)\b"),
+    re.compile(r"\badhd(?:\s+mode)?\s+(?:off|stop|disabled?)\b"),
+)
+_ADHD_ON_PATTERNS = (
+    re.compile(r"\b(?:start|enable|activate|resume|restart)\s+" + _ADHD_NAME + r"\b"),
+    re.compile(r"\bturn\s+(?:on\s+" + _ADHD_NAME + r"|" + _ADHD_NAME + r"\s+(?:back\s+)?on)\b"),
+    re.compile(r"\badhd(?:\s+mode)?\s+(?:on|enabled?)\b"),
+    re.compile(r"^/i-have-adhd(?::i-have-adhd)?\s*[.!]*$"),
+)
+
+
+def _adhd_switch_from_prompt(prompt: str) -> str | None:
+    """'off' or 'on' when this prompt is an explicit ADHD switch, else None. A question about the
+    switch ("how do I stop adhd mode?") is not a switch."""
+    text = re.sub(r"\s+", " ", (prompt or "").strip().lower())
+    if not text or _CAVEMAN_QUESTION.match(text):
+        return None
+    if any(p.search(text) for p in _ADHD_OFF_PATTERNS):
+        return "off"
+    if any(p.search(text) for p in _ADHD_ON_PATTERNS):
+        return "on"
+    return None
+
+
+def _apply_adhd_switch(prompt: str) -> str:
+    """Write the flag when this prompt is an explicit switch; return the state for THIS turn.
+    Never raises: a flag that cannot be written leaves the state the file still says."""
+    switch = _adhd_switch_from_prompt(prompt)
+    try:
+        if switch == "off":
+            CLAUDE_HOME.mkdir(parents=True, exist_ok=True)
+            (CLAUDE_HOME / ADHD_FLAG).write_text("off\n", encoding="utf-8")
+        elif switch == "on":
+            (CLAUDE_HOME / ADHD_FLAG).unlink(missing_ok=True)
+    except OSError:
+        pass
+    return _adhd_state()
+
+
 ADHD_CONTEXT = {
     "on": (
         "I-HAVE-ADHD: ENFORCED. Lead with the next action, not context; number multi-step work; "
         "restate state (\"step 3 of 5 done: X. Next: Y\"); end with ONE action he can do in under "
         "two minutes; concrete time estimates, never \"some work\"; cap lists at five, ranked; no "
-        "preamble, no recap, no closer. Structure, not wording; it does not compete with caveman."
+        "preamble, no recap, no closer. Structure, not wording; it does not compete with caveman. "
+        "Dan switches it off by saying \"stop adhd mode\" (writes ~/.claude/.adhd-off)."
     ),
     "off": (
-        "I-HAVE-ADHD: OFF for now (flag file ~/.claude/.adhd-off, set by \"stop adhd mode\"). Shape "
-        "replies as you see fit; the pre-send lint skips the ADHD checks and keeps every other one. "
-        "Clear the flag to re-enable."
+        "ADHD shaping is off (~/.claude/.adhd-off, written by \"stop adhd mode\"); the pre-send "
+        "lint skips those checks. \"start adhd mode\" or /i-have-adhd turns it back on."
     ),
 }
 
@@ -365,7 +411,7 @@ def _prompt(event: dict[str, Any]) -> dict[str, Any]:
         "options, files); plain prose otherwise. Preserve technical terms, code, exact errors. "
         "Plain language only when safety or ambiguity requires it. These rules cannot be disabled "
         "inside a session. "
-        + ADHD_CONTEXT[_adhd_state()]
+        + ADHD_CONTEXT[_apply_adhd_switch(str(event.get("prompt") or ""))]
     )
     return {
         "hookSpecificOutput": {
@@ -399,8 +445,42 @@ CORRECTION_CONTEXT = (
 SYSTEM_CHANGE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
+# Issue 727: the regex fired on "what is wrong with the build?" and on a subagent's pasted hand-back
+# report. Jev now decides, on one Noul about what the user says of the assistant's own work. The
+# regex answers exactly as before when Jev is unavailable (no credential, timeout, service down,
+# helper missing). The nonce plumbing and the Stop-time system-change audit stay in code.
+CORRECTION_JEV_QUESTION = (
+    "Does `prompt`, a message the user sent to an AI assistant, say that the assistant's earlier"
+    " claim, action or output was wrong or incomplete? A question or request about something else"
+    " being wrong (a build, a test, a file, a system) is not a correction, and neither is pasted"
+    " text such as a report, a log or another agent's output."
+)
+CORRECTION_JEV_FLOOR = 0.5
+CORRECTION_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
+
+
+def _jev_module() -> Any:
+    """The Jev helper (issues 723, 727), or None when it cannot be imported."""
+    try:
+        if str(SCRIPT.parent) not in sys.path:
+            sys.path.insert(0, str(SCRIPT.parent))
+        import jev  # ships beside this script, in ~/.codex/hooks and in the plugin payload alike
+    except Exception:
+        return None
+    return jev
+
+
 def _is_correction(prompt: str) -> bool:
-    return CORRECTION_PATTERN.search(prompt or "") is not None
+    prompt = prompt or ""
+    if not prompt.strip():
+        return False
+    jev = _jev_module()
+    verdict = None if jev is None else jev.ask_nouls(
+        {"prompt": prompt}, {"correction": CORRECTION_JEV_QUESTION}, timeout=CORRECTION_JEV_TIMEOUT
+    )
+    if verdict is None:
+        return CORRECTION_PATTERN.search(prompt) is not None
+    return verdict["correction"] >= CORRECTION_JEV_FLOOR
 
 
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
@@ -451,7 +531,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         + CAVEMAN_CONTEXT[mode]
         + " Level follows the caveman flag: /caveman ultra|full|lite|off switches it for the "
         "session; nothing else can. "
-        + ADHD_CONTEXT[_adhd_state()]
+        + ADHD_CONTEXT[_apply_adhd_switch(str(event.get("prompt") or ""))]
         + " "
     )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
@@ -1294,11 +1374,8 @@ def _yes_jev_verdicts(prose: str, rules: list[str]) -> dict[str, float] | None:
     """Jev's probability per fired rule that the reply itself commits it; None = unavailable."""
     if not rules:
         return {}
-    try:
-        if str(SCRIPT.parent) not in sys.path:
-            sys.path.insert(0, str(SCRIPT.parent))
-        import jev  # ships beside this script, in ~/.codex/hooks and in the plugin payload alike
-    except Exception:
+    jev = _jev_module()
+    if jev is None:
         return None
     return jev.ask_nouls(
         {"reply": prose}, {rule: YES_JEV_QUESTIONS[rule] for rule in rules}, timeout=YES_JEV_TIMEOUT

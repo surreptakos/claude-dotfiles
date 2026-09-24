@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T04:05:06Z'
-  previous-modified: '2026-09-24T03:50:44Z'
-  revision: '34'
-  content-sha: 47a34bc46fa4
+  modified: '2026-09-24T04:43:33Z'
+  previous-modified: '2026-09-24T04:42:51Z'
+  revision: '36'
+  content-sha: 1891fb870530
 ---
 
 # ticket-fleet
@@ -487,15 +487,6 @@ merge, pushes nothing and opens no PR; the ticket appears in the run result's `f
 with `conflictPaths` naming every path still in conflict. A test command that fails after an
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
-
-**A branch the deliverer cannot see is not a blocked merge** (issue 654). Run `6ab1884a`'s
-deliverer called a pushed, verified branch "not found on origin" while `git ls-remote` printed its
-ref, and the ticket was listed as failed. The deliverer now reports every
-`git ls-remote --exit-code --heads origin <branch>` it ran under `branchLookup` with
-`mergeStatus: "branch-unconfirmed"`, and the run decides: two exit-2 lookups are "absent", and
-anything else is "could not determine". When the run itself recorded the branch as pushed and
-verified, the ticket goes under the run result's `inconsistent` list, naming the branch, instead
-of `failed`. Check the ref by hand and deliver it (a `finishRunId` pass, or a PR from the journal).
 
 **A merge the classifier refuses is not a blocked merge.** In a container the auto-mode
 classifier sometimes refuses `git merge` on the shape of the command rather than on what it
