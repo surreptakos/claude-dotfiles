@@ -399,8 +399,42 @@ CORRECTION_CONTEXT = (
 SYSTEM_CHANGE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
+# Issue 727: the regex fired on "what is wrong with the build?" and on a subagent's pasted hand-back
+# report. Jev now decides, on one Noul about what the user says of the assistant's own work. The
+# regex answers exactly as before when Jev is unavailable (no credential, timeout, service down,
+# helper missing). The nonce plumbing and the Stop-time system-change audit stay in code.
+CORRECTION_JEV_QUESTION = (
+    "Does `prompt`, a message the user sent to an AI assistant, say that the assistant's earlier"
+    " claim, action or output was wrong or incomplete? A question or request about something else"
+    " being wrong (a build, a test, a file, a system) is not a correction, and neither is pasted"
+    " text such as a report, a log or another agent's output."
+)
+CORRECTION_JEV_FLOOR = 0.5
+CORRECTION_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
+
+
+def _jev_module() -> Any:
+    """The Jev helper (issues 723, 727), or None when it cannot be imported."""
+    try:
+        if str(SCRIPT.parent) not in sys.path:
+            sys.path.insert(0, str(SCRIPT.parent))
+        import jev  # ships beside this script, in ~/.codex/hooks and in the plugin payload alike
+    except Exception:
+        return None
+    return jev
+
+
 def _is_correction(prompt: str) -> bool:
-    return CORRECTION_PATTERN.search(prompt or "") is not None
+    prompt = prompt or ""
+    if not prompt.strip():
+        return False
+    jev = _jev_module()
+    verdict = None if jev is None else jev.ask_nouls(
+        {"prompt": prompt}, {"correction": CORRECTION_JEV_QUESTION}, timeout=CORRECTION_JEV_TIMEOUT
+    )
+    if verdict is None:
+        return CORRECTION_PATTERN.search(prompt) is not None
+    return verdict["correction"] >= CORRECTION_JEV_FLOOR
 
 
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
@@ -1294,11 +1328,8 @@ def _yes_jev_verdicts(prose: str, rules: list[str]) -> dict[str, float] | None:
     """Jev's probability per fired rule that the reply itself commits it; None = unavailable."""
     if not rules:
         return {}
-    try:
-        if str(SCRIPT.parent) not in sys.path:
-            sys.path.insert(0, str(SCRIPT.parent))
-        import jev  # ships beside this script, in ~/.codex/hooks and in the plugin payload alike
-    except Exception:
+    jev = _jev_module()
+    if jev is None:
         return None
     return jev.ask_nouls(
         {"reply": prose}, {rule: YES_JEV_QUESTIONS[rule] for rule in rules}, timeout=YES_JEV_TIMEOUT

@@ -712,6 +712,29 @@ class PluginHookDedupGuard(unittest.TestCase):
             self.assertEqual(proc.stdout, "SENTINEL_WROTE")
 
 
+# Issue 727: the payload's copy of the gate asks Jev whether a prompt is a correction, through the
+# jev.py shipped beside it. The committed payload is the rebuild CI diffs, so running the gate from
+# there proves the import works where a container runs it: a stubbed "no" silences a regex hit only
+# when jev imported; a failed import would fall back to the regex and fire.
+class PayloadGateImportsJev(unittest.TestCase):
+    def _prompt(self, stub, prompt):
+        with tempfile.TemporaryDirectory() as tmp:
+            env = {**os.environ, "TYPESAFE_JEV_STUB": stub, "ASK_MATT_GATE_STATE_DIR": tmp,
+                   "GOVERNANCE_CLAUDE_HOME": str(Path(tmp) / "claude-home")}
+            env.pop("CLAUDE_PLUGIN_ROOT", None)
+            proc = subprocess.run(
+                [sys.executable, str(MARKETPLACE_HOOKS / "scripts" / "ask_matt_gate.py"),
+                 "claude-prompt"], input=json.dumps({"session_id": "s-727", "prompt": prompt}),
+                capture_output=True, text=True, env=env, timeout=15)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+        return json.loads(proc.stdout)["hookSpecificOutput"]["additionalContext"]
+
+    def test_the_payload_gate_takes_jevs_correction_verdict(self):
+        prompt = "what is wrong with the build?"
+        self.assertIn("CORRECTION DETECTED", self._prompt("off", prompt))  # the regex fallback
+        self.assertNotIn("CORRECTION DETECTED", self._prompt('{"correction": 0.03}', prompt))
+
+
 # Regression guard for issue 495: the per-turn reminder must point at rules that exist where it
 # runs. The source copy says ~/.claude/CLAUDE.md, true on the PC; a container has no such
 # file, and the rules it summarises ship in this payload at rules/global-rules.md (issue 209). The
