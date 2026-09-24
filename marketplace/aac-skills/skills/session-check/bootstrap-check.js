@@ -28,10 +28,16 @@
  *   BOOTSTRAP_MASTER_MANIFEST  absolute path to a plugin.json to compare the marker's version
  *                              against (in real runs the check fetches this from git; the env
  *                              override lets a test pin it)
+ *   BOOTSTRAP_WAIT_MS          longest awaitBootstrap waits on a running bootstrap (default 90000)
+ *   BOOTSTRAP_START_GRACE_MS   how long a young container's stale or missing marker is given for
+ *                              a bootstrap to take its lock (default 10000)
  *
  * Exports:
  *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable' | 'failed' | 'stale',
  *                                      marker?, path, reason?, stage?, writtenAt?, bootedAt? }
+ *   awaitBootstrap(env)          -> readMarker's answer once no bootstrap is running (plus
+ *                                      waitedMs when it had to wait), or { state: 'pending', path,
+ *                                      lock, waitedMs } when one still held its lock at the deadline
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
  *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker?,
  *                                      stale?: [{ name, local, master }] | null }
@@ -109,6 +115,68 @@ function readMarker(env) {
     return { state: 'ok', marker, path: p };
   } catch (e) {
     return { state: 'unreadable', path: p, reason: e.message };
+  }
+}
+
+/**
+ * The gate and the bootstrap are two SessionStart groups nothing orders (issue 669). A check that
+ * read the marker while the bootstrap was still installing quoted the image's marker — a `!!`
+ * stale line and a payload version that were both false fifteen seconds later, when the model
+ * read them. So the start report waits for the bootstrap before it reads: while the hook's
+ * `run.lock` is held, and, in a container booted under two minutes ago whose marker is stale or
+ * missing, for a short grace in which a hook that has not reached its `mkdir` yet can take it.
+ * A lock older than the boot is one the image carried and a lock older than ten minutes is a dead
+ * run (the hook takes those over too); neither is waited on. Past the deadline with the lock
+ * still held the answer is 'pending': the report says it was taken before the bootstrap finished
+ * rather than describing the state the bootstrap is replacing.
+ */
+const LOCK_DEAD_MS = 10 * 60 * 1000;
+const YOUNG_CONTAINER_MS = 2 * 60 * 1000;
+
+function lockPath(env) {
+  return path.join(path.dirname(markerPath(env)), 'run.lock');
+}
+
+function bootstrapRunning(env, boot) {
+  try {
+    const taken = fs.statSync(lockPath(env)).mtimeMs;
+    return taken >= boot.ms - 1000 && Date.now() - taken < LOCK_DEAD_MS;
+  } catch {
+    return false;
+  }
+}
+
+function envMs(value, fallback) {
+  const n = Number(value);
+  return value !== undefined && value !== '' && Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function awaitBootstrap(env, pollMs = 250) {
+  const waitMs = envMs(env.BOOTSTRAP_WAIT_MS, 90000);
+  const graceMs = envMs(env.BOOTSTRAP_START_GRACE_MS, 10000);
+  const started = Date.now();
+  const boot = containerBootedAt();
+  const young = started - boot.ms < YOUNG_CONTAINER_MS;
+  let slept = false;
+  for (;;) {
+    const running = bootstrapRunning(env, boot);
+    const r = readMarker(env);
+    const waited = Date.now() - started;
+    const unsettled = r.state === 'stale' || r.state === 'missing';
+    const inGrace = !running && unsettled && young && waited < Math.min(graceMs, waitMs);
+    if (!running && !inGrace) {
+      if (slept) r.waitedMs = waited;
+      return r;
+    }
+    if (waited >= waitMs) {
+      return { state: 'pending', path: r.path, lock: lockPath(env), waitedMs: waited };
+    }
+    sleepMs(pollMs);
+    slept = true;
   }
 }
 
@@ -238,6 +306,6 @@ function verifySelfHook(marker) {
 }
 
 module.exports = {
-  readMarker, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
-  staleSkillsAtRemote, markerPath, skillsDir, containerBootedAt,
+  readMarker, awaitBootstrap, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
+  staleSkillsAtRemote, markerPath, lockPath, skillsDir, containerBootedAt, execGit,
 };

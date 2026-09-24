@@ -809,6 +809,39 @@ function cloudSkillChecks() {
   note("fix: in a claude-dotfiles checkout, `python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'` on a branch, then merge");
 }
 
+/* --------------------------------------------------------- pull nudge ------------------------
+ *  Whether this desktop has pulled a commit that touched a path `sync.ps1 -Mode pull` still
+ *  writes (issue 735). `sync.ps1` records the commit it installed from; a merge since then that
+ *  only moved plugin-carried content (issues 732-734 shrank the whitelist to exactly what a pull
+ *  still installs) needs no pull, and this stays silent. Desktop-only — there is nothing for a
+ *  cloud container to pull into — and only in a claude-dotfiles checkout (gated on the two files
+ *  the whitelist and the pull command both live in). */
+const pullNudge = require('./pull-nudge');
+function pullNudgeChecks() {
+  if (IS_CLOUD) return;
+  if (!has('sync.ps1') || !has('lib/manifest.ps1')) return;
+  const masterHead = defaultBranchHead();
+  if (!masterHead) return;
+  const stamp = pullNudge.readStamp();
+  if (!stamp) {
+    warn('no pull recorded on this machine yet — nothing to compare a merge against until one runs');
+    return;
+  }
+  if (stamp.sha === masterHead) return;
+  const parsed = pullNudge.parseWhitelist(fs.readFileSync(path.join(REPO, 'lib', 'manifest.ps1'), 'utf8'));
+  if (parsed.error) { warn(`could not read the pull whitelist from lib/manifest.ps1 — ${parsed.error}`); return; }
+  const diffOut = tryRun('git', ['diff', '--name-only', stamp.sha, masterHead]);
+  if (diffOut === null) {
+    warn(`could not diff since the last recorded pull (${stamp.sha.slice(0, 7)}) — is that commit still in this clone's history?`);
+    return;
+  }
+  const files = diffOut ? diffOut.split('\n').filter(Boolean) : [];
+  const result = pullNudge.evaluate(stamp.sha, files, parsed.paths);
+  if (result.state !== 'needs-pull') return;
+  const extra = result.files.length > 1 ? ` (+${result.files.length - 1} more)` : '';
+  warn(`master has a pull-carried change since your last pull — ${result.files[0]}${extra} — run \`.\\sync.ps1 -Mode pull\``);
+}
+
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, '')); }
   catch (e) { return null; }
@@ -1071,10 +1104,21 @@ function harnessChecks() {
  *  Local runs skip the whole block: the desktop machine IS where the payload is authored, and
  *  the check would false-STOP on every clean local session. */
 const bootstrap = require('./bootstrap-check');
+// Issue 669: read once, before any check, after waiting out a bootstrap still running in this
+// SessionStart, so the whole report describes the post-bootstrap container (main sets it).
+let bootRead = null;
 function bootstrapChecks() {
   if (!IS_CLOUD) return;
   head('Cloud bootstrap');
-  const r = bootstrap.readMarker(process.env);
+  const r = bootRead || bootstrap.readMarker(process.env);
+  if (r.state === 'pending') {
+    // Issue 669: the deadline passed with the bootstrap's lock still held. What the marker says
+    // now is what the bootstrap is replacing, so this block describes nothing else.
+    warn(`aac-bootstrap still running when this report was taken — waited ${Math.round(r.waitedMs / 1000)}s on its lock ${r.lock}; this report was taken before the bootstrap finished, so it quotes no payload, skills or governance hooks`);
+    note('re-read it once the bootstrap finishes: `/session-start --refresh` — do not re-run the bootstrap, it is running');
+    return;
+  }
+  if (r.waitedMs) note(`waited ${Math.round(r.waitedMs / 1000)}s for this session's bootstrap to finish before reading its marker (issue 669)`);
   if (r.state === 'missing') {
     stop(`aac-bootstrap marker absent at ${r.path} — the SessionStart bootstrap hook did not run`);
     note('the hook is `.claude/hooks/session-start.sh` (or `session-start-bootstrap.sh` beside a repo\'s own hook, issue 542) in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true');
@@ -1215,6 +1259,7 @@ function accountChecks() {
 async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
+  if (IS_CLOUD) bootRead = bootstrap.awaitBootstrap(process.env);
   gitChecks();
   harnessChecks();
   bootstrapChecks();
@@ -1223,6 +1268,7 @@ async function main() {
   await workChecks();
   ticketChecks();
   installedPluginChecks();
+  pullNudgeChecks();
   if (END) endGateChecks();
   if (END) cloudSkillChecks();
   if (CFG.note) { head('Note'); note(CFG.note); }

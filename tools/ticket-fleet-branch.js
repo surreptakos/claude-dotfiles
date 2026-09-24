@@ -259,6 +259,39 @@ function confineToCandidates(tickets, candidateNumbers) {
 }
 
 /**
+ * Drop every candidate parked in the Maybe Someday milestone (issue 786).
+ *
+ * The ticket reaper parks tickets there without touching their labels (its own rule -
+ * docs/agents/memory), so a parked ticket still carries `ready-for-agent` and a label-driven
+ * scout listing still returns it. A label the reaper does not touch and a scout that reads only
+ * labels is the gap: on aac-sales-commissions on 2026-09-24 a label-driven run would have
+ * implemented five tickets the reaper had just parked against a speed-over-robustness ruling.
+ *
+ * This only gates the label-driven listing. A ticket named explicitly in `args.tickets` runs
+ * whatever its milestone - the caller asked for it by number, same as the kind/handoff gates
+ * leave explicit tickets alone.
+ *
+ * @param {Array<{number:number, milestone?:string|null}>|null|undefined} tickets
+ * @param {Array<number|string>|null|undefined} explicitNumbers - `args.tickets`, parsed; a
+ *   non-empty list means every candidate was named explicitly and none are dropped
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, milestone:string}>}} the surviving
+ *   tickets in order, and the dropped ones with the milestone that parked each, for the run
+ *   result's `skippedParked`
+ */
+function dropParkedTickets(tickets, explicitNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (Array.isArray(explicitNumbers) && explicitNumbers.length > 0) return { tickets: list, skipped: [] };
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const milestone = String((t && t.milestone) || '').trim();
+    if (milestone.toLowerCase() !== 'maybe someday') return true;
+    skipped.push({ ticket: parseInt(t.number, 10), milestone });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
  * Drop blockers that have already closed (issue 403).
  *
  * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
@@ -478,6 +511,20 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 /**
+ * The acceptance criteria a PASSING verdict still names as unmet, by their text (issue 699).
+ *
+ * A verifier can rightly pass a branch that stops short of the ticket - a doc-only change whose
+ * code half waits on an owner decision filed as its own ticket - and the deliver stage used to
+ * write `Closes #N` on it anyway, so the merge closed aac-bill-intake#682 with three of its four
+ * boxes unticked. The verdict's `unmetCriteria` is what the closing keyword now follows: any entry
+ * makes the PR say `Refs #N` and list them. Absent, null or blank entries read as none.
+ */
+function unmetCriteriaOf(verdict) {
+  if (!verdict) return [];
+  return stableList(verdict.unmetCriteria);
+}
+
+/**
  * Implementer model per ticket from a TypeSafe Jev difficulty Score (issue 725).
  *
  * One `implModel` used to be pinned for every implementer, so a one-line mechanical ticket paid
@@ -556,6 +603,195 @@ function pickImplModel(level, attempt, cfg) {
   return pins[level] || c.implModel;
 }
 
+/**
+ * Pure (issue 654): what a deliverer's `git ls-remote --exit-code --heads origin <branch>` runs say
+ * about the branch - `lookups` is [{exitCode, output}] in the order they ran. "Could not tell" is
+ * not "absent": run 6ab1884a's deliverer read a lookup that printed nothing as a missing branch
+ * while the ref sat on origin.
+ *   'present'      - some run exited 0 and printed a refs/heads/ line.
+ *   'absent'       - at least two runs, every one exited 2 (git's own "no matching refs" answer
+ *                    under --exit-code) with no output. One run is never enough.
+ *   'undetermined' - anything else: no runs, a lone run, any other non-zero exit (network, auth,
+ *                    a cwd whose origin is another repo), or an exit 0 that printed nothing.
+ */
+function classifyBranchLookup(lookups) {
+  const runs = (Array.isArray(lookups) ? lookups : []).filter((l) => l && typeof l === 'object');
+  const code = (l) => (l.exitCode === null || l.exitCode === undefined || l.exitCode === '' ? NaN : Number(l.exitCode));
+  const out = (l) => String(l.output == null ? '' : l.output).trim();
+  if (runs.some((l) => code(l) === 0 && /refs\/heads\//.test(out(l)))) return 'present';
+  if (runs.length >= 2 && runs.every((l) => code(l) === 2 && !out(l))) return 'absent';
+  return 'undetermined';
+}
+
+/**
+ * The live-tree hard rail's exclusions (issues 334, 489, 677): paths under the live roots the
+ * harness and the CLI rewrite by themselves during every run, so a `find -newermt` hit there says
+ * nothing about the implementer. This is the ONE list - the verifier prompt's find flags and the
+ * reasons it quotes are both generated from it. The verifier is told to add none of its own: a
+ * rail whose verdict turns on how each agent reads "bookkeeping" refused two branches and passed a
+ * third on the same file (issue 677). Add an entry here, with its why, or not at all.
+ */
+const LIVE_TREE_ROOTS = '~/.claude ~/.codex ~/.agents';
+const LIVE_TREE_EXCLUSIONS = Object.freeze([
+  Object.freeze({ path: '*/hook-state/*', why: '~/.claude/hook-state is hook bookkeeping' }),
+  Object.freeze({ path: '*/.claude/projects/*', why: "~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes" }),
+  Object.freeze({ path: '*/.claude/sessions/*', why: "~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489)" }),
+  Object.freeze({ path: '*/.claude/skills/synced/*', why: "~/.claude/skills/synced/<id>/manifest.json is the CLI's cross-session skills-sync catalogue, rewritten by the verifying session's own Skill and ToolSearch loads (issue 677)" }),
+]);
+
+/** The rail's find command, every exclusion from LIVE_TREE_EXCLUSIONS and nothing else. */
+function liveTreeFindCommand(since) {
+  const excludes = LIVE_TREE_EXCLUSIONS.map((e) => `-not -path '${e.path}'`).join(' ');
+  return `find ${LIVE_TREE_ROOTS} -type f -newermt "${since}" ${excludes}`;
+}
+
+/** Why each exclusion is there, and the order not to invent more - quoted in the verifier prompt. */
+function liveTreeExclusionNote() {
+  const n = LIVE_TREE_EXCLUSIONS.length;
+  return `Those ${n} exclusions are the harness's and the CLI's own bookkeeping, not implementer output: ${LIVE_TREE_EXCLUSIONS.map((e) => e.why).join('; ')} - keep all ${n} exclusions exactly as given, add none of your own, do not re-derive them and do not count their contents as a breach.`;
+}
+
+// A blockedReason that says the branch itself could not be found, as opposed to a merge conflict
+// or a failing test tail. Run 6ab1884a's read "Branch <b> not found on origin or locally".
+const BRANCH_NOT_FOUND_RE = /\b(?:branch|ref|refs)\b[^\n]*?\b(?:not found|does not exist|doesn't exist|is missing|no matching)\b|\bno matching (?:refs|branches)\b|\bnot found on origin\b/i;
+
+/**
+ * Pure (issue 654): the outcome of one Deliver result, so a deliverer that could not SEE the
+ * branch is never filed as a blocked merge. `facts` is {branch, pushed, verified}: what the run
+ * itself recorded - the implementer's (or the push agent's) pushed:true, and a verifier pass.
+ * Returns {kind, lookup, message}; kind is one of
+ *   'delivered'     - a PR (or comment) URL came back.
+ *   'merge-blocked' - the pre-push merge conflicted or broke the tests (issues 318, 514).
+ *   'inconsistency' - the run recorded pushed:true AND a verifier pass, yet the deliverer could not
+ *                     find the branch: the record and git disagree, and the branch may need
+ *                     manual delivery. Never an ordinary failure.
+ *   'undetermined'  - the deliverer could not tell whether the branch is on origin.
+ *   'absent'        - git authoritatively reported no such ref (classifyBranchLookup 'absent').
+ *   'undelivered'   - anything else with no URL (the caller keeps its own message for it).
+ */
+function classifyDelivery(delivery, facts) {
+  const f = facts || {};
+  const branch = String(f.branch || '');
+  const d = delivery && typeof delivery === 'object' ? delivery : null;
+  if (!d) return { kind: 'undelivered', lookup: null, message: null };
+  if (d.prUrl || d.commentUrl) return { kind: 'delivered', lookup: null, message: null };
+  const conflictPaths = Array.isArray(d.conflictPaths) ? d.conflictPaths : [];
+  const reason = String(d.blockedReason || '');
+  const lookupRuns = Array.isArray(d.branchLookup) ? d.branchLookup : [];
+  const lookup = classifyBranchLookup(lookupRuns);
+  const branchUnseen = d.pushed !== true && !conflictPaths.length && lookup !== 'present'
+    && (d.mergeStatus === 'branch-unconfirmed' || lookupRuns.length > 0 || BRANCH_NOT_FOUND_RE.test(reason));
+  if (branchUnseen) {
+    const said = reason ? ` Deliverer said: ${reason}` : '';
+    const runs = lookupRuns.length
+      ? ` ls-remote exit codes: ${lookupRuns.map((l) => (l && l.exitCode != null ? String(l.exitCode) : '?')).join(', ')}.`
+      : ' No ls-remote result was reported.';
+    if (f.pushed === true && f.verified === true) {
+      return { kind: 'inconsistency', lookup, message: `INCONSISTENCY: branch ${branch} is recorded pushed:true with a verifier pass:true, but the deliverer could not find it (lookup: ${lookup}).${runs}${said} This is not a blocked merge and not an ordinary failure: check \`git ls-remote --heads origin ${branch}\` yourself - the branch may need manual delivery (a finishRunId pass, or a PR opened from the journal).` };
+    }
+    if (lookup === 'absent') {
+      return { kind: 'absent', lookup, message: `branch ${branch} is not on origin: two \`git ls-remote --exit-code\` runs exited 2 (no matching ref).${said}` };
+    }
+    return { kind: 'undetermined', lookup, message: `could not determine whether branch ${branch} is on origin - not a blocked merge and not proof the branch is missing.${runs}${said}` };
+  }
+  if (d.mergeStatus === 'blocked' || conflictPaths.length) return { kind: 'merge-blocked', lookup: null, message: null };
+  return { kind: 'undelivered', lookup: null, message: null };
+}
+
+/**
+ * Pure (issue 561): the ONE bash command the tip agent (`revParse`) runs to resolve a ref that may
+ * exist only as `origin/<ref>` - handed in through `priorImpl` from an earlier run, or pushed from
+ * an implementer in another container. `git -C <cwd> rev-parse <ref>` alone exits 128 for such a
+ * branch and issue-404's tip cross-check is skipped for the whole ticket (the bug this closes).
+ *
+ * Still one command, so the tip agent keeps the same "run exactly this" shape every other agent in
+ * this file gets: a fallback chain built from `||`, never a loop. Three steps, tried in order:
+ *   1. `git rev-parse --verify <ref>`        - the ref as given (a local branch, or already
+ *                                               `origin/<defaultBranch>` for the probe lane).
+ *   2. `git rev-parse --verify origin/<ref>` - the same name on the remote-tracking ref, for a
+ *                                               branch that exists only as `origin/<ref>` locally.
+ *   3. `git ls-remote --heads origin <ref>`  - the remote itself, for a branch pushed from another
+ *                                               container that this checkout has never fetched.
+ * Each of the first two steps echoes a `SPELLING=given` / `SPELLING=origin` marker on success, so
+ * `parseTipLookupOutput` can tell which one answered without re-running anything or guessing from
+ * the shape of the sha. The third step needs no marker: its raw `ls-remote` line is unambiguous
+ * (parsed by `parseLsRemoteSha`), and it is reached only when both markers failed to print.
+ *
+ * @param {string} cwd - the orchestrator's own checkout, absolute (matches every other `-C`
+ *   command in this file - see the orchestratorCwd note on the guard commands above).
+ * @param {string} ref - the ref to resolve, exactly as the caller passed to `revParse`.
+ * @returns {string} the single bash command string.
+ */
+function buildTipLookupCommand(cwd, ref) {
+  const c = String(cwd);
+  const r = String(ref);
+  return `{ git -C ${c} rev-parse --verify ${r} 2>/dev/null && echo SPELLING=given; }`
+    + ` || { git -C ${c} rev-parse --verify origin/${r} 2>/dev/null && echo SPELLING=origin; }`
+    + ` || git -C ${c} ls-remote --heads origin ${r} 2>/dev/null`;
+}
+
+/**
+ * Pure (issue 561): a raw `git ls-remote --heads origin <ref>` line - `<sha>\trefs/heads/<ref>` -
+ * to the 40 (or abbreviated) hex sha, or null when the line is not that shape. `git ls-remote`
+ * exits 0 and prints nothing at all for a ref that does not exist on the remote, so an empty or
+ * markerless output is "not found," not a parse failure - the caller (`parseTipLookupOutput`)
+ * treats null here the same way `revParse` already treats a rev-parse miss.
+ *
+ * @param {string} output - the command's stdout, verbatim.
+ * @returns {string|null}
+ */
+function parseLsRemoteSha(output) {
+  const lines = String(output == null ? '' : output).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const line = lines.find((l) => /^[0-9a-f]{7,40}\trefs\/heads\//i.test(l));
+  if (!line) return null;
+  const sha = line.split(/\s+/)[0];
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+}
+
+/**
+ * Pure (issue 561): `buildTipLookupCommand`'s stdout in, `{sha, spelling}` or null out. `spelling`
+ * is `'given'` or `'origin'` when the matching marker line printed (the sha is the line directly
+ * above it - both echoing branches of the command print sha-then-marker, in that order), or
+ * `'ls-remote'` when neither marker appears but `parseLsRemoteSha` finds a ref line anyway (the
+ * third fallback prints no marker of its own - see `buildTipLookupCommand`). Null when nothing in
+ * stdout resolves the ref by any of the three routes: an absent branch, not a parse failure.
+ *
+ * @param {string} stdout - the command's stdout, verbatim, exactly as `revParse` receives it.
+ * @returns {{sha: string, spelling: 'given'|'origin'|'ls-remote'}|null}
+ */
+function parseTipLookupOutput(stdout) {
+  const text = String(stdout == null ? '' : stdout);
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const markerIdx = lines.findIndex((l) => /^SPELLING=(given|origin)$/.test(l));
+  if (markerIdx > 0) {
+    const spelling = lines[markerIdx].slice('SPELLING='.length);
+    const sha = lines[markerIdx - 1];
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? { sha, spelling } : null;
+  }
+  const sha = parseLsRemoteSha(text);
+  return sha ? { sha, spelling: 'ls-remote' } : null;
+}
+
+/**
+ * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
+ * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
+ * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
+ * accepted every time. The Windows desktop (the gh instrument) has no /usr/bin/git, so there the
+ * bare spelling leads and the absolute path is the named retry. Either way the prompt carries
+ * both spellings and says when each one applies, so no worker is left holding only the refused
+ * one. `args` is everything after `git`; returns prompt text, the command in backticks first.
+ */
+const GIT_ABSOLUTE_PATH = '/usr/bin/git';
+const GIT_GUARD_REFUSAL = 'runs caveman with a git command among its operands';
+function gitSpelling(instrument, args) {
+  const bare = `git ${args}`;
+  const absolute = `${GIT_ABSOLUTE_PATH} ${args}`;
+  if (instrument === 'mcp') {
+    return `\`${absolute}\` (the absolute path: in a cloud container the worktree guard refuses a bare \`git ...\` with "${GIT_GUARD_REFUSAL}" and accepts this one; only where ${GIT_ABSOLUTE_PATH} does not exist, run \`${bare}\`)`;
+  }
+  return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -578,8 +814,11 @@ function difficultyEvalSet(branchNames) {
 
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
-  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
-  stableJson, stableText, stableList, priorFindingsBlock,
+  stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
+  classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
+  LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
+  buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
 };

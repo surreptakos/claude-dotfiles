@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T03:50:44Z'
-  previous-modified: '2026-09-24T00:56:57Z'
-  revision: '33'
-  content-sha: e8fc0d6d3040
+  modified: '2026-09-24T14:17:43Z'
+  previous-modified: '2026-09-24T14:10:39Z'
+  revision: '41'
+  content-sha: f17731584484
 ---
 
 # ticket-fleet
@@ -157,9 +157,21 @@ Workflow({
 })
 ```
 
-On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
-edited in place; on every other repo the copy stays a byte-identical mirror of the plugin
-source and is refreshed by re-running the `cp` above whenever the plugin bumps.
+On a fork (aac-routines' auth/cleanup phases, aac-sales-cockpit's `PROMPT_CONTRACT`) the copy is
+edited in place. On every other repo the copy is a mirror of claude-dotfiles master, and **the run
+refreshes it itself** (issue 770): the first Setup agent, `fleet-refresh`, downloads
+`aac-skills/ticket-fleet/ticket-fleet.js` and `editable-install-guard.js` from master, overwrites
+each `.claude/workflows/` copy whose sha256 differs (and `tools/editable-install-guard.js` when
+present), and commits them as `chore(fleet): refresh ticket-fleet script from claude-dotfiles
+master (issue 770)` on the current branch - no push. The running script is still the old copy;
+the next launch runs the refreshed one, so a fix merged here reaches every fleeted repo one run
+later with no `cp` by hand. The fork list it skips is `FORKS` in `tools/ticket-fleet-contract.js`.
+
+**The deliverer merges its own PR (issue 770).** STEP D of the Deliver prompt waits for CI on the
+PR head (20 minutes at most), applies the runbook merge bar, squash-merges with the head sha the
+checks ran on, re-runs the pre-push merge once if the default branch moved under it, and stops on
+a red check or a changes-requested review. The result carries `merged`, `mergeSha`, `prState` and
+`ticketState`; the run log says `MERGED <sha>` or `open, not merged: <prState>` per ticket.
 
 On a repo's first run, always pass `deliver: false` - verify the Scout, lane and verifier
 prompts before letting the fleet push branches and open PRs. Full args list:
@@ -335,7 +347,7 @@ Copies this repo does not rebuild, all of which move when the contract does:
 | Where | What | Keeps its own edits |
 | --- | --- | --- |
 | `surreptakos/aac-routines` | `.claude/workflows/ticket-fleet.js` | Setup phase (sub-session auth, issue 83) and the no-cleanup history |
-| `surreptakos/aac-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
+| `surreptakos/aac-sales-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
 | `claude-dotfiles` | `orchestrator/RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | this page |
@@ -390,6 +402,20 @@ a PR was selected and then skipped inside its lane, burning a wave slot while a 
 sat unselected (issue 430). An unusable answer - retry cap, empty output - is read as "no candidate
 has an open PR" for the whole wave and logged once; the worst case is a duplicate PR a human
 closes, which is the trade the per-lane check made too.
+
+## A ticket parked in Maybe Someday never enters a label-driven wave
+
+The ticket reaper (`ticket-reaper`) parks a ticket by moving it into the Maybe Someday milestone
+without touching its labels - its own rule - so a parked ticket still carries `ready-for-agent`
+and a label-driven scout listing still returns it. The scout reports each ticket's milestone
+title (`milestone.title` from `gh api` or the MCP tracker tools), and any candidate whose
+milestone is Maybe Someday is dropped before wave selection, whatever its labels, and named in
+the run result under `skippedParked`. This only gates a label-driven listing: a ticket named
+explicitly in `args.tickets` still runs - the caller asked for it by number, same as the human-lane
+tickets that stay in the wave despite the label rule. On aac-sales-commissions on 2026-09-24 the
+reaper's first sweep parked #4 #5 #22 #38 #41 and a label-driven run would have implemented all
+five against the owner's speed-over-robustness ruling had the caller not passed `tickets: [...]`
+explicitly (issue 786).
 
 ## Blocker state is read, not believed
 
@@ -517,12 +543,31 @@ whatever branch the session is on - on 2026-09-16 that tree predated the code un
 #361 probe was refuted as "fabricated" for flags `origin/main` carried and that branch did not. So
 the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
 `head` against the tip it expects: the branch under review in the code lane,
-`origin/<defaultBranch>` in the probe lane, each read by its own one-command `rev-parse` agent so
-no agent certifies itself. A mismatch re-runs the verifier ONCE with the mismatch named - "for
-where it was produced and not for what it concluded", so the re-run is not read as pressure to
-change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
-and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
-log says the cross-check was skipped: a guess is not a rejection.
+`origin/<defaultBranch>` in the probe lane, each read by its own one-command tip agent so no agent
+certifies itself. That command is a `||` fallback chain, not a bare `rev-parse`: the ref as given,
+then `origin/<ref>`, then `git ls-remote --heads origin <ref>` - a branch handed in from an earlier
+run's `priorImpl`, or pushed by an implementer in another container, exists only as `origin/<ref>`
+in the orchestrator's own checkout, and a bare `rev-parse` there used to exit 128 and skip the
+cross-check for the whole ticket (issue 561). The run log names which spelling answered. A mismatch
+re-runs the verifier ONCE with the mismatch named - "for where it was produced and not for what it
+concluded", so the re-run is not read as pressure to change its answer. A second mismatch is
+recorded as a failed attempt carrying only that mismatch, and nothing is delivered on it. When none
+of the three spellings resolve the ref the verdict stands and the run log says the cross-check was
+skipped: a guess is not a rejection.
+
+That `rev-parse` agent, the tree-guard baseline and every later checkpoint, and the editable-install
+guard all spawn a FRESH sub-agent, and a fresh sub-agent's shell starts wherever the orchestrating
+session's shell cwd happens to be the moment it is launched - not wherever it was when the run
+started. Passing each of them the relative `cfg.orchestratorCwd` default (`.`) is only correct until
+the parent session's shell `cd`s to another repository mid-run, which was silently misdirecting the
+tree guard (a missing guard script there turns `treeGuard:'auto'` off with no error) and sending the
+tip agent a ref it resolved against the wrong tree (claude-dotfiles issue 562). The fix measures the
+orchestrator's absolute checkout path exactly once, with a one-command `pwd` agent at Setup, right
+after the fleet-refresh step and before anything needs it, and bakes that literal string into every
+later guard, tip and scratch-worktree command; a `cd` by the parent afterwards cannot touch a string
+already written into a prompt. A caller that already knows the absolute path - or wants the guard to
+audit a different tree on purpose - can still pass `orchestratorCwd` itself; only the `.` default
+triggers the measurement.
 
 ## The scratchpad is one per run, not one per worker
 

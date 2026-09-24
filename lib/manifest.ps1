@@ -23,12 +23,20 @@ function Get-DotfileItems {
     $docs   = Get-DocumentsPath -UserHome $UserHome
 
     @(
-        # The skill tree itself: one hand-edited source, restored as ~/.claude/skills. The plugin
-        # payload under marketplace/ is built from the same tree for cloud containers; a desktop
-        # reads the source copy, which keeps this machine's paths rather than the plugin root.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'aac-skills';                              Local = (Join-Path $claude 'skills') }
+        # No skill tree (issue 734). The aac-skills plugin serves every skill as aac-skills:<name>,
+        # updated by the marketplace; a pull-written ~/.claude/skills listed each one a second
+        # time, bare, and only as fresh as the last pull. Pull never deletes, so a tree an older
+        # pull wrote stays until moved aside by hand, from this checkout's root. Only the names
+        # aac-skills/ carries move: ~/.claude/skills also holds Claude Code's own synced/ bucket.
+        #   md -Force ~\.claude\skills.pre-734 >$null; ls aac-skills | % { mv ~\.claude\skills\$($_.Name) ~\.claude\skills.pre-734\ -ErrorAction SilentlyContinue }
+        # Rollback: ls ~\.claude\skills.pre-734 | % { mv $_.FullName ~\.claude\skills\ }
 
-        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/CLAUDE.md';                Local = (Join-Path $claude 'CLAUDE.md') }
+        # The global CLAUDE.md is a POINTER (issue 732), not the rules text. The rules reach a desktop
+        # the way they reach a container - the aac-skills plugin's global-rules hook - so a rules
+        # change lands with a plugin update instead of waiting on a pull. profile/claude/CLAUDE.md
+        # stays the one source the packager copies from. The pointer must never carry that file's
+        # first line: the hook stays silent when the global CLAUDE.md does.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/global-pointer.md';        Local = (Join-Path $claude 'CLAUDE.md') }
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/settings.json';            Local = (Join-Path $claude 'settings.json') }
         # Claude Code's own plugin records (issue 717). A fresh machine needs them to register the
         # marketplaces and name what to install, but `claude plugin update` rewrites them live, so
@@ -44,13 +52,12 @@ function Get-DotfileItems {
         # machine gets the skill on /i-have-adhd and nowhere else. Contents are never read; the
         # off-switch is ~/.claude/.adhd-off, which the ask-matt gate reads.
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/i-have-adhd-always';      Local = (Join-Path $claude '.i-have-adhd-always') }
-        # The governance hook scripts settings.json dispatches. Also the source the packager
-        # copies into the plugin payload, so the desktop and a container run the same code.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/hooks';                    Local = (Join-Path $claude 'hooks') }
-        # What those hook scripts import (issue 620). stopslop-write.py and stopslop-stop.py add
-        # ../tools to sys.path and `import stopslop`; without this entry the module never lands and
-        # both hooks fail open with one line on stderr, which is how the gate sat dead.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/tools';                    Local = (Join-Path $claude 'tools') }
+        # No ~/.claude/hooks or ~/.claude/tools (issue 733). The governance hooks fire from the
+        # aac-skills plugin, which carries its own copies of the scripts and of stopslop.py, and
+        # settings.json no longer names any of them - so nothing dispatches a live-tree copy, and
+        # the plugin hook guard finds no entry and lets the plugin copy run once per event.
+        # profile/claude/hooks and profile/claude/tools stay in the repo as the packager's source.
+        # Pull never deletes, so a machine restored before this keeps its old folders, inert.
         # User-level subagent definitions (issue 86). Claude Code auto-discovers *.md files here
         # for the agent registry the Agent tool and Workflow's `agentType` share, so the
         # ticket-fleet's tool-restricted verifier reaches every repo the fleet runs in.
@@ -144,9 +151,9 @@ function Test-Excluded {
 # Absolute home paths are stored as tokens so a machine with a different username
 # still works. settings.json hard-codes C:\Users\<you>\... in five hook commands.
 #
-# The skill tree is the exception: aac-skills/ is hand-edited prose that names the owner's home
-# literally (a clasp-auth path, a --home argument), and since issue 214 retired sync push
-# nothing tokenises it before it is committed. Pull folds that spelling into the same tokens
+# Hand-edited files are the exception: the skill tree pull restored until issue 734 named the
+# owner's home literally (a clasp-auth path, a --home argument), and since issue 214 retired sync
+# push nothing tokenises a file before it is committed. Pull folds that spelling into the same tokens
 # before substituting the local home, so a restore under another username never carries it
 # (issue 582). Same constant as OWNER_HOME in tools/skill-stamps.py: the owner's home, never
 # the running user's.

@@ -722,9 +722,24 @@ class AskMattGateTests(unittest.TestCase):
                             self.assertIn("${CLAUDE_PLUGIN_ROOT}", cmd)
         settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
         live = json.dumps(settings.get("hooks", {}))
-        for name in ("session-gate.js", "state-rehydrate.js", "state-stash.js",
-                     "governance-reminder.js", "ask_matt_gate.py"):
+        # Issue 733: EVERY script the plugin manifest dispatches, read off the manifest rather than
+        # listed here, so a hook added to the payload later is covered without editing this test.
+        # The stop-slop pair was the last one settings.json still named.
+        shipped = set()
+        for event_groups in hooks.values():
+            for group in event_groups:
+                for hook in group["hooks"]:
+                    cmd = hook.get("command", "")
+                    if "hooks/scripts/" in cmd:
+                        shipped.add(cmd.split("hooks/scripts/", 1)[1].split('"', 1)[0])
+        self.assertIn("stopslop-stop.py", shipped)
+        self.assertIn("session-gate.js", shipped)
+        for name in sorted(shipped):
             self.assertNotIn(name, live, f"settings.json still dispatches {name}: double fire")
+        # Third-party entries are not the plugin's to carry and stay (the caveman proxy, the
+        # caveman shrink hook).
+        self.assertIn("caveman-proxy.exe", live)
+        self.assertIn("shrink-hook", live)
 
     def test_global_instruction_files_pin_yes_and_caveman_default_ultra(self) -> None:
         codex_text = CODEX_INSTRUCTIONS.read_text(encoding="utf-8")
@@ -928,6 +943,63 @@ class AskMattGateTests(unittest.TestCase):
             self.assertNotIn("CORRECTION DETECTED", turn["context"])
             self.assertNotIn("pending_correction", turn["state"])
 
+    # Issue 727: Jev decides; the regex answers only when Jev is unavailable.
+    FALSE_FIRES = ("what is wrong with the build?", "the test output looks wrong, dig in")
+
+    def _with_jev(self, stub: str) -> None:
+        os.environ["TYPESAFE_JEV_STUB"] = stub
+        self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+
+    def test_the_observed_false_fires_are_not_corrections_when_jev_says_no(self) -> None:
+        self._with_jev('{"correction": 0.04}')
+        for n, prompt in enumerate(self.FALSE_FIRES):
+            with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as folder:
+                turn = self._correction_turn(Path(folder), f"s-ff{n}", prompt, ["Bash"])
+                self.assertNotIn("CORRECTION DETECTED", turn["context"])
+                self.assertNotIn("pending_correction", turn["state"])
+
+    def test_a_real_correction_still_fires_when_jev_says_yes(self) -> None:
+        self._with_jev('{"correction": 0.97}')
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(
+                Path(folder), "s-real", "that's wrong, you said X but it is Y", ["Bash"]
+            )
+            self.assertIn("CORRECTION DETECTED", turn["context"])
+            self.assertIn("CORRECTION NOT CLOSED", turn["state"]["pending_correction"])
+
+    def test_jev_unavailable_detection_is_exactly_the_regex(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test_corr", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        prompts = [*self.FALSE_FIRES, "that's wrong, you said X but it is Y", "do them all",
+                   "Somehow you missed the end of this email chain", "", "   "]
+        expected = [gate.CORRECTION_PATTERN.search(p) is not None for p in prompts]
+        self.assertEqual(expected, [True, True, True, False, True, False, False])
+        for stub in ("off", '{"hedge": 0.1}', "{not json"):
+            os.environ["TYPESAFE_JEV_STUB"] = stub
+            with self.subTest(stub=stub):
+                self.assertEqual([gate._is_correction(p) for p in prompts], expected)
+        os.environ["TYPESAFE_JEV_STUB"] = "off"
+        # The real client against a refused loopback port: the service-down path.
+        import socket
+
+        os.environ.pop("TYPESAFE_JEV_STUB")
+        self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+        import jev
+
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        saved = jev.ENDPOINT
+        jev.ENDPOINT = f"http://127.0.0.1:{port}/v1/systemone"
+        try:
+            self.assertEqual([gate._is_correction(p) for p in prompts], expected)
+        finally:
+            jev.ENDPOINT = saved
+
     def test_clean_final_message_carries_no_lint(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
@@ -1085,6 +1157,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("CAVEMAN LITE: ENFORCED", context("/caveman lite"))
             self.assertEqual(self._state(state_dir, "s-switch")["caveman"], "lite")
             self.assertIn("CAVEMAN FULL: ENFORCED", context("/caveman:caveman full"))
+            self.assertIn("CAVEMAN LITE: ENFORCED", context("/aac-skills:caveman lite"))
             self.assertIn("CAVEMAN: OFF", context("/caveman off"))
             self.assertIn("CAVEMAN: OFF", context("stop caveman"))
             self.assertIn("CAVEMAN: OFF", context("turn the caveman mode off"))

@@ -1,40 +1,51 @@
 ---
 name: grill-ready-for-human
-description: Walk every ready-for-human ticket one at a time — grill for the ruling, land it as a comment, relabel or close.
+description: Walk every ready-for-human ticket — read them all, ask every ruling in one batch, then land each as a comment and relabel or close.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-18T20:01:13Z'
-  previous-modified: '2026-09-14T22:40:59Z'
-  revision: '3'
-  content-sha: a7eab8aeb907
+  modified: '2026-09-24T05:12:03Z'
+  previous-modified: '2026-09-18T20:01:13Z'
+  revision: '4'
+  content-sha: 02d4f52f5c17
 ---
 
 # Grill ready-for-human
 
-Every `ready-for-human` ticket waits on a **ruling** only the owner can give. Walk the open queue in the current repo one ticket at a time: a ticket is finished when its ruling is on the tracker, and only then does the next one open.
+Every `ready-for-human` ticket waits on a **ruling** only the owner can give. Walk the open queue in the current repo in two phases, so the owner answers everything in one sitting and never waits on a landing:
 
-## One ticket per grill
+1. **Ask.** Read every ticket first, then put all the questions to the owner in one batch.
+2. **Land.** Land every ruling afterwards, without the owner in the loop.
 
-One ticket per turn: surface it, grill it, land it, move on. A batch ruling ("just close them all") is grilled as its own premise first — which ticket, what ruling, why the shared answer holds — because a batch ruling is unfinished work.
+## One ticket per question
+
+Each question covers one ticket, and each ticket gets its own question. A batch ruling ("just close them all") is grilled as its own premise first — which ticket, what ruling, why the shared answer holds — because a batch ruling is unfinished work.
 
 ## Setup
 
 - Repo: `gh repo view --json nameWithOwner --jq .nameWithOwner`.
 - Queue: `gh issue list --repo <repo> --label ready-for-human --state open --json number,title,body,labels --limit 100`.
 - Empty queue: report "no ready-for-human tickets" and stop.
-- State the count, then surface only the ticket about to be worked.
+- State the count.
 
-## Per ticket
+## Phase 1: read every ticket, then ask in one batch
 
-1. `gh issue view N --repo <repo> --comments` — body and every comment, before the grill opens. Prior comments carry earlier owner language and partial rulings.
-2. Run `/grilling` scoped to this ticket's decision: relentless, one question at a time, facts looked up first (blast radius via `grep`, downstream dependents, related tickets via `gh issue list --search`).
+1. For every ticket in the queue, before any question goes out: `gh issue view N --repo <repo> --comments` — body and every comment. Prior comments carry earlier owner language and partial rulings. Look the facts up now (blast radius via `grep`, downstream dependents, related tickets via `gh issue list --search`), so no question waits on research.
+2. Frame each ticket's question as `/grilling` would for that ticket's decision. Its one-question-at-a-time rule holds within a ticket's follow-ups, not across the queue: the first question for every ticket goes out in the batch.
 
-   **Ask shape.** When the ticket enumerates 2-4 discrete options (an `Options:` block, a numbered list under "What to build"), ask with `AskUserQuestion` using those options, `(Recommended)` on the one you back, and each option's description naming its landing consequence ("closes as not planned", "relabels for an agent"). Prose questions are for surfacing options the ticket has not named yet; a yes/no goes either way.
+   **Batch shape.** `AskUserQuestion` takes up to four questions per call, so a 20-ticket queue is five calls back to back, with no landing in between. One ticket per question.
+
+   **Ask shape.** When the ticket enumerates 2-4 discrete options (an `Options:` block, a numbered list under "What to build"), use those options, `(Recommended)` on the one you back, and each option's description naming its landing consequence ("closes as not planned", "relabels for an agent"). Otherwise offer the options your research surfaced, `(Recommended)` on the backed one; the owner's free-text answer covers the rest. A yes/no goes either way.
 
    **Plain English.** The owner never opens the ticket and holds no coding context. The question body explains the ticket in real-world terms: every code symbol, filename, ticket number and jargon term becomes what it does for the owner. Options carry the trade-off in the same register. A technical term survives only where it names something the owner will touch (a UI label they click).
-3. The pick is the ruling. Land it in the same turn, the pick being the confirmation — the owner has already answered (Dan, 2026-09-10). One more question only when the pick leaves a fork the ticket needs settled, or hinges on a result only the owner saw (a UI outcome, a test they ran).
+3. The pick is the ruling, the pick being the confirmation — the owner has already answered (Dan, 2026-09-10). A follow-up is warranted only when the pick leaves a fork the ticket needs settled, or hinges on a result only the owner saw (a UI outcome, a test they ran).
 
-## Land the ruling
+## Phase 2: land every ruling
+
+Once the batch is answered, land every ruling in turn — comment, relabel or close, and any live action a ruling authorised — without asking the owner anything further. A ruling that opened a fork lands as far as it goes, and its follow-up question is held back.
+
+Follow-ups go in a second, smaller batch at the end, after every landing, not interleaved with them; land those rulings the same way. Within one ticket's follow-ups, `/grilling`'s one-question-at-a-time rule applies.
+
+### Landing one ruling
 
 Write the ruling to a temp file: verbatim quote plus one-sentence context (`from grill session <YYYY-MM-DD>`). Post with `gh issue comment N --repo <repo> --body-file <path>`.
 

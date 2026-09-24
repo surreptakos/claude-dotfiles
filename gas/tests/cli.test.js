@@ -7,6 +7,7 @@ const os = require('os');
 const path = require('path');
 const vm = require('vm');
 const cp = require('child_process');
+const http = require('http');
 const cli = require('../cli/gas.js');
 
 const ROOT = path.join(__dirname, '..');
@@ -27,6 +28,30 @@ function fakeRemote(t) {
   });
   return { bare, git: (args) => cp.execFileSync('git', ['--git-dir', bare].concat(args), { encoding: 'utf8' }).trim() };
 }
+
+// A local server standing in for api.github.com: GAS_GITHUB_API points gh() at it, GITHUB_TOKEN gives it
+// something to send. `handler(req, res)` gets {method, url, body} and answers with the raw `res`.
+function fakeGithubApi(t, handler) {
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => { raw += c; });
+    req.on('end', () => {
+      let body = null;
+      try { body = raw ? JSON.parse(raw) : null; } catch (e) { body = null; }
+      handler({ method: req.method, url: req.url, body }, res);
+    });
+  });
+  server.listen(0);
+  const before = { api: process.env.GAS_GITHUB_API, token: process.env.GITHUB_TOKEN };
+  process.env.GAS_GITHUB_API = 'http://127.0.0.1:' + server.address().port;
+  process.env.GITHUB_TOKEN = 'test-token';
+  t.after(() => {
+    server.close();
+    for (const [k, v] of [['GAS_GITHUB_API', before.api], ['GITHUB_TOKEN', before.token]]) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+  });
+  return server;
+}
+function sendJson(res, status, obj) { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); }
 
 test('parseArgs: flags with values, =, bare flags, positionals', () => {
   const { flags, rest } = cli.parseArgs(['ref', 'o/r', 'deploy/test', 'abc', '--wait', '15', '--paste', '--out=dir', '--limit', '3']);
@@ -160,6 +185,59 @@ test('the git fallback is taken when --via-git asks or the API refuses the write
   assert.equal(cli.isForbidden(forbidden), true); assert.equal(cli.isForbidden(unprocessable), false);
 });
 
+test('runViaApi retries the commit on a 422 fast-forward rejection and lands on the new tip', async (t) => {
+  const repo = 'o/r';
+  const oldTip = 'a'.repeat(40);
+  const newTip = 'b'.repeat(40);
+  const finalCommit = 'c'.repeat(40);
+  const firstCommit = 'd'.repeat(40);
+  let refsCalls = 0, patchCalls = 0;
+  const commits = [];
+  fakeGithubApi(t, (req, res) => {
+    if (req.method === 'GET' && /\/git\/matching-refs\/heads\/deploy$/.test(req.url)) {
+      refsCalls++;
+      const sha = refsCalls === 1 ? oldTip : newTip;
+      return sendJson(res, 200, [{ ref: 'refs/heads/deploy/run', object: { sha } }]);
+    }
+    if (req.method === 'POST' && /\/git\/blobs$/.test(req.url)) return sendJson(res, 201, { sha: 'blob-sha' });
+    if (req.method === 'POST' && /\/git\/trees$/.test(req.url)) return sendJson(res, 201, { sha: 'tree-sha' });
+    if (req.method === 'POST' && /\/git\/commits$/.test(req.url)) {
+      commits.push(req.body);
+      return sendJson(res, 201, { sha: commits.length === 1 ? firstCommit : finalCommit });
+    }
+    if (req.method === 'PATCH' && /\/git\/refs\/heads\/deploy\/run$/.test(req.url)) {
+      patchCalls++;
+      assert.equal(req.body.force, false, 'the run path must not force the ref move');
+      if (patchCalls === 1) return sendJson(res, 422, { message: 'Update is not a fast forward' });
+      return sendJson(res, 200, { ref: 'refs/heads/deploy/run', object: { sha: req.body.sha } });
+    }
+    res.writeHead(404); res.end('unhandled: ' + req.method + ' ' + req.url);
+  });
+
+  const sha = await cli.runViaApi(repo, cli.runRequest('hello'));
+  assert.equal(sha, finalCommit);
+  assert.equal(commits.length, 2, 'the commit is rebuilt once, after the rejection');
+  assert.deepEqual(commits[0].parents, [oldTip], 'the first attempt is built on the tip read at the start');
+  assert.deepEqual(commits[1].parents, [newTip], 'the retry is rebuilt on the new tip, not the orphaned old one');
+  assert.equal(patchCalls, 2);
+});
+
+test('runViaApi gives up after 3 straight fast-forward rejections and names the race', async (t) => {
+  const repo = 'o/r';
+  let tip = 'a'.repeat(40);
+  let commitN = 0;
+  fakeGithubApi(t, (req, res) => {
+    if (req.method === 'GET' && /\/git\/matching-refs\/heads\/deploy$/.test(req.url)) return sendJson(res, 200, [{ ref: 'refs/heads/deploy/run', object: { sha: tip } }]);
+    if (req.method === 'POST' && /\/git\/blobs$/.test(req.url)) return sendJson(res, 201, { sha: 'blob-sha' });
+    if (req.method === 'POST' && /\/git\/trees$/.test(req.url)) return sendJson(res, 201, { sha: 'tree-sha' });
+    if (req.method === 'POST' && /\/git\/commits$/.test(req.url)) { commitN++; return sendJson(res, 201, { sha: String(commitN).repeat(40).slice(0, 40) }); }
+    if (req.method === 'PATCH' && /\/git\/refs\/heads\/deploy\/run$/.test(req.url)) { tip = 'e'.repeat(40); return sendJson(res, 422, { message: 'Update is not a fast forward' }); }
+    res.writeHead(404); res.end('unhandled');
+  });
+  await assert.rejects(cli.runViaApi(repo, cli.runRequest('hello')), /lost the fast-forward race 3 times/);
+  assert.equal(commitN, cli.RUN_RACE_ATTEMPTS, 'one commit build per attempt, no more');
+});
+
 test('runViaGit pushes one gas-run.json commit to deploy/run, chained on the previous run request', (t) => {
   const remote = fakeRemote(t);
   const first = cli.runRequest('hello', '["a", 1]');
@@ -190,6 +268,39 @@ test('refViaGit moves a deploy ref to a commit the remote already carries', (t) 
   assert.equal(remote.git(['rev-parse', 'refs/heads/deploy/test']), commit);
   assert.equal(cli.refViaGit('o/r', 'deploy/test', commit), 'moved');
   assert.throws(() => cli.refViaGit('o/r', 'deploy/test', 'd'.repeat(40)), /cannot reach commit/);
+});
+
+test('runViaGit is fast-forward only: a concurrent push is not orphaned, the retry rebuilds on it', (t) => {
+  const remote = fakeRemote(t);
+  const who = Object.assign({}, process.env, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@x', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@x' });
+  const plumb = (args, input) => cp.execFileSync('git', ['--git-dir', remote.bare].concat(args), { encoding: 'utf8', input, env: who }).trim();
+
+  const first = cli.runViaGit('o/r', cli.runRequest('first'));
+
+  // Simulate the race directly on the plumbing runViaGit itself uses: right as our push is about to go
+  // out, a concurrent caller lands its own commit on deploy/run, parented on the same tip we read. A
+  // --force push would have overwritten it (orphaning it, the bug this fix closes); fast-forward-only
+  // must instead be rejected, re-read the new tip, and rebuild on top of the racer's commit.
+  const realSpawnSync = cp.spawnSync;
+  let raced = false, raceCommit = '';
+  t.after(() => { cp.spawnSync = realSpawnSync; });
+  cp.spawnSync = function (bin, args) {
+    if (!raced && bin === 'git' && args[0] === 'push' && String(args[args.length - 1]).endsWith(':refs/heads/deploy/run')) {
+      raced = true;
+      const blob = plumb(['hash-object', '-w', '--stdin'], 'race\n');
+      const tree = plumb(['mktree'], '100644 blob ' + blob + '\tgas-run.json\n');
+      raceCommit = plumb(['commit-tree', tree, '-p', first, '-m', 'race']);
+      plumb(['update-ref', 'refs/heads/deploy/run', raceCommit]);
+    }
+    return realSpawnSync.apply(this, arguments);
+  };
+
+  const second = cli.runViaGit('o/r', cli.runRequest('second'));
+
+  assert.equal(raced, true, 'the race was actually injected');
+  assert.equal(remote.git(['rev-parse', 'refs/heads/deploy/run']), second, 'the retried push landed');
+  assert.equal(remote.git(['rev-parse', second + '^']), raceCommit, 'rebuilt on the racer\'s commit, not orphaning it');
+  assert.doesNotThrow(() => remote.git(['cat-file', '-e', raceCommit]), 'the racer\'s commit still exists, reachable from the new tip');
 });
 
 test('logs names the Apps Script default Cloud project instead of asking it for entries', () => {

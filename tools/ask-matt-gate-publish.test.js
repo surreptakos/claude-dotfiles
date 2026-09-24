@@ -221,6 +221,18 @@ test('a prompt invoking /session-end lets the batch through before and after the
   assert.notStrictEqual(permissionOf(res.stdout), 'deny', `denied after declaring: ${res.stdout}`);
 });
 
+// Issue 734: the plugin serves the skill once pull stops writing ~/.claude/skills, so the
+// namespaced spelling is the same invocation.
+test('a prompt invoking /aac-skills:session-end lets the batch through', () => {
+  const stateDir = scratchStateDir('session-end-namespaced');
+  const sid = 'sess-session-end-namespaced';
+  writeSessionState(stateDir, sid, { nonce: 'old', flow: 'to-tickets', yes: true, caveman: 'ultra' });
+  runGate('claude-prompt', { session_id: sid, prompt: '/aac-skills:session-end' }, { stateDir });
+  writePublishCount(stateDir, sid, 1);
+  const { stdout } = runGate('claude-pre-tool', makeEvent(sid, ISSUE_CREATE_CMD), { stateDir });
+  assert.notStrictEqual(permissionOf(stdout), 'deny', `namespaced /session-end was denied: ${stdout}`);
+});
+
 test('outside session-end the second gh issue create still asks for approval', () => {
   const stateDir = scratchStateDir('to-tickets-batch');
   const sid = 'sess-to-tickets-batch';

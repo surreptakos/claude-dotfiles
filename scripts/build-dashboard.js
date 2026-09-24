@@ -16,9 +16,24 @@ const CONFIG = {
   // -From worktree, not origin: this repo is private, so a clone from inside a CI runner has no
   // credential, and a gate that cloned HEAD would report on the previous commit rather than the
   // one being made. worktree copies what git currently sees. ~13s.
+  //
+  // Not run by `dashboard.yml` any more (issue 452): the CI job reads the restore-test verdict
+  // from the Actions API instead (see `restoreTestWorkflow` below and `fetchRestoreTestVerdict()`)
+  // rather than paying `windows-latest`'s 2x billing multiplier to re-run this suite on every one
+  // of the ~176 label/issue-event runs a day. This command is kept as an opt-in LOCAL path only:
+  // set `RUN_LOCAL_TEST_COMMAND=1` to spawn it (e.g. from the desktop, where the PowerShell
+  // profile it restores actually exists) instead of reading the Actions verdict.
   testCommand: 'powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree',
   adrDir: null,                     // no ADRs here
-  deployWorkflow: null              // nothing deploys; sync.ps1 is the release path and it is local
+  deployWorkflow: null,             // nothing deploys; sync.ps1 is the release path and it is local
+  // The health line's real source of truth (issue 452): the latest completed run of this workflow
+  // on `master`, read through the Actions API rather than re-run here. That workflow is the gate
+  // on the PowerShell half of `sync.ps1` (CLAUDE.md's "Testing a change to the scripts") and
+  // already runs on every push and PR that touches a PowerShell file, so its most recent master
+  // run is a verdict on the tip this job is building a dashboard for — taken once, not
+  // re-measured on every dashboard refresh.
+  restoreTestWorkflow: 'windows-restore-test.yml',
+  restoreTestBranch: 'master'
 };
 // -----------------------------------------------------------------------------
 
@@ -28,8 +43,9 @@ const OUT = path.join(ROOT, 'DASHBOARD.md');
 // Children run without NODE_TEST_CONTEXT. `node --test` exports that variable into everything it
 // spawns, and a nested `node --test` that inherits it exits 0 even when a test throws (Node 22.22.2:
 // `node --test boom.test.js` exits 1, `NODE_TEST_CONTEXT=child-v8 node --test boom.test.js` exits 0
-// on the same file). This script runs CONFIG.testCommand, and it is spawned from inside node tests,
-// so without the scrub the dashboard reports a failing suite as passing (claude-dotfiles issue 395).
+// on the same file). This script can run CONFIG.testCommand (the opt-in local path below), and it is
+// spawned from inside node tests, so without the scrub the dashboard would report a failing suite as
+// passing (claude-dotfiles issue 395).
 const CHILD_ENV = (() => { const e = Object.assign({}, process.env); delete e.NODE_TEST_CONTEXT; return e; })();
 function sh(cmd) { return execSync(cmd, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, cwd: ROOT, env: CHILD_ENV }); }
 function ghJson(cmd) { try { return JSON.parse(sh(cmd)); } catch (e) { return null; } }
@@ -40,14 +56,6 @@ function esc(s) { return String(s || '').replace(/\|/g, '\\|').replace(/\r?\n/g,
 // Absolute dates are stable: only real content changes produce a diff, so CI's "commit if changed"
 // step can be the only thing that ever advances the artifact and the daily safety cron is redundant.
 function ymd(iso) { return String(iso || '').slice(0, 10); }
-
-const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
-const issues = ghJson('gh issue list --state open --limit 500 --json number,title,labels,assignees,updatedAt,url,body,subIssuesSummary,parent') || [];
-issues.forEach(i => {
-  const names = i.labels.map(l => l.name);
-  i.triage = TRIAGE.find(t => names.includes(t)) || '';
-  i.type = names.find(n => !TRIAGE.includes(n)) || '';
-});
 
 /** A `prd` issue is a container, so its real question is whether it has been broken into tickets yet.
  *
@@ -71,24 +79,6 @@ function decomposition(i) {
   }
   return { done: false, label: '**none — needs `/to-tickets`**' };
 }
-issues.filter(i => i.type === 'prd').forEach(i => { i.decomp = decomposition(i); });
-
-const deploy = CONFIG.deployWorkflow
-  ? (ghJson('gh run list --workflow ' + CONFIG.deployWorkflow + ' --limit 1 --json conclusion,status,headSha,updatedAt,url') || [])[0] || null
-  : null;
-
-let adrs = [];
-if (CONFIG.adrDir && fs.existsSync(path.join(ROOT, CONFIG.adrDir))) {
-  const dir = path.join(ROOT, CONFIG.adrDir);
-  adrs = fs.readdirSync(dir).filter(f => /^\d{4}-.*\.md$/.test(f)).sort().map(f => {
-    const text = fs.readFileSync(path.join(dir, f), 'utf8');
-    const title = (text.match(/^#\s+(.+)$/m) || [])[1] || f;
-    let status = (text.match(/^\*\*Status:\*\*\s*(.+)$/m) || [])[1] || 'no status line';
-    status = status.split(/(?<=\w[.)])\s/)[0];
-    if (status.length > 160) status = status.slice(0, 157) + '...';
-    return { id: f.slice(0, 4), title, status, file: CONFIG.adrDir + '/' + f };
-  });
-}
 
 /** A one-line health summary from a test run's output.
  *
@@ -106,7 +96,9 @@ if (CONFIG.adrDir && fs.existsSync(path.join(ROOT, CONFIG.adrDir))) {
  *  Parsed in JS rather than piped through grep so it works on Windows, where execSync runs cmd.exe
  *  and a pipeline of unix tools is unavailable.
  *
- *  Verified by `verify-dashboard-parse.js` in this skill folder — run it after editing this. */
+ *  Used only by the opt-in local `RUN_LOCAL_TEST_COMMAND=1` path (issue 452); the CI job reads the
+ *  restore-test verdict from Actions instead, via `fetchRestoreTestVerdict()` below. Verified by
+ *  `verify-dashboard-parse.js` in the project-harness skill folder — run it after editing this. */
 function testSummary(out) {
   const text = String(out || '');
   function count(label) {
@@ -136,20 +128,61 @@ function testSummary(out) {
   return (text.trim().split('\n').pop() || '').trim();
 }
 
-let tests = null;
-if (CONFIG.testCommand) {
+/** The repo slug (`owner/repo`) the Actions API call needs. `GITHUB_REPOSITORY` is set by every
+ *  Actions runner automatically; a local run has no such env var, so fall back to the `origin`
+ *  remote (the same shape `git@github.com:owner/repo.git` / `https://github.com/owner/repo.git`
+ *  either form of remote produces). */
+function repoSlugFromGit() {
+  if (process.env.GITHUB_REPOSITORY) return process.env.GITHUB_REPOSITORY;
   try {
-    tests = testSummary(sh(CONFIG.testCommand));
+    const url = sh('git remote get-url origin').trim();
+    const m = /github\.com[:/]([^/]+\/[^/]+?)(\.git)?$/.exec(url);
+    return m ? m[1] : null;
   } catch (e) {
-    tests = 'FAILING — ' + testSummary(String((e.stdout || '') + (e.stderr || '')));
+    return null;
   }
 }
 
-// sha and generation-time timestamp used to head every DASHBOARD.md. Both drifted on every rerun
-// against unchanged inputs — the timestamp always, the sha whenever HEAD moved for unrelated reasons
-// — so the artifact never converged to byte-identical output and CI would either commit a no-op
-// churn or (with the v6 "commit only when changed" guard) swallow the run. Header dropped in issue
-// 26; sha with it, since nothing else read it.
+const UNKNOWN_VERDICT = 'unknown (no completed windows-restore-test run on master)';
+
+/** The dashboard's health line, read from the latest completed run of `restoreTestWorkflow` on
+ *  `restoreTestBranch` (issue 452) instead of spawned locally. `fetchImpl` is injectable so this
+ *  is testable without network — pass a stub that resolves a canned Response-shaped object (or
+ *  rejects, to exercise the failure path) instead of the real `fetch`.
+ *
+ *  Never throws: any failure (network, non-2xx, no runs found, malformed body) resolves to the
+ *  explicit `UNKNOWN_VERDICT` string rather than crashing the dashboard build — a hiccup reading
+ *  Actions must not stop DASHBOARD.md from being written. */
+async function fetchRestoreTestVerdict(opts) {
+  opts = opts || {};
+  const workflow = opts.workflow || CONFIG.restoreTestWorkflow;
+  const branch = opts.branch || CONFIG.restoreTestBranch;
+  const repoSlug = opts.repoSlug || repoSlugFromGit();
+  const token = opts.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+  const fetchImpl = opts.fetchImpl || (typeof fetch === 'function' ? fetch : null);
+
+  if (!repoSlug || !fetchImpl) return UNKNOWN_VERDICT;
+
+  const url = 'https://api.github.com/repos/' + repoSlug + '/actions/workflows/' + workflow
+    + '/runs?branch=' + encodeURIComponent(branch) + '&status=completed&per_page=1';
+
+  try {
+    const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'build-dashboard.js' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const res = await fetchImpl(url, { headers });
+    if (!res || !res.ok) return UNKNOWN_VERDICT;
+    const data = await res.json();
+    const run = (data && data.workflow_runs && data.workflow_runs[0]) || null;
+    if (!run) return UNKNOWN_VERDICT;
+
+    const conclusion = run.conclusion || run.status || 'unknown';
+    const label = conclusion === 'success' ? 'PASSING' : 'FAILING — ' + conclusion;
+    const where = 'windows-restore-test run ' + run.id + ' on ' + branch + ', ' + ymd(run.updated_at);
+    return label + ' (' + where + ') — ' + (run.html_url || url);
+  } catch (e) {
+    return UNKNOWN_VERDICT;
+  }
+}
 
 function table(rows, cols) {
   if (!rows.length) return '_None._\n';
@@ -157,76 +190,133 @@ function table(rows, cols) {
   const rule = '|' + cols.map(() => ' --- ').join('|') + '|';
   return [head, rule].concat(rows.map(r => '| ' + cols.map(c => c.f(r)).join(' | ') + ' |')).join('\n') + '\n';
 }
-const issueCols = [
-  { h: 'Issue', f: i => '[#' + i.number + '](' + i.url + ')' },
-  { h: 'Title', f: i => esc(i.title) },
-  { h: 'Type', f: i => i.type || '—' },
-  { h: 'Triage', f: i => i.triage || '—' },
-  // The child's-eye view of decomposition. `parent` is already fetched for `decomposition()`, so this costs
-  // nothing, and without it the relationship is only visible from the PRD side — someone scanning the issue
-  // list cannot tell which tickets belong to an initiative and which are standalone.
-  { h: 'From PRD', f: i => i.parent ? '#' + i.parent.number : '—' },
-  { h: 'Updated', f: i => ymd(i.updatedAt) }
-];
-// The PRD table swaps "From PRD" (always blank on a parent) for the decomposition state.
-const prdCols = issueCols.slice(0, 4)
-  .concat([{ h: 'Tickets', f: i => i.decomp.label }, issueCols[issueCols.length - 1]]);
 
-const attention = [];
-if (CONFIG.deployWorkflow) {
-  if (!deploy) attention.push('- **No deploy run found** for `' + CONFIG.deployWorkflow + '`.');
-  else if (deploy.status !== 'completed' || deploy.conclusion !== 'success')
-    attention.push('- **Deploy is ' + (deploy.conclusion || deploy.status) + '** — [run](' + deploy.url + ') at `' + deploy.headSha.slice(0, 7) + '`.');
+async function build() {
+  const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
+  const issues = ghJson('gh issue list --state open --limit 500 --json number,title,labels,assignees,updatedAt,url,body,subIssuesSummary,parent') || [];
+  issues.forEach(i => {
+    const names = i.labels.map(l => l.name);
+    i.triage = TRIAGE.find(t => names.includes(t)) || '';
+    i.type = names.find(n => !TRIAGE.includes(n)) || '';
+  });
+  issues.filter(i => i.type === 'prd').forEach(i => { i.decomp = decomposition(i); });
+
+  const deploy = CONFIG.deployWorkflow
+    ? (ghJson('gh run list --workflow ' + CONFIG.deployWorkflow + ' --limit 1 --json conclusion,status,headSha,updatedAt,url') || [])[0] || null
+    : null;
+
+  let adrs = [];
+  if (CONFIG.adrDir && fs.existsSync(path.join(ROOT, CONFIG.adrDir))) {
+    const dir = path.join(ROOT, CONFIG.adrDir);
+    adrs = fs.readdirSync(dir).filter(f => /^\d{4}-.*\.md$/.test(f)).sort().map(f => {
+      const text = fs.readFileSync(path.join(dir, f), 'utf8');
+      const title = (text.match(/^#\s+(.+)$/m) || [])[1] || f;
+      let status = (text.match(/^\*\*Status:\*\*\s*(.+)$/m) || [])[1] || 'no status line';
+      status = status.split(/(?<=\w[.)])\s/)[0];
+      if (status.length > 160) status = status.slice(0, 157) + '...';
+      return { id: f.slice(0, 4), title, status, file: CONFIG.adrDir + '/' + f };
+    });
+  }
+
+  // The health line's source (issue 452): RUN_LOCAL_TEST_COMMAND=1 opts into spawning
+  // CONFIG.testCommand locally (the old default, kept for a desktop that wants the real
+  // PowerShell suite run against its own worktree). Otherwise — including every CI run of
+  // `dashboard.yml`, which no longer sets that variable — the verdict is read from the latest
+  // completed `restoreTestWorkflow` run on `restoreTestBranch` through the Actions API.
+  let tests = null;
+  if (process.env.RUN_LOCAL_TEST_COMMAND === '1' && CONFIG.testCommand) {
+    try {
+      tests = testSummary(sh(CONFIG.testCommand));
+    } catch (e) {
+      tests = 'FAILING — ' + testSummary(String((e.stdout || '') + (e.stderr || '')));
+    }
+  } else if (CONFIG.restoreTestWorkflow) {
+    tests = await fetchRestoreTestVerdict();
+  }
+
+  // sha and generation-time timestamp used to head every DASHBOARD.md. Both drifted on every rerun
+  // against unchanged inputs — the timestamp always, the sha whenever HEAD moved for unrelated reasons
+  // — so the artifact never converged to byte-identical output and CI would either commit a no-op
+  // churn or (with the v6 "commit only when changed" guard) swallow the run. Header dropped in issue
+  // 26; sha with it, since nothing else read it.
+
+  const issueCols = [
+    { h: 'Issue', f: i => '[#' + i.number + '](' + i.url + ')' },
+    { h: 'Title', f: i => esc(i.title) },
+    { h: 'Type', f: i => i.type || '—' },
+    { h: 'Triage', f: i => i.triage || '—' },
+    // The child's-eye view of decomposition. `parent` is already fetched for `decomposition()`, so this costs
+    // nothing, and without it the relationship is only visible from the PRD side — someone scanning the issue
+    // list cannot tell which tickets belong to an initiative and which are standalone.
+    { h: 'From PRD', f: i => i.parent ? '#' + i.parent.number : '—' },
+    { h: 'Updated', f: i => ymd(i.updatedAt) }
+  ];
+  // The PRD table swaps "From PRD" (always blank on a parent) for the decomposition state.
+  const prdCols = issueCols.slice(0, 4)
+    .concat([{ h: 'Tickets', f: i => i.decomp.label }, issueCols[issueCols.length - 1]]);
+
+  const attention = [];
+  if (CONFIG.deployWorkflow) {
+    if (!deploy) attention.push('- **No deploy run found** for `' + CONFIG.deployWorkflow + '`.');
+    else if (deploy.status !== 'completed' || deploy.conclusion !== 'success')
+      attention.push('- **Deploy is ' + (deploy.conclusion || deploy.status) + '** — [run](' + deploy.url + ') at `' + deploy.headSha.slice(0, 7) + '`.');
+  }
+  if (tests && /FAILING/.test(tests)) attention.push('- **Test suite failing at this commit:** ' + tests);
+  ['needs-triage', 'needs-info', 'ready-for-human'].forEach(k => {
+    issues.filter(i => i.triage === k).forEach(i =>
+      attention.push('- **' + k + ':** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ymd(i.updatedAt) + ')_'));
+  });
+  issues.filter(i => i.type === 'bug').forEach(i =>
+    attention.push('- **open bug:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ymd(i.updatedAt) + ')_'));
+
+  issues.filter(i => i.type === 'prd' && !i.decomp.done).forEach(i =>
+    attention.push('- **PRD not broken into tickets:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' — run `/to-tickets`'));
+
+  const prds = issues.filter(i => i.type === 'prd');
+  const rest = issues.filter(i => i.type !== 'prd');
+
+  const health = [];
+  if (CONFIG.deployWorkflow) health.push('- **Deploy (`' + CONFIG.deployWorkflow + '`):** ' + (deploy ? (deploy.conclusion || deploy.status) + ' at `' + deploy.headSha.slice(0, 7) + '` (' + ymd(deploy.updatedAt) + ') — [run](' + deploy.url + ')' : 'no runs found'));
+  if (tests) health.push('- **Test suite at this commit:** ' + tests);
+
+  const md = [
+    '# ' + CONFIG.title + ' — working dashboard',
+    '',
+    '_Generated by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._',
+    '',
+    '## Needs your attention',
+    '',
+    attention.length ? attention.join('\n') : '_Nothing waiting on you._',
+    ''
+  ].concat(health.length ? ['## Pipeline health', '', health.join('\n'), ''] : []).concat([
+    '## Open PRDs',
+    '',
+    table(prds, prdCols),
+    '## Open issues',
+    '',
+    table(rest, issueCols)
+  ]).concat(adrs.length ? [
+    '## ADRs',
+    '',
+    table(adrs, [
+      { h: 'ADR', f: a => '[' + a.id + '](' + a.file + ')' },
+      { h: 'Title', f: a => esc(a.title) },
+      { h: 'Status', f: a => esc(a.status) }
+    ])
+  ] : []).concat([
+    '## Where the rest lives',
+    '',
+    '- Triage vocabulary: [docs/agents/triage-labels.md](docs/agents/triage-labels.md)',
+    '- Tracker conventions: [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)',
+    ''
+  ]).join('\n');
+
+  fs.writeFileSync(OUT, md);
+  console.log('DASHBOARD.md written (' + issues.length + ' open issues, ' + adrs.length + ' ADRs)');
 }
-if (tests && /FAILING/.test(tests)) attention.push('- **Test suite failing at this commit:** ' + tests);
-['needs-triage', 'needs-info', 'ready-for-human'].forEach(k => {
-  issues.filter(i => i.triage === k).forEach(i =>
-    attention.push('- **' + k + ':** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ymd(i.updatedAt) + ')_'));
-});
-issues.filter(i => i.type === 'bug').forEach(i =>
-  attention.push('- **open bug:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' _(updated ' + ymd(i.updatedAt) + ')_'));
 
-issues.filter(i => i.type === 'prd' && !i.decomp.done).forEach(i =>
-  attention.push('- **PRD not broken into tickets:** [#' + i.number + '](' + i.url + ') ' + esc(i.title) + ' — run `/to-tickets`'));
+if (require.main === module) {
+  build().catch(e => { console.error(e); process.exit(1); });
+}
 
-const prds = issues.filter(i => i.type === 'prd');
-const rest = issues.filter(i => i.type !== 'prd');
-
-const health = [];
-if (CONFIG.deployWorkflow) health.push('- **Deploy (`' + CONFIG.deployWorkflow + '`):** ' + (deploy ? (deploy.conclusion || deploy.status) + ' at `' + deploy.headSha.slice(0, 7) + '` (' + ymd(deploy.updatedAt) + ') — [run](' + deploy.url + ')' : 'no runs found'));
-if (tests) health.push('- **Test suite at this commit:** ' + tests);
-
-const md = [
-  '# ' + CONFIG.title + ' — working dashboard',
-  '',
-  '_Generated by `scripts/build-dashboard.js` (CI: `dashboard.yml`). Do not edit by hand._',
-  '',
-  '## Needs your attention',
-  '',
-  attention.length ? attention.join('\n') : '_Nothing waiting on you._',
-  ''
-].concat(health.length ? ['## Pipeline health', '', health.join('\n'), ''] : []).concat([
-  '## Open PRDs',
-  '',
-  table(prds, prdCols),
-  '## Open issues',
-  '',
-  table(rest, issueCols)
-]).concat(adrs.length ? [
-  '## ADRs',
-  '',
-  table(adrs, [
-    { h: 'ADR', f: a => '[' + a.id + '](' + a.file + ')' },
-    { h: 'Title', f: a => esc(a.title) },
-    { h: 'Status', f: a => esc(a.status) }
-  ])
-] : []).concat([
-  '## Where the rest lives',
-  '',
-  '- Triage vocabulary: [docs/agents/triage-labels.md](docs/agents/triage-labels.md)',
-  '- Tracker conventions: [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)',
-  ''
-]).join('\n');
-
-fs.writeFileSync(OUT, md);
-console.log('DASHBOARD.md written (' + issues.length + ' open issues, ' + adrs.length + ' ADRs)');
+module.exports = { testSummary, decomposition, table, ymd, repoSlugFromGit, fetchRestoreTestVerdict, UNKNOWN_VERDICT, CONFIG, build };

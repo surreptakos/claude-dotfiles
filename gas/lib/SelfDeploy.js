@@ -47,7 +47,7 @@
 //
 // LOGGING: every line starts with [gas]. In Cloud Logging, filter on that.
 
-var GAS_SELF_DEPLOY_VERSION = '0.1.1';
+var GAS_SELF_DEPLOY_VERSION = '0.1.2';
 // THE RUNTIME'S OWN BUILD MARKER. The deploy replaces the placeholder with the commit it writes, so the
 // code that runs can always say which commit it is. Compared against the pending record each tick.
 var GAS_DEPLOYED_SHA = '__GAS_SHA__';
@@ -78,6 +78,7 @@ var GAS_SCRIPT_API_ = 'https://script.googleapis.com/v1/projects/';
 var GAS_TOKEN_URL_ = 'https://oauth2.googleapis.com/token';
 var GAS_RUN_FILE_ = 'gas-run.json';
 var GAS_RESULT_MAX_ = 60000;
+var GAS_RUN_WALK_MAX_ = 20;                    // deploy/run: how far back the tick walks parents to find unprocessed requests
 
 // ============================================================================================
 // Entry points (no trailing underscore: runnable from the editor)
@@ -288,12 +289,61 @@ function gasPromote_(cfg, sha, reason) {
   return { versionNumber: vn, sha: sha, versions: used };
 }
 
-// deploy/run: a commit whose root carries gas-run.json {id, fn, args}. Runs on THIS runtime (HEAD).
+// deploy/run: every `gas run` commit names the previous run commit as its parent, so the ref is an
+// ordered chain, not a single slot. This tick walks that chain from the tip back to the last commit it
+// processed (state.run.sha) and runs each one it finds, oldest first, so two requests pushed inside one
+// tick interval both get a verdict instead of the later push silently burying the earlier one.
 function gasTickRun_(repo, sha, state) {
   if (!sha) return { note: 'no ' + GAS_REF_PREFIX_ + 'run ref' };
   var r = state.run || {};
   if (sha === r.sha) return { unchanged: sha.slice(0, 7) };
   var cfg = gasConfig_() || {};
+  // First-ever tick: no last-processed sha to walk back to, so run only the tip — do not replay history
+  // that predates this library's adoption of the walk.
+  var chain = r.sha ? gasRunChain_(repo, sha, r.sha) : [sha];
+  var out = { sha: sha, ran: [] };
+  for (var i = 0; i < chain.length; i++) {
+    var one = gasRunOne_(repo, chain[i], cfg);
+    out.ran.push(one);
+    // A request that fails still advances the watermark: the next one still runs, and a mid-batch
+    // failure of the whole tick (an uncaught throw elsewhere) does not replay the ones already done.
+    state.run = { sha: chain[i], id: one.id, fn: one.fn, ok: one.ok, at: one.at };
+    gasSaveState_(state);
+  }
+  var last = out.ran[out.ran.length - 1];
+  out.ok = last ? last.ok : undefined;
+  out.id = last ? last.id : undefined;
+  out.fn = last ? last.fn : undefined;
+  out.result = last ? last.result : undefined;
+  out.error = last ? last.error : undefined;
+  return out;
+}
+// Walks refs/heads/deploy/run's history backward via the Git Data API's parents[], from `tip` down to
+// (but excluding) `lastSha`, a commit with no parent, or GAS_RUN_WALK_MAX_ commits — whichever comes
+// first. Returns the shas to run, oldest first.
+function gasRunChain_(repo, tip, lastSha) {
+  var collected = [tip];
+  var cur = tip;
+  var depth = 0;
+  while (depth < GAS_RUN_WALK_MAX_) {
+    var c = gasGithub_('get', '/repos/' + repo + '/git/commits/' + cur);
+    if (c.code !== 200) break;                                  // can't see further back; run what we have
+    var parsed;
+    try { parsed = JSON.parse(c.text); } catch (e) { break; }
+    var parents = Array.isArray(parsed.parents) ? parsed.parents : [];
+    if (!parents.length) break;                                 // the root of history: nothing before it
+    var parentSha = String(parents[0].sha || '');
+    if (!parentSha || parentSha === lastSha) break;              // reached the last processed commit
+    collected.push(parentSha);
+    cur = parentSha;
+    depth++;
+  }
+  if (depth >= GAS_RUN_WALK_MAX_) gasLog_('[gas-run] walk hit the ' + GAS_RUN_WALK_MAX_ + '-commit bound before reaching ' + (lastSha || '?').slice(0, 7) + ' — running the ' + collected.length + ' commits found');
+  collected.reverse();
+  return collected;
+}
+// Runs the one request at `sha`: status, commit comment and log, exactly as a single gasTickRun_ once did.
+function gasRunOne_(repo, sha, cfg) {
   var req = null, out = { sha: sha, at: new Date().toISOString() };
   try {
     var raw = gasGithubRaw_(repo, GAS_RUN_FILE_, sha);
@@ -311,7 +361,6 @@ function gasTickRun_(repo, sha, state) {
   } catch (e) {
     out.ok = false; out.error = String((e && e.message) || e); out.id = (req && req.id) || ''; out.fn = (req && req.fn) || '';
   }
-  state.run = { sha: sha, id: out.id, fn: out.fn, ok: out.ok, at: out.at };
   var line = (out.ok ? 'ok' : 'FAILED') + ' ' + (out.fn || '?') + (out.id ? ' id=' + out.id : '') + (out.ms !== undefined ? ' ' + out.ms + 'ms' : '');
   gasStatus_(repo, sha, GAS_STATUS_RUN_, out.ok ? 'success' : 'failure', line + ' — ' + gasShort_(out.ok ? out.result : out.error, 100));
   gasCommitComment_(repo, sha, '**gas run** `' + (out.fn || '?') + '` on build ' + gasRuntimeSha_().slice(0, 7) + ' — ' + (out.ok ? 'ok' : 'FAILED') + (out.ms !== undefined ? ' in ' + out.ms + ' ms' : '')

@@ -21,10 +21,13 @@ const { spawnSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
-  stableJson, stableText, stableList, priorFindingsBlock,
+  stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
+  classifyBranchLookup, classifyDelivery,
+  LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
+  buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -440,7 +443,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} verifier prompt still runs the live-tree 
 // re-reports the false breach or quietly widens the hole.
 test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state from the live-tree sweep (issue 334)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
+  assert.match(liveTreeFindCommand('T'), /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
     `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/projects (tool-results, transcripts) as well as hook-state`);
   assert.match(src, /~\/\.claude\/projects holds this session's transcripts, tool-results\/\*\.txt/,
     `${FLEET_SCRIPT_REL} must state the exclusion and why in the prompt so the verifier does not re-derive it`);
@@ -456,10 +459,53 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state fr
 // to wave it through.
 test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from the live-tree sweep (issue 489)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
+  assert.match(liveTreeFindCommand('T'), /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
     `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/sessions alongside hook-state and projects`);
   assert.match(src, /~\/\.claude\/sessions\/<pid>\.json is the CLI's own process registry, heartbeat-rewritten/,
     `${FLEET_SCRIPT_REL} must state why ~/.claude/sessions is excluded so the verifier does not re-derive it`);
+});
+
+// Issue 677: ~/.claude/skills/synced/<id>/manifest.json is the CLI's skills-sync catalogue, rewritten
+// by the verifying session's own Skill and ToolSearch loads. Run the generated find against a fake
+// home: the bookkeeping paths stay quiet and a real implementer write under ~/.claude still fires.
+test('live-tree find skips the CLI skills-sync manifest but still catches an implementer write (issue 677)', (t) => {
+  // The rail runs in a Linux container. On a Windows runner Git Bash's `find` prints POSIX paths
+  // (/c/Users/...) for a HOME the test created with a drive letter, so path.relative() cannot pair
+  // them and the assertion below fails on the path spelling, not on the exclusions: the restore
+  // suite went red on master at 1c250885 for exactly that. The Linux gate keeps the case live.
+  if (process.platform === 'win32') { t.skip('bash find prints POSIX paths for a Windows HOME; covered by the Linux gate'); return; }
+  const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'fleet-677-'));
+  try {
+    const quiet = ['.claude/skills/synced/abc_def/manifest.json', '.claude/sessions/42.json',
+      '.claude/projects/p/s.jsonl', '.claude/hook-state/x/state.json'];
+    const loud = ['.claude/skills/foo/SKILL.md', '.claude/settings.json', '.codex/config.toml', '.agents/a.md'];
+    for (const rel of [...quiet, ...loud]) {
+      fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+      fs.writeFileSync(path.join(home, rel), 'x');
+    }
+    const r = spawnSync('bash', ['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
+      { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+    assert.strictEqual(r.status, 0, r.stderr);
+    const hits = r.stdout.split('\n').filter(Boolean).map((f) => path.relative(home, f)).sort();
+    assert.deepStrictEqual(hits, [...loud].sort());
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} builds the live-tree exclusions from one list (issue 677)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const handWritten = src.slice(0, src.indexOf('// [FLEET-GENERATED-START]'))
+    + src.slice(src.indexOf('// [FLEET-GENERATED-END]'));
+  for (const e of LIVE_TREE_EXCLUSIONS) {
+    assert.ok(!handWritten.includes(e.path),
+      `${FLEET_SCRIPT_REL} must not spell exclusion ${e.path} outside the generated LIVE_TREE_EXCLUSIONS`);
+  }
+  assert.ok(handWritten.includes("${liveTreeFindCommand('<that time>')}") && handWritten.includes('${liveTreeExclusionNote()}'),
+    `${FLEET_SCRIPT_REL} verifier prompt must take the rail's find command and reasons from the generated helpers`);
+  assert.ok(LIVE_TREE_EXCLUSIONS.some((e) => e.path === '*/.claude/skills/synced/*'));
+  assert.match(liveTreeExclusionNote(), /add none of your own, do not re-derive them/,
+    'the prompt must still forbid the verifier inventing its own exclusions');
 });
 
 // ---- Three-copies gone (issue 138) ----
@@ -489,6 +535,9 @@ for (const rel of REMOVED_COPIES) {
 const RESUME_GUARD_PAIR = [FLEET_SCRIPT];
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+// Issue 755: every push instruction in the fleet's prompts goes through gitSpelling, so the
+// source anchor for "the push" is that call, not a bare `git push` literal.
+const PUSH_ANCHOR = 'gitSpelling(instrument, `push -u origin ${branch}`)';
 
 function extractMarked(src, name) {
   // Everything between the markers (exclusive); a marker that moved is a named failure (issue 488).
@@ -544,7 +593,7 @@ function generatedBlock(scriptPath = FLEET_SCRIPT) {
 // Evaluated out of the script's generated block so the lane body below resolves them.
 function loadStableHelpers(scriptPath) {
   // eslint-disable-next-line no-new-func
-  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
+  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf, gitSpelling };`)();
 }
 
 // Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
@@ -583,6 +632,8 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     // module's worktreeMismatch - the very function the generated block carries (issue 486) - so
     // the decision under test is the real one.
     revParse: async () => null,
+    // Issue 654: the Deliver-result classifier is the module's own, the one the generated block carries.
+    classifyDelivery,
   }, stubs)));
 }
 
@@ -603,6 +654,8 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+    unmetCriteriaOf: helpers.unmetCriteriaOf,
+    gitSpelling: helpers.gitSpelling,
     worktreeMismatch,
     treeGuardCheck,
   }, stubOverrides), scriptPath);
@@ -628,10 +681,11 @@ test('lane harness resolves a module-scope binding it does not model (issue 340)
 // default branch rather than appending them into whatever branch the session sits on. Drive the
 // marked block with a mocked `agent` so the branch choice and the returned sha are behavior,
 // not prompt-text trivia. Same proxy scope as the lanes, so an unmodelled binding is inert.
-async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
+async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides, stubs = {}) {
   const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-REPORT');
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn runReport;\n}`);
   const runReport = await wrapper(laneScope({
+    gitSpelling: loadStableHelpers(scriptPath).gitSpelling,
     agent: agentMock,
     cfg: Object.assign({ deliver: true, reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' }, cfgOverrides || {}),
     runId: 'testrun',
@@ -639,6 +693,7 @@ async function driveReport(scriptPath, agentMock, discoveries, cfgOverrides) {
     rules: new Proxy({}, { get: () => () => 'gh pr create' }),
     instrument: 'gh',
     DISCOVERY_REPORT: {},
+    ...stubs,
   }));
   // The writer takes the default branch as an argument since issue 405: the finish mode calls it
   // with the branch its journal names, long before a scout would have run.
@@ -876,7 +931,7 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(src, /git merge --abort/,
       'a conflict outside the two classes must abort the merge rather than guess');
     const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
-    const pushIdx = src.indexOf('git push -u origin ${branch}');
+    const pushIdx = src.indexOf(PUSH_ANCHOR);
     assert.ok(deliverIdx > 0 && pushIdx > deliverIdx,
       'the merge instructions must precede the push in the deliver prompt');
   });
@@ -891,7 +946,7 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(prompt, /git grep -l -e '\^<<<<<<< ' -e '\^>>>>>>> ' HEAD/,
       'deliver must scan the merge result for committed conflict markers, by the exact command');
     const scanIdx = prompt.indexOf('git grep -l -e');
-    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    const pushIdx = prompt.indexOf(PUSH_ANCHOR);
     assert.ok(scanIdx > 0 && pushIdx > scanIdx,
       'the marker scan must come before the push: the gate that ran before the bad commit did not catch it');
     assert.match(prompt, /runs on EVERY path through STEP A, a clean merge included/,
@@ -914,7 +969,7 @@ for (const file of RESUME_GUARD_PAIR) {
       "A5's first half must run the repo's configured stamps check");
     const regenIdx = prompt.indexOf('${regenNote}');
     const checkIdx = prompt.indexOf('${regenCheckNote}');
-    const pushIdx = prompt.indexOf('git push -u origin ${branch}');
+    const pushIdx = prompt.indexOf(PUSH_ANCHOR);
     assert.ok(regenIdx > 0 && checkIdx > regenIdx && pushIdx > checkIdx,
       'the stamps check must sit between A4 regenerate and the STEP B push, in that order');
     assert.match(prompt, /Do NOT hand-edit a stamp to make this pass/,
@@ -1053,7 +1108,7 @@ for (const file of RESUME_GUARD_PAIR) {
 
   test(`${rel} deliver prompt pushes the branch and fails loudly rather than calling it missing (issue 405)`, () => {
     const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
-    assert.match(prompt, /git push -u origin \$\{branch\}/,
+    assert.ok(prompt.includes(PUSH_ANCHOR),
       'the deliverer must be told to push the branch, by the exact command');
     assert.match(prompt, /never conclude that the branch, or the issue, does not exist/,
       "the deliverer must never report the branch missing: #356's deliverer did exactly that without ever pushing");
@@ -1094,7 +1149,7 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.match(prompt, /mcp__github__create_pull_request/,
       'a refused PR call has the MCP route as its fallback (issue 245 evidence), so the refusal cannot end the delivery either');
     const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /enum: \['clean', 'resolved', 'blocked', 'unmerged-by-classifier'\]/,
+    assert.match(src, /enum: \['clean', 'resolved', 'blocked', 'unmerged-by-classifier'[,\]]/,
       'the DELIVERED schema must accept the status the prompt asks for, or the deliverer cannot return it');
   });
 
@@ -1268,6 +1323,35 @@ test('applyOpenPrs drops only candidates with a NAMED open PR (issue 430)', () =
     'a listing nothing reported drops nothing');
 });
 
+test('dropParkedTickets drops a Maybe Someday ticket from a label-driven listing (issue 786)', () => {
+  const tickets = [
+    { number: 4, milestone: 'Maybe Someday' },
+    { number: 5, milestone: '' },
+    { number: 22, milestone: 'maybe someday' },
+    { number: 38 },
+  ];
+  const applied = dropParkedTickets(tickets, []);
+  assert.deepEqual(applied.tickets.map((t) => t.number), [5, 38],
+    'a ticket parked in Maybe Someday never survives a label-driven listing, whatever its labels');
+  assert.deepEqual(applied.skipped, [
+    { ticket: 4, milestone: 'Maybe Someday' },
+    { ticket: 22, milestone: 'maybe someday' },
+  ], 'the dropped tickets carry their milestone, for skippedParked');
+});
+
+test('dropParkedTickets leaves an explicit args.tickets list untouched (issue 786)', () => {
+  const tickets = [{ number: 4, milestone: 'Maybe Someday' }, { number: 5, milestone: '' }];
+  const applied = dropParkedTickets(tickets, [4]);
+  assert.deepEqual(applied.tickets.map((t) => t.number), [4, 5],
+    'a parked ticket named explicitly by number still runs - the caller asked for it');
+  assert.deepEqual(applied.skipped, [], 'nothing is dropped when the caller named tickets explicitly');
+});
+
+test('dropParkedTickets handles absent input', () => {
+  assert.deepEqual(dropParkedTickets(null, null), { tickets: [], skipped: [] });
+  assert.deepEqual(dropParkedTickets(undefined, []), { tickets: [], skipped: [] });
+});
+
 test('selectWave splits the candidates into the wave and the three reasons the rest do not run', () => {
   const t = (number, blockedBy, handoffPending) => ({ number, blockedBy, handoffPending });
   const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])], 2);
@@ -1325,6 +1409,51 @@ test(`fleet script ${FLEET_SCRIPT_REL} ends the run when the label listing is em
     tickets: [{ number: 41, blockedBy: [] }, { number: 42, blockedBy: [] }],
   });
   assert.equal(kept.result, 'fell-through', 'a ticket the listing returned must still reach the wave');
+});
+
+// ---- Maybe Someday milestone parks a ticket before the wave (issue 786) ----
+// The reaper parks a ticket by milestone without touching its labels, so a label-driven scout
+// listing still returns it; the gate must drop it before the wave, name it in skippedParked, and
+// still run it when the caller named it explicitly.
+
+test(`fleet script ${FLEET_SCRIPT_REL} scout gate drops a Maybe Someday ticket from a label listing`, async () => {
+  const scout = {
+    candidateNumbers: [4, 5],
+    tickets: [
+      { number: 4, blockedBy: [], milestone: 'Maybe Someday' },
+      { number: 5, blockedBy: [], milestone: '' },
+    ],
+  };
+  const allParked = await driveScoutGate({ candidateNumbers: [4], tickets: [{ number: 4, blockedBy: [], milestone: 'Maybe Someday' }] });
+  assert.equal(allParked.result.ran, 0, 'a listing that is entirely parked ends the run with ran: 0');
+  assert.deepEqual(allParked.result.skippedParked, [{ ticket: 4, milestone: 'Maybe Someday' }],
+    'the parked ticket is still named in skippedParked on the early return');
+
+  const body = generatedBlock() + extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  const wrapper = new AsyncFunction(
+    'scout', 'explicitTickets', 'cfg', 'instrument', 'log',
+    body + '\nreturn { eligibleTickets, skippedParked };'
+  );
+  const logs = [];
+  const { eligibleTickets, skippedParked } = await wrapper(scout, [], { label: 'ready-for-agent' }, 'gh', (m) => logs.push(m));
+  assert.deepEqual(eligibleTickets.map((t) => t.number), [5],
+    'the scout gate\'s candidate filter must drop the parked ticket before the wave, whatever its labels');
+  assert.deepEqual(skippedParked, [{ ticket: 4, milestone: 'Maybe Someday' }],
+    'the run result must list the drop under skippedParked with its number');
+  assert.ok(logs.some((m) => /parked in the Maybe Someday milestone.*#4/.test(m)), 'the drop is logged');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} scout gate still runs a parked ticket named explicitly`, async () => {
+  const scout = { candidateNumbers: [4], tickets: [{ number: 4, blockedBy: [], milestone: 'Maybe Someday' }] };
+  const body = generatedBlock() + extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  const wrapper = new AsyncFunction(
+    'scout', 'explicitTickets', 'cfg', 'instrument', 'log',
+    body + '\nreturn { eligibleTickets, skippedParked };'
+  );
+  const { eligibleTickets, skippedParked } = await wrapper(scout, [4], { label: 'ready-for-agent' }, 'gh', () => {});
+  assert.deepEqual(eligibleTickets.map((t) => t.number), [4],
+    'a parked ticket named explicitly in args.tickets must still run');
+  assert.deepEqual(skippedParked, [], 'nothing is dropped when the caller named the ticket by number');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} gates the lanes before any agent is spawned`, () => {
@@ -1491,6 +1620,61 @@ function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
 }
 
 const TICKET_42 = { number: 42, title: 'a ticket', criteria: '- do the thing', keepOpen: false };
+
+// ---- The verdict decides Closes vs Refs (issue 699) ----
+// aac-bill-intake#682 was closed by a PR whose verifier had passed a branch that stopped short of
+// the ticket. A passing verdict that names any criterion unmet now makes the PR say Refs #N and
+// list those criteria; a verdict with none still says Closes #N.
+
+async function deliverPromptFor(verdict) {
+  const calls = [];
+  const agentMock = async (prompt, opts) => {
+    calls.push({ label: opts.label, prompt });
+    if (opts.label === 'impl:#42.1') {
+      return { branch: 'agent/issue-42-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    }
+    if (opts.label === 'verify:#42.1') return verdict;
+    if (opts.label === 'deliver:#42') return { pushed: true, prUrl: 'https://github.com/x/y/pull/9', mergeStatus: 'clean', conflictPaths: [] };
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, TICKET_42, 0);
+  const deliver = calls.find((c) => c.label === 'deliver:#42');
+  assert.ok(deliver, 'a passing verdict must reach the deliver stage');
+  return deliver.prompt;
+}
+
+test('a passing verdict that marks criteria unmet delivers Refs #N, no closing keyword, and lists them (issue 699)', async () => {
+  const prompt = await deliverPromptFor({
+    pass: true, evidence: 'doc-only change; suite exit 0', failures: [],
+    unmetCriteria: ['- [ ] remove the fallback once the owner rules', '  ', '- [ ] migrate the 5 work orders'],
+  });
+  assert.match(prompt, /"Refs #42"/, 'an unmet criterion must turn the PR reference into Refs #N');
+  assert.doesNotMatch(prompt, /"Closes #42"/, 'no closing keyword may be offered while a criterion is unmet');
+  assert.match(prompt, /never write Closes, Fixes or Resolves/);
+  assert.match(prompt, /Acceptance criteria not met by this PR/, 'the PR body must carry a section for the unmet criteria');
+  assert.match(prompt, /- - \[ \] remove the fallback once the owner rules\n\s+- - \[ \] migrate the 5 work orders/,
+    'each unmet criterion must be listed by its text, blank entries dropped');
+});
+
+test('a passing verdict with every criterion met still delivers Closes #N (issue 699)', async () => {
+  for (const verdict of [
+    { pass: true, evidence: 'suite exit 0', failures: [], unmetCriteria: [] },
+    { pass: true, evidence: 'suite exit 0' },
+  ]) {
+    const prompt = await deliverPromptFor(verdict);
+    assert.match(prompt, /"Closes #42"/, 'a verdict naming no unmet criterion must close the ticket');
+    assert.doesNotMatch(prompt, /"Refs #42"/);
+    assert.doesNotMatch(prompt, /Acceptance criteria not met by this PR/);
+  }
+});
+
+test('unmetCriteriaOf in the fleet script matches tools/ticket-fleet-branch.js (issue 699)', () => {
+  const inlined = loadStableHelpers(FLEET_SCRIPT);
+  for (const v of [null, {}, { unmetCriteria: [] }, { unmetCriteria: ['a', ' ', null, 'b\r\n'] }, { unmetCriteria: 'one' }]) {
+    assert.deepEqual(inlined.unmetCriteriaOf(v), unmetCriteriaOf(v));
+  }
+  assert.deepEqual(unmetCriteriaOf({ unmetCriteria: ['a', ' ', null, 'b\r\n'] }), ['a', 'b']);
+});
 
 test('resume-stable helpers inlined in the fleet script match tools/ticket-fleet-branch.js', () => {
   const inlined = loadStableHelpers(FLEET_SCRIPT);
@@ -1711,6 +1895,7 @@ async function driveFinish(scriptPath, agentMock, journal, cfgOverrides = {}) {
     stableList: helpers.stableList,
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     treeGuardCheck: async (label, ticketNumber) => { checkpoints.push(`${label}#${ticketNumber}`); },
+    classifyDelivery,
     DELIVERED: {},
     DISCOVERY_REPORT: {},
   }));
@@ -1783,6 +1968,94 @@ test(`${FLEET_SCRIPT_REL} finish mode is reached from args.finishRunId without a
   assert.ok(finishIdx > 0 && scoutIdx > finishIdx,
     'the finish branch must return before the scout agent is ever started');
   assert.match(src, /label: `journal-read:\$\{finishRunId\}`/, 'finish mode must read the dead run journal through its own agent');
+});
+
+// ---- "Could not tell" is not "absent" (issue 654) ----
+// Run 6ab1884a: the implementer pushed, the verifier passed, and the deliverer returned
+// {mergeStatus:"blocked", conflictPaths:[], blockedReason:"Branch ... not found on origin or locally"}
+// while the ref sat on origin. The ticket was listed under `failed`, as if nothing were to deliver.
+test('classifyBranchLookup calls a branch absent only on two authoritative exit-2 lookups (issue 654)', () => {
+  assert.equal(classifyBranchLookup([]), 'undetermined', 'no lookup at all says nothing');
+  assert.equal(classifyBranchLookup([{ exitCode: 0, output: '' }]), 'undetermined', 'an exit 0 that printed nothing is not an answer');
+  assert.equal(classifyBranchLookup([{ exitCode: 128, output: 'fatal: could not read from remote repository' }]), 'undetermined');
+  assert.equal(classifyBranchLookup([{ exitCode: 2, output: '' }]), 'undetermined', 'one lookup is never enough to call a branch absent');
+  assert.equal(classifyBranchLookup([{ exitCode: 2, output: '' }, { exitCode: 2, output: '' }]), 'absent');
+  assert.equal(classifyBranchLookup([{ exitCode: 128, output: '' }, { exitCode: 0, output: 'c4065bcc\trefs/heads/agent/issue-629-attempt1-wf_6ab1884a-w1' }]), 'present',
+    'a later lookup that prints the ref wins over an earlier failed one');
+});
+
+function lane654Mock(branch, { implPushed, pushBack, delivery }) {
+  const calls = [];
+  const agentMock = async (_prompt, opts) => {
+    calls.push(opts.label);
+    if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: implPushed, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label.startsWith('push:')) return pushBack;
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (opts.label.startsWith('deliver:')) return delivery;
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  return { calls, agentMock };
+}
+
+test(`${FLEET_SCRIPT_REL} a deliverer whose first ls-remote comes back empty does not conclude the branch is missing (issue 654)`, async () => {
+  const branch = 'agent/issue-629-attempt1-wf_testrun-w0';
+  const { agentMock } = lane654Mock(branch, {
+    implPushed: false,
+    pushBack: { pushed: false, output: 'fatal: unable to access origin' },
+    delivery: { pushed: false, prUrl: '', mergeStatus: 'branch-unconfirmed', conflictPaths: [], branchLookup: [{ exitCode: 128, output: '' }], blockedReason: 'fatal: unable to access origin' },
+  });
+  const { result } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 629, title: 't', criteria: '' }, 0);
+  assert.equal(result.mergeStatus, 'branch-unconfirmed');
+  assert.deepEqual(result.conflictPaths, [], 'a lookup failure is not a merge conflict');
+  assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'a lookup that could not tell must not be reported as a blocked merge');
+  assert.match(result.deliveryFailure, /could not determine whether branch agent\/issue-629-attempt1-wf_testrun-w0 is on origin/);
+  assert.doesNotMatch(result.deliveryFailure, /is not on origin/, 'one failed ls-remote must never read as "the branch is missing"');
+  assert.equal(result.inconsistency, null, 'the run never recorded this branch as pushed, so this is not an inconsistency');
+  const prompt = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-DELIVER-PROMPT');
+  assert.match(prompt, /git ls-remote --exit-code --heads origin \$\{branch\}/, 'the deliverer must run the lookup whose exit code tells absent from unknown');
+  assert.match(prompt, /mergeStatus:"branch-unconfirmed"/, 'and return an unseen branch under its own status');
+  assert.match(prompt, /never mergeStatus "blocked"/, 'never as a blocked merge');
+});
+
+test(`${FLEET_SCRIPT_REL} a pushed, verified branch the deliverer cannot find is an inconsistency naming the branch (issue 654)`, async () => {
+  const branch = 'agent/issue-629-attempt1-wf_testrun-w0';
+  const { calls, agentMock } = lane654Mock(branch, {
+    implPushed: true,
+    delivery: {
+      pushed: false, prUrl: '', mergeStatus: 'blocked', conflictPaths: [], branchLookup: [{ exitCode: 0, output: '' }],
+      blockedReason: `Branch ${branch} not found on origin or locally; git ls-remote --heads origin returned no matching refs`,
+    },
+  });
+  const { result, logs } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 629, title: 't', criteria: '' }, 0);
+  assert.deepEqual(calls, ['impl:#629.1', 'verify:#629.1', 'deliver:#629']);
+  assert.deepEqual(result.inconsistency && result.inconsistency.branch, branch, 'the inconsistency must name the branch');
+  assert.match(result.inconsistency.detail, /^INCONSISTENCY: branch agent\/issue-629-attempt1-wf_testrun-w0 is recorded pushed:true with a verifier pass:true/);
+  assert.match(result.inconsistency.detail, /manual delivery/, 'it must say the branch may need delivering by hand');
+  assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'it is not a blocked merge, whatever mergeStatus the deliverer chose');
+  assert.ok(logs.some((m) => /INCONSISTENCY/.test(m)), 'the inconsistency must be logged loudly');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\)/,
+    'the run result must keep an inconsistent ticket out of `failed`');
+  assert.match(src, /inconsistent: clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent`');
+});
+
+test(`${FLEET_SCRIPT_REL} finish mode reports a journal-pushed branch the deliverer cannot find as inconsistent (issue 654)`, async () => {
+  const branch = 'agent/issue-324-attempt1-wf_dead-w1';
+  const journal = Object.assign({}, DEAD_RUN_JOURNAL, {
+    tickets: [Object.assign({}, DEAD_RUN_JOURNAL.tickets[1], { pushed: true })],
+  });
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label.startsWith('deliver:')) {
+      return { pushed: false, prUrl: '', mergeStatus: 'branch-unconfirmed', conflictPaths: [], branchLookup: [{ exitCode: 128, output: 'fatal' }, { exitCode: 2, output: '' }], blockedReason: 'fatal' };
+    }
+    if (opts.label === 'followups-writer') return { branch: 'b', sha: 's', prUrl: '', appended: 1 };
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  const { result } = await driveFinish(FLEET_SCRIPT, agentMock, journal);
+  assert.deepEqual(result.failed, [], 'an inconsistency is not an ordinary failure');
+  assert.equal(result.inconsistent.length, 1);
+  assert.equal(result.inconsistent[0].branch, branch);
+  assert.match(result.inconsistent[0].detail, /INCONSISTENCY: branch agent\/issue-324-attempt1-wf_dead-w1/);
 });
 
 // ---- Implementer model per ticket from a Jev difficulty Score (issue 725) ----
@@ -1900,4 +2173,421 @@ test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come fro
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const fn = src.slice(src.indexOf('async function dropTicketsWithOpenPr'), src.indexOf("found = await agent(", src.indexOf('async function dropTicketsWithOpenPr')));
   assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
+});
+
+// Issue 770: the deliverer merges the PR it opened, in the instrument the rest of the stage uses.
+test(`${FLEET_SCRIPT_REL} deliver rules carry the PR merge in both instruments (issue 770)`, () => {
+  const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
+  const gh = loadTrackerRules(FLEET_SCRIPT, 'gh');
+  for (const [name, rules] of [['mcp', mcp], ['gh', gh]]) {
+    for (const fn of ['prState', 'prChecks', 'prReviews', 'prMerge', 'issueState', 'issueClose']) {
+      assert.equal(typeof rules[fn], 'function', `${name} rules lack ${fn}`);
+    }
+    assert.match(rules.prMerge(7, 'fix: x (#7)'), /squash/, `${name} prMerge must squash`);
+    assert.match(rules.prChecks(7), /check.runs/, `${name} prChecks must read the head's check runs`);
+  }
+  assert.match(mcp.prMerge(7, 'fix: x (#7)'), /mcp__github__merge_pull_request/);
+  assert.match(mcp.prMerge(7, 'fix: x (#7)'), /expectedHeadSha/);
+  assert.match(gh.prMerge(7, 'fix: x (#7)'), /gh api --method PUT repos\/\{owner\}\/\{repo\}\/pulls\/7\/merge/);
+  assert.match(gh.prMerge(7, 'fix: x (#7)'), /-f sha=/);
+  assert.doesNotMatch(gh.prMerge(7, 'fix: x (#7)').split('(never')[0], /gh pr merge/, 'gh prMerge must not run gh pr merge');
+  assert.match(gh.prState(7), /never `gh pr view`/);
+});
+
+test(`${FLEET_SCRIPT_REL} deliver prompt runs STEP D: wait for CI, the runbook bar, merge, then the ticket (issue 770)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const prompt = src.slice(src.indexOf('function deliverPrompt('), src.indexOf('// [FLEET-DELIVER-PROMPT-END]'));
+  assert.match(prompt, /STEP D - merge the PR you opened/, 'STEP D missing');
+  assert.match(prompt, /at most 20 minutes/, 'the CI wait must name its bound');
+  assert.match(prompt, /\$\{rules\.prChecks\(/, 'D1 must read check runs through the instrument rule');
+  assert.match(prompt, /\$\{rules\.prMerge\(/, 'D4 must merge through the instrument rule');
+  assert.match(prompt, /never merge a head with a red check/);
+  assert.match(prompt, /\$\{rules\.labelSwap\(t\.number\)\}/, 'a keep-open ticket is relabelled ready-for-human after the merge');
+  assert.match(prompt, /\$\{rules\.issueClose\(t\.number/, 'a Closes ticket still open after the merge is closed citing the PR');
+  assert.doesNotMatch(prompt, /Do NOT merge the PR/, 'the old prohibition would contradict STEP D');
+  const delivered = src.slice(src.indexOf('const DELIVERED = '), src.indexOf('const COMMENTED = '));
+  for (const key of ['merged', 'mergeSha', 'prState']) {
+    assert.match(delivered, new RegExp(`required: \\[[^\\]]*'${key}'`), `DELIVERED must require ${key}`);
+  }
+});
+
+// Issue 770: every run refreshes the served repo's copy of this script from claude-dotfiles master,
+// except the forks the contract names.
+test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles master, forks excepted (issue 770)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const block = extractBetween(src, 'FLEET-REFRESH');
+  assert.match(block, /https:\/\/raw\.githubusercontent\.com\/surreptakos\/claude-dotfiles\/master\/aac-skills\/ticket-fleet/);
+  assert.match(block, /label: 'fleet-refresh', phase: 'Setup'/);
+  assert.match(block, /sha256sum/, 'a copy that already matches must not be rewritten');
+  assert.match(block, /git commit -m "chore\(fleet\): refresh ticket-fleet script from claude-dotfiles master \(issue 770\)"/);
+  assert.match(block, /never created/, 'a repo with no copy launches from the plugin path and gets none');
+  const forks = /const FLEET_FORKS = \[([^\]]*)\]/.exec(block);
+  assert.ok(forks, 'FLEET_FORKS missing');
+  const listed = forks[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean).sort();
+  const contract = require(path.join(REPO_ROOT, 'tools', 'ticket-fleet-contract.js'));
+  assert.deepEqual(listed, contract.FORKS.map((f) => f.repo).sort(), 'the inlined fork list must equal the contract FORKS');
+  const setupIdx = src.indexOf("phase('Setup')");
+  assert.ok(src.indexOf('[FLEET-REFRESH-START]') > setupIdx && src.indexOf('[FLEET-REFRESH-END]') < src.indexOf('if (treeGuardOn) {', setupIdx),
+    'the refresh runs first in Setup, before the tree-guard baseline, so its commit is inside the baseline');
+});
+
+// Issue 755: in a cloud container a hook wraps a bare `git ...` in caveman and the worktree guard
+// refuses it ("runs caveman with a git command among its operands"), while /usr/bin/git is accepted
+// every time. Run 6ab47219 lost two workers' pushes to prompts that named only the bare spelling.
+// Every push instruction now carries the accepted spelling; the bare one survives only where it is
+// the one that runs, the Windows desktop (no /usr/bin/git), and there the absolute path is the retry.
+const { gitSpelling } = require('./ticket-fleet-branch.js');
+const BARE_PUSH_RE = /(?<![/\w])git push (?!--force)/g;
+
+function assertAcceptedPush(prompt, args, instrument, who) {
+  const absolute = `/usr/bin/git ${args}`;
+  assert.ok(prompt.includes(`\`${absolute}\``), `${who} (${instrument}) must name the spelling the guard accepts: ${absolute}`);
+  const bare = (prompt.match(BARE_PUSH_RE) || []).length;
+  const accepted = (prompt.match(/\/usr\/bin\/git push /g) || []).length;
+  assert.ok(bare <= accepted, `${who} (${instrument}): every bare \`git push\` must be paired with /usr/bin/git (${bare} bare, ${accepted} absolute)`);
+  if (instrument === 'mcp') {
+    assert.ok(prompt.indexOf(absolute) < prompt.indexOf(`\`git ${args}\``),
+      `${who}: in a cloud container the absolute path must lead, the bare spelling is only the fallback`);
+  } else {
+    assert.ok(prompt.includes(`\`git ${args}\``), `${who}: the desktop, where /usr/bin/git does not exist, must keep the bare spelling`);
+  }
+}
+
+test('gitSpelling names both spellings and leads with the one each instrument runs (issue 755)', () => {
+  const cloud = gitSpelling('mcp', 'push -u origin b');
+  assert.ok(cloud.startsWith('`/usr/bin/git push -u origin b`'), cloud);
+  assert.match(cloud, /only where \/usr\/bin\/git does not exist, run `git push -u origin b`/);
+  const desktop = gitSpelling('gh', 'push -u origin b');
+  assert.ok(desktop.startsWith('`git push -u origin b`'), desktop);
+  assert.match(desktop, /runs caveman with a git command among its operands", run `\/usr\/bin\/git push -u origin b` instead/);
+});
+
+for (const instrument of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} push instructions in the generated prompts use the accepted spelling under ${instrument} (issue 755)`, async () => {
+    const branch = 'agent/issue-755-attempt1-wf_testrun-w0';
+    const prompts = {};
+    const agentMock = async (prompt, opts) => {
+      prompts[opts.label.split(':')[0]] = prompt;
+      if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('push:')) return { pushed: true, output: 'ok' };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/755', mergeStatus: 'clean', conflictPaths: [] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 755, title: 't', criteria: '' }, 0, {}, 'inv1', null, { instrument });
+    assert.deepEqual(Object.keys(prompts).sort(), ['deliver', 'impl', 'push', 'verify']);
+    assertAcceptedPush(prompts.impl, `push -u origin ${branch}`, instrument, 'implementer');
+    assertAcceptedPush(prompts.push, `push -u origin ${branch}`, instrument, 'push agent');
+    assertAcceptedPush(prompts.deliver, `push -u origin ${branch}`, instrument, 'deliverer B1');
+    assertAcceptedPush(prompts.deliver, `push origin ${branch}`, instrument, 'deliverer C4/D3');
+    const report = [];
+    await driveReport(FLEET_SCRIPT, async (p) => { report.push(p); return { branch: 'b', sha: 's', prUrl: '', appended: 1 }; },
+      ['finding'], { deliver: true }, { instrument });
+    assertAcceptedPush(report[0], 'push -u origin agent/fleet-discoveries-wf_testrun', instrument, 'report writer');
+  });
+}
+
+test(`${FLEET_SCRIPT_REL} spells no push instruction as a bare \`git push\` literal (issue 755)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const bare = src.split('\n').filter((l) => /(?<![/\w])git push (?!--force)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
+  assert.deepEqual(bare, [], 'a push instruction must go through gitSpelling, which carries the spelling the guard accepts');
+});
+
+// ---------------------------------------------------------------------------
+// Issue 562: every sub-agent below is FRESH and starts wherever the orchestrating session's shell
+// cwd happens to be at the moment it is launched - not wherever it was when this run started. A
+// `cfg.orchestratorCwd` default of '.' is only ever correct until the parent session's shell `cd`s
+// away, which silently turns the guard off (or, worse, points it at whatever other repo now sits
+// there) and sends the tip-check agents a ref they resolve against the wrong tree. The fix is a
+// one-time absolute-path measurement at Setup, baked into every later prompt as a literal string.
+// ---------------------------------------------------------------------------
+
+// The one Setup-time measurement the fix depends on, plus the guard baseline/check block that
+// consumes it. Extracted from the real source (not re-described) so drift is caught here.
+function treeGuardSetupBody(src) {
+  return [
+    extractMarked(src, 'FLEET-TREE-GUARD-DEFS'),
+    extractMarked(src, 'FLEET-TREE-GUARD-SETUP'),
+    extractMarked(src, 'FLEET-TREE-GUARD-CHECK'),
+  ].join('\n');
+}
+
+test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without the Setup-measured absolute path (issue 562)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const guardBody = treeGuardSetupBody(src);
+
+  // The default is still relative - only the caller's own explicit override skips measurement.
+  assert.match(guardBody, /let orchestratorCwd = cfg\.orchestratorCwd/,
+    'orchestratorCwd must start from the cfg default so an explicit caller override is honoured');
+  assert.match(guardBody, /if \(orchestratorCwd === '\.'\)/,
+    'measurement must run precisely when the default (relative) path was not overridden');
+  // The measurement is its own one-command Setup agent, in the same "run exactly this and report
+  // it" shape the guard and tip agents already use - nothing is left to an agent's judgement.
+  assert.match(guardBody, /label: 'orchestrator-cwd'/, 'the cwd measurement must be its own labelled Setup agent');
+  assert.match(guardBody, /phase: 'Setup'/, 'the measurement must run in the Setup phase, before any checkpoint needs it');
+  assert.match(guardBody, /'pwd'|`pwd`/, 'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
+  assert.match(guardBody, /measured\.cwd\[0\] !== '\/'/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
+
+  // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
+  // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
+  const cwdFlags = guardBody.match(/--cwd \$\{orchestratorCwd\}/g) || [];
+  assert.equal(cwdFlags.length, 2, `expected the baseline and the check command to both pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
+  assert.ok(!guardBody.includes('--cwd .'), 'no guard command may hardcode the relative default');
+  assert.ok(!guardBody.includes('--cwd ${cfg.orchestratorCwd}'), 'no guard command may read cfg.orchestratorCwd directly - only the measured orchestratorCwd');
+  assert.match(guardBody, /\$\{GUARD_CMD\} baseline --cwd \$\{orchestratorCwd\}/, 'tree-guard:baseline must run node tools/orchestrator-tree-guard.js with the absolute path');
+  assert.match(guardBody, /\$\{GUARD_CMD\} check --cwd \$\{orchestratorCwd\}/, 'every tree-guard:<label> check must run node tools/orchestrator-tree-guard.js with the absolute path');
+
+  // The tip agent (revParse, `tip:#<ticket>`) reads a ref from the orchestrator's own checkout too,
+  // and is exactly as exposed to a mid-run `cd` as the guard - it must carry the same absolute path.
+  // Since issue 561 the command it runs is `buildTipLookupCommand(orchestratorCwd, ref)`'s fallback
+  // chain, not a literal `git rev-parse` inline - the absolute path still has to be the measured
+  // orchestratorCwd, just passed through the call instead of interpolated directly.
+  assert.match(src, /buildTipLookupCommand\(orchestratorCwd, ref\)/,
+    'the tip-check agent (revParse) must build its command from buildTipLookupCommand(orchestratorCwd, ref), never a bare `git rev-parse` that trusts the ambient shell cwd');
+  assert.ok(!src.includes('git rev-parse ${ref}'), 'no bare, unqualified `git rev-parse ${ref}` may remain');
+
+  // Every scratch-worktree prompt built against the orchestrator's own checkout (the probe and code
+  // verify lanes, and the Report phase's discoveries worktree) must use the same absolute path.
+  const worktreeAddCwd = (src.match(/git -C \$\{orchestratorCwd\} worktree add/g) || []).length;
+  assert.ok(worktreeAddCwd >= 3,
+    `expected at least 3 \`git -C \${orchestratorCwd} worktree add\` prompts (probe verify, code verify, Report), found ${worktreeAddCwd}`);
+  assert.ok(!/(?<!-C \$\{orchestratorCwd\} )git worktree add \$\{scratchFile/.test(src),
+    'no scratch-worktree `git worktree add` built from scratchFile() may omit the absolute -C path');
+});
+
+// Behavioral half: drive the REAL treeGuardCheck (not a stub, unlike the code-lane tests above,
+// which inject a recording checkpoint precisely so the lane body under test does not depend on
+// this mechanism's internals). A mocked agent stands in for both the one-time cwd measurement and
+// every later guard command, and records the exact command string each checkpoint sent - proving
+// that a parent session's `cd` after Setup (simulated by never letting anything downstream
+// re-consult cfg.orchestratorCwd or a live cwd) cannot misdirect a later checkpoint, because the
+// absolute path was already baked into the command as a literal string at Setup.
+async function driveTreeGuard(agentMock, cfgOverrides = {}) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const body = treeGuardSetupBody(src);
+  const logs = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn treeGuardCheck;\n}`);
+  const treeGuardCheck = await wrapper(laneScope({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    cfg: Object.assign({
+      treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js',
+      treeGuardStateDir: '.git/orchestrator-tree-guard', reportModel: 'r', orchestratorCwd: '.',
+    }, cfgOverrides),
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+  return { treeGuardCheck, logs };
+}
+
+const MEASURED_ORCHESTRATOR_CWD = '/home/runner/work/measured-checkout';
+
+test('treeGuardCheck: a parent cd after Setup cannot misdirect a later checkpoint (issue 562)', async () => {
+  const commands = []; // { label, cmd } for every real guard command (baseline + each check)
+  let cwdMeasurements = 0;
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') {
+      cwdMeasurements++;
+      // However many times a later checkpoint runs, the measurement itself must happen once, at
+      // Setup - simulating the parent `cd`ing away right after this call returns.
+      return { cwd: MEASURED_ORCHESTRATOR_CWD };
+    }
+    if (opts.label === 'tree-guard:baseline') {
+      commands.push({ label: opts.label, prompt });
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: `${MEASURED_ORCHESTRATOR_CWD}/.git/orchestrator-tree-guard/state.json`, baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) {
+      commands.push({ label: opts.label, prompt });
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label in treeGuardCheck test: ${opts.label}`);
+  };
+
+  const { treeGuardCheck } = await driveTreeGuard(agentMock);
+  // Two checkpoints, standing in for the Implement and Verify checkpoints of one ticket's chain -
+  // the parent session is free to have `cd`d anywhere between them; nothing here re-measures.
+  await treeGuardCheck('implement-attempt1', 42);
+  await treeGuardCheck('verify-attempt1', 42);
+
+  assert.equal(cwdMeasurements, 1, 'the absolute path must be measured exactly once, at Setup - never re-queried per checkpoint');
+  assert.equal(commands.length, 3, 'expected the baseline plus two checks');
+  for (const { label, prompt } of commands) {
+    assert.match(prompt, new RegExp(`--cwd ${MEASURED_ORCHESTRATOR_CWD.replace(/\//g, '\\/')}(?!\\S)`),
+      `${label} must carry the Setup-measured absolute path verbatim`);
+    assert.ok(!prompt.includes('--cwd .'), `${label} must never fall back to the relative default`);
+  }
+  assert.match(commands[1].prompt, /--label implement-attempt1 --ticket 42/);
+  assert.match(commands[2].prompt, /--label verify-attempt1 --ticket 42/);
+});
+
+test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and is used as-is (issue 562)', async () => {
+  const commands = [];
+  const agentMock = async (prompt, opts) => {
+    assert.notEqual(opts.label, 'orchestrator-cwd', 'an already-absolute caller override must not trigger a measurement agent');
+    if (opts.label === 'tree-guard:baseline') {
+      commands.push(prompt);
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/caller/given/path/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) {
+      commands.push(prompt);
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  const { treeGuardCheck } = await driveTreeGuard(agentMock, { orchestratorCwd: '/caller/given/path' });
+  await treeGuardCheck('implement-attempt1', 7);
+  assert.equal(commands.length, 2, 'expected the baseline plus one check');
+  for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// ---------------------------------------------------------------------------
+// Tip lookup fallback chain (issue 561): a branch present only as `origin/<branch>` - handed in
+// through `priorImpl` from an earlier run, or pushed by an implementer in another container - used
+// to exit 128 from a bare `git rev-parse <branch>` in the orchestrator's own checkout, skipping the
+// whole issue-404 verdict cross-check. `buildTipLookupCommand` builds the one-command `||` fallback
+// chain (ref, then origin/ref, then `git ls-remote --heads origin <ref>`); `parseLsRemoteSha` and
+// `parseTipLookupOutput` read the chain's output back into a sha and which spelling answered.
+// ---------------------------------------------------------------------------
+
+test('buildTipLookupCommand: a single `||` chain, ref then origin/ref then ls-remote, no other command', () => {
+  const cmd = buildTipLookupCommand('/abs/cwd', 'agent/issue-9-attempt1');
+  const steps = cmd.split(/\s*\|\|\s*/);
+  assert.equal(steps.length, 3, `expected exactly 3 fallback steps, found ${steps.length}: ${cmd}`);
+  assert.match(steps[0], /^\{ git -C \/abs\/cwd rev-parse --verify agent\/issue-9-attempt1 2>\/dev\/null && echo SPELLING=given; \}$/);
+  assert.match(steps[1], /^\{ git -C \/abs\/cwd rev-parse --verify origin\/agent\/issue-9-attempt1 2>\/dev\/null && echo SPELLING=origin; \}$/);
+  assert.match(steps[2], /^git -C \/abs\/cwd ls-remote --heads origin agent\/issue-9-attempt1 2>\/dev\/null$/);
+  // One logical command: no `;` outside the `{ ... }` groups, no `&&`/`||` loop construct (`for`,
+  // `while`) anywhere - the guard this repo runs refuses loops, not `||` (issue 561's own wording).
+  assert.ok(!/\bfor\b|\bwhile\b/.test(cmd), 'the fallback chain must not be a loop');
+});
+
+test('buildTipLookupCommand: the cwd and ref are both interpolated verbatim, not re-derived', () => {
+  const cmd = buildTipLookupCommand('/measured/at/setup', 'main');
+  assert.ok(cmd.includes('-C /measured/at/setup'), 'every step must carry the given cwd');
+  assert.ok(cmd.split('-C /measured/at/setup').length - 1 === 3, 'all three steps must carry -C, not just the first');
+});
+
+test('parseLsRemoteSha: a matching heads line yields its sha', () => {
+  const sha = parseLsRemoteSha('abc123def456abc123def456abc123def456789\trefs/heads/agent/issue-9-attempt1\n');
+  assert.equal(sha, 'abc123def456abc123def456abc123def456789');
+});
+
+test('parseLsRemoteSha: empty output (git ls-remote found nothing but still exited 0) is null, not a parse failure', () => {
+  assert.equal(parseLsRemoteSha(''), null);
+  assert.equal(parseLsRemoteSha(null), null);
+  assert.equal(parseLsRemoteSha(undefined), null);
+});
+
+test('parseLsRemoteSha: a line with no refs/heads/ marker (a tag, or garbage) is null', () => {
+  assert.equal(parseLsRemoteSha('abc123def456abc123def456abc123def456789\trefs/tags/v1\n'), null);
+  assert.equal(parseLsRemoteSha('not a ls-remote line at all'), null);
+});
+
+test('parseTipLookupOutput: step 1 (the ref as given) answers - spelling "given"', () => {
+  const out = 'abc123def456abc123def456abc123def456789\nSPELLING=given\n';
+  assert.deepEqual(parseTipLookupOutput(out), { sha: 'abc123def456abc123def456abc123def456789', spelling: 'given' });
+});
+
+test('parseTipLookupOutput: step 1 fails, step 2 (origin/<ref>) answers - spelling "origin" (issue 561 acceptance criterion)', () => {
+  const out = 'def456abc123def456abc123def456abc123def4\nSPELLING=origin\n';
+  assert.deepEqual(parseTipLookupOutput(out), { sha: 'def456abc123def456abc123def456abc123def4', spelling: 'origin' });
+});
+
+test('parseTipLookupOutput: steps 1 and 2 both fail, ls-remote (step 3) answers - spelling "ls-remote", no marker needed', () => {
+  const out = 'abc123def456abc123def456abc123def456789\trefs/heads/agent/issue-9-attempt1\n';
+  assert.deepEqual(parseTipLookupOutput(out), { sha: 'abc123def456abc123def456abc123def456789', spelling: 'ls-remote' });
+});
+
+test('parseTipLookupOutput: all three steps fail (branch absent on both spellings) - null, not a guess (issue 561 acceptance criterion)', () => {
+  assert.equal(parseTipLookupOutput(''), null);
+  assert.equal(parseTipLookupOutput(null), null);
+  assert.equal(parseTipLookupOutput(undefined), null);
+});
+
+test('parseTipLookupOutput: a marker line with nothing above it (malformed stdout) is null, never a guessed sha', () => {
+  assert.equal(parseTipLookupOutput('SPELLING=given\n'), null);
+});
+
+test('parseTipLookupOutput: an unrecognised marker value is ignored, falling through to the ls-remote parse', () => {
+  // Defensive: the schema does not allow a third marker value, but the parser must not crash or
+  // misattribute a spelling it was never told to expect if one ever appears.
+  assert.equal(parseTipLookupOutput('abc123\nSPELLING=bogus\n'), null);
+});
+
+// Behavioral half: drive the REAL revParse (not a stub, unlike the code-lane tests above, which
+// inject `revParse: async () => null` precisely so the lane body under test does not depend on this
+// mechanism's internals). Extracted from the real generated source, evaluated with a mocked `agent`
+// that returns exactly the shape the tip agent would report - so the acceptance criterion "a mocked
+// agent whose first rev-parse fails and whose origin/ fallback answers" is driven at the same
+// abstraction the agent itself operates at: what came back on stdout, not which JS branch ran.
+function driveRevParse(agentMock, logs = []) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const generated = generatedBlock(FLEET_SCRIPT); // buildTipLookupCommand, parseTipLookupOutput live here
+  const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${generated}\n${revParseBody}\nreturn revParse;\n}`);
+  return wrapper(laneScope({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    cfg: { deliverModel: 'z' },
+    orchestratorCwd: '/abs/orchestrator',
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+}
+
+test('revParse: a branch present only as origin/<branch> still returns its tip and the run is told which spelling answered (issue 561)', async () => {
+  const logs = [];
+  const calls = [];
+  const agentMock = async (prompt, opts) => {
+    calls.push({ prompt, opts });
+    // Simulates what the real agent would report after running the fallback chain in a checkout
+    // where the branch was never fetched locally: the first rev-parse (ref as given) produced no
+    // SPELLING=given line, and origin/<ref> is what actually resolved.
+    return {
+      exitCode: 0,
+      stdout: 'def456abc123def456abc123def456abc123def4\nSPELLING=origin\n',
+      stderr: '',
+      spelling: 'origin',
+    };
+  };
+  const revParse = await driveRevParse(agentMock, logs);
+  const sha = await revParse('agent/issue-777-attempt1', 'tip:#777.1');
+
+  assert.equal(sha, 'def456abc123def456abc123def456abc123def4', 'the origin/-only branch tip must still come back');
+  assert.equal(calls.length, 1, 'the tip is read by exactly one agent call - one bash command, not a retry loop');
+  assert.match(calls[0].prompt, /agent\/issue-777-attempt1/, 'the command must be built from the ref the caller passed');
+  assert.match(calls[0].prompt, /ls-remote/, 'the prompt must still describe the full fallback chain, not just the branch as given');
+  assert.ok(logs.some((l) => /origin/.test(l) && /def456abc123def456abc123def456abc123def4/.test(l)),
+    'the resolved spelling must be logged next to the head (issue 561: "log the resolved spelling next to the head")');
+});
+
+test('revParse: a branch absent on both spellings (and on the remote) still reports null, and the lane logs the skip unchanged (issue 561 acceptance criterion)', async () => {
+  const logs = [];
+  const agentMock = async () => ({ exitCode: 0, stdout: '', stderr: '', spelling: '' });
+  const revParse = await driveRevParse(agentMock, logs);
+  const sha = await revParse('agent/issue-778-attempt1', 'tip:#778.1');
+
+  assert.equal(sha, null, 'an unresolvable ref must report null, never a guessed sha');
+  // revParse itself logs only the resolved case; the "accepted without the worktree cross-check"
+  // skip message is the caller's (unchanged - see aac-skills/ticket-fleet/ticket-fleet.js around
+  // both `revParse(...)` call sites), so this behavioral test only has to prove revParse stays
+  // silent and returns null for the caller's existing skip-logging to fire on.
+  assert.equal(logs.length, 0, 'revParse must not itself log anything when nothing resolved');
+});
+
+test('revParse: an agent() throw is still caught and reported through unusableReason, unchanged by the fallback chain', async () => {
+  const logs = [];
+  const agentMock = async () => { throw new Error('StructuredOutput retry cap exceeded'); };
+  const revParse = await driveRevParse(agentMock, logs);
+  const sha = await revParse('agent/issue-779-attempt1', 'tip:#779.1');
+
+  assert.equal(sha, null);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /output unusable.*StructuredOutput retry cap exceeded/);
+  assert.match(logs[0], /worktree HEAD cannot be cross-checked/);
+});
+
+test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries a spelling field (issue 561)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
+  assert.match(revParseBody, /spelling:\s*\{\s*type:\s*'string'/, 'REV must carry a spelling field so the run can report which spelling answered');
+  assert.match(revParseBody, /buildTipLookupCommand\(orchestratorCwd, ref\)/, 'the prompt must be built from the fallback-chain command, not a literal rev-parse');
 });

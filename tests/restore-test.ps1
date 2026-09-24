@@ -18,10 +18,11 @@
       2  every whitelisted item landed, with the same file count as the repo
       4  no __USERHOME* token survives in any restored file
       5  no real-home path survives in any restored file
-      6  settings.json parses, and every absolute path in it points inside the fake home
+      6  settings.json parses, every absolute path in it points inside the fake home, and it
+         names no governance hook script (the aac-skills plugin dispatches those, issue 733)
       7  round trip is lossless: re-tokenizing each restored file reproduces the repo file
       8  nothing credential-shaped was restored (the guard, pointed at the output)
-      9  the restored hooks and skills actually RUN from their new home
+      9  the restored hooks actually RUN from their new home, and the payload's skills from the clone
      10  two overlapping runs do not delete each other's scratch directory
 
     Check 9 is the one that separates this from a file-copy test. Everything up to 8 proves
@@ -62,19 +63,24 @@ param(
     #   missing      a whitelisted file never made it into the repo   -> check 2
     #   crlf         the clone's bytes differ from the pushed bytes   -> check 0
     #   home-leak    a file was copied without going through Copy-OneFile -> check 5 (and 2:
-    #                the planted file is outside the whitelist)
+    #                the planted file is outside the whitelist, and 6b: it lands in ~/.claude/skills)
     #   secret       a credential value reached the repo              -> check 8
     #   drift        a restored file does not round-trip              -> check 7
     #   broken-hook  a restored hook is present but not runnable      -> check 9
+    #   governance-entry  settings.json names a script the plugin ships   -> check 6 (issue 733)
+    #   hooks-dir    pull writes ~/.claude/hooks again                    -> check 6d (issue 733)
+    #   tools-dir    pull writes ~/.claude/tools again                    -> check 6d (issue 733)
     #   collision    two overlapping runs share one scratch root      -> check 10
     #   locked-scratch  the scratch cannot be deleted at the end      -> verdict must stay 0
     #   lint-root    unsuppressed finding planted in the root CLAUDE.md   -> claude-md-lint gate
     #   lint-mirror  unsuppressed finding planted in profile/claude/CLAUDE.md     -> claude-md-lint gate
     #   sandbox-identity  the test suites' user.email is what this checkout would commit as -> check 0-pre2
     #   plugin-downgrade  pull copies the plugin records instead of merging them -> check 9e
+    #   rules-copy   pull writes the rules text to the global CLAUDE.md, not the pointer -> check 6b5
+    #   skill-tree   pull writes aac-skills/ to ~/.claude/skills again         -> check 6b
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
-                 'plugin-downgrade')]
+                 'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -322,8 +328,47 @@ if ($Fault -eq 'secret') {
     # Assembled rather than written out, because a literal credential pair in this file would
     # trip the repo's own secret guard on the next push - which is the guard working correctly.
     $pair = '{ "' + 'refresh' + '_token": "' + ('A1b2C3d4E5' * 3) + '" }'
-    Set-Content -Path (Join-Path $Clone 'aac-skills\secret-probe.json') -Value $pair -Encoding utf8
+    # Into a directory pull still restores: aac-skills/ stopped reaching the fake home (issue 734).
+    Set-Content -Path (Join-Path $Clone 'profile\claude\hooks\secret-probe.json') -Value $pair -Encoding utf8
     Note 'fault: planted a credential value in the repo'
+}
+if ($Fault -eq 'rules-copy') {
+    # What pull did before issue 732: the global CLAUDE.md written from the rules source itself.
+    $cloneManifest = Join-Path $Clone 'lib\manifest.ps1'
+    $text = [System.IO.File]::ReadAllText($cloneManifest).Replace(
+        "'profile/claude/global-pointer.md'", "'profile/claude/CLAUDE.md'")
+    [System.IO.File]::WriteAllText($cloneManifest, $text)
+    Note 'fault: the clone pulls the rules text into the global CLAUDE.md'
+}
+if ($Fault -eq 'governance-entry') {
+    # What settings.json carried before issue 733: a Stop entry naming the live-tree stop-slop copy.
+    # With it back, the plugin copy fires too (it has no guard) and the desktop audits twice.
+    $cloneSettings = Join-Path $Clone 'profile\claude\settings.json'
+    $text = [System.IO.File]::ReadAllText($cloneSettings)
+    $entry = ' { "hooks": [ { "type": "command", "command": "py -3 \"__USERHOME_JSON__\\.claude\\hooks\\stopslop-stop.py\"", "timeout": 10 } ] },'
+    $text = ([regex]'"Stop": \[').Replace($text, ('"Stop": [' + $entry), 1)
+    [System.IO.File]::WriteAllText($cloneSettings, $text)
+    Note 'fault: the clone''s settings.json dispatches stopslop-stop.py again'
+}
+foreach ($dirFault in @(@{ Name = 'hooks-dir'; Dir = 'hooks' }, @{ Name = 'tools-dir'; Dir = 'tools' })) {
+    if ($Fault -ne $dirFault.Name) { continue }
+    # What the whitelist held before issue 733: the live-tree copy of the profile folder.
+    $cloneManifest = Join-Path $Clone 'lib\manifest.ps1'
+    $text  = [System.IO.File]::ReadAllText($cloneManifest)
+    $entry = ("        [pscustomobject]@{{ Type = 'Dir'; Repo = 'profile/claude/{0}'; Local = (Join-Path `$claude '{0}') }}`r`n" -f $dirFault.Dir)
+    $anchor = '        # User-level subagent definitions (issue 86).'
+    [System.IO.File]::WriteAllText($cloneManifest, $text.Replace($anchor, $entry + $anchor))
+    Note ('fault: the clone''s whitelist writes ~/.claude/{0} again' -f $dirFault.Dir)
+}
+if ($Fault -eq 'skill-tree') {
+    # What pull did before issue 734: the whole aac-skills/ tree written to ~/.claude/skills.
+    $cloneManifest = Join-Path $Clone 'lib\manifest.ps1'
+    $entry = "        [pscustomobject]@{ Type = 'Dir';  Repo = 'aac-skills'; Local = (Join-Path `$claude 'skills') }`n"
+    $text = [System.IO.File]::ReadAllText($cloneManifest)
+    $at = $text.IndexOf("        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/global-pointer.md'")
+    if ($at -lt 0) { throw 'skill-tree fault: the global-pointer entry moved; update the anchor here' }
+    [System.IO.File]::WriteAllText($cloneManifest, $text.Insert($at, $entry))
+    Note 'fault: the clone pulls aac-skills/ into ~/.claude/skills'
 }
 Write-Host ''
 
@@ -391,6 +436,14 @@ Set-Content -Path (Join-Path $FakePersonal 'CLAUDE.md') `
             -Value "STALE personal CLAUDE.md - issue 40 refresh must remove this file, not keep it in sync" `
             -Encoding utf8
 
+# Issue 734: seed a skill tree an older pull wrote. Pull no longer writes ~/.claude/skills and
+# never deletes, so section 6b asserts this file comes through byte-for-byte and is the only thing
+# there. It also keeps the personal refresh's skills overlay (section 6c) exercised.
+$StaleSkill = Join-Path $FakeHome '.claude\skills\pre-734-stale\SKILL.md'
+New-Item -ItemType Directory -Path (Split-Path $StaleSkill -Parent) -Force | Out-Null
+$StaleSkillText = "---`nname: pre-734-stale`ndescription: written by a pull from before issue 734`n---`n"
+[System.IO.File]::WriteAllText($StaleSkill, $StaleSkillText, (New-Object System.Text.UTF8Encoding($false)))
+
 # ------------------------------------------------------------------ 1. run the installer
 
 $log = Join-Path $FakeRoot 'install.log'
@@ -413,8 +466,9 @@ if ($Fault -eq 'drift') {
     Note 'fault: a restored file no longer matches the repo'
 }
 if ($Fault -eq 'broken-hook') {
-    Set-Content -Path (Join-Path $FakeHome '.claude\hooks\session-gate.js') `
-                -Value 'throw new Error("restored hook is broken");' -Encoding utf8
+    # The Codex gate: since issue 733 it is the one hook script pull still restores.
+    Set-Content -Path (Join-Path $FakeHome '.codex\hooks\ask_matt_gate.py') `
+                -Value 'import sys; sys.exit(3)  # restored hook is broken' -Encoding utf8
     Note 'fault: a restored hook is present but not runnable'
 }
 if ($Fault -eq 'home-leak') {
@@ -472,6 +526,8 @@ $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction Silently
                              # owns, deliberately outside the sync manifest, so it also stays out
                              # of the whitelist count. Its content is asserted separately below.
                              $_.FullName -ne (Join-Path $FakeHome '.claude.json') -and
+                             # Issue 734: seeded before the install, not restored; section 6b.
+                             $_.FullName -ne $StaleSkill -and
                              $_.FullName -notlike '*\.claude.json.bak-*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
@@ -561,24 +617,44 @@ if ($null -ne $settings) {
     }
     Check 'permissions.defaultMode carries bypassPermissions (issue 199)' ($mode -eq 'bypassPermissions') @($mode)
 
-    # Issue 620: the stop-slop gate. The two hook scripts shipped for months with nothing in
-    # settings.json dispatching them, so the gate passed every message. Assert the dispatch
-    # itself, not just that the scripts travelled - a settings.json rewrite that drops either
-    # entry puts the gate straight back to dead, silently.
-    $slopWrite = @($commands | Where-Object { $_ -like '*stopslop-write.py*' })
-    $slopStop  = @($commands | Where-Object { $_ -like '*stopslop-stop.py*' })
-    Check 'settings.json dispatches stopslop-write.py on PostToolUse for Write/Edit (issue 620)' `
-        (($slopWrite.Count -eq 1) -and
-         (@($settings.hooks.PostToolUse | Where-Object {
-             ($_.PSObject.Properties.Name -contains 'matcher') -and
-             ($_.matcher -match 'Write') -and ($_.matcher -match 'Edit')
-         }).Count -ge 1)) `
-        @("matching commands: $($slopWrite -join '; ')")
-    Check 'settings.json dispatches stopslop-stop.py on Stop (issue 620)' `
-        (($slopStop.Count -eq 1) -and
-         (@($settings.hooks.Stop | ForEach-Object { $_.hooks } |
-            Where-Object { $_.command -like '*stopslop-stop.py*' }).Count -eq 1)) `
-        @("matching commands: $($slopStop -join '; ')")
+    # Issue 733: the governance hooks fire from the aac-skills plugin, so settings.json must name
+    # none of the scripts it ships. The plugin hook guard skips its copy whenever settings.json
+    # names the same basename, and the stop-slop pair ride with no guard at all - so an entry here
+    # either silences the plugin copy (the desktop runs a stale live-tree script) or fires the hook
+    # twice. The names are read off the payload in the clone, so a hook added later is covered.
+    $shippedDir = Join-Path $Clone 'marketplace\aac-skills\hooks\scripts'
+    $shipped = @(Get-ChildItem -Path $shippedDir -File -ErrorAction SilentlyContinue | ForEach-Object { $_.Name })
+    $govEntries = @()
+    foreach ($command in $commands) {
+        foreach ($name in $shipped) {
+            if ($command -like ('*' + $name + '*')) { $govEntries += ("{0}  ({1})" -f $name, $command) }
+        }
+    }
+    Check ("settings.json names none of the {0} scripts the aac-skills plugin ships (issue 733)" -f $shipped.Count) `
+        (($shipped.Count -gt 0) -and ($govEntries.Count -eq 0)) `
+        (@(if ($shipped.Count -eq 0) { "no scripts under $shippedDir - the payload moved" }) + $govEntries)
+
+    # The other half: third-party entries are not the plugin's to carry and stay where they were.
+    $caveman = @($commands | Where-Object { $_ -like '*caveman-proxy.exe*' })
+    $shrink  = @($commands | Where-Object { $_ -like '*shrink-hook*' })
+    Check 'third-party hook entries stay in settings.json (caveman proxy, shrink hook)' `
+        (($caveman.Count -gt 0) -and ($shrink.Count -eq 1)) `
+        @(("caveman proxy entries {0}, shrink hook entries {1}" -f $caveman.Count, $shrink.Count))
+}
+
+# ------------------------------------------------------------------ 6d. no live-tree hooks or tools (issue 733)
+
+# Nothing dispatches ~/.claude/hooks or ~/.claude/tools any more: the plugin carries its own copy
+# of every script and of the stop-slop module. A pull that wrote them again would be harmless on
+# its own, but it is the first half of the double-fire shape, and a fresh machine that grows them
+# invites the settings entries back. profile/claude/hooks and profile/claude/tools stay in the
+# repo as the packager's source.
+Write-Host ''
+Write-Host 'Live-tree hooks and tools (issue 733)'
+foreach ($dir in 'hooks', 'tools') {
+    $live = Join-Path $FakeHome ('.claude\' + $dir)
+    Check ("pull writes no ~/.claude/{0} folder" -f $dir) (-not (Test-Path $live)) `
+        @(("{0} exists - lib/manifest.ps1 whitelists profile/claude/{1} again" -f $live, $dir))
 }
 
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
@@ -642,34 +718,41 @@ if (Test-Path $codexConfig) {
     Check 'every user-profile path in it points inside the fake home' ($badPaths.Count -eq 0) $badPaths
 }
 
-# ------------------------------------------------------------------ 6b. skills are really there
+# ------------------------------------------------------------------ 6b. no skill tree; the plugin serves the skills (issue 734)
 
-# The check that would have caught the original hole: most flow skills used to reach
-# ~/.claude/skills through a junction, and a junction is invisible to a file copy. One tree since
-# issue 214, so pull writes real directories - and present-and-empty is still the failure mode to
-# look for, so this asserts each restored skill carries a SKILL.md.
+# The aac-skills plugin serves every skill as aac-skills:<name>. A pull-written ~/.claude/skills
+# listed each one twice in a desktop session, the bare copy only as fresh as the last pull, so
+# pull stopped writing it. Pull never deletes either: the tree an older pull wrote, seeded in 0b,
+# must come through byte-for-byte and be the only thing under ~/.claude/skills afterwards.
 Write-Host ''
-Write-Host 'Skills'
-$repoSkills = @(Get-ChildItem -Path (Join-Path $Clone 'aac-skills') -Directory -ErrorAction SilentlyContinue)
-$emptySkills = @()
-foreach ($skill in $repoSkills) {
-    if (-not (Test-Path (Join-Path $skill.FullName 'SKILL.md'))) { continue }
-    $restoredSkill = Join-Path $FakeHome ('.claude\skills\' + $skill.Name)
-    if (-not (Test-Path (Join-Path $restoredSkill 'SKILL.md'))) {
-        $emptySkills += ("{0}: no SKILL.md under the restored home" -f $skill.Name)
-    }
-}
-Check ("all {0} skills in aac-skills/ restored with a readable SKILL.md" -f $repoSkills.Count) `
-    (($repoSkills.Count -gt 0) -and ($emptySkills.Count -eq 0)) $emptySkills
+Write-Host 'Skills (issue 734)'
+$liveSkills = Join-Path $FakeHome '.claude\skills'
+$skillFiles = @(Get-ChildItem -Path $liveSkills -Recurse -File -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -ne $StaleSkill } | ForEach-Object { $_.FullName })
+Check 'pull writes no skill tree under ~/.claude/skills' ($skillFiles.Count -eq 0) `
+    (@(("{0} file(s) written there, first ones:" -f $skillFiles.Count)) + @($skillFiles | Select-Object -First 5))
+$staleNow = if (Test-Path $StaleSkill) { [System.IO.File]::ReadAllText($StaleSkill) } else { $null }
+Check 'a skill tree an older pull wrote is left in place (pull never deletes)' ($staleNow -ceq $StaleSkillText) `
+    @(("{0}: {1}" -f $StaleSkill, $(if ($null -eq $staleNow) { 'gone' } else { 'changed' })))
 
-# The flows the global CLAUDE.md names by name. If these are missing the machine restores
-# into a configuration whose own rules point at skills that are not there.
-$required = @('ask-matt', 'implement', 'tdd', 'triage', 'handoff', 'to-spec', 'to-tickets',
-              'code-review', 'diagnosing-bugs', 'grill-with-docs', 'wayfinder', 'research')
-$absentFlows = @($required | Where-Object {
-    -not (Test-Path (Join-Path $FakeHome ('.claude\skills\' + $_ + '\SKILL.md')))
-})
-Check 'every flow skill named in the global CLAUDE.md is invocable' ($absentFlows.Count -eq 0) $absentFlows
+# With no tree, a skill the rules name reaches a session only through the plugin payload, so every
+# aac skill the global rules invoke by short name (/ask-matt, the `yes` skill) must ship in it. The
+# packager's DEAD_LOAD_DROPPED list is how one would silently stop resolving.
+$rulesText  = [System.IO.File]::ReadAllText((Join-Path $Clone 'profile\claude\CLAUDE.md'))
+$repoSkills = @(Get-ChildItem -Path (Join-Path $Clone 'aac-skills') -Directory -ErrorAction SilentlyContinue |
+                Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object { $_.Name })
+$named = @('ask-matt', 'implement', 'tdd', 'triage', 'handoff', 'to-spec', 'to-tickets',
+           'code-review', 'diagnosing-bugs', 'grill-with-docs', 'wayfinder', 'research', 'yes')
+foreach ($m in ([regex]'(?<![\w/.:~$-])/([a-z][a-z0-9-]+)\b|`([a-z][a-z0-9-]+)` skill\b').Matches($rulesText)) {
+    $name = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
+    if ($repoSkills -contains $name) { $named += $name }
+}
+$named = @($named | Select-Object -Unique)
+$payloadSkills = Join-Path $Clone 'marketplace\aac-skills\skills'
+$unserved = @($named | Where-Object { -not (Test-Path (Join-Path $payloadSkills ($_ + '\SKILL.md'))) } |
+              ForEach-Object { "{0}: named in the global rules, not in marketplace/aac-skills/skills" -f $_ })
+Check ("all {0} skills the global rules name by short name are served by the plugin" -f $named.Count) `
+    ($unserved.Count -eq 0) $unserved
 
 # ------------------------------------------------------------------ 6b2. PowerShell profiles
 
@@ -705,6 +788,27 @@ Check 'Get-DocumentsPath keeps a foreign home inside that home' `
     ($docsFake.ToLower().StartsWith($FakeHome.ToLower())) @("resolved to $docsFake")
 Check 'Get-DocumentsPath asks the shell for the real profile' `
     ($docsReal -eq [Environment]::GetFolderPath('MyDocuments')) @("resolved to $docsReal")
+
+# ------------------------------------------------------------------ 6b5. global CLAUDE.md is the pointer (issue 732)
+
+# The desktop takes the rules from the aac-skills plugin, as a container does, so pull writes a
+# pointer there instead. Both halves matter: the pointer, and the ABSENCE of the rules file's first
+# line - the plugin's global-rules hook stays silent whenever the global CLAUDE.md carries it, so a
+# pull that wrote the rules back would freeze the desktop on the pulled copy again.
+Write-Host ''
+Write-Host 'Global CLAUDE.md pointer (issue 732)'
+$liveGlobal  = Join-Path $FakeHome '.claude\CLAUDE.md'
+$pointerSrc  = Join-Path $Clone 'profile\claude\global-pointer.md'
+$liveText    = if (Test-Path $liveGlobal) { [System.IO.File]::ReadAllText($liveGlobal) } else { '' }
+$pointerText = if (Test-Path $pointerSrc) { [System.IO.File]::ReadAllText($pointerSrc) } else { $null }
+$rulesFirst  = ([System.IO.File]::ReadAllText((Join-Path $Clone 'profile\claude\CLAUDE.md')) -split "`r?`n", 2)[0].Trim()
+Check 'global CLAUDE.md after pull is the pointer, not the rules text' `
+    (($null -ne $pointerText) -and ($liveText -eq $pointerText)) `
+    @(("{0} is {1} bytes; profile/claude/global-pointer.md is {2}" -f $liveGlobal, $liveText.Length,
+       $(if ($null -eq $pointerText) { 'missing' } else { $pointerText.Length })))
+Check 'global CLAUDE.md does not carry the rules file''s first line (the plugin hook would go silent)' `
+    (($rulesFirst.Length -gt 0) -and (-not $liveText.Contains($rulesFirst))) `
+    @(("first line of profile/claude/CLAUDE.md found in {0}: {1}" -f $liveGlobal, $rulesFirst))
 
 # ------------------------------------------------------------------ 6b4. global CLAUDE.md single-load (issue 40)
 
@@ -756,16 +860,22 @@ Write-Host 'Personal profile refresh'
 
 $pHooksBad   = @()
 $workHooksDir = Join-Path $FakeHome '.claude\hooks'
-Get-ChildItem -Path $workHooksDir -Recurse -File | ForEach-Object {
-    $relative = $_.FullName.Substring($workHooksDir.Length).TrimStart('\')
-    if (Test-Excluded -RelativePath $relative) { return }
-    $twin = Join-Path $FakePersonal ('hooks\' + $relative)
-    if (-not (Test-Path $twin)) { $pHooksBad += ("missing: {0}" -f $relative); return }
-    $a = [System.IO.File]::ReadAllBytes($_.FullName)
-    $b = [System.IO.File]::ReadAllBytes($twin)
-    if (-not ([System.Linq.Enumerable]::SequenceEqual($a, $b))) { $pHooksBad += ("differs: {0}" -f $relative) }
+# Issue 733: pull writes no ~/.claude/hooks, so on a clean restore there is nothing to mirror and
+# the personal account, like the work one, takes its governance hooks from the plugin.
+if (Test-Path $workHooksDir) {
+    Get-ChildItem -Path $workHooksDir -Recurse -File | ForEach-Object {
+        $relative = $_.FullName.Substring($workHooksDir.Length).TrimStart('\')
+        if (Test-Excluded -RelativePath $relative) { return }
+        $twin = Join-Path $FakePersonal ('hooks\' + $relative)
+        if (-not (Test-Path $twin)) { $pHooksBad += ("missing: {0}" -f $relative); return }
+        $a = [System.IO.File]::ReadAllBytes($_.FullName)
+        $b = [System.IO.File]::ReadAllBytes($twin)
+        if (-not ([System.Linq.Enumerable]::SequenceEqual($a, $b))) { $pHooksBad += ("differs: {0}" -f $relative) }
+    }
+    Check 'personal hooks are byte-equal to the work profile''s' ($pHooksBad.Count -eq 0) $pHooksBad
+} else {
+    Note 'no ~/.claude/hooks to mirror into the personal profile (issue 733: the plugin carries them)'
 }
-Check 'personal hooks are byte-equal to the work profile''s' ($pHooksBad.Count -eq 0) $pHooksBad
 
 $pSettingsPath = Join-Path $FakePersonal 'settings.json'
 $pSettings = $null
@@ -795,10 +905,24 @@ foreach ($command in $pCommands) {
         }
     }
 }
-# Zero commands is a legitimate count since issue 208: the governance hooks ride in the aac-skills
-# plugin and the work profile hooks key is {}, so the personal profile inherits nothing to rewrite.
+# Since issue 733 the work profile's hooks key holds only third-party entries (none on a
+# \.claude\ path), so the refresh replaces the seeded stale hook with those and rewrites nothing.
 Check ("all {0} personal hook commands are rewritten to .claude-personal and resolve" -f $pCommands.Count) `
     ($pCmdBad.Count -eq 0) $pCmdBad
+
+# The personal account's hooks keep working the same way the work account's do: its settings.json
+# names no script the plugin ships, so the plugin hook guard (which reads CLAUDE_CONFIG_DIR's
+# settings.json) finds no entry and the plugin copy fires there, once per event.
+$pShipped = @(Get-ChildItem -Path (Join-Path $Clone 'marketplace\aac-skills\hooks\scripts') -File -ErrorAction SilentlyContinue |
+              ForEach-Object { $_.Name })
+$pGov = @()
+foreach ($command in $pCommands) {
+    foreach ($name in $pShipped) {
+        if ($command -like ('*' + $name + '*')) { $pGov += ("{0}  ({1})" -f $name, $command) }
+    }
+}
+Check 'personal settings.json names no script the aac-skills plugin ships (issue 733)' `
+    (($null -ne $pSettings) -and ($pShipped.Count -gt 0) -and ($pGov.Count -eq 0)) $pGov
 
 $pSkillsBad = @()
 $workSkills = @(Get-ChildItem -Path (Join-Path $FakeHome '.claude\skills') -Directory -Force |
@@ -854,12 +978,14 @@ Check 'restored tree passes the value-shaped secret guard' (Assert-NoSecrets -Ro
 Write-Host ''
 Write-Host 'Executable from the new home'
 
-$gateTest = Join-Path $FakeHome '.claude\hooks\session-gate.test.js'
+# Issue 733: session-gate.js is no longer restored - the plugin packs it from profile/claude/hooks,
+# which is where its suite runs now. Nothing else in CI runs it.
+$gateTest = Join-Path $Clone 'profile\claude\hooks\session-gate.test.js'
 if (Test-Path $gateTest) {
     $out = & node --test $gateTest 2>&1
-    Check 'restored session-gate.js passes its own test suite' ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
+    Check 'session-gate.js (the source the plugin packs) passes its own test suite' ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
 } else {
-    Check 'restored session-gate.js passes its own test suite' $false @('session-gate.test.js was not restored')
+    Check 'session-gate.js (the source the plugin packs) passes its own test suite' $false @('profile/claude/hooks/session-gate.test.js is missing')
 }
 
 $gate = Join-Path $FakeHome '.codex\hooks\ask_matt_gate.py'
@@ -879,14 +1005,14 @@ Check 'restored ask_matt_gate.py runs the pre-send lint' ($gateExit -eq 0 -or $g
 $adhdFlag = Join-Path $FakeHome '.claude\.i-have-adhd-always'
 Check 'i-have-adhd always-on flag restored at ~/.claude/.i-have-adhd-always' (Test-Path $adhdFlag)
 
-# Issue 620: profile/claude/tools is a whitelist entry, so something has to assert it. The module
-# both stop-slop hooks `import stopslop` lands at ~/.claude/tools/stopslop.py; while it did not
-# exist the hooks caught the ImportError, wrote one line to stderr and returned 0, so the gate
-# passed every message. Drive the RESTORED Stop hook the way Claude Code does - a JSON payload on
-# stdin - rather than reading its source: exit 2 on slop, exit 0 on clean prose.
-$slopModule = Join-Path $FakeHome '.claude\tools\stopslop.py'
-$slopHook   = Join-Path $FakeHome '.claude\hooks\stopslop-stop.py'
-Check 'stop-slop linter module restored at ~/.claude/tools/stopslop.py (issue 620)' (Test-Path $slopModule)
+# Issue 620: the module both stop-slop hooks `import stopslop` must sit at ../tools beside them;
+# while it did not the hooks caught the ImportError, wrote one line to stderr and returned 0, so
+# the gate passed every message. Since issue 733 the desktop runs the PLUGIN's copy (pull writes no
+# ~/.claude/hooks or tools), so drive that one, from the payload in the clone, the way Claude Code
+# does - a JSON payload on stdin - rather than reading its source: exit 2 on slop, 0 on clean prose.
+$slopModule = Join-Path $Clone 'marketplace\aac-skills\hooks\tools\stopslop.py'
+$slopHook   = Join-Path $Clone 'marketplace\aac-skills\hooks\scripts\stopslop-stop.py'
+Check 'stop-slop linter module ships beside the plugin hooks at hooks/tools/stopslop.py (issues 620, 733)' (Test-Path $slopModule)
 if ((Test-Path $slopModule) -and (Test-Path $slopHook)) {
     $slopCases = @(
         @{ Name = 'slop';  Want = 2; Text = "Here's the thing: experts agree this release marks a pivotal moment." },
@@ -906,7 +1032,7 @@ if ((Test-Path $slopModule) -and (Test-Path $slopHook)) {
             $slopOut  = $payload | & py -3 $slopHook 2>&1
             $slopExit = $LASTEXITCODE
         } finally { $ErrorActionPreference = $prev }
-        Check ("restored stop-slop Stop hook exits {0} on a {1} message (issue 620)" -f $case.Want, $case.Name) `
+        Check ("plugin stop-slop Stop hook exits {0} on a {1} message (issue 620)" -f $case.Want, $case.Name) `
             ($slopExit -eq $case.Want) `
             (@("exit $slopExit, wanted $($case.Want)") + @($slopOut | Select-Object -Last 8))
     }
@@ -933,19 +1059,21 @@ if ((Test-Path $slopModule) -and (Test-Path $slopHook)) {
             $encExit = $LASTEXITCODE
         } finally { $ErrorActionPreference = $prev }
         Remove-Item $payloadFile -Force -ErrorAction SilentlyContinue
-        Check ("restored stop-slop Stop hook exits 2 on {0} (issue 620)" -f $e.Name) `
+        Check ("plugin stop-slop Stop hook exits 2 on {0} (issue 620)" -f $e.Name) `
             ($encExit -eq 2) `
             (@("exit $encExit, wanted 2") + @($encOut | Select-Object -Last 8))
     }
 }
 
-$check = Join-Path $FakeHome '.claude\skills\session-check\check.js'
+# Issue 734: pull no longer writes the skills, so session-check runs from the plugin payload the
+# desktop now loads it from - the clone's marketplace/aac-skills, which is what a merge publishes.
+$check = Join-Path $Clone 'marketplace\aac-skills\skills\session-check\check.js'
 Push-Location $Clone
 $out = & node $check 2>&1
 $checkExit = $LASTEXITCODE
 Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
-Check 'restored session-check reports on a repo' $ran @($out | Select-Object -Last 10)
+Check 'plugin-served session-check reports on a repo' $ran @($out | Select-Object -Last 10)
 
 # Issue 103: the account registry travels, parses, and names every repo the watchdog serves - the
 # repo list is read from the watchdog script itself so the two cannot drift apart unnoticed.
@@ -960,12 +1088,12 @@ elseif ($null -eq $registry) { $accountsDetail = @("$accounts missing or not JSO
 Check ("restored accounts.json parses and names all {0} watchdog repos" -f $watchdogRepos.Count) `
     ($null -ne $registry -and $watchdogRepos.Count -gt 0 -and $unregistered.Count -eq 0) $accountsDetail
 
-$identityTest = Join-Path $FakeHome '.claude\skills\session-check\identity.test.js'
+$identityTest = Join-Path $Clone 'marketplace\aac-skills\skills\session-check\identity.test.js'
 if (Test-Path $identityTest) {
     $out = & node --test $identityTest 2>&1
-    Check 'restored identity.js passes its own test suite' ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
+    Check 'plugin-served identity.js passes its own test suite' ($LASTEXITCODE -eq 0) @($out | Select-Object -Last 12)
 } else {
-    Check 'restored identity.js passes its own test suite' $false @('identity.test.js was not restored')
+    Check 'plugin-served identity.js passes its own test suite' $false @('identity.test.js is not in the plugin payload')
 }
 
 # ticket-fleet branch-naming + gh/mcp instrument switch (issues 29, 138): the workflow's
@@ -1249,27 +1377,27 @@ if (Test-Path $leakTests) {
 
 # ------------------------------------------------------------------ 9b. claims-audit engine ships
 
-# The claims-audit engine ships via the claude/skills whitelist entry, so the restore places it at
-# ~/.claude/skills/consistency-audit/claims-audit.js on the fake home. The hand-written test suite
-# in this repo's tests/ exercises all four claim types (pass and fail each), plus every claim
-# type's missing-cite path, plus the cross-claim resilience regression (a broken claim mid-batch
-# must not swallow later ones - that was attempt 2's silent crash-and-exit-2 bug). Wiring it here
-# is what turns "a file that could regress" into a gate that catches the regression. Runs against
-# the RESTORED engine from the fake home - not the mirror in the clone - because a broken restore
-# that dropped the engine must fail this check, not silently fall back to the mirror.
+# The claims-audit engine ships in the aac-skills plugin payload at
+# skills/consistency-audit/claims-audit.js (pull stopped writing ~/.claude/skills, issue 734). The
+# hand-written test suite in this repo's tests/ exercises all four claim types (pass and fail each),
+# plus every claim type's missing-cite path, plus the cross-claim resilience regression (a broken
+# claim mid-batch must not swallow later ones - that was attempt 2's silent crash-and-exit-2 bug).
+# Wiring it here is what turns "a file that could regress" into a gate that catches the regression.
+# Runs against the PAYLOAD engine - not the aac-skills/ source - because a build that dropped the
+# engine must fail this check, not silently fall back to the source.
 $claimsAuditTest = Join-Path $Clone 'tests\claims-audit.test.js'
-$restoredEngine  = Join-Path $FakeHome '.claude\skills\consistency-audit\claims-audit.js'
+$restoredEngine  = Join-Path $Clone 'marketplace\aac-skills\skills\consistency-audit\claims-audit.js'
 if ((Test-Path $claimsAuditTest) -and (Test-Path $restoredEngine)) {
     $env:CLAIMS_AUDIT_ENGINE = $restoredEngine
     $out = & node --test $claimsAuditTest 2>&1
     $claimsExit = $LASTEXITCODE
     Remove-Item Env:\CLAIMS_AUDIT_ENGINE
-    Check 'restored claims-audit.js passes tests/claims-audit.test.js' ($claimsExit -eq 0) @($out | Select-Object -Last 20)
+    Check 'plugin-served claims-audit.js passes tests/claims-audit.test.js' ($claimsExit -eq 0) @($out | Select-Object -Last 20)
 } else {
     $detail = @()
     if (-not (Test-Path $claimsAuditTest)) { $detail += ("tests/claims-audit.test.js missing in clone: {0}" -f $claimsAuditTest) }
-    if (-not (Test-Path $restoredEngine))  { $detail += ("engine not restored under fake home: {0}" -f $restoredEngine) }
-    Check 'restored claims-audit.js passes tests/claims-audit.test.js' $false $detail
+    if (-not (Test-Path $restoredEngine))  { $detail += ("engine not in the plugin payload: {0}" -f $restoredEngine) }
+    Check 'plugin-served claims-audit.js passes tests/claims-audit.test.js' $false $detail
 }
 
 # ------------------------------------------------------------------ 9d. issue-87 CRLF-blob byte stability

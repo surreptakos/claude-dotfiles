@@ -56,10 +56,15 @@ never from an intermediate one, so `previous-modified` names the published versi
 ## Layout
 
 - `aac-skills/` — every skill, one tree, hand-edited. The packager builds the plugin payload from
-  it and pull restores it as `~/.claude/skills`.
+  it, and that plugin is how a desktop gets the skills too: pull no longer writes `~/.claude/skills`
+  (issue 734), so a skill named by short name must ship in the payload.
 - `profile/` — what a desktop consumer needs beyond the skills: `profile/claude/CLAUDE.md` (the
-  global rules, and the one source the payload's rules text is copied from), `settings.json`,
-  `hooks/`, `agents/`, the plugin manifests, and `profile/codex/`.
+  global rules, and the one source the payload's rules text is copied from; pull does not restore
+  it - a desktop gets the rules from the plugin hook and pull writes `global-pointer.md` to
+  `~/.claude/CLAUDE.md`, which must never carry the rules' first line, issue 732), `settings.json`,
+  `hooks/` and `tools/` (the packager's source only: pull does not restore them, and
+  `settings.json` names no script the plugin ships, issue 733), `agents/`, the plugin manifests,
+  and `profile/codex/`.
 - `lib/manifest.ps1` — the whitelist of what pull writes, the exclusions, the path templating, the
   secret guard. Adding something to the setup means adding it to `Get-DotfileItems` here.
 - `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before

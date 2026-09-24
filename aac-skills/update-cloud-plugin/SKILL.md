@@ -2,10 +2,10 @@
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin (the single package built from the repo's aac-skills/ tree) when the session-end sweep reports drift. Merging the rebuild is the primary channel; zip upload is the fallback for claude.ai Skills pages. Use when the session-end cloud-skills sweep reports drift or no recorded upload, when the user says the cloud sessions are missing a skill, or after adding or editing a skill that should reach claude.ai/code and Cowork.
 metadata:
-  modified: "2026-09-18T04:29:15Z"
-  previous-modified: "2026-09-18T04:27:06Z"
-  revision: "7"
-  content-sha: "0352dcf5a110"
+  modified: "2026-09-24T05:28:01Z"
+  previous-modified: "2026-09-18T04:29:15Z"
+  revision: "8"
+  content-sha: "4aa3004d4e83"
 ---
 
 # Update the cloud plugin
@@ -17,9 +17,10 @@ does not exist on any account or in any zip.
 
 ## Three skill channels, and the surface each serves
 
-1. **Local** — `~/.claude/skills`. What `sync.ps1 -Mode pull` restores from the repo's
-   `aac-skills/` tree, and what the sweep fingerprints. Serves the desktop Claude Code session on
-   this machine.
+1. **Local** — `~/.claude/skills`. Retired for the aac skills (claude-dotfiles issue 734):
+   `sync.ps1 -Mode pull` wrote the repo's `aac-skills/` tree there until then and no longer does,
+   so the desktop Claude Code session takes them from the plugin, as `aac-skills:<name>` (channel 2,
+   installed at user scope). The sweep still fingerprints whatever tree an older pull left there.
 2. **Project-settings marketplace install** — each repo's `.claude/settings.json` declares
    `extraKnownMarketplaces` + `enabledPlugins`, so a cloud claude.ai/code session clones the
    marketplace itself after git credentials are wired and loads every packaged skill plus the

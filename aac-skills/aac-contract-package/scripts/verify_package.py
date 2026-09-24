@@ -20,9 +20,11 @@ cache, because a cached value is stale until Excel reopens the file.
 Covers the mechanical items only. Designation, which conditional clarifications
 a job earns, BASELINES section 0 merges and print layout stay human. The
 registry entity-name check (section A') is advisory: it WARNs on a mismatch and
-the rep-confirmed name governs (OPEN-DECISIONS item 19).
+the rep-confirmed name governs (OPEN-DECISIONS item 19). The Zoho
+cross-checks (zoho_crosscheck.py) are advisory too: WARN or PASS, SKIP without
+a credential.
 """
-import sys, os, re, fnmatch, warnings
+import sys, os, re, fnmatch, warnings, datetime
 warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -40,6 +42,10 @@ SYSTEMS = ('Intrusion Alarm', 'Video Surveillance', 'Access Control', 'Fire Alar
            'Network', 'Standalone Intercom', 'Visitor Management',
            'Standalone Environmental Monitoring')
 SVC_GROUPS = ('New Services', 'Replacement Services', 'Existing Services')
+# Elevator Monitoring Agreement field shape (issue 335): 15 text fields,
+# no leading dot (unlike the Fire form's widgets), no checkboxes. Used to
+# tell this form apart from the Fire master and from an unmapped form.
+ELEVATOR_MASTER_FIELDS = {f'Text{i}' for i in range(1, 16)}
 
 ENTITY = re.compile(r"\b[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,5}\s*,?\s*"
                     r"(?:Inc\.?|LLC|L\.L\.C\.|Corp\.?|Corporation|Company|Co\.|Ltd\.?"
@@ -59,6 +65,35 @@ def money(v):
     m = re.search(r'[\d,]+\.?\d*', str(v))
     return float(m.group(0).replace(',', '')) if m else None
 
+_DATE_FORMATS = ('%m/%d/%Y', '%m/%d/%y', '%m-%d-%Y', '%Y-%m-%d',
+                 '%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y')
+
+def parse_date(v):
+    """A date from a cell value or a form-field string; None when it is not one."""
+    import datetime as _dt
+    if isinstance(v, _dt.datetime): return v.date()
+    if isinstance(v, _dt.date): return v
+    t = re.sub(r'\s+', ' ', str(v or '')).strip()
+    for fmt in _DATE_FORMATS:
+        try: return _dt.datetime.strptime(t, fmt).date()
+        except ValueError: pass
+    return None
+
+def schedule_date(S, end_row):
+    """(date, where) for the schedule header's Date cell: column G on the
+    first column-E 'Date' label above end_row. The template ships that cell
+    as =TODAY(), which shows the day the schedule is opened, so it reads as
+    today; a literal date reads as itself. (None, reason) otherwise."""
+    import datetime as _dt
+    r = S.row_where('E', lambda x: x.rstrip(':').strip().lower() == 'date', end=end_row)
+    if not r:
+        return None, 'no Date label in the schedule header'
+    raw = S.ws[f'G{r}'].value
+    if isinstance(raw, str) and re.fullmatch(r'=\s*TODAY\(\s*\)', raw.strip(), re.I):
+        return _dt.date.today(), f'G{r} =TODAY()'
+    d = parse_date(raw) or parse_date(S.v(f'G{r}'))
+    return (d, f'G{r}') if d else (None, f'G{r} holds no date')
+
 def parts_in(s):
     out = []
     for tok in re.findall(r'[A-Za-z0-9./+-]+', s or ''):
@@ -73,6 +108,13 @@ def parts_in(s):
 # live here (2026-08-24 portfolio diag: 15 jobs with only "Old docs" drafts).
 SKIP_DIRS = ('old', 'old docs', 'old documents', 'archive', 'archived',
              'superseded', 'backup', 'backups')
+
+# Drafted-schedule name patterns. '*Svc Schedule.xlsx' catches the Sales Admin
+# form '<customer>_<site> - <systems> Svc Schedule.xlsx', which carries no
+# "Equip &" token (issue 302).
+SCHED_PATTERNS = ['*Equip & Svc Schedule*.xlsx', '*Equip & Services*.xlsx',
+                  '*Equip & Svc*.xlsx', '*Equip*Sv*Schedule*.xlsx',
+                  '*Service Schedule*.xlsx', '*Svc Schedule.xlsx']
 
 def find_files(job, patterns, exclude=()):
     hits = []
@@ -94,6 +136,51 @@ def pdf_fields(path):
                 for k, v in (PdfReader(path).get_fields() or {}).items()}
     except Exception:
         return {}
+
+# Section H recognizes exactly the master forms build_package.py fills:
+# Commercial Fire, Commercial Security (issue 336) and Residential Security
+# (issue 337) share the name/term/billing checks through MASTER_FORM_SPECS;
+# the Elevator Monitoring Agreement (issue 335) has its own checks keyed on
+# ELEVATOR_MASTER_FIELDS. Any other master has no field map and SKIPs, per
+# docs/verifier-coverage.md. Detection is an exact
+# field-name signature — each form's field dump is fixed, so this never
+# mistakes one for another — not the field-count heuristic this replaced.
+MASTER_FORM_SPECS = {
+    'fire': {'name_key': 'Text2', 'term_key': 'Text16',
+             'billing_re': re.compile(r'CheckBox[5-8]$'),
+             'billing_names': {5: 'Monthly', 6: 'Quarter Annually',
+                               7: 'Semi-Annually', 8: 'Annually'}},
+    'security': {'name_key': 'Text2', 'term_key': 'Text25',
+                 'billing_re': re.compile(r'CheckBox(1[1-4])$'),
+                 'billing_names': {11: 'Monthly', 12: 'Quarter Annually',
+                                   13: 'Semi-Annually', 14: 'Annually'}},
+    # Residential Security (issue 337): term is Text22 and the four billing
+    # options sit at CheckBox11/12/13/14.
+    'residential': {'name_key': 'Text2', 'term_key': 'Text22',
+                    'billing_re': re.compile(r'CheckBox(1[1-4])$'),
+                    'billing_names': {11: 'Monthly', 12: 'Quarter Annually',
+                                      13: 'Semi-Annually', 14: 'Annually'}},
+}
+
+
+def _master_form_kind(mf):
+    """'fire', 'security', 'residential', 'elevator', or None for a master
+    field dump this verifier does not have a map for."""
+    if not mf:
+        return None
+    if set(mf) == ELEVATOR_MASTER_FIELDS:
+        return 'elevator'
+    if '.Text2' in mf and '.CheckBox17' in mf:
+        return 'fire'
+    if 'Text2' in mf and 'CheckBox40' in mf:
+        return 'security'
+    # Residential master fingerprint (issue 337): field names carry no
+    # leading dot (unlike Fire), and 'Text1444' / 'CheckBox34' are two field
+    # names unique to this form's own layout (the "Other (Describe):"
+    # free-text box and the IN LIEU OF checkbox).
+    if 'Text1444' in mf and 'CheckBox34' in mf:
+        return 'residential'
+    return None
 
 # Poppler pdftotext (bundled with poppler-utils on Linux and poppler-windows
 # on Windows) is a runtime prerequisite for the proposal-reconciliation and
@@ -236,6 +323,109 @@ def _cite(n):
     return f'checklist item {n}, {CHECKLIST}'
 
 
+# ---- layout and structure helpers (issue 228, wave 1b) ----
+# Governing rules for section K below: DRAFTER-PRESEND-CHECKLIST.md items 5,
+# 16, 27, 28, 31. The amended multi-Site/multi-System cell map these lean on
+# is SCHEDULE-GENERATION-PROCEDURE.md §4. Findings cite the item number and
+# file rather than restate the rule (hard rule 1).
+TEMPLATE_TABS = ('Covered Equipment - Security', 'Covered Equipment - Fire',
+                  'Covered Sites')
+
+
+def _site_system_lines(S, rows):
+    """(row, kind, text) for every Site:/System: labeled line in column B
+    across `rows`; kind is 'site' or 'system'."""
+    out = []
+    for r in rows:
+        b = S.col('B', r).strip()
+        low = b.lower()
+        if low.startswith('site:'):
+            out.append((r, 'site', b))
+        elif low.startswith('system:'):
+            out.append((r, 'system', b))
+    return out
+
+
+def _dup_site_system(lines, label):
+    """Duplicate Site lines, and duplicate System lines within one Site's
+    block, from `_site_system_lines` output. Returns problem strings."""
+    problems = []
+    site_counts = {}
+    current_site = None
+    current_systems = {}
+
+    def flush():
+        for name, count in current_systems.items():
+            if count > 1:
+                problems.append(f'{label}: duplicate System line "{name}" '
+                                 f'({count}x) under {current_site or "(no Site line yet)"}')
+
+    for _, kind, text in lines:
+        if kind == 'site':
+            flush()
+            site_counts[text] = site_counts.get(text, 0) + 1
+            current_site = text
+            current_systems = {}
+        else:
+            current_systems[text] = current_systems.get(text, 0) + 1
+    flush()
+    for name, count in site_counts.items():
+        if count > 1:
+            problems.append(f'{label}: duplicate Site line "{name}" ({count}x)')
+    return problems
+
+
+def _tab_device_counts(ws):
+    """Numeric values two columns right of a text label, anywhere on the
+    sheet. The Covered Equipment addenda lay out device name / count pairs
+    this way (name in A, count in C; name in E, count in G); used only to
+    see whether any count was ever entered on a tab the deal actually uses."""
+    nums = []
+    for row in ws.iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str) and cell.value.strip():
+                try:
+                    right = ws.cell(row=cell.row, column=cell.column + 2).value
+                except Exception:
+                    right = None
+                if isinstance(right, (int, float)):
+                    nums.append(right)
+    return nums
+
+
+def _used_max_col(ws, max_row):
+    """Rightmost column actually holding a value, up to max_row. Excel and
+    openpyxl both report a sheet's max_column from formatting-only cells
+    (merges, carried-over styling) with no content, which overstates the
+    printable range; scanning values avoids that false positive."""
+    max_c = 0
+    for row in ws.iter_rows(min_row=1, max_row=max_row):
+        for cell in row:
+            if cell.value not in (None, '') and cell.column > max_c:
+                max_c = cell.column
+    return max_c
+
+
+def _print_area_bounds(print_area):
+    """max (col, row) covered by a worksheet's print_area string, which may
+    list several ranges separated by commas and sheet-qualified with a
+    leading `'Name'!`. Returns (None, None) when unparsable."""
+    max_col = max_row = None
+    for part in str(print_area).split(','):
+        part = part.strip()
+        if '!' in part:
+            part = part.split('!', 1)[1]
+        part = part.replace('$', '')
+        try:
+            from openpyxl.utils.cell import range_boundaries
+            _, _, c2, r2 = range_boundaries(part)
+        except Exception:
+            continue
+        max_col = c2 if max_col is None else max(max_col, c2)
+        max_row = r2 if max_row is None else max(max_row, r2)
+    return max_col, max_row
+
+
 # Filename substrings that mark a workbook as NOT the work-up. A schedule,
 # an agreement, a proposal, and the template all live alongside the WU in
 # some folders and share the .xlsx extension; the schedule tab-based
@@ -244,6 +434,10 @@ _WU_EXCLUDE = ('template', 'equip & s', 'schedule', 'agreement',
                'proposal', 'master', 'rider', 'covered equipment', 'fsi')
 _WU_INCLUDE = ('workup', 'work up', 'work-up', 'wu-', ' wu ', 'wu ',
                '- wu', 'wu.', 'fire-lite', 'fire lite')
+# A job's working copy of the master WU template: '<date>-Master WU Template
+# <anything> rev<N>.xlsx'. The rev suffix separates it from the pristine
+# template, which carries none (issue 302).
+_WU_TEMPLATE_COPY = re.compile(r'master wu template.*rev\s*\d+\.xls[xm]$')
 
 
 def _find_workup(job):
@@ -267,10 +461,11 @@ def _find_workup(job):
             ext = os.path.splitext(f)[1].lower()
             if ext not in ('.xlsx', '.xlsm'):
                 continue
-            if not any(k in low for k in _WU_INCLUDE):
-                continue
-            if any(k in low for k in _WU_EXCLUDE):
-                continue
+            if not _WU_TEMPLATE_COPY.search(low):
+                if not any(k in low for k in _WU_INCLUDE):
+                    continue
+                if any(k in low for k in _WU_EXCLUDE):
+                    continue
             hits.append(os.path.join(dirpath, f))
     return sorted(set(hits), key=os.path.getmtime, reverse=True)
 
@@ -355,12 +550,21 @@ def _outgoing_pdfs(job):
             and 'lease agreement' not in os.path.basename(p).lower()]
 
 
-def _foreign_entities(text, sub_name):
+def _entity_norm(s):
+    return re.sub(r'\s+', ' ', str(s or '')).strip().strip('.,').strip().lower()
+
+
+def _foreign_entities(text, sub_name, known_parties=()):
     """Extract entity-shaped names from ``text`` that are neither the
     subscriber nor Active Alarm. Case-insensitive substring check against
     the subscriber name is enough to swallow "Acme Corp" when the
     subscriber is "Acme Corporation, Inc." — the ENTITY regex fires on
-    both forms."""
+    both forms.
+
+    ``known_parties`` are other parties this schedule names on purpose (the
+    installing party of a services-only schedule, issue 303); an entity that
+    matches one of them is not foreign."""
+    known = [k for k in (_entity_norm(p) for p in known_parties) if len(k) >= 4]
     out = set()
     for mm in ENTITY.finditer(text or ''):
         nm = mm.group(0).strip()
@@ -368,8 +572,53 @@ def _foreign_entities(text, sub_name):
             continue
         if 'Active Alarm' in nm:
             continue
+        n = _entity_norm(nm)
+        if any(n == k or n in k or k in n for k in known):
+            continue
         out.add(nm)
     return out
+
+
+# ---- services-only schedules (issue 303) ----
+# Governing text: references/SOW-BASELINES.md §7.13 (the services-only
+# template and its signals) and references/MAPPING-APPENDIX.md §3a "Repair
+# Service start date" (the two-amount presentation). The strings below are
+# the literal tokens the verifier searches for; the rules stay in those files.
+SERVICES_ONLY_OPENER = 'will provide the recurring services listed in the Services section'
+INSTALLING_PARTY = re.compile(
+    r'installation agreement with\s+(.+?)(?:\.(?=\s|$)|$)', re.I | re.S)
+RS_START_SUFFIX = '(begins one year from installation completion date)'
+RS_TWO_AMOUNTS = re.compile(
+    r'\$\s?([\d,]+(?:\.\d+)?)\s+for one year following installation completion'
+    r'\s+and\s+\$\s?([\d,]+(?:\.\d+)?)\s+per month thereafter', re.I)
+SERVICES_ONLY_REF = 'SOW-BASELINES.md §7.13'
+
+
+def _services_only_signals(S, sow, eq_hdr, eq_lbl, pp_row, price):
+    """Return ``{signal_name: bool}`` for the three services-only signals
+    named in SOW-BASELINES.md §7.13: the Equipment and Labor block reads
+    N/A, the Purchase Price is zero, and the SOW carries the services-only
+    opener. The caller treats the schedule as services-only only when all
+    three hold."""
+    start = (eq_hdr or eq_lbl) + 1
+    texts = [S.col('B', r).strip() for r in range(start, pp_row)]
+    texts = [t for t in texts if t and not t.startswith(('Site:', 'System:'))]
+    if not texts:
+        texts = [S.col('A', r).strip() for r in range(start, pp_row)
+                 if S.col('A', r).strip()]
+    eq_na = bool(texts) and all(t.upper() == 'N/A' for t in texts)
+    return {
+        'equipment block reads N/A': eq_na,
+        'Purchase Price is 0': price is not None and abs(price) < 0.01,
+        'SOW carries the services-only opener': SERVICES_ONLY_OPENER.lower() in (sow or '').lower(),
+    }
+
+
+def _installing_parties(sow):
+    """Names following "installation agreement with" in a services-only SOW
+    (SOW-BASELINES.md §7.13)."""
+    return [m.group(1).strip() for m in INSTALLING_PARTY.finditer(sow or '')
+            if m.group(1).strip()]
 
 
 _SUM_RE = re.compile(r'^=SUM\(([A-Z]+)(\d+):([A-Z]+)(\d+)\)$')
@@ -407,6 +656,25 @@ def _match_sum_range(f):
     return c1, a, b
 
 
+def _full_calc_on_load(path):
+    """True when the workbook's calcPr carries fullCalcOnLoad="1".
+
+    xlsx_surgical sets that flag on every write, declaring every cached
+    formula value stale until Excel recalculates; Excel drops it on save.
+    A formula cell's cached value in such a file is whatever the source
+    template last cached, not a value computed for this schedule. Read from
+    workbook.xml directly: openpyxl reports True when the attribute is absent.
+    """
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            wb_xml = z.read('xl/workbook.xml').decode('utf8', 'replace')
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return False
+    m = re.search(r'<calcPr\b[^>]*\bfullCalcOnLoad="(1|true)"', wb_xml)
+    return m is not None
+
+
 class Sheet:
     """Label-anchored view of an Equip & Services tab."""
     def __init__(self, path):
@@ -416,6 +684,7 @@ class Sheet:
         self.ws = self.wb[SHEET]
         self.wsv = self.wbv[SHEET]
         self.maxr = self.ws.max_row
+        self.stale_formula_cache = _full_calc_on_load(path)
 
     def t(self, ref):
         v = self.ws[ref].value
@@ -480,9 +749,7 @@ def verify(job):
     global _pdftotext_missing_warned
     _pdftotext_missing_warned = False
     job = job.rstrip('\\/')
-    scheds = find_files(job, ['*Equip & Svc Schedule*.xlsx', '*Equip & Services*.xlsx',
-                              '*Equip & Svc*.xlsx', '*Equip*Sv*Schedule*.xlsx',
-                              '*Service Schedule*.xlsx'], exclude=['Template', 'BACKUP'])
+    scheds = find_files(job, SCHED_PATTERNS, exclude=['Template', 'BACKUP'])
     if not scheds:
         pdfs = find_files(job, ['*Equip & Svc*.pdf', '*Equip & Services*.pdf'], exclude=['Template'])
         rec('N/A', 'Drafted schedule present',
@@ -558,15 +825,58 @@ def verify(job):
                 f'schedule "{sub_name}" vs registry "{legal}" ({tag}); '
                 f'rep-confirmed name governs (see DRAFTER-PRESEND-CHECKLIST A.1)')
 
+    # ---- Zoho cross-checks (advisory WARN/SKIP only; issue 229) ----
+    # Hard rule 5: Zoho is validated against the package, never trusted, and
+    # nothing read from Zoho is written anywhere. See zoho_crosscheck.py.
+    try:
+        import zoho_crosscheck
+        mt_val = S.resolve(f'G{mt_row}')[0] if mt_row else None
+        zoho_crosscheck.run(
+            job, rec,
+            prospect=S.col('G', pro_row).strip() if pro_row else '',
+            subscriber=sub_name,
+            site=site.splitlines()[0].strip() if site else '',
+            monthly_total=mt_val,
+            workups=_find_workup(job))
+    except Exception as e:
+        rec('SKIP', 'Zoho cross-checks ran', f'{type(e).__name__}: {e}')
+
     # ---------------- B) scope of work ----------------
     sow = ' '.join(S.col('A', r) for r in range(sow_lbl + 1, min(sow_lbl + 4, eq_lbl))).strip()
-    if not sow or sow.lower().rstrip() in ('active alarm company will', 'active alarm company will '):
+
+    # Services-only recognition (SOW-BASELINES.md §7.13, issue 303). All three
+    # signals must hold; a partial set WARNs and the ordinary checks run.
+    eq_hdr = next((r for r in qty_hdrs if r > eq_lbl), None)
+    price, psrc = S.resolve(f'G{pp_row}')
+    so_signals = _services_only_signals(S, sow, eq_hdr, eq_lbl, pp_row, price)
+    services_only = all(so_signals.values())
+    installing = _installing_parties(sow) if services_only else []
+    if services_only:
+        rec('PASS', 'Services-only schedule recognised',
+            f'{SERVICES_ONLY_REF}; ' + ', '.join(so_signals)
+            + (f'; installing party: {"; ".join(installing)}' if installing else ''))
+    elif any(so_signals.values()):
+        rec('WARN', 'Services-only schedule recognised',
+            f'{SERVICES_ONLY_REF}; only some signals present — has: '
+            + ', '.join(k for k, v in so_signals.items() if v)
+            + '; lacks: ' + ', '.join(k for k, v in so_signals.items() if not v))
+    so_skip = f'services-only schedule ({SERVICES_ONLY_REF}): no equipment is sold on it'
+
+    sow_written = bool(sow) and sow.lower().rstrip() != 'active alarm company will'
+    if not sow_written:
         rec('FAIL', 'Scope of work written', '(empty or stub)')
+    elif services_only:
+        rec('PASS' if CANON[0] in sow else 'WARN', f'SOW carries "{CANON[0][:38]}"')
+        rec('PASS', 'SOW opens with the services-only opener',
+            f'{SERVICES_ONLY_REF}; replaces "{CANON[1][:38]}"')
+        rec('PASS', 'SOW designation token present',
+            f'{SERVICES_ONLY_REF}: the services-only template carries no designation token')
     else:
         for frag in CANON:
             rec('PASS' if frag in sow else 'WARN', f'SOW carries "{frag[:38]}"')
         rec('PASS' if any(f' {d} ' in sow.lower() for d in DESIGNATIONS) else 'WARN',
             'SOW designation token present', '/'.join(DESIGNATIONS))
+    if sow_written:
         rec('FAIL' if re.search(r'\bproposal\b', sow, re.I) else 'PASS', 'SOW does not say "proposal"')
         for tok in ('[', ']', 'TBD'):
             rec('FAIL' if tok in sow else 'PASS', f'No "{tok}" in the SOW')
@@ -574,9 +884,12 @@ def verify(job):
         rec('FAIL' if pn else 'PASS', 'No part numbers in the SOW', ', '.join(pn[:4]))
 
     # ---------------- C) equipment block ----------------
-    eq_hdr = next((r for r in qty_hdrs if r > eq_lbl), None)
     eq_end = pp_row - 1
-    if not eq_hdr:
+    if services_only:
+        rec('PASS', 'Equipment and Labor section reads N/A', SERVICES_ONLY_REF)
+        rec('SKIP', 'Equipment line checks', so_skip)
+        eq_items = []
+    elif not eq_hdr:
         rec('SKIP', 'Equipment line checks', 'no Qty/Description header after the EQUIPMENT heading')
         eq_items = []
     else:
@@ -603,8 +916,10 @@ def verify(job):
     pp_match = _match_sum_range(f_pp)
     rec('PASS' if pp_match and pp_match[0] == 'G' else 'WARN',
         'Purchase Price is a SUM over the equipment rows', f_pp or '(empty)')
-    price, psrc = S.resolve(f'G{pp_row}')
-    rec('PASS' if price else 'FAIL', 'Purchase Price non-zero', f'{price} ({psrc})')
+    if services_only:
+        rec('SKIP', 'Purchase Price non-zero', f'{so_skip}; Purchase Price {price} ({psrc})')
+    else:
+        rec('PASS' if price else 'FAIL', 'Purchase Price non-zero', f'{price} ({psrc})')
     dep = money(S.v(f'G{dep_row}')) if dep_row else None
     if bal_row:
         fb = S.col('G', bal_row).replace(' ', '')
@@ -642,15 +957,51 @@ def verify(job):
     else:
         rec('SKIP', 'Services block checks', 'no SERVICES header or Monthly Total label')
 
+    # ---- Repair Service two-amount presentation (MAPPING-APPENDIX.md §3a) ----
+    # Checked on services-only schedules (issue 303); how it applies to other
+    # schedules is left to the ordinary review.
+    if services_only:
+        item = 'Repair Service two-amount presentation (MAPPING-APPENDIX.md §3a)'
+        rs_rows = [r for r in svc_items if 'repair service' in S.col('B', r).lower()]
+        if not rs_rows:
+            rec('SKIP', item, 'no Repair Service line in the Services section')
+        else:
+            probs = [f'B{r} does not end "{RS_START_SUFFIX}"' for r in rs_rows
+                     if not S.col('B', r).strip().endswith(RS_START_SUFFIX)]
+            mt, _ = S.resolve(f'G{mt_row}') if mt_row else (None, '')
+            m = RS_TWO_AMOUNTS.search(sow or '')
+            if not m:
+                probs.append('SOW does not state both monthly amounts')
+            else:
+                first, second = money(m.group(1)), money(m.group(2))
+                if mt is None or abs(second - mt) >= 0.01:
+                    probs.append(f'SOW second amount {second:,.2f} vs Monthly Total '
+                                 f'{mt if mt is None else f"{mt:,.2f}"}')
+            if probs:
+                rec('FAIL', item, '; '.join(probs))
+            else:
+                rec('PASS', item,
+                    f'{len(rs_rows)} Repair Service line(s) carry the start-date suffix; '
+                    f'SOW states {first:,.2f} then {second:,.2f} = Monthly Total')
+
     # ---------------- F) clarifications and exclusions ----------------
     clar, excl, cell = S.clarifications()
+    so_clar = (f'services-only schedule ({SERVICES_ONLY_REF} sets which bullets it keeps; '
+               f'no count range is ratified for it)')
     if not clar:
         rec('SKIP', 'Clarifications block', 'not located')
     else:
         nc, ne = clar.count('•'), excl.count('•')
-        rec('PASS' if CLAR_RANGE[0] <= nc <= CLAR_RANGE[1] else 'WARN',
-            f'Clarification count within {CLAR_RANGE[0]}-{CLAR_RANGE[1]}', f'{nc} (cell {cell})')
-        if excl:
+        if services_only:
+            rec('SKIP', f'Clarification count within {CLAR_RANGE[0]}-{CLAR_RANGE[1]}',
+                f'{so_clar}; {nc} (cell {cell})')
+        else:
+            rec('PASS' if CLAR_RANGE[0] <= nc <= CLAR_RANGE[1] else 'WARN',
+                f'Clarification count within {CLAR_RANGE[0]}-{CLAR_RANGE[1]}', f'{nc} (cell {cell})')
+        if excl and services_only:
+            rec('SKIP', f'Exclusion count within {EXCL_RANGE[0]}-{EXCL_RANGE[1]}',
+                f'{so_clar}; {ne}')
+        elif excl:
             rec('PASS' if EXCL_RANGE[0] <= ne <= EXCL_RANGE[1] else 'WARN',
                 f'Exclusion count within {EXCL_RANGE[0]}-{EXCL_RANGE[1]}', str(ne))
         else:
@@ -675,8 +1026,12 @@ def verify(job):
                and not re.search(r'permit fee|fees,|fees and|fees assessed', b.lower())]
         rec('FAIL' if bad else 'PASS', 'No exclusion excludes permit procurement',
             bad[0].strip()[:70] if bad else '')
-        rec('PASS' if 'procure the permits' in body else 'WARN',
-            'Permit procurement clarification present')
+        if services_only:
+            rec('SKIP', 'Permit procurement clarification present',
+                f'services-only schedule ({SERVICES_ONLY_REF}): installation bullets come out')
+        else:
+            rec('PASS' if 'procure the permits' in body else 'WARN',
+                'Permit procurement clarification present')
         if price:
             has = '50% deposit' in body or '50 % deposit' in body
             if price > DEPOSIT_THRESHOLD:
@@ -691,7 +1046,11 @@ def verify(job):
 
     # ---------------- G) proposal reconciliation ----------------
     props = find_files(job, ['*Proposal*.pdf'], exclude=['Old'])
-    if not props:
+    if services_only:
+        rec('SKIP', 'Purchase Price equals the proposal total',
+            f'{so_skip}; any installation proposal belongs to the installing '
+            f'party\'s deal')
+    elif not props:
         rec('SKIP', 'Purchase Price equals the proposal total', 'no proposal PDF in folder')
     else:
         pt = pdf_text(props[0])
@@ -714,38 +1073,113 @@ def verify(job):
                 f'schedule {price} vs proposal {pv} ({pname})')
 
     # ---------------- H) master agreement and rider ----------------
-    masters = find_files(job, ['*Master Agreement*.pdf', '*All in One*.pdf', '*Agreements*.pdf'],
+    masters = find_files(job, ['*Master Agreement*.pdf', '*All in One*.pdf', '*Agreements*.pdf',
+                              '*Elevator Monitoring Agreement*.pdf'],
                          exclude=['Old', 'Rider', 'LEASE AGREEMENT'])
     riders = find_files(job, ['*Rider*.pdf'], exclude=['Old'])
+    kind = None
     if not masters:
         rec('SKIP', 'Master agreement checks', 'no master agreement PDF in folder')
         mterm = None
+        mf = {}
     else:
         mf = pdf_fields(masters[0])
-        known_fire = any(k.startswith('.Text') for k in mf) and any(k.startswith('.CheckBox') for k in mf)
-        if mf and not known_fire:
+        kind = _master_form_kind(mf)
+        if mf and kind is None:
             rec('SKIP', 'Master agreement field checks',
-                f'{os.path.basename(masters[0])} is not the mapped Commercial Fire form '
-                f'({len(mf)} fields); residential and commercial security forms use a different map')
+                f'{os.path.basename(masters[0])} is not a mapped form '
+                f'({len(mf)} fields); no field map for this form')
             mf = {}
             mterm = None
         if not mf:
             rec('SKIP', 'Master agreement checks',
                 f'{os.path.basename(masters[0])} has no form fields (flattened or signed)')
             mterm = None
+        elif kind == 'elevator':
+            # Elevator Monitoring Agreement (issue 335): 15 text fields, no
+            # checkboxes, term fixed in §5 clause text rather than a field
+            # (§5: "The term of this agreement shall be for a period of
+            # five years."). issue 357: that fixed five-year term is still
+            # the master term DRAFTER-PRESEND-CHECKLIST.md item 12 checks
+            # the rider against — set it here so section H compares it
+            # rather than skipping for "form not mapped".
+            mname = str(mf.get('Text3') or '').strip()
+            rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
+                'Elevator Monitoring Agreement Subscriber name matches the schedule',
+                f'master "{mname}" vs schedule "{sub_name}"'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 3')
+            # Filled and equal to the schedule date; reconciling a mismatch is
+            # the human's (DRAFTER-PRESEND-CHECKLIST.md item 5).
+            mdate_raw = str(mf.get('Text1') or '').strip()
+            mdate = parse_date(mdate_raw)
+            sdate, how = schedule_date(S, sow_lbl)
+            rec('PASS' if mdate and sdate and mdate == sdate else 'FAIL',
+                'Elevator Monitoring Agreement date matches the schedule date',
+                f'master "{mdate_raw or "(empty)"}"'
+                + (' (not a date)' if mdate_raw and not mdate else '')
+                + f' vs schedule {sdate.isoformat() if sdate else "(none)"} ({how})'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 5')
+            mamt = money(mf.get('Text14'))
+            sched_mt = S.resolve(f'G{mt_row}')[0] if mt_row else None
+            rec('PASS' if (mamt is not None and sched_mt is not None
+                          and abs(mamt - sched_mt) < 0.01) else 'FAIL',
+                'Elevator Monitoring Agreement monthly amount matches the schedule',
+                f'master {mamt if mamt is not None else "(empty)"} vs schedule '
+                f'Monthly Total {sched_mt if sched_mt is not None else "(empty)"}'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 11; MAPPING-APPENDIX.md §3')
+            mterm = '5 years'
         else:
+            spec = MASTER_FORM_SPECS[kind]
             mtext = ' '.join(str(v) for v in mf.values())
-            mname = next((str(v).strip() for k, v in mf.items() if k.endswith('Text2')), '')
+            mname = next((str(v).strip() for k, v in mf.items()
+                          if k.endswith(spec['name_key'])), '')
             rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
                 'Master Subscriber name matches the schedule',
                 f'master "{mname}" vs schedule "{sub_name}"')
-            mterm = next((str(v).strip() for k, v in mf.items() if k.endswith('Text16')), '')
+            mterm = next((str(v).strip() for k, v in mf.items()
+                          if k.endswith(spec['term_key'])), '')
             rec('PASS' if mterm and re.search(r'\d', mterm) else 'FAIL',
                 'Master term filled', mterm or '(empty)')
-            billing = [k for k in mf if re.search(r'CheckBox[5-8]$', k)
+            billing = [k for k in mf if spec['billing_re'].search(k)
                        and str(mf[k]) not in ('', '/Off')]
             rec('PASS' if len(billing) == 1 else 'FAIL',
                 'Exactly one billing frequency ticked', ', '.join(billing) or 'none')
+            if kind == 'residential':
+                # Residential (d) Service paragraph: CONTRACT-PACKAGE-RULES.md
+                # §2.7 "Service is always checked on all agreements" — exactly
+                # one of (d)(i) per-call or (d)(ii) monthly must be ticked.
+                service = [k for k in mf if re.search(r'CheckBox(29|30)$', k)
+                          and str(mf[k]) not in ('', '/Off')]
+                rec('PASS' if len(service) == 1 else 'FAIL',
+                    'Exactly one Service option ticked', ', '.join(service) or 'none')
+                mdate = str(mf.get('Text1', '') or '').strip()
+                # Purchase Price / Down Payment / Balance are direct form
+                # fields on this master (Text6/7/8), unlike the Fire form's
+                # delegation to the attached schedule — read the field
+                # values themselves rather than pdftotext's rendering (J-7
+                # above SKIPs on this form for exactly that reason: the
+                # label and the typed value do not land within its 25-char
+                # window in the extracted text layer).
+                def _num(s):
+                    try:
+                        return float(str(s).replace(',', ''))
+                    except (TypeError, ValueError):
+                        return None
+                mp, mdp, mbal = (_num(mf.get('Text6')), _num(mf.get('Text7')),
+                                _num(mf.get('Text8')))
+                if price is None or dep is None:
+                    rec('SKIP', 'Master price fields match the schedule',
+                        'schedule Purchase Price or Deposit unresolved')
+                else:
+                    want_bal = price - dep
+                    ok = (mp is not None and abs(mp - price) < 0.01
+                         and mdp is not None and abs(mdp - dep) < 0.01
+                         and mbal is not None and abs(mbal - want_bal) < 0.01)
+                    rec('PASS' if ok else 'FAIL',
+                        'Master price fields match the schedule',
+                        f'master Purchase Price {mf.get("Text6")!r}, Down Payment '
+                        f'{mf.get("Text7")!r}, Balance {mf.get("Text8")!r} vs schedule '
+                        f'price {price}, deposit {dep}')
             foreign = set()
             for v in mf.values():
                 for mm in ENTITY.finditer(str(v)):
@@ -759,6 +1193,20 @@ def verify(job):
             rec('WARN' if tbd else 'PASS', 'No "TBD" outside the two date fields',
                 ', '.join(tbd[:5]) + '  (TBD is acceptable only in approximate start and '
                 'substantial-completion dates)' if tbd else '')
+
+            # Commercial Security carries fields the Fire form does not:
+            # an execution date and its own §2/§4(b) service-box pair.
+            if kind == 'security':
+                mdate = next((str(v).strip() for k, v in mf.items()
+                              if k.endswith('Text1')), '')
+                rec('PASS' if re.search(r'\d{1,2}/\d{1,2}/\d{2,4}', mdate) else 'FAIL',
+                    'Master agreement date filled', mdate or '(empty)')
+                service_on = str(mf.get('CheckBox2', '')) not in ('', '/Off')
+                percall_on = str(mf.get('CheckBox17', '')) not in ('', '/Off')
+                monthly_on = str(mf.get('CheckBox18', '')) not in ('', '/Off')
+                rec('PASS' if service_on and (percall_on != monthly_on) else 'FAIL',
+                    'Service boxes: Service checked, exactly one of per-call/contracted ticked',
+                    f'Service={service_on}, per-call={percall_on}, contracted={monthly_on}')
     if riders and masters:
         rf = pdf_fields(riders[0])
         if rf:
@@ -775,6 +1223,17 @@ def verify(job):
                 a = re.search(r'\d+', mterm or ''); b = re.search(r'\d+', rterm)
                 rec('PASS' if a and b and a.group(0) == b.group(0) else 'FAIL',
                     'Rider term equals master term', f'master "{mterm}" vs rider "{rterm}"')
+            if kind == 'residential':
+                # DRAFTER-PRESEND-CHECKLIST.md item 14: "Rider: subscriber
+                # name and agreement date match the master." Both forms
+                # leave this field blank until signing (CLAUDE.md hard rule
+                # 4 permits TBD only in the schedule-date fields, not here),
+                # so two blanks are as much a match as two identical dates.
+                rdate = next((str(v).strip() for k, v in rf.items()
+                             if k.lower().startswith('text2')), '')
+                rec('PASS' if mdate == rdate else 'FAIL',
+                    'Rider agreement date matches the master',
+                    f'master "{mdate}" vs rider "{rdate}"')
     elif masters:
         rec('SKIP', 'Rider checks', 'no rider PDF in folder')
 
@@ -800,7 +1259,10 @@ def verify(job):
             wu_total = None
 
     # J-22: Schedule Purchase Price equals the work-up total.
-    if not wus:
+    if services_only:
+        rec('SKIP', 'Schedule Purchase Price equals the work-up total',
+            f'{_cite(22)}; {so_skip}')
+    elif not wus:
         rec('SKIP', 'Schedule Purchase Price equals the work-up total',
             f'{_cite(22)}; no work-up workbook in the folder')
     elif wu_total is None:
@@ -887,28 +1349,36 @@ def verify(job):
             + ', '.join(disc_sources))
 
     # J-9: Billing frequency is Quarter Annually specifically.
-    # On the Commercial Fire form CheckBox5/6/7/8 = Monthly / Quarter Annually /
-    # Semi-Annually / Annually. The customer's-written-request exception in the
-    # checklist item makes any non-Quarter tick a WARN, not a FAIL.
+    # Billing-checkbox keys and names come from MASTER_FORM_SPECS[kind] — the
+    # Commercial Fire master numbers these boxes differently from the
+    # Commercial Security (issue 336) and Residential Security (issue 337)
+    # masters. The customer's-written-request exception in
+    # the checklist item makes any non-Quarter tick a WARN, not a FAIL.
     if not masters:
         rec('SKIP', 'Billing frequency is Quarter Annually',
             f'{_cite(9)}; no master agreement in the folder')
-    elif not mf:
+    elif not mf or kind is None:
         rec('SKIP', 'Billing frequency is Quarter Annually',
             f'{_cite(9)}; master form fields not readable on this form')
     else:
+        # The Elevator Monitoring Agreement has no billing checkboxes (a
+        # free-text frequency blank), so it has no spec here and falls to
+        # the "no billing-frequency checkboxes" SKIP below.
+        billing_names = MASTER_FORM_SPECS.get(kind, {}).get('billing_names', {})
         billing = {}
-        for k, v in mf.items():
-            m = re.search(r'CheckBox([5-8])$', k)
-            if not m:
-                continue
-            billing[int(m.group(1))] = str(v) not in ('', '/Off')
+        if billing_names:
+            billing_re = re.compile(r'CheckBox(' +
+                                    '|'.join(str(n) for n in billing_names) + r')$')
+            for k, v in mf.items():
+                m = billing_re.search(k)
+                if not m:
+                    continue
+                billing[int(m.group(1))] = str(v) not in ('', '/Off')
         if not billing:
             rec('SKIP', 'Billing frequency is Quarter Annually',
                 f'{_cite(9)}; no billing-frequency checkboxes on this master form')
         else:
-            names = {5: 'Monthly', 6: 'Quarter Annually',
-                     7: 'Semi-Annually', 8: 'Annually'}
+            names = billing_names
             ticked = [names[k] for k, v in billing.items() if v]
             if ticked == ['Quarter Annually']:
                 rec('PASS', 'Billing frequency is Quarter Annually',
@@ -1028,7 +1498,9 @@ def verify(job):
     # addenda / disclosure / other PDFs going out. The issued proposal is
     # explicitly excluded per the checklist item 32 note.
     doc_foreign = {}
-    sched_foreign = _foreign_entities(sched_all_text, sub_name)
+    # A services-only SOW names its installing party on purpose
+    # (SOW-BASELINES.md §7.13, issue 303); that name is not foreign.
+    sched_foreign = _foreign_entities(sched_all_text, sub_name, installing)
     if sched_foreign:
         doc_foreign[os.path.basename(sched)] = sched_foreign
     for doc in _outgoing_pdfs(job):
@@ -1036,7 +1508,7 @@ def verify(job):
         text = ' '.join(str(v) for v in fields.values() if v is not None)
         if not text.strip():
             text = pdf_text(doc)
-        found = _foreign_entities(text, sub_name)
+        found = _foreign_entities(text, sub_name, installing)
         if found:
             doc_foreign[os.path.basename(doc)] = found
     if doc_foreign:
@@ -1046,7 +1518,9 @@ def verify(job):
             f'{_cite(32)}; {detail}')
     else:
         rec('PASS', 'No other customer name in any outgoing document',
-            f'{_cite(32)}; every outgoing document names only this subscriber')
+            f'{_cite(32)}; every outgoing document names only this subscriber'
+            + (f' (installing party named per {SERVICES_ONLY_REF}: '
+               f'{"; ".join(installing)})' if installing else ''))
 
     # J-33: Required attachments present.
     # Trigger set: drawings/placement plans are always expected on the
@@ -1087,11 +1561,228 @@ def verify(job):
              if rmr_triggers else
              'drawings/placement plans present; no RMR triggers attendance of addenda'))
 
+    # ---------------- K) layout and structure (issue 228, wave 1b) ----------------
+    # Five folder-only layout checks (spec 215 stream D wave 1). Each finding
+    # cites its checklist item and DRAFTER-PRESEND-CHECKLIST.md; the amended
+    # multi-Site/multi-System cell map is SCHEDULE-GENERATION-PROCEDURE.md §4.
+
+    # K-5: master date equals the schedule date.
+    date_lbl_row = S.row_where('E', lambda s: s.strip().lower() == 'date')
+    sched_date = None
+    if date_lbl_row:
+        v = S.v(f'G{date_lbl_row}')
+        if isinstance(v, datetime.datetime):
+            sched_date = v.date()
+        elif isinstance(v, datetime.date):
+            sched_date = v
+    if not date_lbl_row:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; no "Date" label beside the Subscriber/Site block (§4 cell map)')
+    elif sched_date is None:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; schedule date cell G{date_lbl_row} has no cached date '
+            f'(the =TODAY() formula only caches a value once Excel opens the file)')
+    elif S.t(f'G{date_lbl_row}').startswith('=') and S.stale_formula_cache:
+        # A drafting tool (xlsx_surgical) wrote the schedule after Excel last
+        # saved it: the date formula's cached value is inherited from the
+        # template and Excel recomputes it on open, so it is not this
+        # schedule's date. Same "never opened in Excel" case as above.
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; schedule date cell G{date_lbl_row} is a formula whose '
+            f'cached value ({sched_date.isoformat()}) is stale: the workbook is '
+            f'flagged fullCalcOnLoad (written outside Excel since its last save), '
+            f'so Excel recomputes the date on open')
+    elif not masters:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; no master agreement in the folder')
+    elif not master_all_text:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; master text unreadable on this form')
+    else:
+        date_pat = re.compile(r'\bdate[:\s]{0,15}(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', re.I)
+        master_dates = []
+        for mm in date_pat.finditer(master_all_text):
+            mo, da, yr = mm.groups()
+            yr_i = int(yr) + (2000 if len(yr) <= 2 else 0)
+            try:
+                master_dates.append(datetime.date(yr_i, int(mo), int(da)))
+            except ValueError:
+                continue
+        if not master_dates:
+            rec('SKIP', 'Master date matches the schedule date',
+                f'{_cite(5)}; master carries no date pattern this form maps '
+                f'(Commercial Fire delegates to the attached schedule)')
+        else:
+            ok = sched_date in master_dates
+            rec('PASS' if ok else 'FAIL', 'Master date matches the schedule date',
+                f'{_cite(5)}; schedule {sched_date.isoformat()} vs master '
+                + ', '.join(d.isoformat() for d in master_dates))
+
+    # K-16: one Site line per Site, one System line per System, no
+    # duplicated Site lines.
+    if not eq_hdr:
+        rec('SKIP', 'One Site line per Site, one System line per System',
+            f'{_cite(16)}; no Qty/Description header after the EQUIPMENT heading')
+    else:
+        eq_lines = _site_system_lines(S, range(eq_hdr + 1, eq_end + 1))
+        if not eq_lines:
+            rec('SKIP', 'One Site line per Site, one System line per System',
+                f'{_cite(16)}; no Site: or System: line in the Equipment and Labor block')
+        else:
+            k16_problems = _dup_site_system(eq_lines, 'Equipment and Labor')
+            if svc_hdr and mt_row:
+                svc_lines = _site_system_lines(S, range(svc_hdr + 1, mt_row))
+                k16_problems += _dup_site_system(svc_lines, 'Services')
+            if k16_problems:
+                rec('FAIL', 'One Site line per Site, one System line per System',
+                    f'{_cite(16)}; SCHEDULE-GENERATION-PROCEDURE.md §4; '
+                    + '; '.join(k16_problems))
+            else:
+                n_site = sum(1 for _, k, _ in eq_lines if k == 'site')
+                n_sys = sum(1 for _, k, _ in eq_lines if k == 'system')
+                rec('PASS', 'One Site line per Site, one System line per System',
+                    f'{_cite(16)}; {n_site} Site line(s), {n_sys} System line(s) in '
+                    f'Equipment and Labor, no duplicates')
+
+    # K-27: inapplicable tabs hidden; template counts cleared on tabs used.
+    # Repair Service / Inspection RMR (rmr_triggers, computed above for J-33)
+    # is what makes a Covered Equipment / Covered Sites tab applicable.
+    # WARN, not FAIL, on both halves: like item 30's filename check and
+    # item 33's drawings/placement-plan half, hiding a tab and clearing a
+    # template count are drafter export steps build_package.py does not
+    # automate, so a freshly built (not yet presend-reviewed) package
+    # always carries this until a human does that pass.
+    tab_by_name = {ws.title: ws for ws in S.wb.worksheets}
+    k27_seen = False
+    k27_inapplicable = []
+    k27_uncleared = []
+    for name in TEMPLATE_TABS:
+        ws = tab_by_name.get(name)
+        if ws is None:
+            continue
+        k27_seen = True
+        visible = ws.sheet_state == 'visible'
+        if rmr_triggers:
+            if visible:
+                counts = _tab_device_counts(ws)
+                if counts and not any(counts):
+                    k27_uncleared.append(name)
+        elif visible:
+            k27_inapplicable.append(name)
+    if not k27_seen:
+        rec('SKIP', 'Inapplicable tabs hidden; template counts cleared',
+            f'{_cite(27)}; no Covered Equipment / Covered Sites tab in this workbook')
+    elif k27_inapplicable or k27_uncleared:
+        k27_parts = []
+        if k27_inapplicable:
+            k27_parts.append('visible but not applicable (no Repair Service / '
+                             'Inspection RMR sold): ' + ', '.join(k27_inapplicable))
+        if k27_uncleared:
+            k27_parts.append('applicable and visible but every device count reads '
+                             'zero, which reads like an uncleared template: '
+                             + ', '.join(k27_uncleared))
+        rec('WARN', 'Inapplicable tabs hidden; template counts cleared',
+            f'{_cite(27)}; ' + '; '.join(k27_parts))
+    else:
+        rec('PASS', 'Inapplicable tabs hidden; template counts cleared',
+            f'{_cite(27)}; ' + ('applicable tabs carry entered device counts'
+                                if rmr_triggers else
+                                'no Repair Service / Inspection RMR sold and every '
+                                'template tab is hidden'))
+
+    # K-28: print area covers all content; no cut-off, hidden or truncated rows.
+    clar_cell_k28 = S.clarifications()[2]
+    used_max_row = S.maxr
+    if clar_cell_k28:
+        m = re.match(r'[A-Z]+(\d+)', clar_cell_k28)
+        if m:
+            used_max_row = max(used_max_row, int(m.group(1)))
+    used_max_col = _used_max_col(S.ws, used_max_row)
+    print_area = S.ws.print_area
+    k28_problems = []
+    if print_area:
+        pa_max_col, pa_max_row = _print_area_bounds(print_area)
+        if pa_max_row is not None and pa_max_row < used_max_row:
+            k28_problems.append(f'print area ends at row {pa_max_row} but content '
+                                f'runs to row {used_max_row}')
+        if pa_max_col is not None and pa_max_col < used_max_col:
+            k28_problems.append(f'print area ends at column {pa_max_col} but content '
+                                f'runs to column {used_max_col}')
+    # A hidden row is only a finding when it actually carries content — the
+    # builder hides unused template rows and unused-subgroup labels by
+    # design (build_package.py, "unhidden, unused rows hidden"; the
+    # New/Replacement/Existing Services label is hidden when that subgroup
+    # is empty), and that tidy-up is not what item 28 is guarding against.
+    def _row_carries_content(r):
+        texts = [S.t(f'{c}{r}').strip() for c in 'ABCDEFG']
+        texts = [t for t in texts if t]
+        if not texts:
+            return False
+        return not all(t in SVC_GROUPS or t.lower().startswith(('site:', 'system:'))
+                       for t in texts)
+    hidden_rows = [r for r in range(1, used_max_row + 1)
+                   if S.ws.row_dimensions[r].hidden and _row_carries_content(r)]
+    if hidden_rows:
+        k28_problems.append(
+            'hidden row(s) carrying content within the content range: '
+            + ', '.join(map(str, hidden_rows[:8]))
+            + (f' (+{len(hidden_rows) - 8} more)' if len(hidden_rows) > 8 else ''))
+    if k28_problems:
+        rec('FAIL', 'Print area covers all content; no hidden or cut-off rows',
+            f'{_cite(28)}; ' + '; '.join(k28_problems))
+    else:
+        rec('PASS', 'Print area covers all content; no hidden or cut-off rows',
+            f'{_cite(28)}; ' + (f'print area {print_area} covers the used range'
+                                if print_area else
+                                'no print area set (whole sheet prints); no hidden rows'))
+
+    # K-31: no strikethrough, highlighting or markup colours on the priced
+    # lines and totals. Presentation formatting (struck prices, colored
+    # totals) belongs to proposals only. A theme-coloured fill is the
+    # template's own Site-row banding (§4), not markup, so only a literal
+    # RGB fill counts here.
+    k31_rows = set(eq_items) | set(svc_items)
+    for r in (pp_row, dep_row, bal_row, mt_row):
+        if r:
+            k31_rows.add(r)
+    k31_strike = []
+    k31_highlight = []
+    for r in sorted(k31_rows):
+        for c in 'ABCDEFG':
+            cell = S.ws[f'{c}{r}']
+            if cell.font and cell.font.strike:
+                k31_strike.append(f'{c}{r}')
+            fill = cell.fill
+            if fill and fill.patternType == 'solid' and fill.fgColor is not None \
+                    and fill.fgColor.type == 'rgb' \
+                    and str(fill.fgColor.rgb or '').upper() not in ('00000000', 'FFFFFFFF', '00FFFFFF'):
+                k31_highlight.append(f'{c}{r}')
+    if not k31_rows:
+        rec('SKIP', 'No strikethrough, highlighting or markup colours',
+            f'{_cite(31)}; no equipment, service or pricing lines to check')
+    elif k31_strike or k31_highlight:
+        k31_parts = []
+        if k31_strike:
+            k31_parts.append('strikethrough: ' + ', '.join(k31_strike[:8]))
+        if k31_highlight:
+            k31_parts.append('highlight/markup colour: ' + ', '.join(k31_highlight[:8]))
+        rec('FAIL', 'No strikethrough, highlighting or markup colours',
+            f'{_cite(31)}; ' + '; '.join(k31_parts))
+    else:
+        rec('PASS', 'No strikethrough, highlighting or markup colours',
+            f'{_cite(31)}; {len(k31_rows)} line(s) checked, none carry '
+            f'strikethrough or a highlight colour')
+
     # ---------------- I) filename ----------------
-    fn = os.path.basename(sched)
+    fn = os.path.basename(sched).replace('_', ' ')
     sysnames = [s for s in SYSTEMS if any(s in S.col('B', r) for r in range(1, S.maxr + 1))]
+    # A character Windows forbids in a file name is spelled as a space
+    # (DRAFTER-PRESEND-CHECKLIST.md item 30; ruling on #328, issue 342), so
+    # the first word of the file-name spelling is what the file name carries.
+    def _fn_word(s):
+        return re.sub(r'[\\/:*?"<>|]', ' ', s).split()[0].lower()
     if sysnames:
-        miss = [s for s in sysnames if s.split()[0].lower() not in fn.lower()]
+        miss = [s for s in sysnames if _fn_word(s) not in fn.lower()]
         rec('PASS' if not miss else 'WARN', 'Filename names every system sold',
             ('missing ' + ', '.join(miss)) if miss else ', '.join(sysnames))
 
