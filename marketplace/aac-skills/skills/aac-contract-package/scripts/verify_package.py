@@ -974,7 +974,12 @@ def verify(job):
             mterm = None
         elif kind == 'elevator':
             # Elevator Monitoring Agreement (issue 335): 15 text fields, no
-            # checkboxes, term fixed in §5 clause text rather than a field.
+            # checkboxes, term fixed in §5 clause text rather than a field
+            # (§5: "The term of this agreement shall be for a period of
+            # five years."). issue 357: that fixed five-year term is still
+            # the master term DRAFTER-PRESEND-CHECKLIST.md item 12 checks
+            # the rider against — set it here so section H compares it
+            # rather than skipping for "form not mapped".
             mname = str(mf.get('Text3') or '').strip()
             rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
                 'Elevator Monitoring Agreement Subscriber name matches the schedule',
@@ -999,7 +1004,7 @@ def verify(job):
                 f'master {mamt if mamt is not None else "(empty)"} vs schedule '
                 f'Monthly Total {sched_mt if sched_mt is not None else "(empty)"}'
                 ' — DRAFTER-PRESEND-CHECKLIST.md item 11; MAPPING-APPENDIX.md §3')
-            mterm = None
+            mterm = '5 years'
         else:
             spec = MASTER_FORM_SPECS[kind]
             mtext = ' '.join(str(v) for v in mf.values())
