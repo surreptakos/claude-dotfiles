@@ -189,6 +189,32 @@ test('compareToMaster reads the version master offers from the remote, not the l
   assert.ok(calls.some((a) => a.includes('fetch --depth 1 origin master')), calls.join(' | '));
 });
 
+// Issue 703: a drift names the skills whose installed revision is not master's, so a Routine
+// never runs an old skill silently.
+test('compareToMaster on drift names each skill whose revision differs from master', () => {
+  const home = cloneFixture();
+  const skills = path.join(home, '.claude', 'skills');
+  for (const [name, rev] of [['todoist-triage', '8'], ['caveman', '3']]) {
+    fs.mkdirSync(path.join(skills, name), { recursive: true });
+    fs.writeFileSync(path.join(skills, name, 'SKILL.md'), `---\nmetadata:\n  revision: '${rev}'\n---\n`);
+  }
+  const master = { 'todoist-triage': '17', caveman: '3', 'new-skill': '1' };
+  const run = (cmd, args) => {
+    const spec = args[args.length - 1];
+    if (args.includes('ls-tree')) return { status: 0, stdout: Object.keys(master).join('\n') + '\n' };
+    if (spec.endsWith('plugin.json')) return { status: 0, stdout: JSON.stringify({ version: '2026.9.222215' }) };
+    const name = (/skills\/([^/]+)\/SKILL\.md$/.exec(spec) || [])[1];
+    if (name) return { status: 0, stdout: `---\nmetadata:\n  revision: '${master[name]}'\n---\n` };
+    return { status: 0, stdout: '' };
+  };
+  const c = compareToMaster({ payload_version: '2026.9.211608' }, { HOME: home }, run);
+  assert.equal(c.state, 'drift');
+  assert.deepEqual(c.stale, [
+    { name: 'todoist-triage', local: '8', master: '17' },
+    { name: 'new-skill', local: null, master: '1' },
+  ]);
+});
+
 test('compareToMaster says unknown when the remote cannot be read — never the clone\'s own answer', () => {
   const home = cloneFixture();
   const run = () => ({ status: 128, stdout: '' });
