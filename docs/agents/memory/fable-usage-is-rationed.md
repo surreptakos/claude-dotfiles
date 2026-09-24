@@ -1,6 +1,6 @@
 ---
 name: fable-usage-is-rationed
-description: Dan's Fable 5.1 usage is capped per week; never move fleet or subagent workers onto Fable, keep the Opus 5.5 / Sonnet 5 / Haiku pins
+description: Dan's Fable 5.1 usage is capped per week; fleet and subagent workers keep the Opus 5.5 / Sonnet 5 / Haiku pins, while the orchestrator session itself runs Fable 5.1 high
 metadata:
   type: feedback
 ---
@@ -14,4 +14,7 @@ Fable usage per week"). Cost per task is not the constraint; the weekly Fable qu
 interactive sessions Dan drives are what it must cover.
 
 **How to apply:** Prompt-level improvements to fleet stages are fine. Model or effort changes that
-route bulk agent work through `claude-fable-5-1` need Dan's explicit ask. See [[marketplace-is-the-distribution-spine]] for where the fleet scripts live.
+route bulk agent work through `claude-fable-5-1` need Dan's explicit ask.
+
+The orchestrator session itself runs Fable 5.1 at high effort (Dan, 2026-09-24: "which is where
+you should be as orchestrator"). The rationing covers bulk worker load, not the session that drives it. See [[marketplace-is-the-distribution-spine]] for where the fleet scripts live.

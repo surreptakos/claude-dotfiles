@@ -6,6 +6,74 @@ import zipfile, re
 def _esc(t):
     return t.replace('&','&amp;').replace('<','&lt;').replace('>','&gt;')
 
+# ---- row-deletion helpers (delete_rows) -----------------------------------
+# An endpoint is (column-with-optional-$, row-$-or-'', row); an area is a list
+# of one endpoint (single cell) or two (a range).
+_EP = r'(\$?[A-Z]{1,3})(\$?)(\d+)'
+
+def _parse_area(text):
+    m = re.fullmatch(_EP + r'(?::' + _EP + r')?', text)
+    if not m:
+        raise ValueError('cannot parse cell area %r' % text)
+    eps = [(m.group(1), m.group(2), int(m.group(3)))]
+    if m.group(4):
+        eps.append((m.group(4), m.group(5), int(m.group(6))))
+    return eps
+
+def _fmt_area(eps):
+    return ':'.join('%s%s%d' % ep for ep in eps)
+
+def _shift_area(eps, first, last, count):
+    """Move an area the way Excel does when rows first..last are deleted.
+    Returns None when the area lies wholly inside the deleted rows."""
+    if len(eps) == 1:
+        c, d, r = eps[0]
+        if first <= r <= last:
+            return None
+        return [(c, d, r - count if r > last else r)]
+    (c1, d1, r1), (c2, d2, r2) = eps
+    n1 = r1 if r1 < first else (first if r1 <= last else r1 - count)
+    n2 = r2 if r2 < first else (first - 1 if r2 <= last else r2 - count)
+    if n2 < n1:
+        return None
+    return [(c1, d1, n1), (c2, d2, n2)]
+
+_UNXML = (('&lt;', '<'), ('&gt;', '>'), ('&quot;', '"'), ('&apos;', "'"), ('&amp;', '&'))
+
+def _sheet_of(prefix):
+    """Sheet name a formula prefix (``'A &amp; B'!`` or ``Sheet1!``) names,
+    XML-unescaped, or None for an external-workbook reference."""
+    n = prefix[:-1]
+    if n.startswith("'"):
+        n = n[1:-1].replace("''", "'")
+    for a, b in _UNXML:
+        n = n.replace(a, b)
+    return None if n.startswith('[') else n
+
+_REF = re.compile(r"(?<![\w.$\]!'])"
+                  r"(?P<pre>(?:'(?:[^']|'')+'|[A-Za-z_][\w.]*)!)?"
+                  r"(?P<area>" + _EP + r"(?::" + _EP + r")?)"
+                  r"(?![\w(!])")
+
+def _shift_formula(text, sheet, first, last, count, own):
+    """Repoint the references in one formula (XML-escaped text) that target
+    ``sheet``. ``own`` says unqualified references mean ``sheet``. String
+    literals are left alone. A reference that would lose its target raises
+    rather than becoming #REF!."""
+    parts = re.split(r'(&quot;.*?&quot;|"[^"]*")', text)
+    for k in range(0, len(parts), 2):
+        def sub(m):
+            pre = m.group('pre')
+            target = _sheet_of(pre) if pre else (sheet if own else None)
+            if target != sheet:
+                return m.group(0)
+            moved = _shift_area(_parse_area(m.group('area')), first, last, count)
+            if moved is None:
+                raise ValueError('formula %r points into the deleted rows; refusing' % text)
+            return (pre or '') + _fmt_area(moved)
+        parts[k] = _REF.sub(sub, parts[k])
+    return ''.join(parts)
+
 class Workbook:
     def __init__(self, path):
         # Read every zip member up front, then close the handle. The reader
@@ -293,6 +361,200 @@ class Workbook:
         self.dirty.add('xl/workbook.xml')
         # Keep the in-memory sheet map coherent so later reads work.
         self.sheets[new_name] = self.sheets.pop(old_name)
+
+    def _put(self, name, text):
+        """Store a rewritten XML part, marking it dirty only when its bytes
+        actually changed, so an untouched member is never reported as edited."""
+        data = text.encode('utf8')
+        if data != self.parts[name]:
+            self.parts[name] = data
+            self.dirty.add(name)
+
+    def delete_rows(self, sheet, first, count=1):
+        """Delete ``count`` empty rows starting at ``first`` and move everything
+        below them up, the way Excel's Delete Row does. This is how a merged
+        text block (the Clarifications and Exclusions block, the SOW) gives
+        back the surplus rows after an edit shortened its text (issue 304).
+
+        Repointed: the sheet's rows and cells, ``<dimension>``, merge ranges
+        (a merge that contains the deleted rows shrinks, one wholly inside
+        them is dropped), hyperlinks, data validations, conditional formats,
+        view/selection anchors, row breaks, ``<f ref>`` spans, every formula
+        in the workbook that points at this sheet, defined names (the print
+        area), ``calcChain.xml`` entries for this sheet and the anchors in
+        this sheet's drawing. Each of those parts is rewritten only when a
+        reference in it actually moved; every other zip member is copied
+        byte-for-byte by ``save``.
+
+        Refuses (raises, nothing is changed) rather than guessing when:
+        a deleted row holds a value, formula or inline string; a deleted row
+        is the top row of a merge that continues below it; a merge, hyperlink,
+        validation, conditional format, drawing anchor or single-cell formula
+        reference would lose its target; or the sheet carries comments,
+        tables or the workbook carries charts, whose references this editor
+        does not rewrite.
+        """
+        if count < 1 or first < 1:
+            raise ValueError('first and count must be >= 1')
+        last = first + count - 1
+        name = self.sheets[sheet]
+        rels_name = name.replace('worksheets/', 'worksheets/_rels/') + '.rels'
+        rels = self.parts.get(rels_name, b'').decode('utf8')
+        for kind in ('/comments"', '/table"'):
+            if kind in rels:
+                raise NotImplementedError('sheet has %s parts; refusing' % kind.strip('/"'))
+        if any(n.startswith('xl/charts/') for n in self.parts):
+            raise NotImplementedError('workbook has charts; refusing')
+
+        new = {}  # part name -> rewritten text; committed only if every step succeeds
+
+        # ---- the sheet itself -------------------------------------------
+        sh = self.parts[name].decode('utf8')
+        row_pat = re.compile(r'<row r="(\d+)"[^>]*?(?:/>|>.*?</row>)', re.S)
+
+        def fix_row(m):
+            r = int(m.group(1))
+            if r < first:
+                return m.group(0)
+            body = m.group(0)
+            if r <= last:
+                if re.search(r'<v>|<v |<f[ >]|<is>', body):
+                    raise ValueError('row %d holds content; refusing to delete it' % r)
+                return ''
+            r2 = r - count
+            body = re.sub(r'^<row r="%d"' % r, '<row r="%d"' % r2, body)
+            return re.sub(r'<c r="([A-Z]+)%d"' % r, lambda c: '<c r="%s%d"' % (c.group(1), r2), body)
+        sd = re.search(r'<sheetData>.*?</sheetData>', sh, re.S)
+        if sd:
+            sh = sh[:sd.start()] + row_pat.sub(fix_row, sd.group(0)) + sh[sd.end():]
+
+        # Formulas inside this sheet: unqualified refs are this sheet's.
+        sh = self._shift_formula_elements(sh, sheet, first, last, count, own=True)
+        # <f ref="..."> spans of shared/array formulas.
+        sh = re.sub(r'(<f\b[^>]*\bref=")([^"]+)(")',
+                    lambda m: m.group(1) + self._shift_sqref(m.group(2), first, last, count, 'formula span') + m.group(3), sh)
+
+        def attr(tag, att, what, clamp=False):
+            nonlocal sh
+            sh = re.sub(r'(<%s\b[^>]*?\b%s=")([^"]+)(")' % (tag, att),
+                        lambda m: m.group(1) + self._shift_sqref(m.group(2), first, last, count, what, clamp) + m.group(3), sh)
+        attr('dimension', 'ref', 'dimension', clamp=True)
+        attr('hyperlink', 'ref', 'hyperlink')
+        attr('dataValidation', 'sqref', 'data validation')
+        attr('conditionalFormatting', 'sqref', 'conditional format')
+        attr('ignoredError', 'sqref', 'ignored-error range', clamp=True)
+        attr('selection', 'sqref', 'selection', clamp=True)
+        attr('selection', 'activeCell', 'selection', clamp=True)
+        attr('sheetView', 'topLeftCell', 'view', clamp=True)
+        attr('pane', 'topLeftCell', 'view', clamp=True)
+
+        def fix_brk(m):
+            b = int(m.group(2))
+            if first <= b <= last:
+                raise ValueError('row break at row %d would be deleted; refusing' % b)
+            return m.group(1) + str(b - count if b > last else b) + m.group(3)
+        rb = re.search(r'<rowBreaks\b.*?</rowBreaks>', sh, re.S)
+        if rb:
+            sh = sh[:rb.start()] + re.sub(r'(<brk\b[^>]*?\bid=")(\d+)(")', fix_brk, rb.group(0)) + sh[rb.end():]
+
+        # Merges: shrink, move, or drop the ones the deletion swallows whole.
+        def fix_merges(block):
+            kept = []
+            for m in re.finditer(r'<mergeCell ref="([^"]+)"\s*/>', block):
+                a = _parse_area(m.group(1))
+                r1, r2 = a[0][2], a[-1][2]
+                if first <= r1 <= last and r2 > last:
+                    raise ValueError('rows %d-%d include the top row of merge %s; refusing'
+                                     % (first, last, m.group(1)))
+                moved = _shift_area(a, first, last, count)
+                if moved is None:
+                    continue
+                if len(moved) == 1 or moved[0][::2] == moved[1][::2]:
+                    continue  # collapsed to one cell: no longer a merge
+                kept.append('<mergeCell ref="%s"/>' % _fmt_area(moved))
+            if not kept:
+                return ''
+            head = re.match(r'<mergeCells\b[^>]*>', block).group(0)
+            head = re.sub(r'\bcount="\d+"', 'count="%d"' % len(kept), head)
+            return head + ''.join(kept) + '</mergeCells>'
+        mc = re.search(r'<mergeCells\b[^>]*>.*?</mergeCells>', sh, re.S)
+        if mc:
+            sh = sh[:mc.start()] + fix_merges(mc.group(0)) + sh[mc.end():]
+        new[name] = sh
+
+        # ---- formulas on every other sheet that point at this one -------
+        for other, part in self.sheets.items():
+            if part == name:
+                continue
+            new[part] = self._shift_formula_elements(
+                self.parts[part].decode('utf8'), sheet, first, last, count, own=False)
+
+        # ---- defined names (print area, print titles, named ranges) -----
+        wb = self.parts['xl/workbook.xml'].decode('utf8')
+        new['xl/workbook.xml'] = re.sub(
+            r'(<definedName\b[^>]*>)(.*?)(</definedName>)',
+            lambda m: m.group(1) + _shift_formula(m.group(2), sheet, first, last, count, False) + m.group(3),
+            wb, flags=re.S)
+
+        # ---- calcChain: entries carry the sheetId; omitted i inherits ---
+        sid = None
+        for sm in re.finditer(r'<sheet\s+([^>]*?)/?>', wb):
+            nm = re.search(r'\bname="([^"]+)"', sm.group(1))
+            if nm and nm.group(1).replace('&amp;', '&') == sheet:
+                sid = re.search(r'\bsheetId="(\d+)"', sm.group(1)).group(1)
+        if 'xl/calcChain.xml' in self.parts and sid is not None:
+            cur = [None]
+            def fix_cc(m):
+                attrs = m.group(1)
+                i = re.search(r'\bi="(\d+)"', attrs)
+                if i:
+                    cur[0] = i.group(1)
+                ref = re.search(r'\br="([A-Z]+)(\d+)"', attrs)
+                if cur[0] != sid or not ref:
+                    return m.group(0)
+                col, r = ref.group(1), int(ref.group(2))
+                if first <= r <= last:
+                    raise ValueError('calcChain names %s%d in the deleted rows' % (col, r))
+                if r < first:
+                    return m.group(0)
+                return m.group(0).replace(ref.group(0), 'r="%s%d"' % (col, r - count), 1)
+            cc = self.parts['xl/calcChain.xml'].decode('utf8')
+            new['xl/calcChain.xml'] = re.sub(r'<c\b([^>]*?)/>', fix_cc, cc)
+
+        # ---- drawing anchors (0-based rows) -----------------------------
+        for rel in re.finditer(r'<Relationship\s+([^>]*?)/?>', rels):
+            a = rel.group(1)
+            if '/drawing"' not in a:
+                continue
+            tgt = re.search(r'\bTarget="([^"]+)"', a).group(1)
+            dname = tgt.lstrip('/') if tgt.startswith('/') else 'xl/' + tgt.replace('../', '')
+            def fix_anchor(m):
+                r = int(m.group(2)) + 1
+                if first <= r <= last:
+                    raise ValueError('a drawing is anchored in row %d, which would be deleted' % r)
+                return m.group(1) + str(r - 1 - count if r > last else r - 1) + m.group(3)
+            new[dname] = re.sub(r'(<xdr:(?:from|to)>(?:(?!</xdr:(?:from|to)>).)*?<xdr:row>)(\d+)(</xdr:row>)',
+                                fix_anchor, self.parts[dname].decode('utf8'), flags=re.S)
+
+        for part, text in new.items():
+            self._put(part, text)
+
+    def _shift_formula_elements(self, xml, sheet, first, last, count, own):
+        return re.sub(r'(<(f|formula|formula1|formula2)\b[^>]*>)(.*?)(</\2>)',
+                      lambda m: m.group(1) + _shift_formula(m.group(3), sheet, first, last, count, own) + m.group(4),
+                      xml, flags=re.S)
+
+    def _shift_sqref(self, sqref, first, last, count, what, clamp=False):
+        out = []
+        for part in sqref.split():
+            a = _parse_area(part)
+            moved = _shift_area(a, first, last, count)
+            if moved is None:
+                if not clamp:
+                    raise ValueError('%s %s lies wholly in the deleted rows; refusing' % (what, part))
+                moved = [(c, d, first) for c, d, _ in a]
+            out.append(_fmt_area(moved))
+        return ' '.join(out)
 
     def save(self, out):
         if 'xl/sharedStrings.xml' in self.dirty:
