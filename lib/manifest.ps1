@@ -49,13 +49,12 @@ function Get-DotfileItems {
         # machine gets the skill on /i-have-adhd and nowhere else. Contents are never read; the
         # off-switch is ~/.claude/.adhd-off, which the ask-matt gate reads.
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/i-have-adhd-always';      Local = (Join-Path $claude '.i-have-adhd-always') }
-        # The governance hook scripts settings.json dispatches. Also the source the packager
-        # copies into the plugin payload, so the desktop and a container run the same code.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/hooks';                    Local = (Join-Path $claude 'hooks') }
-        # What those hook scripts import (issue 620). stopslop-write.py and stopslop-stop.py add
-        # ../tools to sys.path and `import stopslop`; without this entry the module never lands and
-        # both hooks fail open with one line on stderr, which is how the gate sat dead.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'profile/claude/tools';                    Local = (Join-Path $claude 'tools') }
+        # No ~/.claude/hooks or ~/.claude/tools (issue 733). The governance hooks fire from the
+        # aac-skills plugin, which carries its own copies of the scripts and of stopslop.py, and
+        # settings.json no longer names any of them - so nothing dispatches a live-tree copy, and
+        # the plugin hook guard finds no entry and lets the plugin copy run once per event.
+        # profile/claude/hooks and profile/claude/tools stay in the repo as the packager's source.
+        # Pull never deletes, so a machine restored before this keeps its old folders, inert.
         # User-level subagent definitions (issue 86). Claude Code auto-discovers *.md files here
         # for the agent registry the Agent tool and Workflow's `agentType` share, so the
         # ticket-fleet's tool-restricted verifier reaches every repo the fleet runs in.
