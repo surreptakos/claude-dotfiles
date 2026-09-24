@@ -12,8 +12,7 @@ credential. The `typesafe@typesafe-ai` plugin carries the method (`skills/typesa
 and the live docs at `https://docs.typesafe.ai/llms.txt` are its source of truth.
 
 The only prior use is the bill-intake shadow trial (`tools/typesafe-shadow-eval.js` and
-`docs/agents/typesafe-judgement-survey.md` in that repo). Measure each swap here the same way before
-it decides anything.
+`docs/agents/typesafe-judgement-survey.md` in that repo). Its eval harness is reusable here; its shadow period is not (see the last section).
 
 ## Method
 
@@ -84,5 +83,6 @@ and need tools); `HANDOFF.remainingKind` (the same agent runs commands, so the c
 
 ## Next step for any candidate
 
-File one ticket per swap. Run the Jev question in shadow beside today's code over the eval set, log
-both answers, and switch only where Jev matches or beats the regex on the fixtures.
+File one ticket per swap. Prove the Jev question on the eval set (tests stub the service), then ship;
+no shadow period (speed over robustness, Dan 2026-09-18). With no credential, a timeout, or the
+service down, today's code answers.
