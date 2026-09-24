@@ -132,7 +132,7 @@ const CONTRACT_VERSION = 2
 const CONTRACT_REQUIRED_ARGS = ['contractVersion', 'runId', 'invocationId']
 const CONTRACT_COPIES = [
   'surreptakos/aac-routines .claude/workflows/ticket-fleet.js',
-  'surreptakos/aac-cockpit .claude/workflows/ticket-fleet.js',
+  'surreptakos/aac-sales-cockpit .claude/workflows/ticket-fleet.js',
   'claude-dotfiles orchestrator/RUNBOOK.md',
   'claude-dotfiles orchestrator/LOCAL-RUNBOOK.md',
   'claude-dotfiles aac-skills/ticket-fleet/SKILL.md',
@@ -1053,7 +1053,7 @@ phase('Setup')
 // tools/ticket-fleet-contract.js, repeated here because the workflow runtime cannot require().
 const FLEET_SOURCE_REPO = 'surreptakos/claude-dotfiles'
 const FLEET_SOURCE_RAW = 'https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/aac-skills/ticket-fleet'
-const FLEET_FORKS = ['surreptakos/aac-routines', 'surreptakos/aac-cockpit']
+const FLEET_FORKS = ['surreptakos/aac-routines', 'surreptakos/aac-sales-cockpit']
 const FLEET_REFRESH_FILES = ['ticket-fleet.js', 'editable-install-guard.js']
 const REFRESHED = { type: 'object', required: ['servedRepo', 'skipped', 'refreshed', 'unchanged', 'commit', 'errors'], properties: {
   servedRepo: { type: 'string', description: 'owner/repo from `git remote get-url origin`' },

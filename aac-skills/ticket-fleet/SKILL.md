@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T05:09:19Z"
-  previous-modified: "2026-09-24T05:03:32Z"
-  revision: "36"
-  content-sha: "57aa5c6bc5e8"
+  modified: "2026-09-24T05:11:29Z"
+  previous-modified: "2026-09-24T05:07:51Z"
+  revision: "39"
+  content-sha: "10956c7a6d13"
 ---
 
 # ticket-fleet
@@ -159,7 +159,7 @@ Workflow({
 })
 ```
 
-On a fork (aac-routines' auth/cleanup phases, aac-cockpit's `PROMPT_CONTRACT`) the copy is
+On a fork (aac-routines' auth/cleanup phases, aac-sales-cockpit's `PROMPT_CONTRACT`) the copy is
 edited in place. On every other repo the copy is a mirror of claude-dotfiles master, and **the run
 refreshes it itself** (issue 770): the first Setup agent, `fleet-refresh`, downloads
 `aac-skills/ticket-fleet/ticket-fleet.js` and `editable-install-guard.js` from master, overwrites
@@ -349,7 +349,7 @@ Copies this repo does not rebuild, all of which move when the contract does:
 | Where | What | Keeps its own edits |
 | --- | --- | --- |
 | `surreptakos/aac-routines` | `.claude/workflows/ticket-fleet.js` | Setup phase (sub-session auth, issue 83) and the no-cleanup history |
-| `surreptakos/aac-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
+| `surreptakos/aac-sales-cockpit` | `.claude/workflows/ticket-fleet.js` | `PROMPT_CONTRACT` |
 | `claude-dotfiles` | `orchestrator/RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | this page |
