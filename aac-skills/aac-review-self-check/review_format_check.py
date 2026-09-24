@@ -61,6 +61,11 @@ def all_dates(text):
     return out
 
 
+def mdy(d):
+    """m/d/yyyy without leading zeros. strftime's %-m is glibc-only and raises on Windows."""
+    return f"{d.month}/{d.day}/{d.year}"
+
+
 RANGE_SEP = re.compile(r"^\s*(?:through|thru|to|until|[\u2013\u2014-])\s*$", re.I)
 
 
@@ -160,7 +165,7 @@ def format_check(argv):
     except ValueError:
         he_d = None
     if he_d != end:
-        fixes.append(f"Header: dates covered end {he or '[missing]'}; must end {end.strftime('%-m/%-d/%Y')}.")
+        fixes.append(f"Header: dates covered end {he or '[missing]'}; must end {mdy(end)}.")
     else:
         passes.append("Header end date")
     if a.start:
@@ -170,7 +175,7 @@ def format_check(argv):
         except ValueError:
             hs_d = None
         if hs_d != st:
-            fixes.append(f"Header: dates covered start {hs or '[missing]'}; must start {st.strftime('%-m/%-d/%Y')}.")
+            fixes.append(f"Header: dates covered start {hs or '[missing]'}; must start {mdy(st)}.")
         else:
             passes.append("Header start date")
     notes = []
@@ -229,7 +234,7 @@ def format_check(argv):
     # 5 dates after the period end
     late = sorted({s for dt, s in all_dates(alltext) if dt > end and s != header.get("date")})
     if late:
-        fixes.append(f"Dates: {', '.join(late)} fall after the period end {end.strftime('%-m/%-d/%Y')}; nothing in the review is dated after it.")
+        fixes.append(f"Dates: {', '.join(late)} fall after the period end {mdy(end)}; nothing in the review is dated after it.")
     else:
         passes.append("No dates after period end")
 
@@ -238,7 +243,7 @@ def format_check(argv):
     items = [(f"S{i}", t) for i, t in enumerate(S, 1)] + [(f"W{i}", t) for i, t in enumerate(W, 1)] + [("Core Message", core)]
     short = [(lbl, r) for lbl, t in items for r in short_ranges(t, pstart, end)]
     for lbl, (t1, t2) in short:
-        fixes.append(f"{lbl}: a figure runs {t1} through {t2}; a range that opens on the period start closes on {end.strftime('%-m/%-d/%Y')}.")
+        fixes.append(f"{lbl}: a figure runs {t1} through {t2}; a range that opens on the period start closes on {mdy(end)}.")
     if not short:
         passes.append("No figure range cut short")
 
@@ -298,7 +303,7 @@ def stamp(argv):
     ap.add_argument("--start"); ap.add_argument("--direct", default="")
     a = ap.parse_args(argv)
     code = review_fingerprint(a.docx, a.start, a.end, a.direct)
-    today = datetime.date.today().strftime("%-m/%-d/%Y")
+    today = mdy(datetime.date.today())
     line = f"aac-review-self-check PASS {today} {code}"
     d = Document(a.docx)
     d.core_properties.comments = line
