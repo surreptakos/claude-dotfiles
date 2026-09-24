@@ -39,14 +39,6 @@
     "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\i-have-adhd",
     "lastUpdated": "2026-09-10T17:22:17.437Z"
   },
-  "local-desktop-app-uploads": {
-    "source": {
-      "source": "directory",
-      "path": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads"
-    },
-    "installLocation": "__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\local-desktop-app-uploads",
-    "lastUpdated": "2026-09-10T17:22:17.444Z"
-  },
   "claude-dotfiles": {
     "source": {
       "source": "github",
