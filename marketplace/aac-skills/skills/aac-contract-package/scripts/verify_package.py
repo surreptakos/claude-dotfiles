@@ -24,7 +24,7 @@ the rep-confirmed name governs (OPEN-DECISIONS item 19). The Zoho
 cross-checks (zoho_crosscheck.py) are advisory too: WARN or PASS, SKIP without
 a credential.
 """
-import sys, os, re, fnmatch, warnings
+import sys, os, re, fnmatch, warnings, datetime
 warnings.filterwarnings('ignore')
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -323,6 +323,109 @@ def _cite(n):
     return f'checklist item {n}, {CHECKLIST}'
 
 
+# ---- layout and structure helpers (issue 228, wave 1b) ----
+# Governing rules for section K below: DRAFTER-PRESEND-CHECKLIST.md items 5,
+# 16, 27, 28, 31. The amended multi-Site/multi-System cell map these lean on
+# is SCHEDULE-GENERATION-PROCEDURE.md §4. Findings cite the item number and
+# file rather than restate the rule (hard rule 1).
+TEMPLATE_TABS = ('Covered Equipment - Security', 'Covered Equipment - Fire',
+                  'Covered Sites')
+
+
+def _site_system_lines(S, rows):
+    """(row, kind, text) for every Site:/System: labeled line in column B
+    across `rows`; kind is 'site' or 'system'."""
+    out = []
+    for r in rows:
+        b = S.col('B', r).strip()
+        low = b.lower()
+        if low.startswith('site:'):
+            out.append((r, 'site', b))
+        elif low.startswith('system:'):
+            out.append((r, 'system', b))
+    return out
+
+
+def _dup_site_system(lines, label):
+    """Duplicate Site lines, and duplicate System lines within one Site's
+    block, from `_site_system_lines` output. Returns problem strings."""
+    problems = []
+    site_counts = {}
+    current_site = None
+    current_systems = {}
+
+    def flush():
+        for name, count in current_systems.items():
+            if count > 1:
+                problems.append(f'{label}: duplicate System line "{name}" '
+                                 f'({count}x) under {current_site or "(no Site line yet)"}')
+
+    for _, kind, text in lines:
+        if kind == 'site':
+            flush()
+            site_counts[text] = site_counts.get(text, 0) + 1
+            current_site = text
+            current_systems = {}
+        else:
+            current_systems[text] = current_systems.get(text, 0) + 1
+    flush()
+    for name, count in site_counts.items():
+        if count > 1:
+            problems.append(f'{label}: duplicate Site line "{name}" ({count}x)')
+    return problems
+
+
+def _tab_device_counts(ws):
+    """Numeric values two columns right of a text label, anywhere on the
+    sheet. The Covered Equipment addenda lay out device name / count pairs
+    this way (name in A, count in C; name in E, count in G); used only to
+    see whether any count was ever entered on a tab the deal actually uses."""
+    nums = []
+    for row in ws.iter_rows():
+        for cell in row:
+            if isinstance(cell.value, str) and cell.value.strip():
+                try:
+                    right = ws.cell(row=cell.row, column=cell.column + 2).value
+                except Exception:
+                    right = None
+                if isinstance(right, (int, float)):
+                    nums.append(right)
+    return nums
+
+
+def _used_max_col(ws, max_row):
+    """Rightmost column actually holding a value, up to max_row. Excel and
+    openpyxl both report a sheet's max_column from formatting-only cells
+    (merges, carried-over styling) with no content, which overstates the
+    printable range; scanning values avoids that false positive."""
+    max_c = 0
+    for row in ws.iter_rows(min_row=1, max_row=max_row):
+        for cell in row:
+            if cell.value not in (None, '') and cell.column > max_c:
+                max_c = cell.column
+    return max_c
+
+
+def _print_area_bounds(print_area):
+    """max (col, row) covered by a worksheet's print_area string, which may
+    list several ranges separated by commas and sheet-qualified with a
+    leading `'Name'!`. Returns (None, None) when unparsable."""
+    max_col = max_row = None
+    for part in str(print_area).split(','):
+        part = part.strip()
+        if '!' in part:
+            part = part.split('!', 1)[1]
+        part = part.replace('$', '')
+        try:
+            from openpyxl.utils.cell import range_boundaries
+            _, _, c2, r2 = range_boundaries(part)
+        except Exception:
+            continue
+        max_col = c2 if max_col is None else max(max_col, c2)
+        max_row = r2 if max_row is None else max(max_row, r2)
+    return max_col, max_row
+
+
 # Filename substrings that mark a workbook as NOT the work-up. A schedule,
 # an agreement, a proposal, and the template all live alongside the WU in
 # some folders and share the .xlsx extension; the schedule tab-based
@@ -553,6 +656,25 @@ def _match_sum_range(f):
     return c1, a, b
 
 
+def _full_calc_on_load(path):
+    """True when the workbook's calcPr carries fullCalcOnLoad="1".
+
+    xlsx_surgical sets that flag on every write, declaring every cached
+    formula value stale until Excel recalculates; Excel drops it on save.
+    A formula cell's cached value in such a file is whatever the source
+    template last cached, not a value computed for this schedule. Read from
+    workbook.xml directly: openpyxl reports True when the attribute is absent.
+    """
+    import zipfile
+    try:
+        with zipfile.ZipFile(path) as z:
+            wb_xml = z.read('xl/workbook.xml').decode('utf8', 'replace')
+    except (KeyError, OSError, zipfile.BadZipFile):
+        return False
+    m = re.search(r'<calcPr\b[^>]*\bfullCalcOnLoad="(1|true)"', wb_xml)
+    return m is not None
+
+
 class Sheet:
     """Label-anchored view of an Equip & Services tab."""
     def __init__(self, path):
@@ -562,6 +684,7 @@ class Sheet:
         self.ws = self.wb[SHEET]
         self.wsv = self.wbv[SHEET]
         self.maxr = self.ws.max_row
+        self.stale_formula_cache = _full_calc_on_load(path)
 
     def t(self, ref):
         v = self.ws[ref].value
@@ -974,7 +1097,12 @@ def verify(job):
             mterm = None
         elif kind == 'elevator':
             # Elevator Monitoring Agreement (issue 335): 15 text fields, no
-            # checkboxes, term fixed in §5 clause text rather than a field.
+            # checkboxes, term fixed in §5 clause text rather than a field
+            # (§5: "The term of this agreement shall be for a period of
+            # five years."). issue 357: that fixed five-year term is still
+            # the master term DRAFTER-PRESEND-CHECKLIST.md item 12 checks
+            # the rider against — set it here so section H compares it
+            # rather than skipping for "form not mapped".
             mname = str(mf.get('Text3') or '').strip()
             rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
                 'Elevator Monitoring Agreement Subscriber name matches the schedule',
@@ -999,7 +1127,7 @@ def verify(job):
                 f'master {mamt if mamt is not None else "(empty)"} vs schedule '
                 f'Monthly Total {sched_mt if sched_mt is not None else "(empty)"}'
                 ' — DRAFTER-PRESEND-CHECKLIST.md item 11; MAPPING-APPENDIX.md §3')
-            mterm = None
+            mterm = '5 years'
         else:
             spec = MASTER_FORM_SPECS[kind]
             mtext = ' '.join(str(v) for v in mf.values())
@@ -1432,6 +1560,218 @@ def verify(job):
             ('addenda and FSI required and found; drawings/placement plans present'
              if rmr_triggers else
              'drawings/placement plans present; no RMR triggers attendance of addenda'))
+
+    # ---------------- K) layout and structure (issue 228, wave 1b) ----------------
+    # Five folder-only layout checks (spec 215 stream D wave 1). Each finding
+    # cites its checklist item and DRAFTER-PRESEND-CHECKLIST.md; the amended
+    # multi-Site/multi-System cell map is SCHEDULE-GENERATION-PROCEDURE.md §4.
+
+    # K-5: master date equals the schedule date.
+    date_lbl_row = S.row_where('E', lambda s: s.strip().lower() == 'date')
+    sched_date = None
+    if date_lbl_row:
+        v = S.v(f'G{date_lbl_row}')
+        if isinstance(v, datetime.datetime):
+            sched_date = v.date()
+        elif isinstance(v, datetime.date):
+            sched_date = v
+    if not date_lbl_row:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; no "Date" label beside the Subscriber/Site block (§4 cell map)')
+    elif sched_date is None:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; schedule date cell G{date_lbl_row} has no cached date '
+            f'(the =TODAY() formula only caches a value once Excel opens the file)')
+    elif S.t(f'G{date_lbl_row}').startswith('=') and S.stale_formula_cache:
+        # A drafting tool (xlsx_surgical) wrote the schedule after Excel last
+        # saved it: the date formula's cached value is inherited from the
+        # template and Excel recomputes it on open, so it is not this
+        # schedule's date. Same "never opened in Excel" case as above.
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; schedule date cell G{date_lbl_row} is a formula whose '
+            f'cached value ({sched_date.isoformat()}) is stale: the workbook is '
+            f'flagged fullCalcOnLoad (written outside Excel since its last save), '
+            f'so Excel recomputes the date on open')
+    elif not masters:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; no master agreement in the folder')
+    elif not master_all_text:
+        rec('SKIP', 'Master date matches the schedule date',
+            f'{_cite(5)}; master text unreadable on this form')
+    else:
+        date_pat = re.compile(r'\bdate[:\s]{0,15}(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})', re.I)
+        master_dates = []
+        for mm in date_pat.finditer(master_all_text):
+            mo, da, yr = mm.groups()
+            yr_i = int(yr) + (2000 if len(yr) <= 2 else 0)
+            try:
+                master_dates.append(datetime.date(yr_i, int(mo), int(da)))
+            except ValueError:
+                continue
+        if not master_dates:
+            rec('SKIP', 'Master date matches the schedule date',
+                f'{_cite(5)}; master carries no date pattern this form maps '
+                f'(Commercial Fire delegates to the attached schedule)')
+        else:
+            ok = sched_date in master_dates
+            rec('PASS' if ok else 'FAIL', 'Master date matches the schedule date',
+                f'{_cite(5)}; schedule {sched_date.isoformat()} vs master '
+                + ', '.join(d.isoformat() for d in master_dates))
+
+    # K-16: one Site line per Site, one System line per System, no
+    # duplicated Site lines.
+    if not eq_hdr:
+        rec('SKIP', 'One Site line per Site, one System line per System',
+            f'{_cite(16)}; no Qty/Description header after the EQUIPMENT heading')
+    else:
+        eq_lines = _site_system_lines(S, range(eq_hdr + 1, eq_end + 1))
+        if not eq_lines:
+            rec('SKIP', 'One Site line per Site, one System line per System',
+                f'{_cite(16)}; no Site: or System: line in the Equipment and Labor block')
+        else:
+            k16_problems = _dup_site_system(eq_lines, 'Equipment and Labor')
+            if svc_hdr and mt_row:
+                svc_lines = _site_system_lines(S, range(svc_hdr + 1, mt_row))
+                k16_problems += _dup_site_system(svc_lines, 'Services')
+            if k16_problems:
+                rec('FAIL', 'One Site line per Site, one System line per System',
+                    f'{_cite(16)}; SCHEDULE-GENERATION-PROCEDURE.md §4; '
+                    + '; '.join(k16_problems))
+            else:
+                n_site = sum(1 for _, k, _ in eq_lines if k == 'site')
+                n_sys = sum(1 for _, k, _ in eq_lines if k == 'system')
+                rec('PASS', 'One Site line per Site, one System line per System',
+                    f'{_cite(16)}; {n_site} Site line(s), {n_sys} System line(s) in '
+                    f'Equipment and Labor, no duplicates')
+
+    # K-27: inapplicable tabs hidden; template counts cleared on tabs used.
+    # Repair Service / Inspection RMR (rmr_triggers, computed above for J-33)
+    # is what makes a Covered Equipment / Covered Sites tab applicable.
+    # WARN, not FAIL, on both halves: like item 30's filename check and
+    # item 33's drawings/placement-plan half, hiding a tab and clearing a
+    # template count are drafter export steps build_package.py does not
+    # automate, so a freshly built (not yet presend-reviewed) package
+    # always carries this until a human does that pass.
+    tab_by_name = {ws.title: ws for ws in S.wb.worksheets}
+    k27_seen = False
+    k27_inapplicable = []
+    k27_uncleared = []
+    for name in TEMPLATE_TABS:
+        ws = tab_by_name.get(name)
+        if ws is None:
+            continue
+        k27_seen = True
+        visible = ws.sheet_state == 'visible'
+        if rmr_triggers:
+            if visible:
+                counts = _tab_device_counts(ws)
+                if counts and not any(counts):
+                    k27_uncleared.append(name)
+        elif visible:
+            k27_inapplicable.append(name)
+    if not k27_seen:
+        rec('SKIP', 'Inapplicable tabs hidden; template counts cleared',
+            f'{_cite(27)}; no Covered Equipment / Covered Sites tab in this workbook')
+    elif k27_inapplicable or k27_uncleared:
+        k27_parts = []
+        if k27_inapplicable:
+            k27_parts.append('visible but not applicable (no Repair Service / '
+                             'Inspection RMR sold): ' + ', '.join(k27_inapplicable))
+        if k27_uncleared:
+            k27_parts.append('applicable and visible but every device count reads '
+                             'zero, which reads like an uncleared template: '
+                             + ', '.join(k27_uncleared))
+        rec('WARN', 'Inapplicable tabs hidden; template counts cleared',
+            f'{_cite(27)}; ' + '; '.join(k27_parts))
+    else:
+        rec('PASS', 'Inapplicable tabs hidden; template counts cleared',
+            f'{_cite(27)}; ' + ('applicable tabs carry entered device counts'
+                                if rmr_triggers else
+                                'no Repair Service / Inspection RMR sold and every '
+                                'template tab is hidden'))
+
+    # K-28: print area covers all content; no cut-off, hidden or truncated rows.
+    clar_cell_k28 = S.clarifications()[2]
+    used_max_row = S.maxr
+    if clar_cell_k28:
+        m = re.match(r'[A-Z]+(\d+)', clar_cell_k28)
+        if m:
+            used_max_row = max(used_max_row, int(m.group(1)))
+    used_max_col = _used_max_col(S.ws, used_max_row)
+    print_area = S.ws.print_area
+    k28_problems = []
+    if print_area:
+        pa_max_col, pa_max_row = _print_area_bounds(print_area)
+        if pa_max_row is not None and pa_max_row < used_max_row:
+            k28_problems.append(f'print area ends at row {pa_max_row} but content '
+                                f'runs to row {used_max_row}')
+        if pa_max_col is not None and pa_max_col < used_max_col:
+            k28_problems.append(f'print area ends at column {pa_max_col} but content '
+                                f'runs to column {used_max_col}')
+    # A hidden row is only a finding when it actually carries content — the
+    # builder hides unused template rows and unused-subgroup labels by
+    # design (build_package.py, "unhidden, unused rows hidden"; the
+    # New/Replacement/Existing Services label is hidden when that subgroup
+    # is empty), and that tidy-up is not what item 28 is guarding against.
+    def _row_carries_content(r):
+        texts = [S.t(f'{c}{r}').strip() for c in 'ABCDEFG']
+        texts = [t for t in texts if t]
+        if not texts:
+            return False
+        return not all(t in SVC_GROUPS or t.lower().startswith(('site:', 'system:'))
+                       for t in texts)
+    hidden_rows = [r for r in range(1, used_max_row + 1)
+                   if S.ws.row_dimensions[r].hidden and _row_carries_content(r)]
+    if hidden_rows:
+        k28_problems.append(
+            'hidden row(s) carrying content within the content range: '
+            + ', '.join(map(str, hidden_rows[:8]))
+            + (f' (+{len(hidden_rows) - 8} more)' if len(hidden_rows) > 8 else ''))
+    if k28_problems:
+        rec('FAIL', 'Print area covers all content; no hidden or cut-off rows',
+            f'{_cite(28)}; ' + '; '.join(k28_problems))
+    else:
+        rec('PASS', 'Print area covers all content; no hidden or cut-off rows',
+            f'{_cite(28)}; ' + (f'print area {print_area} covers the used range'
+                                if print_area else
+                                'no print area set (whole sheet prints); no hidden rows'))
+
+    # K-31: no strikethrough, highlighting or markup colours on the priced
+    # lines and totals. Presentation formatting (struck prices, colored
+    # totals) belongs to proposals only. A theme-coloured fill is the
+    # template's own Site-row banding (§4), not markup, so only a literal
+    # RGB fill counts here.
+    k31_rows = set(eq_items) | set(svc_items)
+    for r in (pp_row, dep_row, bal_row, mt_row):
+        if r:
+            k31_rows.add(r)
+    k31_strike = []
+    k31_highlight = []
+    for r in sorted(k31_rows):
+        for c in 'ABCDEFG':
+            cell = S.ws[f'{c}{r}']
+            if cell.font and cell.font.strike:
+                k31_strike.append(f'{c}{r}')
+            fill = cell.fill
+            if fill and fill.patternType == 'solid' and fill.fgColor is not None \
+                    and fill.fgColor.type == 'rgb' \
+                    and str(fill.fgColor.rgb or '').upper() not in ('00000000', 'FFFFFFFF', '00FFFFFF'):
+                k31_highlight.append(f'{c}{r}')
+    if not k31_rows:
+        rec('SKIP', 'No strikethrough, highlighting or markup colours',
+            f'{_cite(31)}; no equipment, service or pricing lines to check')
+    elif k31_strike or k31_highlight:
+        k31_parts = []
+        if k31_strike:
+            k31_parts.append('strikethrough: ' + ', '.join(k31_strike[:8]))
+        if k31_highlight:
+            k31_parts.append('highlight/markup colour: ' + ', '.join(k31_highlight[:8]))
+        rec('FAIL', 'No strikethrough, highlighting or markup colours',
+            f'{_cite(31)}; ' + '; '.join(k31_parts))
+    else:
+        rec('PASS', 'No strikethrough, highlighting or markup colours',
+            f'{_cite(31)}; {len(k31_rows)} line(s) checked, none carry '
+            f'strikethrough or a highlight colour')
 
     # ---------------- I) filename ----------------
     fn = os.path.basename(sched).replace('_', ' ')
