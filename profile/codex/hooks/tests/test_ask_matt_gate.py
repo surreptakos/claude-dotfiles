@@ -619,6 +619,30 @@ class AskMattGateTests(unittest.TestCase):
                 (state_dir / "claude--claude-session-no-prompt.json").exists()
             )
 
+    def test_claude_deny_names_this_sessions_declaration_after_a_restart(self) -> None:
+        """Issue 715: a model switch restarts the session as B with A's history. B's state has a
+        nonce and no flow, and the model copied A's stale declaration; the deny must name B's."""
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            (state_dir / "claude--session-A.json").write_text(
+                json.dumps({"nonce": "aaaaaaaaaaaaaaaa", "flow": "implement", "yes": True,
+                            "caveman": "ultra"}), encoding="utf-8")
+            (state_dir / "claude--session-B.json").write_text(
+                json.dumps({"nonce": "bbbbbbbbbbbbbbbb", "flow": None, "last_flow": None,
+                            "yes": True, "caveman": "ultra"}), encoding="utf-8")
+            denied = self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "session-B", "hook_event_name": "PreToolUse",
+                 "tool_name": "Bash", "tool_input": {"command": "ls"}},
+                state_dir,
+            )
+
+            decision = json.loads(denied.stdout)["hookSpecificOutput"]
+            self.assertEqual(decision["permissionDecision"], "deny")
+            reason = decision["permissionDecisionReason"]
+            self.assertIn('declare-claude "session-B" "bbbbbbbbbbbbbbbb" <flow>', reason)
+            self.assertNotIn("session-A", reason)
+
     def test_claude_bootstrap_accepts_yes_exit_check_but_no_other_suffix(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
