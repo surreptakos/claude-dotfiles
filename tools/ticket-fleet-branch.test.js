@@ -27,6 +27,7 @@ const {
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
+  buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -2196,8 +2197,11 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
 
   // The tip agent (revParse, `tip:#<ticket>`) reads a ref from the orchestrator's own checkout too,
   // and is exactly as exposed to a mid-run `cd` as the guard - it must carry the same absolute path.
-  assert.match(src, /git -C \$\{orchestratorCwd\} rev-parse \$\{ref\}/,
-    'the tip-check agent (revParse) must run `git -C <absolute path> rev-parse`, never a bare `git rev-parse` that trusts the ambient shell cwd');
+  // Since issue 561 the command it runs is `buildTipLookupCommand(orchestratorCwd, ref)`'s fallback
+  // chain, not a literal `git rev-parse` inline - the absolute path still has to be the measured
+  // orchestratorCwd, just passed through the call instead of interpolated directly.
+  assert.match(src, /buildTipLookupCommand\(orchestratorCwd, ref\)/,
+    'the tip-check agent (revParse) must build its command from buildTipLookupCommand(orchestratorCwd, ref), never a bare `git rev-parse` that trusts the ambient shell cwd');
   assert.ok(!src.includes('git rev-parse ${ref}'), 'no bare, unqualified `git rev-parse ${ref}` may remain');
 
   // Every scratch-worktree prompt built against the orchestrator's own checkout (the probe and code
@@ -2291,4 +2295,157 @@ test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and
   await treeGuardCheck('implement-attempt1', 7);
   assert.equal(commands.length, 2, 'expected the baseline plus one check');
   for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// ---------------------------------------------------------------------------
+// Tip lookup fallback chain (issue 561): a branch present only as `origin/<branch>` - handed in
+// through `priorImpl` from an earlier run, or pushed by an implementer in another container - used
+// to exit 128 from a bare `git rev-parse <branch>` in the orchestrator's own checkout, skipping the
+// whole issue-404 verdict cross-check. `buildTipLookupCommand` builds the one-command `||` fallback
+// chain (ref, then origin/ref, then `git ls-remote --heads origin <ref>`); `parseLsRemoteSha` and
+// `parseTipLookupOutput` read the chain's output back into a sha and which spelling answered.
+// ---------------------------------------------------------------------------
+
+test('buildTipLookupCommand: a single `||` chain, ref then origin/ref then ls-remote, no other command', () => {
+  const cmd = buildTipLookupCommand('/abs/cwd', 'agent/issue-9-attempt1');
+  const steps = cmd.split(/\s*\|\|\s*/);
+  assert.equal(steps.length, 3, `expected exactly 3 fallback steps, found ${steps.length}: ${cmd}`);
+  assert.match(steps[0], /^\{ git -C \/abs\/cwd rev-parse --verify agent\/issue-9-attempt1 2>\/dev\/null && echo SPELLING=given; \}$/);
+  assert.match(steps[1], /^\{ git -C \/abs\/cwd rev-parse --verify origin\/agent\/issue-9-attempt1 2>\/dev\/null && echo SPELLING=origin; \}$/);
+  assert.match(steps[2], /^git -C \/abs\/cwd ls-remote --heads origin agent\/issue-9-attempt1 2>\/dev\/null$/);
+  // One logical command: no `;` outside the `{ ... }` groups, no `&&`/`||` loop construct (`for`,
+  // `while`) anywhere - the guard this repo runs refuses loops, not `||` (issue 561's own wording).
+  assert.ok(!/\bfor\b|\bwhile\b/.test(cmd), 'the fallback chain must not be a loop');
+});
+
+test('buildTipLookupCommand: the cwd and ref are both interpolated verbatim, not re-derived', () => {
+  const cmd = buildTipLookupCommand('/measured/at/setup', 'main');
+  assert.ok(cmd.includes('-C /measured/at/setup'), 'every step must carry the given cwd');
+  assert.ok(cmd.split('-C /measured/at/setup').length - 1 === 3, 'all three steps must carry -C, not just the first');
+});
+
+test('parseLsRemoteSha: a matching heads line yields its sha', () => {
+  const sha = parseLsRemoteSha('abc123def456abc123def456abc123def456789\trefs/heads/agent/issue-9-attempt1\n');
+  assert.equal(sha, 'abc123def456abc123def456abc123def456789');
+});
+
+test('parseLsRemoteSha: empty output (git ls-remote found nothing but still exited 0) is null, not a parse failure', () => {
+  assert.equal(parseLsRemoteSha(''), null);
+  assert.equal(parseLsRemoteSha(null), null);
+  assert.equal(parseLsRemoteSha(undefined), null);
+});
+
+test('parseLsRemoteSha: a line with no refs/heads/ marker (a tag, or garbage) is null', () => {
+  assert.equal(parseLsRemoteSha('abc123def456abc123def456abc123def456789\trefs/tags/v1\n'), null);
+  assert.equal(parseLsRemoteSha('not a ls-remote line at all'), null);
+});
+
+test('parseTipLookupOutput: step 1 (the ref as given) answers - spelling "given"', () => {
+  const out = 'abc123def456abc123def456abc123def456789\nSPELLING=given\n';
+  assert.deepEqual(parseTipLookupOutput(out), { sha: 'abc123def456abc123def456abc123def456789', spelling: 'given' });
+});
+
+test('parseTipLookupOutput: step 1 fails, step 2 (origin/<ref>) answers - spelling "origin" (issue 561 acceptance criterion)', () => {
+  const out = 'def456abc123def456abc123def456abc123def4\nSPELLING=origin\n';
+  assert.deepEqual(parseTipLookupOutput(out), { sha: 'def456abc123def456abc123def456abc123def4', spelling: 'origin' });
+});
+
+test('parseTipLookupOutput: steps 1 and 2 both fail, ls-remote (step 3) answers - spelling "ls-remote", no marker needed', () => {
+  const out = 'abc123def456abc123def456abc123def456789\trefs/heads/agent/issue-9-attempt1\n';
+  assert.deepEqual(parseTipLookupOutput(out), { sha: 'abc123def456abc123def456abc123def456789', spelling: 'ls-remote' });
+});
+
+test('parseTipLookupOutput: all three steps fail (branch absent on both spellings) - null, not a guess (issue 561 acceptance criterion)', () => {
+  assert.equal(parseTipLookupOutput(''), null);
+  assert.equal(parseTipLookupOutput(null), null);
+  assert.equal(parseTipLookupOutput(undefined), null);
+});
+
+test('parseTipLookupOutput: a marker line with nothing above it (malformed stdout) is null, never a guessed sha', () => {
+  assert.equal(parseTipLookupOutput('SPELLING=given\n'), null);
+});
+
+test('parseTipLookupOutput: an unrecognised marker value is ignored, falling through to the ls-remote parse', () => {
+  // Defensive: the schema does not allow a third marker value, but the parser must not crash or
+  // misattribute a spelling it was never told to expect if one ever appears.
+  assert.equal(parseTipLookupOutput('abc123\nSPELLING=bogus\n'), null);
+});
+
+// Behavioral half: drive the REAL revParse (not a stub, unlike the code-lane tests above, which
+// inject `revParse: async () => null` precisely so the lane body under test does not depend on this
+// mechanism's internals). Extracted from the real generated source, evaluated with a mocked `agent`
+// that returns exactly the shape the tip agent would report - so the acceptance criterion "a mocked
+// agent whose first rev-parse fails and whose origin/ fallback answers" is driven at the same
+// abstraction the agent itself operates at: what came back on stdout, not which JS branch ran.
+function driveRevParse(agentMock, logs = []) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const generated = generatedBlock(FLEET_SCRIPT); // buildTipLookupCommand, parseTipLookupOutput live here
+  const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${generated}\n${revParseBody}\nreturn revParse;\n}`);
+  return wrapper(laneScope({
+    agent: agentMock,
+    log: (m) => logs.push(m),
+    cfg: { deliverModel: 'z' },
+    orchestratorCwd: '/abs/orchestrator',
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+}
+
+test('revParse: a branch present only as origin/<branch> still returns its tip and the run is told which spelling answered (issue 561)', async () => {
+  const logs = [];
+  const calls = [];
+  const agentMock = async (prompt, opts) => {
+    calls.push({ prompt, opts });
+    // Simulates what the real agent would report after running the fallback chain in a checkout
+    // where the branch was never fetched locally: the first rev-parse (ref as given) produced no
+    // SPELLING=given line, and origin/<ref> is what actually resolved.
+    return {
+      exitCode: 0,
+      stdout: 'def456abc123def456abc123def456abc123def4\nSPELLING=origin\n',
+      stderr: '',
+      spelling: 'origin',
+    };
+  };
+  const revParse = await driveRevParse(agentMock, logs);
+  const sha = await revParse('agent/issue-777-attempt1', 'tip:#777.1');
+
+  assert.equal(sha, 'def456abc123def456abc123def456abc123def4', 'the origin/-only branch tip must still come back');
+  assert.equal(calls.length, 1, 'the tip is read by exactly one agent call - one bash command, not a retry loop');
+  assert.match(calls[0].prompt, /agent\/issue-777-attempt1/, 'the command must be built from the ref the caller passed');
+  assert.match(calls[0].prompt, /ls-remote/, 'the prompt must still describe the full fallback chain, not just the branch as given');
+  assert.ok(logs.some((l) => /origin/.test(l) && /def456abc123def456abc123def456abc123def4/.test(l)),
+    'the resolved spelling must be logged next to the head (issue 561: "log the resolved spelling next to the head")');
+});
+
+test('revParse: a branch absent on both spellings (and on the remote) still reports null, and the lane logs the skip unchanged (issue 561 acceptance criterion)', async () => {
+  const logs = [];
+  const agentMock = async () => ({ exitCode: 0, stdout: '', stderr: '', spelling: '' });
+  const revParse = await driveRevParse(agentMock, logs);
+  const sha = await revParse('agent/issue-778-attempt1', 'tip:#778.1');
+
+  assert.equal(sha, null, 'an unresolvable ref must report null, never a guessed sha');
+  // revParse itself logs only the resolved case; the "accepted without the worktree cross-check"
+  // skip message is the caller's (unchanged - see aac-skills/ticket-fleet/ticket-fleet.js around
+  // both `revParse(...)` call sites), so this behavioral test only has to prove revParse stays
+  // silent and returns null for the caller's existing skip-logging to fire on.
+  assert.equal(logs.length, 0, 'revParse must not itself log anything when nothing resolved');
+});
+
+test('revParse: an agent() throw is still caught and reported through unusableReason, unchanged by the fallback chain', async () => {
+  const logs = [];
+  const agentMock = async () => { throw new Error('StructuredOutput retry cap exceeded'); };
+  const revParse = await driveRevParse(agentMock, logs);
+  const sha = await revParse('agent/issue-779-attempt1', 'tip:#779.1');
+
+  assert.equal(sha, null);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /output unusable.*StructuredOutput retry cap exceeded/);
+  assert.match(logs[0], /worktree HEAD cannot be cross-checked/);
+});
+
+test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries a spelling field (issue 561)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
+  assert.match(revParseBody, /spelling:\s*\{\s*type:\s*'string'/, 'REV must carry a spelling field so the run can report which spelling answered');
+  assert.match(revParseBody, /buildTipLookupCommand\(orchestratorCwd, ref\)/, 'the prompt must be built from the fallback-chain command, not a literal rev-parse');
 });

@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T13:31:37Z'
-  previous-modified: '2026-09-24T05:51:55Z'
-  revision: '39'
-  content-sha: e41fc1eb3943
+  modified: '2026-09-24T14:10:39Z'
+  previous-modified: '2026-09-24T13:31:37Z'
+  revision: '40'
+  content-sha: b357d5bb81e8
 ---
 
 # ticket-fleet
@@ -529,12 +529,17 @@ whatever branch the session is on - on 2026-09-16 that tree predated the code un
 #361 probe was refuted as "fabricated" for flags `origin/main` carried and that branch did not. So
 the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
 `head` against the tip it expects: the branch under review in the code lane,
-`origin/<defaultBranch>` in the probe lane, each read by its own one-command `rev-parse` agent so
-no agent certifies itself. A mismatch re-runs the verifier ONCE with the mismatch named - "for
-where it was produced and not for what it concluded", so the re-run is not read as pressure to
-change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
-and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run
-log says the cross-check was skipped: a guess is not a rejection.
+`origin/<defaultBranch>` in the probe lane, each read by its own one-command tip agent so no agent
+certifies itself. That command is a `||` fallback chain, not a bare `rev-parse`: the ref as given,
+then `origin/<ref>`, then `git ls-remote --heads origin <ref>` - a branch handed in from an earlier
+run's `priorImpl`, or pushed by an implementer in another container, exists only as `origin/<ref>`
+in the orchestrator's own checkout, and a bare `rev-parse` there used to exit 128 and skip the
+cross-check for the whole ticket (issue 561). The run log names which spelling answered. A mismatch
+re-runs the verifier ONCE with the mismatch named - "for where it was produced and not for what it
+concluded", so the re-run is not read as pressure to change its answer. A second mismatch is
+recorded as a failed attempt carrying only that mismatch, and nothing is delivered on it. When none
+of the three spellings resolve the ref the verdict stands and the run log says the cross-check was
+skipped: a guess is not a rejection.
 
 That `rev-parse` agent, the tree-guard baseline and every later checkpoint, and the editable-install
 guard all spawn a FRESH sub-agent, and a fresh sub-agent's shell starts wherever the orchestrating
