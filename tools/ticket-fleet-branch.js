@@ -665,6 +665,26 @@ function classifyDelivery(delivery, facts) {
   return { kind: 'undelivered', lookup: null, message: null };
 }
 
+/**
+ * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
+ * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
+ * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
+ * accepted every time. The Windows desktop (the gh instrument) has no /usr/bin/git, so there the
+ * bare spelling leads and the absolute path is the named retry. Either way the prompt carries
+ * both spellings and says when each one applies, so no worker is left holding only the refused
+ * one. `args` is everything after `git`; returns prompt text, the command in backticks first.
+ */
+const GIT_ABSOLUTE_PATH = '/usr/bin/git';
+const GIT_GUARD_REFUSAL = 'runs caveman with a git command among its operands';
+function gitSpelling(instrument, args) {
+  const bare = `git ${args}`;
+  const absolute = `${GIT_ABSOLUTE_PATH} ${args}`;
+  if (instrument === 'mcp') {
+    return `\`${absolute}\` (the absolute path: in a cloud container the worktree guard refuses a bare \`git ...\` with "${GIT_GUARD_REFUSAL}" and accepts this one; only where ${GIT_ABSOLUTE_PATH} does not exist, run \`${bare}\`)`;
+  }
+  return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -691,6 +711,6 @@ module.exports = {
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
-  classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE,
+  classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
 };
