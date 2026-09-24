@@ -131,6 +131,24 @@ def _warn_pdftotext_missing():
     )
 
 
+def decode_pdftotext(raw):
+    """Decode pdftotext stdout bytes without ever raising (issue 368).
+
+    Poppler writes UTF-8; xpdf (the pdftotext Git for Windows ships) writes
+    Latin-1 by default, so a registered-trademark sign arrives as a lone
+    0xae byte. Decoding in text mode under PYTHONUTF8=1 raised on that byte
+    and the caller's broad except turned the whole document into ''. Try
+    UTF-8 first, fall back to Latin-1, which maps every byte. Shared by
+    verify_package.pdf_text and extract_pdf below.
+    """
+    if not raw:
+        return ''
+    try:
+        return raw.decode('utf-8')
+    except UnicodeDecodeError:
+        return raw.decode('latin-1')
+
+
 def extract_pdf(path, out):
     """pdftotext -layout, plus a form-field dump when the PDF carries one.
 
@@ -143,8 +161,8 @@ def extract_pdf(path, out):
     """
     try:
         r = subprocess.run(['pdftotext', '-layout', path, '-'],
-                           capture_output=True, text=True, timeout=120)
-        text = r.stdout
+                           capture_output=True, timeout=120)
+        text = decode_pdftotext(r.stdout)
     except FileNotFoundError:
         _warn_pdftotext_missing()
         text = ''
