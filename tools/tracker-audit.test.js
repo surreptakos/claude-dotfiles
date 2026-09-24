@@ -39,6 +39,8 @@ const {
   pageFromUrl,
   stalePremiseFindings,
   stalePremiseIgnores,
+  citingSentences,
+  jevCitationClassifier,
   isExampleCitation,
   boxPathCandidates,
   deletedPathIndex,
@@ -598,6 +600,83 @@ test('stalePremiseIgnores: the marker opts a whole body out, or one cited issue 
   const found = stalePremiseFindings(all, byNumberOf(all));
   assert.deepStrictEqual(found.map((f) => f.detail.slice(0, 17)), ['cites closed #282']);
   assert.deepStrictEqual(stalePremiseIgnores('nothing here'), { all: false, numbers: new Set() });
+});
+
+// ---- issue 724: Jev reads what each closed-issue citation means --------------------------
+// Stubbed here: no test reaches the network. Shapes the proximity rule misread: a meta-ticket
+// quoting another ticket on purpose (issue 374) and a bug report naming a journal's agent label
+// in prose (issue 274). Both raise under the rule; neither is a premise.
+const CLOSED_205 = { number: 205, state: 'CLOSED', labels: [], title: 'auto-mode settings for fleet sessions',
+                     url: 'https://github.com/o/r/issues/205', closedByPullRequestsReferences: [] };
+const META_374 = { number: 375, state: 'OPEN', labels: [], title: 'meta: stale-premise noise',
+  url: 'https://github.com/o/r/issues/375',
+  body: 'The audit flagged #281 on the triage chore, which quotes #281 on purpose to stop refiling.' };
+const JOURNAL_274 = { number: 271, state: 'OPEN', labels: [], title: 'fleet run on aac-routines stalled at verify',
+  url: 'https://github.com/o/r/issues/271',
+  body: 'The journal line impl:#205.2 rebuilt the branch twice; the agent label #205 there is an aac-routines ticket.' };
+// A real premise sitting next to `see`, which the proximity rule reads as a hedge and skips.
+const PREMISE_NEAR_SEE = { number: 376, state: 'OPEN', labels: [], title: 'hook writes the old path',
+  url: 'https://github.com/o/r/issues/376',
+  body: 'See the hook: it still writes the old cache path, the one #282 moved, so fix the reader.' };
+const JEV_FIXTURES = [META_374, JOURNAL_274, PREMISE_NEAR_SEE, CLOSED_205, CLOSED_281, CLOSED_282];
+const stubJev = (roleOf, calls) => (state, questions) => {
+  if (calls) calls.push({ state, questions });
+  const answers = {};
+  Object.keys(questions).forEach((k) => { answers[k] = { type: 'choice', choice: roleOf(Number(k.slice(1))), confidence: 0.9 }; });
+  return answers;
+};
+const numbersOf = (found) => found.map((f) => f.issue.number + ':' + f.detail.slice(0, 17));
+
+test('stalePremiseFindings with Jev: the 374 and 274 shapes are silent unless Jev answers premise', () => {
+  const by = byNumberOf(JEV_FIXTURES);
+  assert.deepStrictEqual(numbersOf(stalePremiseFindings(JEV_FIXTURES, by)),
+                         ['375:cites closed #281', '271:cites closed #205']);
+  for (const role of ['background', 'example', 'follow-up', 'none']) {
+    const classify = jevCitationClassifier(stubJev(() => role));
+    assert.deepStrictEqual(stalePremiseFindings(JEV_FIXTURES, by, { classify }), [], role);
+  }
+  const calls = [];
+  const classify = jevCitationClassifier(stubJev((n) => (n === 282 ? 'premise' : 'example'), calls));
+  const found = stalePremiseFindings(JEV_FIXTURES, by, { classify });
+  // The premise is raised even beside `see`; the rule alone would have skipped it.
+  assert.deepStrictEqual(numbersOf(found), ['376:cites closed #282']);
+  assert.match(found[0].detail, /as a premise/);
+  // One request per open issue, carrying the citing sentence and the closed issue's title.
+  assert.strictEqual(calls.length, 3);
+  assert.deepStrictEqual(calls[2].state.citations.c282, {
+    closed_issue: { number: 282, title: CLOSED_282.title },
+    citing_sentences: ['See the hook: it still writes the old cache path, the one #282 moved, so fix the reader.'],
+  });
+  assert.strictEqual(calls[2].questions.c282.type, 'choice');
+  assert.deepStrictEqual(Object.keys(calls[2].questions.c282.criteria),
+                         ['premise', 'background', 'example', 'follow-up', 'none']);
+});
+
+test('stalePremiseFindings with Jev unavailable: findings identical to the proximity rule, one attempt only', () => {
+  const all = JEV_FIXTURES.concat([
+    { number: 359, state: 'OPEN', labels: [], title: 'the packager stamps on pull as well as push',
+      url: 'https://github.com/o/r/issues/359',
+      body: 'The packager stamps every skill on pull as well as push, which #281 changed to push only.' },
+  ]);
+  const by = byNumberOf(all);
+  const today = stalePremiseFindings(all, by);
+  let attempts = 0;
+  for (const ask of [() => { attempts++; return null; }, () => { attempts++; throw new Error('ETIMEDOUT'); }, null]) {
+    attempts = 0;
+    const got = stalePremiseFindings(all, by, { classify: jevCitationClassifier(ask) });
+    assert.deepStrictEqual(got, today);
+    assert.ok(attempts <= 1, 'Jev marked down after the first failure, got ' + attempts + ' attempts');
+  }
+  // An answer outside the Choice's options is no answer: the rule decides that citation.
+  const junk = jevCitationClassifier(stubJev(() => 'maybe'));
+  assert.deepStrictEqual(stalePremiseFindings(all, by, { classify: junk }), today);
+});
+
+test('citingSentences: every prose sentence citing #N, code masked, deduplicated', () => {
+  const body = 'Intro. The hook still writes what #281 changed. Quoted `#281` here.\nAlso #281 again';
+  assert.deepStrictEqual(citingSentences(body, 281),
+                         ['The hook still writes what #281 changed.', 'Also #281 again']);
+  assert.deepStrictEqual(citingSentences('Not #2810 or o/r#281.', 281), []);
 });
 
 test('deletedSubjectFindings: a box quoting another issue box is about that issue, not this one', () => {
