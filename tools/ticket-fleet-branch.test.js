@@ -26,6 +26,7 @@ const {
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
   classifyBranchLookup, classifyDelivery,
+  LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -441,7 +442,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} verifier prompt still runs the live-tree 
 // re-reports the false breach or quietly widens the hole.
 test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state from the live-tree sweep (issue 334)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
+  assert.match(liveTreeFindCommand('T'), /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*'/,
     `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/projects (tool-results, transcripts) as well as hook-state`);
   assert.match(src, /~\/\.claude\/projects holds this session's transcripts, tool-results\/\*\.txt/,
     `${FLEET_SCRIPT_REL} must state the exclusion and why in the prompt so the verifier does not re-derive it`);
@@ -457,10 +458,48 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes harness-written session state fr
 // to wave it through.
 test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from the live-tree sweep (issue 489)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
+  assert.match(liveTreeFindCommand('T'), /-not -path '\*\/hook-state\/\*' -not -path '\*\/\.claude\/projects\/\*' -not -path '\*\/\.claude\/sessions\/\*'/,
     `${FLEET_SCRIPT_REL} live-tree find must exclude ~/.claude/sessions alongside hook-state and projects`);
   assert.match(src, /~\/\.claude\/sessions\/<pid>\.json is the CLI's own process registry, heartbeat-rewritten/,
     `${FLEET_SCRIPT_REL} must state why ~/.claude/sessions is excluded so the verifier does not re-derive it`);
+});
+
+// Issue 677: ~/.claude/skills/synced/<id>/manifest.json is the CLI's skills-sync catalogue, rewritten
+// by the verifying session's own Skill and ToolSearch loads. Run the generated find against a fake
+// home: the bookkeeping paths stay quiet and a real implementer write under ~/.claude still fires.
+test('live-tree find skips the CLI skills-sync manifest but still catches an implementer write (issue 677)', () => {
+  const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'fleet-677-'));
+  try {
+    const quiet = ['.claude/skills/synced/abc_def/manifest.json', '.claude/sessions/42.json',
+      '.claude/projects/p/s.jsonl', '.claude/hook-state/x/state.json'];
+    const loud = ['.claude/skills/foo/SKILL.md', '.claude/settings.json', '.codex/config.toml', '.agents/a.md'];
+    for (const rel of [...quiet, ...loud]) {
+      fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
+      fs.writeFileSync(path.join(home, rel), 'x');
+    }
+    const r = spawnSync('bash', ['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
+      { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+    assert.strictEqual(r.status, 0, r.stderr);
+    const hits = r.stdout.split('\n').filter(Boolean).map((f) => path.relative(home, f)).sort();
+    assert.deepStrictEqual(hits, [...loud].sort());
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} builds the live-tree exclusions from one list (issue 677)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const handWritten = src.slice(0, src.indexOf('// [FLEET-GENERATED-START]'))
+    + src.slice(src.indexOf('// [FLEET-GENERATED-END]'));
+  for (const e of LIVE_TREE_EXCLUSIONS) {
+    assert.ok(!handWritten.includes(e.path),
+      `${FLEET_SCRIPT_REL} must not spell exclusion ${e.path} outside the generated LIVE_TREE_EXCLUSIONS`);
+  }
+  assert.ok(handWritten.includes("${liveTreeFindCommand('<that time>')}") && handWritten.includes('${liveTreeExclusionNote()}'),
+    `${FLEET_SCRIPT_REL} verifier prompt must take the rail's find command and reasons from the generated helpers`);
+  assert.ok(LIVE_TREE_EXCLUSIONS.some((e) => e.path === '*/.claude/skills/synced/*'));
+  assert.match(liveTreeExclusionNote(), /add none of your own, do not re-derive them/,
+    'the prompt must still forbid the verifier inventing its own exclusions');
 });
 
 // ---- Three-copies gone (issue 138) ----
