@@ -36,6 +36,9 @@ function runHook() {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
+      // Without it the Windows Python install manager behind python3 roots itself in the cwd and
+      // downloads a whole Python into ./Python, printing "Downloading" into the hook output.
+      ...(process.env.LOCALAPPDATA && { LOCALAPPDATA: process.env.LOCALAPPDATA }),
       HOME: home,
       CLAUDE_CODE_REMOTE: 'true',
       BOOTSTRAP_HOME: home,

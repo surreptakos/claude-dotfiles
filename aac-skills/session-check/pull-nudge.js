@@ -37,7 +37,8 @@ function readStamp(file) {
   const target = file || STATE_FILE;
   if (!fs.existsSync(target)) return null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
+    // sync.ps1 writes the stamp with PowerShell 5.1's `Set-Content -Encoding UTF8`, which prefixes a BOM.
+    const parsed = JSON.parse(fs.readFileSync(target, 'utf8').replace(/^\uFEFF/, ''));
     return (parsed && typeof parsed.sha === 'string' && parsed.sha) ? parsed : null;
   } catch (e) {
     return null;
