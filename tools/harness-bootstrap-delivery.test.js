@@ -240,3 +240,18 @@ test('the wired command never depends on the executable bit', () => {
   const r = spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_PROJECT_DIR: root } });
   assert.strictEqual(r.status, 0, 'a 644 hook must still run through the wired command: ' + r.stderr);
 });
+
+test("this repo's own settings already carry the delivery, Workflow allow included (issue 705)", () => {
+  // A scriptPath Workflow call (the fleet) asks with no "don't ask again" option, and in auto mode
+  // an ask on Workflow becomes the usage-consent prompt before the classifier sees it. Only a
+  // permissions.allow entry skips both; claude-dotfiles never re-ran v32's delivery on itself.
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude', 'hooks'), { recursive: true });
+  for (const rel of ['.claude/settings.json', '.claude/hooks/session-start.sh']) {
+    fs.copyFileSync(path.join(REPO_ROOT, rel), path.join(root, rel));
+  }
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.ok(s.permissions.allow.includes('Workflow'), 'Workflow missing from .claude/settings.json permissions.allow');
+  assert.match(deliver(root), /already delivered/,
+    'run: node aac-skills/project-harness/templates/add-cloud-plugin.js . and commit .claude/settings.json');
+});

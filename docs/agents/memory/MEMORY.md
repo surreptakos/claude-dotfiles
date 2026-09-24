@@ -50,3 +50,4 @@ and give the note a name that says what it is — adding one costs its own line 
 - user-scope-plugin-wins-over-project-scope: user wins
 - verify-before-filing-a-sweep-ticket: re-list first
 - workflow-runtime-quirks: scriptPath; no Date.now; LF
+- workflow-prompt-needs-allow-rule: bare Workflow in allow
