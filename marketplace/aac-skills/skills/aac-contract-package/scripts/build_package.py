@@ -26,6 +26,7 @@ import sys, os, re, json, shutil, zipfile, argparse
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import xlsx_surgical as X
+from verify_package import RS_START_SUFFIX
 import aac_paths
 
 SHEET = 'Equip & Services'
@@ -335,6 +336,24 @@ def _norm_desc(s):
     return re.sub(r'\s+', ' ', str(s).strip().lower())
 
 
+def _rmr_desc_key(s):
+    """``_norm_desc(s)``, with the Repair Service start-date suffix
+    (verify_package.RS_START_SUFFIX — the one copy of that text) stripped
+    when what precedes it is a canonical Repair Service name (issue 354).
+    MAPPING-APPENDIX.md §3a requires that suffix on the schedule line, so a
+    _facts.json Repair Service line carrying it must still match the
+    canonical name. Any other description keeps the suffix, so it cannot
+    launder a non-Repair-Service line into the whitelist.
+    """
+    n = _norm_desc(s)
+    suffix = _norm_desc(RS_START_SUFFIX)
+    if n.endswith(suffix):
+        base = n[:-len(suffix)].strip()
+        if base in {_norm_desc(x) for x in _FIRE_MASTER_REPAIR_SERVICE_NAMES}:
+            return base
+    return n
+
+
 def _categorize_fire_master_rmr(services):
     """Return (monitoring, inspection, repair_service) service dicts by
     matching each `services[].description` against the canonical Fire-master
@@ -356,7 +375,7 @@ def _categorize_fire_master_rmr(services):
     picked = {'monitoring': None, 'inspection': None, 'repair_service': None}
     for s in services or ():
         desc = s.get('description', '')
-        n = _norm_desc(desc)
+        n = _rmr_desc_key(desc)
         for trigger, canonical_names, cat in _FIRE_MASTER_CATEGORIES:
             if trigger not in n:
                 continue
@@ -409,12 +428,18 @@ _SECURITY_REMOTE_ACCESS_NAMES = (
     'Eagle Eye - 911 Camera Sharing (monthly fee per camera)',
 )
 # 'remote_access_video': Contract selections = "Remote Access by Subscriber"
-# plus "Video Data to Subscriber's Smart Phone" and "Cloud Service Data
-# Storage and Retrieval" (several also add "Recording Device"). Approximated
-# here as one bucket that ticks all three §4(e) sub-boxes — the sheet does
-# not need per-line sub-box precision for this ticket's acceptance criteria;
-# splitting the sub-boxes item-by-item is a follow-on (see the discovery
-# filed with this ticket).
+# plus "Video Data to Subscriber's Smart Phone", and (per line) "Recording
+# Device" and/or "Cloud Service Data Storage and Retrieval". Every name in
+# this bucket carries "Video Data to Subscriber's Smart Phone" in the RMR
+# Items sheet's Contract selections column (fixtures/google-drive/
+# RMR-Items-2026-08-19.xlsx, "Standard RMR" tab), so cb_4e_video_smartphone
+# ticks for the bucket as a whole; which of the other two §4(e) sub-boxes
+# also ticks is decided per line by the two subset tuples below, cross-
+# checked against that same column (issue 356 — this bucket used to tick
+# all three sub-boxes for every line in it, which over-ticked Recording
+# Device on cloud-storage-only lines like "Maxpro Cloud Video Service -
+# Camera cloud storage" and Cloud Storage on recording-device-only lines
+# like "Remote Video Services for Local Video System").
 _SECURITY_REMOTE_ACCESS_VIDEO_NAMES = (
     'DMP Video - 4000/5000 Series - up to 8 Cameras',
     'DMP Video - 4000/5000 Series - up to 12 Cameras',
@@ -455,6 +480,73 @@ _SECURITY_REMOTE_ACCESS_VIDEO_NAMES = (
     'monthly charge per Cabinet/Ca,era Appliance',
     '4MP 60-day retention cloud recording monthly per camera',
 )
+# Subset of _SECURITY_REMOTE_ACCESS_VIDEO_NAMES above whose RMR Items sheet
+# Contract selections cell also names "Recording Device" (issue 356).
+_SECURITY_VIDEO_RECORDING_DEVICE_NAMES = (
+    'Remote Video Services for Local Video System',
+    'Maxpro Cloud Video Service - Recorder',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 30 Days',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 60 Days',
+    'Alta Intercom License, Premium',
+    'Alta Cloud Video with Analytics and 30 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 60 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 90 Days of Cloud Storage - Per Camera',
+    'Alta Cloud LPR Analytics Add-On - Per Camera',
+    'Eagle Eye Cloud VMS, 1 FPS, 30-day storage, per camera',
+)
+# Subset of _SECURITY_REMOTE_ACCESS_VIDEO_NAMES above whose RMR Items sheet
+# Contract selections cell also names "Cloud Service Data Storage and
+# Retrieval" (issue 356).
+_SECURITY_VIDEO_CLOUD_STORAGE_NAMES = (
+    'DMP Video - 4000/5000 Series - up to 8 Cameras',
+    'DMP Video - 4000/5000 Series - up to 12 Cameras',
+    'DMP Video - 4000/5000 Series - up to 16 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 8 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 12 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 16 Cameras',
+    'DMP Video - 6000 Series - Smart Analytics (per camera)',
+    'DMP Video - XV Gateways AlarmVision Advanced Analytics, per camera',
+    'DMP - Virtual Keypad Video Doorbell License',
+    'VX Series Standard Camera Package - 4 Devices, 7-Day Storage',
+    'VX Series Standard Camera Package - 4 Devices, 30-Day Storage',
+    'VX Series Single Doorbell Package - 1 Device, 30-Day Storage',
+    'VX Series Extended Camera Package - 12 Devices, 30-Day Storage',
+    'Alarm.com Pro Video',
+    'Alarm.com Pro Video with Analytics',
+    'Alarm.com Premium Video',
+    'Alarm.com Video Expansion add-on',
+    'Total Connect Video - 7 Day Storage',
+    'Total Connect Video - 30 Day Storage',
+    'Total Connect Video - Additional Camera Storage',
+    'Maxpro Cloud Video Service - Camera cloud storage',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 30 Days',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 60 Days',
+    'Alta Intercom License, Premium',
+    'Alta Cloud Video with Analytics and 30 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 60 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 90 Days of Cloud Storage - Per Camera',
+    'Alta Cloud LPR Analytics Add-On - Per Camera',
+    'Monthly Eagle Eye Networks VMS Per Camera License with 1MP, 30 Days Retention',
+    '180deg. Cabinet Appliance with Solar/Cellular/Back-up Battery \n'
+    'monthly charge per Cabinet/Ca,era Appliance',
+    '4MP 60-day retention cloud recording monthly per camera',
+)
+
+
+def _security_video_subbox_sold(systems, names):
+    """True if any service line across ``systems`` matches (case/whitespace
+    normalized) one of ``names`` — a presence test, not a dollar sum, used
+    to decide the Commercial Security master's §4(e) Recording Device and
+    Cloud Service Data Storage sub-boxes independently of each other and of
+    the combined remote-access-video dollar amount (issue 356)."""
+    norm_names = {_norm_desc(n) for n in names}
+    for s in systems:
+        for svc in s.get('services') or ():
+            if _norm_desc(svc.get('description', '')) in norm_names:
+                return True
+    return False
+
+
 # 'access_control_other': Contract selections = "Remote Access by
 # Subscriber" + 'Other "See Schedule"' — the combine route (MAPPING-
 # APPENDIX.md §1 rule 6) always applies to these.
@@ -483,15 +575,27 @@ _SECURITY_OTHER_ONLY_NAMES = (
     'Azure Active Directory, 1000 users, 15-minute sync, Alta Access',
     'Remote Tech Support',
     'Communication Assurance Program',
+    # MAPPING-APPENDIX.md §3: "Check the Video Alarm Verification box if
+    # present; otherwise use Other 'See Schedule'." This CS form carries no
+    # "Video Alarm Verification" box (only §2/§4(d) "Alarm Signal
+    # Verification", a different, pre-existing box) — the RMR Items sheet's
+    # Contract selections cell for this row is also blank. Per the
+    # appendix's own fallback and MAPPING-APPENDIX.md §1 rule 6, this line
+    # routes to the combine ("Other / See Schedule") route rather than
+    # ticking Alarm Signal Verification (issue 356; supersedes the earlier
+    # best-fit mapping onto that box).
+    'Video Alarm Verification Service',
 )
 # 'self_monitoring': Contract selections = "Self-Monitoring (under Remote
 # Subscriber Access)".
 _SECURITY_SELF_MONITORING_NAMES = ('Maxpro Cloud Health Notifications',)
-# 'signal_verification': closest existing CS-form box is §2/§4(d) "Alarm
-# Signal Verification" — the sheet's own box name is "Video Verification",
-# which this form does not carry as a separate box. Best-fit mapping,
-# recorded as a discovery with this ticket rather than left silent.
-_SECURITY_SIGNAL_VERIFICATION_NAMES = ('Video Alarm Verification Service',)
+# 'signal_verification': §2/§4(d) "Alarm Signal Verification" box. No
+# Standard RMR tab row's Contract selections column names it (issue 356
+# moved the one line that used to approximate onto it, "Video Alarm
+# Verification Service", to 'other_only' instead — see that tuple's
+# comment) — kept as an empty category rather than removed, since the box
+# itself is still a real, distinct field on the form.
+_SECURITY_SIGNAL_VERIFICATION_NAMES = ()
 # 'no_rmr': generates no recurring line at all. Not a Standard RMR tab row
 # (Axis-based access control needs no hosted service, so the RMR sheet
 # carries nothing for it); cited from MAPPING-APPENDIX.md §3 instead, whose
@@ -553,7 +657,7 @@ def _categorize_security_master_rmr(systems):
     unmapped = []
     for s in systems:
         for svc in s.get('services') or ():
-            cat = _SECURITY_RMR_CATEGORY.get(_norm_desc(svc.get('description', '')))
+            cat = _SECURITY_RMR_CATEGORY.get(_rmr_desc_key(svc.get('description', '')))
             if cat in (None, 'no_rmr', 'repair_service'):
                 continue
             if cat == 'unmapped':
@@ -698,7 +802,7 @@ def _categorize_residential_master_rmr(services):
     unmapped = []
     for s in services or ():
         desc = s.get('description', '')
-        n = _norm_desc(desc)
+        n = _rmr_desc_key(desc)
         if n in mon_names:
             if monitoring is None:
                 monitoring = s
@@ -964,23 +1068,17 @@ def _flatten_v1(f):
     ``plan_service_rows``, ``build_schedule``). A single-Site record is the
     same shape with one entry in ``sites``.
 
-    ``customer.site_name``/``site_address`` and ``pricing`` continue to
-    name one Site and one price the way they did before #227, for the
-    header block (A10/C10), the schedule and agreement filenames and the
-    payments-bullet threshold — none of which the amended cell map (
-    references/SCHEDULE-GENERATION-PROCEDURE.md §4) says anything about for
-    more than one Site. ``customer.site_name``/``site_address`` take the
-    first Site (the schedule's header predates the multi-Site amendment and
-    is silent on it); ``pricing.price`` is the total Purchase Price across
+    ``customer.site_name``/``site_address`` keep naming the first Site as
+    they did before #227; the header block (C10) and the schedule and
+    agreement filenames read ``_site_header`` instead, which names every
+    Site collectively once there is more than one (Dan's ruling on issue
+    359, question 1). ``pricing.price`` is the total Purchase Price across
     every Site's line (what G73 sums to). ``pricing.deposit`` is ``None``
     (build_schedule's standing 50%-over-$5,000 rule then applies to that
-    total, unchanged from before #227) when no Site sets one explicitly, or
-    else the sum of every Site's own deposit, an unset Site's own share
-    defaulting to $0 — the payments bullet states the 50% rule once, for
-    the whole schedule, with no per-Site form, so a Site left unset is not
-    given one of its own invention. Both readings are this file's own
-    choice, not a standard's — recorded as a discovery for Dan to rule on
-    (hard rule 7).
+    total) when no Site sets one explicitly, or else the sum of every
+    Site's own deposit with an unset Site counted as $0 — Dan's ruling on
+    issue 359, question 2. The SOW's per-Site labelling is question 3 of
+    the same ruling (``build_sow``).
 
     Package composition and the cross-family refusal (issue #225) run over
     the whole tree in ``compose`` before this normaliser is reached.
@@ -1177,7 +1275,15 @@ def build_sow(f, L):
     paragraph opens with its label — the System's approved name and a colon
     — per the per-System labelled paragraph form of references/SOW-BASELINES.md
     §1; a single System keeps the unlabelled paragraph the cell map's A15
-    row describes, so single-System output is unchanged."""
+    row describes, so single-System output is unchanged. More than one
+    Site: one paragraph per Site and System occurrence, each label opening
+    with the Site's name so two Sites selling the same System read
+    distinctly (Dan's ruling on issue 359, question 3)."""
+    sites = f['sites']
+    if len(sites) > 1:
+        return (CR * 2).join(
+            f"{site['site_name']}, {s['system']}: {_sow_paragraph(s, L)}"
+            for site in sites for s in site['systems'])
     paragraphs = [_sow_paragraph(s, L) for s in f['systems']]
     if len(paragraphs) == 1:
         return paragraphs[0]
@@ -1201,15 +1307,18 @@ def _jurisdiction_phrase(state):
 def _systems_label(names):
     """The Systems a schedule carries, as its filename names them: one name
     alone, two joined with '&', three or more comma-separated with '&'
-    before the last. A character a Windows filename cannot carry becomes
-    '-' (the approved name Audio/Visual is the case)."""
+    before the last. Each character a Windows filename cannot carry is
+    replaced with a space (the approved name Audio/Visual becomes
+    'Audio Visual', per the issue 328 ruling). A System sold at more than
+    one Site is one System type and is named once (issue 359)."""
+    names = list(dict.fromkeys(names))
     if len(names) == 1:
         label = names[0]
     elif len(names) == 2:
         label = ' & '.join(names)
     else:
         label = ', '.join(names[:-1]) + ', & ' + names[-1]
-    return re.sub(r'[<>:"/\\|?*]', '-', label)
+    return re.sub(r'[<>:"/\\|?*]', ' ', label)
 
 
 def plan_equipment_rows(sites):
@@ -1394,6 +1503,27 @@ def _site_line(site):
     return f"Site: {site['site_name']}, {site['site_address'].replace(chr(10), ', ')}"
 
 
+# Dan's ruling on issue 359 (question 1): a multi-Site schedule's C10 site
+# block names no one Site, and the schedule and agreement filenames carry
+# "Multiple Sites" where a single Site's name would go.
+MULTI_SITE_HEADER = 'Multiple; see EQUIPMENT AND LABOR section for complete list'
+MULTI_SITE_STEM = 'Multiple Sites'
+
+
+def _site_header(sites):
+    """``(C10 text, filename stem)`` for the header block and the schedule
+    and agreement filenames. One Site: its name over its address lines,
+    and ``<name>_<street>``. More than one: MULTI_SITE_HEADER and
+    MULTI_SITE_STEM (issue 359 ruling), so no Site is named over the
+    others."""
+    if len(sites) > 1:
+        return MULTI_SITE_HEADER, MULTI_SITE_STEM
+    site = sites[0]
+    cell = CR.join([site['site_name']]
+                   + [x for x in site['site_address'].split('\n') if x.strip()])
+    return cell, f"{site['site_name']}_{_slug(site['site_address'])}"
+
+
 def build_schedule(job, f, L, R):
     cust, deal, pr, systems, sites = (f['customer'], f['deal'], f['pricing'],
                                       f['systems'], f['sites'])
@@ -1409,8 +1539,7 @@ def build_schedule(job, f, L, R):
                 "add the field to _facts.json.")
         name = f"{cust['subscriber_name']}, {_jurisdiction_phrase(state)}, d/b/a {cust['assumed_name']}"
     sub = CR.join([name] + [x for x in cust['billing_address'].split('\n') if x.strip()])
-    siteline = f"Site: {cust['site_name']}, {cust['site_address'].replace(chr(10), ', ')}"
-    site = CR.join([cust['site_name']] + [x for x in cust['site_address'].split('\n') if x.strip()])
+    site, stem = _site_header(sites)
 
     # Lay every row out before the template is copied, so a refusal (a
     # region that cannot hold the schedule, a subgroup over its cap) writes
@@ -1420,8 +1549,7 @@ def build_schedule(job, f, L, R):
     sow = build_sow(f, L)
     clar, ex = select_bullets(f, L)
 
-    out = os.path.join(job, f"{cust['site_name']}_{_slug(cust['site_address'])} - "
-                            f"{_systems_label([s['system'] for s in systems])} "
+    out = os.path.join(job, f"{stem} - {_systems_label([s['system'] for s in systems])} "
                             "Equip & Svc Schedule.xlsx")
     os.makedirs(R.to_delete, exist_ok=True)
     shutil.copy2(R.schedule_template, out)
@@ -1436,7 +1564,7 @@ def build_schedule(job, f, L, R):
     w.set_inline_text(SHEET, 'A15', sow)
 
     price = float(pr['price'])  # aggregate Purchase Price across every Site
-    w.set_inline_text(SHEET, 'B21', siteline)
+    w.set_inline_text(SHEET, 'B21', _site_line(sites[0]))
     w.set_num(SHEET, 'F21', sites[0]['price'])
     w.set_num(SHEET, 'G21', sites[0]['price'])
     w.set_inline_text(SHEET, f'B{EQ_SYS_ROW}', f"System: {sites[0]['systems'][0]['system']}")
@@ -1674,7 +1802,7 @@ def _repair_service_line(systems):
     target = _norm_desc(_FIRE_MASTER_REPAIR_SERVICE_NAMES[0])
     for s in systems:
         for svc in s.get('services') or ():
-            if _norm_desc(svc.get('description', '')) == target:
+            if _rmr_desc_key(svc.get('description', '')) == target:
                 return svc
     return None
 
@@ -1696,6 +1824,13 @@ def _security_agreement_fields(f, dep):
     deal, cust, pr = f['deal'], f['customer'], f['pricing']
     systems = f['systems']
     amounts, unmapped = _categorize_security_master_rmr(systems)
+    # §4(e) Recording Device / Cloud Service Data Storage tick independently
+    # per sold line (issue 356) — see _SECURITY_VIDEO_RECORDING_DEVICE_NAMES
+    # / _SECURITY_VIDEO_CLOUD_STORAGE_NAMES.
+    video_recording_device = _security_video_subbox_sold(
+        systems, _SECURITY_VIDEO_RECORDING_DEVICE_NAMES)
+    video_cloud_storage = _security_video_subbox_sold(
+        systems, _SECURITY_VIDEO_CLOUD_STORAGE_NAMES)
     amt = lambda x: f'{x:.2f}' if x is not None else 'N/A'
 
     monitor_amt = amounts['monitoring']
@@ -1765,8 +1900,8 @@ def _security_agreement_fields(f, dep):
         SECURITY['cb_4c_inspection']: False,
         SECURITY['cb_4d_signal_verification']: (not combine) and signal_amt is not None,
         SECURITY['cb_4e_remote_access']: (not combine) and has_remote,
-        SECURITY['cb_4e_recording_device']: (not combine) and amounts['remote_access_video'] is not None,
-        SECURITY['cb_4e_cloud_storage']: (not combine) and amounts['remote_access_video'] is not None,
+        SECURITY['cb_4e_recording_device']: (not combine) and video_recording_device,
+        SECURITY['cb_4e_cloud_storage']: (not combine) and video_cloud_storage,
         SECURITY['cb_4e_video_smartphone']: (not combine) and amounts['remote_access_video'] is not None,
         SECURITY['cb_4e_self_monitoring']: False,
         SECURITY['cb_4e_remote_access_subscriber']: (not combine) and has_remote,
@@ -1886,27 +2021,18 @@ def _residential_agreement_fields(f, dep):
 
 def build_agreements(job, f, R, family, dep=None):
     cust = f['customer']
-    # Elevator Monitoring dispatches on the System name ahead of Fire, as
-    # issue 335 shipped it.
-    # The Fire branch keys off the System name, not ``family``, exactly as
-    # before issue 336 — a residential Project with a Fire Alarm System
-    # already took this branch pre-336 (family is forced to "Residential
-    # Security" for any residential record, SOW-BASELINES.md §3 note) and
-    # this ticket's scope is the Commercial Security field map only, so
-    # that pre-existing dispatch is left untouched (see the discovery filed
-    # with this ticket rather than changed here).
-    if any(s['system'] == 'Elevator Monitoring' for s in f['systems']):
-        pkg_key = 'Elevator Monitoring'
-    elif any(s['system'] == 'Fire Alarm' for s in f['systems']):
-        pkg_key = 'Commercial Fire'
-    elif family == 'Commercial Security':
-        pkg_key = 'Commercial Security'
-    elif family == RESIDENTIAL_FAMILY:
-        pkg_key = 'Residential Security'
-    else:
+    # The package follows the Contract family compose() derived (issue 355):
+    # SOW-BASELINES.md §3 maps each commercial System to its family and
+    # collapses every residential System, fire included, into Residential
+    # Security, so a residential Fire Alarm record takes the Residential
+    # form, never the Commercial Fire one. compose() has already refused a
+    # commercial record whose Systems span two families, so one family
+    # names one package here; PACKAGES is keyed by family name.
+    if family not in PACKAGES:
         return None, None, (
             f'only the {", ".join(MAPPED_FAMILIES)} forms are mapped so far '
             f'({family} is not)')
+    pkg_key = family
     folder, mname, rname = PACKAGES[pkg_key]
     mpath = os.path.join(R.agreements_root, folder, mname)
     rpath = os.path.join(R.agreements_root, folder, rname)
@@ -1927,7 +2053,7 @@ def build_agreements(job, f, R, family, dep=None):
     f.setdefault('held', [])
     f['held'].extend(questions)
 
-    stem = f"{cust['site_name']}_{_slug(cust['site_address'])}"
+    stem = _site_header(f['sites'])[1]
     mo = os.path.join(job, f'{stem} - {mlabel}.pdf')
     ro = os.path.join(job, f'{stem} - {rlabel}.pdf')
     _fill_pdf(mpath, mo, text, checks)

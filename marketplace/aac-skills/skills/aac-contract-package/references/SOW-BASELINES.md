@@ -28,9 +28,11 @@ Deprecated openers — do not use: any variant that spells out the site address,
 
 ### Per-System labelled paragraph form
 
-*Amended 2026-09-10 (spec 215 stream B, ADR-0001); awaiting Dan's signature.* A Project selling more than one System within one Contract family (§3) carries one scope-of-work paragraph per System, in the same order the Systems appear in the Equipment and Labor section. Each paragraph opens with a label — the System's approved name from §3, followed by a colon — and then follows the canonical sentence above and the applicable §5 follow-on sentences for that System. Golden-12 and golden-17 already read this way; see `fixtures/golden/golden-17/expected/` for a three-System example.
+*Amended 2026-09-10 (spec 215 stream B, ADR-0001); ratified by Dan 2026-09-18 (PR #238, confirmed on issue 359).* A Project selling more than one System within one Contract family (§3) carries one scope-of-work paragraph per System, in the same order the Systems appear in the Equipment and Labor section. Each paragraph opens with a label — the System's approved name from §3, followed by a colon — and then follows the canonical sentence above and the applicable §5 follow-on sentences for that System. Golden-12 and golden-17 already read this way; see `fixtures/golden/golden-17/expected/` for a three-System example.
 
 The single-System form uses the same labelled shape: one paragraph, the approved system name as its label. Keeping the label on single-System Projects means the drafter, the reviewer and the verifier all read one layout rather than two.
+
+*Multi-Site form, ruled by Dan 2026-09-24 (issue 359).* A Project spanning more than one Site carries one paragraph per Site and System occurrence, in Equipment and Labor order, each label opening with the Site's name, a comma, then the System's approved name and the colon — so two Sites selling the same System read as two distinct paragraphs.
 
 The label is exactly the approved name from §3, verbatim — no synonyms, no site name inside the label, no equipment count in the label, no "System" prefix. Anything else on the label side is a review failure.
 
@@ -53,7 +55,7 @@ Selecting **replacement** or **takeover** triggers the Reused/Taken-Over baselin
 
 ## 3) Approved system type names
 
-*Contract family column added 2026-09-10 (spec 215 stream B, ADR-0001); awaiting Dan's signature.*
+*Contract family column added 2026-09-10 (spec 215 stream B, ADR-0001); ratified by Dan 2026-09-18 (PR #238, confirmed on issue 359).*
 
 | Approved | Never | Contract family (commercial Projects) |
 |---|---|---|
