@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: '2026-09-24T16:24:40Z'
-  previous-modified: '2026-09-24T16:19:28Z'
-  revision: '38'
-  content-sha: 0ff2f3bb97f3
+  modified: '2026-09-24T16:34:56Z'
+  previous-modified: '2026-09-24T16:24:40Z'
+  revision: '39'
+  content-sha: b889debbe2d0
 ---
 
 # Project Harness
@@ -52,7 +52,7 @@ per repo.
 ## 1 — Explore (before touching anything)
 
 - `git remote -v` — must be a GitHub repo for the tracker/CI pieces; if no remote, offer to `gh repo create` (private by default).
-- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so.
+- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so. File that TODO as a `ready-for-agent` ticket, never `ready-for-human`: writing a suite is agent work, and `ready-for-human` is only for a step an agent cannot perform (credential, owner ruling, UI-only action). brazil-flights #1 sat on `ready-for-human` for three days and an agent then built the whole suite in one session (2026-09-24).
 - **ADR dir** — `docs/adr/` or `doc/adr/` or none. None is fine (section skipped).
 - **Deploy/CI workflow** — any existing `.github/workflows/*.yml` whose name suggests deploy/test; the dashboard reports the most deploy-like one, or skips.
 - Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to skip or merge.
