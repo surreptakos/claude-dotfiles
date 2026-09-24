@@ -67,7 +67,11 @@
       "Bash(*)",
       "Edit",
       "Write",
-      "mcp__github__*"
+      "mcp__github__*",
+      "Workflow",
+      "Agent",
+      "Task",
+      "mcp__Claude_Code_Remote__*"
     ]
   },
   "autoMode": {
