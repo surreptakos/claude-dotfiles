@@ -2049,3 +2049,59 @@ test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come fro
   const fn = src.slice(src.indexOf('async function dropTicketsWithOpenPr'), src.indexOf("found = await agent(", src.indexOf('async function dropTicketsWithOpenPr')));
   assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
 });
+
+// Issue 770: the deliverer merges the PR it opened, in the instrument the rest of the stage uses.
+test(`${FLEET_SCRIPT_REL} deliver rules carry the PR merge in both instruments (issue 770)`, () => {
+  const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
+  const gh = loadTrackerRules(FLEET_SCRIPT, 'gh');
+  for (const [name, rules] of [['mcp', mcp], ['gh', gh]]) {
+    for (const fn of ['prState', 'prChecks', 'prReviews', 'prMerge', 'issueState', 'issueClose']) {
+      assert.equal(typeof rules[fn], 'function', `${name} rules lack ${fn}`);
+    }
+    assert.match(rules.prMerge(7, 'fix: x (#7)'), /squash/, `${name} prMerge must squash`);
+    assert.match(rules.prChecks(7), /check.runs/, `${name} prChecks must read the head's check runs`);
+  }
+  assert.match(mcp.prMerge(7, 'fix: x (#7)'), /mcp__github__merge_pull_request/);
+  assert.match(mcp.prMerge(7, 'fix: x (#7)'), /expectedHeadSha/);
+  assert.match(gh.prMerge(7, 'fix: x (#7)'), /gh api --method PUT repos\/\{owner\}\/\{repo\}\/pulls\/7\/merge/);
+  assert.match(gh.prMerge(7, 'fix: x (#7)'), /-f sha=/);
+  assert.doesNotMatch(gh.prMerge(7, 'fix: x (#7)').split('(never')[0], /gh pr merge/, 'gh prMerge must not run gh pr merge');
+  assert.match(gh.prState(7), /never `gh pr view`/);
+});
+
+test(`${FLEET_SCRIPT_REL} deliver prompt runs STEP D: wait for CI, the runbook bar, merge, then the ticket (issue 770)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const prompt = src.slice(src.indexOf('function deliverPrompt('), src.indexOf('// [FLEET-DELIVER-PROMPT-END]'));
+  assert.match(prompt, /STEP D - merge the PR you opened/, 'STEP D missing');
+  assert.match(prompt, /at most 20 minutes/, 'the CI wait must name its bound');
+  assert.match(prompt, /\$\{rules\.prChecks\(/, 'D1 must read check runs through the instrument rule');
+  assert.match(prompt, /\$\{rules\.prMerge\(/, 'D4 must merge through the instrument rule');
+  assert.match(prompt, /never merge a head with a red check/);
+  assert.match(prompt, /\$\{rules\.labelSwap\(t\.number\)\}/, 'a keep-open ticket is relabelled ready-for-human after the merge');
+  assert.match(prompt, /\$\{rules\.issueClose\(t\.number/, 'a Closes ticket still open after the merge is closed citing the PR');
+  assert.doesNotMatch(prompt, /Do NOT merge the PR/, 'the old prohibition would contradict STEP D');
+  const delivered = src.slice(src.indexOf('const DELIVERED = '), src.indexOf('const COMMENTED = '));
+  for (const key of ['merged', 'mergeSha', 'prState']) {
+    assert.match(delivered, new RegExp(`required: \\[[^\\]]*'${key}'`), `DELIVERED must require ${key}`);
+  }
+});
+
+// Issue 770: every run refreshes the served repo's copy of this script from claude-dotfiles master,
+// except the forks the contract names.
+test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles master, forks excepted (issue 770)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const block = extractBetween(src, 'FLEET-REFRESH');
+  assert.match(block, /https:\/\/raw\.githubusercontent\.com\/surreptakos\/claude-dotfiles\/master\/aac-skills\/ticket-fleet/);
+  assert.match(block, /label: 'fleet-refresh', phase: 'Setup'/);
+  assert.match(block, /sha256sum/, 'a copy that already matches must not be rewritten');
+  assert.match(block, /git commit -m "chore\(fleet\): refresh ticket-fleet script from claude-dotfiles master \(issue 770\)"/);
+  assert.match(block, /never created/, 'a repo with no copy launches from the plugin path and gets none');
+  const forks = /const FLEET_FORKS = \[([^\]]*)\]/.exec(block);
+  assert.ok(forks, 'FLEET_FORKS missing');
+  const listed = forks[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean).sort();
+  const contract = require(path.join(REPO_ROOT, 'tools', 'ticket-fleet-contract.js'));
+  assert.deepEqual(listed, contract.FORKS.map((f) => f.repo).sort(), 'the inlined fork list must equal the contract FORKS');
+  const setupIdx = src.indexOf("phase('Setup')");
+  assert.ok(src.indexOf('[FLEET-REFRESH-START]') > setupIdx && src.indexOf('[FLEET-REFRESH-END]') < src.indexOf('if (treeGuardOn) {', setupIdx),
+    'the refresh runs first in Setup, before the tree-guard baseline, so its commit is inside the baseline');
+});

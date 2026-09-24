@@ -730,6 +730,14 @@ function trackerRules(mode) {
     blockerState: (nums) => `${REPO} Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
     prCreate: (_bodyFile) => `mcp__github__create_pull_request (${REPO}) - the body is an argument here, so no scratch file is written.`,
     prComment: (_bodyFile) => `mcp__github__add_issue_comment (${REPO}) on issue`,
+    // Issue 770: the deliverer merges its own PR, so the run needs the PR's head, its checks, its
+    // reviews and the merge call in the same instrument the rest of the stage uses.
+    prState: (n) => `${REPO} mcp__github__pull_request_read (method "get", pullNumber ${n}): read head.sha, mergeable_state and state.`,
+    prChecks: (n) => `${REPO} mcp__github__pull_request_read (method "get_check_runs", pullNumber ${n}): every check run's name, status and conclusion for the PR head.`,
+    prReviews: (n) => `${REPO} mcp__github__pull_request_read (method "get_reviews", pullNumber ${n}): every review's state.`,
+    prMerge: (n, title) => `${REPO} mcp__github__merge_pull_request (pullNumber ${n}, merge_method "squash", expectedHeadSha = the head sha the checks ran on, commit_title ${JSON.stringify(title)}). The result's "sha" is mergeSha.`,
+    issueState: (n) => `${REPO} mcp__github__issue_read (method "get", issue_number ${n}): the "state" field verbatim.`,
+    issueClose: (n, prUrl) => `${REPO} mcp__github__add_issue_comment (issue_number ${n}) with the one line "Merged in ${prUrl}; closing." then mcp__github__issue_write (method "update", issue_number ${n}, state "closed", state_reason "completed").`,
   }
   return {
     repoNote: '{owner}/{repo} come from `git remote get-url origin`.',
@@ -742,6 +750,14 @@ function trackerRules(mode) {
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from \`git remote get-url origin\`), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: (bodyFile) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
     prComment: (bodyFile) => `write the comment to \`${bodyFile}\` (that exact path - issue 439), then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\``,
+    // Issue 770: REST only - `gh pr checks`, `gh pr view` and `gh pr merge` are GraphQL-backed and
+    // HTTP 403 through the proxy (issue 130).
+    prState: (n) => `\`gh api repos/{owner}/{repo}/pulls/${n} --jq '{head: .head.sha, mergeable_state, state}'\` ({owner}/{repo} from \`git remote get-url origin\`; never \`gh pr view\`).`,
+    prChecks: (n) => `\`gh api repos/{owner}/{repo}/commits/<head sha>/check-runs --jq '[.check_runs[]|{name,status,conclusion}]'\` for the head sha of PR ${n} (never \`gh pr checks\`).`,
+    prReviews: (n) => `\`gh api repos/{owner}/{repo}/pulls/${n}/reviews --jq '[.[]|.state]'\`.`,
+    prMerge: (n, title) => `\`gh api --method PUT repos/{owner}/{repo}/pulls/${n}/merge -f merge_method=squash -f sha=<head sha the checks ran on> -f commit_title=${JSON.stringify(title)}\` (never \`gh pr merge\`). The response's "sha" is mergeSha.`,
+    issueState: (n) => `\`gh api repos/{owner}/{repo}/issues/${n} --jq .state\`.`,
+    issueClose: (n, prUrl) => `\`gh api --method POST repos/{owner}/{repo}/issues/${n}/comments -f body="Merged in ${prUrl}; closing."\` then \`gh api --method PATCH repos/{owner}/{repo}/issues/${n} -f state=closed -f state_reason=completed\`.`,
   }
 }
 // [FLEET-TRACKER-RULES-END]
@@ -846,12 +862,17 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
   } },
 } }
 
-const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths'], properties: {
+const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths', 'merged', 'mergeSha', 'prState'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
   mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked', 'unmerged-by-classifier', 'branch-unconfirmed'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: branch-unconfirmed = the branch could not be SEEN on origin, so no merge ran - branchLookup carries every ls-remote run and the run decides whether that is "absent", "could not determine" or an inconsistency (issue 654), never a blocked merge; clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened; unmerged-by-classifier = the auto-mode classifier refused the merge command itself twice, so the branch was pushed and the PR opened WITHOUT the merge (issue 544) - the branch is verified, pushed is true, prUrl is real, and blockedReason carries the refusal text for the orchestrator to merge the default branch itself' },
   conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp resolver refused, and any path the pre-push marker scan found conflict markers in; empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
   branchLookup: { type: 'array', items: { type: 'object', required: ['exitCode', 'output'], properties: { exitCode: { type: 'integer', description: 'REAL exit code of `git ls-remote --exit-code --heads origin <branch>`, not a pipeline\'s' }, output: { type: 'string', description: 'its stdout and stderr, verbatim' } } }, description: 'issue 654: every `git ls-remote --exit-code --heads origin <branch>` this stage ran, in order; [] when it never had to look. Exit 2 is git\'s own "no matching ref"; any other non-zero, or an exit 0 that printed nothing, means "could not tell", not "absent"' },
-  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed' },
+  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed; when prState is ci-red or changes-requested, the failing check names or the reviewer' },
+  // Issue 770: STEP D merges the PR the deliverer opened. These say whether it did and why not.
+  merged: { type: 'boolean', description: 'true only when the merge call in STEP D returned merged:true for THIS PR' },
+  mergeSha: { type: 'string', description: 'the sha the merge call returned; "" when not merged' },
+  prState: { type: 'string', enum: ['merged', 'ci-pending', 'ci-red', 'changes-requested', 'dirty-unresolved', 'not-attempted'], description: 'STEP D outcome: merged; ci-pending = the wait bound passed with checks still running; ci-red = a check run failed; changes-requested = a review in state CHANGES_REQUESTED; dirty-unresolved = mergeable_state stayed dirty after the re-merge; not-attempted = no PR was opened' },
+  ticketState: { type: 'string', description: 'the issue "state" read after STEP D ("open" or "closed"), "" when STEP D did not run' },
 } }
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
@@ -1022,6 +1043,47 @@ function breachMessage() {
 function assertNoBreach() { if (breaches.length) throw new Error(breachMessage()) }
 
 phase('Setup')
+// [FLEET-REFRESH-START]
+// Issue 770 (Dan, 2026-09-24): a served repo's `.claude/workflows/ticket-fleet.js` is a copy of
+// the plugin source, refreshed by hand whenever someone remembered - so a fix merged here reached
+// the other repos one manual `cp` at a time (zoho-source-of-truth PR 166 is one). Every run now
+// overwrites the copy it was launched from with claude-dotfiles master, commits it, and says so.
+// The RUNNING script is the old copy (a script cannot reload itself mid-run); the next launch runs
+// the new one. Two repos keep an edited fork and are never overwritten: the FORKS list in
+// tools/ticket-fleet-contract.js, repeated here because the workflow runtime cannot require().
+const FLEET_SOURCE_REPO = 'surreptakos/claude-dotfiles'
+const FLEET_SOURCE_RAW = 'https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/aac-skills/ticket-fleet'
+const FLEET_FORKS = ['surreptakos/aac-routines', 'surreptakos/aac-cockpit']
+const FLEET_REFRESH_FILES = ['ticket-fleet.js', 'editable-install-guard.js']
+const REFRESHED = { type: 'object', required: ['servedRepo', 'skipped', 'refreshed', 'unchanged', 'commit', 'errors'], properties: {
+  servedRepo: { type: 'string', description: 'owner/repo from `git remote get-url origin`' },
+  skipped: { type: 'string', description: 'why nothing was refreshed ("" when the refresh ran): the served repo is the source, a fork, or has no copy' },
+  refreshed: { type: 'array', items: { type: 'string' }, description: 'paths overwritten because their sha256 differed from master' },
+  unchanged: { type: 'array', items: { type: 'string' }, description: 'paths whose sha256 already matched master' },
+  commit: { type: 'string', description: 'the sha of the refresh commit, "" when nothing changed' },
+  errors: { type: 'array', items: { type: 'string' }, description: 'each curl or git failure verbatim, one per entry' },
+} }
+let refresh = null
+try {
+  refresh = await agent(
+    `Refresh this repository's copy of the ticket-fleet script from its source (claude-dotfiles issue 770). Run from the repository root; make no other change.
+1. \`git remote get-url origin\` - servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>).
+2. If servedRepo is ${FLEET_SOURCE_REPO}: skipped "source repo", stop. If it is one of ${FLEET_FORKS.join(', ')}: skipped "fork keeps its own edits", stop.
+3. For each of ${FLEET_REFRESH_FILES.map(f => '`.claude/workflows/' + f + '`').join(' and ')} that EXISTS (\`test -f\`; a missing one is simply not listed, never created): \`curl -fsSL ${FLEET_SOURCE_RAW}/<name> -o /tmp/fleet-refresh-<name>\` and compare \`sha256sum\` of the download with the file. Different: \`cp /tmp/fleet-refresh-<name> .claude/workflows/<name>\` and list it under refreshed; same: list it under unchanged. A curl exit other than 0 goes under errors verbatim and that file is left alone. Also refresh \`tools/editable-install-guard.js\` the same way when it exists.
+4. If refreshed is non-empty: \`git add\` exactly those paths and \`git commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"\`; commit is the sha \`git rev-parse HEAD\` prints. No push, no other path staged, no rebase. If nothing was refreshed: neither add nor commit, commit "".
+Return structured output only.`,
+    { label: 'fleet-refresh', phase: 'Setup', schema: REFRESHED, model: cfg.reportModel, effort: 'low' }
+  )
+} catch (err) {
+  log(`fleet-refresh did not run: ${unusableReason('fleet-refresh', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
+}
+if (refresh) {
+  if (refresh.skipped) log(`fleet-refresh: ${refresh.servedRepo || 'served repo'} - ${refresh.skipped}; the copy is left as it is.`)
+  else if (refresh.refreshed && refresh.refreshed.length) log(`fleet-refresh: ${refresh.refreshed.join(', ')} overwritten from ${FLEET_SOURCE_REPO} master and committed as ${refresh.commit || '(no commit reported)'} - THIS run still executes the copy it was launched from; the next launch runs the refreshed one (issue 770).`)
+  else log(`fleet-refresh: ${(refresh.unchanged || []).join(', ') || 'no copy present'} already match ${FLEET_SOURCE_REPO} master.`)
+  for (const e of refresh.errors || []) log(`fleet-refresh error: ${e}`)
+}
+// [FLEET-REFRESH-END]
 if (treeGuardOn) {
   // Wrapped (aac-routines issue 270): a guard agent that blows the StructuredOutput retry cap
   // throws out of agent(...), and an unwrapped throw here would abort the run with the harness's
@@ -1715,6 +1777,13 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // Run 6aac3d3b lost two deliveries that way ("Modify Shared Resources", "Interfere With
 // Workloads"); the other three are the refusals FOLLOW-UPS recorded from earlier waves.
 const CLASSIFIER_CATEGORIES_SEEN = '"Modify Shared Resources", "Interfere With Workloads", "External System Writes", "Instruction Poisoning" and "Self-Modification"'
+// Issue 770: one clause for the run log saying what STEP D did with the PR.
+function mergeNote(delivery) {
+  if (!delivery || !delivery.prUrl) return ''
+  if (delivery.merged === true) return ` - MERGED ${delivery.mergeSha || ''}${delivery.ticketState ? ` (ticket ${delivery.ticketState})` : ''}`
+  return ` - open, not merged: ${delivery.prState || 'prState not reported'}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
+}
+
 function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
   // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
   // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
@@ -1787,7 +1856,14 @@ C2. \`git read-tree -u --reset <corrected-commit>\` - index and worktree become 
 C3. \`git commit -m "repair merge <bad-sha> (issue ${t.number}): conflict markers removed"\`, then re-run the STEP A7 scan on the new HEAD.
 C4. \`git push origin ${branch}\` - a fast-forward, no force flag - and go on with STEP B from B2. This is the pattern that recovered commit 966a36f by hand, as repair commit b00db2e; the run performs it itself.
 
-Do NOT merge the PR, do NOT close the issue, do NOT push or otherwise touch ${defaultBranch} itself. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`
+STEP D - merge the PR you opened (issue 770). Run 6ab4840f opened ten PRs that each waited for an orchestrator to find them, and six went dirty on the generated payload in the meantime; the session that opened a PR is the one that knows it is finished, so it merges it. Runs only when STEP B returned a prUrl; otherwise return merged false, mergeSha "", prState "not-attempted".
+D1. WAIT FOR CI. ${rules.prState('<PR number>')} Then ${rules.prChecks('<PR number>')} Poll with \`sleep 60\` between reads, for at most 20 minutes (the Windows restore test on claude-dotfiles takes about 8). CI is finished when no check run is "queued" or "in_progress". A head that shows ZERO check runs on two reads one minute apart has no CI - treat that as finished and green. If the bound passes first: return merged false, mergeSha "", prState "ci-pending", blockedReason naming the checks still running.
+D2. THE BAR (orchestrator/RUNBOOK.md "Merge"): every check run's conclusion is "success", "skipped" or "neutral"; mergeable_state is "clean"; ${rules.prReviews('<PR number>')} has no review in state "CHANGES_REQUESTED". Any conclusion "failure", "cancelled", "timed_out" or "action_required": return merged false, prState "ci-red", blockedReason naming each failing check by name. A CHANGES_REQUESTED review: prState "changes-requested", blockedReason naming the reviewer. Never re-run a job, never edit, skip or quarantine a test, never push an empty commit, never merge a head with a red check.
+D3. DIRTY: mergeable_state "dirty" means ${defaultBranch} moved under the PR after STEP A. Run STEP A once more on ${branch} exactly as above (A1-A7, the same three resolvable classes, the same regeneration and gate, the same marker scan), push with a plain \`git push origin ${branch}\` (no force flag), then go back to D1 with the NEW head sha. At most two such rounds; after that return merged false, prState "dirty-unresolved", conflictPaths from the last STEP A. mergeable_state "unknown" is GitHub still computing: wait 30 seconds and read D1 again.
+D4. MERGE: when the bar holds, ${rules.prMerge('<PR number>', `fix: ${t.title} (#${t.number})`)} Pass the head sha you read in D1 and that the checks ran on: a merge call for a head that moved fails, and that failure means go back to D1, never retry blind. Never a branch delete: delete_branch_on_merge is on for every fleeted repo. On merged:true, return merged true, mergeSha, prState "merged".
+D5. THE TICKET, only after merged:true: ${rules.issueState(t.number)} ${keepOpen || unmet.length ? `This ticket stays OPEN (${keepOpen ? 'its own instruction' : 'unmet acceptance criteria are listed in the PR'}): if it reads "closed", it was closed by mistake - say so in blockedReason and leave it; if "open", ${rules.labelSwap(t.number)}` : `The PR body's "Closes #${t.number}" closes it at merge; if it still reads "open" one read later (wait 30 seconds), ${rules.issueClose(t.number, '<prUrl>')}`} Report the final state as ticketState.
+
+Do NOT push to or otherwise touch ${defaultBranch} except through the merge call in D4. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`
 }
 // [FLEET-DELIVER-PROMPT-END]
 
@@ -1846,7 +1922,7 @@ async function runFinish(journal) {
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
     }
-    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
+    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
     else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
@@ -2080,7 +2156,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // than re-implementing - the refusal text travels in the PR body and in the journal's
     // blockedReason, not in this line.
     const unmergedByClassifier = !!(delivery && delivery.mergeStatus === 'unmerged-by-classifier')
-    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
+    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${mergeNote(delivery)}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
 
     // Checkpoint 3 of 4 (aac-routines issue 270): the Deliver step pushes and opens the PR from
     // the parent's context - unisolated, like the verifier - so it can dirty the orchestrator's
@@ -2106,6 +2182,9 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     prUrl: mergeBlocked ? null : (delivery && delivery.prUrl), commentUrl: null, deliveryFailure,
     // Carried so the run report can say which PRs still owe the default-branch merge (issue 544).
     mergeStatus: (delivery && delivery.mergeStatus) || null,
+    // Issue 770: STEP D merged the PR itself, or says why it is still open.
+    merged: !!(delivery && delivery.merged === true), mergeSha: (delivery && delivery.mergeSha) || null,
+    prState: (delivery && delivery.prState) || null, ticketState: (delivery && delivery.ticketState) || null,
     mergeNote: delivery && delivery.mergeStatus === 'unmerged-by-classifier'
       ? `opened without the pre-push merge - the classifier refused \`git merge origin/${scout.defaultBranch}\` twice: ${delivery.blockedReason || 'refusal text not reported'}`
       : null,
