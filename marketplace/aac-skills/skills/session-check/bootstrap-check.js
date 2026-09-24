@@ -307,5 +307,5 @@ function verifySelfHook(marker) {
 
 module.exports = {
   readMarker, awaitBootstrap, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
-  staleSkillsAtRemote, markerPath, lockPath, skillsDir, containerBootedAt,
+  staleSkillsAtRemote, markerPath, lockPath, skillsDir, containerBootedAt, execGit,
 };
