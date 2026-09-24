@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T04:58:11Z'
-  previous-modified: '2026-09-24T04:43:33Z'
-  revision: '37'
-  content-sha: 086d5700e7b7
+  modified: '2026-09-24T05:09:23Z'
+  previous-modified: '2026-09-24T04:58:11Z'
+  revision: '38'
+  content-sha: 2f031e546180
 ---
 
 # ticket-fleet
@@ -530,7 +530,10 @@ whatever branch the session is on - on 2026-09-16 that tree predated the code un
 the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
 `head` against the tip it expects: the branch under review in the code lane,
 `origin/<defaultBranch>` in the probe lane, each read by its own one-command `rev-parse` agent so
-no agent certifies itself. A mismatch re-runs the verifier ONCE with the mismatch named - "for
+no agent certifies itself. That one command falls back from `<branch>` to `origin/<branch>` to
+`git ls-remote --heads origin`, because a branch handed in from an earlier run or pushed from
+another container exists only on the remote (issue 561), and the run log names the spelling that
+answered next to the tip. A mismatch re-runs the verifier ONCE with the mismatch named - "for
 where it was produced and not for what it concluded", so the re-run is not read as pressure to
 change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
 and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run

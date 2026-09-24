@@ -22,7 +22,7 @@ const { spawnSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
+  applyBlockerStates, shaMatches, worktreeMismatch, tipCommand, parseTip, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
   classifyBranchLookup, classifyDelivery,
@@ -614,6 +614,59 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   return { result, logs, checkpoints };
 }
 
+// Issue 561: the script's own revParse, evaluated out of its FLEET-REV-PARSE block with the
+// module's tipCommand/parseTip (the functions the generated block carries) and a mocked agent.
+function instantiateRevParse(scriptPath, agentMock, logs) {
+  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-REV-PARSE');
+  // eslint-disable-next-line no-new-func
+  return new Function('scope', `with (scope) {\n${body}\nreturn revParse;\n}`)(laneScope({
+    agent: agentMock, log: (m) => logs.push(m), cfg: { deliverModel: 'z' }, tipCommand, parseTip,
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+}
+
+// A git environment with no inherited GIT_* variables, so a fixture never touches the checkout
+// the suite runs in.
+function git(cwd, ...args) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+  return spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args],
+    { cwd, env, encoding: 'utf8' });
+}
+
+// A tip agent that does what the prompt says: runs its one command in `cwd` and copies the result.
+function tipAgent(cwd) {
+  return async (prompt, opts) => {
+    assert.match(opts.label, /^tip:/);
+    const cmd = prompt.match(/report its result:\n\n([^\n]+)\n\nDo not cd/)[1];
+    const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('GIT_')));
+    const r = spawnSync('bash', ['-c', cmd], { cwd, env, encoding: 'utf8' });
+    return { exitCode: r.status, stdout: r.stdout, stderr: r.stderr };
+  };
+}
+
+// An orchestrator checkout cloned from a remote that carries a fleet branch, so the branch exists
+// here only as origin/<branch>; a second branch is pushed after the clone and never fetched.
+function remoteOnlyFixture(branch) {
+  const root = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'fleet-561-'));
+  process.once('exit', () => fs.rmSync(root, { recursive: true, force: true }));
+  const ok = (r) => { assert.equal(r.status, 0, r.stderr); return r.stdout.trim(); };
+  const remote = path.join(root, 'remote.git');
+  const seed = path.join(root, 'seed');
+  const orch = path.join(root, 'orch');
+  const unfetched = 'agent/issue-561-attempt2-x';
+  ok(git(root, 'init', '-q', '--bare', remote));
+  ok(git(root, 'init', '-q', '-b', 'main', seed));
+  ok(git(seed, 'commit', '-q', '--allow-empty', '-m', 'base'));
+  ok(git(seed, 'commit', '-q', '--allow-empty', '-m', 'work'));
+  const tip = ok(git(seed, 'rev-parse', 'HEAD'));
+  ok(git(seed, 'push', '-q', remote, 'HEAD~1:refs/heads/main', `HEAD:refs/heads/${branch}`));
+  ok(git(root, 'clone', '-q', remote, orch));
+  ok(git(seed, 'commit', '-q', '--allow-empty', '-m', 'later'));
+  const unfetchedTip = ok(git(seed, 'rev-parse', 'HEAD'));
+  ok(git(seed, 'push', '-q', remote, `HEAD:refs/heads/${unfetched}`));
+  return { orch, branch, tip, unfetched, unfetchedTip };
+}
+
 test('lane harness resolves a module-scope binding it does not model (issue 340)', async () => {
   // Stands in for a future fleet edit: the lane references bindings this harness never names.
   const body = `const runCodeLane = async (t) => {
@@ -812,6 +865,53 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.verdict.failures.length, 1, 'only the mismatch is recorded; the wrong-tree findings are not passed on');
     assert.match(result.verdict.failures[0], new RegExp(mainCheckout));
     assert.ok(logs.some((m) => m.includes('Re-running the verifier once')), 'the rejection and its single re-run must be logged');
+  });
+
+  // ---- The tip of a branch that exists only as origin/<branch> (issue 561) ----
+
+  test(`${rel} reads the tip of a branch present only as origin/<branch> and cross-checks the verdict (issue 561)`, async () => {
+    const fx = remoteOnlyFixture(buildBranchName(561, 'testrun', 0, 1));
+    assert.notEqual(git(fx.orch, 'rev-parse', fx.branch).status, 0, 'fixture: the bare branch name must not resolve locally');
+    const tipLogs = [];
+    const revParse = instantiateRevParse(file, tipAgent(fx.orch), tipLogs);
+    const mainCheckout = 'ffffeeee00001111222233334444555566667777';
+    const calls = [];
+    const agentMock = async (_prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label.startsWith('impl:')) return { branch: fx.branch, committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/home/user/repo', head: mainCheckout } };
+      throw new Error(`nothing may be delivered on a rejected verdict: ${opts.label}`);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 561, title: 't', criteria: '' }, 0, { maxAttempts: 1 }, 'inv1', null, { revParse });
+    assert.ok(tipLogs.includes(`tip:#561.1: tip ${fx.tip} read from origin/${fx.branch}.`),
+      `the journal must name the spelling that answered: ${JSON.stringify(tipLogs)}`);
+    assert.ok(!logs.some((m) => m.includes('could not read the tip')), 'a tip read from origin/ must not skip the cross-check');
+    assert.deepEqual(calls, ['impl:#561.1', 'push:#561.1', 'verify:#561.1', 'verify:#561.1-rerun'],
+      'the cross-check must run against the origin/ tip and reject a verdict from elsewhere');
+    assert.equal(result.done, false);
+    assert.match(result.verdict.failures[0], new RegExp(fx.tip));
+    // The last leg: a branch pushed from another container after this checkout last fetched.
+    assert.equal(await revParse(fx.unfetched, 'tip:#561.2'), fx.unfetchedTip);
+    assert.ok(tipLogs.includes(`tip:#561.2: tip ${fx.unfetchedTip} read from ls-remote origin refs/heads/${fx.unfetched}.`));
+  });
+
+  test(`${rel} still skips the cross-check when the branch is absent on every spelling (issue 561)`, async () => {
+    const fx = remoteOnlyFixture('agent/issue-9-attempt1-other');
+    const tipLogs = [];
+    const revParse = instantiateRevParse(file, tipAgent(fx.orch), tipLogs);
+    const missing = buildBranchName(561, 'testrun', 0, 1);
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('impl:')) return { branch: missing, committed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/scratch/v', head: fx.tip } };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/561' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    assert.equal(await revParse(missing, 'tip:#561.9'), null, 'an absent branch has no tip');
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 561, title: 't', criteria: '' }, 0, {}, 'inv1', null, { revParse });
+    assert.ok(logs.includes(`#561.1: could not read the tip of ${missing}; this attempt's verdict is accepted without the worktree cross-check.`),
+      `the skip must still be logged, unchanged: ${JSON.stringify(logs)}`);
+    assert.deepEqual(tipLogs, [], 'no spelling answered, so none is logged');
+    assert.equal(result.done, true);
   });
 
   test(`${rel} verifier and prober prompts say the main checkout is never a test surface (issue 404)`, () => {

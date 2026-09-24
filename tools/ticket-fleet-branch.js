@@ -349,6 +349,39 @@ function worktreeMismatch(verdict, expectedHead, expectedLabel) {
 }
 
 /**
+ * The one command the tip agent runs (issue 561). A branch handed in from an earlier run, or
+ * pushed from another container, exists only as origin/<branch> in the orchestrator's checkout,
+ * and a bare `git rev-parse <branch>` exits 128 there. So the command tries `<ref>`, then
+ * `origin/<ref>`, then asks the remote itself, and each leg that answers prints its spelling on
+ * a second line. One shell line with `||`, no loop: the one-command shape the tip agent has always
+ * had. The ls-remote leg names the full ref, because a bare pattern matches any ref ENDING in it.
+ */
+function tipCommand(ref) {
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const said = (spelling) => `echo ${q(`resolved-by: ${spelling}`)}`;
+  return `{ git rev-parse --verify --quiet ${q(ref)} && ${said(ref)}; }`
+    + ` || { git rev-parse --verify --quiet ${q(`origin/${ref}`)} && ${said(`origin/${ref}`)}; }`
+    + ` || { git ls-remote --exit-code --heads origin ${q(`refs/heads/${ref}`)} && ${said(`ls-remote origin refs/heads/${ref}`)}; }`;
+}
+
+/**
+ * Read the tip agent's report of tipCommand (issue 561): the object name is the first token of
+ * stdout (a rev-parse line, or an ls-remote `<sha>\trefs/heads/...` line) and the spelling that
+ * answered is the `resolved-by:` line. A non-zero exit or a first token that is not 7-40 hex
+ * characters is no tip at all.
+ *
+ * @returns {{sha:string, spelling:string}|null}
+ */
+function parseTip(res) {
+  if (!res || res.exitCode !== 0) return null;
+  const out = String(res.stdout || '');
+  const sha = out.trim().split(/\s+/)[0] || '';
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+  const said = out.match(/^resolved-by: (.+)$/m);
+  return { sha, spelling: said ? said[1].trim() : 'an unreported spelling' };
+}
+
+/**
  * Drop every candidate that already has an open fleet PR (issue 430).
  *
  * The fleet asks the tracker ONCE per launch which candidates already carry an open
@@ -660,7 +693,7 @@ function difficultyEvalSet(branchNames) {
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
   ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
+  applyBlockerStates, shaMatches, worktreeMismatch, tipCommand, parseTip, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE,

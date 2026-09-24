@@ -416,6 +416,39 @@ function worktreeMismatch(verdict, expectedHead, expectedLabel) {
 }
 
 /**
+ * The one command the tip agent runs (issue 561). A branch handed in from an earlier run, or
+ * pushed from another container, exists only as origin/<branch> in the orchestrator's checkout,
+ * and a bare `git rev-parse <branch>` exits 128 there. So the command tries `<ref>`, then
+ * `origin/<ref>`, then asks the remote itself, and each leg that answers prints its spelling on
+ * a second line. One shell line with `||`, no loop: the one-command shape the tip agent has always
+ * had. The ls-remote leg names the full ref, because a bare pattern matches any ref ENDING in it.
+ */
+function tipCommand(ref) {
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const said = (spelling) => `echo ${q(`resolved-by: ${spelling}`)}`;
+  return `{ git rev-parse --verify --quiet ${q(ref)} && ${said(ref)}; }`
+    + ` || { git rev-parse --verify --quiet ${q(`origin/${ref}`)} && ${said(`origin/${ref}`)}; }`
+    + ` || { git ls-remote --exit-code --heads origin ${q(`refs/heads/${ref}`)} && ${said(`ls-remote origin refs/heads/${ref}`)}; }`;
+}
+
+/**
+ * Read the tip agent's report of tipCommand (issue 561): the object name is the first token of
+ * stdout (a rev-parse line, or an ls-remote `<sha>\trefs/heads/...` line) and the spelling that
+ * answered is the `resolved-by:` line. A non-zero exit or a first token that is not 7-40 hex
+ * characters is no tip at all.
+ *
+ * @returns {{sha:string, spelling:string}|null}
+ */
+function parseTip(res) {
+  if (!res || res.exitCode !== 0) return null;
+  const out = String(res.stdout || '');
+  const sha = out.trim().split(/\s+/)[0] || '';
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) return null;
+  const said = out.match(/^resolved-by: (.+)$/m);
+  return { sha, spelling: said ? said[1].trim() : 'an unreported spelling' };
+}
+
+/**
  * Drop every candidate that already has an open fleet PR (issue 430).
  *
  * The fleet asks the tracker ONCE per launch which candidates already carry an open
@@ -945,9 +978,13 @@ function failuresOf(verdict) {
 // command and copies its output back - the shape the tree guard already uses, for the same reason:
 // nothing is left to the agent's judgement, so a paraphrase is detectable. The prompt names only a
 // ref, so its cache key is stable across a resume and a resumed run replays the same sha.
+// Issue 561: the command (tipCommand) falls back from <ref> to origin/<ref> to `git ls-remote`, so
+// a branch that exists only on the remote still has a tip, and the log names the spelling that
+// answered. Marked so the lane tests drive this very function with a mocked agent.
+// [FLEET-REV-PARSE-START]
 const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
   exitCode: { type: 'integer', description: 'REAL exit code of the command, not the exit code of a pipe' },
-  stdout: { type: 'string', description: 'stdout VERBATIM - the full 40-character object name when the ref resolved; never abbreviate or reformat it' },
+  stdout: { type: 'string', description: 'stdout VERBATIM - when the ref resolved, a line starting with the full 40-character object name, then a "resolved-by:" line; never abbreviate or reformat either' },
   stderr: { type: 'string', description: 'stderr verbatim ("" if none)' },
 } }
 async function revParse(ref, label) {
@@ -956,21 +993,24 @@ async function revParse(ref, label) {
     res = await agent(
     `Run exactly this one bash command, from the repository root, and report its result:
 
-git rev-parse ${ref}
+${tipCommand(ref)}
 
 Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
 file. Do not interpret the output. Return the command's REAL exit code plus its stdout and stderr
-VERBATIM - stdout is one 40-character object name when the ref resolved; copy it character for
-character.`,
+VERBATIM - when the ref resolved, stdout starts with one 40-character object name and carries a
+"resolved-by:" line; copy both character for character.`,
     { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
     )
   } catch (err) {
     log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
     return null
   }
-  const sha = res && res.exitCode === 0 ? String(res.stdout || '').trim().split(/\s+/)[0] : ''
-  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
+  const tip = parseTip(res)
+  if (!tip) return null
+  log(`${label}: tip ${tip.sha} read from ${tip.spelling}.`)
+  return tip.sha
 }
+// [FLEET-REV-PARSE-END]
 
 // ---------------------------------------------------------------------------
 // Orchestrator-tree isolation guard (aac-routines issue 192, extended by 270)
