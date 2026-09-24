@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-24T16:36:04Z'
-  previous-modified: '2026-09-23T18:31:02Z'
-  revision: '21'
-  content-sha: 2485e68e354b
+  modified: '2026-09-24T16:49:30Z'
+  previous-modified: '2026-09-24T16:36:04Z'
+  revision: '22'
+  content-sha: 73340235063e
 ---
 
 # todoist-triage
@@ -160,6 +160,8 @@ The shape matters more than the medium, because the shape is what failed before:
 - `triage/<taskId>` (`set`), one per tier-2 question: `runId`, `taskId`, `title`, `question` (the one-clause reason), `source` (`{lastFrom, lastAt, quote}` — the thread's newest message as read this run, never the task description; the board flags a card without it), `status: "open"`, and `options` — the same substantive rulings the numbered question offers, each `{label, labels?, projectId?, dueString?, deadlineDate?, priority?, delete?, mergeInto?, mergeComment?}` in `update-tasks` vocabulary, `content` included when the ruling retitles a stale task. The board adds Rule out (moves to Wontfix) and the reason box itself; never add them.
 
 The board is a second place to answer, not a replacement for the session questions. `ArtifactData` unavailable is an unreachable surface for step 6, never a stop.
+
+**The board's page source is `day-board.html` beside this file (Dan, 2026-09-24).** The board is the artifact at the URL above; to change it, edit that file and republish it to that URL with its `capabilities` (the header comment lists them). Never rebuild the board from memory or from whatever the live page shows: on 2026-09-24 the only copy of the board lived in a cloud session's artifact this account could not open, a rebuild from the old calendar-only page dropped the huddle draft, team blockers, routine health and O3 prep links, and Dan had to hand back a downloaded copy. Two rules for every button on it: every Todoist write stores what it changed so the card offers Undo, and no button uses `confirm()` or `alert()`, which the artifact frame blocks silently (the 2026-09-24 delete and Rule out buttons did nothing for that reason). A card Dan undoes goes back to `status: "open"`; step 1 treats it as unanswered.
 
 **This run also owns the board's "Waiting on you" list.** The forgotten-tasks routine runs on Dan's desktop without board access; the task it creates overnight carries only `claude`, so it is in this queue, and it is the handoff. In the same batch, for every open task whose source thread (read to its last message in step 3) ends with a named person asking Dan for something he has not answered, `set` `waiting/<taskId>`: `from` (that person), `subject` (the thread subject), `receivedAt` (that last message's date), `link` (the thread URL), `ask` (one clause), `todoistId` (the task id), `status: "open"`. Read `waiting` first: skip a row Dan marked `done` unless the thread has a message newer than its `doneAt`, and `update` to `done` any open row whose task is gone or whose thread now ends with Dan. The board shows a row whose task is also an open question once, as the question.
 
