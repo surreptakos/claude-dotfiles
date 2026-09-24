@@ -90,17 +90,24 @@ SVC_ITEM_ROW = SVC_START                                 # 82
 SVC_REGION_ROWS = SVC_END - SVC_SYS_ROW + 1              # 24
 CLAR_CELL = 'A107'
 
+# Keyed by the Contract family compose() resolves (references/SOW-BASELINES.md
+# §3), not by system name — a Project can carry several System types in one
+# family (issue 336).
 PACKAGES = {
-    'Fire Alarm':       ('Commercial Fire Package',
+    'Commercial Fire':     ('Commercial Fire Package',
                          'Subscriber - Fire Master Agreement Rev.1.pdf',
                          'Subscriber - Fire Rider Additional Locations Rev.1.pdf'),
     'Commercial Security': ('Commercial Security Package',
                          'Commercial Security Master Agreement Rev.1.pdf',
-                         'Commercial Security Rider Additional Locations Rev.1.pdf'),
+                         'Commercial - Security Rider Additional Locations Rev.1.pdf'),
     'Elevator Monitoring': ('Elevator Package',
                          'Elevator Monitoring Agreement.pdf',
                          'Elevator - Security Rider Additional Locations Rev.1.pdf'),
 }
+# Forms this builder can fill. build_agreements refuses any other family by
+# name (issue 40's field-map ruling; Elevator Monitoring is issue 335,
+# Residential is issue 337).
+MAPPED_FAMILIES = tuple(PACKAGES)
 # Commercial Fire All-in-One field map, derived from the form's own layout.
 FIRE = {
     'name': '.Text2', 'phone': '.Text3', 'address': '.Text4', 'email': '.Text5',
@@ -117,6 +124,48 @@ FIRE = {
     'cb_insp_fire': '.CheckBox13', 'cb_insp_refuge': '.CheckBox14',
     'cb_insp_wireless': '.CheckBox15', 'cb_ul': '.CheckBox16',
     'cb_in_lieu_of': '.CheckBox17',
+}
+
+# Commercial Security Master Agreement field map, derived from the form's own
+# field dump (issue #40 evidence comment, 58 fields; ruling 1 in the same
+# thread: every mapped box is set explicitly, template state never consulted).
+# Field names are exactly what pypdf's PdfReader.get_fields() returns for
+# fixtures/New Agreements 8-22-19/Commercial Security Package/Commercial
+# Security Master Agreement Rev.1.pdf — some carry a leading "." from the
+# form's own AcroForm hierarchy; that is not a naming convention this file
+# chose, it is copied verbatim from the field dump.
+SECURITY = {
+    'date': 'Text1', 'name': 'Text2', 'address': 'Text3', 'phone': 'Text4',
+    'cell': 'Text5', 'purchase_price': 'Text6', 'down_payment': 'Text7',
+    'balance_due': 'Text10', 'work_begin_date': '.Text11',
+    'completion_date': '.Text12', 'charge_install': '.Text11_2',
+    'charge_monitoring': '.Text12_2', 'charge_service': 'Text14',
+    'charge_inspection': 'Text15', 'inspections_per_year': 'Text16',
+    'charge_signal_verification': '.Text17', 'charge_remote_access': 'Text18',
+    'remote_access_other_describe': '.Text8', 'charge_access_control': 'Text19',
+    'charge_self_monitoring': 'Text22', 'charge_cyber': 'Text23',
+    'in_lieu_of_amount': '.Text24', 'term': '.Text25',
+    # §2 "Check Services Provided"
+    'cb_monitoring_services': 'CheckBox1', 'cb_service': 'CheckBox2',
+    'cb_inspection': 'CheckBox3', 'cb_remote_access_cameras': 'CheckBox4',
+    'cb_access_control_admin': 'CheckBox5', 'cb_signal_verification': 'CheckBox6',
+    'cb_self_monitoring': 'CheckBox7', 'cb_cyber': 'CheckBox8',
+    'cb_other': 'CheckBox10',
+    # §4 billing frequency
+    'cb_billing_monthly': 'CheckBox11', 'cb_billing_quarter': 'CheckBox12',
+    'cb_billing_semi': 'CheckBox13', 'cb_billing_annual': 'CheckBox14',
+    # §4 service selectors
+    'cb_4a_install': 'CheckBox15', 'cb_4a_monitoring': 'CheckBox16',
+    'cb_service_percall': 'CheckBox17', 'cb_service_monthly': 'CheckBox18',
+    'cb_4c_inspection': 'CheckBox19', 'cb_4d_signal_verification': 'CheckBox20',
+    'cb_4e_remote_access': 'CheckBox21', 'cb_4e_recording_device': 'CheckBox22',
+    'cb_4e_cloud_storage': 'CheckBox23', 'cb_4e_video_smartphone': 'CheckBox24',
+    'cb_4e_self_monitoring': 'CheckBox25', 'cb_4e_remote_access_subscriber': 'CheckBox26',
+    'cb_4e_audio': 'CheckBox29', 'cb_4e_other': 'CheckBox30',
+    'cb_4f_access_control': 'CheckBox32', 'cb_4f_remote_admin': 'CheckBox33',
+    'cb_4f_onsite_admin': 'CheckBox34', 'cb_4f_data_storage': 'CheckBox35',
+    'cb_4f_data_backup': 'CheckBox36', 'cb_4g_self_monitoring': 'CheckBox38',
+    'cb_4h_cyber': 'CheckBox39', 'cb_in_lieu_of': 'CheckBox40',
 }
 
 # Elevator Monitoring Agreement field map (issue #40 evidence comment,
@@ -253,6 +302,190 @@ def _categorize_fire_master_rmr(services):
                 picked[cat] = s
             break
     return picked['monitoring'], picked['inspection'], picked['repair_service']
+
+
+# Commercial Security master §2/§4 RMR-to-box mapping (issue 336; issue #40's
+# ruling 4: the box for each sold RMR line is the "Contract selections"
+# column of the RMR Items sheet "Standard RMR" tab, repo snapshot
+# fixtures/google-drive/RMR-Items-2026-08-19.xlsx, Drive-authoritative per
+# the issue #15 ruling — MAPPING-APPENDIX.md §3 is the companion pricing/
+# description view of the same lines). Names are hardcoded from that column,
+# the same pattern the Fire recognizer above uses for its canonical names,
+# and cross-checked against the fixture by
+# tests/test_build_package_security_rmr_recognition.py so a Drive-side
+# rename fails a test instead of drifting silently.
+#
+# 'monitoring' / 'monitoring_smart': Contract selections = "Monitoring
+# Center Charges" (smart tiers add "+ Remote Access by Subscriber").
+_SECURITY_MONITORING_NAMES = (
+    'Commercial Security Monitoring via Phone Line',
+    'Commercial Security Monitoring via Cellular Radio',
+)
+_SECURITY_MONITORING_SMART_NAMES = (
+    'Commercial Smart Security Monitoring via Cellular Radio',
+    'Commercial Smart Building Security Monitoring via Cellular Radio',
+)
+# 'remote_access': Contract selections = "Remote Access by Subscriber" alone.
+_SECURITY_REMOTE_ACCESS_NAMES = (
+    'DMP Advanced Reporting, per door (ethernet)',
+    'DMP Advanced Reporting, per door (cellular)',
+    'Elements Cloud Access Control, per door',
+    'Eagle Eye - 911 Camera Sharing (monthly fee per camera)',
+)
+# 'remote_access_video': Contract selections = "Remote Access by Subscriber"
+# plus "Video Data to Subscriber's Smart Phone" and "Cloud Service Data
+# Storage and Retrieval" (several also add "Recording Device"). Approximated
+# here as one bucket that ticks all three §4(e) sub-boxes — the sheet does
+# not need per-line sub-box precision for this ticket's acceptance criteria;
+# splitting the sub-boxes item-by-item is a follow-on (see the discovery
+# filed with this ticket).
+_SECURITY_REMOTE_ACCESS_VIDEO_NAMES = (
+    'DMP Video - 4000/5000 Series - up to 8 Cameras',
+    'DMP Video - 4000/5000 Series - up to 12 Cameras',
+    'DMP Video - 4000/5000 Series - up to 16 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 8 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 12 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 16 Cameras',
+    'DMP Video - 6000 Series - Smart Analytics (per camera)',
+    'DMP Video - XV Gateways AlarmVision Advanced Analytics, per camera',
+    'DMP - Virtual Keypad Video Doorbell License',
+    'VX Series Standard Camera Package - 4 Devices, 7-Day Storage',
+    'VX Series Standard Camera Package - 4 Devices, 30-Day Storage',
+    'VX Series Single Doorbell Package - 1 Device, 30-Day Storage',
+    'VX Series Extended Camera Package - 12 Devices, 30-Day Storage',
+    'Alarm.com Pro Video',
+    'Alarm.com Pro Video with Analytics',
+    'Alarm.com Premium Video',
+    'Alarm.com Video Expansion add-on',
+    'Total Connect Video - 7 Day Storage',
+    'Total Connect Video - 30 Day Storage',
+    'Total Connect Video - Additional Camera Storage',
+    'Remote Video Services for Local Video System',
+    'Maxpro Cloud Video Service - Recorder',
+    'Maxpro Cloud Video Service - Camera cloud storage',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 30 Days',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 60 Days',
+    'Alta Intercom License, Premium',
+    'Alta Cloud Video with Analytics and 30 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 60 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 90 Days of Cloud Storage - Per Camera',
+    'Alta Cloud LPR Analytics Add-On - Per Camera',
+    'Eagle Eye Cloud VMS, 1 FPS, 30-day storage, per camera',
+    'Monthly Eagle Eye Networks VMS Per Camera License with 1MP, 30 Days Retention',
+    # Sheet row 102 carries a typo ("Ca,era") and an embedded newline;
+    # quoted verbatim rather than silently corrected (hard rule 1 — this
+    # file cites the sheet, it does not restate a cleaned-up version of it).
+    '180deg. Cabinet Appliance with Solar/Cellular/Back-up Battery \n'
+    'monthly charge per Cabinet/Ca,era Appliance',
+    '4MP 60-day retention cloud recording monthly per camera',
+)
+# 'access_control_other': Contract selections = "Remote Access by
+# Subscriber" + 'Other "See Schedule"' — the combine route (MAPPING-
+# APPENDIX.md §1 rule 6) always applies to these.
+_SECURITY_ACCESS_CONTROL_OTHER_NAMES = (
+    'Win-Pak Hosted Access Control - each door',
+    'Maxpro Cloud Access Control - per door',
+    'Alta Cloud Access Control, Basic Tier - Up to X Entry/Entries',
+    'Alta Cloud Access Control, Premium Tier - Up to X Entry/Entries',
+    'Alta Cloud Access Control, Enterprise Tier - Up to X Entry/Entries',
+    'Brivo Access Professional Edition - Base Plan',
+    'Brivo Access Professional Edition - Reader Tier 1',
+    'Brivo Access Standard Edition - Base Data Plan Yearly',
+    'Brivo Access Standard Edition - Tier 1 Reader Data Plan',
+    'Brivo Access Standard Edition - Tier 2 Reader Data Plan',
+    'Brivo Access Standard Edition - Tier 3 Reader Data Plan',
+)
+# 'other_only': Contract selections = 'Other "See Schedule"' alone — also
+# always the combine route.
+_SECURITY_OTHER_ONLY_NAMES = (
+    'Honeywell WIN-PAK SMU (Software Maintenance Upgrade Program)',
+    'Standard Software Support Agreement - Pro-Watch XXXXX Edition',
+    'Software Upgrade Agreement',
+    'Azure Active Directory, 500 users, 60-minute sync, Alta Access',
+    'Azure Active Directory, 1000 users, 60-minute sync, Alta Access',
+    'Azure Active Directory, 500 users, 15-minute sync, Alta Access',
+    'Azure Active Directory, 1000 users, 15-minute sync, Alta Access',
+    'Remote Tech Support',
+    'Communication Assurance Program',
+)
+# 'self_monitoring': Contract selections = "Self-Monitoring (under Remote
+# Subscriber Access)".
+_SECURITY_SELF_MONITORING_NAMES = ('Maxpro Cloud Health Notifications',)
+# 'signal_verification': closest existing CS-form box is §2/§4(d) "Alarm
+# Signal Verification" — the sheet's own box name is "Video Verification",
+# which this form does not carry as a separate box. Best-fit mapping,
+# recorded as a discovery with this ticket rather than left silent.
+_SECURITY_SIGNAL_VERIFICATION_NAMES = ('Video Alarm Verification Service',)
+# 'no_rmr': generates no recurring line at all. Not a Standard RMR tab row
+# (Axis-based access control needs no hosted service, so the RMR sheet
+# carries nothing for it); cited from MAPPING-APPENDIX.md §3 instead, whose
+# note says exactly this ("If no RMR is sold... read 'N/A'").
+_SECURITY_NO_RMR_NAMES = ('Axis-based Access Control — no hosted service',)
+# 'unmapped': the RMR Items sheet leaves Contract selections blank or marks
+# it "?" for these rows (ruling 4) — the box stays unticked and the sold
+# line is named as a question in the handoff text, never guessed.
+_SECURITY_UNMAPPED_NAMES = (
+    '50 additional intercom call recipients, Alta Access Control',
+    '500 additional active users, Alta Access Control',
+    '1000 additional active users, Alta Access Control',
+    'Alta Cloud Access Control, Mobile Credentials - 10 Users',
+)
+
+
+def _security_rmr_lookup():
+    table = {}
+    groups = (
+        ('monitoring', _SECURITY_MONITORING_NAMES),
+        ('monitoring_smart', _SECURITY_MONITORING_SMART_NAMES),
+        ('remote_access', _SECURITY_REMOTE_ACCESS_NAMES),
+        ('remote_access_video', _SECURITY_REMOTE_ACCESS_VIDEO_NAMES),
+        ('access_control_other', _SECURITY_ACCESS_CONTROL_OTHER_NAMES),
+        ('other_only', _SECURITY_OTHER_ONLY_NAMES),
+        ('self_monitoring', _SECURITY_SELF_MONITORING_NAMES),
+        ('signal_verification', _SECURITY_SIGNAL_VERIFICATION_NAMES),
+        ('no_rmr', _SECURITY_NO_RMR_NAMES),
+        ('unmapped', _SECURITY_UNMAPPED_NAMES),
+        ('repair_service', _FIRE_MASTER_REPAIR_SERVICE_NAMES),
+    )
+    for cat, names in groups:
+        for n in names:
+            table[_norm_desc(n)] = cat
+    return table
+
+
+_SECURITY_RMR_CATEGORY = _security_rmr_lookup()
+_SECURITY_AMOUNT_CATS = ('monitoring', 'monitoring_smart', 'remote_access',
+                         'remote_access_video', 'access_control_other',
+                         'other_only', 'self_monitoring', 'signal_verification')
+
+
+def _categorize_security_master_rmr(systems):
+    """Categorize every service line across ``systems`` for the Commercial
+    Security master's §2/§4 boxes (RMR amounts sum across Systems the way
+    issue #226 does for the Fire fields). Returns ``(amounts, unmapped)``:
+    ``amounts`` maps each of ``_SECURITY_AMOUNT_CATS`` to a summed monthly
+    dollar figure (``qty * unit``) or ``None`` when nothing sold that
+    category; ``unmapped`` lists ``(system_name, service)`` pairs whose RMR
+    row carries no Contract selections value (ruling 4) — never guessed,
+    always a question for the handoff. Repair Service and "no RMR" lines are
+    recognized but excluded from ``amounts`` — Repair Service drives the
+    §2/§4(b) service box separately (ruling 3) and "no RMR" lines drive
+    nothing. A description this table does not recognize at all is left
+    alone, same as the Fire recognizer's treatment of non-Fire-master lines.
+    """
+    amounts = dict.fromkeys(_SECURITY_AMOUNT_CATS)
+    unmapped = []
+    for s in systems:
+        for svc in s.get('services') or ():
+            cat = _SECURITY_RMR_CATEGORY.get(_norm_desc(svc.get('description', '')))
+            if cat in (None, 'no_rmr', 'repair_service'):
+                continue
+            if cat == 'unmapped':
+                unmapped.append((s['system'], svc))
+                continue
+            amt = float(svc.get('qty', 1)) * float(svc.get('unit', 0))
+            amounts[cat] = (amounts[cat] or 0.0) + amt
+    return amounts, unmapped
 
 
 # Canonical Elevator Monitoring master RMR names, cited from
@@ -1008,7 +1241,8 @@ def _fire_master_rmr(systems):
 
 def _fill_pdf(src, out, txt, cks):
     """Fill a form's text and checkbox fields explicitly and write the
-    result. Shared by every mapped agreement (Fire, Elevator Monitoring):
+    result. Shared by every mapped agreement (Fire, Commercial Security,
+    Elevator Monitoring):
     every checkbox on the form gets set from ``cks`` (never left at the
     template's own state) and every field named in ``txt`` gets its value,
     including an explicit empty string for a field the record holds no
@@ -1029,8 +1263,10 @@ def _fill_pdf(src, out, txt, cks):
     with open(out, 'wb') as fh: w.write(fh)
 
 
-def _build_elevator_agreements(job, f, R, cust, deal):
-    """Fill the Elevator Monitoring Agreement and its rider (issue 335).
+def _elevator_agreement_fields(f):
+    """(text, checks) for the Elevator Monitoring Agreement and its rider
+    (issue 335), in the same shape as _fire_agreement_fields so the family
+    dispatch in build_agreements shares one _fill_pdf/naming path.
 
     Identity, pricing and the billing-frequency word fill the same way the
     Commercial Fire map fills the equivalent fields, citing the same
@@ -1049,12 +1285,7 @@ def _build_elevator_agreements(job, f, R, cust, deal):
     (hard rule 7: no inferred fill) and recorded as open questions in
     docs/GAP-REPORT.md rather than guessed.
     """
-    folder, mname, rname = PACKAGES['Elevator Monitoring']
-    mpath = os.path.join(R.agreements_root, folder, mname)
-    rpath = os.path.join(R.agreements_root, folder, rname)
-    if not os.path.exists(mpath):
-        return None, None, f'agreement forms not reachable at {mpath}'
-
+    deal, cust = f['deal'], f['customer']
     mon = _elevator_master_rmr(f['systems'])
     amount = lambda x: f'{x:.2f}' if x is not None else 'N/A'
 
@@ -1070,28 +1301,18 @@ def _build_elevator_agreements(job, f, R, cust, deal):
              'description2', 'comm_channel', 'connection_charge', 'setup'):
         text[ELEVATOR[k]] = ''
 
-    stem = f"{cust['site_name']}_{_slug(cust['site_address'])}"
-    mo = os.path.join(job, f'{stem} - Elevator Monitoring Agreement.pdf')
-    ro = os.path.join(job, f'{stem} - Elevator Rider Additional Locations.pdf')
-    _fill_pdf(mpath, mo, text, {})
-    _fill_pdf(rpath, ro, {'Text16666': cust['subscriber_name'], 'Text26666': '',
-                          'Text36666': str(deal['term_years'])}, {})
-    return mo, ro, None
+    rider_text = {'Text16666': cust['subscriber_name'], 'Text26666': '',
+                  'Text36666': str(deal['term_years'])}
+    return (text, {}, rider_text, {}, 'Elevator Monitoring Agreement',
+            'Elevator Rider Additional Locations')
 
 
-def build_agreements(job, f, R):
+def _fire_agreement_fields(f):
+    """(text, checks) for the Commercial Fire master, unchanged from before
+    issue 336 — split out of build_agreements so the family dispatch below
+    can share one _fill_pdf/naming path with the Commercial Security and
+    Elevator Monitoring branches."""
     deal, cust = f['deal'], f['customer']
-    if any(s['system'] == 'Elevator Monitoring' for s in f['systems']):
-        return _build_elevator_agreements(job, f, R, cust, deal)
-    if not any(s['system'] == 'Fire Alarm' for s in f['systems']):
-        return None, None, ('only the Commercial Fire and Elevator '
-                            'Monitoring forms are mapped so far')
-    folder, mname, rname = PACKAGES['Fire Alarm']
-    mpath = os.path.join(R.agreements_root, folder, mname)
-    rpath = os.path.join(R.agreements_root, folder, rname)
-    if not os.path.exists(mpath):
-        return None, None, f'agreement forms not reachable at {mpath}'
-
     mon, insp, rep = _fire_master_rmr(f['systems'])
     amount = lambda x: f'{x:.2f}' if x is not None else 'N/A'
 
@@ -1124,13 +1345,181 @@ def build_agreements(job, f, R):
         FIRE['cb_insp_refuge']: False, FIRE['cb_insp_wireless']: False,
         FIRE['cb_ul']: False, FIRE['cb_in_lieu_of']: False,
     }
+    rider_text = {'Text17777': cust['subscriber_name'], 'Text277777': '',
+                  'Text37777': str(deal['term_years'])}
+    return text, checks, rider_text, {}, 'Fire Master Agreement', 'Fire Rider Additional Locations'
+
+
+def _repair_service_line(systems):
+    """The one Repair Service RMR line across ``systems``, or ``None`` — the
+    shared name both the Fire and Commercial Security masters key their
+    contracted-vs-per-call service box on (ruling 3)."""
+    target = _norm_desc(_FIRE_MASTER_REPAIR_SERVICE_NAMES[0])
+    for s in systems:
+        for svc in s.get('services') or ():
+            if _norm_desc(svc.get('description', '')) == target:
+                return svc
+    return None
+
+
+def _security_agreement_fields(f, dep):
+    """(text, checks) for the Commercial Security master (issue 336; issue
+    #40's evidence comment and rulings). Every mapped box is set True or
+    False explicitly — template state is never consulted (ruling 1). The
+    §2 "Check Services Provided" boxes mirror the selected §4 boxes
+    mechanically (ruling 5). The combine ("IN LIEU OF") route fires only
+    when a sold RMR line needs Other / See Schedule (MAPPING-APPENDIX.md
+    §1 rule 6) — access-control-cloud and software-passthrough lines
+    always need it, so their line items never get their own §4(f) box;
+    when it fires, every other RMR category folds into the same combined
+    figure rather than being split out ("do not split... into fragmented
+    unsupported entries", same rule).
+    """
+    import datetime
+    deal, cust, pr = f['deal'], f['customer'], f['pricing']
+    systems = f['systems']
+    amounts, unmapped = _categorize_security_master_rmr(systems)
+    amt = lambda x: f'{x:.2f}' if x is not None else 'N/A'
+
+    monitor_amt = amounts['monitoring']
+    if amounts['monitoring_smart'] is not None:
+        monitor_amt = (monitor_amt or 0.0) + amounts['monitoring_smart']
+    remote_amt = amounts['remote_access']
+    if amounts['remote_access_video'] is not None:
+        remote_amt = (remote_amt or 0.0) + amounts['remote_access_video']
+    self_amt = amounts['self_monitoring']
+    signal_amt = amounts['signal_verification']
+    has_remote = remote_amt is not None or amounts['monitoring_smart'] is not None
+    combine = (amounts['access_control_other'] is not None
+               or amounts['other_only'] is not None)
+    total_all = sum(v for v in amounts.values() if v is not None) or None
+
+    rep = _repair_service_line(systems)
+    rep_amt = float(rep['qty']) * float(rep['unit']) if rep else None
+
+    price = float(pr['price'])
+    balance = price - (dep or 0)
+
+    text = {
+        SECURITY['date']: datetime.date.today().strftime('%m/%d/%Y'),
+        SECURITY['name']: cust['subscriber_name'],
+        SECURITY['address']: cust['billing_address'].replace('\n', ', '),
+        SECURITY['phone']: cust.get('phone', ''),
+        SECURITY['cell']: cust.get('cell', ''),
+        SECURITY['purchase_price']: f'{price:.2f}',
+        SECURITY['down_payment']: f'{dep or 0:.2f}',
+        SECURITY['balance_due']: f'{balance:.2f}',
+        # Checklist item 8: "TBD" is acceptable only in the approximate
+        # start and substantial-completion date fields (CLAUDE.md hard
+        # rule 4). The builder writes it explicitly (ruling 2) rather
+        # than leaving the cleaned template's own blank.
+        SECURITY['work_begin_date']: 'TBD',
+        SECURITY['completion_date']: 'TBD',
+        SECURITY['charge_install']: 'N/A',
+        SECURITY['charge_monitoring']: 'N/A' if combine else amt(monitor_amt),
+        SECURITY['charge_service']: amt(rep_amt),
+        SECURITY['charge_inspection']: 'N/A',
+        SECURITY['inspections_per_year']: 'N/A',
+        SECURITY['charge_signal_verification']: 'N/A' if combine else amt(signal_amt),
+        SECURITY['charge_remote_access']: 'N/A' if combine else amt(remote_amt),
+        SECURITY['remote_access_other_describe']: '',
+        SECURITY['charge_access_control']: 'N/A',
+        SECURITY['charge_self_monitoring']: 'N/A' if combine else amt(self_amt),
+        SECURITY['charge_cyber']: 'N/A',
+        SECURITY['in_lieu_of_amount']: amt(total_all) if combine else 'N/A',
+        SECURITY['term']: f"{deal['term_years']} years",
+    }
+    checks = {
+        SECURITY['cb_monitoring_services']: (not combine) and monitor_amt is not None,
+        SECURITY['cb_service']: True,   # Contract Package Rules: Service is always checked
+        SECURITY['cb_inspection']: False,
+        SECURITY['cb_remote_access_cameras']: (not combine) and has_remote,
+        SECURITY['cb_access_control_admin']: False,
+        SECURITY['cb_signal_verification']: (not combine) and signal_amt is not None,
+        SECURITY['cb_self_monitoring']: (not combine) and self_amt is not None,
+        SECURITY['cb_cyber']: False,
+        SECURITY['cb_other']: combine,
+        SECURITY['cb_billing_monthly']: False, SECURITY['cb_billing_quarter']: True,
+        SECURITY['cb_billing_semi']: False, SECURITY['cb_billing_annual']: False,
+        SECURITY['cb_4a_install']: False,
+        SECURITY['cb_4a_monitoring']: (not combine) and monitor_amt is not None,
+        SECURITY['cb_service_percall']: rep is None,
+        SECURITY['cb_service_monthly']: rep is not None,
+        SECURITY['cb_4c_inspection']: False,
+        SECURITY['cb_4d_signal_verification']: (not combine) and signal_amt is not None,
+        SECURITY['cb_4e_remote_access']: (not combine) and has_remote,
+        SECURITY['cb_4e_recording_device']: (not combine) and amounts['remote_access_video'] is not None,
+        SECURITY['cb_4e_cloud_storage']: (not combine) and amounts['remote_access_video'] is not None,
+        SECURITY['cb_4e_video_smartphone']: (not combine) and amounts['remote_access_video'] is not None,
+        SECURITY['cb_4e_self_monitoring']: False,
+        SECURITY['cb_4e_remote_access_subscriber']: (not combine) and has_remote,
+        SECURITY['cb_4e_audio']: False,
+        SECURITY['cb_4e_other']: False,
+        SECURITY['cb_4f_access_control']: False,
+        SECURITY['cb_4f_remote_admin']: False,
+        SECURITY['cb_4f_onsite_admin']: False,
+        SECURITY['cb_4f_data_storage']: False,
+        SECURITY['cb_4f_data_backup']: False,
+        SECURITY['cb_4g_self_monitoring']: (not combine) and self_amt is not None,
+        SECURITY['cb_4h_cyber']: False,
+        SECURITY['cb_in_lieu_of']: combine,
+    }
+    rider_text = {'Text16666': cust['subscriber_name'], 'Text26666': '',
+                  'Text36666': str(deal['term_years'])}
+    questions = [
+        f'Commercial Security master: {svc.get("description", "")!r} '
+        f'(System {sysname!r}) is sold as an RMR service line, but the RMR '
+        f'Items sheet\'s Contract selections column leaves that row blank '
+        f'or marked "?" — which master-agreement box should it tick?'
+        for sysname, svc in unmapped
+    ]
+    return (text, checks, rider_text, {}, 'Commercial Security Master Agreement',
+            'Commercial Security Rider Additional Locations', questions)
+
+
+def build_agreements(job, f, R, family, dep=None):
+    cust = f['customer']
+    # Elevator Monitoring dispatches on the System name ahead of Fire, as
+    # issue 335 shipped it.
+    # The Fire branch keys off the System name, not ``family``, exactly as
+    # before issue 336 — a residential Project with a Fire Alarm System
+    # already took this branch pre-336 (family is forced to "Residential
+    # Security" for any residential record, SOW-BASELINES.md §3 note) and
+    # this ticket's scope is the Commercial Security field map only, so
+    # that pre-existing dispatch is left untouched (see the discovery filed
+    # with this ticket rather than changed here).
+    if any(s['system'] == 'Elevator Monitoring' for s in f['systems']):
+        pkg_key = 'Elevator Monitoring'
+    elif any(s['system'] == 'Fire Alarm' for s in f['systems']):
+        pkg_key = 'Commercial Fire'
+    elif family == 'Commercial Security':
+        pkg_key = 'Commercial Security'
+    else:
+        return None, None, (
+            f'only the {", ".join(MAPPED_FAMILIES)} forms are mapped so far '
+            f'({family} is not)')
+    folder, mname, rname = PACKAGES[pkg_key]
+    mpath = os.path.join(R.agreements_root, folder, mname)
+    rpath = os.path.join(R.agreements_root, folder, rname)
+    if not os.path.exists(mpath):
+        return None, None, f'agreement forms not reachable at {mpath}'
+
+    questions = []
+    if pkg_key == 'Commercial Fire':
+        text, checks, rider_text, rider_checks, mlabel, rlabel = _fire_agreement_fields(f)
+    elif pkg_key == 'Elevator Monitoring':
+        text, checks, rider_text, rider_checks, mlabel, rlabel = _elevator_agreement_fields(f)
+    else:
+        text, checks, rider_text, rider_checks, mlabel, rlabel, questions = \
+            _security_agreement_fields(f, dep)
+    f.setdefault('held', [])
+    f['held'].extend(questions)
 
     stem = f"{cust['site_name']}_{_slug(cust['site_address'])}"
-    mo = os.path.join(job, f'{stem} - Fire Master Agreement.pdf')
-    ro = os.path.join(job, f'{stem} - Fire Rider Additional Locations.pdf')
+    mo = os.path.join(job, f'{stem} - {mlabel}.pdf')
+    ro = os.path.join(job, f'{stem} - {rlabel}.pdf')
     _fill_pdf(mpath, mo, text, checks)
-    _fill_pdf(rpath, ro, {'Text17777': cust['subscriber_name'], 'Text277777': '',
-                         'Text37777': str(deal['term_years'])}, {})
+    _fill_pdf(rpath, ro, rider_text, rider_checks)
     return mo, ro, None
 
 
@@ -1176,7 +1565,7 @@ def main():
 
     written = {'schedule'}
     if plan['agreements']:
-        mo, ro, why = build_agreements(job, f, R)
+        mo, ro, why = build_agreements(job, f, R, plan['family'], dep)
     else:
         mo = ro = None
         why = (f'not part of this package: {PACKAGE_RULES} §{plan["section"]} '
