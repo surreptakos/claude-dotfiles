@@ -2,10 +2,10 @@
 name: aac-review-self-check
 description: Check an AAC One Page performance review draft against the house standards before it goes to the skip-level. Use whenever the user is writing, revising, or about to send a performance review for one of their directs.
 metadata:
-  modified: '2026-09-18T17:31:23Z'
-  previous-modified: '2026-09-14T15:48:24Z'
-  revision: '2'
-  content-sha: 76b4a55378c7
+  modified: '2026-09-24T19:25:38Z'
+  previous-modified: '2026-09-18T17:31:23Z'
+  revision: '3'
+  content-sha: 10d473994f30
 ---
 
 # AAC review self-check
@@ -45,11 +45,12 @@ If you ask it to just fix it all, the answer is no, and that is the skill workin
 - The Core Message is one paragraph, three sentences at most, and contains three things and nothing else: the Rating, the Result, and the Ramification.
   - Rating: Exceeded Expectations, Met Expectations, or Did Not Meet Expectations.
   - Result: Promotion, Vertical Growth, Horizontal Growth, or No Change.
-  - Ramification: what the Result means in practice. Named accounts, named functions, named deliverables, or your own work moving down to him. Not a category label. Not a list of things he should fix.
+  - Ramification: the broad outline of what you and he will do next year because of the Result. For a promotion, the role he is ready for. For vertical or horizontal growth, which parts of his job change, which can be as short as "in the areas of quality control and reporting." If the details are not worked out yet, say they will be settled in the planning part of the meeting. Not a list of things he should fix.
   - Form: "[Name]'s results have (exceeded expectations)/(met expectations)/(not met expectations) since (his/her) last review. I am recommending (he/she) (is ready for promotion to X)/(is ready for vertical growth in (his/her) role, in the areas of X)/(is ready for horizontal growth in (his/her) role, in the areas of X)/(maintain (his/her) current role and responsibilities at this time)."
 - Result definitions. Promotion: ready now or during the year. Vertical Growth: more responsibility in areas he already works in, which in practice means your own work handed down, including leadership tasks such as meetings, administration, reporting, or developing other reps. Horizontal Growth: tasks in an area he is not in today. No Change: he holds his current role and responsibilities for the year. A Ramification that lists the accounts he already owns is No Change. A Ramification that lists his Weaknesses is not a Ramification at all.
-- Every Guidance point starts "Guidance Point N:" and then an action verb, names a deliverable or a target, and says how you will know in 12 months whether he did it. One to three sentences. Every Weakness has at least one Guidance point, and every Guidance point traces back to a Weakness or to the Ramification.
+- Every Guidance point is a bullet under "Guidance for the next year" that starts with an action verb and names a behavior or piece of work you want to see next year. It does not need details or a measure yet. "Successfully complete Project X" is enough when you and he will settle what success means in the weeks after the review. One to three sentences. Every Weakness has at least one Guidance point. Guidance can also carry new work and professional development that no Weakness asked for.
 - A Weakness that also appeared in his last review says so in the body: "which was also noted in his last review."
+- Write a little cooler than you will say it, in both directions. Praise on the page is a notch below what you say in the meeting, and criticism a notch lighter; the facts, examples and Rating stay true either way. The Rating never softens: the raise follows it.
 - One page. "Opportunities for Improvement" means Weaknesses.
 
 ## Check 1: Format
@@ -65,16 +66,15 @@ python3 review_format_check.py REVIEW.docx --end END --start START --direct FIRS
 Run it if the environment allows. If it does not, or python-docx is missing and cannot be installed, do not stop and do not tell the manager to install anything. Read the .docx and run the same tests by hand. They are all readable:
 
 1. Header. Dates covered start and end on the two dates from step 2.
-2. Nothing anywhere on the page is dated after the period end.
+2. Nothing anywhere on the page is dated after the period end, and no figure that runs from the period start stops before the period end. "From 7/24/25 through 6/30/26" against a 7/23/26 header fails. "As of 6/30/26" on a status is a data date and passes.
 3. Every Strength and Weakness is exactly two sentences or exactly four. Count them.
-4. Every Strength and Weakness carries at least one date, dollar figure, percentage, or named account or person.
-5. No Strength or Weakness contains "should," "must," "needs to," "would benefit from," "ought to," "is expected to," or "shall."
-6. Core Message is three sentences or fewer and names one Rating and one Result.
-7. No "you" or "your" anywhere on the page, and no "his manager," "her manager," or "their manager" where the reviewer is meant.
-8. Every Guidance point starts "Guidance Point N:" followed by an action verb.
-9. One page. The script needs LibreOffice for this one; without it, say the page count was not tested and tell the manager to check it in Word.
+4. No Strength or Weakness contains "should," "must," "needs to," "would benefit from," "ought to," "is expected to," or "shall."
+5. Core Message is three sentences or fewer and names one Rating and one Result.
+6. No "you" or "your" anywhere on the page, and no "his manager," "her manager," or "their manager" where the reviewer is meant.
+7. Every Guidance point starts with an action verb. The 9/23/26 template lists them as plain bullets; an older draft that labels each "Guidance Point N:" passes too, as long as a verb follows the label.
+8. One page. The script needs LibreOffice for this one; without it, say the page count was not tested and tell the manager to check it in Word.
 
-Two things neither route can see. An example with no date on the page may still fall outside the period, so any event the manager is unsure about goes against his own records. And test 7 cannot tell whether "his manager" meant the reviewer or, if the direct manages people, someone else's manager; ask rather than flag it.
+Two things neither route can see. An example with no date on the page may still fall outside the period, so any event the manager is unsure about goes against his own records. And test 6 cannot tell whether "his manager" meant the reviewer or, if the direct manages people, someone else's manager; ask rather than flag it.
 
 Report the run as PASS, or as FAIL with each failing test named. Say which route ran: the script, or reading. If any test was not run, say which and why, and never report PASS on a test that did not run.
 
@@ -85,8 +85,10 @@ Only after Format passes. This is reading, and every finding is still a yes or n
 Per Strength and Weakness:
 
 - Sentence roles match. In SEER, sentence 1 is the pattern, sentence 2 adds detail, sentence 3 is one specific event or figure, and sentence 4 restates sentence 1 rather than adding a new theme or an instruction. In Sum-Ex, sentence 1 is the pattern and sentence 2 is the example.
+- Behavior, not inference. Sentence 1 names something he does that you can see or hear: what he says, how he says it, his expressions or body language, or his work product (quality, quantity, accuracy, timeliness, documents, relationships). Not a trait, a motive, an attitude, an intent, an idea, or a circumstance. "He is not committed to the team" is an inference; "he missed three of the last five team meetings" is behavior. "He owns a complex account book" is a circumstance: what does he do with it? An attitude or trait word ("good judgment," "a good attitude about improving") is fine only when the rest of the item shows the behavior you read it from.
 - Pattern, not one-off. Sentence 1 says what he does repeatedly or how he performs over the period, even though only one example follows. "He closed the largest deal of the year" is a one-off. "He closes large multi-site projects" is a pattern, and the largest deal is the example under it.
 - One example. Not two events in one sentence. Not a list of accounts or functions. Not his own self-appraisal quoted back as though you had observed it.
+- The example demonstrates the pattern. Sentence 1 names what he does; the example is an instance of that, not of something next to it. "He completed several certifications" followed by an example of him using a tool well is two different strengths in one item. When they do not match, say which one the item is about.
 - No instruction and no note to yourself anywhere in the item. "Set a target with him" is Guidance. "These are self-identified patterns rather than a single dated example" is a note to yourself and does not belong on the page. A "rather than" or "instead of" clause is an instruction only when the second half names what he should have done; a contrast in observed behavior is fine.
 - Weaknesses only: if the theme was in his last review, the body says so.
 
@@ -96,11 +98,25 @@ Core Message:
 
 Guidance:
 
-- Every Weakness has a point. Every point traces to a Weakness or to the Ramification; a point that traces to neither comes out. Every point says how you will know in 12 months.
+- Every Weakness has a point. A point that names new work or development with no Weakness behind it is fine, and none of them needs a measure yet.
 
 Work through every item, not only the ones that look wrong. Account for each Strength, each Weakness, the Core Message, and each Guidance point by name: it passes, or it carries a finding. A sweep that stops at the first few problems is not a sweep, and the items it skipped come back from your skip-level.
 
+Run the bullets against the item, not the item against the bullets. For each Strength and Weakness, take the six checks above in order and answer each one for that item before moving to the next item. Reading an item once and forming an impression skips the checks that impression did not raise. That is how a run with every rule in hand still ships a bad restate.
+
 Report as: PASS with every item accounted for, or a numbered list of findings plus the items that passed.
+
+## Stamp the file when both checks pass
+
+Only when Check 1 passes and Check 2 passes with every item accounted for:
+
+```
+python3 review_format_check.py stamp REVIEW.docx --end END --start START --direct FIRSTNAME
+```
+
+It writes a line into the file and prints a code. Give the manager the code and tell him to put it in the email with the review. The code is computed from the text of the page, so it stops matching the moment the page changes. That is the point: it tells his skip-level that the checks ran, and that they ran on the version he actually sent.
+
+Never stamp a file that has an open finding, and never stamp one where a check did not run. If the script cannot write to the file, say so and give the manager the code to send by hand.
 
 ## Before you send
 
@@ -110,6 +126,8 @@ When both checks pass, the draft is in form. It is not finished, because form is
 - The Rating, against what he actually did, with the case against it in your head so you can answer it.
 - The Result and the Ramification, and whether you are genuinely handing him something.
 - Whether the whole page supports the Core Message. Not every item has to, but most of it should.
+- No surprises. Every Weakness is something he has already heard from you this year, so in the meeting you can say "we've talked about this." If he hasn't, take it off the page, raise it out loud in the meeting, and do not let it count toward the Rating.
+- Any behavior that could lead to discipline if it does not improve: it is on the page as a Weakness, with a Guidance point covering it.
 - Every item the direct raised in his self-appraisal: it is in the review, or you decided to leave it out.
 - Anything the draft says that you would not say out loud in the meeting.
 
