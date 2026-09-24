@@ -478,6 +478,20 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 /**
+ * The acceptance criteria a PASSING verdict still names as unmet, by their text (issue 699).
+ *
+ * A verifier can rightly pass a branch that stops short of the ticket - a doc-only change whose
+ * code half waits on an owner decision filed as its own ticket - and the deliver stage used to
+ * write `Closes #N` on it anyway, so the merge closed aac-bill-intake#682 with three of its four
+ * boxes unticked. The verdict's `unmetCriteria` is what the closing keyword now follows: any entry
+ * makes the PR say `Refs #N` and list them. Absent, null or blank entries read as none.
+ */
+function unmetCriteriaOf(verdict) {
+  if (!verdict) return [];
+  return stableList(verdict.unmetCriteria);
+}
+
+/**
  * Implementer model per ticket from a TypeSafe Jev difficulty Score (issue 725).
  *
  * One `implModel` used to be pinned for every implementer, so a one-line mechanical ticket paid
@@ -580,6 +594,6 @@ module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
   ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
-  stableJson, stableText, stableList, priorFindingsBlock,
+  stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
 };
