@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work projects. Use when Dan asks to triage tasks, clear the backlog, run the daily or Friday pass, or decide what to delegate.
 metadata:
-  modified: '2026-09-23T18:31:02Z'
-  previous-modified: '2026-09-23T18:26:45Z'
-  revision: '20'
-  content-sha: 7deef8ccc15b
+  modified: '2026-09-24T16:36:04Z'
+  previous-modified: '2026-09-23T18:31:02Z'
+  revision: '21'
+  content-sha: 2485e68e354b
 ---
 
 # todoist-triage
@@ -95,7 +95,7 @@ Load the two prior run records first, then the exports, then the live tail.
 - **Leave Dates (API, never mail).** Before any leave item is ruled on, run `python -m aac_routines.leave_dates pending` (and `out` when the week's absences matter). A `hello@leavedates.com` mail with no matching `awaiting_me` row is filed; exit 2 makes Leave Dates an unreachable surface for step 6.
 - **Live tail (tail-fill only).** Fill the window "newest export stamp → now" from Gmail (`mcp__Gmail__search_threads`), Teams (`mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`), meeting notes (Granola), and Todoist history (`find-activity`). Never widen this window past the export stamp; never let the connectors stand in as the primary reader. Any connector that fails or returns no access is recorded and carried into step 6 as an unreachable surface.
 - **Todoist queue.** `find-tasks` on all three projects — Current Work, the backlog, and the Inbox project named by `inbox_project_id` in aac-routines' `config/task-capture.json` — `responsibleUserFiltering: "all"`, `limit: 100`, `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for any task whose title is a bare link. An Inbox item is triaged where it sits; the router moves it, this skill does not.
-- **Board answers.** Query Dan's Day Board (`https://claude.ai/artifact/SQcwMLBKKrtdEPBHtJfGMi`) with the `ArtifactData` tool: `query` on collection `triage` where `status == "answered"`. Each is a tier-2 answer Dan gave on the board since the last run, and its Todoist write is already done: `Rule out` moved the task into Wontfix, which both routines read, so it needs nothing more. Every board item is a task, so none of them goes in the run record. Name the count on status line 2. A `Note only` answer carries no write: act on the note as if he typed it in the session. Then `delete` each consumed document so the next run does not read it twice.
+- **Board answers.** Query Dan's Day Board (`https://claude.ai/artifact/PSr7LzYZqhtF8QHAyX8FGq`) with the `ArtifactData` tool: `query` on collection `triage` where `status == "answered"`. Each is a tier-2 answer Dan gave on the board since the last run, and its Todoist write is already done: `Rule out` moved the task into Wontfix, which both routines read, so it needs nothing more. Every board item is a task, so none of them goes in the run record. Name the count on status line 2. A `Note only` answer carries no write: act on the note as if he typed it in the session. Then `delete` each consumed document so the next run does not read it twice.
 
 Done when both run records are located or their absence recorded, the newest export is read, the tail window is fetched from every reachable connector (and every failure is logged), all three projects are exhausted, and every link-only title has its source read.
 
@@ -188,7 +188,7 @@ The order, and nothing else above it:
 
 Inbox items judged personal are named on line 2's tail, by title, as left alone.
 
-**End every run with the Day Board link (Dan, 2026-09-23).** The last line of the run's output, after the tier-2 questions, is the board's URL, `https://claude.ai/artifact/SQcwMLBKKrtdEPBHtJfGMi`, so he can open it in one tap; the notification carries the same URL as its last line. A run whose board write failed still links it, beside the line naming the board dark.
+**End every run with the Day Board link (Dan, 2026-09-23).** The last line of the run's output, after the tier-2 questions, is the board's URL, `https://claude.ai/artifact/PSr7LzYZqhtF8QHAyX8FGq`, so he can open it in one tap; the notification carries the same URL as its last line. A run whose board write failed still links it, beside the line naming the board dark.
 
 Vocabulary: plain English throughout. No internal names in the body — nothing like `aac-forgotten-tasks`, `aac-routines`, `aac-source`/`aac-topic`, `ball`, `queue`, `do`/`to-*`/`chase`, `no-sweep`, the `claude` label, project ids, connector or MCP tool names, or "step N of the procedure". Say what happened and what needs Dan's attention in words a reader outside this skill would understand. Line 6 and the closing board link are the exceptions: line 6 may spell the record filenames so he can go find them.
 
