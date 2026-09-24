@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T14:10:39Z"
-  previous-modified: "2026-09-24T13:31:37Z"
-  revision: "40"
-  content-sha: "b357d5bb81e8"
+  modified: "2026-09-24T14:17:43Z"
+  previous-modified: "2026-09-24T14:10:39Z"
+  revision: "41"
+  content-sha: "f17731584484"
 ---
 
 # ticket-fleet
@@ -404,6 +404,20 @@ a PR was selected and then skipped inside its lane, burning a wave slot while a 
 sat unselected (issue 430). An unusable answer - retry cap, empty output - is read as "no candidate
 has an open PR" for the whole wave and logged once; the worst case is a duplicate PR a human
 closes, which is the trade the per-lane check made too.
+
+## A ticket parked in Maybe Someday never enters a label-driven wave
+
+The ticket reaper (`ticket-reaper`) parks a ticket by moving it into the Maybe Someday milestone
+without touching its labels - its own rule - so a parked ticket still carries `ready-for-agent`
+and a label-driven scout listing still returns it. The scout reports each ticket's milestone
+title (`milestone.title` from `gh api` or the MCP tracker tools), and any candidate whose
+milestone is Maybe Someday is dropped before wave selection, whatever its labels, and named in
+the run result under `skippedParked`. This only gates a label-driven listing: a ticket named
+explicitly in `args.tickets` still runs - the caller asked for it by number, same as the human-lane
+tickets that stay in the wave despite the label rule. On aac-sales-commissions on 2026-09-24 the
+reaper's first sweep parked #4 #5 #22 #38 #41 and a label-driven run would have implemented all
+five against the owner's speed-over-robustness ruling had the caller not passed `tickets: [...]`
+explicitly (issue 786).
 
 ## Blocker state is read, not believed
 

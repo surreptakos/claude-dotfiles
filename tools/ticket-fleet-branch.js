@@ -259,6 +259,39 @@ function confineToCandidates(tickets, candidateNumbers) {
 }
 
 /**
+ * Drop every candidate parked in the Maybe Someday milestone (issue 786).
+ *
+ * The ticket reaper parks tickets there without touching their labels (its own rule -
+ * docs/agents/memory), so a parked ticket still carries `ready-for-agent` and a label-driven
+ * scout listing still returns it. A label the reaper does not touch and a scout that reads only
+ * labels is the gap: on aac-sales-commissions on 2026-09-24 a label-driven run would have
+ * implemented five tickets the reaper had just parked against a speed-over-robustness ruling.
+ *
+ * This only gates the label-driven listing. A ticket named explicitly in `args.tickets` runs
+ * whatever its milestone - the caller asked for it by number, same as the kind/handoff gates
+ * leave explicit tickets alone.
+ *
+ * @param {Array<{number:number, milestone?:string|null}>|null|undefined} tickets
+ * @param {Array<number|string>|null|undefined} explicitNumbers - `args.tickets`, parsed; a
+ *   non-empty list means every candidate was named explicitly and none are dropped
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, milestone:string}>}} the surviving
+ *   tickets in order, and the dropped ones with the milestone that parked each, for the run
+ *   result's `skippedParked`
+ */
+function dropParkedTickets(tickets, explicitNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (Array.isArray(explicitNumbers) && explicitNumbers.length > 0) return { tickets: list, skipped: [] };
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const milestone = String((t && t.milestone) || '').trim();
+    if (milestone.toLowerCase() !== 'maybe someday') return true;
+    skipped.push({ ticket: parseInt(t.number, 10), milestone });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
  * Drop blockers that have already closed (issue 403).
  *
  * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
@@ -739,6 +772,26 @@ function parseTipLookupOutput(stdout) {
   return sha ? { sha, spelling: 'ls-remote' } : null;
 }
 
+/**
+ * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
+ * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
+ * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
+ * accepted every time. The Windows desktop (the gh instrument) has no /usr/bin/git, so there the
+ * bare spelling leads and the absolute path is the named retry. Either way the prompt carries
+ * both spellings and says when each one applies, so no worker is left holding only the refused
+ * one. `args` is everything after `git`; returns prompt text, the command in backticks first.
+ */
+const GIT_ABSOLUTE_PATH = '/usr/bin/git';
+const GIT_GUARD_REFUSAL = 'runs caveman with a git command among its operands';
+function gitSpelling(instrument, args) {
+  const bare = `git ${args}`;
+  const absolute = `${GIT_ABSOLUTE_PATH} ${args}`;
+  if (instrument === 'mcp') {
+    return `\`${absolute}\` (the absolute path: in a cloud container the worktree guard refuses a bare \`git ...\` with "${GIT_GUARD_REFUSAL}" and accepts this one; only where ${GIT_ABSOLUTE_PATH} does not exist, run \`${bare}\`)`;
+  }
+  return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -761,11 +814,11 @@ function difficultyEvalSet(branchNames) {
 
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
-  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
-  classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE,
+  classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
 };

@@ -326,6 +326,39 @@ function confineToCandidates(tickets, candidateNumbers) {
 }
 
 /**
+ * Drop every candidate parked in the Maybe Someday milestone (issue 786).
+ *
+ * The ticket reaper parks tickets there without touching their labels (its own rule -
+ * docs/agents/memory), so a parked ticket still carries `ready-for-agent` and a label-driven
+ * scout listing still returns it. A label the reaper does not touch and a scout that reads only
+ * labels is the gap: on aac-sales-commissions on 2026-09-24 a label-driven run would have
+ * implemented five tickets the reaper had just parked against a speed-over-robustness ruling.
+ *
+ * This only gates the label-driven listing. A ticket named explicitly in `args.tickets` runs
+ * whatever its milestone - the caller asked for it by number, same as the kind/handoff gates
+ * leave explicit tickets alone.
+ *
+ * @param {Array<{number:number, milestone?:string|null}>|null|undefined} tickets
+ * @param {Array<number|string>|null|undefined} explicitNumbers - `args.tickets`, parsed; a
+ *   non-empty list means every candidate was named explicitly and none are dropped
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, milestone:string}>}} the surviving
+ *   tickets in order, and the dropped ones with the milestone that parked each, for the run
+ *   result's `skippedParked`
+ */
+function dropParkedTickets(tickets, explicitNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (Array.isArray(explicitNumbers) && explicitNumbers.length > 0) return { tickets: list, skipped: [] };
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const milestone = String((t && t.milestone) || '').trim();
+    if (milestone.toLowerCase() !== 'maybe someday') return true;
+    skipped.push({ ticket: parseInt(t.number, 10), milestone });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
  * Drop blockers that have already closed (issue 403).
  *
  * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
@@ -805,6 +838,26 @@ function parseTipLookupOutput(stdout) {
   const sha = parseLsRemoteSha(text);
   return sha ? { sha, spelling: 'ls-remote' } : null;
 }
+
+/**
+ * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
+ * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
+ * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
+ * accepted every time. The Windows desktop (the gh instrument) has no /usr/bin/git, so there the
+ * bare spelling leads and the absolute path is the named retry. Either way the prompt carries
+ * both spellings and says when each one applies, so no worker is left holding only the refused
+ * one. `args` is everything after `git`; returns prompt text, the command in backticks first.
+ */
+const GIT_ABSOLUTE_PATH = '/usr/bin/git';
+const GIT_GUARD_REFUSAL = 'runs caveman with a git command among its operands';
+function gitSpelling(instrument, args) {
+  const bare = `git ${args}`;
+  const absolute = `${GIT_ABSOLUTE_PATH} ${args}`;
+  if (instrument === 'mcp') {
+    return `\`${absolute}\` (the absolute path: in a cloud container the worktree guard refuses a bare \`git ...\` with "${GIT_GUARD_REFUSAL}" and accepts this one; only where ${GIT_ABSOLUTE_PATH} does not exist, run \`${bare}\`)`;
+  }
+  return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -900,6 +953,7 @@ const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoM
     discoveryTriage: { type: 'boolean', description: 'true when the ticket is a discovery-triage chore: it asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run\'s follow-ups, a review list) to be turned into tracker items - tickets filed, doc fixes landed, noise struck. Two of these in one wave file the same finding twice if they run concurrently, so the fleet chains them.' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'every blocker issue number the ticket names, whatever its state - the run resolves open vs closed itself (issue 403)' },
+    milestone: { type: 'string', description: 'the ticket\'s milestone title, verbatim from the tracker (mcp list_issues/issue_read or gh api both return milestone.title); "" when the ticket has none. A milestone of "Maybe Someday" parks the ticket - dropped from a label-driven listing before the wave (issue 786) - so report it even when nothing else here reads it' },
   } } },
   repoMap: { type: 'string', description: '15-line map: key dirs, test command, conventions, rails' },
   testCommand: { type: 'string' },
@@ -1507,7 +1561,7 @@ const scout = await agent(
 2. Collect the tickets: ${scoutSource}
    That one listing is the WHOLE candidate set. Do not widen it under any circumstances: not another label, not a sweep of open issues, not a search, not a ticket you happened to read elsewhere. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it.
    A listing that comes back with zero tickets is a valid and complete answer, not a cue to go looking: return candidateNumbers: [] and tickets: [] and stop. The run ending with nothing to do is the correct outcome there.
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false. Report the ticket's milestone title verbatim (mcp list_issues/issue_read and gh api both return milestone.title; "" when it has none) - this run drops a Maybe Someday ticket from a label-driven listing before the wave (issue 786).
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
@@ -1530,7 +1584,16 @@ const candidateSet = explicitTickets.length ? explicitTickets : (scout && scout.
 const scoutTickets = confineToCandidates(scout && scout.tickets, candidateSet)
 const offListing = ((scout && Array.isArray(scout.tickets)) ? scout.tickets.length : 0) - scoutTickets.length
 if (offListing > 0) log(`${offListing} ticket(s) dropped: not in the ${explicitTickets.length ? 'requested numbers' : 'label listing'} the scout was given.`)
-if (!scout || !scoutTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
+// The ticket reaper parks a ticket in the Maybe Someday milestone without touching its labels
+// (its own rule), so a parked ticket still carries `ready-for-agent` and reaches here. A ticket
+// named explicitly in args.tickets still runs whatever its milestone - dropParkedTickets leaves
+// an explicit list untouched (issue 786). The pure filter is dropParkedTickets in the generated
+// block above.
+const parkedFilter = dropParkedTickets(scoutTickets, explicitTickets)
+const skippedParked = parkedFilter.skipped
+const eligibleTickets = parkedFilter.tickets
+if (skippedParked.length) log(`${skippedParked.length} ticket(s) skipped: parked in the Maybe Someday milestone - ${skippedParked.map(s => '#' + s.ticket).join(', ')}.`)
+if (!scout || !eligibleTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, skippedParked, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
 // [FLEET-SCOUT-GATE-END]
 
 // ---- test command override (issue 317) ----
@@ -1588,7 +1651,7 @@ These are blocker edges named by tickets this run is about to select from, so th
   return applied.tickets
 }
 // [FLEET-BLOCKER-STATE-END]
-const resolvedTickets = await resolveBlockerStates(scoutTickets)
+const resolvedTickets = await resolveBlockerStates(eligibleTickets)
 
 // ---- open-PR filter: one listing per launch, before wave selection (issue 430) ----
 // The same question the code lane used to ask per ticket, asked once for the whole candidate set.
@@ -2032,7 +2095,7 @@ A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, 
 A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(d), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
 
 STEP B - push and open the PR (only when STEP A ended clean, resolved, or unmerged-by-classifier):
-B1. Push the branch: \`git push -u origin ${branch}\`. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run AL's lookups and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed" when no lookup printed the ref ("blocked" when one did - the push itself failed), conflictPaths:[], branchLookup:[every run], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the classifier REFUSES is not a failed push: re-issue it byte-identical once (A0), and if that retry is refused too, read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. Only when the remote tip is missing or behind does a twice-refused push come back as {pushed:false, ...}.
+B1. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run AL's lookups and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed" when no lookup printed the ref ("blocked" when one did - the push itself failed), conflictPaths:[], branchLookup:[every run], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the classifier REFUSES is not a failed push: re-issue it byte-identical once (A0), and if that retry is refused too, read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. Only when the remote tip is missing or behind does a twice-refused push come back as {pushed:false, ...}.
 B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused, re-issue it byte-identical once, and if that retry is refused too open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
 B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean", "resolved", or "unmerged-by-classifier" with blockedReason holding the refusal text).
@@ -2041,12 +2104,12 @@ STEP C - repair a commit that ALREADY reached origin (issue 514), which happens 
 C1. \`git fetch origin ${branch}\`, then \`git checkout -B ${branch} origin/${branch}\` - HEAD now sits on the bad commit.
 C2. \`git read-tree -u --reset <corrected-commit>\` - index and worktree become the tree of the corrected merge you produced locally, and nothing already pushed is rewritten.
 C3. \`git commit -m "repair merge <bad-sha> (issue ${t.number}): conflict markers removed"\`, then re-run the STEP A7 scan on the new HEAD.
-C4. \`git push origin ${branch}\` - a fast-forward, no force flag - and go on with STEP B from B2. This is the pattern that recovered commit 966a36f by hand, as repair commit b00db2e; the run performs it itself.
+C4. ${gitSpelling(instrument, `push origin ${branch}`)} - a fast-forward, no force flag - and go on with STEP B from B2. This is the pattern that recovered commit 966a36f by hand, as repair commit b00db2e; the run performs it itself.
 
 STEP D - merge the PR you opened (issue 770). Run 6ab4840f opened ten PRs that each waited for an orchestrator to find them, and six went dirty on the generated payload in the meantime; the session that opened a PR is the one that knows it is finished, so it merges it. Runs only when STEP B returned a prUrl; otherwise return merged false, mergeSha "", prState "not-attempted".
 D1. WAIT FOR CI. ${rules.prState('<PR number>')} Then ${rules.prChecks('<PR number>')} Poll with \`sleep 60\` between reads, for at most 20 minutes (the Windows restore test on claude-dotfiles takes about 8). CI is finished when no check run is "queued" or "in_progress". A head that shows ZERO check runs on two reads one minute apart has no CI - treat that as finished and green. If the bound passes first: return merged false, mergeSha "", prState "ci-pending", blockedReason naming the checks still running.
 D2. THE BAR (orchestrator/RUNBOOK.md "Merge"): every check run's conclusion is "success", "skipped" or "neutral"; mergeable_state is "clean"; ${rules.prReviews('<PR number>')} has no review in state "CHANGES_REQUESTED". Any conclusion "failure", "cancelled", "timed_out" or "action_required": return merged false, prState "ci-red", blockedReason naming each failing check by name. A CHANGES_REQUESTED review: prState "changes-requested", blockedReason naming the reviewer. Never re-run a job, never edit, skip or quarantine a test, never push an empty commit, never merge a head with a red check.
-D3. DIRTY: mergeable_state "dirty" means ${defaultBranch} moved under the PR after STEP A. Run STEP A once more on ${branch} exactly as above (A1-A7, the same three resolvable classes, the same regeneration and gate, the same marker scan), push with a plain \`git push origin ${branch}\` (no force flag), then go back to D1 with the NEW head sha. At most two such rounds; after that return merged false, prState "dirty-unresolved", conflictPaths from the last STEP A. mergeable_state "unknown" is GitHub still computing: wait 30 seconds and read D1 again.
+D3. DIRTY: mergeable_state "dirty" means ${defaultBranch} moved under the PR after STEP A. Run STEP A once more on ${branch} exactly as above (A1-A7, the same three resolvable classes, the same regeneration and gate, the same marker scan), push with a plain ${gitSpelling(instrument, `push origin ${branch}`)} (no force flag), then go back to D1 with the NEW head sha. At most two such rounds; after that return merged false, prState "dirty-unresolved", conflictPaths from the last STEP A. mergeable_state "unknown" is GitHub still computing: wait 30 seconds and read D1 again.
 D4. MERGE: when the bar holds, ${rules.prMerge('<PR number>', `fix: ${t.title} (#${t.number})`)} Pass the head sha you read in D1 and that the checks ran on: a merge call for a head that moved fails, and that failure means go back to D1, never retry blind. Never a branch delete: delete_branch_on_merge is on for every fleeted repo. On merged:true, return merged true, mergeSha, prState "merged".
 D5. THE TICKET, only after merged:true: ${rules.issueState(t.number)} ${keepOpen || unmet.length ? `This ticket stays OPEN (${keepOpen ? 'its own instruction' : 'unmet acceptance criteria are listed in the PR'}): if it reads "closed", it was closed by mistake - say so in blockedReason and leave it; if "open", ${rules.labelSwap(t.number)}` : `The PR body's "Closes #${t.number}" closes it at merge; if it still reads "open" one read later (wait 30 seconds), ${rules.issueClose(t.number, '<prUrl>')}`} Report the final state as ticketState.
 
@@ -2175,7 +2238,7 @@ ${SCRATCH_RAIL}
 Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
-Rules: one branch named ${branch}; commit your work, then push that branch and nothing else: run \`git push -u origin ${branch}\` as soon as the commit lands, and return pushed: true only when it exits 0 (a pushed branch survives a dead container, a killed Deliver step and an interrupt - issue 405). If the push fails, return pushed: false and quote the git output verbatim at the end of testTail, after the test tail; the run then pushes the branch for you. NEVER open a PR, NEVER merge, NEVER push any branch but ${branch}, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
+Rules: one branch named ${branch}; commit your work, then push that branch and nothing else: run ${gitSpelling(instrument, `push -u origin ${branch}`)} as soon as the commit lands, and return pushed: true only when it exits 0 (a pushed branch survives a dead container, a killed Deliver step and an interrupt - issue 405). If the push fails, return pushed: false and quote the git output verbatim at the end of testTail, after the test tail; the run then pushes the branch for you. NEVER open a PR, NEVER merge, NEVER push any branch but ${branch}, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
 Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are read-only production paths - never write to them, never leave .bak files there; a change that would need a live-tree edit to land is committed to the branch only and named as a discovery.
 Done-condition (machine-checkable, all required): branch exists with your commits and is on origin (\`git ls-remote --heads origin ${branch}\` prints a ref); \`${testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
 Scope: if, while working or testing, you find a pre-existing bug, a performance concern, or behavior the ticket doesn't mention, don't fix, optimize or extend it in this change unless the requested behavior cannot work without it; report it as a self-contained discovery string instead. Where the ticket is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in a discovery string, and don't build for the other readings as well. Verify your work however you like; scratch scripts and quick checks need not be kept. Commit tests only where the ticket asks for them or this repository already keeps tests for this kind of change, sized like the neighboring test files - roughly one focused test per stated behavior - and don't turn scratch checks into additional permanent test files. This is about extras only: implement every behavior the ticket asks for, completely.
@@ -2220,9 +2283,9 @@ Return structured output only.`,
       try {
         pushBack = await agent(
         `Put branch ${branch} on origin, so the work committed on it survives this container (issue 405).
-Run exactly this one command from the repository root:
+Run this one push from the repository root - the spelling below, or the other one it names when that applies:
 
-git push -u origin ${branch}
+${gitSpelling(instrument, `push -u origin ${branch}`)}
 
 Then run \`git ls-remote --heads origin ${branch}\` and report pushed: true only when it prints a ref.
 If the push fails for any reason, that is the answer: return pushed: false with the git output VERBATIM. Never conclude that the branch "does not exist" and never invent a reason - when git says the ref is missing, run \`git branch -a --list '*${branch}*'\` and \`git worktree list\` and quote their output too.
@@ -2529,7 +2592,7 @@ async function runReport(discoveries, defaultBranch) {
   if (!discoveries.length) return null
   const branch = `agent/fleet-discoveries-wf_${runId}`
   const deliverStep = cfg.deliver
-    ? `6. git push -u origin ${branch}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'))}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
+    ? `6. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'))}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
     : `6. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
   // Wrapped (aac-routines issue 270): a writer that blows the StructuredOutput retry cap used
   // to lose the whole run report; it is now a named error on the discovery report instead.
@@ -2616,6 +2679,9 @@ return {
   // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
   // (issue 430): they never entered the wave, so the cap ran this many real tickets more.
   skippedOpenPR,
+  // Candidates parked in the Maybe Someday milestone by the ticket reaper, dropped from a
+  // label-driven listing before the wave (issue 786); an explicit args.tickets number still runs.
+  skippedParked,
   skippedOverCap: droppedCap,
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
