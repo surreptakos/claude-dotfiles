@@ -699,6 +699,80 @@ function classifyDelivery(delivery, facts) {
 }
 
 /**
+ * Pure (issue 561): the ONE bash command the tip agent (`revParse`) runs to resolve a ref that may
+ * exist only as `origin/<ref>` - handed in through `priorImpl` from an earlier run, or pushed from
+ * an implementer in another container. `git -C <cwd> rev-parse <ref>` alone exits 128 for such a
+ * branch and issue-404's tip cross-check is skipped for the whole ticket (the bug this closes).
+ *
+ * Still one command, so the tip agent keeps the same "run exactly this" shape every other agent in
+ * this file gets: a fallback chain built from `||`, never a loop. Three steps, tried in order:
+ *   1. `git rev-parse --verify <ref>`        - the ref as given (a local branch, or already
+ *                                               `origin/<defaultBranch>` for the probe lane).
+ *   2. `git rev-parse --verify origin/<ref>` - the same name on the remote-tracking ref, for a
+ *                                               branch that exists only as `origin/<ref>` locally.
+ *   3. `git ls-remote --heads origin <ref>`  - the remote itself, for a branch pushed from another
+ *                                               container that this checkout has never fetched.
+ * Each of the first two steps echoes a `SPELLING=given` / `SPELLING=origin` marker on success, so
+ * `parseTipLookupOutput` can tell which one answered without re-running anything or guessing from
+ * the shape of the sha. The third step needs no marker: its raw `ls-remote` line is unambiguous
+ * (parsed by `parseLsRemoteSha`), and it is reached only when both markers failed to print.
+ *
+ * @param {string} cwd - the orchestrator's own checkout, absolute (matches every other `-C`
+ *   command in this file - see the orchestratorCwd note on the guard commands above).
+ * @param {string} ref - the ref to resolve, exactly as the caller passed to `revParse`.
+ * @returns {string} the single bash command string.
+ */
+function buildTipLookupCommand(cwd, ref) {
+  const c = String(cwd);
+  const r = String(ref);
+  return `{ git -C ${c} rev-parse --verify ${r} 2>/dev/null && echo SPELLING=given; }`
+    + ` || { git -C ${c} rev-parse --verify origin/${r} 2>/dev/null && echo SPELLING=origin; }`
+    + ` || git -C ${c} ls-remote --heads origin ${r} 2>/dev/null`;
+}
+
+/**
+ * Pure (issue 561): a raw `git ls-remote --heads origin <ref>` line - `<sha>\trefs/heads/<ref>` -
+ * to the 40 (or abbreviated) hex sha, or null when the line is not that shape. `git ls-remote`
+ * exits 0 and prints nothing at all for a ref that does not exist on the remote, so an empty or
+ * markerless output is "not found," not a parse failure - the caller (`parseTipLookupOutput`)
+ * treats null here the same way `revParse` already treats a rev-parse miss.
+ *
+ * @param {string} output - the command's stdout, verbatim.
+ * @returns {string|null}
+ */
+function parseLsRemoteSha(output) {
+  const lines = String(output == null ? '' : output).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const line = lines.find((l) => /^[0-9a-f]{7,40}\trefs\/heads\//i.test(l));
+  if (!line) return null;
+  const sha = line.split(/\s+/)[0];
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+}
+
+/**
+ * Pure (issue 561): `buildTipLookupCommand`'s stdout in, `{sha, spelling}` or null out. `spelling`
+ * is `'given'` or `'origin'` when the matching marker line printed (the sha is the line directly
+ * above it - both echoing branches of the command print sha-then-marker, in that order), or
+ * `'ls-remote'` when neither marker appears but `parseLsRemoteSha` finds a ref line anyway (the
+ * third fallback prints no marker of its own - see `buildTipLookupCommand`). Null when nothing in
+ * stdout resolves the ref by any of the three routes: an absent branch, not a parse failure.
+ *
+ * @param {string} stdout - the command's stdout, verbatim, exactly as `revParse` receives it.
+ * @returns {{sha: string, spelling: 'given'|'origin'|'ls-remote'}|null}
+ */
+function parseTipLookupOutput(stdout) {
+  const text = String(stdout == null ? '' : stdout);
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const markerIdx = lines.findIndex((l) => /^SPELLING=(given|origin)$/.test(l));
+  if (markerIdx > 0) {
+    const spelling = lines[markerIdx].slice('SPELLING='.length);
+    const sha = lines[markerIdx - 1];
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? { sha, spelling } : null;
+  }
+  const sha = parseLsRemoteSha(text);
+  return sha ? { sha, spelling: 'ls-remote' } : null;
+}
+
+/**
  * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
  * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
  * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
@@ -746,4 +820,5 @@ module.exports = {
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
+  buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
 };

@@ -766,6 +766,80 @@ function classifyDelivery(delivery, facts) {
 }
 
 /**
+ * Pure (issue 561): the ONE bash command the tip agent (`revParse`) runs to resolve a ref that may
+ * exist only as `origin/<ref>` - handed in through `priorImpl` from an earlier run, or pushed from
+ * an implementer in another container. `git -C <cwd> rev-parse <ref>` alone exits 128 for such a
+ * branch and issue-404's tip cross-check is skipped for the whole ticket (the bug this closes).
+ *
+ * Still one command, so the tip agent keeps the same "run exactly this" shape every other agent in
+ * this file gets: a fallback chain built from `||`, never a loop. Three steps, tried in order:
+ *   1. `git rev-parse --verify <ref>`        - the ref as given (a local branch, or already
+ *                                               `origin/<defaultBranch>` for the probe lane).
+ *   2. `git rev-parse --verify origin/<ref>` - the same name on the remote-tracking ref, for a
+ *                                               branch that exists only as `origin/<ref>` locally.
+ *   3. `git ls-remote --heads origin <ref>`  - the remote itself, for a branch pushed from another
+ *                                               container that this checkout has never fetched.
+ * Each of the first two steps echoes a `SPELLING=given` / `SPELLING=origin` marker on success, so
+ * `parseTipLookupOutput` can tell which one answered without re-running anything or guessing from
+ * the shape of the sha. The third step needs no marker: its raw `ls-remote` line is unambiguous
+ * (parsed by `parseLsRemoteSha`), and it is reached only when both markers failed to print.
+ *
+ * @param {string} cwd - the orchestrator's own checkout, absolute (matches every other `-C`
+ *   command in this file - see the orchestratorCwd note on the guard commands above).
+ * @param {string} ref - the ref to resolve, exactly as the caller passed to `revParse`.
+ * @returns {string} the single bash command string.
+ */
+function buildTipLookupCommand(cwd, ref) {
+  const c = String(cwd);
+  const r = String(ref);
+  return `{ git -C ${c} rev-parse --verify ${r} 2>/dev/null && echo SPELLING=given; }`
+    + ` || { git -C ${c} rev-parse --verify origin/${r} 2>/dev/null && echo SPELLING=origin; }`
+    + ` || git -C ${c} ls-remote --heads origin ${r} 2>/dev/null`;
+}
+
+/**
+ * Pure (issue 561): a raw `git ls-remote --heads origin <ref>` line - `<sha>\trefs/heads/<ref>` -
+ * to the 40 (or abbreviated) hex sha, or null when the line is not that shape. `git ls-remote`
+ * exits 0 and prints nothing at all for a ref that does not exist on the remote, so an empty or
+ * markerless output is "not found," not a parse failure - the caller (`parseTipLookupOutput`)
+ * treats null here the same way `revParse` already treats a rev-parse miss.
+ *
+ * @param {string} output - the command's stdout, verbatim.
+ * @returns {string|null}
+ */
+function parseLsRemoteSha(output) {
+  const lines = String(output == null ? '' : output).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const line = lines.find((l) => /^[0-9a-f]{7,40}\trefs\/heads\//i.test(l));
+  if (!line) return null;
+  const sha = line.split(/\s+/)[0];
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+}
+
+/**
+ * Pure (issue 561): `buildTipLookupCommand`'s stdout in, `{sha, spelling}` or null out. `spelling`
+ * is `'given'` or `'origin'` when the matching marker line printed (the sha is the line directly
+ * above it - both echoing branches of the command print sha-then-marker, in that order), or
+ * `'ls-remote'` when neither marker appears but `parseLsRemoteSha` finds a ref line anyway (the
+ * third fallback prints no marker of its own - see `buildTipLookupCommand`). Null when nothing in
+ * stdout resolves the ref by any of the three routes: an absent branch, not a parse failure.
+ *
+ * @param {string} stdout - the command's stdout, verbatim, exactly as `revParse` receives it.
+ * @returns {{sha: string, spelling: 'given'|'origin'|'ls-remote'}|null}
+ */
+function parseTipLookupOutput(stdout) {
+  const text = String(stdout == null ? '' : stdout);
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const markerIdx = lines.findIndex((l) => /^SPELLING=(given|origin)$/.test(l));
+  if (markerIdx > 0) {
+    const spelling = lines[markerIdx].slice('SPELLING='.length);
+    const sha = lines[markerIdx - 1];
+    return /^[0-9a-f]{7,40}$/i.test(sha) ? { sha, spelling } : null;
+  }
+  const sha = parseLsRemoteSha(text);
+  return sha ? { sha, spelling: 'ls-remote' } : null;
+}
+
+/**
  * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
  * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
  * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
@@ -1027,10 +1101,21 @@ function failuresOf(verdict) {
 // command and copies its output back - the shape the tree guard already uses, for the same reason:
 // nothing is left to the agent's judgement, so a paraphrase is detectable. The prompt names only a
 // ref, so its cache key is stable across a resume and a resumed run replays the same sha.
+//
+// Issue 561: a branch handed in through `priorImpl` from an earlier run, or pushed by an
+// implementer in another container, exists only as `origin/<branch>` in the orchestrator's own
+// checkout - a bare `git rev-parse <branch>` exits 128 and the whole cross-check was skipped. The
+// command is now the three-step fallback chain `buildTipLookupCommand` builds (ref, then
+// origin/ref, then `git ls-remote --heads origin <ref>`), still one bash command - a `||` chain,
+// not a loop. `spelling` names which of the three answered, read straight off the marker the
+// command itself printed (see buildTipLookupCommand/parseTipLookupOutput) so the log line below
+// shows where the tip came from without asking the agent to judge anything.
+// [FLEET-TIP-REVPARSE-START]
 const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
   exitCode: { type: 'integer', description: 'REAL exit code of the command, not the exit code of a pipe' },
-  stdout: { type: 'string', description: 'stdout VERBATIM - the full 40-character object name when the ref resolved; never abbreviate or reformat it' },
+  stdout: { type: 'string', description: 'stdout VERBATIM - every line the command printed, unmodified; never abbreviate, reformat or drop the SPELLING= marker line when one printed' },
   stderr: { type: 'string', description: 'stderr verbatim ("" if none)' },
+  spelling: { type: 'string', description: 'the marker the command printed - "given", "origin" or "" when neither fallback echoed one (the ls-remote step prints no marker of its own; copy exactly what stdout shows, do not infer it)' },
 } }
 async function revParse(ref, label) {
   let res = null
@@ -1038,23 +1123,35 @@ async function revParse(ref, label) {
     res = await agent(
     `Run exactly this one bash command and report its result:
 
-git -C ${orchestratorCwd} rev-parse ${ref}
+${buildTipLookupCommand(orchestratorCwd, ref)}
 
 The path is the orchestrator's own checkout, measured absolute at Setup (issue 562) - it is baked
 into the command already, so do not cd anywhere first and do not substitute a bare \`git rev-parse\`
-that would read whatever repository your shell happens to start in instead. Do not run any other
-command. Do not read, write, stage or delete any file. Do not interpret the output. Return the
-command's REAL exit code plus its stdout and stderr VERBATIM - stdout is one 40-character object
-name when the ref resolved; copy it character for character.`,
+or \`git ls-remote\` that would read whatever repository your shell happens to start in instead.
+This is ONE bash command built as a \`||\` fallback chain: try the ref as given, then the same name
+under origin/, then ask the remote directly with ls-remote - do not split it into several commands
+and do not run any other command. Do not read, write, stage or delete any file. Do not interpret
+the output. Return the command's REAL exit code plus its stdout and stderr VERBATIM, and the
+SPELLING= marker line stdout printed (if any) in \`spelling\` - "given" or "origin" copied exactly,
+or "" when stdout has no such line (either nothing resolved, or the ls-remote fallback answered,
+which prints no marker of its own).`,
     { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
     )
   } catch (err) {
     log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
     return null
   }
-  const sha = res && res.exitCode === 0 ? String(res.stdout || '').trim().split(/\s+/)[0] : ''
-  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
+  // The chain's exit code is whichever of the three steps ran last, so it is not a reliable
+  // present/absent signal on its own - an ls-remote fallback that found nothing still exits 0
+  // with empty stdout. parseTipLookupOutput is the single source of truth: a sha with no marker
+  // or an unresolvable ref both come back null from there, exit code or no.
+  if (!res) return null
+  const parsed = parseTipLookupOutput(res.stdout)
+  if (!parsed) return null
+  log(`${label}: resolved ${ref} via ${parsed.spelling} to ${parsed.sha}`)
+  return parsed.sha
 }
+// [FLEET-TIP-REVPARSE-END]
 
 // ---------------------------------------------------------------------------
 // Orchestrator-tree isolation guard (aac-routines issue 192, extended by 270)
