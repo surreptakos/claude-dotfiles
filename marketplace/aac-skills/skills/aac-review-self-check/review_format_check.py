@@ -10,7 +10,7 @@
 
 Requires python-docx (pip install python-docx). The page count needs LibreOffice (soffice) and pdfinfo.
 """
-import re, sys, argparse, subprocess, tempfile, os, datetime, shutil
+import re, sys, argparse, subprocess, tempfile, os, datetime, shutil, hashlib
 from docx import Document
 
 RATINGS = ["exceeded expectations", "met expectations", "not met expectations", "did not meet expectations"]
@@ -58,6 +58,34 @@ def all_dates(text):
     for m in DATE_TXT.finditer(text):
         try: out.append((parse_date(m.group(0)), m.group(0)))
         except ValueError: pass
+    return out
+
+
+def mdy(d):
+    """m/d/yyyy without leading zeros. strftime's %-m is glibc-only and raises on Windows."""
+    return f"{d.month}/{d.day}/{d.year}"
+
+
+RANGE_SEP = re.compile(r"^\s*(?:through|thru|to|until|[\u2013\u2014-])\s*$", re.I)
+
+
+def short_ranges(text, pstart, pend):
+    """Date ranges that open on the period start and close before the period end:
+    a period figure cut short. A status with its as-of date is not a range and is
+    not reached; an event span inside the period does not start on the period
+    start and is not reached either."""
+    ds = []
+    for rx in (DATE_NUM, DATE_TXT):
+        for m in rx.finditer(text):
+            try:
+                ds.append((m.start(), m.end(), parse_date(m.group(0)), m.group(0)))
+            except ValueError:
+                pass
+    ds.sort()
+    out = []
+    for (s1, e1, d1, t1), (s2, e2, d2, t2) in zip(ds, ds[1:]):
+        if RANGE_SEP.match(text[e1:s2]) and d1 == pstart and d2 < pend:
+            out.append((t1, t2))
     return out
 
 
@@ -137,7 +165,7 @@ def format_check(argv):
     except ValueError:
         he_d = None
     if he_d != end:
-        fixes.append(f"Header: dates covered end {he or '[missing]'}; must end {end.strftime('%-m/%-d/%Y')}.")
+        fixes.append(f"Header: dates covered end {he or '[missing]'}; must end {mdy(end)}.")
     else:
         passes.append("Header end date")
     if a.start:
@@ -147,7 +175,7 @@ def format_check(argv):
         except ValueError:
             hs_d = None
         if hs_d != st:
-            fixes.append(f"Header: dates covered start {hs or '[missing]'}; must start {st.strftime('%-m/%-d/%Y')}.")
+            fixes.append(f"Header: dates covered start {hs or '[missing]'}; must start {mdy(st)}.")
         else:
             passes.append("Header start date")
     notes = []
@@ -179,8 +207,8 @@ def format_check(argv):
             n = len(sentences(txt))
             if n not in (2, 4):
                 fixes.append(f"{name}: {n} sentences; must be two (Sum-Ex) or four (SEER).")
-            if not has_anchor(txt, a.direct):
-                fixes.append(f"{name}: no date, figure, or named account or person; must contain one.")
+            # 9/23/26: no date, figure or name is required here. Manager Tools asks for a
+            # specific example, not an anchor; Gate 2 reads whether the example is specific.
             for pat in PRESCRIPTIVE:
                 m = re.search(pat, txt, re.I)
                 if m:
@@ -206,24 +234,39 @@ def format_check(argv):
     # 5 dates after the period end
     late = sorted({s for dt, s in all_dates(alltext) if dt > end and s != header.get("date")})
     if late:
-        fixes.append(f"Dates: {', '.join(late)} fall after the period end {end.strftime('%-m/%-d/%Y')}; nothing in the review is dated after it.")
+        fixes.append(f"Dates: {', '.join(late)} fall after the period end {mdy(end)}; nothing in the review is dated after it.")
     else:
         passes.append("No dates after period end")
+
+    # figure ranges cut short of the period
+    pstart = parse_date(a.start) if a.start else end.replace(year=end.year - 1) + datetime.timedelta(days=1)
+    items = [(f"S{i}", t) for i, t in enumerate(S, 1)] + [(f"W{i}", t) for i, t in enumerate(W, 1)] + [("Core Message", core)]
+    short = [(lbl, r) for lbl, t in items for r in short_ranges(t, pstart, end)]
+    for lbl, (t1, t2) in short:
+        fixes.append(f"{lbl}: a figure runs {t1} through {t2}; a range that opens on the period start closes on {mdy(end)}.")
+    if not short:
+        passes.append("No figure range cut short")
 
     # 6 guidance
     if not G:
         fixes.append("Guidance: no Guidance points found under \"Guidance for the next year.\"")
     for i, g in enumerate(G, 1):
-        m = re.match(r"Guidance Point (\d+):\s*(\S+)", g)
-        if not m:
-            fixes.append(f"Guidance {i}: does not start \"Guidance Point N:\" followed by an action verb.")
+        # The 9/23/26 template lists Guidance as plain bullets; older drafts label
+        # each "Guidance Point N:". Accept either, and check the verb that follows.
+        m = re.match(r"Guidance Point (\d+):\s*(.*)$", g, re.S)
+        body = m.group(2) if m else g
+        label = f"Guidance {m.group(1) if m else i}"
+        words = body.split()
+        if not words:
+            fixes.append(f"{label}: empty.")
             continue
-        first = m.group(2).rstrip(",.").lower()
-        if first in ("you", "your", "he", "she", "the", "a", "an", "it", "this") or (a.direct and first == a.direct.lower()):
-            fixes.append(f"Guidance Point {m.group(1)}: starts with \"{m.group(2)}\"; must start with an action verb.")
-        n = len(sentences(g))
+        first = words[0].rstrip(",.:").lower()
+        not_verbs = ("you", "your", "he", "she", "his", "her", "the", "a", "an", "it", "this", "guidance")
+        if first in not_verbs or (a.direct and first == a.direct.lower()):
+            fixes.append(f"{label}: starts with \"{words[0]}\"; must start with an action verb.")
+        n = len(sentences(body))
         if n > 3:
-            fixes.append(f"Guidance Point {m.group(1)}: {n} sentences; must be one to three.")
+            fixes.append(f"{label}: {n} sentences; must be one to three.")
     if not any(f.startswith("Guidance") for f in fixes):
         passes.append(f"Guidance form ({len(G)} points)")
 
@@ -243,8 +286,69 @@ def format_check(argv):
     return 0 if not fixes else 1
 
 
+# ---------------------------------------------------------------- stamping
+def review_fingerprint(path, start, end, direct):
+    """Deterministic over the review's own text plus the period it was checked
+    against. Any later edit to the page changes it, so a stamp cannot be moved
+    from one draft to the next."""
+    _, core, S, W, G, alltext = load(path)
+    body = re.sub(r"\s+", " ", alltext).strip()
+    key = f"{body}|{start or ''}|{end}|{direct}".encode("utf-8")
+    return "SC-" + hashlib.sha256(key).hexdigest()[:6].upper()
+
+
+def stamp(argv):
+    ap = argparse.ArgumentParser(prog="stamp")
+    ap.add_argument("docx"); ap.add_argument("--end", required=True)
+    ap.add_argument("--start"); ap.add_argument("--direct", default="")
+    a = ap.parse_args(argv)
+    code = review_fingerprint(a.docx, a.start, a.end, a.direct)
+    today = mdy(datetime.date.today())
+    line = f"aac-review-self-check PASS {today} {code}"
+    d = Document(a.docx)
+    d.core_properties.comments = line
+    d.save(a.docx)
+    print(line)
+    print()
+    print("Both checks passed. The file now carries this stamp, and the code is")
+    print("in it. Put this line in the email when you send the review:")
+    print()
+    print(f"    Self-check: {code}")
+    return 0
+
+
+def verify(argv):
+    ap = argparse.ArgumentParser(prog="verify")
+    ap.add_argument("docx"); ap.add_argument("--end", required=True)
+    ap.add_argument("--start"); ap.add_argument("--direct", default="")
+    ap.add_argument("--code", help="the code the manager sent, if any")
+    a = ap.parse_args(argv)
+    d = Document(a.docx)
+    stamped = (d.core_properties.comments or "").strip()
+    current = review_fingerprint(a.docx, a.start, a.end, a.direct)
+    if not stamped.startswith("aac-review-self-check"):
+        print("NO STAMP. The file does not say the self-check ran.")
+        if a.code:
+            print(f"Manager's code {a.code}; the file's own code is {current}.")
+            print("MATCH" if a.code.strip().upper() == current else "MISMATCH")
+        return 1
+    print("STAMP:", stamped)
+    m = re.search(r"(SC-[0-9A-F]{6})", stamped)
+    if m and m.group(1) == current:
+        print("VALID. The stamp matches the page as it stands.")
+        return 0
+    print(f"STALE. Stamped {m.group(1) if m else '[unreadable]'}, page is now {current}.")
+    print("The review was edited after the self-check ran.")
+    return 1
+
+
 def main():
-    return format_check(sys.argv[1:])
+    argv = sys.argv[1:]
+    if argv and argv[0] == "stamp":
+        return stamp(argv[1:])
+    if argv and argv[0] == "verify":
+        return verify(argv[1:])
+    return format_check(argv)
 
 
 if __name__ == "__main__":
