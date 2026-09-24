@@ -78,7 +78,7 @@ test('the workflow template carries the contract this repo\'s workflow does', ()
   for (const [what, pattern] of [
     ['the runner step', /\n\s+run: node tools\/tracker-audit-job\.js\n/],
     ['the runner unit tests', /\n\s+run: node --test tools\/tracker-audit-job\.test\.js\n/],
-    ['the issue triggers', /\n\s+types: \[opened, closed, edited, labeled, unlabeled, milestoned\]\n/],
+    ['the issue triggers', /\n\s+types: \[opened, closed, reopened, edited, labeled, unlabeled, milestoned, demilestoned\]\n/],
     ['the job token', /\n\s+GH_TOKEN: \$\{\{ secrets\.GITHUB_TOKEN \}\}\n/],
     ['the full checkout', /\n\s+fetch-depth: 0\n/],
     ['pull-requests: read', /\n\s{2}pull-requests: read\n/],
