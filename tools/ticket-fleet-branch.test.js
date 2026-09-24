@@ -1784,3 +1784,97 @@ test(`${FLEET_SCRIPT_REL} finish mode is reached from args.finishRunId without a
     'the finish branch must return before the scout agent is ever started');
   assert.match(src, /label: `journal-read:\$\{finishRunId\}`/, 'finish mode must read the dead run journal through its own agent');
 });
+
+// ---- Implementer model per ticket from a Jev difficulty Score (issue 725) ----
+// Jev is stubbed throughout: the `difficulty` agent is the only thing that talks to the service,
+// so a mocked agent returning Jev-shaped bodies is the whole service boundary.
+const DIFF_CFG = { implModel: 'heavy', implPins: { mechanical: 'light', 'multi-file': 'mid', design: null }, deliverModel: 'd' };
+function jevBody(scores) {
+  const answers = {};
+  for (const [n, score] of Object.entries(scores)) answers[`ticket-${n}`] = { type: 'score', score, confidence: 0.9 };
+  return JSON.stringify({ model: 'jev-1.13.0', answers });
+}
+function generatedPickImplModel() {
+  // eslint-disable-next-line no-new-func
+  return new Function(`${generatedBlock()}\nreturn pickImplModel;`)();
+}
+async function driveScoreDifficulty(agentMock, tickets, cfgOverrides = {}) {
+  const logs = [];
+  const body = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-DIFFICULTY');
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${generatedBlock()}\n${body}\nreturn scoreDifficulty;\n}`);
+  const scoreDifficulty = await wrapper(laneScope({
+    agent: agentMock, log: (m) => logs.push(m), wave: [], cfg: Object.assign({}, DIFF_CFG, cfgOverrides),
+    scout: { repoMap: 'tools/ holds the scripts' }, scratchRoot: '/tmp/fleet-t', scratchFile: (n) => `/tmp/fleet-t/${n}`,
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+  return { levels: await scoreDifficulty(tickets), logs };
+}
+const DIFF_TICKETS = [
+  { number: 1, title: 'fix a typo', criteria: '- [ ] typo gone', kind: 'code' },
+  { number: 2, title: 'add a flag and its tests', criteria: '- [ ] flag', kind: 'code' },
+  { number: 3, title: 'design a new contract', criteria: '- [ ] contract', kind: 'code' },
+];
+
+test('stubbed Jev: each of the three levels maps to its own attempt-1 pin, retries to the heaviest', async () => {
+  let prompt = null;
+  const { levels } = await driveScoreDifficulty(async (p, opts) => {
+    assert.equal(opts.label, 'difficulty');
+    prompt = p;
+    return { status: 'ok', body: jevBody({ 1: 0.1, 2: 1.2, 3: 1.8 }) };
+  }, DIFF_TICKETS.concat([{ number: 4, title: 'probe', criteria: '', kind: 'probe' }]));
+  assert.deepEqual(Object.fromEntries(Object.entries(levels).map(([n, d]) => [n, d.level])),
+    { 1: 'mechanical', 2: 'multi-file', 3: 'design' }, 'probe tickets are not scored');
+  assert.match(prompt, /"ticket-1":\{"type":"score"/, 'the agent posts one Score per code ticket');
+  assert.doesNotMatch(prompt, /"ticket-4"/);
+  const pickImplModel = generatedPickImplModel();
+  assert.deepEqual(['mechanical', 'multi-file', 'design'].map(l => pickImplModel(l, 1, DIFF_CFG)), ['light', 'mid', 'heavy']);
+  assert.deepEqual(['mechanical', 'multi-file', 'design'].map(l => pickImplModel(l, 2, DIFF_CFG)), ['heavy', 'heavy', 'heavy'],
+    'a retry after a failed verify takes the heaviest pin');
+});
+
+test('stubbed Jev unavailable: no levels, so every ticket and attempt runs on implModel', async () => {
+  const pickImplModel = generatedPickImplModel();
+  const shapes = [
+    async () => ({ status: 'unavailable', body: '', detail: 'curl exit 28 (timeout)' }),
+    async () => ({ status: 'ok', body: '<html>502</html>' }),
+    async () => { throw new Error('agent died'); },
+    async () => null,
+  ];
+  for (const mock of shapes) {
+    const { levels, logs } = await driveScoreDifficulty(mock, DIFF_TICKETS);
+    assert.deepEqual(levels, {});
+    assert.ok(logs.some(l => /implModel/.test(l)), 'the fallback is logged');
+    for (const attempt of [1, 2, 3]) assert.equal(pickImplModel(null, attempt, DIFF_CFG), 'heavy');
+  }
+  const off = await driveScoreDifficulty(async () => { throw new Error('must not be called'); }, DIFF_TICKETS, { difficulty: false });
+  assert.deepEqual(off.levels, {}, 'difficulty:false skips the call');
+});
+
+test('runCodeLane runs attempt 1 on the level pin, the retry on the heaviest, and records both', async () => {
+  const pickImplModel = generatedPickImplModel();
+  for (const [difficulty, expected] of [['mechanical', ['light', 'heavy']], [null, ['heavy', 'heavy']]]) {
+    const models = [];
+    let verifies = 0;
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('impl:')) { models.push(opts.model); return { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] }; }
+      if (opts.label.startsWith('verify:')) return ++verifies === 1 ? { pass: false, evidence: 'x', failures: ['criterion 2 unmet'] } : { pass: true, evidence: 'ok', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/1' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 725, title: 't', criteria: '', difficulty }, 0,
+      DIFF_CFG, 'inv1', null, { pickImplModel });
+    assert.deepEqual(models, expected);
+    assert.equal(result.difficulty, difficulty);
+    assert.deepEqual(result.implModels, expected.map((model, i) => ({ attempt: i + 1, model })), 'the run record names the model per attempt');
+  }
+  assert.match(fs.readFileSync(FLEET_SCRIPT, 'utf8'), /implModels: clean\.filter\(r => r\.kind === 'code'\)\.map\(r => \(\{ ticket: r\.ticket, difficulty:/,
+    'the run result names the level and models per ticket');
+});
+
+test('difficultyEvalSet labels a ticket "hard" when a fleet branch shows attempt 2 or later', () => {
+  const { difficultyEvalSet } = require('./ticket-fleet-branch.js');
+  assert.deepEqual(difficultyEvalSet([
+    'agent/issue-12-attempt1-wf_a-w0', 'agent/issue-12-attempt2-wf_a-w0',
+    'agent/issue-7-attempt1-wf_b-w1', 'feat/other', 'agent/fleet-discoveries-wf_a',
+  ]), [{ number: 7, label: null, maxAttempt: 1 }, { number: 12, label: 'hard', maxAttempt: 2 }]);
+});
