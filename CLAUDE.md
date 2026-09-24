@@ -56,7 +56,8 @@ never from an intermediate one, so `previous-modified` names the published versi
 ## Layout
 
 - `aac-skills/` — every skill, one tree, hand-edited. The packager builds the plugin payload from
-  it and pull restores it as `~/.claude/skills`.
+  it, and that plugin is how a desktop gets the skills too: pull no longer writes `~/.claude/skills`
+  (issue 734), so a skill named by short name must ship in the payload.
 - `profile/` — what a desktop consumer needs beyond the skills: `profile/claude/CLAUDE.md` (the
   global rules, and the one source the payload's rules text is copied from; pull does not restore
   it - a desktop gets the rules from the plugin hook and pull writes `global-pointer.md` to

@@ -1142,6 +1142,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("CAVEMAN LITE: ENFORCED", context("/caveman lite"))
             self.assertEqual(self._state(state_dir, "s-switch")["caveman"], "lite")
             self.assertIn("CAVEMAN FULL: ENFORCED", context("/caveman:caveman full"))
+            self.assertIn("CAVEMAN LITE: ENFORCED", context("/aac-skills:caveman lite"))
             self.assertIn("CAVEMAN: OFF", context("/caveman off"))
             self.assertIn("CAVEMAN: OFF", context("stop caveman"))
             self.assertIn("CAVEMAN: OFF", context("turn the caveman mode off"))

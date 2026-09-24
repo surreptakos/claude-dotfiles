@@ -23,10 +23,13 @@ function Get-DotfileItems {
     $docs   = Get-DocumentsPath -UserHome $UserHome
 
     @(
-        # The skill tree itself: one hand-edited source, restored as ~/.claude/skills. The plugin
-        # payload under marketplace/ is built from the same tree for cloud containers; a desktop
-        # reads the source copy, which keeps this machine's paths rather than the plugin root.
-        [pscustomobject]@{ Type = 'Dir';  Repo = 'aac-skills';                              Local = (Join-Path $claude 'skills') }
+        # No skill tree (issue 734). The aac-skills plugin serves every skill as aac-skills:<name>,
+        # updated by the marketplace; a pull-written ~/.claude/skills listed each one a second
+        # time, bare, and only as fresh as the last pull. Pull never deletes, so a tree an older
+        # pull wrote stays until moved aside by hand, from this checkout's root. Only the names
+        # aac-skills/ carries move: ~/.claude/skills also holds Claude Code's own synced/ bucket.
+        #   md -Force ~\.claude\skills.pre-734 >$null; ls aac-skills | % { mv ~\.claude\skills\$($_.Name) ~\.claude\skills.pre-734\ -ErrorAction SilentlyContinue }
+        # Rollback: ls ~\.claude\skills.pre-734 | % { mv $_.FullName ~\.claude\skills\ }
 
         # The global CLAUDE.md is a POINTER (issue 732), not the rules text. The rules reach a desktop
         # the way they reach a container - the aac-skills plugin's global-rules hook - so a rules
@@ -149,9 +152,9 @@ function Test-Excluded {
 # Absolute home paths are stored as tokens so a machine with a different username
 # still works. settings.json hard-codes C:\Users\<you>\... in five hook commands.
 #
-# The skill tree is the exception: aac-skills/ is hand-edited prose that names the owner's home
-# literally (a clasp-auth path, a --home argument), and since issue 214 retired sync push
-# nothing tokenises it before it is committed. Pull folds that spelling into the same tokens
+# Hand-edited files are the exception: the skill tree pull restored until issue 734 named the
+# owner's home literally (a clasp-auth path, a --home argument), and since issue 214 retired sync
+# push nothing tokenises a file before it is committed. Pull folds that spelling into the same tokens
 # before substituting the local home, so a restore under another username never carries it
 # (issue 582). Same constant as OWNER_HOME in tools/skill-stamps.py: the owner's home, never
 # the running user's.
