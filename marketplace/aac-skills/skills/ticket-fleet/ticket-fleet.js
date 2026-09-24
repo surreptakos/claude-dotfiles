@@ -657,6 +657,34 @@ function classifyBranchLookup(lookups) {
   return 'undetermined';
 }
 
+/**
+ * The live-tree hard rail's exclusions (issues 334, 489, 677): paths under the live roots the
+ * harness and the CLI rewrite by themselves during every run, so a `find -newermt` hit there says
+ * nothing about the implementer. This is the ONE list - the verifier prompt's find flags and the
+ * reasons it quotes are both generated from it. The verifier is told to add none of its own: a
+ * rail whose verdict turns on how each agent reads "bookkeeping" refused two branches and passed a
+ * third on the same file (issue 677). Add an entry here, with its why, or not at all.
+ */
+const LIVE_TREE_ROOTS = '~/.claude ~/.codex ~/.agents';
+const LIVE_TREE_EXCLUSIONS = Object.freeze([
+  Object.freeze({ path: '*/hook-state/*', why: '~/.claude/hook-state is hook bookkeeping' }),
+  Object.freeze({ path: '*/.claude/projects/*', why: "~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes" }),
+  Object.freeze({ path: '*/.claude/sessions/*', why: "~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489)" }),
+  Object.freeze({ path: '*/.claude/skills/synced/*', why: "~/.claude/skills/synced/<id>/manifest.json is the CLI's cross-session skills-sync catalogue, rewritten by the verifying session's own Skill and ToolSearch loads (issue 677)" }),
+]);
+
+/** The rail's find command, every exclusion from LIVE_TREE_EXCLUSIONS and nothing else. */
+function liveTreeFindCommand(since) {
+  const excludes = LIVE_TREE_EXCLUSIONS.map((e) => `-not -path '${e.path}'`).join(' ');
+  return `find ${LIVE_TREE_ROOTS} -type f -newermt "${since}" ${excludes}`;
+}
+
+/** Why each exclusion is there, and the order not to invent more - quoted in the verifier prompt. */
+function liveTreeExclusionNote() {
+  const n = LIVE_TREE_EXCLUSIONS.length;
+  return `Those ${n} exclusions are the harness's and the CLI's own bookkeeping, not implementer output: ${LIVE_TREE_EXCLUSIONS.map((e) => e.why).join('; ')} - keep all ${n} exclusions exactly as given, add none of your own, do not re-derive them and do not count their contents as a breach.`;
+}
+
 // A blockedReason that says the branch itself could not be found, as opposed to a merge conflict
 // or a failing test tail. Run 6ab1884a's read "Branch <b> not found on origin or locally".
 const BRANCH_NOT_FOUND_RE = /\b(?:branch|ref|refs)\b[^\n]*?\b(?:not found|does not exist|doesn't exist|is missing|no matching)\b|\bno matching (?:refs|branches)\b|\bnot found on origin\b/i;
@@ -2090,7 +2118,7 @@ In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
-4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*' -not -path '*/.claude/sessions/*'\`. Those three exclusions are the harness's own bookkeeping, not implementer output: ~/.claude/hook-state is hook bookkeeping; ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes; and ~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489) - keep all three exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
+4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`${liveTreeFindCommand('<that time>')}\`. ${liveTreeExclusionNote()} Everything else still counts: a write to ~/.claude/skills (outside skills/synced), ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
 Clean up your scratch worktree (git worktree remove) when done. If this repo is a Python package, check afterwards that the container's editable install still names the MAIN checkout (\`python -m pip show -f <dist> | grep -i 'editable project location'\`): when it names a scratch path, quote that line in evidence and leave it alone - do NOT repair it by installing from the orchestrator's checkout, because pip writes .egg-info into the very tree the isolation checkpoint is watching. This run's editable-install guard repairs it once the wave has drained. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
