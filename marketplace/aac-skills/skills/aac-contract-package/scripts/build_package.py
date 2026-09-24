@@ -50,12 +50,14 @@ CR = '\r\n'
 # while any subgroup is in use. Row-visibility runs through
 # xlsx_surgical.set_row_hidden (the sanctioned write path — hard rule 2)
 # rather than inserting or reindexing rows.
+EQ_SITE_ROW = 21         # the template's own Site line (A21/B21/F21/G21)
 EQ_SYS_ROW = 22          # the template's own System line (B22)
 EQ_START = 23
 EQ_CAP = 50
 EQ_END = EQ_START + EQ_CAP - 1  # row 72
 DEP_CELL = 'G74'
-SVC_SITE_CELL = 'B79'
+SVC_SITE_ROW = 79        # the template's own Site line under Services (A79/B79)
+SVC_SITE_CELL = f'B{SVC_SITE_ROW}'
 SVC_SYS_ROW = 80         # the template's own System line under Services
 SVC_SYS_CELL = f'B{SVC_SYS_ROW}'
 # Per-subgroup fill regions (kind, first row, cap, label cell, label row).
@@ -81,10 +83,21 @@ SVC_LABELS = {'new': 'New Services', 'replacement': 'Replacement Services',
 # the region from the System line at SVC_SYS_ROW to SVC_END is filled top to
 # bottom with one System sub-block per System (its subgroup label rows only
 # for subgroups that carry lines). Repeated rows take the template's own
-# styles for that role (rows EQ_SYS_ROW, SVC_SYS_ROW, SVC_LABEL_ROW,
-# SVC_ITEM_ROW) through xlsx_surgical.copy_row_styles; rows are hidden or
-# shown, never inserted or deleted, and a region that cannot hold the
-# schedule refuses before anything is written.
+# styles for that role (rows EQ_SITE_ROW, EQ_SYS_ROW, SVC_SITE_ROW,
+# SVC_SYS_ROW, SVC_LABEL_ROW, SVC_ITEM_ROW) through
+# xlsx_surgical.copy_row_styles; rows are hidden or shown, never inserted or
+# deleted, and a region that cannot hold the schedule refuses before
+# anything is written.
+#
+# Multi-Site schedule (issue #227, spec 215 stream B): the same two regions
+# also repeat one Site block per Site, the first Site's own line being the
+# template's fixed EQ_SITE_ROW/SVC_SITE_ROW row and every further Site
+# taking one row of the fill region, carrying that Site's price in F/G under
+# Equipment and Labor. A further Site's own first System sits directly below
+# its Site line with no spacer row (matching the template's own row
+# 21-then-22), the same rule the first Site's own first System already
+# follows; the blank-spacer ruling above still separates a Site's second and
+# later System sub-blocks.
 SVC_LABEL_ROW = SVC_SUBGROUPS[0][4]                      # 81
 SVC_ITEM_ROW = SVC_START                                 # 82
 SVC_REGION_ROWS = SVC_END - SVC_SYS_ROW + 1              # 24
@@ -735,63 +748,98 @@ def compose(record):
             'documents': bullets, 'agreements': agreements}
 
 
-def _flatten_v1(f):
-    """Normalise a v1.0 tree record into the working shape the
-    build_schedule / build_agreements / select_bullets code consumes: the
-    one Site's identity and pricing at the top, and ``systems`` — one entry
-    per System at that Site, in record order, each carrying its
-    designation, scope, equipment and services. A single-System record is
-    the same shape with one entry (issue #226, spec 215 stream B).
-
-    Refuses a record with more than one Site with a message naming the
-    ticket (the multi-Site schedule is issue #227), so the failure mode is
-    a clear pointer instead of a silent one-Site build of a multi-Site
-    packet. Package composition and the cross-family refusal (issue #225)
-    run over the whole tree in ``compose`` before this normaliser is
-    reached.
-
-    Missing optional blocks default to empty (Q7 Resolved in
+def _sys_entry(sysrec):
+    """One System record in the working shape build_schedule / build_sow /
+    select_bullets consume: designation, scope, equipment and services,
+    with missing optional blocks defaulted to empty (Q7 Resolved in
     references/FACTS-SCHEMA.md); a missing kind tag on a service line is
-    left absent and the services fill warns and defaults to "new".
-    """
-    pairs = _tree_systems(f)
-    if len(f['sites']) > 1:
-        raise SystemExit(
-            f'{len(f["sites"])} sites in _facts.json — the multi-site '
-            'schedule is issue #227. Split the packet into one _facts.json '
-            'per Site until then.'
-        )
-    site = f['sites'][0]
-
-    cust = dict(f.get('customer') or {})
-    cust['site_name'] = site['site_name']
-    cust['site_address'] = site['site_address']
-
-    pricing = {
-        'price': site['price'],
-        'price_source': site.get('price_source', ''),
-        'deposit': site.get('deposit'),
+    left absent and the services fill warns and defaults to "new"."""
+    scope = sysrec.get('scope') or {}
+    return {
+        'system': sysrec['system'],
+        'designation': sysrec['designation'],
+        'scope': {
+            'coverage_sentence': scope.get('coverage_sentence', ''),
+            'extra_sentences': list(scope.get('extra_sentences') or []),
+        },
+        'equipment': list(sysrec.get('equipment') or []),
+        'services': list(sysrec.get('services') or []),
     }
 
-    systems = []
-    for _, sysrec in pairs:
-        scope = sysrec.get('scope') or {}
-        systems.append({
-            'system': sysrec['system'],
-            'designation': sysrec['designation'],
-            'scope': {
-                'coverage_sentence': scope.get('coverage_sentence', ''),
-                'extra_sentences': list(scope.get('extra_sentences') or []),
-            },
-            'equipment': list(sysrec.get('equipment') or []),
-            'services': list(sysrec.get('services') or []),
-        })
+
+def _flatten_v1(f):
+    """Normalise a v1.0 tree record into the working shape build_schedule /
+    build_agreements / select_bullets / build_sow consume.
+
+    ``systems`` is every System of every Site, in record order — the shape
+    #226 introduced, unchanged here — for the code that reasons about the
+    whole Project (the SOW, clarification and exclusion selection, the
+    Contract-family RMR rollups). ``sites`` is new for #227: one entry per
+    Site, each carrying its own price and its own ``systems`` slice, for
+    the code that lays out the repeated Site blocks (``plan_equipment_rows``,
+    ``plan_service_rows``, ``build_schedule``). A single-Site record is the
+    same shape with one entry in ``sites``.
+
+    ``customer.site_name``/``site_address`` and ``pricing`` continue to
+    name one Site and one price the way they did before #227, for the
+    header block (A10/C10), the schedule and agreement filenames and the
+    payments-bullet threshold — none of which the amended cell map (
+    references/SCHEDULE-GENERATION-PROCEDURE.md §4) says anything about for
+    more than one Site. ``customer.site_name``/``site_address`` take the
+    first Site (the schedule's header predates the multi-Site amendment and
+    is silent on it); ``pricing.price`` is the total Purchase Price across
+    every Site's line (what G73 sums to). ``pricing.deposit`` is ``None``
+    (build_schedule's standing 50%-over-$5,000 rule then applies to that
+    total, unchanged from before #227) when no Site sets one explicitly, or
+    else the sum of every Site's own deposit, an unset Site's own share
+    defaulting to $0 — the payments bullet states the 50% rule once, for
+    the whole schedule, with no per-Site form, so a Site left unset is not
+    given one of its own invention. Both readings are this file's own
+    choice, not a standard's — recorded as a discovery for Dan to rule on
+    (hard rule 7).
+
+    Package composition and the cross-family refusal (issue #225) run over
+    the whole tree in ``compose`` before this normaliser is reached.
+    """
+    pairs = _tree_systems(f)
+    sites_raw = f['sites']
+
+    cust = dict(f.get('customer') or {})
+    cust['site_name'] = sites_raw[0]['site_name']
+    cust['site_address'] = sites_raw[0]['site_address']
+
+    total_price = sum(float(site['price']) for site in sites_raw)
+    # Every Site left ``deposit`` unset: defer to build_schedule's own
+    # standing default (the 50%-over-$5,000 rule applied to the aggregate
+    # Purchase Price, unchanged from before #227 — single-Site math is the
+    # same either way). Any Site sets one explicitly: sum the ones given
+    # and default an unset Site's own share to $0 rather than inventing a
+    # per-Site reading of a rule the standard states once, for the whole
+    # schedule (BASELINES.md's payments bullet has no per-Site form).
+    if any(site.get('deposit') is not None for site in sites_raw):
+        total_deposit = sum(float(site.get('deposit') or 0) for site in sites_raw)
+    else:
+        total_deposit = None
+    pricing = {
+        'price': total_price,
+        'price_source': sites_raw[0].get('price_source', ''),
+        'deposit': total_deposit,
+    }
+
+    systems = [_sys_entry(sysrec) for _, sysrec in pairs]
+    sites = [{
+        'site_name': site['site_name'],
+        'site_address': site['site_address'],
+        'price': float(site['price']),
+        'systems': [_sys_entry(sysrec) for sysrec in site['systems']],
+    } for site in sites_raw]
 
     return {
         'customer': cust,
         'deal': dict(f.get('deal') or {}),
         'pricing': pricing,
         'systems': systems,
+        'sites': sites,
         'flags': dict(f.get('flags') or {}),
         'job_clarifications': list(f.get('job_clarifications') or []),
         'held': list(f.get('held') or []),
@@ -980,39 +1028,65 @@ def _systems_label(names):
     return re.sub(r'[<>:"/\\|?*]', '-', label)
 
 
-def plan_equipment_rows(systems):
+def plan_equipment_rows(sites):
     """The rows of the Equipment and Labor fill region (EQ_START..EQ_END),
-    top to bottom: ``('blank', None)`` then ``('system', name)`` for every
-    System after the first (the first System's line is the template's own
-    EQ_SYS_ROW) and ``('item', line)`` for every equipment line — the
-    repeated System sub-blocks of references/SCHEDULE-GENERATION-PROCEDURE.md
-    §4, one blank spacer row between consecutive sub-blocks.
+    top to bottom: a ``('site', site)`` row (that Site's price, in F/G) for
+    every Site after the first, a ``('system', name)`` row for every System
+    after the very first System of the very first Site, and ``('item',
+    line)`` for every equipment line — the repeated Site and System
+    sub-blocks of references/SCHEDULE-GENERATION-PROCEDURE.md §4 (issues
+    #226 and #227). The very first Site's own line is the template's fixed
+    EQ_SITE_ROW/EQ_SYS_ROW pair, so neither gets a row here. A Site's own
+    first System follows its Site row directly, with no spacer (matching
+    the template's own row 21-then-22); one blank spacer row still
+    separates a Site's second and later System sub-blocks (owner ruling
+    2026-09-18).
 
     Refuses before anything is written when one System's lines exceed the
-    per-System cap or the region cannot hold every System, naming the
-    System where the overflow begins."""
+    per-System cap or the region cannot hold every Site and System, naming
+    the System (and, with more than one Site, the Site) where the overflow
+    begins."""
     rows, offender = [], None
-    for k, s in enumerate(systems):
-        eq = s['equipment']
-        if len(eq) > EQ_CAP:
-            whom = f" for System {s['system']!r}" if len(systems) > 1 else ''
-            raise SystemExit(f'{len(eq)} equipment lines{whom} exceed the {EQ_CAP}-line '
-                             'cap in the schedule template. Split the schedule '
-                             'across two packages.')
-        if k:
-            rows += [('blank', None), ('system', s['system'])]
-        rows += [('item', item) for item in eq]
-        if len(rows) > EQ_CAP and offender is None:
-            offender = s['system']
+    very_first = True
+    for site in sites:
+        systems = site['systems']
+        if not very_first:
+            rows.append(('site', site))
+        for k, s in enumerate(systems):
+            eq = s['equipment']
+            if len(eq) > EQ_CAP:
+                whom = f" for System {s['system']!r}" if (len(sites) > 1 or len(systems) > 1) else ''
+                raise SystemExit(f'{len(eq)} equipment lines{whom} exceed the {EQ_CAP}-line '
+                                 'cap in the schedule template. Split the schedule '
+                                 'across two packages.')
+            if very_first:
+                very_first = False
+            elif k == 0:
+                rows.append(('system', s['system']))
+            else:
+                rows += [('blank', None), ('system', s['system'])]
+            rows += [('item', item) for item in eq]
+            if len(rows) > EQ_CAP and offender is None:
+                offender = (s['system'], site['site_name'] if len(sites) > 1 else None)
     if offender is not None:
-        n_items = sum(len(s['equipment']) for s in systems)
+        off_sys, off_site = offender
+        n_systems = sum(len(s['systems']) for s in sites)
+        n_items = sum(len(sy['equipment']) for s in sites for sy in s['systems'])
+        if len(sites) == 1:
+            raise SystemExit(
+                f'the Equipment and Labor region of the schedule template holds '
+                f'{EQ_CAP} rows; {n_systems} Systems need {len(rows)} ({n_items} '
+                f'equipment lines plus {n_systems - 1} System lines, each behind '
+                f'a blank spacer row), '
+                f'{len(rows) - EQ_CAP} more than it has, and the overflow begins '
+                f'inside System {off_sys!r}. Split the schedule across two packages.')
         raise SystemExit(
             f'the Equipment and Labor region of the schedule template holds '
-            f'{EQ_CAP} rows; {len(systems)} Systems need {len(rows)} ({n_items} '
-            f'equipment lines plus {len(systems) - 1} System lines, each behind '
-            f'a blank spacer row), '
-            f'{len(rows) - EQ_CAP} more than it has, and the overflow begins '
-            f'inside System {offender!r}. Split the schedule across two packages.')
+            f'{EQ_CAP} rows; {len(sites)} Sites and {n_systems} Systems need '
+            f'{len(rows)} ({n_items} equipment lines plus Site and System lines, '
+            f'some behind a blank spacer row), {len(rows) - EQ_CAP} more than it '
+            f'has, and the overflow begins inside System {off_sys!r} at Site '
+            f'{off_site!r}. Split the schedule across two packages.')
     return rows
 
 
@@ -1043,45 +1117,73 @@ def _service_buckets(s):
     return buckets
 
 
-def plan_service_rows(systems):
+def plan_service_rows(sites):
     """How the Services region is filled, decided before anything is written.
 
-    ``None`` when no System sells a service (the section then reads N/A).
-    One System with services keeps the template's fixed subgroup rows:
-    ``('grouped', system, buckets)``. Two or more fill the region from the
-    System line at SVC_SYS_ROW down to SVC_END, top to bottom, with one
-    System sub-block per System that carries services, a subgroup label
-    row only for the subgroups that carry lines and one blank spacer row
-    between consecutive sub-blocks (references/
-    SCHEDULE-GENERATION-PROCEDURE.md §4): ``('sequential', rows)`` where
-    each row is ``('blank', None)``, ``('system', name)``, ``('label',
-    kind)`` or ``('item', service)``. A region that cannot hold every
-    System refuses, naming the System where the overflow begins."""
-    selling = [(s, _service_buckets(s)) for s in systems if s['services']]
-    if not selling:
+    ``None`` when no System at any Site sells a service (the section then
+    reads N/A) — a Site with no selling System carries no Site block here,
+    the same way a non-selling System carries no System sub-block. Exactly
+    one Site with exactly one selling System keeps the template's fixed
+    subgroup rows: ``('grouped', site, system, buckets)``. Everything else
+    fills the region from the System line at SVC_SYS_ROW down to SVC_END,
+    top to bottom: a ``('site', site)`` row for every selling Site after
+    the first (the first selling Site's own line is the template's fixed
+    SVC_SITE_ROW), then, within each Site, one System sub-block per selling
+    System with a subgroup label row only for the subgroups that carry
+    lines, one blank spacer row between a Site's own consecutive System
+    sub-blocks and none between a Site row and its own first System
+    (references/SCHEDULE-GENERATION-PROCEDURE.md §4, issues #226 and #227):
+    ``('sequential', first_selling_site, rows)`` where each row is
+    ``('blank', None)``, ``('site', site)``, ``('system', name)``,
+    ``('label', kind)`` or ``('item', service)``. A region that cannot hold
+    every Site and System refuses, naming the System (and, with more than
+    one selling Site, the Site) where the overflow begins."""
+    site_selling = []
+    for site in sites:
+        selling = [(s, _service_buckets(s)) for s in site['systems'] if s['services']]
+        if selling:
+            site_selling.append((site, selling))
+    if not site_selling:
         return None
-    if len(selling) == 1:
-        return ('grouped',) + selling[0]
+    if len(site_selling) == 1 and len(site_selling[0][1]) == 1:
+        site, selling = site_selling[0]
+        s, buckets = selling[0]
+        return ('grouped', site, s, buckets)
+
     rows, offender = [], None
-    for s, buckets in selling:
-        if rows:
-            rows.append(('blank', None))
-        rows.append(('system', s['system']))
-        for kind, *_ in SVC_SUBGROUPS:
-            if buckets[kind]:
-                rows.append(('label', kind))
-                rows += [('item', svc) for svc in buckets[kind]]
-        if len(rows) > SVC_REGION_ROWS and offender is None:
-            offender = s['system']
+    for site_idx, (site, selling) in enumerate(site_selling):
+        if site_idx:
+            rows.append(('site', site))
+        for sys_idx, (s, buckets) in enumerate(selling):
+            just_after_site = bool(site_idx) and sys_idx == 0
+            if rows and not just_after_site:
+                rows.append(('blank', None))
+            rows.append(('system', s['system']))
+            for kind, *_ in SVC_SUBGROUPS:
+                if buckets[kind]:
+                    rows.append(('label', kind))
+                    rows += [('item', svc) for svc in buckets[kind]]
+            if len(rows) > SVC_REGION_ROWS and offender is None:
+                offender = (s['system'], site['site_name'] if len(site_selling) > 1 else None)
     if offender is not None:
+        off_sys, off_site = offender
+        total_systems = sum(len(sel) for _, sel in site_selling)
+        if len(site_selling) == 1:
+            raise SystemExit(
+                f'the Services region of the schedule template holds {SVC_REGION_ROWS} '
+                f'rows; {total_systems} Systems need {len(rows)} (System lines, subgroup '
+                f'labels, service lines and one blank spacer row between Systems), '
+                f'{len(rows) - SVC_REGION_ROWS} more than it '
+                f'has, and the overflow begins inside System {off_sys!r}. Split the '
+                'schedule across two packages.')
         raise SystemExit(
             f'the Services region of the schedule template holds {SVC_REGION_ROWS} '
-            f'rows; {len(selling)} Systems need {len(rows)} (System lines, subgroup '
-            f'labels, service lines and one blank spacer row between Systems), '
-            f'{len(rows) - SVC_REGION_ROWS} more than it '
-            f'has, and the overflow begins inside System {offender!r}. Split the '
-            'schedule across two packages.')
-    return ('sequential', rows)
+            f'rows; {len(site_selling)} Sites and {total_systems} Systems selling a '
+            f'service need {len(rows)} (Site lines, System lines, subgroup labels, '
+            f'service lines and blank spacer rows), {len(rows) - SVC_REGION_ROWS} '
+            f'more than it has, and the overflow begins inside System {off_sys!r} at '
+            f'Site {off_site!r}. Split the schedule across two packages.')
+    return ('sequential', site_selling[0][0], rows)
 
 
 def _write_service(w, r, s):
@@ -1091,8 +1193,14 @@ def _write_service(w, r, s):
     w.set_num(SHEET, f'G{r}', round(s['qty'] * s['unit'], 2))
 
 
+def _site_line(site):
+    """One Site's 'Site: <name>, <address>' text for a Site line cell."""
+    return f"Site: {site['site_name']}, {site['site_address'].replace(chr(10), ', ')}"
+
+
 def build_schedule(job, f, L, R):
-    cust, deal, pr, systems = f['customer'], f['deal'], f['pricing'], f['systems']
+    cust, deal, pr, systems, sites = (f['customer'], f['deal'], f['pricing'],
+                                      f['systems'], f['sites'])
     name = cust['subscriber_name']
     if cust.get('assumed_name'):
         state = cust.get('state_of_incorporation')
@@ -1111,8 +1219,8 @@ def build_schedule(job, f, L, R):
     # Lay every row out before the template is copied, so a refusal (a
     # region that cannot hold the schedule, a subgroup over its cap) writes
     # nothing into the job folder.
-    eq_rows = plan_equipment_rows(systems)
-    svc_plan = plan_service_rows(systems)
+    eq_rows = plan_equipment_rows(sites)
+    svc_plan = plan_service_rows(sites)
     sow = build_sow(f, L)
     clar, ex = select_bullets(f, L)
 
@@ -1131,16 +1239,22 @@ def build_schedule(job, f, L, R):
     w.set_inline_text(SHEET, 'G11', str(deal['prospect']))
     w.set_inline_text(SHEET, 'A15', sow)
 
-    price = float(pr['price'])
+    price = float(pr['price'])  # aggregate Purchase Price across every Site
     w.set_inline_text(SHEET, 'B21', siteline)
-    w.set_num(SHEET, 'F21', price)
-    w.set_num(SHEET, 'G21', price)
-    w.set_inline_text(SHEET, f'B{EQ_SYS_ROW}', f"System: {systems[0]['system']}")
+    w.set_num(SHEET, 'F21', sites[0]['price'])
+    w.set_num(SHEET, 'G21', sites[0]['price'])
+    w.set_inline_text(SHEET, f'B{EQ_SYS_ROW}', f"System: {sites[0]['systems'][0]['system']}")
     for i, (role, payload) in enumerate(eq_rows):
         r = EQ_START + i
         if role == 'blank':
             continue        # the template's fill rows are empty already
-        if role == 'system':
+        if role == 'site':
+            w.copy_row_styles(SHEET, EQ_SITE_ROW, r)
+            w.set_inline_text(SHEET, f'A{r}', '-')
+            w.set_inline_text(SHEET, f'B{r}', _site_line(payload))
+            w.set_num(SHEET, f'F{r}', payload['price'])
+            w.set_num(SHEET, f'G{r}', payload['price'])
+        elif role == 'system':
             w.copy_row_styles(SHEET, EQ_SYS_ROW, r)
             w.set_inline_text(SHEET, f'B{r}', f'System: {payload}')
         else:
@@ -1159,11 +1273,13 @@ def build_schedule(job, f, L, R):
     if svc_plan is None:
         w.set_inline_text(SHEET, SVC_SITE_CELL, 'N/A')
     elif svc_plan[0] == 'grouped':
-        # One System sells services: the template's fixed subgroup rows.
-        # Per-subgroup fill + row-visibility toggle. Labels are never
-        # cleared; the label row is hidden only when the subgroup is unused.
-        _, s, buckets = svc_plan
-        w.set_inline_text(SHEET, SVC_SITE_CELL, siteline)
+        # One System at one Site sells services: the template's fixed
+        # subgroup rows. Per-subgroup fill + row-visibility toggle. Labels
+        # are never cleared; the label row is hidden only when the subgroup
+        # is unused. The selling Site need not be the first (issue #227): a
+        # Site with no selling System carries no Site block here.
+        _, site, s, buckets = svc_plan
+        w.set_inline_text(SHEET, SVC_SITE_CELL, _site_line(site))
         w.set_inline_text(SHEET, SVC_SYS_CELL, f"System: {s['system']}")
         for kind, start, cap, label_cell, label_row in SVC_SUBGROUPS:
             items = buckets[kind]
@@ -1178,21 +1294,28 @@ def build_schedule(job, f, L, R):
             if kind != 'new':
                 w.set_row_hidden(SHEET, label_row, hidden=(not items))
     else:
-        # Two or more Systems sell services: one System sub-block after
-        # another from the System line down, each row styled like the
-        # template's own row for that role. A spacer row takes the item
-        # row's look and is cleared, since it may land on one of the
-        # template's own subgroup label rows.
-        _, rows = svc_plan
-        w.set_inline_text(SHEET, SVC_SITE_CELL, siteline)
+        # More than one selling System, one selling Site, or both: one Site
+        # block (and inside it one System sub-block) after another from the
+        # System line down, each row styled like the template's own row for
+        # that role. A spacer row takes the item row's look and is cleared,
+        # since it may land on one of the template's own subgroup label
+        # rows. The first selling Site's own line is the template's fixed
+        # SVC_SITE_CELL (issue #227; not necessarily ``sites[0]`` when an
+        # earlier Site sells nothing).
+        _, first_selling_site, rows = svc_plan
+        w.set_inline_text(SHEET, SVC_SITE_CELL, _site_line(first_selling_site))
         style_row = {'system': SVC_SYS_ROW, 'label': SVC_LABEL_ROW,
-                     'item': SVC_ITEM_ROW, 'blank': SVC_ITEM_ROW}
+                     'item': SVC_ITEM_ROW, 'blank': SVC_ITEM_ROW,
+                     'site': SVC_SITE_ROW}
         for i, (role, payload) in enumerate(rows):
             r = SVC_SYS_ROW + i
             if r != style_row[role]:
                 w.copy_row_styles(SHEET, style_row[role], r)
             if role == 'blank':
                 w.set_inline_text(SHEET, f'B{r}', '')
+            elif role == 'site':
+                w.set_inline_text(SHEET, f'A{r}', '-')
+                w.set_inline_text(SHEET, f'B{r}', _site_line(payload))
             elif role == 'system':
                 w.set_inline_text(SHEET, f'B{r}', f'System: {payload}')
             elif role == 'label':
