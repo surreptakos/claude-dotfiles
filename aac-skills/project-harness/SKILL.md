@@ -48,7 +48,7 @@ per repo.
 ## 1 — Explore (before touching anything)
 
 - `git remote -v` — must be a GitHub repo for the tracker/CI pieces; if no remote, offer to `gh repo create` (private by default).
-- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so.
+- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so. File that TODO as a `ready-for-agent` ticket, never `ready-for-human`: writing a suite is agent work, and `ready-for-human` is only for a step an agent cannot perform (credential, owner ruling, UI-only action). brazil-flights #1 sat on `ready-for-human` for three days and an agent then built the whole suite in one session (2026-09-24).
 - **ADR dir** — `docs/adr/` or `doc/adr/` or none. None is fine (section skipped).
 - **Deploy/CI workflow** — any existing `.github/workflows/*.yml` whose name suggests deploy/test; the dashboard reports the most deploy-like one, or skips.
 - Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to skip or merge.
