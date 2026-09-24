@@ -230,6 +230,14 @@ PR body says:
 
 A PR that fails the bar stays open and is the next pass's first work item.
 
+**A fleet PR merges itself (issue 770).** The deliver stage's STEP D waits for CI on the PR it
+opened, applies the bar above, squash-merges with `expectedHeadSha`, re-runs its pre-push merge
+once when the default branch moved under it, and stops on a red check or a changes-requested
+review; the run log says `MERGED <sha>` or `open, not merged: <why>` per ticket. The pass above is
+the backstop for a PR older than one cycle, never the first merger. The same holds for a session's
+own PR: the session that opened it is the only party that knows the draft is finished, so it marks
+it ready and merges it, same bar, before the session ends.
+
 **The discoveries PR.** The fleet's Report phase opens one PR per run from
 `agent/fleet-discoveries-wf_<runId>`, carrying only the run's `FOLLOW-UPS.md` bullets (issue 360).
 It has no ticket and therefore no verifier evidence, so the first bullet above does not apply to
