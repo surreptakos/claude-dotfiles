@@ -24,7 +24,7 @@ script or the global rules text is edited here, on a branch, and merging to mast
 | `profile/claude/settings.json` | `~/.claude/settings.json` | hook wiring, plugin marketplaces, status line |
 | `profile/claude/hooks/` | `~/.claude/hooks/` | `session-gate.js`, `governance-reminder.js`, the stop-slop pair — and the source the packager copies into the plugin |
 | `profile/claude/agents/` | `~/.claude/agents/` | user-level subagent definitions, including the fleet's tool-restricted verifier |
-| `profile/claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache |
+| `profile/claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache. Merged, not copied: a newer live entry wins (issue 717) |
 | `profile/claude/accounts.json` | `~/.claude/accounts.json` | which Claude account owns which repo and routine (issue 103) |
 | `profile/codex/hooks/` | `~/.codex/hooks/` | `ask_matt_gate.py`, which the pre-send lint and the governance gate both call |
 | `profile/codex/hooks.json` | `~/.codex/hooks.json` | the wiring that calls it — without this the script above is inert |
@@ -248,7 +248,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity`
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade`
 breaks one thing on purpose so the matching check can be watched going red. A check that has only
 ever passed is not yet a check — the retired `dead-link` fault passed on its first attempt because
 it deleted a directory nothing linked to.
