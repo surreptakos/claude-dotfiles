@@ -186,3 +186,71 @@ test('the flag file switches the ADHD checks off and leaves caveman alone', () =
   assert.match(off.stdout, /banned filler/, `caveman check was collateral damage: ${off.stdout}`);
   assert.strictEqual(off.status, 1, `caveman violation stopped failing the draft: ${off.stdout}`);
 });
+
+// Issue 680: the documented off phrase used to write nothing, so "stop adhd mode" silenced nothing.
+// The gate is now the one writer: the phrase writes the flag, every other prompt only reads it, and
+// the flag outlives the turn and the session until "start adhd mode" deletes it.
+test('"stop adhd mode" switches ADHD off across turns and sessions; "start adhd mode" restores it', () => {
+  const home = scratchHome('switch');
+  fs.writeFileSync(path.join(home.home, '.caveman-active'), 'ultra', 'utf-8');
+  const draft = [
+    'The sync script just reads the whitelist in lib manifest.',
+    'The two trees disagreed after the last push.',
+  ].join('\n');
+  const flag = path.join(home.home, '.adhd-off');
+
+  const switching = hint('claude-prompt', { session_id: 's-a', prompt: 'stop adhd mode' }, home);
+  assert.ok(fs.existsSync(flag), 'the off phrase wrote no flag');
+  assert.doesNotMatch(switching, /I-HAVE-ADHD: ENFORCED/, switching);
+
+  // A following turn, then a new session: no ADHD clause, no ADHD finding, YES and caveman intact.
+  for (const [name, event] of [
+    ['next turn', { session_id: 's-a', prompt: 'hi' }],
+    ['next session', { session_id: 's-b', prompt: 'hi' }],
+  ]) {
+    const context = hint('claude-prompt', event, home);
+    assert.doesNotMatch(context, /I-HAVE-ADHD|Lead with the next action/, `${name}: ${context}`);
+    assert.match(context, /start adhd mode/, `${name} does not name the on switch: ${context}`);
+    assert.match(context, /YES GOVERNANCE: ENFORCED/, `${name}: ${context}`);
+    assert.match(context, /CAVEMAN ULTRA: ENFORCED/, `${name}: ${context}`);
+    const off = lint(draft, home);
+    assert.doesNotMatch(off.stdout, /ADHD /, `${name}: ADHD lint still ran: ${off.stdout}`);
+    assert.match(off.stdout, /banned filler/, `${name}: caveman check lost: ${off.stdout}`);
+    assert.strictEqual(off.status, 1, `${name}: caveman violation stopped failing: ${off.stdout}`);
+  }
+  // A question about the switch is not a switch.
+  hint('claude-prompt', { session_id: 's-b', prompt: 'how do I start adhd mode again?' }, home);
+  assert.ok(fs.existsSync(flag), 'a question flipped the switch');
+
+  // One explicit step back on.
+  const back = hint('claude-prompt', { session_id: 's-b', prompt: 'start adhd mode' }, home);
+  assert.ok(!fs.existsSync(flag), 'the on phrase left the flag in place');
+  assert.match(back, /I-HAVE-ADHD: ENFORCED/, back);
+  assert.match(back, /stop adhd mode/, `the on clause does not name the off switch: ${back}`);
+  const on = lint(draft, home);
+  assert.strictEqual(on.status, 1, on.stdout);
+  assert.match(on.stdout, /ADHD opener is context/, on.stdout);
+  assert.match(on.stdout, /banned filler/, on.stdout);
+});
+
+test('the per-turn governance reminder names the switch and follows the flag', () => {
+  const home = scratchHome('reminder');
+  const script = path.join(REPO, 'profile', 'claude', 'hooks', 'governance-reminder.js');
+  const reminder = (prompt) => {
+    const res = spawnSync('node', [script], {
+      input: JSON.stringify({ prompt }),
+      encoding: 'utf-8',
+      env: { ...process.env, CLAUDE_CONFIG_DIR: home.home },
+    });
+    assert.strictEqual(res.status, 0, res.stderr);
+    return JSON.parse(res.stdout).hookSpecificOutput.additionalContext;
+  };
+  assert.match(reminder('hi'), /4\. I-HAVE-ADHD[\s\S]*"stop adhd mode"/);
+  // Parallel hooks: on the switching prompt the phrase, not the flag, decides this turn.
+  assert.doesNotMatch(reminder('stop adhd mode'), /I-HAVE-ADHD/);
+  fs.writeFileSync(path.join(home.home, '.adhd-off'), 'off\n', 'utf-8');
+  const off = reminder('hi');
+  assert.doesNotMatch(off, /I-HAVE-ADHD/, off);
+  assert.match(off, /"start adhd mode"/, off);
+  assert.match(off, /2\. YES/, off);
+});

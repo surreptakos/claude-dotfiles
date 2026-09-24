@@ -23,7 +23,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
-  stableJson, stableText, stableList, priorFindingsBlock,
+  stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
@@ -544,7 +544,7 @@ function generatedBlock(scriptPath = FLEET_SCRIPT) {
 // Evaluated out of the script's generated block so the lane body below resolves them.
 function loadStableHelpers(scriptPath) {
   // eslint-disable-next-line no-new-func
-  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock };`)();
+  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf };`)();
 }
 
 // Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
@@ -603,6 +603,7 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
     invocationId,
     stableJson: helpers.stableJson, stableText: helpers.stableText,
     stableList: helpers.stableList, priorFindingsBlock: helpers.priorFindingsBlock,
+    unmetCriteriaOf: helpers.unmetCriteriaOf,
     worktreeMismatch,
     treeGuardCheck,
   }, stubOverrides), scriptPath);
@@ -1491,6 +1492,61 @@ function twoAttemptAgent(capture, shape = (x) => x, implBranch = null) {
 }
 
 const TICKET_42 = { number: 42, title: 'a ticket', criteria: '- do the thing', keepOpen: false };
+
+// ---- The verdict decides Closes vs Refs (issue 699) ----
+// aac-bill-intake#682 was closed by a PR whose verifier had passed a branch that stopped short of
+// the ticket. A passing verdict that names any criterion unmet now makes the PR say Refs #N and
+// list those criteria; a verdict with none still says Closes #N.
+
+async function deliverPromptFor(verdict) {
+  const calls = [];
+  const agentMock = async (prompt, opts) => {
+    calls.push({ label: opts.label, prompt });
+    if (opts.label === 'impl:#42.1') {
+      return { branch: 'agent/issue-42-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    }
+    if (opts.label === 'verify:#42.1') return verdict;
+    if (opts.label === 'deliver:#42') return { pushed: true, prUrl: 'https://github.com/x/y/pull/9', mergeStatus: 'clean', conflictPaths: [] };
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, TICKET_42, 0);
+  const deliver = calls.find((c) => c.label === 'deliver:#42');
+  assert.ok(deliver, 'a passing verdict must reach the deliver stage');
+  return deliver.prompt;
+}
+
+test('a passing verdict that marks criteria unmet delivers Refs #N, no closing keyword, and lists them (issue 699)', async () => {
+  const prompt = await deliverPromptFor({
+    pass: true, evidence: 'doc-only change; suite exit 0', failures: [],
+    unmetCriteria: ['- [ ] remove the fallback once the owner rules', '  ', '- [ ] migrate the 5 work orders'],
+  });
+  assert.match(prompt, /"Refs #42"/, 'an unmet criterion must turn the PR reference into Refs #N');
+  assert.doesNotMatch(prompt, /"Closes #42"/, 'no closing keyword may be offered while a criterion is unmet');
+  assert.match(prompt, /never write Closes, Fixes or Resolves/);
+  assert.match(prompt, /Acceptance criteria not met by this PR/, 'the PR body must carry a section for the unmet criteria');
+  assert.match(prompt, /- - \[ \] remove the fallback once the owner rules\n\s+- - \[ \] migrate the 5 work orders/,
+    'each unmet criterion must be listed by its text, blank entries dropped');
+});
+
+test('a passing verdict with every criterion met still delivers Closes #N (issue 699)', async () => {
+  for (const verdict of [
+    { pass: true, evidence: 'suite exit 0', failures: [], unmetCriteria: [] },
+    { pass: true, evidence: 'suite exit 0' },
+  ]) {
+    const prompt = await deliverPromptFor(verdict);
+    assert.match(prompt, /"Closes #42"/, 'a verdict naming no unmet criterion must close the ticket');
+    assert.doesNotMatch(prompt, /"Refs #42"/);
+    assert.doesNotMatch(prompt, /Acceptance criteria not met by this PR/);
+  }
+});
+
+test('unmetCriteriaOf in the fleet script matches tools/ticket-fleet-branch.js (issue 699)', () => {
+  const inlined = loadStableHelpers(FLEET_SCRIPT);
+  for (const v of [null, {}, { unmetCriteria: [] }, { unmetCriteria: ['a', ' ', null, 'b\r\n'] }, { unmetCriteria: 'one' }]) {
+    assert.deepEqual(inlined.unmetCriteriaOf(v), unmetCriteriaOf(v));
+  }
+  assert.deepEqual(unmetCriteriaOf({ unmetCriteria: ['a', ' ', null, 'b\r\n'] }), ['a', 'b']);
+});
 
 test('resume-stable helpers inlined in the fleet script match tools/ticket-fleet-branch.js', () => {
   const inlined = loadStableHelpers(FLEET_SCRIPT);

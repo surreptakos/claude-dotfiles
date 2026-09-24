@@ -186,6 +186,10 @@ means naming the wrong assumption instead of iterating; the request is genuinely
 would delete the answer itself ("what are my options" gets 2-4 ranked options, recommendation first).
 When a rule fights a harness constraint, the constraint wins and the shape stays.
 
+**Off switch:** Dan saying "stop adhd mode" makes the ask-matt gate write `~/.claude/.adhd-off`,
+which drops the per-turn ADHD clause and the pre-send ADHD checks, across turns and sessions, until
+"start adhd mode" (or a bare `/i-have-adhd`) deletes it. YES and caveman are untouched either way.
+
 **Pre-send:** delete any opener announcing what you are about to do, any closing "anything else",
 any by-the-way sidebar, and any idiom. Then check: reading only the first and last line, does he know
 what to do next and what just happened?

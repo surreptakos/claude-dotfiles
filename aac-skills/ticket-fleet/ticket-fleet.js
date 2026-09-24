@@ -545,6 +545,20 @@ function priorFindingsBlock(verdict, howToFix) {
 }
 
 /**
+ * The acceptance criteria a PASSING verdict still names as unmet, by their text (issue 699).
+ *
+ * A verifier can rightly pass a branch that stops short of the ticket - a doc-only change whose
+ * code half waits on an owner decision filed as its own ticket - and the deliver stage used to
+ * write `Closes #N` on it anyway, so the merge closed aac-bill-intake#682 with three of its four
+ * boxes unticked. The verdict's `unmetCriteria` is what the closing keyword now follows: any entry
+ * makes the PR say `Refs #N` and list them. Absent, null or blank entries read as none.
+ */
+function unmetCriteriaOf(verdict) {
+  if (!verdict) return [];
+  return stableList(verdict.unmetCriteria);
+}
+
+/**
  * Implementer model per ticket from a TypeSafe Jev difficulty Score (issue 725).
  *
  * One `implModel` used to be pinned for every implementer, so a one-line mechanical ticket paid
@@ -758,6 +772,7 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
   pass: { type: 'boolean' },
   evidence: { type: 'string', description: 'what YOU ran and observed; commands + decisive output lines' },
   failures: { type: 'array', items: { type: 'string' }, description: 'one entry per criterion that failed; on a pass send [] or omit this key entirely' },
+  unmetCriteria: { type: 'array', items: { type: 'string' }, description: 'every acceptance criterion the branch does NOT satisfy as it stands, quoted by its own text - on a pass too, when the branch rightly stops short (a precondition not met, an owner decision still pending, work split to another ticket). Leave out delivery-stage criteria (PR, merge, presence on the default branch). Send [] or omit when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).' },
   worktree: { type: 'object', required: ['path', 'head'], description: 'where you actually ran: the scratch worktree you created, never the repository you started in', properties: {
     path: { type: 'string', description: 'absolute path of the scratch worktree every command above ran inside' },
     head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed INSIDE that worktree, copied verbatim - not abbreviated, not from memory' },
@@ -797,6 +812,7 @@ const JOURNAL = { type: 'object', required: ['journalPath', 'defaultBranch', 'ti
     branch: { type: 'string', description: "the branch of the attempt whose verifier passed, from that attempt's impl result; '' when no attempt passed or the journal records no branch" },
     verified: { type: 'boolean', description: 'true ONLY when a verify:#<N>.<attempt> result in the journal has pass true' },
     evidence: { type: 'string', description: "that passing verdict's evidence, verbatim; '' when there is none" },
+    unmetCriteria: { type: 'array', items: { type: 'string' }, description: "that passing verdict's unmetCriteria, verbatim; [] when it has none (issue 699)" },
     keepOpen: { type: 'boolean', description: "the scout result's keepOpen for this ticket" },
     criteria: { type: 'string', description: "the scout result's criteria for this ticket, verbatim" },
     delivered: { type: 'boolean', description: 'true when a deliver:#<N> result in the journal recorded a non-empty prUrl or commentUrl' },
@@ -1133,8 +1149,8 @@ if (cfg.finishRunId) {
     `Read the ticket-fleet run journal for run ${finishRunId} and report what each of that run's tickets reached. You are reading a record, not making one: every field below is copied out of the journal or left empty.
 1. Find the journal. The workflow runtime writes one JSONL file per run at ~/.claude/projects/<project slug>/<session id>/subagents/workflows/<workflow run id>/journal.jsonl. List them newest first (\`ls -t ~/.claude/projects/*/*/subagents/workflows/*/journal.jsonl\`) and take the one whose workflow-run directory contains "${finishRunId}". If none does, the id is the caller-minted runId the branch names embed instead: take the newest file that \`grep -l "${finishRunId}" <each journal>\` matches. Report the path you read as journalPath; if nothing matches, return tickets: [] and say so in journalPath.
 2. Parse it with a JSON reader (python3 or jq), never by eye. Two line shapes matter: {"type":"started","agentId":...,"label":"<stage>:#<N>.<attempt>","phase":...} and {"type":"result","agentId":...,"result":{...}}. Pair them by agentId - the result carrying a started line's agentId is that label's structured output.
-3. The \`scout\` label's result gives defaultBranch, testCommand and, per ticket, {number, title, criteria, keepOpen, kind}. The per-ticket labels are impl:#<N>.<attempt> ({branch, committed, pushed, discoveries}), verify:#<N>.<attempt> ({pass, evidence}) and deliver:#<N> ({prUrl} in the code lane, {commentUrl} in the probe and human lanes).
-4. Per ticket the scout returned, report: verified true ONLY when some verify:#<N>.<attempt> result has pass true; branch = the branch from THAT attempt's impl result ("" when there is none); evidence = that passing verdict's evidence verbatim; delivered true when a deliver:#<N> result recorded a non-empty prUrl or commentUrl, with deliveryRef that url ("" otherwise).
+3. The \`scout\` label's result gives defaultBranch, testCommand and, per ticket, {number, title, criteria, keepOpen, kind}. The per-ticket labels are impl:#<N>.<attempt> ({branch, committed, pushed, discoveries}), verify:#<N>.<attempt> ({pass, evidence, unmetCriteria}) and deliver:#<N> ({prUrl} in the code lane, {commentUrl} in the probe and human lanes).
+4. Per ticket the scout returned, report: verified true ONLY when some verify:#<N>.<attempt> result has pass true; branch = the branch from THAT attempt's impl result ("" when there is none); evidence = that passing verdict's evidence verbatim; unmetCriteria = that passing verdict's unmetCriteria verbatim ([] when it has none); delivered true when a deliver:#<N> result recorded a non-empty prUrl or commentUrl, with deliveryRef that url ("" otherwise).
 5. discoveries = every string in every impl/probe result's discoveries array, in journal order.
 Never invent a ticket, a branch, a URL or a verdict, and never infer one from a prompt or a log line: a field the journal does not hold is "" or false. Make no repository change, no commit, no push, no PR, no comment - reading only. Return structured output only.`,
     { label: `journal-read:${finishRunId}`, phase: 'Deliver', schema: JOURNAL, model: cfg.scoutModel, effort: 'low' }
@@ -1629,15 +1645,21 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // Run 6aac3d3b lost two deliveries that way ("Modify Shared Resources", "Interfere With
 // Workloads"); the other three are the refusals FOLLOW-UPS recorded from earlier waves.
 const CLASSIFIER_CATEGORIES_SEEN = '"Modify Shared Resources", "Interfere With Workloads", "External System Writes", "Instruction Poisoning" and "Self-Modification"'
-function deliverPrompt({ t, branch, evidence, defaultBranch, testCommand, resumed }) {
+function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
   // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
   // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
   // commit messages say.
   const keepOpen = t.keepOpen === true || /\b(?:leave|keep|stay|remain)s?\s+(?:this\s+|the\s+|it\s+)?(?:ticket\s+|issue\s+)?open\b/i.test(t.criteria || '')
+  // So does the verdict (issue 699): a pass that names any criterion unmet is a branch that stops
+  // short of the ticket, and Closes on it closed aac-bill-intake#682 with three boxes unticked.
+  const unmet = stableList(unmetCriteria)
   const issueRef = keepOpen
     ? `"Refs #${t.number}" (this ticket stays OPEN by its own instruction; never write Closes, Fixes or Resolves)`
-    : `"Closes #${t.number}"`
-  const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."' : ''
+    : unmet.length
+      ? `"Refs #${t.number}" (the verifier marked acceptance criteria unmet, so this PR must not close the ticket; never write Closes, Fixes or Resolves), and a section headed "Acceptance criteria not met by this PR" listing each of these verbatim, one bullet each:\n${unmet.map(c => '   - ' + c).join('\n')}\n  `
+      : `"Closes #${t.number}"`
+  const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."'
+    : unmet.length ? ` and the sentence "Ticket left open: the verifier marked ${unmet.length} acceptance criteri${unmet.length === 1 ? 'on' : 'a'} unmet, listed in the PR."` : ''
   const prToolNote = instrument === 'mcp'
     ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
     : ''
@@ -1738,7 +1760,7 @@ async function runFinish(journal) {
     let delivery = null, deliveryFailure = null
     try {
       delivery = await agent(
-      deliverPrompt({ t, branch, evidence: e.evidence, defaultBranch, testCommand: finishTestCommand, resumed: true }),
+      deliverPrompt({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch, testCommand: finishTestCommand, resumed: true }),
       { label: `deliver:#${number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
@@ -1902,7 +1924,7 @@ ${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
 In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
-2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them.
+2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`find ~/.claude ~/.codex ~/.agents -type f -newermt "<that time>" -not -path '*/hook-state/*' -not -path '*/.claude/projects/*' -not -path '*/.claude/sessions/*'\`. Those three exclusions are the harness's own bookkeeping, not implementer output: ~/.claude/hook-state is hook bookkeeping; ~/.claude/projects holds this session's transcripts, tool-results/*.txt, subagent and workflow logs, which every fleet run writes; and ~/.claude/sessions/<pid>.json is the CLI's own process registry, heartbeat-rewritten by the PARENT session's runtime so it is always newer than the implementer's first commit (issue 489) - keep all three exclusions exactly as given, do not re-derive them and do not count their contents as a breach. Everything else still counts: a write to ~/.claude/skills, ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
@@ -1949,7 +1971,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // carries a named deliveryFailure into the run report instead of disappearing from it.
     try {
       delivery = await agent(
-      deliverPrompt({ t, branch, evidence: lastVerdict.evidence, defaultBranch: scout.defaultBranch, testCommand }),
+      deliverPrompt({ t, branch, evidence: lastVerdict.evidence, unmetCriteria: unmetCriteriaOf(lastVerdict), defaultBranch: scout.defaultBranch, testCommand }),
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
