@@ -45,7 +45,7 @@ function load(opts) {
   };
   st.deployments[PROD] = { versionNumber: opts.prodVersion || 0 };
   for (let i = 1; i <= (opts.versionCount || 0); i++) st.versions.push({ versionNumber: i });
-  const gh = { refs: Object.assign({}, opts.refs || {}), commits: Object.assign({}, opts.commits || {}), token: 'gh-ok', refsStatus: opts.refsStatus || 200, statusesCode: opts.statusesCode || 201 };
+  const gh = { refs: Object.assign({}, opts.refs || {}), commits: Object.assign({}, opts.commits || {}), parents: Object.assign({}, opts.parents || {}), token: 'gh-ok', refsStatus: opts.refsStatus || 200, statusesCode: opts.statusesCode || 201 };
   const resp = (code, body) => ({ getResponseCode: () => code, getContentText: () => (typeof body === 'string' ? body : JSON.stringify(body)) });
 
   function fetch(url, params) {
@@ -63,6 +63,8 @@ function load(opts) {
         if (gh.refsStatus !== 200) return resp(gh.refsStatus, { message: 'nope' });
         return resp(200, Object.keys(gh.refs).filter((k) => gh.refs[k]).map((k) => ({ ref: 'refs/heads/deploy/' + k, object: { sha: gh.refs[k] } })));
       }
+      m = url.match(/\/git\/commits\/([0-9a-f]{40})$/);
+      if (m) return gh.commits[m[1]] ? resp(200, { sha: m[1], parents: (gh.parents[m[1]] || []).map((p) => ({ sha: p })) }) : resp(404, {});
       m = url.match(/\/commits\/([0-9a-f]{40})$/);
       if (m) return gh.commits[m[1]] ? resp(200, { sha: m[1], commit: { tree: { sha: 'tree-' + m[1].slice(0, 6) } } }) : resp(404, {});
       m = url.match(/\/git\/trees\/tree-([0-9a-f]{6})\?recursive=1$/);
@@ -339,6 +341,48 @@ test('deploy/run: the request runs on this runtime and reports through status, c
   const allow = {}; allow[SHA_C] = { 'gas-run.json': JSON.stringify({ id: 'r3', fn: 'hello', args: ['a', 'b'] }) };
   const s3 = load({ props: Object.assign({}, SEEDED, { GAS_CONFIG: JSON.stringify(baseConfig({ runnable: ['other'] })) }), refs: { run: SHA_C }, commits: allow, runtime: SHA_B, host: HOST_OK });
   assert.match(s3.gasDeployTick().run.error, /outside gas\.json `runnable`/);
+});
+
+test('deploy/run: two requests pushed inside one tick — the tick walks both parents and runs them oldest first', () => {
+  const SHA_R1 = 'e'.repeat(40), SHA_R2 = 'f'.repeat(40);
+  const commits = {};
+  commits[SHA_R1] = { 'gas-run.json': JSON.stringify({ id: 'r-old', fn: 'hello', args: ['a', 1] }) };
+  commits[SHA_R2] = { 'gas-run.json': JSON.stringify({ id: 'r-new', fn: 'hello', args: ['b', 2] }) };
+  const parents = {}; parents[SHA_R2] = [SHA_R1]; parents[SHA_R1] = [SHA_R];
+  const sb = load({
+    props: Object.assign({}, SEEDED, { GAS_STATE: JSON.stringify({ run: { sha: SHA_R, id: 'r1', fn: 'hello', ok: true } }), GAS_CONFIG: JSON.stringify(baseConfig()) }),
+    refs: { run: SHA_R2 }, commits, parents, runtime: SHA_B, host: HOST_OK
+  });
+  const out = sb.gasDeployTick();
+  assert.equal(out.run.ran.length, 2, 'both queued requests ran');
+  assert.deepEqual([...out.run.ran].map((r) => r.id), ['r-old', 'r-new'], 'oldest first');
+  assert.equal(out.run.sha, SHA_R2, 'the watermark ends at the tip');
+  const runStatuses = sb.statusesFor('gas/run');
+  assert.equal(runStatuses.length, 2, 'each commit gets its own gas/run status');
+  assert.deepEqual(runStatuses.map((s) => s.sha), [SHA_R1, SHA_R2]);
+  assert.ok(runStatuses.every((s) => s.state === 'success'));
+  assert.equal(sb.st.comments.length, 2, 'each commit gets its own commit comment');
+  assert.deepEqual(sb.st.comments.map((c) => c.sha), [SHA_R1, SHA_R2]);
+  assert.match(sb.st.comments[0].body, /hello a1/);
+  assert.match(sb.st.comments[1].body, /hello b2/);
+  assert.equal(sb.state().run.sha, SHA_R2);
+  assert.equal(sb.gasDeployTick().run.unchanged, SHA_R2.slice(0, 7), 'settled — nothing left to run');
+});
+
+test('deploy/run: the walk stops at the last processed sha — an already-run commit is not re-run', () => {
+  const SHA_R1 = 'e'.repeat(40);
+  const commits = {}; commits[SHA_R1] = { 'gas-run.json': JSON.stringify({ id: 'r-new', fn: 'hello', args: ['c', 3] }) };
+  const parents = {}; parents[SHA_R1] = [SHA_R];
+  const sb = load({
+    props: Object.assign({}, SEEDED, { GAS_STATE: JSON.stringify({ run: { sha: SHA_R, id: 'r1', fn: 'hello', ok: true } }), GAS_CONFIG: JSON.stringify(baseConfig()) }),
+    refs: { run: SHA_R1 }, commits, parents, runtime: SHA_B, host: HOST_OK
+  });
+  const out = sb.gasDeployTick();
+  assert.equal(out.run.ran.length, 1, 'only the new commit ran, not the already-processed one');
+  assert.equal(out.run.ran[0].id, 'r-new');
+  assert.equal(sb.statusesFor('gas/run').length, 1);
+  assert.equal(sb.st.comments.length, 1);
+  assert.equal(sb.state().run.sha, SHA_R1);
 });
 
 test('an idle tick is one GitHub call and no Google call', () => {
