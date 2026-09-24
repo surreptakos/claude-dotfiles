@@ -20,7 +20,9 @@ cache, because a cached value is stale until Excel reopens the file.
 Covers the mechanical items only. Designation, which conditional clarifications
 a job earns, BASELINES section 0 merges and print layout stay human. The
 registry entity-name check (section A') is advisory: it WARNs on a mismatch and
-the rep-confirmed name governs (OPEN-DECISIONS item 19).
+the rep-confirmed name governs (OPEN-DECISIONS item 19). The Zoho
+cross-checks (zoho_crosscheck.py) are advisory too: WARN or PASS, SKIP without
+a credential.
 """
 import sys, os, re, fnmatch, warnings
 warnings.filterwarnings('ignore')
@@ -40,6 +42,10 @@ SYSTEMS = ('Intrusion Alarm', 'Video Surveillance', 'Access Control', 'Fire Alar
            'Network', 'Standalone Intercom', 'Visitor Management',
            'Standalone Environmental Monitoring')
 SVC_GROUPS = ('New Services', 'Replacement Services', 'Existing Services')
+# Elevator Monitoring Agreement field shape (issue 335): 15 text fields,
+# no leading dot (unlike the Fire form's widgets), no checkboxes. Used to
+# tell this form apart from the Fire master and from an unmapped form.
+ELEVATOR_MASTER_FIELDS = {f'Text{i}' for i in range(1, 16)}
 
 ENTITY = re.compile(r"\b[A-Z][A-Za-z&.'-]*(?:\s+[A-Z][A-Za-z&.'-]*){0,5}\s*,?\s*"
                     r"(?:Inc\.?|LLC|L\.L\.C\.|Corp\.?|Corporation|Company|Co\.|Ltd\.?"
@@ -58,6 +64,35 @@ def money(v):
     if isinstance(v, (int, float)): return float(v)
     m = re.search(r'[\d,]+\.?\d*', str(v))
     return float(m.group(0).replace(',', '')) if m else None
+
+_DATE_FORMATS = ('%m/%d/%Y', '%m/%d/%y', '%m-%d-%Y', '%Y-%m-%d',
+                 '%B %d, %Y', '%b %d, %Y', '%B %d %Y', '%b %d %Y')
+
+def parse_date(v):
+    """A date from a cell value or a form-field string; None when it is not one."""
+    import datetime as _dt
+    if isinstance(v, _dt.datetime): return v.date()
+    if isinstance(v, _dt.date): return v
+    t = re.sub(r'\s+', ' ', str(v or '')).strip()
+    for fmt in _DATE_FORMATS:
+        try: return _dt.datetime.strptime(t, fmt).date()
+        except ValueError: pass
+    return None
+
+def schedule_date(S, end_row):
+    """(date, where) for the schedule header's Date cell: column G on the
+    first column-E 'Date' label above end_row. The template ships that cell
+    as =TODAY(), which shows the day the schedule is opened, so it reads as
+    today; a literal date reads as itself. (None, reason) otherwise."""
+    import datetime as _dt
+    r = S.row_where('E', lambda x: x.rstrip(':').strip().lower() == 'date', end=end_row)
+    if not r:
+        return None, 'no Date label in the schedule header'
+    raw = S.ws[f'G{r}'].value
+    if isinstance(raw, str) and re.fullmatch(r'=\s*TODAY\(\s*\)', raw.strip(), re.I):
+        return _dt.date.today(), f'G{r} =TODAY()'
+    d = parse_date(raw) or parse_date(S.v(f'G{r}'))
+    return (d, f'G{r}') if d else (None, f'G{r} holds no date')
 
 def parts_in(s):
     out = []
@@ -622,6 +657,22 @@ def verify(job):
                 f'schedule "{sub_name}" vs registry "{legal}" ({tag}); '
                 f'rep-confirmed name governs (see DRAFTER-PRESEND-CHECKLIST A.1)')
 
+    # ---- Zoho cross-checks (advisory WARN/SKIP only; issue 229) ----
+    # Hard rule 5: Zoho is validated against the package, never trusted, and
+    # nothing read from Zoho is written anywhere. See zoho_crosscheck.py.
+    try:
+        import zoho_crosscheck
+        mt_val = S.resolve(f'G{mt_row}')[0] if mt_row else None
+        zoho_crosscheck.run(
+            job, rec,
+            prospect=S.col('G', pro_row).strip() if pro_row else '',
+            subscriber=sub_name,
+            site=site.splitlines()[0].strip() if site else '',
+            monthly_total=mt_val,
+            workups=_find_workup(job))
+    except Exception as e:
+        rec('SKIP', 'Zoho cross-checks ran', f'{type(e).__name__}: {e}')
+
     # ---------------- B) scope of work ----------------
     sow = ' '.join(S.col('A', r) for r in range(sow_lbl + 1, min(sow_lbl + 4, eq_lbl))).strip()
 
@@ -854,7 +905,8 @@ def verify(job):
                 f'schedule {price} vs proposal {pv} ({pname})')
 
     # ---------------- H) master agreement and rider ----------------
-    masters = find_files(job, ['*Master Agreement*.pdf', '*All in One*.pdf', '*Agreements*.pdf'],
+    masters = find_files(job, ['*Master Agreement*.pdf', '*All in One*.pdf', '*Agreements*.pdf',
+                              '*Elevator Monitoring Agreement*.pdf'],
                          exclude=['Old', 'Rider', 'LEASE AGREEMENT'])
     riders = find_files(job, ['*Rider*.pdf'], exclude=['Old'])
     if not masters:
@@ -863,15 +915,44 @@ def verify(job):
     else:
         mf = pdf_fields(masters[0])
         known_fire = any(k.startswith('.Text') for k in mf) and any(k.startswith('.CheckBox') for k in mf)
-        if mf and not known_fire:
+        known_elevator = bool(mf) and set(mf) == ELEVATOR_MASTER_FIELDS
+        if mf and not known_fire and not known_elevator:
             rec('SKIP', 'Master agreement field checks',
-                f'{os.path.basename(masters[0])} is not the mapped Commercial Fire form '
+                f'{os.path.basename(masters[0])} is not a mapped form '
                 f'({len(mf)} fields); residential and commercial security forms use a different map')
             mf = {}
             mterm = None
         if not mf:
             rec('SKIP', 'Master agreement checks',
                 f'{os.path.basename(masters[0])} has no form fields (flattened or signed)')
+            mterm = None
+        elif known_elevator:
+            # Elevator Monitoring Agreement (issue 335): 15 text fields, no
+            # checkboxes, term fixed in §5 clause text rather than a field.
+            mname = str(mf.get('Text3') or '').strip()
+            rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
+                'Elevator Monitoring Agreement Subscriber name matches the schedule',
+                f'master "{mname}" vs schedule "{sub_name}"'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 3')
+            # Filled and equal to the schedule date; reconciling a mismatch is
+            # the human's (DRAFTER-PRESEND-CHECKLIST.md item 5).
+            mdate_raw = str(mf.get('Text1') or '').strip()
+            mdate = parse_date(mdate_raw)
+            sdate, how = schedule_date(S, sow_lbl)
+            rec('PASS' if mdate and sdate and mdate == sdate else 'FAIL',
+                'Elevator Monitoring Agreement date matches the schedule date',
+                f'master "{mdate_raw or "(empty)"}"'
+                + (' (not a date)' if mdate_raw and not mdate else '')
+                + f' vs schedule {sdate.isoformat() if sdate else "(none)"} ({how})'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 5')
+            mamt = money(mf.get('Text14'))
+            sched_mt = S.resolve(f'G{mt_row}')[0] if mt_row else None
+            rec('PASS' if (mamt is not None and sched_mt is not None
+                          and abs(mamt - sched_mt) < 0.01) else 'FAIL',
+                'Elevator Monitoring Agreement monthly amount matches the schedule',
+                f'master {mamt if mamt is not None else "(empty)"} vs schedule '
+                f'Monthly Total {sched_mt if sched_mt is not None else "(empty)"}'
+                ' — DRAFTER-PRESEND-CHECKLIST.md item 11; MAPPING-APPENDIX.md §3')
             mterm = None
         else:
             mtext = ' '.join(str(v) for v in mf.values())
