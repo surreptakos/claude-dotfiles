@@ -614,6 +614,17 @@ async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfg
   return { result, logs, checkpoints };
 }
 
+// Issue 561: the script's own revParse, evaluated out of its FLEET-REV-PARSE block against the
+// same mocked `agent` the lane is driven with, so the tip agents a test sees are the real ones.
+function instantiateRevParse(scriptPath, agentMock, logs) {
+  const body = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-REV-PARSE');
+  // eslint-disable-next-line no-new-func
+  return new Function('scope', `with (scope) {\n${body}\nreturn revParse;\n}`)(laneScope({
+    agent: agentMock, log: (m) => logs.push(m), cfg: { deliverModel: 'z' },
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+  }));
+}
+
 test('lane harness resolves a module-scope binding it does not model (issue 340)', async () => {
   // Stands in for a future fleet edit: the lane references bindings this harness never names.
   const body = `const runCodeLane = async (t) => {
@@ -812,6 +823,70 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.verdict.failures.length, 1, 'only the mismatch is recorded; the wrong-tree findings are not passed on');
     assert.match(result.verdict.failures[0], new RegExp(mainCheckout));
     assert.ok(logs.some((m) => m.includes('Re-running the verifier once')), 'the rejection and its single re-run must be logged');
+  });
+
+  // ---- The tip of a branch that exists only as origin/<branch> (issue 561) ----
+
+  const unknownRevision = (ref) => ({ exitCode: 128, stdout: `${ref}\n`,
+    stderr: `fatal: ambiguous argument '${ref}': unknown revision or path not in the working tree.` });
+
+  test(`${rel} reads the tip of a branch present only as origin/<branch> and cross-checks the verdict (issue 561)`, async () => {
+    const branch = 'agent/issue-561-attempt1-wf_testrun-w0';
+    const tip = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const mainCheckout = 'ffffeeee00001111222233334444555566667777';
+    const calls = [];
+    const agentMock = async (prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label === 'tip:#561.1') {
+        assert.match(prompt, new RegExp(`\\ngit rev-parse ${branch}\\n`));
+        return unknownRevision(branch);
+      }
+      if (opts.label === 'tip:#561.1-origin') {
+        assert.match(prompt, new RegExp(`\\ngit rev-parse origin/${branch}\\n`));
+        return { exitCode: 0, stdout: `${tip}\n`, stderr: '' };
+      }
+      if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      // The first verdict comes from the wrong tree, so only a cross-check that ran rejects it.
+      if (opts.label === 'verify:#561.1') return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/home/user/repo', head: mainCheckout } };
+      if (opts.label === 'verify:#561.1-rerun') return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/scratch/v', head: tip } };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/561' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const tipLogs = [];
+    const revParse = instantiateRevParse(file, agentMock, tipLogs);
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 561, title: 't', criteria: '' }, 0, {}, 'inv1', null, { revParse });
+    assert.deepEqual(calls, ['impl:#561.1', 'tip:#561.1', 'tip:#561.1-origin', 'verify:#561.1', 'verify:#561.1-rerun', 'deliver:#561'],
+      'a failed bare rev-parse must fall back to origin/<branch>, and the tip it reads must drive the cross-check');
+    assert.deepEqual(tipLogs, [`tip:#561.1: tip ${tip} read from origin/${branch}.`], 'the journal must name the spelling that answered next to the tip');
+    assert.ok(!logs.some((m) => m.includes('could not read the tip')), 'a tip read from origin/ must not skip the cross-check');
+    assert.ok(logs.some((m) => m.includes(`verdict rejected`) && m.includes(tip)), 'the wrong-tree verdict must be rejected against the origin/ tip');
+    assert.equal(result.done, true);
+  });
+
+  test(`${rel} still skips the cross-check when the branch is absent on every spelling (issue 561)`, async () => {
+    const branch = 'agent/issue-561-attempt1-wf_testrun-w0';
+    const calls = [];
+    const agentMock = async (prompt, opts) => {
+      calls.push(opts.label);
+      if (opts.label === 'tip:#561.1') return unknownRevision(branch);
+      if (opts.label === 'tip:#561.1-origin') return unknownRevision(`origin/${branch}`);
+      if (opts.label === 'tip:#561.1-ls-remote') {
+        assert.match(prompt, new RegExp(`\\ngit ls-remote --exit-code --heads origin refs/heads/${branch}\\n`));
+        return { exitCode: 2, stdout: '', stderr: '' };
+      }
+      if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran tests', failures: [], worktree: { path: '/scratch/v', head: 'ffffeeee00001111222233334444555566667777' } };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/561' };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const tipLogs = [];
+    const revParse = instantiateRevParse(file, agentMock, tipLogs);
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 561, title: 't', criteria: '' }, 0, {}, 'inv1', null, { revParse });
+    assert.deepEqual(calls, ['impl:#561.1', 'tip:#561.1', 'tip:#561.1-origin', 'tip:#561.1-ls-remote', 'verify:#561.1', 'deliver:#561']);
+    assert.deepEqual(tipLogs, [], 'no spelling answered, so the tip reports null and names none');
+    assert.ok(logs.includes(`#561.1: could not read the tip of ${branch}; this attempt's verdict is accepted without the worktree cross-check.`),
+      `the skip must still be logged, unchanged: ${JSON.stringify(logs)}`);
+    assert.equal(result.done, true);
   });
 
   test(`${rel} verifier and prober prompts say the main checkout is never a test surface (issue 404)`, () => {

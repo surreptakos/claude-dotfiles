@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T05:11:29Z"
-  previous-modified: "2026-09-24T05:07:51Z"
-  revision: "39"
-  content-sha: "10956c7a6d13"
+  modified: "2026-09-24T05:49:20Z"
+  previous-modified: "2026-09-24T05:11:29Z"
+  revision: "40"
+  content-sha: "544aa2225d60"
 ---
 
 # ticket-fleet
@@ -532,7 +532,10 @@ whatever branch the session is on - on 2026-09-16 that tree predated the code un
 the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
 `head` against the tip it expects: the branch under review in the code lane,
 `origin/<defaultBranch>` in the probe lane, each read by its own one-command `rev-parse` agent so
-no agent certifies itself. A mismatch re-runs the verifier ONCE with the mismatch named - "for
+no agent certifies itself. A branch handed in from an earlier run or pushed from another container
+exists only on the remote (issue 561), so the code lane's tip falls back from `<branch>` to
+`origin/<branch>` to `git ls-remote --heads origin`, one one-command agent per spelling, and the
+run log names the spelling that answered next to the tip. A mismatch re-runs the verifier ONCE with the mismatch named - "for
 where it was produced and not for what it concluded", so the re-run is not read as pressure to
 change its answer. A second mismatch is recorded as a failed attempt carrying only that mismatch,
 and nothing is delivered on it. When the tip cannot be read at all the verdict stands and the run

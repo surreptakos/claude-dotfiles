@@ -945,32 +945,54 @@ function failuresOf(verdict) {
 // command and copies its output back - the shape the tree guard already uses, for the same reason:
 // nothing is left to the agent's judgement, so a paraphrase is detectable. The prompt names only a
 // ref, so its cache key is stable across a resume and a resumed run replays the same sha.
+// [FLEET-REV-PARSE-START]
 const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
   exitCode: { type: 'integer', description: 'REAL exit code of the command, not the exit code of a pipe' },
-  stdout: { type: 'string', description: 'stdout VERBATIM - the full 40-character object name when the ref resolved; never abbreviate or reformat it' },
+  stdout: { type: 'string', description: 'stdout VERBATIM - it starts with the full 40-character object name when the ref resolved; never abbreviate or reformat it' },
   stderr: { type: 'string', description: 'stderr verbatim ("" if none)' },
 } }
+// Issue 561: a branch handed in through priorImpl, or pushed by an implementer in another
+// container, exists in the orchestrator's checkout only as origin/<branch>, where a bare
+// `git rev-parse <branch>` exits 128 - which skipped the issue-404 guard for whole waves. So a
+// branch name is tried as `<branch>`, then `origin/<branch>`, then asked of the remote itself,
+// each spelling by its own one-command agent, and the first that answers is the tip; the run log
+// names that spelling next to the sha. A ref already spelled `origin/...` (the probe lane's
+// default branch) has no fallback and is read as given.
 async function revParse(ref, label) {
-  let res = null
-  try {
-    res = await agent(
+  const spellings = /^origin\//.test(ref)
+    ? [{ said: ref, cmd: `git rev-parse ${ref}`, label }]
+    : [
+        { said: ref, cmd: `git rev-parse ${ref}`, label },
+        { said: `origin/${ref}`, cmd: `git rev-parse origin/${ref}`, label: `${label}-origin` },
+        { said: `ls-remote origin refs/heads/${ref}`, cmd: `git ls-remote --exit-code --heads origin refs/heads/${ref}`, label: `${label}-ls-remote` },
+      ]
+  for (const s of spellings) {
+    let res = null
+    try {
+      res = await agent(
     `Run exactly this one bash command, from the repository root, and report its result:
 
-git rev-parse ${ref}
+${s.cmd}
 
 Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
 file. Do not interpret the output. Return the command's REAL exit code plus its stdout and stderr
-VERBATIM - stdout is one 40-character object name when the ref resolved; copy it character for
-character.`,
-    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
-    )
-  } catch (err) {
-    log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
-    return null
+VERBATIM - when the ref resolved, stdout starts with one 40-character object name; copy it
+character for character.`,
+      { label: s.label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
+      )
+    } catch (err) {
+      log(`${unusableReason(s.label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
+      return null
+    }
+    const sha = res && res.exitCode === 0 ? String(res.stdout || '').trim().split(/\s+/)[0] : ''
+    if (/^[0-9a-f]{7,40}$/i.test(sha)) {
+      log(`${label}: tip ${sha} read from ${s.said}.`)
+      return sha
+    }
   }
-  const sha = res && res.exitCode === 0 ? String(res.stdout || '').trim().split(/\s+/)[0] : ''
-  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null
+  return null
 }
+// [FLEET-REV-PARSE-END]
 
 // ---------------------------------------------------------------------------
 // Orchestrator-tree isolation guard (aac-routines issue 192, extended by 270)
