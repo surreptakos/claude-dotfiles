@@ -62,7 +62,10 @@ const LOGIN_SCOPES = [
 ];
 const CRED_PATH = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'gas', 'credentials.json');
 const SCRIPT_API = 'https://script.googleapis.com/v1/projects/';
+// GAS_GITHUB_API overrides the API base for tests only (a local server standing in for github.com). Read
+// per call, not once at module load, so a test can set it after requiring the module.
 const GITHUB_API = 'https://api.github.com';
+const githubApiBase = () => process.env.GAS_GITHUB_API || GITHUB_API;
 const SEED_PREFIX = 'gas-seed-';
 const REF_PREFIX = 'deploy/';
 const STATUS = { deploy: 'gas/deploy', promote: 'gas/promote', run: 'gas/run' };
@@ -413,7 +416,7 @@ function githubToken() {
 async function gh(method, suffix, body) {
   const tok = githubToken();
   if (!tok) throw new Error('no GitHub token: set GITHUB_TOKEN or sign in with `gh auth login`');
-  const r = await json(method, GITHUB_API + suffix, { Authorization: 'Bearer ' + tok, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' }, body);
+  const r = await json(method, githubApiBase() + suffix, { Authorization: 'Bearer ' + tok, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json' }, body);
   return r;
 }
 // Errors from a GitHub call carry the status, so the caller can tell a refusal to write at all (403,
@@ -450,10 +453,15 @@ async function status(repo) {
   for (const row of rows) console.log(row.ref.padEnd(12) + row.sha.padEnd(9) + row.status.padEnd(15) + row.description + (row.at ? '  (' + row.at + ')' : ''));
   return rows;
 }
-async function moveRef(repo, name, sha) {
-  const r = await gh('PATCH', '/repos/' + repo + '/git/refs/heads/' + name, { sha, force: true });
+// force defaults to true (the ref subcommand and promote rely on that — a deliberate ref move that must
+// win). Passing force:false makes the PATCH fast-forward-only; GitHub answers 422 when it is not, and
+// that 422 is left for the caller to see (no create-ref fallback for it — the ref exists, this is a
+// race, not a missing ref). A genuinely missing ref (404) still gets created either way.
+async function moveRef(repo, name, sha, force) {
+  const useForce = force !== false;
+  const r = await gh('PATCH', '/repos/' + repo + '/git/refs/heads/' + name, { sha, force: useForce });
   if (r.status === 200) return 'moved';
-  if (r.status === 422 || r.status === 404) {
+  if (r.status === 404 || (useForce && r.status === 422)) {
     const c = await gh('POST', '/repos/' + repo + '/git/refs', { ref: 'refs/heads/' + name, sha });
     if (c.status === 201) return 'created';
     throw apiError('create ref ' + name + ' answered ' + c.status + ': ' + (c.text || '').slice(0, 200), c.status);
@@ -495,17 +503,29 @@ function runRequest(fn, argsJson) {
   }
   return { id: new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15) + '-' + crypto.randomBytes(3).toString('hex'), fn, args, requestedAt: new Date().toISOString() };
 }
+const RUN_RACE_ATTEMPTS = 3;
+// deploy/run is fast-forward only: two callers reading the same parent and pushing at once must not let
+// the second force-push orphan the first's commit (the tick's chain walk would never see it). The blob
+// and tree do not depend on the parent, so they are built once; only the commit (parent) and the ref move
+// are retried, rebuilding the commit on the new tip each time a fast-forward is rejected (422).
 async function runViaApi(repo, req) {
-  const all = await refs(repo);
-  const parent = all[REF_PREFIX + 'run'] || '';
   const blob = await gh('POST', '/repos/' + repo + '/git/blobs', { content: runFileContent(req), encoding: 'utf-8' });
   if (blob.status !== 201) throw apiError('create blob answered ' + blob.status + ': ' + (blob.text || '').slice(0, 200), blob.status);
   const tree = await gh('POST', '/repos/' + repo + '/git/trees', { tree: [{ path: RUN_FILE, mode: '100644', type: 'blob', sha: blob.body.sha }] });
   if (tree.status !== 201) throw apiError('create tree answered ' + tree.status, tree.status);
-  const commit = await gh('POST', '/repos/' + repo + '/git/commits', { message: runMessage(req), tree: tree.body.sha, parents: parent ? [parent] : [] });
-  if (commit.status !== 201) throw apiError('create commit answered ' + commit.status + ': ' + (commit.text || '').slice(0, 200), commit.status);
-  await moveRef(repo, REF_PREFIX + 'run', commit.body.sha);
-  return commit.body.sha;
+  let parent = (await refs(repo))[REF_PREFIX + 'run'] || '';
+  for (let attempt = 1; ; attempt++) {
+    const commit = await gh('POST', '/repos/' + repo + '/git/commits', { message: runMessage(req), tree: tree.body.sha, parents: parent ? [parent] : [] });
+    if (commit.status !== 201) throw apiError('create commit answered ' + commit.status + ': ' + (commit.text || '').slice(0, 200), commit.status);
+    try {
+      await moveRef(repo, REF_PREFIX + 'run', commit.body.sha, false);
+      return commit.body.sha;
+    } catch (e) {
+      if (e.status !== 422) throw e;
+      if (attempt >= RUN_RACE_ATTEMPTS) throw apiError('deploy/run lost the fast-forward race ' + RUN_RACE_ATTEMPTS + ' times in a row (another run landed first each time) — try again', e.status);
+      parent = (await refs(repo))[REF_PREFIX + 'run'] || '';
+    }
+  }
 }
 async function run(repo, fn, argsJson, flags) {
   const req = runRequest(fn, argsJson);
@@ -564,15 +584,30 @@ function gitFetch(dir, url, refspec) {
 const gitHas = (dir, sha) => { try { git(dir, ['cat-file', '-e', sha + '^{commit}']); return true; } catch (e) { return false; } };
 const runFileContent = (req) => JSON.stringify(req, null, 2) + '\n';
 const runMessage = (req) => 'gas run ' + req.fn + ' (' + req.id + ')';
+function gitRefTip(dir, url, name) {
+  if (!gitFetch(dir, url, '+refs/heads/' + name + ':refs/gas/' + name)) return '';
+  try { return git(dir, ['rev-parse', 'refs/gas/' + name]); } catch (e) { return ''; }
+}
+// Same race as runViaApi, plumbed through git: the blob/tree do not depend on the parent, so they are
+// built once; the commit and the push (fast-forward only, no --force) are retried on rejection, rebuilt
+// on the remote's new tip each time.
 function runViaGit(repo, req) {
   const dir = gitScratch(repo), url = gitRemoteUrl(repo), name = REF_PREFIX + 'run';
-  let parent = '';
-  if (gitFetch(dir, url, '+refs/heads/' + name + ':refs/gas/' + name)) { try { parent = git(dir, ['rev-parse', 'refs/gas/' + name]); } catch (e) { parent = ''; } }
+  let parent = gitRefTip(dir, url, name);
   const blob = git(dir, ['hash-object', '-w', '--stdin'], runFileContent(req));
   const tree = git(dir, ['mktree'], '100644 blob ' + blob + '\t' + RUN_FILE + '\n');
-  const commit = git(dir, ['commit-tree', tree].concat(parent ? ['-p', parent] : [], ['-m', runMessage(req)]));
-  git(dir, ['push', '--force', url, commit + ':refs/heads/' + name]);
-  return commit;
+  for (let attempt = 1; ; attempt++) {
+    const commit = git(dir, ['commit-tree', tree].concat(parent ? ['-p', parent] : [], ['-m', runMessage(req)]));
+    const r = gitRaw(dir, ['push', url, commit + ':refs/heads/' + name]);
+    if (r.status === 0) return commit;
+    const rejected = /(non-fast-forward|fetch first|stale info)/i.test(r.stderr);
+    if (!rejected || attempt >= RUN_RACE_ATTEMPTS) {
+      throw new Error(rejected
+        ? 'deploy/run lost the fast-forward race ' + RUN_RACE_ATTEMPTS + ' times in a row (another run landed first each time) — try again'
+        : redact('git push ' + name) + ' exited ' + r.status + ': ' + redact(r.stderr.trim()).slice(0, 300));
+    }
+    parent = gitRefTip(dir, url, name);
+  }
 }
 function refViaGit(repo, name, sha) {
   const dir = gitScratch(repo), url = gitRemoteUrl(repo);
@@ -741,7 +776,7 @@ async function main() {
       process.exitCode = cmd ? 2 : 0;
   }
 }
-module.exports = { parseArgs, normalizeCredentials, codeFromRedirect, scriptName, scriptType, extFor, deployedShaOf, seedPayload, globToRegExp, matchesAny, normalizeConfig, carryOver, runRequest, libraryVersionOf, localDeployables, apiError, isForbidden, viaApiOrGit, viaLabel, runViaGit, refViaGit, runMessage, runFileContent, isDefaultGcpProject, PUBLISHED_CLIENT, LOGIN_SCOPES, STATUS, REF_PREFIX, SEED_PREFIX, RUN_FILE };
+module.exports = { parseArgs, normalizeCredentials, codeFromRedirect, scriptName, scriptType, extFor, deployedShaOf, seedPayload, globToRegExp, matchesAny, normalizeConfig, carryOver, runRequest, libraryVersionOf, localDeployables, apiError, isForbidden, viaApiOrGit, viaLabel, moveRef, runViaApi, runViaGit, refViaGit, runMessage, runFileContent, isDefaultGcpProject, PUBLISHED_CLIENT, LOGIN_SCOPES, STATUS, REF_PREFIX, SEED_PREFIX, RUN_FILE, RUN_RACE_ATTEMPTS };
 if (require.main === module) {
   main().catch((e) => { console.error('ERR  ' + (e && e.message ? e.message : e)); process.exit(process.exitCode || 2); });
 }
