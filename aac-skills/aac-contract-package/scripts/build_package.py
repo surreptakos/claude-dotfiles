@@ -97,6 +97,9 @@ PACKAGES = {
     'Commercial Security': ('Commercial Security Package',
                          'Commercial Security Master Agreement Rev.1.pdf',
                          'Commercial Security Rider Additional Locations Rev.1.pdf'),
+    'Elevator Monitoring': ('Elevator Package',
+                         'Elevator Monitoring Agreement.pdf',
+                         'Elevator - Security Rider Additional Locations Rev.1.pdf'),
 }
 # Commercial Fire All-in-One field map, derived from the form's own layout.
 FIRE = {
@@ -114,6 +117,21 @@ FIRE = {
     'cb_insp_fire': '.CheckBox13', 'cb_insp_refuge': '.CheckBox14',
     'cb_insp_wireless': '.CheckBox15', 'cb_ul': '.CheckBox16',
     'cb_in_lieu_of': '.CheckBox17',
+}
+
+# Elevator Monitoring Agreement field map (issue #40 evidence comment,
+# 2026-08-20: 15 text fields, no checkboxes, term fixed in §5 clause text —
+# no field). Unlike the Fire form's widgets, these field names carry no
+# leading dot. 'address'/'address2' and 'location'/'location2' and
+# 'description'/'description2' are each one logical value split across two
+# form blanks on the printed page; this builder always writes the whole
+# value into the first blank and leaves the continuation blank empty.
+ELEVATOR = {
+    'date': 'Text1', 'address': 'Text2', 'name': 'Text3', 'address2': 'Text4',
+    'phone': 'Text5', 'cell': 'Text6', 'location': 'Text7', 'location2': 'Text8',
+    'description': 'Text9', 'description2': 'Text10', 'comm_channel': 'Text11',
+    'connection_charge': 'Text12', 'setup': 'Text13', 'monitoring': 'Text14',
+    'frequency': 'Text15',
 }
 
 # Package composition (issue #225, spec 215 stream B). Which documents make
@@ -235,6 +253,56 @@ def _categorize_fire_master_rmr(services):
                 picked[cat] = s
             break
     return picked['monitoring'], picked['inspection'], picked['repair_service']
+
+
+# Canonical Elevator Monitoring master RMR names, cited from
+# skill/aac-contract-package/references/MAPPING-APPENDIX.md §3. Same
+# false-positive-guarded pattern as the Fire master's category matcher
+# above, with one category (the form's one monitoring $ field).
+_ELEVATOR_MASTER_MONITORING_NAMES = (
+    'Elevator Monitoring via Phone Line',
+    'Cellular Elevator Monitoring with Equipment Lease',
+)
+
+
+def _categorize_elevator_master_rmr(services):
+    """The one Elevator-master monitoring RMR line, matched against the
+    canonical names above. A description that trips the 'elevator
+    monitoring' trigger substring but is not a canonical name raises
+    SystemExit naming the offending line — never a silent best-effort fill
+    (mirrors _categorize_fire_master_rmr's trigger/whitelist pattern)."""
+    canonical = {_norm_desc(x) for x in _ELEVATOR_MASTER_MONITORING_NAMES}
+    for s in services or ():
+        desc = s.get('description', '')
+        n = _norm_desc(desc)
+        if 'elevator monitoring' not in n:
+            continue
+        if n not in canonical:
+            raise SystemExit(
+                'build_agreements: services description '
+                f'{desc!r} tripped the elevator-master "elevator monitoring" '
+                'matcher but is not a canonical Elevator-master RMR name. '
+                'Accepted names per skill/aac-contract-package/references/'
+                'MAPPING-APPENDIX.md §3:\n  ' +
+                '\n  '.join(repr(x) for x in _ELEVATOR_MASTER_MONITORING_NAMES) +
+                '\nFix the services entry in _facts.json (either quote a '
+                'canonical name, or remove the line if it does not belong '
+                'on the Elevator master).'
+            )
+        return s
+    return None
+
+
+def _elevator_master_rmr(systems):
+    """The Elevator master's one monthly monitoring amount, summed across
+    the Systems that carry a canonical line (mirrors _fire_master_rmr's
+    category-sum pattern); None when no System carries one."""
+    total = None
+    for s in systems:
+        pick = _categorize_elevator_master_rmr(s['services'])
+        if pick is not None:
+            total = (total or 0.0) + float(pick['unit'])
+    return total
 
 
 # STARTER is the tree-shape v1.0 record ratified by Dan on 2026-09-10 (issue
@@ -938,11 +1006,86 @@ def _fire_master_rmr(systems):
     return tuple(totals[c] for c in cats)
 
 
-def build_agreements(job, f, R):
+def _fill_pdf(src, out, txt, cks):
+    """Fill a form's text and checkbox fields explicitly and write the
+    result. Shared by every mapped agreement (Fire, Elevator Monitoring):
+    every checkbox on the form gets set from ``cks`` (never left at the
+    template's own state) and every field named in ``txt`` gets its value,
+    including an explicit empty string for a field the record holds no
+    fact for — the pypdf field dump this ticket's acceptance criteria asks
+    for shows that as a set-but-blank field, not an untouched one."""
     from pypdf import PdfReader, PdfWriter
+    r = PdfReader(src); w = PdfWriter(clone_from=src)
+    w.set_need_appearances_writer(True)
+    vals = {}
+    for k, fd in (r.get_fields() or {}).items():
+        if fd.get('/FT') == '/Btn':
+            if k in cks: vals[k] = '/Yes' if cks[k] else '/Off'
+        elif k in txt:
+            vals[k] = txt[k]
+    for pg in w.pages:
+        try: w.update_page_form_field_values(pg, vals, auto_regenerate=False)
+        except Exception: pass
+    with open(out, 'wb') as fh: w.write(fh)
+
+
+def _build_elevator_agreements(job, f, R, cust, deal):
+    """Fill the Elevator Monitoring Agreement and its rider (issue 335).
+
+    Identity, pricing and the billing-frequency word fill the same way the
+    Commercial Fire map fills the equivalent fields, citing the same
+    governing files; the monthly monitoring amount comes from the Elevator
+    rows of references/MAPPING-APPENDIX.md §3 via _elevator_master_rmr.
+    Billing frequency has no checkbox on this form (a free-text "payable
+    ___ in advance" blank), so the word written is the one the Fire map
+    ticks as FIRE['cb_quarter'], per MAPPING-APPENDIX.md §1 rule 3 and
+    DRAFTER-PRESEND-CHECKLIST.md item 9.
+
+    Fields the v1.0 deal record holds no fact for — the agreement date (no
+    date fact exists in the schema; the Fire rider's own date field is
+    blank for the same reason), elevator location if different, elevator
+    description, communication channel, the §1(b) connection charge and
+    the §4 one-time set-up charge — are set to an explicit empty string
+    (hard rule 7: no inferred fill) and recorded as open questions in
+    docs/GAP-REPORT.md rather than guessed.
+    """
+    folder, mname, rname = PACKAGES['Elevator Monitoring']
+    mpath = os.path.join(R.agreements_root, folder, mname)
+    rpath = os.path.join(R.agreements_root, folder, rname)
+    if not os.path.exists(mpath):
+        return None, None, f'agreement forms not reachable at {mpath}'
+
+    mon = _elevator_master_rmr(f['systems'])
+    amount = lambda x: f'{x:.2f}' if x is not None else 'N/A'
+
+    text = {
+        ELEVATOR['name']: cust['subscriber_name'],
+        ELEVATOR['address']: cust['billing_address'].replace('\n', ', '),
+        ELEVATOR['phone']: cust.get('phone', ''),
+        ELEVATOR['cell']: cust.get('cell', ''),
+        ELEVATOR['monitoring']: amount(mon),
+        ELEVATOR['frequency']: 'quarter annually',
+    }
+    for k in ('date', 'address2', 'location', 'location2', 'description',
+             'description2', 'comm_channel', 'connection_charge', 'setup'):
+        text[ELEVATOR[k]] = ''
+
+    stem = f"{cust['site_name']}_{_slug(cust['site_address'])}"
+    mo = os.path.join(job, f'{stem} - Elevator Monitoring Agreement.pdf')
+    ro = os.path.join(job, f'{stem} - Elevator Rider Additional Locations.pdf')
+    _fill_pdf(mpath, mo, text, {})
+    _fill_pdf(rpath, ro, {'Text16666': cust['subscriber_name'], 'Text26666': '',
+                          'Text36666': str(deal['term_years'])}, {})
+    return mo, ro, None
+
+
+def build_agreements(job, f, R):
     deal, cust = f['deal'], f['customer']
+    if any(s['system'] == 'Elevator Monitoring' for s in f['systems']):
+        return _build_elevator_agreements(job, f, R, cust, deal)
     if not any(s['system'] == 'Fire Alarm' for s in f['systems']):
-        return None, None, 'only the Commercial Fire form is mapped so far'
+        return None, None, ('only the Commercial Fire and Elevator '
+                            'Monitoring forms are mapped so far')
     folder, mname, rname = PACKAGES['Fire Alarm']
     mpath = os.path.join(R.agreements_root, folder, mname)
     rpath = os.path.join(R.agreements_root, folder, rname)
@@ -982,26 +1125,12 @@ def build_agreements(job, f, R):
         FIRE['cb_ul']: False, FIRE['cb_in_lieu_of']: False,
     }
 
-    def fill(src, out, txt, cks):
-        r = PdfReader(src); w = PdfWriter(clone_from=src)
-        w.set_need_appearances_writer(True)
-        vals = {}
-        for k, fd in (r.get_fields() or {}).items():
-            if fd.get('/FT') == '/Btn':
-                if k in cks: vals[k] = '/Yes' if cks[k] else '/Off'
-            elif k in txt:
-                vals[k] = txt[k]
-        for pg in w.pages:
-            try: w.update_page_form_field_values(pg, vals, auto_regenerate=False)
-            except Exception: pass
-        with open(out, 'wb') as fh: w.write(fh)
-
     stem = f"{cust['site_name']}_{_slug(cust['site_address'])}"
     mo = os.path.join(job, f'{stem} - Fire Master Agreement.pdf')
     ro = os.path.join(job, f'{stem} - Fire Rider Additional Locations.pdf')
-    fill(mpath, mo, text, checks)
-    fill(rpath, ro, {'Text17777': cust['subscriber_name'], 'Text277777': '',
-                     'Text37777': str(deal['term_years'])}, {})
+    _fill_pdf(mpath, mo, text, checks)
+    _fill_pdf(rpath, ro, {'Text17777': cust['subscriber_name'], 'Text277777': '',
+                         'Text37777': str(deal['term_years'])}, {})
     return mo, ro, None
 
 
