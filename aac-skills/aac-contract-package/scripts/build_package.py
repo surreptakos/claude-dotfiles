@@ -409,12 +409,18 @@ _SECURITY_REMOTE_ACCESS_NAMES = (
     'Eagle Eye - 911 Camera Sharing (monthly fee per camera)',
 )
 # 'remote_access_video': Contract selections = "Remote Access by Subscriber"
-# plus "Video Data to Subscriber's Smart Phone" and "Cloud Service Data
-# Storage and Retrieval" (several also add "Recording Device"). Approximated
-# here as one bucket that ticks all three §4(e) sub-boxes — the sheet does
-# not need per-line sub-box precision for this ticket's acceptance criteria;
-# splitting the sub-boxes item-by-item is a follow-on (see the discovery
-# filed with this ticket).
+# plus "Video Data to Subscriber's Smart Phone", and (per line) "Recording
+# Device" and/or "Cloud Service Data Storage and Retrieval". Every name in
+# this bucket carries "Video Data to Subscriber's Smart Phone" in the RMR
+# Items sheet's Contract selections column (fixtures/google-drive/
+# RMR-Items-2026-08-19.xlsx, "Standard RMR" tab), so cb_4e_video_smartphone
+# ticks for the bucket as a whole; which of the other two §4(e) sub-boxes
+# also ticks is decided per line by the two subset tuples below, cross-
+# checked against that same column (issue 356 — this bucket used to tick
+# all three sub-boxes for every line in it, which over-ticked Recording
+# Device on cloud-storage-only lines like "Maxpro Cloud Video Service -
+# Camera cloud storage" and Cloud Storage on recording-device-only lines
+# like "Remote Video Services for Local Video System").
 _SECURITY_REMOTE_ACCESS_VIDEO_NAMES = (
     'DMP Video - 4000/5000 Series - up to 8 Cameras',
     'DMP Video - 4000/5000 Series - up to 12 Cameras',
@@ -455,6 +461,73 @@ _SECURITY_REMOTE_ACCESS_VIDEO_NAMES = (
     'monthly charge per Cabinet/Ca,era Appliance',
     '4MP 60-day retention cloud recording monthly per camera',
 )
+# Subset of _SECURITY_REMOTE_ACCESS_VIDEO_NAMES above whose RMR Items sheet
+# Contract selections cell also names "Recording Device" (issue 356).
+_SECURITY_VIDEO_RECORDING_DEVICE_NAMES = (
+    'Remote Video Services for Local Video System',
+    'Maxpro Cloud Video Service - Recorder',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 30 Days',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 60 Days',
+    'Alta Intercom License, Premium',
+    'Alta Cloud Video with Analytics and 30 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 60 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 90 Days of Cloud Storage - Per Camera',
+    'Alta Cloud LPR Analytics Add-On - Per Camera',
+    'Eagle Eye Cloud VMS, 1 FPS, 30-day storage, per camera',
+)
+# Subset of _SECURITY_REMOTE_ACCESS_VIDEO_NAMES above whose RMR Items sheet
+# Contract selections cell also names "Cloud Service Data Storage and
+# Retrieval" (issue 356).
+_SECURITY_VIDEO_CLOUD_STORAGE_NAMES = (
+    'DMP Video - 4000/5000 Series - up to 8 Cameras',
+    'DMP Video - 4000/5000 Series - up to 12 Cameras',
+    'DMP Video - 4000/5000 Series - up to 16 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 8 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 12 Cameras',
+    'DMP Video - 6000 Series Cloud Services - up to 16 Cameras',
+    'DMP Video - 6000 Series - Smart Analytics (per camera)',
+    'DMP Video - XV Gateways AlarmVision Advanced Analytics, per camera',
+    'DMP - Virtual Keypad Video Doorbell License',
+    'VX Series Standard Camera Package - 4 Devices, 7-Day Storage',
+    'VX Series Standard Camera Package - 4 Devices, 30-Day Storage',
+    'VX Series Single Doorbell Package - 1 Device, 30-Day Storage',
+    'VX Series Extended Camera Package - 12 Devices, 30-Day Storage',
+    'Alarm.com Pro Video',
+    'Alarm.com Pro Video with Analytics',
+    'Alarm.com Premium Video',
+    'Alarm.com Video Expansion add-on',
+    'Total Connect Video - 7 Day Storage',
+    'Total Connect Video - 30 Day Storage',
+    'Total Connect Video - Additional Camera Storage',
+    'Maxpro Cloud Video Service - Camera cloud storage',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 30 Days',
+    'Alta Cloud Access Control, Video Intercom Cloud Storage - 60 Days',
+    'Alta Intercom License, Premium',
+    'Alta Cloud Video with Analytics and 30 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 60 Days of Cloud Storage - Per Camera',
+    'Alta Cloud Video with Analytics and 90 Days of Cloud Storage - Per Camera',
+    'Alta Cloud LPR Analytics Add-On - Per Camera',
+    'Monthly Eagle Eye Networks VMS Per Camera License with 1MP, 30 Days Retention',
+    '180deg. Cabinet Appliance with Solar/Cellular/Back-up Battery \n'
+    'monthly charge per Cabinet/Ca,era Appliance',
+    '4MP 60-day retention cloud recording monthly per camera',
+)
+
+
+def _security_video_subbox_sold(systems, names):
+    """True if any service line across ``systems`` matches (case/whitespace
+    normalized) one of ``names`` — a presence test, not a dollar sum, used
+    to decide the Commercial Security master's §4(e) Recording Device and
+    Cloud Service Data Storage sub-boxes independently of each other and of
+    the combined remote-access-video dollar amount (issue 356)."""
+    norm_names = {_norm_desc(n) for n in names}
+    for s in systems:
+        for svc in s.get('services') or ():
+            if _norm_desc(svc.get('description', '')) in norm_names:
+                return True
+    return False
+
+
 # 'access_control_other': Contract selections = "Remote Access by
 # Subscriber" + 'Other "See Schedule"' — the combine route (MAPPING-
 # APPENDIX.md §1 rule 6) always applies to these.
@@ -483,15 +556,27 @@ _SECURITY_OTHER_ONLY_NAMES = (
     'Azure Active Directory, 1000 users, 15-minute sync, Alta Access',
     'Remote Tech Support',
     'Communication Assurance Program',
+    # MAPPING-APPENDIX.md §3: "Check the Video Alarm Verification box if
+    # present; otherwise use Other 'See Schedule'." This CS form carries no
+    # "Video Alarm Verification" box (only §2/§4(d) "Alarm Signal
+    # Verification", a different, pre-existing box) — the RMR Items sheet's
+    # Contract selections cell for this row is also blank. Per the
+    # appendix's own fallback and MAPPING-APPENDIX.md §1 rule 6, this line
+    # routes to the combine ("Other / See Schedule") route rather than
+    # ticking Alarm Signal Verification (issue 356; supersedes the earlier
+    # best-fit mapping onto that box).
+    'Video Alarm Verification Service',
 )
 # 'self_monitoring': Contract selections = "Self-Monitoring (under Remote
 # Subscriber Access)".
 _SECURITY_SELF_MONITORING_NAMES = ('Maxpro Cloud Health Notifications',)
-# 'signal_verification': closest existing CS-form box is §2/§4(d) "Alarm
-# Signal Verification" — the sheet's own box name is "Video Verification",
-# which this form does not carry as a separate box. Best-fit mapping,
-# recorded as a discovery with this ticket rather than left silent.
-_SECURITY_SIGNAL_VERIFICATION_NAMES = ('Video Alarm Verification Service',)
+# 'signal_verification': §2/§4(d) "Alarm Signal Verification" box. No
+# Standard RMR tab row's Contract selections column names it (issue 356
+# moved the one line that used to approximate onto it, "Video Alarm
+# Verification Service", to 'other_only' instead — see that tuple's
+# comment) — kept as an empty category rather than removed, since the box
+# itself is still a real, distinct field on the form.
+_SECURITY_SIGNAL_VERIFICATION_NAMES = ()
 # 'no_rmr': generates no recurring line at all. Not a Standard RMR tab row
 # (Axis-based access control needs no hosted service, so the RMR sheet
 # carries nothing for it); cited from MAPPING-APPENDIX.md §3 instead, whose
@@ -1696,6 +1781,13 @@ def _security_agreement_fields(f, dep):
     deal, cust, pr = f['deal'], f['customer'], f['pricing']
     systems = f['systems']
     amounts, unmapped = _categorize_security_master_rmr(systems)
+    # §4(e) Recording Device / Cloud Service Data Storage tick independently
+    # per sold line (issue 356) — see _SECURITY_VIDEO_RECORDING_DEVICE_NAMES
+    # / _SECURITY_VIDEO_CLOUD_STORAGE_NAMES.
+    video_recording_device = _security_video_subbox_sold(
+        systems, _SECURITY_VIDEO_RECORDING_DEVICE_NAMES)
+    video_cloud_storage = _security_video_subbox_sold(
+        systems, _SECURITY_VIDEO_CLOUD_STORAGE_NAMES)
     amt = lambda x: f'{x:.2f}' if x is not None else 'N/A'
 
     monitor_amt = amounts['monitoring']
@@ -1765,8 +1857,8 @@ def _security_agreement_fields(f, dep):
         SECURITY['cb_4c_inspection']: False,
         SECURITY['cb_4d_signal_verification']: (not combine) and signal_amt is not None,
         SECURITY['cb_4e_remote_access']: (not combine) and has_remote,
-        SECURITY['cb_4e_recording_device']: (not combine) and amounts['remote_access_video'] is not None,
-        SECURITY['cb_4e_cloud_storage']: (not combine) and amounts['remote_access_video'] is not None,
+        SECURITY['cb_4e_recording_device']: (not combine) and video_recording_device,
+        SECURITY['cb_4e_cloud_storage']: (not combine) and video_cloud_storage,
         SECURITY['cb_4e_video_smartphone']: (not combine) and amounts['remote_access_video'] is not None,
         SECURITY['cb_4e_self_monitoring']: False,
         SECURITY['cb_4e_remote_access_subscriber']: (not combine) and has_remote,

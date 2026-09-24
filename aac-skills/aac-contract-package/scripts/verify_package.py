@@ -1398,7 +1398,10 @@ def verify(job):
         parts = [master_field_text]
         pt = pdf_text(masters[0])
         if pt:
-            parts.append(pt)
+            # Xpdf's pdftotext (the one Git for Windows ships) lays a filled
+            # field over its underline as "$_1_0_0_0_0_.0_0___"; drop the
+            # underscores so the label-to-amount patterns read "$10000.00".
+            parts.append(pt.replace('_', ''))
         master_all_text = '\n'.join(p for p in parts if p)
 
     # J-7: Master's Purchase Price / Down Payment / Balance reconcile to the
