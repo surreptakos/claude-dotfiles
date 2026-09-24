@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-22T21:53:23Z'
-  previous-modified: '2026-09-18T04:53:57Z'
-  revision: '31'
-  content-sha: 524321ceef61
+  modified: '2026-09-24T00:56:57Z'
+  previous-modified: '2026-09-22T21:53:23Z'
+  revision: '32'
+  content-sha: 1c05ceb9879d
 ---
 
 # ticket-fleet
@@ -181,6 +181,15 @@ prompts before letting the fleet push branches and open PRs. Full args list:
 - `scoutModel` / `implModel` / `verifyModel` / `deliverModel` / `reportModel`: per-stage
   model pins. Defaults: Sonnet 5 for scout and verify, Opus 5.5 for implement, Haiku 4.5
   for deliver and report.
+- `implPins` (object, default `{mechanical: Haiku 4.5, multi-file: Sonnet 5, design: null}`)
+  and `difficulty` (boolean, default true), issue 725: after the scout, one `difficulty` agent
+  asks TypeSafe Jev one Score per code ticket (single-file mechanical, multi-file, design-level).
+  Attempt 1 runs on that level's pin; a level with no pin uses `implModel`, and every retry
+  after a failed verify uses the heaviest pin (`design`, default `implModel`). With Jev
+  unavailable, or `difficulty: false`, every attempt runs on `implModel`. The result's
+  `implModels` names each code ticket's level and the model of each attempt. Eval data:
+  `node tools/fleet-difficulty-eval.js --score` labels tickets that needed attempt 2+ "hard"
+  (`docs/agents/evals/fleet-difficulty.json`).
 - `maxAttempts` (integer, default 3): Ralph-style bounded retry, fresh context each attempt.
 - `deliver` (boolean, default true): `false` stops after verify - no push, no PR, no
   resolution comment.

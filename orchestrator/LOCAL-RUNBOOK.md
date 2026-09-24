@@ -64,7 +64,7 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   of reading SKILL.md files out of a clone.
 - **Pacing: one pass, then stop. No `/loop`.** Serve the repo until nothing is actionable or a cap
   is hit, heartbeating the state issue as you go. Then clear the venue, write
-  `**Pass complete — YYYY-MM-DD HH:MM UTC**` (current UTC) at the top of the heartbeat section of
+  `**Pass complete — YYYY-MM-DD HH:MM UTC**` at the top of the heartbeat section of
   the state issue, say "pass complete", and end the turn. The watchdog closes this window once the
   marker is newer than the process start, no Heartbeat line is newer than the marker, and the
   session transcript has been untouched for five minutes; then it launches the next repo's master.
@@ -76,6 +76,11 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
   fleet launch: its marker was from 22:20, Dan had typed into the window at 22:27, and the kill
   rule only compared the marker with the process start (ticket #82). Finish the reopened work,
   then write Pass complete again.
+- **Every marker's time comes from `date -u +'%Y-%m-%d %H:%M'`, run at the moment you write the
+  line** — `Heartbeat` and `Pass complete` alike, never a time from memory or an estimate. On
+  2026-09-23 the zoho master stamped a heartbeat two minutes ahead of the clock; a stamp ahead of a
+  later `Pass complete` reads as a reopened pass. The watchdog clamps any future marker to now,
+  logs `marker in the future (+Nm)`, and never lets a clamped heartbeat reopen a pass (issue 711).
 - **Nobody is at the keyboard (Dan, 2026-09-02, verbatim: "I should not ever be asked to
   approve-tickets. I am not at the computer. This is meant to be a completely autonomous run").**
   Never call `AskUserQuestion`; never wait for a typed approval. Anything that needs Dan becomes a
@@ -193,9 +198,11 @@ but cannot merge.
 > and that no other master serves `<owner/repo>`; claim venue local-pc there. Then run ONE pass, no
 > `/loop`: serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When
 > the pass is done, clear the venue, write a line `**Pass complete - YYYY-MM-DD HH:MM UTC**`
-> (current UTC) at the top of your state issue's heartbeat section, say pass complete, and stop;
-> the watchdog closes this window and starts the next repo. My messages in this terminal override
-> everything.
+> at the top of your state issue's heartbeat section, say pass complete, and stop;
+> the watchdog closes this window and starts the next repo. Take the time on every Heartbeat and
+> Pass complete line from running `date -u` at the moment you write it (format in
+> LOCAL-RUNBOOK.md), never from memory or an estimate (issue 711). My messages in this terminal
+> override everything.
 
 The remote-control session name is `master-<slug>` (`master-bill-intake`, `master-contract-builder`,
 `master-sales-cockpit`, `master-zoho`), which is also what the watchdog's alive check and the

@@ -292,6 +292,11 @@ def _runner_spelling() -> str:
     return sys.executable or "python3"
 
 
+def _claude_declaration(session_id: str, nonce: str) -> str:
+    """The exact declare-claude command for THIS session and nonce, as the prompt and deny print it."""
+    return f'{_runner_spelling()} "{SCRIPT}" declare-claude "{session_id}" "{nonce}" <flow>'
+
+
 def _is_exact_declaration_command(command: str, turn_id: str) -> bool:
     if not isinstance(command, str):
         return False
@@ -431,6 +436,10 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     correction = _is_correction(str(event.get("prompt") or ""))
     if correction:
         state["correction_nonce"] = nonce
+    # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
+    # so the next user message clears it and the ticket-SET round applies again outside session-end.
+    if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
+        state["session_end_invoked"] = True
     _write_state("claude", session_id, state)
     pending_correction = (previous or {}).get("pending_correction")
     # Style violations from the previous turn are carried here rather than blocked at Stop. A Stop
@@ -439,7 +448,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     pending_lint = (previous or {}).get("pending_lint") or []
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
-        f"`{_runner_spelling()} \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>` — as the ONLY "
+        f"`{_claude_declaration(session_id, nonce)}` — as the ONLY "
         "command in that shell call, nothing chained after it, or the call is denied. "
         "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
         "Broken behavior: diagnosing-bugs. Raw issues: triage. "
@@ -709,6 +718,19 @@ def _transcript_user_approved(transcript_path: str) -> bool:
     return any(_matches_approval(text) for text in _iter_user_text(transcript_path))
 
 
+# `/session-end` as a slash command, not a path segment such as `aac-skills/session-end/`.
+SESSION_END_INVOKED = re.compile(r"(?<![\w/.-])/session-end\b")
+
+
+def _session_end_turn(state: dict[str, Any] | None) -> bool:
+    """True when THIS turn is the session-end sweep: its declared flow (not the carried last_flow)
+    is session-end, or the user's prompt invoked /session-end. The session-end skill files its batch
+    without an approval round (#704, Dan 2026-09-23: typing /session-end is the approval)."""
+    return bool(state) and (
+        state.get("flow") == "session-end" or bool(state.get("session_end_invoked"))
+    )
+
+
 def _autonomous_master() -> bool:
     """True only under the watchdog-launched orchestrator master (claude-dotfiles issue 81)."""
     # .strip(): master-watchdog.ps1 launches via `cmd /k set VAR=1 && claude ...`, and cmd's
@@ -758,6 +780,7 @@ def _publish_gate(
         return None
     if (
         already >= 1
+        and not _session_end_turn(state)
         and not _transcript_used_tool(transcript_path, "AskUserQuestion")
         and not _transcript_user_approved(transcript_path)
     ):
@@ -827,9 +850,15 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     # The wording names the two ways a first call fails: no declaration yet, or a declaration with
     # a command chained onto it. A session that chained `; ls` onto its declaration read the old
     # text as "the declaration failed" and retried the same shape, losing two turns to the gate.
+    # Issue 715: the deny names the declaration itself, with THIS session's id and nonce. After a
+    # model switch restarts the session, the context still holds gate prompts naming the old id and
+    # nonces; a deny that only said "run the declaration from the prompt gate" let the model copy a
+    # stale one, recording state under the old id and leaving every call here denied for minutes.
     return _deny(
-        "Ask Matt, Yes, and caveman ultra missing. Run the exact declaration from the prompt gate "
-        "as the ONLY command in the call — a chained command after it denies the whole call."
+        "Ask Matt, Yes, and caveman ultra missing. Run exactly "
+        f"`{_claude_declaration(session_id, nonce)}` (this session's id and current nonce; any "
+        "id or nonce from an earlier prompt is stale) as the ONLY command in the call — a chained "
+        "command after it denies the whole call."
     )
 
 
@@ -857,6 +886,8 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             # The correction flag is the prompt's finding about this turn; declaring a route
             # must not erase it, or the Stop audit never sees a correction turn.
             "correction_nonce": state.get("correction_nonce"),
+            # Likewise the prompt's /session-end finding (issue 716).
+            "session_end_invoked": state.get("session_end_invoked"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")

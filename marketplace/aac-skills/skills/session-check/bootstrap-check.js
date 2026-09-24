@@ -17,8 +17,8 @@
  *   - does the marker name a skills directory that actually still holds those skills? (STOP:
  *     the skills tree was wiped or never copied)
  *   - is the payload version the marker records the same as what dotfiles master offers today?
- *     (informational: "on v2026.9.151521, master v2026.9.161010" — a drift is not a stop, the
- *     next session will re-clone)
+ *     (a WARNING naming both versions and the skills whose revision differs, issue 703 — not a
+ *     stop: re-running the bootstrap takes master)
  *
  * The marker lives at ~/.claude/hook-state/aac-bootstrap/state.json; a bootstrap that ran
  * anywhere in this container writes it. Env overrides are for tests only.
@@ -33,7 +33,8 @@
  *   readMarker(env)              -> { state: 'ok' | 'missing' | 'unreadable' | 'failed' | 'stale',
  *                                      marker?, path, reason?, stage?, writtenAt?, bootedAt? }
  *   verifySkills(marker, env)    -> { state: 'ok' | 'skills-missing', missing: [name] }
- *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker? }
+ *   compareToMaster(marker, env) -> { state: 'same' | 'drift' | 'unknown', master?, marker?,
+ *                                      stale?: [{ name, local, master }] | null }
  *   verifyPluginRoot(marker)     -> { state: 'ok' | 'absent' | 'unrecorded', root? }
  *   verifySelfHook(marker)       -> { state: 'ok' | 'absent' | 'not-executable' | 'unrecorded', hook? }
  */
@@ -144,15 +145,49 @@ function gitVersionAtRemote(clone, ref, run) {
   return version || null;
 }
 
+const SKILLS_IN_REPO = 'marketplace/aac-skills/skills';
+
+function skillRevision(text) {
+  const m = /^\s*revision:\s*['"]?(\d+)['"]?\s*$/m.exec(text || '');
+  return m ? m[1] : null;
+}
+
+/**
+ * Which installed skills differ from the ones master offers (issue 703: a Routine's Skill tool
+ * served todoist-triage revision 8 while master had 17). Run straight after the fetch in
+ * gitVersionAtRemote, so FETCH_HEAD is master's tree. A skill whose `revision` stamp differs
+ * from the installed copy's, or that master has and this container lacks, is one the Skill tool
+ * would serve stale. Entries are { name, local, master }, `local` null when absent. Null when
+ * master's skill list cannot be read.
+ */
+function staleSkillsAtRemote(clone, localSkills, run) {
+  const git = (...args) => run('git', ['-C', clone, ...args]);
+  const listed = git('ls-tree', '--name-only', `FETCH_HEAD:${SKILLS_IN_REPO}`);
+  if (listed.status !== 0) return null;
+  const stale = [];
+  for (const name of listed.stdout.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const shown = git('show', `FETCH_HEAD:${SKILLS_IN_REPO}/${name}/SKILL.md`);
+    if (shown.status !== 0) continue;
+    const master = skillRevision(shown.stdout);
+    let local = null;
+    try {
+      local = skillRevision(fs.readFileSync(path.join(localSkills, name, 'SKILL.md'), 'utf8'));
+    } catch { /* not installed */ }
+    if (local !== master) stale.push({ name, local, master });
+  }
+  return stale;
+}
+
 function compareToMaster(marker, env, run = execGit) {
   const unknown = (reason) => ({ state: 'unknown', marker: marker.payload_version, reason });
   let master = null;
+  let clone = null;
   try {
     if (env.BOOTSTRAP_MASTER_MANIFEST) {
       if (!fs.existsSync(env.BOOTSTRAP_MASTER_MANIFEST)) return unknown('no manifest to read');
       master = JSON.parse(fs.readFileSync(env.BOOTSTRAP_MASTER_MANIFEST, 'utf8')).version || null;
     } else {
-      const clone = path.join(env.HOME || os.homedir(), '.aac-dotfiles');
+      clone = path.join(env.HOME || os.homedir(), '.aac-dotfiles');
       if (!fs.existsSync(path.join(clone, '.git'))) return unknown('no dotfiles clone to fetch in');
       master = gitVersionAtRemote(clone, env.BOOTSTRAP_DOTFILES_REF || 'master', run);
     }
@@ -160,9 +195,12 @@ function compareToMaster(marker, env, run = execGit) {
     return unknown(e.message);
   }
   if (!master) return unknown('master version could not be read from the remote');
-  return master === marker.payload_version
-    ? { state: 'same', master, marker: marker.payload_version }
-    : { state: 'drift', master, marker: marker.payload_version };
+  if (master === marker.payload_version) return { state: 'same', master, marker: marker.payload_version };
+  const drift = { state: 'drift', master, marker: marker.payload_version };
+  if (clone) {
+    try { drift.stale = staleSkillsAtRemote(clone, skillsDir(env), run); } catch { /* unlisted */ }
+  }
+  return drift;
 }
 
 /**
@@ -201,5 +239,5 @@ function verifySelfHook(marker) {
 
 module.exports = {
   readMarker, verifySkills, compareToMaster, verifyPluginRoot, verifySelfHook,
-  markerPath, skillsDir, containerBootedAt,
+  staleSkillsAtRemote, markerPath, skillsDir, containerBootedAt,
 };
