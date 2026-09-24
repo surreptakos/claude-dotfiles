@@ -138,11 +138,11 @@ def pdf_fields(path):
         return {}
 
 # Section H recognizes exactly the master forms build_package.py fills:
-# Commercial Fire and Commercial Security (issue 336) share the
-# name/term/billing checks through MASTER_FORM_SPECS; the Elevator
-# Monitoring Agreement (issue 335) has its own checks keyed on
-# ELEVATOR_MASTER_FIELDS. Every other master (Residential) has no field map
-# yet and SKIPs, per docs/verifier-coverage.md. Detection is an exact
+# Commercial Fire, Commercial Security (issue 336) and Residential Security
+# (issue 337) share the name/term/billing checks through MASTER_FORM_SPECS;
+# the Elevator Monitoring Agreement (issue 335) has its own checks keyed on
+# ELEVATOR_MASTER_FIELDS. Any other master has no field map and SKIPs, per
+# docs/verifier-coverage.md. Detection is an exact
 # field-name signature — each form's field dump is fixed, so this never
 # mistakes one for another — not the field-count heuristic this replaced.
 MASTER_FORM_SPECS = {
@@ -154,12 +154,18 @@ MASTER_FORM_SPECS = {
                  'billing_re': re.compile(r'CheckBox(1[1-4])$'),
                  'billing_names': {11: 'Monthly', 12: 'Quarter Annually',
                                    13: 'Semi-Annually', 14: 'Annually'}},
+    # Residential Security (issue 337): term is Text22 and the four billing
+    # options sit at CheckBox11/12/13/14.
+    'residential': {'name_key': 'Text2', 'term_key': 'Text22',
+                    'billing_re': re.compile(r'CheckBox(1[1-4])$'),
+                    'billing_names': {11: 'Monthly', 12: 'Quarter Annually',
+                                      13: 'Semi-Annually', 14: 'Annually'}},
 }
 
 
 def _master_form_kind(mf):
-    """'fire', 'security', 'elevator', or None for a master field dump this
-    verifier does not have a map for."""
+    """'fire', 'security', 'residential', 'elevator', or None for a master
+    field dump this verifier does not have a map for."""
     if not mf:
         return None
     if set(mf) == ELEVATOR_MASTER_FIELDS:
@@ -168,6 +174,12 @@ def _master_form_kind(mf):
         return 'fire'
     if 'Text2' in mf and 'CheckBox40' in mf:
         return 'security'
+    # Residential master fingerprint (issue 337): field names carry no
+    # leading dot (unlike Fire), and 'Text1444' / 'CheckBox34' are two field
+    # names unique to this form's own layout (the "Other (Describe):"
+    # free-text box and the IN LIEU OF checkbox).
+    if 'Text1444' in mf and 'CheckBox34' in mf:
+        return 'residential'
     return None
 
 # Poppler pdftotext (bundled with poppler-utils on Linux and poppler-windows
@@ -953,7 +965,7 @@ def verify(job):
         if mf and kind is None:
             rec('SKIP', 'Master agreement field checks',
                 f'{os.path.basename(masters[0])} is not a mapped form '
-                f'({len(mf)} fields); residential forms have no field map yet')
+                f'({len(mf)} fields); no field map for this form')
             mf = {}
             mterm = None
         if not mf:
@@ -1004,6 +1016,42 @@ def verify(job):
                        and str(mf[k]) not in ('', '/Off')]
             rec('PASS' if len(billing) == 1 else 'FAIL',
                 'Exactly one billing frequency ticked', ', '.join(billing) or 'none')
+            if kind == 'residential':
+                # Residential (d) Service paragraph: CONTRACT-PACKAGE-RULES.md
+                # §2.7 "Service is always checked on all agreements" — exactly
+                # one of (d)(i) per-call or (d)(ii) monthly must be ticked.
+                service = [k for k in mf if re.search(r'CheckBox(29|30)$', k)
+                          and str(mf[k]) not in ('', '/Off')]
+                rec('PASS' if len(service) == 1 else 'FAIL',
+                    'Exactly one Service option ticked', ', '.join(service) or 'none')
+                mdate = str(mf.get('Text1', '') or '').strip()
+                # Purchase Price / Down Payment / Balance are direct form
+                # fields on this master (Text6/7/8), unlike the Fire form's
+                # delegation to the attached schedule — read the field
+                # values themselves rather than pdftotext's rendering (J-7
+                # above SKIPs on this form for exactly that reason: the
+                # label and the typed value do not land within its 25-char
+                # window in the extracted text layer).
+                def _num(s):
+                    try:
+                        return float(str(s).replace(',', ''))
+                    except (TypeError, ValueError):
+                        return None
+                mp, mdp, mbal = (_num(mf.get('Text6')), _num(mf.get('Text7')),
+                                _num(mf.get('Text8')))
+                if price is None or dep is None:
+                    rec('SKIP', 'Master price fields match the schedule',
+                        'schedule Purchase Price or Deposit unresolved')
+                else:
+                    want_bal = price - dep
+                    ok = (mp is not None and abs(mp - price) < 0.01
+                         and mdp is not None and abs(mdp - dep) < 0.01
+                         and mbal is not None and abs(mbal - want_bal) < 0.01)
+                    rec('PASS' if ok else 'FAIL',
+                        'Master price fields match the schedule',
+                        f'master Purchase Price {mf.get("Text6")!r}, Down Payment '
+                        f'{mf.get("Text7")!r}, Balance {mf.get("Text8")!r} vs schedule '
+                        f'price {price}, deposit {dep}')
             foreign = set()
             for v in mf.values():
                 for mm in ENTITY.finditer(str(v)):
@@ -1047,6 +1095,17 @@ def verify(job):
                 a = re.search(r'\d+', mterm or ''); b = re.search(r'\d+', rterm)
                 rec('PASS' if a and b and a.group(0) == b.group(0) else 'FAIL',
                     'Rider term equals master term', f'master "{mterm}" vs rider "{rterm}"')
+            if kind == 'residential':
+                # DRAFTER-PRESEND-CHECKLIST.md item 14: "Rider: subscriber
+                # name and agreement date match the master." Both forms
+                # leave this field blank until signing (CLAUDE.md hard rule
+                # 4 permits TBD only in the schedule-date fields, not here),
+                # so two blanks are as much a match as two identical dates.
+                rdate = next((str(v).strip() for k, v in rf.items()
+                             if k.lower().startswith('text2')), '')
+                rec('PASS' if mdate == rdate else 'FAIL',
+                    'Rider agreement date matches the master',
+                    f'master "{mdate}" vs rider "{rdate}"')
     elif masters:
         rec('SKIP', 'Rider checks', 'no rider PDF in folder')
 
@@ -1163,8 +1222,9 @@ def verify(job):
 
     # J-9: Billing frequency is Quarter Annually specifically.
     # Billing-checkbox keys and names come from MASTER_FORM_SPECS[kind] — the
-    # Commercial Fire and Commercial Security masters number these boxes
-    # differently (issue 336). The customer's-written-request exception in
+    # Commercial Fire master numbers these boxes differently from the
+    # Commercial Security (issue 336) and Residential Security (issue 337)
+    # masters. The customer's-written-request exception in
     # the checklist item makes any non-Quarter tick a WARN, not a FAIL.
     if not masters:
         rec('SKIP', 'Billing frequency is Quarter Annually',
