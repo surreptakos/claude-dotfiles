@@ -20,7 +20,9 @@ cache, because a cached value is stale until Excel reopens the file.
 Covers the mechanical items only. Designation, which conditional clarifications
 a job earns, BASELINES section 0 merges and print layout stay human. The
 registry entity-name check (section A') is advisory: it WARNs on a mismatch and
-the rep-confirmed name governs (OPEN-DECISIONS item 19).
+the rep-confirmed name governs (OPEN-DECISIONS item 19). The Zoho
+cross-checks (zoho_crosscheck.py) are advisory too: WARN or PASS, SKIP without
+a credential.
 """
 import sys, os, re, fnmatch, warnings
 warnings.filterwarnings('ignore')
@@ -621,6 +623,22 @@ def verify(job):
             rec('WARN', 'Registry entity-name matches',
                 f'schedule "{sub_name}" vs registry "{legal}" ({tag}); '
                 f'rep-confirmed name governs (see DRAFTER-PRESEND-CHECKLIST A.1)')
+
+    # ---- Zoho cross-checks (advisory WARN/SKIP only; issue 229) ----
+    # Hard rule 5: Zoho is validated against the package, never trusted, and
+    # nothing read from Zoho is written anywhere. See zoho_crosscheck.py.
+    try:
+        import zoho_crosscheck
+        mt_val = S.resolve(f'G{mt_row}')[0] if mt_row else None
+        zoho_crosscheck.run(
+            job, rec,
+            prospect=S.col('G', pro_row).strip() if pro_row else '',
+            subscriber=sub_name,
+            site=site.splitlines()[0].strip() if site else '',
+            monthly_total=mt_val,
+            workups=_find_workup(job))
+    except Exception as e:
+        rec('SKIP', 'Zoho cross-checks ran', f'{type(e).__name__}: {e}')
 
     # ---------------- B) scope of work ----------------
     sow = ' '.join(S.col('A', r) for r in range(sow_lbl + 1, min(sow_lbl + 4, eq_lbl))).strip()

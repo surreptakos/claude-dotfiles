@@ -2,11 +2,10 @@
 
 The ruling ledger, opened 2026-08-11 and carried forward since. An item is open when it carries no **Resolved** or **Executed** line; the ledger below is history and is never rewritten (Dan's rule 2026-08-25: do not restate item counts elsewhere — read this file).
 
-## Still open (2026-09-18)
+## Still open (2026-09-24)
 
 - **12** — Tom's five answers (CUSTOMER-14 only; live-deal work, not roadmap).
 - **13** — Fire Alarm System to Code checkbox and plans-filed-by field (CUSTOMER-14 only).
-- **15** — Pre-ticked checkbox semantics on the Commercial Security and Residential masters; gates their field maps (spec 215 out of scope).
 - **16** — Whether anything still in flight from the portfolio sweep gets corrected.
 - **17** — Deleting the two duplicate document sets (Claude project knowledge; Documents folder) — off-repo.
 - **22** — The crew-day floor remainder of the subcontractor markup ruling.
@@ -63,7 +62,7 @@ Everything else below is resolved, and where execution was pending it is recorde
 
 **14. Retiring Active Alarm as lessor.** Three LEASE packages sit in the agreements folder and the Lease Guide and Calculator documents three AAC-as-lessor structures with our own rate factors. Nothing has been moved or deleted, because St. Sophia, Wentworth Volo and Cleaver Brooks are live AAC-as-lessor leases and the forms must stay retrievable. ~~Say how you want them marked superseded: a `_RETIRED` prefix on the folders, a note inside each, or a line at the top of the Lease Guide.~~ **Resolved 2026-08-21** (Dan, in-session ruling): **`_RETIRED` prefix on the folders.** Visible at a glance, no file content touched, forms stay retrievable for the three live leases. The jobs drive is not mounted on the dev machine; the rename executes the next time it is reachable. **Executed** — Dan confirmed the `_RETIRED` rename done, 2026-09-18 (in session, recorded on issue 273). The Lease Guide wrong-payment risk was split out to item 18 (Dan's ruling, 2026-08-21).
 
-**15. Pre-ticked checkboxes on the other masters.** The Commercial Security master ships with six boxes ticked and the Residential with seven. On the Fire master, two pre-ticked boxes turned out to be correct defaults (Quarter Annually billing, and 2(a) service per call). I did not touch the other two forms because their field semantics are unmapped and a default cannot be told from a leftover without reading the clauses. Worth a look before the next security or residential job.
+**15. Pre-ticked checkboxes on the other masters.** The Commercial Security master ships with six boxes ticked and the Residential with seven. On the Fire master, two pre-ticked boxes turned out to be correct defaults (Quarter Annually billing, and 2(a) service per call). I did not touch the other two forms because their field semantics are unmapped and a default cannot be told from a leftover without reading the clauses. ~~Worth a look before the next security or residential job.~~ **Resolved 2026-09-24** (Dan, in-session ruling, recorded on issue 334): **answered by issue 40.** The builder sets every mapped box from deal facts and never consults template state (issue 40 ruling 1); every pre-tick was removed from the four blank forms under issue 42 (ruling 2); the box mapping is the RMR Items "Standard RMR" tab (ruling 4). Nothing remains open on the two forms; their field maps are issues 336 and 337.
 
 **16. The portfolio sweep.** 25 drafted packages carry findings, listed per job in `references/PORTFOLIO-SWEEP.md`. Signed and exported packages are history; the value is in the recurring patterns, and the top two trace to template defects fixed today. Decide whether anything still in flight gets corrected.
 
