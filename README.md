@@ -20,7 +20,8 @@ script or the global rules text is edited here, on a branch, and merging to mast
 | Path | Restores to | Why it matters |
 |---|---|---|
 | `aac-skills/` | `~/.claude/skills/` | every skill, one hand-edited tree; also what the plugin payload is built from |
-| `profile/claude/CLAUDE.md` | `~/.claude/CLAUDE.md` | global governance — caveman, YES, ask-matt, the AAC Google access notes. The payload's rules text is copied from this file |
+| `profile/claude/CLAUDE.md` | — (not restored) | global governance — caveman, YES, ask-matt, the AAC Google access notes. The one source the payload's rules text is copied from; a desktop gets it from the aac-skills plugin's global-rules hook, like a container (issue 732) |
+| `profile/claude/global-pointer.md` | `~/.claude/CLAUDE.md` | a short pointer: rules arrive via the plugin, their source is the file above, then a heading for machine-local notes. It must never carry the rules file's first line, because the hook stays silent when the global CLAUDE.md does |
 | `profile/claude/settings.json` | `~/.claude/settings.json` | hook wiring, plugin marketplaces, status line |
 | `profile/claude/hooks/` | `~/.claude/hooks/` | `session-gate.js`, `governance-reminder.js`, the stop-slop pair — and the source the packager copies into the plugin |
 | `profile/claude/agents/` | `~/.claude/agents/` | user-level subagent definitions, including the fleet's tool-restricted verifier |
@@ -248,7 +249,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade`
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade|rules-copy`
 breaks one thing on purpose so the matching check can be watched going red. A check that has only
 ever passed is not yet a check — the retired `dead-link` fault passed on its first attempt because
 it deleted a directory nothing linked to.
