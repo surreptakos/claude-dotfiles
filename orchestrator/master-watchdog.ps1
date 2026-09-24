@@ -179,7 +179,12 @@ function Get-StateMarkers {
     }
     # `**Heartbeat N <em dash or hyphen> YYYY-MM-DD HH:MM UTC**` and `**Pass complete <dash> YYYY-MM-DD HH:MM UTC**`.
     $rx = '(?m)\*\*(Heartbeat\s+\d+|Pass complete)\s*[—\-]\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})\s+UTC\*\*'
-    $out = @{ Heartbeat = $null; PassComplete = $null }
+    # Issue 711: a master can stamp a marker ahead of the clock. Any marker later than now is
+    # clamped to now and logged. HeartbeatTrusted is the latest heartbeat that was NOT clamped:
+    # only it can supersede a Pass complete, so one bad stamp cannot block the close path (the
+    # idle-transcript rule still keeps a genuinely reopened master alive).
+    $now = [datetime]::UtcNow
+    $out = @{ Heartbeat = $null; PassComplete = $null; HeartbeatTrusted = $null }
     foreach ($m in [regex]::Matches($body, $rx)) {
         $ts = [datetime]::ParseExact(
             ($m.Groups[2].Value + ' ' + $m.Groups[3].Value),
@@ -188,7 +193,15 @@ function Get-StateMarkers {
             [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
         $key = 'Heartbeat'
         if ($m.Groups[1].Value -like 'Pass complete*') { $key = 'PassComplete' }
+        $clamped = $false
+        if ($ts -gt $now) {
+            $ahead = [int][math]::Ceiling(($ts - $now).TotalMinutes)
+            Write-Info "issue #${Issue}: '$($m.Groups[1].Value) $($ts.ToString('u'))' marker in the future (+${ahead}m) - clamped to now $($now.ToString('u'))"
+            $ts = $now
+            $clamped = $true
+        }
         if ($null -eq $out[$key] -or $ts -gt $out[$key]) { $out[$key] = $ts }
+        if ($key -eq 'Heartbeat' -and -not $clamped -and ($null -eq $out.HeartbeatTrusted -or $ts -gt $out.HeartbeatTrusted)) { $out.HeartbeatTrusted = $ts }
     }
     return $out
 }
@@ -236,10 +249,12 @@ function Get-BootPrompt {
             "Check your state issue for the current state and that no other master serves " +
             "$($R.Repo); claim venue local-pc there. Then run ONE pass, no /loop: " +
             "serve this repo until nothing is actionable or a cap is hit, heartbeating as you go. When the pass is done, clear " +
-            "the venue, write a line **Pass complete - YYYY-MM-DD HH:MM UTC** (current UTC) at the top of your state issue's " +
+            "the venue, write a line **Pass complete - YYYY-MM-DD HH:MM UTC** at the top of your state issue's " +
             "heartbeat section, say pass complete, and stop; the watchdog closes this window once it has been idle five minutes " +
             "and starts the next repo. If a message arrives after that, the pass is reopened: write a fresh Heartbeat line " +
-            "before doing anything else, so the watchdog does not close you mid-work. My messages in this terminal override everything.")
+            "before doing anything else, so the watchdog does not close you mid-work. Take the time on every Heartbeat and " +
+            "Pass complete line from running date -u at the moment you write it (format in LOCAL-RUNBOOK.md), never from " +
+            "memory or an estimate (issue 711). My messages in this terminal override everything.")
 }
 
 function Stop-MasterWindow {
@@ -360,7 +375,7 @@ foreach ($p in $rcProcs) {
     $pc = $null
     if ($markers) { $pc = $markers.PassComplete }
     $hb = $null
-    if ($markers) { $hb = $markers.Heartbeat }
+    if ($markers) { $hb = $markers.HeartbeatTrusted }   # issue 711: a clamped future stamp never reopens a pass
     $lastWrite = Get-TranscriptLastWriteUtc -R $row -StartedUtc $started
     $idleMin = -1
     if ($lastWrite) { $idleMin = [int](([datetime]::UtcNow - $lastWrite).TotalMinutes) }

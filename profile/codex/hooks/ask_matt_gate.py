@@ -283,6 +283,11 @@ def _runner_spelling() -> str:
     return sys.executable or "python3"
 
 
+def _claude_declaration(session_id: str, nonce: str) -> str:
+    """The exact declare-claude command for THIS session and nonce, as the prompt and deny print it."""
+    return f'{_runner_spelling()} "{SCRIPT}" declare-claude "{session_id}" "{nonce}" <flow>'
+
+
 def _is_exact_declaration_command(command: str, turn_id: str) -> bool:
     if not isinstance(command, str):
         return False
@@ -430,7 +435,7 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     pending_lint = (previous or {}).get("pending_lint") or []
     context = (
         "ASK-MATT GATE: Before tools or final answer, name applicable route, then run "
-        f"`{_runner_spelling()} \"{SCRIPT}\" declare-claude \"{session_id}\" \"{nonce}\" <flow>` — as the ONLY "
+        f"`{_claude_declaration(session_id, nonce)}` — as the ONLY "
         "command in that shell call, nothing chained after it, or the call is denied. "
         "New feature or multi-session build: to-spec, then to-tickets. Single-session build: implement. "
         "Broken behavior: diagnosing-bugs. Raw issues: triage. "
@@ -818,9 +823,15 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     # The wording names the two ways a first call fails: no declaration yet, or a declaration with
     # a command chained onto it. A session that chained `; ls` onto its declaration read the old
     # text as "the declaration failed" and retried the same shape, losing two turns to the gate.
+    # Issue 715: the deny names the declaration itself, with THIS session's id and nonce. After a
+    # model switch restarts the session, the context still holds gate prompts naming the old id and
+    # nonces; a deny that only said "run the declaration from the prompt gate" let the model copy a
+    # stale one, recording state under the old id and leaving every call here denied for minutes.
     return _deny(
-        "Ask Matt, Yes, and caveman ultra missing. Run the exact declaration from the prompt gate "
-        "as the ONLY command in the call — a chained command after it denies the whole call."
+        "Ask Matt, Yes, and caveman ultra missing. Run exactly "
+        f"`{_claude_declaration(session_id, nonce)}` (this session's id and current nonce; any "
+        "id or nonce from an earlier prompt is stale) as the ONLY command in the call — a chained "
+        "command after it denies the whole call."
     )
 
 
