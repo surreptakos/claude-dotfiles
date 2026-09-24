@@ -818,11 +818,9 @@ def main():
         (scripts_dir / name).write_bytes(
             src_file.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
 
-    # The stop-slop hooks ride WITHOUT the dedup guard on purpose: unlike the governance scripts,
-    # a desktop dispatches these from settings.json by their ~/.claude path, and the guard's job is
-    # to stop a live-tree twin and the payload copy both firing. Here the two copies are the same
-    # file reached by two paths, so the guard would silence the payload copy on the one machine
-    # that also has the live one, and a container has no live tree to collide with either way.
+    # The stop-slop hooks ride WITHOUT the dedup guard. Since issue 733 no settings.json names
+    # them - a desktop runs this payload copy, as a container does - so there is no live-tree twin
+    # to yield to, and an entry put back in settings.json would fire each of them twice.
     if slop_present:
         slop_tools = hooks_dir / "tools"
         slop_tools.mkdir()

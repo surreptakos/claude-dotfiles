@@ -467,7 +467,12 @@ test(`fleet script ${FLEET_SCRIPT_REL} excludes the CLI session registry from th
 // Issue 677: ~/.claude/skills/synced/<id>/manifest.json is the CLI's skills-sync catalogue, rewritten
 // by the verifying session's own Skill and ToolSearch loads. Run the generated find against a fake
 // home: the bookkeeping paths stay quiet and a real implementer write under ~/.claude still fires.
-test('live-tree find skips the CLI skills-sync manifest but still catches an implementer write (issue 677)', () => {
+test('live-tree find skips the CLI skills-sync manifest but still catches an implementer write (issue 677)', (t) => {
+  // The rail runs in a Linux container. On a Windows runner Git Bash's `find` prints POSIX paths
+  // (/c/Users/...) for a HOME the test created with a drive letter, so path.relative() cannot pair
+  // them and the assertion below fails on the path spelling, not on the exclusions: the restore
+  // suite went red on master at 1c250885 for exactly that. The Linux gate keeps the case live.
+  if (process.platform === 'win32') { t.skip('bash find prints POSIX paths for a Windows HOME; covered by the Linux gate'); return; }
   const home = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'fleet-677-'));
   try {
     const quiet = ['.claude/skills/synced/abc_def/manifest.json', '.claude/sessions/42.json',

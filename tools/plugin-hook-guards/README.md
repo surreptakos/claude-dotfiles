@@ -22,7 +22,9 @@ the live-tree entry, and the plugin copy exits 0 silently to let it fire once.
 - **PC with the settings entries still present**: guard finds the entry,
   exits 0 silently; the user-settings entry fires the live-tree copy once.
 - **PC after the entries are removed**: guard finds nothing; the plugin copy
-  runs. One fire per event.
+  runs. One fire per event. This is the live desktop state since issue 733:
+  the committed `settings.json` names no governance script and pull no longer
+  writes `~/.claude/hooks` or `~/.claude/tools`.
 
 It deliberately does **not** key on the live *file* existing. The live-tree
 files stay after the entries come out: `profile/codex/hooks/` and `profile/claude/hooks/` are

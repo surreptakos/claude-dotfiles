@@ -116,10 +116,13 @@ PACKAGES = {
     'Elevator Monitoring': ('Elevator Package',
                          'Elevator Monitoring Agreement.pdf',
                          'Elevator - Security Rider Additional Locations Rev.1.pdf'),
+    'Residential Security': ('Residential Security Package',
+                         'Residential - Security Master Agreement.pdf',
+                         'Residential - Security Rider Additional Locations Rev.1.pdf'),
 }
 # Forms this builder can fill. build_agreements refuses any other family by
 # name (issue 40's field-map ruling; Elevator Monitoring is issue 335,
-# Residential is issue 337).
+# Commercial Security is issue 336, Residential Security is issue 337).
 MAPPED_FAMILIES = tuple(PACKAGES)
 # Commercial Fire All-in-One field map, derived from the form's own layout.
 FIRE = {
@@ -195,6 +198,66 @@ ELEVATOR = {
     'connection_charge': 'Text12', 'setup': 'Text13', 'monitoring': 'Text14',
     'frequency': 'Text15',
 }
+
+# Residential Security All-in-One field map (issue 337), derived the same
+# way as FIRE above: from the form's own layout (field Rect vs. the nearby
+# label text, poppler pdftotext -bbox against pypdf's annotation rects).
+# Unlike the Fire form, this form's field names carry no leading dot.
+# `date` (Text1, "Date:") is left unfilled by the builder, matching the
+# Fire form's own precedent of never carrying a signature-date field
+# (CLAUDE.md hard rule 4 permits TBD only in the two schedule-date fields
+# below; the top Date: field is neither TBD nor guessed, it stays blank
+# until signing, same as the rider's own date field carries '').
+RESIDENTIAL = {
+    'date': 'Text1', 'name': 'Text2', 'address': 'Text3',
+    'phone': 'Text4', 'cell': 'Text5',
+    'purchase_price': 'Text6', 'down_payment': 'Text7', 'balance': 'Text8',
+    'approx_start': 'Text9', 'substantial_completion': 'Text10',
+    'term': 'Text22',
+    # §2 "Check services provided" overview checklist — mirrors whichever
+    # of the lettered §3 paragraphs below are selected.
+    'cb2_monitoring': 'CheckBox1', 'cb2_alarm_verification': 'CheckBox2',
+    'cb2_other': 'CheckBox3', 'cb2_service': 'CheckBox4',
+    'cb2_self_monitoring': 'CheckBox5', 'cb2_cyber_security': 'CheckBox6',
+    'cb2_inspection': 'CheckBox7', 'cb2_remote_access': 'CheckBox8',
+    # Billing frequency
+    'cb_monthly': 'CheckBox11', 'cb_quarter': 'CheckBox12',
+    'cb_semi': 'CheckBox13', 'cb_annual': 'CheckBox14',
+    # (a) Monitoring Center Charges
+    'cb_a_install': 'CheckBox15', 'a_install_amount': 'Text11',
+    'cb_a_monthly': 'CheckBox16', 'a_monthly_amount': 'Text12',
+    # (b) Remote Subscriber Access / Video / CCTV / Audio / Self-Monitoring
+    'cb_b_main': 'CheckBox17', 'b_amount': 'Text13',
+    'cb_b_recording_device': 'CheckBox18',
+    'cb_b_remote_video_live': 'CheckBox22',
+    'cb_b_video_clips_on_alarm': 'CheckBox19',
+    'cb_b_verification_recorded_clips': 'CheckBox23',
+    'cb_b_cloud_storage': 'CheckBox20',
+    'cb_b_remote_access_by_subscriber': 'CheckBox24',
+    'cb_b_video_to_smart_phone': 'CheckBox21',
+    'cb_b_self_monitoring': 'CheckBox25',
+    'cb_b_audio': 'CheckBox27',
+    'cb_b_other': 'CheckBox26', 'b_other_describe': 'Text1444',
+    # (c) Alarm Signal Verification
+    'cb_c_main': 'CheckBox28', 'c_amount': 'Text14',
+    # (d) Service — select (i) per call or (ii) monthly
+    'cb_d_percall': 'CheckBox29',
+    'cb_d_monthly': 'CheckBox30', 'd_monthly_amount': 'Text16',
+    # (e) Inspection and Testing
+    'cb_e_main': 'CheckBox31', 'e_amount': 'Text17',
+    'e_inspections_per_year': 'Text18',
+    # (f) Self-Monitoring
+    'cb_f_main': 'CheckBox32', 'f_amount': 'Text19',
+    # (g) Cyber Security: Compliant Encryption
+    'cb_g_main': 'CheckBox33', 'g_amount': 'Text20',
+    # IN LIEU OF SEPARATE RECURRING CHARGES IN PARAGRAPHS 3(a)-(g)
+    'cb_in_lieu_of': 'CheckBox34', 'in_lieu_amount': 'Text21',
+}
+# Every checkbox on the Residential master, so the builder can set each one
+# explicitly on or off (never leaves one at the template's own default —
+# OPEN-DECISIONS.md item 15, resolved by issue 40 ruling 1).
+RESIDENTIAL_ALL_CHECKBOXES = tuple(
+    v for k, v in RESIDENTIAL.items() if k.startswith('cb'))
 
 # Package composition (issue #225, spec 215 stream B). Which documents make
 # up the package is governed by the situation rows of
@@ -549,6 +612,127 @@ def _elevator_master_rmr(systems):
         if pick is not None:
             total = (total or 0.0) + float(pick['unit'])
     return total
+
+
+# Canonical RMR names that populate the Residential Security master (issue
+# 337). Names are cited verbatim from MAPPING-APPENDIX.md §3 — a unit test
+# enforces the verbatim match, same as the Fire names above.
+_RESIDENTIAL_MONITORING_NAMES = (
+    'Residential Security Monitoring via Phone Line',
+    'Residential Security Monitoring via Cellular Radio',
+    'Residential Smart Security Monitoring via Cellular Radio',
+    'Residential Smart Home Security Monitoring via Cellular Radio',
+)
+# The two "Smart" monitoring tiers bundle Remote Access by Subscriber
+# (MAPPING-APPENDIX.md §3, "Monitoring Center Charges + Remote Access by
+# Subscriber") — selecting one also ticks the (b) Remote Subscriber Access
+# paragraph's "Remote Access by Subscriber" box.
+_RESIDENTIAL_SMART_MONITORING_NAMES = (
+    'Residential Smart Security Monitoring via Cellular Radio',
+    'Residential Smart Home Security Monitoring via Cellular Radio',
+)
+# Repair Service is the same appendix row (and master paragraph, (d)(ii))
+# for every form; the Fire master's canonical name is reused rather than
+# restated (CLAUDE.md hard rule 1).
+_RESIDENTIAL_REPAIR_SERVICE_NAMES = _FIRE_MASTER_REPAIR_SERVICE_NAMES
+# RMR names whose MAPPING-APPENDIX.md §3 "Master agreement selection(s)"
+# column is "Other \"See Schedule\"" (with or without a Remote Access by
+# Subscriber companion box). The Residential form carries no lettered
+# "Other" paragraph the way the appendix's "Other" selection assumes, so
+# per §1 rule 6 ("select IN LIEU OF with the Monthly Total rather than
+# guessing") any of these names routes the whole master to the combine
+# route: every 3(a)-(g) box stays clear and IN LIEU OF carries the summed
+# Monthly Total.
+_RESIDENTIAL_OTHER_SEE_SCHEDULE_NAMES = (
+    'Win-Pak Hosted Access Control — each door',
+    'Maxpro Cloud Access Control — per door',
+    'Honeywell WIN-PAK SMU (Software Maintenance Upgrade Program)',
+    'Standard Software Support Agreement — Pro-Watch XXXXX Edition',
+    'Software Upgrade Agreement',
+    'Alta Cloud Access Control, Basic Tier — Up to X Entry/Entries',
+    'Alta Cloud Access Control, Premium Tier — Up to X Entry/Entries',
+    'Alta Cloud Access Control, Enterprise Tier — Up to X Entry/Entries',
+    'Azure Active Directory, 500 users, 60-minute sync, Alta Access',
+    'Azure Active Directory, 1000 users, 60-minute sync, Alta Access',
+    'Azure Active Directory, 500 users, 15-minute sync, Alta Access',
+    'Azure Active Directory, 1000 users, 15-minute sync, Alta Access',
+    '50 additional intercom call recipients, Alta Access Control',
+    '500 additional active users, Alta Access Control',
+    '1000 additional active users, Alta Access Control',
+    'Remote Tech Support',
+    'Communication Assurance Program',
+)
+
+
+def _categorize_residential_master_rmr(services):
+    """Sort one System's RMR service lines against the Residential master's
+    boxes (issue 337).
+
+    Returns ``(monitoring, repair_service, smart, combine, unmapped)``:
+
+    * ``monitoring`` / ``repair_service`` — the first canonical service dict
+      of that category (None if the System sells none), same first-wins
+      rule as ``_categorize_fire_master_rmr``.
+    * ``smart`` — True when a Smart-tier monitoring name was sold (bundles
+      Remote Access by Subscriber per MAPPING-APPENDIX.md §3).
+    * ``combine`` — True when a service names an "Other \"See Schedule\""
+      row; the caller routes the whole master to the IN LIEU OF line.
+    * ``unmapped`` — descriptions that match none of the canonical name
+      sets above. CLAUDE.md hard rule 7 forbids inventing a mapping for
+      these; the caller leaves their box unticked and raises them as a
+      question in the build's handoff output rather than guessing or
+      failing the build.
+
+    Unlike ``_categorize_fire_master_rmr`` this does not trigger-substring
+    trap-detect: the Residential form's box set is far larger than Fire's
+    three cells, and per issue 337's acceptance criteria an unrecognized
+    RMR name is a question for the handoff, not a hard failure.
+    """
+    mon_names = {_norm_desc(x) for x in _RESIDENTIAL_MONITORING_NAMES}
+    smart_names = {_norm_desc(x) for x in _RESIDENTIAL_SMART_MONITORING_NAMES}
+    rep_names = {_norm_desc(x) for x in _RESIDENTIAL_REPAIR_SERVICE_NAMES}
+    other_names = {_norm_desc(x) for x in _RESIDENTIAL_OTHER_SEE_SCHEDULE_NAMES}
+
+    monitoring = repair_service = None
+    smart = combine = False
+    unmapped = []
+    for s in services or ():
+        desc = s.get('description', '')
+        n = _norm_desc(desc)
+        if n in mon_names:
+            if monitoring is None:
+                monitoring = s
+            if n in smart_names:
+                smart = True
+        elif n in rep_names:
+            if repair_service is None:
+                repair_service = s
+        elif n in other_names:
+            combine = True
+        else:
+            unmapped.append(desc)
+    return monitoring, repair_service, smart, combine, unmapped
+
+
+def _residential_master_rmr(systems):
+    """Aggregate ``_categorize_residential_master_rmr`` across every System
+    the way ``_fire_master_rmr`` aggregates the Fire categories: monitoring
+    and repair-service dollar amounts sum across Systems (first canonical
+    line per System), ``smart``/``combine`` OR across Systems, and every
+    System's unmapped descriptions concatenate in record order."""
+    mon_total = rep_total = None
+    smart = combine = False
+    unmapped = []
+    for s in systems:
+        mon, rep, sm, cb, um = _categorize_residential_master_rmr(s['services'])
+        if mon is not None:
+            mon_total = (mon_total or 0.0) + float(mon['unit'])
+        if rep is not None:
+            rep_total = (rep_total or 0.0) + float(rep['unit'])
+        smart = smart or sm
+        combine = combine or cb
+        unmapped += um
+    return mon_total, rep_total, smart, combine, unmapped
 
 
 # STARTER is the tree-shape v1.0 record ratified by Dan on 2026-09-10 (issue
@@ -1193,6 +1377,18 @@ def _write_service(w, r, s):
     w.set_num(SHEET, f'G{r}', round(s['qty'] * s['unit'], 2))
 
 
+def _compute_deposit(price, pr, deal):
+    """The schedule Deposit: ``pricing.deposit`` when the record carries one,
+    else 50% of a subscriber-paid price over $5,000, else 0. Shared by
+    ``build_schedule`` (the schedule's own Deposit cell) and
+    ``build_agreements`` (the Residential master's Down Payment field, which
+    must reconcile to the same figure — MAPPING-APPENDIX.md §3 J-7)."""
+    dep = pr.get('deposit')
+    if dep is None:
+        dep = round(price * 0.5, 2) if (price > 5000 and deal.get('paid_by') == 'subscriber') else 0
+    return dep
+
+
 def _site_line(site):
     """One Site's 'Site: <name>, <address>' text for a Site line cell."""
     return f"Site: {site['site_name']}, {site['site_address'].replace(chr(10), ', ')}"
@@ -1265,9 +1461,7 @@ def build_schedule(job, f, L, R):
     for i in range(EQ_CAP):
         w.set_row_hidden(SHEET, EQ_START + i, hidden=(i >= len(eq_rows)))
 
-    dep = pr.get('deposit')
-    if dep is None:
-        dep = round(price * 0.5, 2) if (price > 5000 and deal.get('paid_by') == 'subscriber') else 0
+    dep = _compute_deposit(price, pr, deal)
     w.set_num(SHEET, DEP_CELL, dep)
 
     if svc_plan is None:
@@ -1365,7 +1559,7 @@ def _fire_master_rmr(systems):
 def _fill_pdf(src, out, txt, cks):
     """Fill a form's text and checkbox fields explicitly and write the
     result. Shared by every mapped agreement (Fire, Commercial Security,
-    Elevator Monitoring):
+    Elevator Monitoring, Residential Security):
     every checkbox on the form gets set from ``cks`` (never left at the
     template's own state) and every field named in ``txt`` gets its value,
     including an explicit empty string for a field the record holds no
@@ -1600,6 +1794,96 @@ def _security_agreement_fields(f, dep):
             'Commercial Security Rider Additional Locations', questions)
 
 
+def _residential_agreement_fields(f, dep):
+    """(text, checks) for the Residential Security master and its rider
+    (issue 337), in the same shape as _security_agreement_fields so the
+    family dispatch in build_agreements shares one _fill_pdf/naming path.
+
+    Every checkbox on the form is set explicitly on or off
+    (RESIDENTIAL_ALL_CHECKBOXES). An RMR description with no mapping in
+    MAPPING-APPENDIX.md §3 leaves its box unticked and comes back as a
+    question for the build's handoff (CLAUDE.md hard rule 7), never a
+    guessed box.
+    """
+    deal, cust = f['deal'], f['customer']
+    price = float(f['pricing']['price'])
+    if dep is None:
+        dep = _compute_deposit(price, f['pricing'], deal)
+    mon, rep, smart, combine, unmapped = _residential_master_rmr(f['systems'])
+    # CLAUDE.md hard rule 7: a standard silent on this description is a
+    # question to record, not a mapping to invent. The box for this line
+    # stays unticked (never defaulted to a guess); the question surfaces
+    # in the build's printed handoff via f['held'].
+    questions = [
+        f'services description {desc!r} has no Contract selections '
+        'value in MAPPING-APPENDIX.md §3 (the RMR Items "Standard RMR" '
+        'tab); its box on the Residential master was left unticked — '
+        'confirm the mapping before send.'
+        for desc in unmapped
+    ]
+    monthly_total = sum(float(s.get('qty', 1)) * float(s.get('unit', 0))
+                        for sysrec in f['systems'] for s in sysrec['services'])
+    amount = lambda x: f'{x:.2f}' if x is not None else 'N/A'
+
+    text = {
+        RESIDENTIAL['name']: cust['subscriber_name'],
+        RESIDENTIAL['address']: cust['billing_address'].replace('\n', ', '),
+        RESIDENTIAL['phone']: cust.get('phone', ''),
+        RESIDENTIAL['cell']: cust.get('cell', ''),
+        RESIDENTIAL['purchase_price']: f'{price:.2f}',
+        RESIDENTIAL['down_payment']: f'{dep:.2f}',
+        RESIDENTIAL['balance']: f'{(price - dep):.2f}',
+        # CLAUDE.md hard rule 4 permits TBD only in these two schedule-date
+        # fields; no fact in the v1.0 record supplies an actual date.
+        RESIDENTIAL['approx_start']: 'TBD',
+        RESIDENTIAL['substantial_completion']: 'TBD',
+        RESIDENTIAL['term']: f"{deal['term_years']} years",
+        RESIDENTIAL['a_install_amount']: 'N/A',
+        # A Smart-tier monitoring line's single RMR figure already covers
+        # both (a) Monitoring and (b) Remote Access by Subscriber per
+        # MAPPING-APPENDIX.md §3's combined selection cell; the (b) dollar
+        # field is not a second, double-counted charge.
+        RESIDENTIAL['a_monthly_amount']: 'N/A' if combine else amount(mon),
+        RESIDENTIAL['b_amount']: 'N/A',
+        RESIDENTIAL['c_amount']: 'N/A',
+        RESIDENTIAL['d_monthly_amount']: amount(rep),
+        RESIDENTIAL['e_amount']: 'N/A',
+        RESIDENTIAL['e_inspections_per_year']: 'N/A',
+        RESIDENTIAL['f_amount']: 'N/A',
+        RESIDENTIAL['g_amount']: 'N/A',
+        RESIDENTIAL['b_other_describe']: '',
+        RESIDENTIAL['in_lieu_amount']:
+            amount(monthly_total - (rep or 0)) if combine else 'N/A',
+    }
+    checks = {k: False for k in RESIDENTIAL_ALL_CHECKBOXES}
+    checks[RESIDENTIAL['cb_quarter']] = True
+    # CONTRACT-PACKAGE-RULES.md §2.7: "Service is always checked on all
+    # agreements" — independent of the combine route below, which only
+    # folds the recurring-charge paragraphs the "Other" RMR names route to.
+    checks[RESIDENTIAL['cb2_service']] = True
+    checks[RESIDENTIAL['cb_d_percall']] = rep is None
+    checks[RESIDENTIAL['cb_d_monthly']] = rep is not None
+    if combine:
+        # MAPPING-APPENDIX.md §1 rule 6: the Residential form carries no
+        # lettered "Other" paragraph, so an RMR name whose selection is
+        # "Other \"See Schedule\"" combines on IN LIEU OF instead — every
+        # other 3(a)-(g) box this build would otherwise tick stays clear.
+        checks[RESIDENTIAL['cb_in_lieu_of']] = True
+        checks[RESIDENTIAL['cb2_other']] = True
+    else:
+        checks[RESIDENTIAL['cb2_monitoring']] = mon is not None
+        checks[RESIDENTIAL['cb_a_monthly']] = mon is not None
+        if smart:
+            checks[RESIDENTIAL['cb_b_main']] = True
+            checks[RESIDENTIAL['cb_b_remote_access_by_subscriber']] = True
+            checks[RESIDENTIAL['cb2_remote_access']] = True
+
+    rider_text = {'Text16666': cust['subscriber_name'], 'Text26666': '',
+                  'Text36666': str(deal['term_years'])}
+    return (text, checks, rider_text, {}, 'Residential Security Master Agreement',
+            'Residential Security Rider Additional Locations', questions)
+
+
 def build_agreements(job, f, R, family, dep=None):
     cust = f['customer']
     # Elevator Monitoring dispatches on the System name ahead of Fire, as
@@ -1617,6 +1901,8 @@ def build_agreements(job, f, R, family, dep=None):
         pkg_key = 'Commercial Fire'
     elif family == 'Commercial Security':
         pkg_key = 'Commercial Security'
+    elif family == RESIDENTIAL_FAMILY:
+        pkg_key = 'Residential Security'
     else:
         return None, None, (
             f'only the {", ".join(MAPPED_FAMILIES)} forms are mapped so far '
@@ -1632,6 +1918,9 @@ def build_agreements(job, f, R, family, dep=None):
         text, checks, rider_text, rider_checks, mlabel, rlabel = _fire_agreement_fields(f)
     elif pkg_key == 'Elevator Monitoring':
         text, checks, rider_text, rider_checks, mlabel, rlabel = _elevator_agreement_fields(f)
+    elif pkg_key == 'Residential Security':
+        text, checks, rider_text, rider_checks, mlabel, rlabel, questions = \
+            _residential_agreement_fields(f, dep)
     else:
         text, checks, rider_text, rider_checks, mlabel, rlabel, questions = \
             _security_agreement_fields(f, dep)
@@ -1667,6 +1956,22 @@ def main():
             json.dump(STARTER, fh, indent=2)
         print('wrote', p)
         return
+
+    # Pre-build gate first (issue 224, spec 215 stream C): a record the
+    # standards would reject stops here, before anything is resolved or written.
+    # With no record at all, the prerequisite and read_record messages below
+    # say what is missing.
+    import prebuild_gate
+    has_record = os.path.exists(os.path.join(job, '_facts.json'))
+    code, findings = prebuild_gate.run(job) if has_record else (0, [])
+    if code:
+        raise SystemExit('pre-build gate refused the record; nothing written '
+                         f'(prebuild_gate.py exit {code}):\n' + '\n'.join(
+                             f'  {st}  {item}  —  {detail}'
+                             for st, item, detail in findings
+                             if st in ('REFUSE', 'BAD')))
+    for _, item, detail in (x for x in findings if x[0] == 'WARN'):
+        print(f'gate WARN  {item}  —  {detail}')
 
     R = aac_paths.for_job(job)
     R.require('schedule_template', 'jobs_root')
