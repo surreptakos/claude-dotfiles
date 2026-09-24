@@ -90,9 +90,16 @@ Issue #9 decisions, 2026-08-19:
   mechanical path rewrite `\.claude\` → `\.claude-personal\` (`.codex` paths untouched) — the
   personal model, plugins, statusLine and prefs are preserved; project memories union-merge (work
   files copy in, newer mtime wins, `MEMORY.md` unions by pointer-line target).
-- **(b) Declined** — reverse memory sync. Personal-only memories never flow into the work profile
-  or into this repo: nothing here ever reads `~/.claude-personal`. Declined by default 2026-08-19;
-  flipping it requires an explicit owner instruction.
+- **(b) Superseded 2026-09-23** — declined on 2026-08-19, then flipped by owner instruction ("I
+  want two way sync between claude-personal and claude"). `profile/claude/tools/link-personal-profile.ps1`
+  merges personal-only content into `~/.claude`, then replaces `projects`, `agents`, `hooks`,
+  `tools`, `plans` and `file-history` in `~/.claude-personal` with junctions to their `~/.claude`
+  twins. Both accounts then read and write one copy: memories, transcripts (`/resume` spans both)
+  and file history. Personal-only memories come in only when born in a personal session, so work
+  memories that consolidation pruned stay pruned. Skills stay per profile by owner choice. Each
+  replaced folder is kept as `<dir>.pre-link-<stamp>` for rollback. Run it once, with no
+  personal-profile session open; a re-run reports "already linked". Once linked, the refresh
+  above is a no-op for those folders (its copies land on the same files).
 
 The refresh never deletes anything personal and never touches `.credentials.json`, `.claude.json`
 or any account state in either profile. On a machine without `~/.claude-personal` it does nothing
@@ -265,7 +272,6 @@ Switching *accounts* on one machine is a different problem, solved separately in
 profile. This repo is where the work profile is authored, and a pull refreshes the personal profile
 *from* what it restores.
 
-Reverse memory sync is also deliberately unsolved: the personal-only memories in
-`~/.claude-personal/projects/*/memory` never flow back into `~/.claude` or into this repo. That is
-a privacy default (declined 2026-08-19), not an oversight — nothing here ever reads
-`~/.claude-personal`, and flipping the direction requires an explicit owner instruction.
+Personal memories reach this repo only through the shared `~/.claude` tree once the profiles
+are linked (issue #9 decision (b) superseded 2026-09-23, see above); `sync.ps1` itself still
+never reads `~/.claude-personal`.
