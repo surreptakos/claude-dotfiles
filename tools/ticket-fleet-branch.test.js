@@ -21,7 +21,7 @@ const { spawnSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, resolveVerifierAgent, pickVerifierAgent,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
@@ -1316,6 +1316,35 @@ test('applyOpenPrs drops only candidates with a NAMED open PR (issue 430)', () =
     'a listing nothing reported drops nothing');
 });
 
+test('dropParkedTickets drops a Maybe Someday ticket from a label-driven listing (issue 786)', () => {
+  const tickets = [
+    { number: 4, milestone: 'Maybe Someday' },
+    { number: 5, milestone: '' },
+    { number: 22, milestone: 'maybe someday' },
+    { number: 38 },
+  ];
+  const applied = dropParkedTickets(tickets, []);
+  assert.deepEqual(applied.tickets.map((t) => t.number), [5, 38],
+    'a ticket parked in Maybe Someday never survives a label-driven listing, whatever its labels');
+  assert.deepEqual(applied.skipped, [
+    { ticket: 4, milestone: 'Maybe Someday' },
+    { ticket: 22, milestone: 'maybe someday' },
+  ], 'the dropped tickets carry their milestone, for skippedParked');
+});
+
+test('dropParkedTickets leaves an explicit args.tickets list untouched (issue 786)', () => {
+  const tickets = [{ number: 4, milestone: 'Maybe Someday' }, { number: 5, milestone: '' }];
+  const applied = dropParkedTickets(tickets, [4]);
+  assert.deepEqual(applied.tickets.map((t) => t.number), [4, 5],
+    'a parked ticket named explicitly by number still runs - the caller asked for it');
+  assert.deepEqual(applied.skipped, [], 'nothing is dropped when the caller named tickets explicitly');
+});
+
+test('dropParkedTickets handles absent input', () => {
+  assert.deepEqual(dropParkedTickets(null, null), { tickets: [], skipped: [] });
+  assert.deepEqual(dropParkedTickets(undefined, []), { tickets: [], skipped: [] });
+});
+
 test('selectWave splits the candidates into the wave and the three reasons the rest do not run', () => {
   const t = (number, blockedBy, handoffPending) => ({ number, blockedBy, handoffPending });
   const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])], 2);
@@ -1373,6 +1402,51 @@ test(`fleet script ${FLEET_SCRIPT_REL} ends the run when the label listing is em
     tickets: [{ number: 41, blockedBy: [] }, { number: 42, blockedBy: [] }],
   });
   assert.equal(kept.result, 'fell-through', 'a ticket the listing returned must still reach the wave');
+});
+
+// ---- Maybe Someday milestone parks a ticket before the wave (issue 786) ----
+// The reaper parks a ticket by milestone without touching its labels, so a label-driven scout
+// listing still returns it; the gate must drop it before the wave, name it in skippedParked, and
+// still run it when the caller named it explicitly.
+
+test(`fleet script ${FLEET_SCRIPT_REL} scout gate drops a Maybe Someday ticket from a label listing`, async () => {
+  const scout = {
+    candidateNumbers: [4, 5],
+    tickets: [
+      { number: 4, blockedBy: [], milestone: 'Maybe Someday' },
+      { number: 5, blockedBy: [], milestone: '' },
+    ],
+  };
+  const allParked = await driveScoutGate({ candidateNumbers: [4], tickets: [{ number: 4, blockedBy: [], milestone: 'Maybe Someday' }] });
+  assert.equal(allParked.result.ran, 0, 'a listing that is entirely parked ends the run with ran: 0');
+  assert.deepEqual(allParked.result.skippedParked, [{ ticket: 4, milestone: 'Maybe Someday' }],
+    'the parked ticket is still named in skippedParked on the early return');
+
+  const body = generatedBlock() + extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  const wrapper = new AsyncFunction(
+    'scout', 'explicitTickets', 'cfg', 'instrument', 'log',
+    body + '\nreturn { eligibleTickets, skippedParked };'
+  );
+  const logs = [];
+  const { eligibleTickets, skippedParked } = await wrapper(scout, [], { label: 'ready-for-agent' }, 'gh', (m) => logs.push(m));
+  assert.deepEqual(eligibleTickets.map((t) => t.number), [5],
+    'the scout gate\'s candidate filter must drop the parked ticket before the wave, whatever its labels');
+  assert.deepEqual(skippedParked, [{ ticket: 4, milestone: 'Maybe Someday' }],
+    'the run result must list the drop under skippedParked with its number');
+  assert.ok(logs.some((m) => /parked in the Maybe Someday milestone.*#4/.test(m)), 'the drop is logged');
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} scout gate still runs a parked ticket named explicitly`, async () => {
+  const scout = { candidateNumbers: [4], tickets: [{ number: 4, blockedBy: [], milestone: 'Maybe Someday' }] };
+  const body = generatedBlock() + extractScoutGate(fs.readFileSync(FLEET_SCRIPT, 'utf8'));
+  const wrapper = new AsyncFunction(
+    'scout', 'explicitTickets', 'cfg', 'instrument', 'log',
+    body + '\nreturn { eligibleTickets, skippedParked };'
+  );
+  const { eligibleTickets, skippedParked } = await wrapper(scout, [4], { label: 'ready-for-agent' }, 'gh', () => {});
+  assert.deepEqual(eligibleTickets.map((t) => t.number), [4],
+    'a parked ticket named explicitly in args.tickets must still run');
+  assert.deepEqual(skippedParked, [], 'nothing is dropped when the caller named the ticket by number');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} gates the lanes before any agent is spawned`, () => {

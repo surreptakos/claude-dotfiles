@@ -326,6 +326,39 @@ function confineToCandidates(tickets, candidateNumbers) {
 }
 
 /**
+ * Drop every candidate parked in the Maybe Someday milestone (issue 786).
+ *
+ * The ticket reaper parks tickets there without touching their labels (its own rule -
+ * docs/agents/memory), so a parked ticket still carries `ready-for-agent` and a label-driven
+ * scout listing still returns it. A label the reaper does not touch and a scout that reads only
+ * labels is the gap: on aac-sales-commissions on 2026-09-24 a label-driven run would have
+ * implemented five tickets the reaper had just parked against a speed-over-robustness ruling.
+ *
+ * This only gates the label-driven listing. A ticket named explicitly in `args.tickets` runs
+ * whatever its milestone - the caller asked for it by number, same as the kind/handoff gates
+ * leave explicit tickets alone.
+ *
+ * @param {Array<{number:number, milestone?:string|null}>|null|undefined} tickets
+ * @param {Array<number|string>|null|undefined} explicitNumbers - `args.tickets`, parsed; a
+ *   non-empty list means every candidate was named explicitly and none are dropped
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, milestone:string}>}} the surviving
+ *   tickets in order, and the dropped ones with the milestone that parked each, for the run
+ *   result's `skippedParked`
+ */
+function dropParkedTickets(tickets, explicitNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (Array.isArray(explicitNumbers) && explicitNumbers.length > 0) return { tickets: list, skipped: [] };
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const milestone = String((t && t.milestone) || '').trim();
+    if (milestone.toLowerCase() !== 'maybe someday') return true;
+    skipped.push({ ticket: parseInt(t.number, 10), milestone });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
  * Drop blockers that have already closed (issue 403).
  *
  * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
@@ -826,6 +859,7 @@ const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoM
     discoveryTriage: { type: 'boolean', description: 'true when the ticket is a discovery-triage chore: it asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run\'s follow-ups, a review list) to be turned into tracker items - tickets filed, doc fixes landed, noise struck. Two of these in one wave file the same finding twice if they run concurrently, so the fleet chains them.' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'every blocker issue number the ticket names, whatever its state - the run resolves open vs closed itself (issue 403)' },
+    milestone: { type: 'string', description: 'the ticket\'s milestone title, verbatim from the tracker (mcp list_issues/issue_read or gh api both return milestone.title); "" when the ticket has none. A milestone of "Maybe Someday" parks the ticket - dropped from a label-driven listing before the wave (issue 786) - so report it even when nothing else here reads it' },
   } } },
   repoMap: { type: 'string', description: '15-line map: key dirs, test command, conventions, rails' },
   testCommand: { type: 'string' },
@@ -1410,7 +1444,7 @@ const scout = await agent(
 2. Collect the tickets: ${scoutSource}
    That one listing is the WHOLE candidate set. Do not widen it under any circumstances: not another label, not a sweep of open issues, not a search, not a ticket you happened to read elsewhere. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it.
    A listing that comes back with zero tickets is a valid and complete answer, not a cue to go looking: return candidateNumbers: [] and tickets: [] and stop. The run ending with nothing to do is the correct outcome there.
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false.
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false. Report the ticket's milestone title verbatim (mcp list_issues/issue_read and gh api both return milestone.title; "" when it has none) - this run drops a Maybe Someday ticket from a label-driven listing before the wave (issue 786).
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
@@ -1433,7 +1467,16 @@ const candidateSet = explicitTickets.length ? explicitTickets : (scout && scout.
 const scoutTickets = confineToCandidates(scout && scout.tickets, candidateSet)
 const offListing = ((scout && Array.isArray(scout.tickets)) ? scout.tickets.length : 0) - scoutTickets.length
 if (offListing > 0) log(`${offListing} ticket(s) dropped: not in the ${explicitTickets.length ? 'requested numbers' : 'label listing'} the scout was given.`)
-if (!scout || !scoutTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
+// The ticket reaper parks a ticket in the Maybe Someday milestone without touching its labels
+// (its own rule), so a parked ticket still carries `ready-for-agent` and reaches here. A ticket
+// named explicitly in args.tickets still runs whatever its milestone - dropParkedTickets leaves
+// an explicit list untouched (issue 786). The pure filter is dropParkedTickets in the generated
+// block above.
+const parkedFilter = dropParkedTickets(scoutTickets, explicitTickets)
+const skippedParked = parkedFilter.skipped
+const eligibleTickets = parkedFilter.tickets
+if (skippedParked.length) log(`${skippedParked.length} ticket(s) skipped: parked in the Maybe Someday milestone - ${skippedParked.map(s => '#' + s.ticket).join(', ')}.`)
+if (!scout || !eligibleTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, skippedParked, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
 // [FLEET-SCOUT-GATE-END]
 
 // ---- test command override (issue 317) ----
@@ -1491,7 +1534,7 @@ These are blocker edges named by tickets this run is about to select from, so th
   return applied.tickets
 }
 // [FLEET-BLOCKER-STATE-END]
-const resolvedTickets = await resolveBlockerStates(scoutTickets)
+const resolvedTickets = await resolveBlockerStates(eligibleTickets)
 
 // ---- open-PR filter: one listing per launch, before wave selection (issue 430) ----
 // The same question the code lane used to ask per ticket, asked once for the whole candidate set.
@@ -2519,6 +2562,9 @@ return {
   // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
   // (issue 430): they never entered the wave, so the cap ran this many real tickets more.
   skippedOpenPR,
+  // Candidates parked in the Maybe Someday milestone by the ticket reaper, dropped from a
+  // label-driven listing before the wave (issue 786); an explicit args.tickets number still runs.
+  skippedParked,
   skippedOverCap: droppedCap,
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
