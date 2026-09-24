@@ -39,6 +39,9 @@
 #                                                        # commands carrying the literal
 #                                                        # ${CLAUDE_PLUGIN_ROOT} - must turn checks
 #                                                        # 3 and 7 red
+#   tests/bootstrap-test.sh --fault stale-payload        # issue 703: the remote master offers a
+#                                                        # newer payload than the one served;
+#                                                        # session-check's `!!` must turn check 6 red
 #   tests/bootstrap-test.sh --scenario clone-failure     # issue 483: an unreachable dotfiles repo
 #                                                        # leaves a FAILED marker naming the cause,
 #                                                        # a STOP additionalContext line, and gh;
@@ -69,8 +72,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 case "$FAULT" in
-  ""|missing-hook-entry|verbatim-plugin-root) ;;
-  *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root)" >&2; exit 64 ;;
+  ""|missing-hook-entry|verbatim-plugin-root|stale-payload) ;;
+  *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root, stale-payload)" >&2; exit 64 ;;
 esac
 case "$SCENARIO" in
   ""|clone-failure) ;;
@@ -370,6 +373,50 @@ else
     grep -F 'payload' "$drift_out" | sed -n '1,5p' >&2
   else
     pass "session-check does not claim a master match it cannot prove: $(grep -Ec 'master offers|master version could not be read' "$drift_out") honest line(s)"
+  fi
+
+  # Issue 703: the served payload must be the one master offers, and session-check is what says
+  # so, off the REMOTE, through the real fetch path (no pinned manifest). A fixture remote holds
+  # this payload; the dotfiles clone the check fetches in points at it. Under
+  # `--fault stale-payload` the remote has moved on - a newer plugin.json and one skill a revision
+  # ahead - so the served payload is two versions stale the way the 2026-09-23 Routine's was, and
+  # the check must say `!!` with both versions and name the skill, turning this red.
+  REMOTE="$SCRATCH/remote-dotfiles"
+  mkdir -p "$REMOTE/marketplace"
+  cp -r "$PAYLOAD" "$REMOTE/marketplace/aac-skills"
+  if [ "$FAULT" = "stale-payload" ]; then
+    python3 - "$REMOTE/marketplace/aac-skills" <<'PYSTALE'
+import json, os, re, sys
+root = sys.argv[1]
+mf = os.path.join(root, '.claude-plugin', 'plugin.json')
+doc = json.load(open(mf))
+doc['version'] = doc['version'] + '9'
+json.dump(doc, open(mf, 'w'), indent=2)
+skill = sorted(os.listdir(os.path.join(root, 'skills')))[0]
+p = os.path.join(root, 'skills', skill, 'SKILL.md')
+text = open(p).read()
+text = re.sub(r"(revision:\s*'?)(\d+)", lambda m: m.group(1) + str(int(m.group(2)) + 9), text, count=1)
+open(p, 'w').write(text)
+print(f"  fault injected: remote master now offers v{doc['version']} and a newer {skill}")
+PYSTALE
+  fi
+  git -C "$REMOTE" init -q -b master
+  git -C "$REMOTE" add -A
+  git -C "$REMOTE" -c user.name=bootstrap-gate -c user.email=gate@localhost commit -q -m 'fixture master'
+  git clone -q --depth 1 "file://$REMOTE" "$CLEAN_HOME/.aac-dotfiles" 2>/dev/null
+  remote_out="$SCRATCH/session-check-remote.txt"
+  ( cd "$FIXTURE" && env -i \
+      PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+      node "$CHECK" ) >"$remote_out" 2>&1
+  if grep -qF "payload matches dotfiles master (v$version)" "$remote_out" \
+     && ! grep -qF 'origin/master offers' "$remote_out"; then
+    pass "session-check read the remote's plugin.json at check time and it matches the served v$version"
+  else
+    fail "the served payload is not what the remote master offers: $(grep -F 'origin/master offers' "$remote_out" | sed 's/^ *//' | head -1)"
+    grep -F 'stale skills' "$remote_out" | sed 's/^ */        /' >&2
+    grep -F 'payload' "$remote_out" | sed -n '1,5p' >&2
   fi
 
   # The --end mechanical gate (issue 622) ships in the payload, so the container has it too.

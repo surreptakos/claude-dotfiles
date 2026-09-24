@@ -62,5 +62,12 @@ jobs:
             exit 1
           fi
           echo "the gate fails when the merged commands are not seated for settings.json, as it must"
-      - name: Clone failure — an unreachable dotfiles repo must leave a named STOP, not a missing marker (issue 483)
+      - name: Fault injection — a served payload older than the remote master must turn this red (issue 703)
+        run: |
+          if tests/bootstrap-test.sh --fault stale-payload; then
+            echo "::error::the gate passed with the remote master a payload version ahead of the one served"
+            exit 1
+          fi
+          echo "the gate fails when the served payload is behind the remote, as it must"
+      - name: Clone failure —an unreachable dotfiles repo must leave a named STOP, not a missing marker (issue 483)
         run: tests/bootstrap-test.sh --scenario clone-failure
