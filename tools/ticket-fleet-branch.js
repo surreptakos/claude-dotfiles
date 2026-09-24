@@ -570,6 +570,73 @@ function pickImplModel(level, attempt, cfg) {
   return pins[level] || c.implModel;
 }
 
+/**
+ * Pure (issue 654): what a deliverer's `git ls-remote --exit-code --heads origin <branch>` runs say
+ * about the branch - `lookups` is [{exitCode, output}] in the order they ran. "Could not tell" is
+ * not "absent": run 6ab1884a's deliverer read a lookup that printed nothing as a missing branch
+ * while the ref sat on origin.
+ *   'present'      - some run exited 0 and printed a refs/heads/ line.
+ *   'absent'       - at least two runs, every one exited 2 (git's own "no matching refs" answer
+ *                    under --exit-code) with no output. One run is never enough.
+ *   'undetermined' - anything else: no runs, a lone run, any other non-zero exit (network, auth,
+ *                    a cwd whose origin is another repo), or an exit 0 that printed nothing.
+ */
+function classifyBranchLookup(lookups) {
+  const runs = (Array.isArray(lookups) ? lookups : []).filter((l) => l && typeof l === 'object');
+  const code = (l) => (l.exitCode === null || l.exitCode === undefined || l.exitCode === '' ? NaN : Number(l.exitCode));
+  const out = (l) => String(l.output == null ? '' : l.output).trim();
+  if (runs.some((l) => code(l) === 0 && /refs\/heads\//.test(out(l)))) return 'present';
+  if (runs.length >= 2 && runs.every((l) => code(l) === 2 && !out(l))) return 'absent';
+  return 'undetermined';
+}
+
+// A blockedReason that says the branch itself could not be found, as opposed to a merge conflict
+// or a failing test tail. Run 6ab1884a's read "Branch <b> not found on origin or locally".
+const BRANCH_NOT_FOUND_RE = /\b(?:branch|ref|refs)\b[^\n]*?\b(?:not found|does not exist|doesn't exist|is missing|no matching)\b|\bno matching (?:refs|branches)\b|\bnot found on origin\b/i;
+
+/**
+ * Pure (issue 654): the outcome of one Deliver result, so a deliverer that could not SEE the
+ * branch is never filed as a blocked merge. `facts` is {branch, pushed, verified}: what the run
+ * itself recorded - the implementer's (or the push agent's) pushed:true, and a verifier pass.
+ * Returns {kind, lookup, message}; kind is one of
+ *   'delivered'     - a PR (or comment) URL came back.
+ *   'merge-blocked' - the pre-push merge conflicted or broke the tests (issues 318, 514).
+ *   'inconsistency' - the run recorded pushed:true AND a verifier pass, yet the deliverer could not
+ *                     find the branch: the record and git disagree, and the branch may need
+ *                     manual delivery. Never an ordinary failure.
+ *   'undetermined'  - the deliverer could not tell whether the branch is on origin.
+ *   'absent'        - git authoritatively reported no such ref (classifyBranchLookup 'absent').
+ *   'undelivered'   - anything else with no URL (the caller keeps its own message for it).
+ */
+function classifyDelivery(delivery, facts) {
+  const f = facts || {};
+  const branch = String(f.branch || '');
+  const d = delivery && typeof delivery === 'object' ? delivery : null;
+  if (!d) return { kind: 'undelivered', lookup: null, message: null };
+  if (d.prUrl || d.commentUrl) return { kind: 'delivered', lookup: null, message: null };
+  const conflictPaths = Array.isArray(d.conflictPaths) ? d.conflictPaths : [];
+  const reason = String(d.blockedReason || '');
+  const lookupRuns = Array.isArray(d.branchLookup) ? d.branchLookup : [];
+  const lookup = classifyBranchLookup(lookupRuns);
+  const branchUnseen = d.pushed !== true && !conflictPaths.length && lookup !== 'present'
+    && (d.mergeStatus === 'branch-unconfirmed' || lookupRuns.length > 0 || BRANCH_NOT_FOUND_RE.test(reason));
+  if (branchUnseen) {
+    const said = reason ? ` Deliverer said: ${reason}` : '';
+    const runs = lookupRuns.length
+      ? ` ls-remote exit codes: ${lookupRuns.map((l) => (l && l.exitCode != null ? String(l.exitCode) : '?')).join(', ')}.`
+      : ' No ls-remote result was reported.';
+    if (f.pushed === true && f.verified === true) {
+      return { kind: 'inconsistency', lookup, message: `INCONSISTENCY: branch ${branch} is recorded pushed:true with a verifier pass:true, but the deliverer could not find it (lookup: ${lookup}).${runs}${said} This is not a blocked merge and not an ordinary failure: check \`git ls-remote --heads origin ${branch}\` yourself - the branch may need manual delivery (a finishRunId pass, or a PR opened from the journal).` };
+    }
+    if (lookup === 'absent') {
+      return { kind: 'absent', lookup, message: `branch ${branch} is not on origin: two \`git ls-remote --exit-code\` runs exited 2 (no matching ref).${said}` };
+    }
+    return { kind: 'undetermined', lookup, message: `could not determine whether branch ${branch} is on origin - not a blocked merge and not proof the branch is missing.${runs}${said}` };
+  }
+  if (d.mergeStatus === 'blocked' || conflictPaths.length) return { kind: 'merge-blocked', lookup: null, message: null };
+  return { kind: 'undelivered', lookup: null, message: null };
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -596,4 +663,5 @@ module.exports = {
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
+  classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE,
 };
