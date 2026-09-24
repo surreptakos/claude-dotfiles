@@ -154,10 +154,17 @@ In this order:
    a pass that matches only `agent/issue-*` skips the discoveries PR and strands the run's
    bullets, issue 377), in this same session.
 4. **Fleet.** After the triage / to-tickets subagents have returned (the fleet's scout reads the
-   labels they produce), invoke the Workflow tool with
-   `scriptPath = .claude/workflows/ticket-fleet.js` — copy it there first with `mkdir -p
+   labels they produce), invoke the Workflow tool with an ABSOLUTE `scriptPath`
+   (`/home/user/<repo>/.claude/workflows/ticket-fleet.js`, never the bare relative form) — copy it
+   there first with `mkdir -p
    .claude/workflows && cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js"
-   .claude/workflows/ticket-fleet.js` — and `args` from the
+   .claude/workflows/ticket-fleet.js`. **Confirm the served repo is the cwd immediately before the
+   `Workflow` call** (`cd <repo> && git rev-parse --is-inside-work-tree` → `true`) — the harness's
+   "Primary working directory" environment line updates asynchronously and can still read an
+   earlier value when `Workflow` fires. A relative `scriptPath` launched from the wrong cwd fails
+   every implementer identically with `Cannot create agent worktree: not in a git repository`, 0
+   delivered, no branches created (measured 2026-09-23, `surreptakos/claude-dotfiles` memory note
+   `workflow-runtime-quirks`). — and `args` from the
    state issue's `config.fleetArgs`, plus the three contract args: `contractVersion: 2`, a `runId`
    minted inline (`printf %x $(date +%s)`) and an `invocationId` minted fresh on every launch,
    resume included (`printf %x%x $(date +%s) $$`), never equal to the `runId`. The workflow runtime
