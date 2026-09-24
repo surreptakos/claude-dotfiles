@@ -427,6 +427,10 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     correction = _is_correction(str(event.get("prompt") or ""))
     if correction:
         state["correction_nonce"] = nonce
+    # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
+    # so the next user message clears it and the ticket-SET round applies again outside session-end.
+    if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
+        state["session_end_invoked"] = True
     _write_state("claude", session_id, state)
     pending_correction = (previous or {}).get("pending_correction")
     # Style violations from the previous turn are carried here rather than blocked at Stop. A Stop
@@ -705,6 +709,19 @@ def _transcript_user_approved(transcript_path: str) -> bool:
     return any(_matches_approval(text) for text in _iter_user_text(transcript_path))
 
 
+# `/session-end` as a slash command, not a path segment such as `aac-skills/session-end/`.
+SESSION_END_INVOKED = re.compile(r"(?<![\w/.-])/session-end\b")
+
+
+def _session_end_turn(state: dict[str, Any] | None) -> bool:
+    """True when THIS turn is the session-end sweep: its declared flow (not the carried last_flow)
+    is session-end, or the user's prompt invoked /session-end. The session-end skill files its batch
+    without an approval round (#704, Dan 2026-09-23: typing /session-end is the approval)."""
+    return bool(state) and (
+        state.get("flow") == "session-end" or bool(state.get("session_end_invoked"))
+    )
+
+
 def _autonomous_master() -> bool:
     """True only under the watchdog-launched orchestrator master (claude-dotfiles issue 81)."""
     # .strip(): master-watchdog.ps1 launches via `cmd /k set VAR=1 && claude ...`, and cmd's
@@ -754,6 +771,7 @@ def _publish_gate(
         return None
     if (
         already >= 1
+        and not _session_end_turn(state)
         and not _transcript_used_tool(transcript_path, "AskUserQuestion")
         and not _transcript_user_approved(transcript_path)
     ):
@@ -859,6 +877,8 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             # The correction flag is the prompt's finding about this turn; declaring a route
             # must not erase it, or the Stop audit never sees a correction turn.
             "correction_nonce": state.get("correction_nonce"),
+            # Likewise the prompt's /session-end finding (issue 716).
+            "session_end_invoked": state.get("session_end_invoked"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
