@@ -1071,10 +1071,21 @@ function harnessChecks() {
  *  Local runs skip the whole block: the desktop machine IS where the payload is authored, and
  *  the check would false-STOP on every clean local session. */
 const bootstrap = require('./bootstrap-check');
+// Issue 669: read once, before any check, after waiting out a bootstrap still running in this
+// SessionStart, so the whole report describes the post-bootstrap container (main sets it).
+let bootRead = null;
 function bootstrapChecks() {
   if (!IS_CLOUD) return;
   head('Cloud bootstrap');
-  const r = bootstrap.readMarker(process.env);
+  const r = bootRead || bootstrap.readMarker(process.env);
+  if (r.state === 'pending') {
+    // Issue 669: the deadline passed with the bootstrap's lock still held. What the marker says
+    // now is what the bootstrap is replacing, so this block describes nothing else.
+    warn(`aac-bootstrap still running when this report was taken — waited ${Math.round(r.waitedMs / 1000)}s on its lock ${r.lock}; this report was taken before the bootstrap finished, so it quotes no payload, skills or governance hooks`);
+    note('re-read it once the bootstrap finishes: `/session-start --refresh` — do not re-run the bootstrap, it is running');
+    return;
+  }
+  if (r.waitedMs) note(`waited ${Math.round(r.waitedMs / 1000)}s for this session's bootstrap to finish before reading its marker (issue 669)`);
   if (r.state === 'missing') {
     stop(`aac-bootstrap marker absent at ${r.path} — the SessionStart bootstrap hook did not run`);
     note('the hook is `.claude/hooks/session-start.sh` (or `session-start-bootstrap.sh` beside a repo\'s own hook, issue 542) in every AAC repo; a container reaches it via CLAUDE_CODE_REMOTE=true');
@@ -1215,6 +1226,7 @@ function accountChecks() {
 async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
+  if (IS_CLOUD) bootRead = bootstrap.awaitBootstrap(process.env);
   gitChecks();
   harnessChecks();
   bootstrapChecks();
