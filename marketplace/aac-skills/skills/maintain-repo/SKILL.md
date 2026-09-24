@@ -3,17 +3,13 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-18T18:36:19Z'
-  previous-modified: '2026-09-18T18:14:35Z'
-  revision: '5'
-  content-sha: 5dc24fe29e8f
+  modified: '2026-09-24T05:27:51Z'
+  previous-modified: '2026-09-18T18:36:19Z'
+  revision: '6'
+  content-sha: 535b9cf10d61
 ---
 
 # Maintain repo
-
-> **Packaged copy.** A cloud session runs none of this machine's hooks, so the commands below
-> call the plugin's own bundled scripts. Nothing is cached and `--refresh` does not apply:
-> every run is fresh.
 
 One weekly pass. Two skills back-to-back, in order.
 
@@ -51,7 +47,7 @@ It sweeps every prose surface (README, CLAUDE.md, ADRs, PRDs, runbooks, memory f
 
 ## Step 2 — consolidate-memory
 
-Invoke `/consolidate-memory` (local override at `${CLAUDE_PLUGIN_ROOT}/skills/consolidate-memory/`, which wraps the anthropic-skills version with the full-sweep rule).
+Invoke `/aac-skills:consolidate-memory`, the aac-skills plugin's copy, which wraps the anthropic-skills version with the full-sweep rule. Name it with the prefix: `/anthropic-skills:consolidate-memory` has the same bare name and lacks that rule.
 
 It walks every note plus `MEMORY.md` in the repo's memory set — `docs/agents/memory/` when the repo commits its notes (the auto-memory directory is then a pointer on the PC and empty in a cloud container), the auto-memory directory only when the repo has no `docs/agents/memory/` — merges duplicates, retires dated entries, converts relative to absolute dates, and trims the index under 200 lines / 25KB. Every file every run — never "only files added since last consolidation".
 

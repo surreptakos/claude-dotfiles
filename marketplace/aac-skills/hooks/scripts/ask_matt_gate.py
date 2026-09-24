@@ -99,7 +99,9 @@ _CAVEMAN_OFF_PATTERNS = (
 _CAVEMAN_QUESTION = re.compile(
     r"^(what|whats|what's|how|why|when|where|who|does|do|did|is|are|can|could|would|should|tell me|explain)\b"
 )
-_CAVEMAN_SLASH = re.compile(r"^/caveman(?::caveman)?(?:\s+(\S+))?\s*[.!]*$")
+# Issue 734: with no pull-written ~/.claude/skills the aac copy is aac-skills:caveman, beside the
+# caveman plugin's caveman:caveman; either namespaced spelling is the same switch.
+_CAVEMAN_SLASH = re.compile(r"^/(?:aac-skills:)?caveman(?::caveman)?(?:\s+(\S+))?\s*[.!]*$")
 
 
 def _caveman_default_mode() -> str:
@@ -798,8 +800,9 @@ def _transcript_user_approved(transcript_path: str) -> bool:
     return any(_matches_approval(text) for text in _iter_user_text(transcript_path))
 
 
-# `/session-end` as a slash command, not a path segment such as `aac-skills/session-end/`.
-SESSION_END_INVOKED = re.compile(r"(?<![\w/.-])/session-end\b")
+# `/session-end` as a slash command, not a path segment such as `aac-skills/session-end/`. Since
+# issue 734 the plugin serves the skill, so its namespaced `/aac-skills:session-end` counts too.
+SESSION_END_INVOKED = re.compile(r"(?<![\w/.-])/(?:aac-skills:)?session-end\b")
 
 
 def _session_end_turn(state: dict[str, Any] | None) -> bool:
