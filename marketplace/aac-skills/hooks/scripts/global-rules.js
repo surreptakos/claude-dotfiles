@@ -111,7 +111,8 @@ function startContext(index) {
   const parts = splitParts(text, PART_BYTES);
   if (index < 1 || index > parts.length) return null;
   const header = `GLOBAL RULES (part ${index} of ${parts.length} — the owner's global CLAUDE.md `
-    + 'in full, delivered from the plugin payload because a container has no live tree. Every '
+    + 'in full, delivered from the plugin payload: a container has no live tree, and on a desktop the '
+    + 'global CLAUDE.md is only a pointer to this (issue 732). Every '
     + 'standing directive in it applies to this session, and a short digest repeats the four '
     + 'disciplines on every prompt):';
   return header + '\n' + parts[index - 1];
