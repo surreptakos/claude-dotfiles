@@ -165,17 +165,6 @@
             "shell": "powershell"
           }
         ]
-      },
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "py -3 \"__USERHOME_JSON__\\.claude\\hooks\\stopslop-write.py\"",
-            "timeout": 10,
-            "statusMessage": "Stop-slop gate on the written file"
-          }
-        ]
       }
     ],
     "PostToolUseFailure": [
@@ -234,16 +223,6 @@
             "command": "& '__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' native-hook claude --adapter '__USERHOME_FWD__/AppData/Local/nvm/v24.18.0/node_modules/@caveman-ai/cli/dist/native-hook-fast.js'",
             "timeout": 30,
             "shell": "powershell"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "py -3 \"__USERHOME_JSON__\\.claude\\hooks\\stopslop-stop.py\"",
-            "timeout": 10,
-            "statusMessage": "Stop-slop gate on the final message"
           }
         ]
       }
