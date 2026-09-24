@@ -1,7 +1,8 @@
 name: Refresh dashboard
 
 # DASHBOARD.md stays accurate at the end of every commit and every tracker change:
-# every push to the default branch and every issue event regenerates it.
+# every push to the default branch and every issue open or close regenerates it (a label edit
+# needs a workflow_dispatch; the list was narrowed 2026-09-16 under the Actions-quota ruling).
 #
 # NO daily cron. Issue 21 on claude-dotfiles (2026-08-26): the relative "N days ago" labels in
 # the dashboard drifted daily by construction, so the 6am safety tick regenerated the file every

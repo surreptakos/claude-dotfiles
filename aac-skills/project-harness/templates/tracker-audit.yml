@@ -16,7 +16,7 @@ name: Tracker audit
 # link, not in a line of a session report nobody can act on twice a day.
 #
 # THE AUDIT IS NOT WRITTEN HERE, AND NOT COPIED INTO tools/. `tools/tracker-audit.js` is the audit —
-# sixteen checks and its own `--paginate`-free page loop (issue 171, issue 230), which is what this
+# twelve numbered checks (nineteen finding kinds) and its own `--paginate`-free page loop (issue 171, issue 230), which is what this
 # job runs. `tools/tracker-audit-job.js` is a thin runner: token refusal, job-summary mirror,
 # exit-code propagation, all under `node --test tools/tracker-audit-job.test.js`, which the first
 # step below runs. Do not move logic into this file: YAML bash is the one thing in this repo nothing
@@ -42,7 +42,7 @@ name: Tracker audit
 
 on:
   issues:
-    types: [opened, closed, edited, labeled, unlabeled, milestoned]
+    types: [opened, closed, reopened, edited, labeled, unlabeled, milestoned, demilestoned]
   push:
     # SUBSTITUTE: this repo's default branch. `main` on most repos, `master` on some.
     # Read it from `git symbolic-ref refs/remotes/origin/HEAD` — an un-substituted branch name

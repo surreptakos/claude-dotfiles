@@ -11,7 +11,7 @@
  *   node tools/tracker-audit-job.js
  *
  * WHAT THIS IS NOT: a second copy of the audit. `tools/tracker-audit.js` is the audit — its own
- * `--paginate`-free page loop (issue 171), its own sixteen checks, its own exit codes — and this
+ * `--paginate`-free page loop (issue 171), its own twelve numbered checks (nineteen finding kinds), its own exit codes — and this
  * runner spawns it. Re-expressing any of that here would give the job and a local run two
  * implementations to drift apart, which is the failure the tracker audit itself exists to catch.
  *

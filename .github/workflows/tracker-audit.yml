@@ -44,7 +44,7 @@ name: Tracker audit
 
 on:
   issues:
-    types: [opened, closed, edited, labeled, unlabeled, milestoned]
+    types: [opened, closed, reopened, edited, labeled, unlabeled, milestoned, demilestoned]
   push:
     branches: [master]
   workflow_dispatch:
