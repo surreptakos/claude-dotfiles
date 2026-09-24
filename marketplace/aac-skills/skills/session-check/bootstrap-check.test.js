@@ -95,15 +95,18 @@ test('readMarker returns ok with the parsed marker', () => {
   assert.equal(r.marker.payload_version, '2026.9.15');
 });
 
+// The date is taken an hour before this machine's boot, never a fixed one: a fixed date reads
+// as stale only on a machine booted after it, so a long-running desktop went red (issue 681).
 test('readMarker returns stale when the marker predates this container (issue 643)', () => {
   const f = fixture();
+  const beforeBoot = new Date(Date.now() - os.uptime() * 1000 - 3600 * 1000).toISOString();
   writeMarker(f.marker, {
     payload_version: '2026.9.15', skills: ['ticket-fleet'],
-    installed_at: '2026-09-19T14:02:16Z',
+    installed_at: beforeBoot,
   });
   const r = readMarker(env(f));
   assert.equal(r.state, 'stale');
-  assert.equal(r.writtenAt, '2026-09-19T14:02:16Z');
+  assert.equal(r.writtenAt, beforeBoot);
   assert.equal(r.marker.payload_version, '2026.9.15');
 });
 
