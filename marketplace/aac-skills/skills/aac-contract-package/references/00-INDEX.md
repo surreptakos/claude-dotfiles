@@ -14,7 +14,7 @@ A sweep on 2026-08-11 found **91 copies** of one baselines document across the j
 |---|---|---|
 | `PROMPT.md` | The reviewer standard: run order, what you fix versus what you ask, recurring defect checks, the Output Contract for the review email | Active, rev. 6 (2026-09-22: review email in Dan's Z-4260 shape) |
 | `LIVING-STANDARD.md` | The full reviewer standard behind PROMPT.md | Active |
-| `DRAFTER-PRESEND-CHECKLIST.md` | Completion and export QA | Active |
+| `DRAFTER-PRESEND-CHECKLIST.md` | Completion and export QA | Active. Item 30 Audio/Visual file-name spelling sentence ratified by Dan 2026-09-24 (in session, recorded on issues 328 and 342) |
 
 ## Create side
 
