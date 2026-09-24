@@ -2,10 +2,10 @@
 name: aac-contract-package
 description: Create, review, or audit an Active Alarm Company (AAC) customer contract package — the Schedule of Equipment and Services, the master agreement, and the Rider for Additional Locations. Use whenever a rep or Sales Admin asks to create, draft, build, or "put together" a contract, schedule, or paperwork for a named job or customer; when a "please create contract" request is forwarded; when a job folder path is given and the ask is paperwork; when a package needs rebuilding after a fact changes (price, purchase vs. financed, designation, scope); or when an existing package needs reviewing, verifying, or sweeping for defects across the jobs drive. Also use for questions about AAC clarifications, exclusions, RMR names and prices, SOW wording, the $5,000 deposit rule, permit responsibility, or the Schedule-to-Master mapping. Prefer this over generic document generation or contract review for anything touching an AAC package, even if the words "schedule" or "package" are not used.
 metadata:
-  modified: "2026-09-24T04:46:30Z"
-  previous-modified: "2026-09-24T04:09:47Z"
+  modified: "2026-09-24T05:09:53Z"
+  previous-modified: "2026-09-24T05:02:17Z"
   revision: "1"
-  content-sha: "ce13e4df3a7a"
+  content-sha: "a3f5eaf20ecc"
 ---
 
 # AAC Contract Package
@@ -85,6 +85,7 @@ Then read from `_extract/`, not from the binaries. The fan-out rules — what a 
 | `verify_package.py` | The machine-checkable half of DRAFTER-PRESEND. Read-only. Exit 0 clean, 1 failures, 2 bad input, 3 no drafted schedule |
 | `extract_package.py` | One read-only pass over the job folder: plain-text extracts in `_extract/` plus `_digest.json` (hashes, hidden tabs, quick facts, unreadables). Run it before reading anything; read the extracts, not the binaries. Re-runs skip unchanged files. `--clean` removes the folder |
 | `verify_workup.py` | The mechanical workup arithmetic: overwritten extension formulas, typed costs on blank quantities, costs outside a total's range, stranded lower-section costs. Read-only, tab/cell/amount findings. Run before reading a single workup cell |
+| `zoho_crosscheck.py` | Called by `verify_package.py`: five advisory Zoho cross-checks (WARN or PASS, never FAIL; SKIP without `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN` or network). Read-only; never writes a Zoho value anywhere |
 | `xlsx_surgical.py` | The **only** sanctioned way to write a schedule workbook |
 
 **Never save a schedule through openpyxl, pandas, or any spreadsheet library.** They rebuild the file from their own object model and silently destroy printer settings, rich text, embedded images and the calc chain, while every cell still reads back correct. Reading with openpyxl is fine.
