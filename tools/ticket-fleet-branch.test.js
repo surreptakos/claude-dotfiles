@@ -1934,3 +1934,26 @@ test('difficultyEvalSet labels a ticket "hard" when a fleet branch shows attempt
     'agent/issue-7-attempt1-wf_b-w1', 'feat/other', 'agent/fleet-discoveries-wf_a',
   ]), [{ number: 7, label: null, maxAttempt: 1 }, { number: 12, label: 'hard', maxAttempt: 2 }]);
 });
+
+// Issue 757: every MCP tool the fleet calls takes owner and repo as arguments. A prompt that never
+// named them left the open-pr-scan agent to guess ("Dan-AAC"), and its fallback call stalled run
+// 6ab4840f for 106 minutes. Every MCP tracker rule, and the open-pr-scan MCP steps, name the source.
+test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come from (issue 757)`, () => {
+  const rules = loadTrackerRules(FLEET_SCRIPT, 'mcp');
+  const texts = {
+    scoutList: rules.scoutList('ready-for-agent'),
+    scoutExplicit: rules.scoutExplicit([1]),
+    handoffRead: rules.handoffRead(1),
+    commentPost: rules.commentPost('/tmp/x'),
+    labelSwap: rules.labelSwap(1),
+    blockerState: rules.blockerState([1]),
+    prCreate: rules.prCreate('/tmp/x'),
+    prComment: rules.prComment('/tmp/x'),
+  };
+  for (const [name, text] of Object.entries(texts)) {
+    assert.match(text, /git remote get-url origin/, `mcp rule ${name} does not say where owner/repo come from`);
+  }
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const fn = src.slice(src.indexOf('async function dropTicketsWithOpenPr'), src.indexOf("found = await agent(", src.indexOf('async function dropTicketsWithOpenPr')));
+  assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
+});

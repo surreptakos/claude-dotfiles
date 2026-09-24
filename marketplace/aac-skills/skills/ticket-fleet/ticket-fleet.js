@@ -649,18 +649,23 @@ function pickImplModel(level, attempt, cfg) {
 // handoff comment is written again (issue 266).
 // [FLEET-TRACKER-RULES-START]
 function trackerRules(mode) {
+  // Every MCP tool here takes owner and repo as arguments; a prompt that never names them leaves
+  // the agent to guess, and a guessed owner stalled run 6ab4840f for 106 minutes (issue 757).
+  const REPO = 'owner and repo: take them from `git remote get-url origin` (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).'
   if (mode === 'mcp') return {
-    scoutList: (label) => `mcp__github__list_issues with label "${label}", state open (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
-    scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
+    repoNote: REPO,
+    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
+    scoutExplicit: (nums) => `${REPO} Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
-    handoffRead: (n) => `Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
-    commentPost: (_bodyFile) => `Use mcp__github__add_issue_comment - the body is an argument here, so no scratch file is written.`,
-    labelSwap: (n, target = 'ready-for-human') => `Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
-    blockerState: (nums) => `Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
-    prCreate: (_bodyFile) => `mcp__github__create_pull_request - the body is an argument here, so no scratch file is written.`,
-    prComment: (_bodyFile) => `mcp__github__add_issue_comment on issue`,
+    handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
+    commentPost: (_bodyFile) => `${REPO} Use mcp__github__add_issue_comment - the body is an argument here, so no scratch file is written.`,
+    labelSwap: (n, target = 'ready-for-human') => `${REPO} Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
+    blockerState: (nums) => `${REPO} Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
+    prCreate: (_bodyFile) => `mcp__github__create_pull_request (${REPO}) - the body is an argument here, so no scratch file is written.`,
+    prComment: (_bodyFile) => `mcp__github__add_issue_comment (${REPO}) on issue`,
   }
   return {
+    repoNote: '{owner}/{repo} come from `git remote get-url origin`.',
     scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100"\`, then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number N: \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\`.`,
     scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
@@ -1304,7 +1309,7 @@ async function dropTicketsWithOpenPr(tickets) {
   const numbers = [...new Set(list.map(t => parseInt(t && t.number, 10)).filter(n => n > 0))]
   if (!numbers.length) return { tickets: list, skipped: [] }
   const listSteps = instrument === 'mcp'
-    ? `There is no gh CLI here: call mcp__github__list_pull_requests ONCE with state="open" and per_page=100, and read head.ref (each PR's head branch name) off the entries it returns.`
+    ? `There is no gh CLI here. ${rules.repoNote} Call mcp__github__list_pull_requests ONCE with that owner and repo, state="open" and per_page=100, and read head.ref (each PR's head branch name) off the entries it returns.`
     : `Steps:
 1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
 2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\` ONCE. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
