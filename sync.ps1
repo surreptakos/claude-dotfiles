@@ -151,6 +151,38 @@ function Invoke-SettingsInvariants {
     }
 }
 
+# Issue 717: installed_plugins.json and known_marketplaces.json are rewritten live by
+# `claude plugin update`, so copying the committed snapshot over them rolled every update back.
+# When a live copy exists, the committed one is detokenized to a temp file and merged into it by
+# tools/plugin-records-merge.js, which keeps any live entry with a later lastUpdated. Without node
+# the live file is left alone: skipping a merge loses nothing, overwriting would downgrade.
+function Merge-PluginRecords {
+    param(
+        [Parameter(Mandatory = $true)]$Item,
+        [Parameter(Mandatory = $true)][string]$Source
+    )
+    if ($DryRun) { Write-Host ("  would merge {0}" -f $Item.Local); return }
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) {
+        Write-Host ("  node not found - live {0} left as it is (issue 717)" -f $Item.Local) -ForegroundColor Yellow
+        return
+    }
+    $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("plugin-records-{0}.json" -f [guid]::NewGuid())
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        Copy-OneFile -Source $Source -Destination $temp -Direction Detokenize -UserHome $UserHome
+        $out = & $node.Source (Join-Path $RepoRoot 'tools\plugin-records-merge.js') $Item.Merge $temp $Item.Local 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ("  merge FAILED, live {0} left as it is:" -f $Item.Local) -ForegroundColor Yellow
+            $out | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
+        }
+    } finally {
+        $ErrorActionPreference = $previous
+        Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+    }
+}
+
 # ------------------------------------------------------------------------ pull
 
 $backup = Backup-LocalTargets
@@ -163,7 +195,11 @@ foreach ($item in $items) {
         Write-Host ("  skip (not in repo): {0}" -f $item.Repo)
         continue
     }
-    if ($item.Type -eq 'File') {
+    if ($item.Type -eq 'File' -and $item.PSObject.Properties['Merge'] -and (Test-Path $item.Local)) {
+        Merge-PluginRecords -Item $item -Source $source
+        $total++
+        Write-Host ("  {0}  (merged)" -f $item.Local)
+    } elseif ($item.Type -eq 'File') {
         Copy-OneFile -Source $source -Destination $item.Local `
                      -Direction Detokenize -UserHome $UserHome -DryRun:$DryRun
         $total++

@@ -71,8 +71,10 @@ param(
     #   lint-root    unsuppressed finding planted in the root CLAUDE.md   -> claude-md-lint gate
     #   lint-mirror  unsuppressed finding planted in profile/claude/CLAUDE.md     -> claude-md-lint gate
     #   sandbox-identity  the test suites' user.email is what this checkout would commit as -> check 0-pre2
+    #   plugin-downgrade  pull copies the plugin records instead of merging them -> check 9e
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
-                 'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity')]
+                 'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
+                 'plugin-downgrade')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -1361,6 +1363,79 @@ if ($missing.Count -gt 0) {
         }
     }
 }
+
+# ------------------------------------------------------------------ 9e. pull never downgrades a plugin (issue 717)
+
+# installed_plugins.json and known_marketplaces.json are rewritten live by `claude plugin update`;
+# copying the committed snapshot over them undid every update on the next pull. The fresh install
+# above proves a new machine still gets them (check 2) and that every enabled plugin's marketplace
+# is registered; this plants live records NEWER than the committed ones in the fake home, pulls
+# again, and asserts they survive. Runs after the file-count and fidelity checks, which read the
+# fake home as the first pull left it.
+Write-Host ''
+Write-Host 'Plugin records (issue 717)'
+$pluginDir   = Join-Path $FakeHome '.claude\plugins'
+$installedJs = Join-Path $pluginDir 'installed_plugins.json'
+$knownJs     = Join-Path $pluginDir 'known_marketplaces.json'
+$registered = @()
+try {
+    $known = Get-Content $knownJs -Raw | ConvertFrom-Json
+    $registered += @($known.PSObject.Properties.Name)
+    if ($null -ne $settings -and $settings.PSObject.Properties.Name -contains 'extraKnownMarketplaces') {
+        $registered += @($settings.extraKnownMarketplaces.PSObject.Properties.Name)
+    }
+} catch { }
+$unregistered = @()
+if ($null -ne $settings -and $settings.PSObject.Properties.Name -contains 'enabledPlugins') {
+    $unregistered = @($settings.enabledPlugins.PSObject.Properties.Name |
+                      ForEach-Object { ($_ -split '@', 2)[1] } |
+                      Where-Object { $registered -notcontains $_ })
+}
+Check 'fresh install registers the marketplace of every enabled plugin' `
+    (($registered.Count -gt 0) -and ($unregistered.Count -eq 0)) @($unregistered)
+
+$plant = @'
+const fs = require('fs');
+const [installed, known, mode] = process.argv.slice(2);
+const i = JSON.parse(fs.readFileSync(installed, 'utf8'));
+const k = JSON.parse(fs.readFileSync(known, 'utf8'));
+const FUTURE = '2099-01-01T00:00:00.000Z', MARK = 'restore-test-717';
+if (mode === 'plant') {
+  for (const list of Object.values(i.plugins)) { list[0].version = MARK; list[0].lastUpdated = FUTURE; }
+  for (const m of Object.values(k)) m.lastUpdated = FUTURE;
+  fs.writeFileSync(installed, JSON.stringify(i, null, 2));
+  fs.writeFileSync(known, JSON.stringify(k, null, 2));
+} else {
+  const lowered = Object.entries(i.plugins).filter(([, l]) => l[0].version !== MARK).map(([n]) => n)
+    .concat(Object.entries(k).filter(([, m]) => m.lastUpdated !== FUTURE).map(([n]) => 'marketplace ' + n));
+  console.log(lowered.join('\n'));
+  process.exit(lowered.length ? 1 : 0);
+}
+'@
+if ($Fault -eq 'plugin-downgrade') {
+    # What the pull did before issue 717: the two records copied, not merged.
+    $cloneManifest = Join-Path $Clone 'lib\manifest.ps1'
+    $text = [System.IO.File]::ReadAllText($cloneManifest) -replace ";\s*Merge = '\w+'", ''
+    [System.IO.File]::WriteAllText($cloneManifest, $text)
+    Note 'fault: the clone pulls the plugin records by plain copy'
+}
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+$plantJs = Join-Path $FakeRoot 'plant-717.js'
+[System.IO.File]::WriteAllText($plantJs, $plant)
+try {
+    $plantOut  = & node $plantJs $installedJs $knownJs plant 2>&1
+    $plantExit = $LASTEXITCODE
+    $pullOut   = & $Engine -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Clone 'sync.ps1') `
+                     -Mode pull -UserHome $FakeHome 2>&1 | Out-String
+    $pullExit  = $LASTEXITCODE
+    $afterOut  = & node $plantJs $installedJs $knownJs verify 2>&1
+    $afterExit = $LASTEXITCODE
+} finally { $ErrorActionPreference = $prev }
+Check 'a live plugin record newer than the committed one survives a pull (issue 717)' `
+    (($plantExit -eq 0) -and ($pullExit -eq 0) -and ($afterExit -eq 0)) `
+    (@("plant exit $plantExit, pull exit $pullExit, lowered:") + @($afterOut) + @($plantOut) +
+     @(($pullOut -split "`r?`n") | Select-Object -Last 6))
 
 # ------------------------------------------------------------------ 10. two runs can overlap
 
