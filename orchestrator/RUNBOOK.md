@@ -201,7 +201,8 @@ In this order:
    issue, written `owner/repo#N`, so the run survives the container. A repo without
    `tools/fleet-run-record.js` has nothing to run — say so in the heartbeat and move on.
 5. **Heartbeat.** After each step, rewrite the state issue's JSON block with the new state and
-   append a `**Heartbeat N — <UTC>**` line to the heartbeat section. Ground truth is the tracker
+   append a `**Heartbeat N — <UTC>**` line to the heartbeat section, the time taken from
+   `date -u +'%Y-%m-%d %H:%M'` at write time, never from memory (issue 711). Ground truth is the tracker
    and PR list — never a subagent self-report.
 
 ## Merge
