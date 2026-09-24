@@ -5,6 +5,7 @@ and the skill loads only when someone types /i-have-adhd.
 
 The contents are never read. This text is here so the file is not a mystery on a restored machine.
 
-Turning it off: create ~/.claude/.adhd-off. The ask-matt gate reads that flag and drops the
-per-turn ADHD clause and the pre-send ADHD lint checks, leaving YES and caveman alone. Deleting
+Turning it off: say "stop adhd mode". The ask-matt gate writes ~/.claude/.adhd-off, reads that
+flag every turn and drops the per-turn ADHD clause and the pre-send ADHD lint checks, leaving YES
+and caveman alone; "start adhd mode" (or a bare /i-have-adhd) deletes it again (issue 680). Deleting
 this file stops the plugin's session-start injection as well.
