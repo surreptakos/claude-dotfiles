@@ -68,6 +68,9 @@ function makeHome() {
 function run(hook, { home, source, remote = true, stdin = '', extraEnv = {} }) {
   const env = {
     PATH: process.env.PATH,
+    // Without it the Windows Python install manager behind python3 roots itself in the cwd and
+    // downloads a whole Python into ./Python, printing "Downloading" into the hook output.
+    ...(process.env.LOCALAPPDATA && { LOCALAPPDATA: process.env.LOCALAPPDATA }),
     HOME: home,
     CAVEMAN_BOOTSTRAP_HOME: home,
     CAVEMAN_BOOTSTRAP_SOURCE: source,

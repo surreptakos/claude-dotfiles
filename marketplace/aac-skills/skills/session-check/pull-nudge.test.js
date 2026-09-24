@@ -82,6 +82,19 @@ test('writeStamp then readStamp round-trips the sha; a missing file reads as no 
   }
 });
 
+test('readStamp reads a stamp written with a UTF-8 BOM, the way sync.ps1 writes it on PowerShell 5.1', () => {
+  // Found on AAC-AI 2026-09-24: `Set-Content -Encoding UTF8` prefixes EF BB BF, JSON.parse threw,
+  // and every session reported "no pull recorded" right after a pull.
+  const dir = mkTmp('pull-nudge-bom-');
+  const file = path.join(dir, 'state.json');
+  try {
+    fs.writeFileSync(file, '﻿{\r\n    "sha":  "deadbeef",\r\n    "pulledAt":  "2026-09-24T22:17:17Z"\r\n}\r\n', 'utf8');
+    assert.equal(readStamp(file).sha, 'deadbeef');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 /* ------------------------------------------------------------------- check.js wiring ----------- */
 
 /**
