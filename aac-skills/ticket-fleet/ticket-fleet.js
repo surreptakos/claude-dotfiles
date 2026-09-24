@@ -982,14 +982,16 @@ async function revParse(ref, label) {
   let res = null
   try {
     res = await agent(
-    `Run exactly this one bash command, from the repository root, and report its result:
+    `Run exactly this one bash command and report its result:
 
-git rev-parse ${ref}
+git -C ${orchestratorCwd} rev-parse ${ref}
 
-Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
-file. Do not interpret the output. Return the command's REAL exit code plus its stdout and stderr
-VERBATIM - stdout is one 40-character object name when the ref resolved; copy it character for
-character.`,
+The path is the orchestrator's own checkout, measured absolute at Setup (issue 562) - it is baked
+into the command already, so do not cd anywhere first and do not substitute a bare \`git rev-parse\`
+that would read whatever repository your shell happens to start in instead. Do not run any other
+command. Do not read, write, stage or delete any file. Do not interpret the output. Return the
+command's REAL exit code plus its stdout and stderr VERBATIM - stdout is one 40-character object
+name when the ref resolved; copy it character for character.`,
     { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
     )
   } catch (err) {
@@ -1031,6 +1033,7 @@ character.`,
 // ships in aac-routines only. The baseline command therefore probes for the tool first and exits 3
 // when it is absent; under the default `treeGuard: 'auto'` that turns the guard off for repos that
 // do not serve it, and `treeGuard: true` makes the same absence a hard abort.
+// [FLEET-TREE-GUARD-DEFS-START]
 const GUARD_CMD = `node ${cfg.treeGuardScript}`
 const breaches = []
 const attributed = new Set()
@@ -1069,6 +1072,7 @@ function breachMessage() {
 // A breach recorded anywhere in the wave stops every other chain before it spends another
 // sub-session or - worse - reaches Deliver and pushes from a tree nobody can trust.
 function assertNoBreach() { if (breaches.length) throw new Error(breachMessage()) }
+// [FLEET-TREE-GUARD-DEFS-END]
 
 phase('Setup')
 // [FLEET-REFRESH-START]
@@ -1112,6 +1116,55 @@ if (refresh) {
   for (const e of refresh.errors || []) log(`fleet-refresh error: ${e}`)
 }
 // [FLEET-REFRESH-END]
+// [FLEET-TREE-GUARD-SETUP-START]
+// ---------------------------------------------------------------------------
+// Orchestrator absolute checkout path (claude-dotfiles issue 562)
+// ---------------------------------------------------------------------------
+// Every checkpoint below - the tree-guard baseline and every later check, the editable-install
+// guard, and the `tip:#<ticket>` agent that reads `origin/<defaultBranch>` or a branch's own tip
+// before trusting a verifier's worktree - spawns a FRESH sub-agent, and a fresh sub-agent's shell
+// starts wherever the ORCHESTRATING SESSION's shell cwd is at the moment it is launched, not
+// wherever it was when this run started. `cfg.orchestratorCwd` defaults to '.', a relative path:
+// correct only for as long as the parent session's shell never `cd`s away between Setup and a
+// later checkpoint. A parent that `cd`s mid-run - to look at another repo, say - sends every later
+// guard or tip agent a `.` (or an implicit "the repository root") that resolves somewhere else
+// entirely: `[ -f <script> ] || exit 3` finds no guard tool there and `treeGuard:'auto'` just turns
+// itself off, or - worse - some other git repository sits there and the guard, or the tip check,
+// silently audits the wrong tree.
+//
+// So the ABSOLUTE path is measured ONCE, here, by an agent that runs nothing but `pwd`, right after
+// Setup's own repo-identifying work (fleet-refresh) and before anything that needs it. Every later
+// checkpoint is handed that literal string - a `cd` by the parent afterwards cannot touch a string
+// already baked into a prompt. A caller that already knows the absolute path (or wants the guard to
+// audit a different tree on purpose) can still pass `orchestratorCwd` itself; only the '.' default
+// triggers the measurement.
+const CWD_MEASURE = { type: 'object', required: ['cwd'], properties: {
+  cwd: { type: 'string', description: 'the absolute path `pwd` printed, verbatim - not abbreviated, not reconstructed from memory' },
+} }
+let orchestratorCwd = cfg.orchestratorCwd
+if (orchestratorCwd === '.') {
+  let measured = null, measureError = null
+  try {
+    measured = await agent(
+      'Run exactly this one bash command and report its result: `pwd`. Do not cd anywhere first. Do not run any other command.',
+      { label: 'orchestrator-cwd', phase: 'Setup', schema: CWD_MEASURE, model: cfg.reportModel, effort: 'low' }
+    )
+  } catch (err) {
+    measureError = unusableReason('orchestrator-cwd', (err && err.message) || err)
+  }
+  if (!measured || typeof measured.cwd !== 'string' || measured.cwd[0] !== '/') {
+    throw new Error(
+      'ticket-fleet run ABORTED before Scout - could not measure the orchestrator checkout\'s absolute path (issue 562). '
+      + `cwd=${measured ? JSON.stringify(measured.cwd) : 'null'} error=${measureError || 'none'}. `
+      + 'Every guard and tip-check agent after this one is a fresh sub-agent whose shell cwd can drift from '
+      + "the orchestrating session's if it `cd`s mid-run, so an unmeasured relative path is never used."
+    )
+  }
+  orchestratorCwd = measured.cwd
+  log(`Orchestrator checkout measured at ${orchestratorCwd} (issue 562) - every guard and tip-check agent below is handed this absolute path, not cfg.orchestratorCwd's relative default, so a later \`cd\` in the parent session cannot misdirect one.`)
+} else {
+  log(`Orchestrator checkout path from args.orchestratorCwd: ${orchestratorCwd} (already absolute or caller-set - measurement skipped).`)
+}
 if (treeGuardOn) {
   // Wrapped (aac-routines issue 270): a guard agent that blows the StructuredOutput retry cap
   // throws out of agent(...), and an unwrapped throw here would abort the run with the harness's
@@ -1119,7 +1172,7 @@ if (treeGuardOn) {
   let baseline = null, baselineError = null
   try {
     baseline = await agent(
-      guardAgentPrompt(`[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd ${cfg.orchestratorCwd} --state-dir ${cfg.treeGuardStateDir}`),
+      guardAgentPrompt(`[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd ${orchestratorCwd} --state-dir ${cfg.treeGuardStateDir}`),
       { label: 'tree-guard:baseline', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
     )
   } catch (err) {
@@ -1148,7 +1201,9 @@ if (treeGuardOn) {
 } else {
   log('Orchestrator-tree guard DISABLED by args (treeGuard:false) - isolation breaches will not fail this run (aac-routines issue 192).')
 }
+// [FLEET-TREE-GUARD-SETUP-END]
 
+// [FLEET-TREE-GUARD-CHECK-START]
 /**
  * One isolation checkpoint. Throws on a breach and on could-not-audit; returns quietly when the
  * orchestrator's tree holds nothing beyond the run baseline. `label` names the checkpoint (e.g.
@@ -1168,7 +1223,7 @@ async function treeGuardCheck(label, ticketNumber) {
   let res = null, agentError = null
   try {
     res = await agent(
-      guardAgentPrompt(`${GUARD_CMD} check --cwd ${cfg.orchestratorCwd} --state ${guardStatePath} --label ${label} --ticket ${ticketNumber} ${guardCandidates}`),
+      guardAgentPrompt(`${GUARD_CMD} check --cwd ${orchestratorCwd} --state ${guardStatePath} --label ${label} --ticket ${ticketNumber} ${guardCandidates}`),
       { label: `tree-guard:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
     )
   } catch (err) {
@@ -1200,6 +1255,7 @@ async function treeGuardCheck(label, ticketNumber) {
   log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}`)
   throw new Error(breachMessage())
 }
+// [FLEET-TREE-GUARD-CHECK-END]
 
 // ---------------------------------------------------------------------------
 // Orchestrator-tree rail (aac-routines issue 192, extended by claude-dotfiles issue 493)
@@ -1644,7 +1700,7 @@ The main checkout is never a test surface (issue 404): the repository you start 
 ${orchestratorTreeRail('origin/' + scout.defaultBranch)}
 ${PYTHON_RAIL}
 The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
-In this repo run: git fetch origin, then git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
+Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} fetch origin, then git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
 1. Re-run every command above that is re-runnable in this container and compare YOUR output with the claimed output. Output you cannot reproduce, or that does not match, is a failure.
@@ -1863,7 +1919,7 @@ This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
 A0. A CLASSIFIER REFUSAL IS NOT A RULE VIOLATION (issue 544). In a container the auto-mode classifier sometimes refuses a command of this stage on the shape of its text rather than on what it would do, and the refusals are not deterministic - run 6aaafad4 found that re-issuing the byte-identical command usually succeeded on the next try. The categories this fleet has been refused under so far are ${classifierCategoriesSeen()}. An unattended session is sanctioned to run every command this stage needs (the 2026-09-15 cloud permission ruling), so read a refusal as a flaky gate, never as a sign that you are doing something forbidden and never as a reason to stop the delivery. Whenever a command below is REFUSED (as opposed to running and failing): re-issue it ONCE, byte-identical. If that retry is refused too, take the fallback the step names - A8 for the merge, B1 for the push, B2 for the PR. NEVER end this stage with {pushed:false, prUrl:""} while the branch is verified: a verified branch always reaches origin and a PR, and the refusal text becomes a note on that PR rather than a substitute for it.
 AL. FINDING ${branch} ON ORIGIN (issue 654) - "could not tell" is never "absent". Run 6ab1884a's deliverer reported a verified, pushed branch "not found on origin or locally" while \`git ls-remote\` from the orchestrator printed its ref minutes later, and the ticket was filed as a failure. Whenever this stage needs to know whether ${branch} is on origin - A1's fetch of it failed, B1's push failed, or anything else makes it look missing: (1) \`git rev-parse --show-toplevel\` and \`git remote get-url origin\` - you must be in a checkout of the served repository, and an origin naming any other repository makes every answer below worthless, so say so; (2) \`git ls-remote --exit-code --heads origin ${branch}\`; (3) \`git fetch origin\`, then that same ls-remote again. Record EVERY ls-remote in branchLookup as {exitCode: its REAL exit code, output: verbatim}. Exit 0 printing a refs/heads/ line means the branch IS on origin: fetch it and carry on. Exit 2 is git's own "no matching ref"; any other exit, and an exit 0 that printed nothing, means you could not tell. When no lookup printed the ref, stop this ticket and return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed", conflictPaths:[], branchLookup:[every run], blockedReason:"<the git output of every command above, VERBATIM>"} - never mergeStatus "blocked", which means a merge that conflicted or broke the tests, and never "not found" or "does not exist" as your own conclusion: the run reads the exit codes and decides.
-A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
+A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git -C ${orchestratorCwd} worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` against the orchestrator's own checkout, measured absolute at Setup - issue 562 - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
 A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`aac-skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - run A5(i)'s stamps check on the merge result before going on, because a clean merge that folded this branch's skill edit into the default branch's leaves the stamp stale with no conflict to resolve (issue 553), and if it fails do A4's regenerate, \`git add -A\`, commit it and run the check again. Then go to STEP A7, which runs on this path too.
 A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly three classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
@@ -2114,7 +2170,7 @@ Branch under review: ${branch} (do NOT trust its author; you have not seen their
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 ${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
-In this repo run: git worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
+Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
@@ -2324,7 +2380,7 @@ if (cfg.editableGuard === false) {
   // extracts this block verbatim, builds the command from it and runs it for real in a repo
   // that has no guard anywhere, then in the same repo once the named path exists.
   const guardPaths = editableGuardPaths(cfg.editableGuardScript)
-  const editableCmd = editableGuardCommand(guardPaths, cfg.orchestratorCwd)
+  const editableCmd = editableGuardCommand(guardPaths, orchestratorCwd)
   let res = null, resError = null
   try {
     res = await agent(guardAgentPrompt(editableCmd),
@@ -2336,7 +2392,7 @@ if (cfg.editableGuard === false) {
   try { parsed = JSON.parse(String((res && res.stdout) || '')) } catch (e) { parsed = null }
   const hard = cfg.editableGuard === true
   if (res && res.exitCode === 3) {
-    const absent = editableGuardAbsentMessage(guardPaths, cfg.orchestratorCwd)
+    const absent = editableGuardAbsentMessage(guardPaths, orchestratorCwd)
     if (hard) throw new Error(`ticket-fleet run FAILED after the wave - ${absent}`)
     log(absent)
   } else if (!res || !parsed || res.exitCode === 2) {
@@ -2384,8 +2440,8 @@ async function runReport(discoveries, defaultBranch) {
   try {
     written = await agent(
     `Append this ticket-fleet run's discoveries to ${cfg.followupsFile} on a branch of their own, cut from the repo default branch - never the branch this session happens to be sitting on (issue 360).
-1. git fetch origin ${defaultBranch}
-2. git worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
+1. git -C ${orchestratorCwd} fetch origin ${defaultBranch} - ${orchestratorCwd} is the orchestrator's own checkout, measured absolute at Setup (issue 562), never wherever your shell happens to start.
+2. git -C ${orchestratorCwd} worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
 3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run <DATE> (ticket-fleet ${runId})" heading, where <DATE> is today's UTC date in ISO form as \`date -u +%F\` prints it - a run's section has to be tellable from every other run's at a glance (issue 322), then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
 4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
 5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
