@@ -722,9 +722,24 @@ class AskMattGateTests(unittest.TestCase):
                             self.assertIn("${CLAUDE_PLUGIN_ROOT}", cmd)
         settings = json.loads(CLAUDE_SETTINGS.read_text(encoding="utf-8"))
         live = json.dumps(settings.get("hooks", {}))
-        for name in ("session-gate.js", "state-rehydrate.js", "state-stash.js",
-                     "governance-reminder.js", "ask_matt_gate.py"):
+        # Issue 733: EVERY script the plugin manifest dispatches, read off the manifest rather than
+        # listed here, so a hook added to the payload later is covered without editing this test.
+        # The stop-slop pair was the last one settings.json still named.
+        shipped = set()
+        for event_groups in hooks.values():
+            for group in event_groups:
+                for hook in group["hooks"]:
+                    cmd = hook.get("command", "")
+                    if "hooks/scripts/" in cmd:
+                        shipped.add(cmd.split("hooks/scripts/", 1)[1].split('"', 1)[0])
+        self.assertIn("stopslop-stop.py", shipped)
+        self.assertIn("session-gate.js", shipped)
+        for name in sorted(shipped):
             self.assertNotIn(name, live, f"settings.json still dispatches {name}: double fire")
+        # Third-party entries are not the plugin's to carry and stay (the caveman proxy, the
+        # caveman shrink hook).
+        self.assertIn("caveman-proxy.exe", live)
+        self.assertIn("shrink-hook", live)
 
     def test_global_instruction_files_pin_yes_and_caveman_default_ultra(self) -> None:
         codex_text = CODEX_INSTRUCTIONS.read_text(encoding="utf-8")

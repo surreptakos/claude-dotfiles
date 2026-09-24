@@ -62,7 +62,9 @@ never from an intermediate one, so `previous-modified` names the published versi
   global rules, and the one source the payload's rules text is copied from; pull does not restore
   it - a desktop gets the rules from the plugin hook and pull writes `global-pointer.md` to
   `~/.claude/CLAUDE.md`, which must never carry the rules' first line, issue 732), `settings.json`,
-  `hooks/`, `agents/`, the plugin manifests, and `profile/codex/`.
+  `hooks/` and `tools/` (the packager's source only: pull does not restore them, and
+  `settings.json` names no script the plugin ships, issue 733), `agents/`, the plugin manifests,
+  and `profile/codex/`.
 - `lib/manifest.ps1` — the whitelist of what pull writes, the exclusions, the path templating, the
   secret guard. Adding something to the setup means adding it to `Get-DotfileItems` here.
 - `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before
