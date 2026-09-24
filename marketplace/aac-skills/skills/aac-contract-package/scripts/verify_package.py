@@ -137,6 +137,39 @@ def pdf_fields(path):
     except Exception:
         return {}
 
+# Section H recognizes exactly the master forms build_package.py fills:
+# Commercial Fire and Commercial Security (issue 336) share the
+# name/term/billing checks through MASTER_FORM_SPECS; the Elevator
+# Monitoring Agreement (issue 335) has its own checks keyed on
+# ELEVATOR_MASTER_FIELDS. Every other master (Residential) has no field map
+# yet and SKIPs, per docs/verifier-coverage.md. Detection is an exact
+# field-name signature — each form's field dump is fixed, so this never
+# mistakes one for another — not the field-count heuristic this replaced.
+MASTER_FORM_SPECS = {
+    'fire': {'name_key': 'Text2', 'term_key': 'Text16',
+             'billing_re': re.compile(r'CheckBox[5-8]$'),
+             'billing_names': {5: 'Monthly', 6: 'Quarter Annually',
+                               7: 'Semi-Annually', 8: 'Annually'}},
+    'security': {'name_key': 'Text2', 'term_key': 'Text25',
+                 'billing_re': re.compile(r'CheckBox(1[1-4])$'),
+                 'billing_names': {11: 'Monthly', 12: 'Quarter Annually',
+                                   13: 'Semi-Annually', 14: 'Annually'}},
+}
+
+
+def _master_form_kind(mf):
+    """'fire', 'security', 'elevator', or None for a master field dump this
+    verifier does not have a map for."""
+    if not mf:
+        return None
+    if set(mf) == ELEVATOR_MASTER_FIELDS:
+        return 'elevator'
+    if '.Text2' in mf and '.CheckBox17' in mf:
+        return 'fire'
+    if 'Text2' in mf and 'CheckBox40' in mf:
+        return 'security'
+    return None
+
 # Poppler pdftotext (bundled with poppler-utils on Linux and poppler-windows
 # on Windows) is a runtime prerequisite for the proposal-reconciliation and
 # other PDF-text checks below. When it is missing on PATH, subprocess.run
@@ -909,24 +942,25 @@ def verify(job):
                               '*Elevator Monitoring Agreement*.pdf'],
                          exclude=['Old', 'Rider', 'LEASE AGREEMENT'])
     riders = find_files(job, ['*Rider*.pdf'], exclude=['Old'])
+    kind = None
     if not masters:
         rec('SKIP', 'Master agreement checks', 'no master agreement PDF in folder')
         mterm = None
+        mf = {}
     else:
         mf = pdf_fields(masters[0])
-        known_fire = any(k.startswith('.Text') for k in mf) and any(k.startswith('.CheckBox') for k in mf)
-        known_elevator = bool(mf) and set(mf) == ELEVATOR_MASTER_FIELDS
-        if mf and not known_fire and not known_elevator:
+        kind = _master_form_kind(mf)
+        if mf and kind is None:
             rec('SKIP', 'Master agreement field checks',
                 f'{os.path.basename(masters[0])} is not a mapped form '
-                f'({len(mf)} fields); residential and commercial security forms use a different map')
+                f'({len(mf)} fields); residential forms have no field map yet')
             mf = {}
             mterm = None
         if not mf:
             rec('SKIP', 'Master agreement checks',
                 f'{os.path.basename(masters[0])} has no form fields (flattened or signed)')
             mterm = None
-        elif known_elevator:
+        elif kind == 'elevator':
             # Elevator Monitoring Agreement (issue 335): 15 text fields, no
             # checkboxes, term fixed in §5 clause text rather than a field.
             mname = str(mf.get('Text3') or '').strip()
@@ -955,15 +989,18 @@ def verify(job):
                 ' — DRAFTER-PRESEND-CHECKLIST.md item 11; MAPPING-APPENDIX.md §3')
             mterm = None
         else:
+            spec = MASTER_FORM_SPECS[kind]
             mtext = ' '.join(str(v) for v in mf.values())
-            mname = next((str(v).strip() for k, v in mf.items() if k.endswith('Text2')), '')
+            mname = next((str(v).strip() for k, v in mf.items()
+                          if k.endswith(spec['name_key'])), '')
             rec('PASS' if mname and sub_name and mname.lower() == sub_name.lower() else 'FAIL',
                 'Master Subscriber name matches the schedule',
                 f'master "{mname}" vs schedule "{sub_name}"')
-            mterm = next((str(v).strip() for k, v in mf.items() if k.endswith('Text16')), '')
+            mterm = next((str(v).strip() for k, v in mf.items()
+                          if k.endswith(spec['term_key'])), '')
             rec('PASS' if mterm and re.search(r'\d', mterm) else 'FAIL',
                 'Master term filled', mterm or '(empty)')
-            billing = [k for k in mf if re.search(r'CheckBox[5-8]$', k)
+            billing = [k for k in mf if spec['billing_re'].search(k)
                        and str(mf[k]) not in ('', '/Off')]
             rec('PASS' if len(billing) == 1 else 'FAIL',
                 'Exactly one billing frequency ticked', ', '.join(billing) or 'none')
@@ -980,6 +1017,20 @@ def verify(job):
             rec('WARN' if tbd else 'PASS', 'No "TBD" outside the two date fields',
                 ', '.join(tbd[:5]) + '  (TBD is acceptable only in approximate start and '
                 'substantial-completion dates)' if tbd else '')
+
+            # Commercial Security carries fields the Fire form does not:
+            # an execution date and its own §2/§4(b) service-box pair.
+            if kind == 'security':
+                mdate = next((str(v).strip() for k, v in mf.items()
+                              if k.endswith('Text1')), '')
+                rec('PASS' if re.search(r'\d{1,2}/\d{1,2}/\d{2,4}', mdate) else 'FAIL',
+                    'Master agreement date filled', mdate or '(empty)')
+                service_on = str(mf.get('CheckBox2', '')) not in ('', '/Off')
+                percall_on = str(mf.get('CheckBox17', '')) not in ('', '/Off')
+                monthly_on = str(mf.get('CheckBox18', '')) not in ('', '/Off')
+                rec('PASS' if service_on and (percall_on != monthly_on) else 'FAIL',
+                    'Service boxes: Service checked, exactly one of per-call/contracted ticked',
+                    f'Service={service_on}, per-call={percall_on}, contracted={monthly_on}')
     if riders and masters:
         rf = pdf_fields(riders[0])
         if rf:
@@ -1111,28 +1162,35 @@ def verify(job):
             + ', '.join(disc_sources))
 
     # J-9: Billing frequency is Quarter Annually specifically.
-    # On the Commercial Fire form CheckBox5/6/7/8 = Monthly / Quarter Annually /
-    # Semi-Annually / Annually. The customer's-written-request exception in the
-    # checklist item makes any non-Quarter tick a WARN, not a FAIL.
+    # Billing-checkbox keys and names come from MASTER_FORM_SPECS[kind] — the
+    # Commercial Fire and Commercial Security masters number these boxes
+    # differently (issue 336). The customer's-written-request exception in
+    # the checklist item makes any non-Quarter tick a WARN, not a FAIL.
     if not masters:
         rec('SKIP', 'Billing frequency is Quarter Annually',
             f'{_cite(9)}; no master agreement in the folder')
-    elif not mf:
+    elif not mf or kind is None:
         rec('SKIP', 'Billing frequency is Quarter Annually',
             f'{_cite(9)}; master form fields not readable on this form')
     else:
+        # The Elevator Monitoring Agreement has no billing checkboxes (a
+        # free-text frequency blank), so it has no spec here and falls to
+        # the "no billing-frequency checkboxes" SKIP below.
+        billing_names = MASTER_FORM_SPECS.get(kind, {}).get('billing_names', {})
         billing = {}
-        for k, v in mf.items():
-            m = re.search(r'CheckBox([5-8])$', k)
-            if not m:
-                continue
-            billing[int(m.group(1))] = str(v) not in ('', '/Off')
+        if billing_names:
+            billing_re = re.compile(r'CheckBox(' +
+                                    '|'.join(str(n) for n in billing_names) + r')$')
+            for k, v in mf.items():
+                m = billing_re.search(k)
+                if not m:
+                    continue
+                billing[int(m.group(1))] = str(v) not in ('', '/Off')
         if not billing:
             rec('SKIP', 'Billing frequency is Quarter Annually',
                 f'{_cite(9)}; no billing-frequency checkboxes on this master form')
         else:
-            names = {5: 'Monthly', 6: 'Quarter Annually',
-                     7: 'Semi-Annually', 8: 'Annually'}
+            names = billing_names
             ticked = [names[k] for k, v in billing.items() if v]
             if ticked == ['Quarter Annually']:
                 rec('PASS', 'Billing frequency is Quarter Annually',
