@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.7 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.8 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.7 |
+| **Version** | 0.8 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -38,6 +38,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
+| 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
 
 # How to use this standard
 
@@ -103,9 +104,9 @@ Avoid: It is anticipated that the estimate should hopefully be completed by the 
 
 State known facts as facts. State estimates as estimates. State assumptions as assumptions.
 
-## 5. Put the main point first
+## 5. State the main point early
 
-For decision-oriented or action-oriented writing, state the principal point before supporting detail. An email requesting a decision should identify the decision or action needed, the person responsible, the deadline if one exists, and the essential reason or context.
+For decision-oriented or action-oriented writing, state the principal point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. An email requesting a decision should identify the decision or action needed, the person responsible, the deadline if one exists, and the essential reason or context.
 
 Long emails should use a bottom-line-first opening.
 
@@ -1053,7 +1054,7 @@ Do not end on a manufactured resonance, and do not close by restating what the r
 
 ## 163. Interpretive metadiscourse
 
-Do not narrate the writing. Delete **the key point is, this distinction matters, it is worth noting,** and **what this means is.** If a point is the key point, state it first under Rule 5.
+Do not narrate the writing. Delete **the key point is, this distinction matters, it is worth noting,** and **what this means is.** If a point is the key point, state it early under Rule 5.
 
 ## 164. Formulaic structures
 
@@ -1247,6 +1248,7 @@ Table F1. House decision register
 | 53; D | U.S. telephone numbers use hyphens, without parentheses. | Concurrent draft, Rule 53. Standardizes the displayed number. | 0.4 |
 | 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
 | 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
+| 5 | State the main point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. | Owner ruling, September 25, 2026. "Main point first" left no room for a courtesy opening. | 0.8 |
 
 # Appendix G - Phrase register
 

@@ -64,9 +64,9 @@ Avoid: It is anticipated that the estimate should hopefully be completed by the 
 
 State known facts as facts. State estimates as estimates. State assumptions as assumptions.
 
-## 5. Put the main point first
+## 5. State the main point early
 
-For decision-oriented or action-oriented writing, state the principal point before supporting detail. An email requesting a decision should identify the decision or action needed, the person responsible, the deadline if one exists, and the essential reason or context.
+For decision-oriented or action-oriented writing, state the principal point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. An email requesting a decision should identify the decision or action needed, the person responsible, the deadline if one exists, and the essential reason or context.
 
 Long emails should use a bottom-line-first opening.
 

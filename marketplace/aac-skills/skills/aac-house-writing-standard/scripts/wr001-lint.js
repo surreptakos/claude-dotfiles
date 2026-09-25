@@ -31,7 +31,7 @@ const fs = require("fs");
 const path = require("path");
 const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.7";
+const STANDARD_VERSION = "0.8";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
@@ -225,11 +225,11 @@ const noul = (instructions, yes, no) =>
 
 const JEV_RULES = {
   5: {
-    msg: "main point not first (Jev); open with the decision or action needed",
+    msg: "main point not early (Jev); open with the decision or action needed",
     q: (i) => noul(
-      `Rule 5 of a business writing standard: in decision-oriented or action-oriented writing, state the principal point (the decision or action needed, who owns it, the deadline) before supporting detail, so the reader does not search through history to learn why the message was sent. \`paragraphs\` is the whole document in order. Does the opening paragraph \`paragraphs[${i}]\` give background, history or preamble while the document's request, decision or conclusion appears only in a later paragraph?`,
+      `Rule 5 of a business writing standard: in decision-oriented or action-oriented writing, state the principal point (the decision or action needed, who owns it, the deadline) early, before supporting detail, so the reader does not search through history to learn why the message was sent. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. \`paragraphs\` is the whole document in order. Does the opening paragraph \`paragraphs[${i}]\` give background, history or preamble (other than a short courtesy opening) while the document's request, decision or conclusion appears only in a later paragraph?`,
       "The opening paragraph is background, history or preamble, and the request, decision or conclusion comes later in the document.",
-      "The opening paragraph states the main point first, or the writing is not decision- or action-oriented."),
+      "The opening paragraph states the main point, is a short courtesy opening followed by the main point, or the writing is not decision- or action-oriented."),
   },
   6: {
     msg: "passive voice hides who is responsible (Jev); name the actor",
