@@ -127,7 +127,7 @@ const RECORD_COMMAND = 'node tools/fleet-run-record.js --latest'
 // declares the version it was written for, and any mismatch fails naming both sides and the
 // ripple list. Pure counterpart (plus the fork auditor) in tools/ticket-fleet-contract.js;
 // tools/ticket-fleet-contract.test.js pins the two together, so a bump here that misses the
-// module or the SKILL.md ripple table turns the suite red.
+// module or the INTERNALS.md ripple table turns the suite red.
 const CONTRACT_VERSION = 2
 const CONTRACT_REQUIRED_ARGS = ['contractVersion', 'runId', 'invocationId']
 const CONTRACT_COPIES = [
@@ -139,7 +139,7 @@ const CONTRACT_COPIES = [
   'claude-dotfiles aac-skills/project-harness/SKILL.md',
 ]
 function contractError(detail) {
-  return new Error(`ticket-fleet contract mismatch: this script implements contract v${CONTRACT_VERSION}${detail} Contract v${CONTRACT_VERSION} requires args {${CONTRACT_REQUIRED_ARGS.join(', ')}}; its scout must return {candidateNumbers, tickets, repoMap, testCommand, defaultBranch} with per-ticket {number, title, criteria, blockedBy, keepOpen, kind, kindReason, discoveryTriage}. Forks and runbooks that must move with the contract: ${CONTRACT_COPIES.join(', ')}. Refresh a fork by re-copying the plugin script over it (keeping that fork's own edits) - see the ripple table in aac-skills/ticket-fleet/SKILL.md.`)
+  return new Error(`ticket-fleet contract mismatch: this script implements contract v${CONTRACT_VERSION}${detail} Contract v${CONTRACT_VERSION} requires args {${CONTRACT_REQUIRED_ARGS.join(', ')}}; its scout must return {candidateNumbers, tickets, repoMap, testCommand, defaultBranch} with per-ticket {number, title, criteria, blockedBy, keepOpen, kind, kindReason, discoveryTriage}. Forks and runbooks that must move with the contract: ${CONTRACT_COPIES.join(', ')}. Refresh a fork by re-copying the plugin script over it (keeping that fork's own edits) - see the ripple table in aac-skills/ticket-fleet/INTERNALS.md.`)
 }
 if (cfg.contractVersion === null || cfg.contractVersion === undefined || cfg.contractVersion === '') {
   throw contractError(' and the launcher declared no args.contractVersion, so it was written for an older contract (v1 passed runId alone). Pass contractVersion: 2.')

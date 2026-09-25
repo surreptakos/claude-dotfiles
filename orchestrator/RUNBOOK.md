@@ -170,7 +170,7 @@ In this order:
    resume included (`printf %x%x $(date +%s) $$`), never equal to the `runId`. The workflow runtime
    forbids `Date.now()` and `Math.random()` in scripts, so the caller mints both ids; a launch that
    omits any of the three is refused with a contract-mismatch error naming the version on both
-   sides (the ripple table is in the ticket-fleet SKILL.md). Resuming a run (`resumeFromRunId`)
+   sides (the ripple table is in `aac-skills/ticket-fleet/INTERNALS.md`). Resuming a run (`resumeFromRunId`)
    keeps the same `runId` - the branch names embed it - and takes a NEW `invocationId`, which is
    what makes the open-PR guard re-ask the tracker instead of replaying the cached "no PR" it
    recorded before the PRs existed. A cloud session needs no `instrument` or `verifierAgent`

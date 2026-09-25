@@ -2,10 +2,10 @@
 name: project-harness
 description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
 metadata:
-  modified: "2026-09-24T16:34:56Z"
-  previous-modified: "2026-09-24T16:24:40Z"
-  revision: "39"
-  content-sha: "b889debbe2d0"
+  modified: "2026-09-25T23:07:36Z"
+  previous-modified: "2026-09-24T16:34:56Z"
+  revision: "40"
+  content-sha: "6153685d7366"
 ---
 
 # Project Harness
@@ -127,7 +127,7 @@ cross-repo Projects board instead of per-repo (see step 6).
       `PROMPT_CONTRACT`) and calls it by name; otherwise `scriptPath` at the plugin copy is the
       default and the repo carries no fleet file. A fork goes stale the moment the plugin's
       contract moves: `node tools/ticket-fleet-contract.js <fork>` in `claude-dotfiles` says
-      which forks are behind, and the ripple table in the ticket-fleet SKILL.md lists them.
+      which forks are behind, and the ripple table in the ticket-fleet `INTERNALS.md` lists them.
     - **First run in a repo: pass `deliver: false`** (verify-only dry run) before letting the
       fleet push branches and open PRs.
 
