@@ -1,0 +1,299 @@
+<title>Ticket Rulings Desk</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<style>
+:root{
+  --bg:#f3f6fa;--surface:#ffffff;--ink:#172b42;--muted:#52647a;--line:#d4deea;--input:#b6c6d8;
+  --primary:#1859a5;--primary-ink:#ffffff;--soft:#e9f1fc;--soft-ink:#144c89;
+  --band:#172b42;--band-ink:#ffffff;--band-muted:#b9c8da;
+  --ok:#1f7a4d;--ok-soft:#e5f3eb;--warn:#9a6a12;--warn-soft:#fbf1dc;--bad:#a63a2e;--bad-soft:#f9e6e3;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:Arial,Helvetica,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f1824;--surface:#172334;--ink:#e3eaf3;--muted:#9fb0c4;--line:#2a3a50;--input:#3b4f69;
+  --primary:#6ea6ea;--primary-ink:#0b1522;--soft:#1c2f48;--soft-ink:#a9cbf3;
+  --band:#0a121c;--band-ink:#e3eaf3;--band-muted:#8ea1b8;
+  --ok:#6cc79a;--ok-soft:#173327;--warn:#e0b25c;--warn-soft:#33281a;--bad:#ef8a7c;--bad-soft:#3a1f1c;color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#0f1824;--surface:#172334;--ink:#e3eaf3;--muted:#9fb0c4;--line:#2a3a50;--input:#3b4f69;
+  --primary:#6ea6ea;--primary-ink:#0b1522;--soft:#1c2f48;--soft-ink:#a9cbf3;
+  --band:#0a121c;--band-ink:#e3eaf3;--band-muted:#8ea1b8;
+  --ok:#6cc79a;--ok-soft:#173327;--warn:#e0b25c;--warn-soft:#33281a;--bad:#ef8a7c;--bad-soft:#3a1f1c;color-scheme:dark;}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0}
+.band{background:var(--band);color:var(--band-ink);padding-inline:16px;padding-block:14px}
+.band .in{max-width:880px;margin:0 auto;display:flex;align-items:center;gap:14px}
+.badge{border:1.5px solid var(--band-muted);border-radius:6px;font-weight:700;font-size:17px;padding:6px 9px;letter-spacing:.02em}
+.band b{display:block;font-size:17px}
+.band span{color:var(--band-muted);font-size:13px}
+.wrap{max-width:880px;margin:0 auto;padding-inline:16px;padding-block:22px 120px}
+.eyebrow{font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:700}
+h1{font-size:30px;line-height:1.15;margin:6px 0 8px;text-wrap:balance}
+.lede{color:var(--muted);max-width:65ch;margin:0 0 18px}
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));background:var(--surface);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tile{padding:14px 16px;display:flex;gap:12px;align-items:center;border-right:1px solid var(--line)}
+.tile:last-child{border-right:0}
+.tile .num{font-size:30px;font-weight:700;font-variant-numeric:tabular-nums;min-width:2ch}
+.tile .t b{display:block;font-size:14px}.tile .t span{font-size:13px;color:var(--muted)}
+.num.ok{color:var(--ok)}.num.warn{color:var(--warn)}.num.pri{color:var(--primary)}
+@media (max-width:600px){.tiles{grid-template-columns:1fr}.tile{border-right:0;border-bottom:1px solid var(--line)}.tile:last-child{border-bottom:0}}
+.nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:3;background:var(--bg);padding-block:12px;margin-top:18px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:6px;overflow-x:auto;scrollbar-width:thin;padding-bottom:2px}
+.tab{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:999px;padding:6px 12px;font:inherit;font-size:14px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.tab .c{font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
+.tab[aria-selected="true"]{background:var(--primary);border-color:var(--primary);color:var(--primary-ink)}
+.tab[aria-selected="true"] .c{color:var(--primary-ink)}
+.tab.done:not([aria-selected="true"]) .c{color:var(--ok);font-weight:700}
+.tab:focus-visible,.pill input:focus-visible+span,.btn:focus-visible,select:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.sel{display:none;width:100%;font:inherit;padding:8px 10px;border:1px solid var(--input);border-radius:8px;background:var(--surface);color:var(--ink)}
+@media (max-width:600px){.tabs{display:none}.sel{display:block}}
+.repohead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 16px;margin:20px 0 10px}
+.repohead h2{font-size:20px;margin:0}
+.repohead a{color:var(--primary);font-size:13px}
+.bulk{display:flex;gap:8px;flex-wrap:wrap}
+.linkbtn{background:none;border:0;color:var(--primary);font:inherit;font-size:13px;cursor:pointer;padding:0;text-decoration:underline}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:12px;display:grid;gap:10px}
+.card.answered{border-color:color-mix(in srgb,var(--primary) 45%,var(--line))}
+.top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.n{font-family:var(--mono);font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.title{font-weight:700;color:var(--ink);text-decoration:none}
+.title:hover{text-decoration:underline}
+.plain{color:var(--ink);margin:0;max-width:72ch}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+@media (max-width:760px){.cols{grid-template-columns:1fr}}
+.pane{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg);min-width:0}
+.pane h3,.pane summary{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:700}
+.pane summary{cursor:pointer;margin:0}
+.pane[open] summary{margin-bottom:6px}
+.explain p{margin:0 0 8px;max-width:68ch}.explain p:last-child{margin-bottom:0}
+.explain b{color:var(--ink)}
+.issue{max-height:440px;overflow:auto;font-size:13.5px;line-height:1.45;overflow-wrap:anywhere}
+.issue h1,.issue h2,.issue h3,.issue h4{font-size:14px;margin:10px 0 4px}
+.issue p,.issue ul,.issue ol{margin:0 0 8px}
+.issue ul,.issue ol{padding-left:20px}
+.issue pre{white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12.5px}
+.issue code{font-family:var(--mono);font-size:12.5px;background:var(--surface);padding:0 3px;border-radius:3px}
+.issue table{border-collapse:collapse;font-size:12.5px;display:block;overflow-x:auto}
+.issue th,.issue td{border:1px solid var(--line);padding:3px 6px;text-align:left}
+.issue a{color:var(--primary)}
+.issue blockquote{margin:0 0 8px;padding-left:10px;border-left:3px solid var(--line);color:var(--muted)}
+.q{margin:0;font-weight:700;color:var(--soft-ink);background:var(--soft);border-radius:6px;padding:8px 10px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;border-radius:999px;padding:2px 9px;background:var(--warn-soft);color:var(--warn)}
+.chip.o{background:var(--soft);color:var(--soft-ink)}
+.chip.d{background:var(--bad-soft);color:var(--bad)}
+.chip.ok{background:var(--ok-soft);color:var(--ok)}
+.opts{display:grid;gap:8px}
+.pill{display:block;cursor:pointer}
+.pill input{position:absolute;opacity:0;pointer-events:none}
+.pill>span{display:grid;gap:2px;border:1px solid var(--line);border-radius:8px;padding:9px 12px;background:var(--surface)}
+.pill>span b{font-size:14px}
+.pill>span i{font-style:normal;font-size:13px;color:var(--muted)}
+.pill>span em{font-style:normal;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.pill:hover>span{border-color:var(--input)}
+.pill input:checked+span{border-color:var(--primary);box-shadow:inset 0 0 0 1px var(--primary);background:var(--soft)}
+.rec{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--ok);font-weight:700;margin-left:6px}
+textarea{width:100%;border:1px solid var(--input);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit;font-size:14px;padding:7px 9px;min-height:38px;resize:vertical}
+.foot{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding-inline:16px;padding-block:10px calc(10px + env(safe-area-inset-bottom,0px));z-index:4}
+.foot .in{max-width:880px;margin:0 auto;display:flex;gap:12px;align-items:center;flex-wrap:wrap;justify-content:space-between}
+.foot .s{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.btn{background:var(--primary);color:var(--primary-ink);border:0;border-radius:8px;padding:10px 16px;font:inherit;font-weight:700;cursor:pointer}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--primary);border:1px solid var(--primary)}
+.confirm{border:1px solid var(--primary);background:var(--soft);border-radius:10px;padding:14px;margin-top:10px;display:grid;gap:10px}
+.confirm ul{margin:0;padding-left:18px;font-size:14px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.landed{font-size:13px;border-radius:6px;padding:6px 10px;background:var(--ok-soft);color:var(--ok)}
+.landed.fail{background:var(--bad-soft);color:var(--bad)}
+@media (prefers-reduced-motion:no-preference){.pill>span,.tab{transition:border-color .12s,background-color .12s}}
+</style>
+
+<header class="band"><div class="in"><div class="badge">AAC</div><div><b>Active Alarm Company</b><span>Engineering tracker · owner rulings</span></div></div></header>
+<main class="wrap">
+  <div class="eyebrow" id="eyebrow"></div>
+  <h1>Ready-for-human rulings</h1>
+  <p class="lede">Each card is one ticket waiting on your call. Pick an option (the <b>recommended</b> one is my drafted answer), add a note if you want to steer it, and press <b>Submit</b> when done. Picks save as you click; close the tab any time. Submit hands every answered ticket to Claude, which writes the ruling onto the ticket, relabels or closes it and unblocks what it was holding up: at once if a Claude session is watching this page, otherwise within 30 minutes on weekdays.</p>
+  <section class="tiles" aria-label="Progress">
+    <div class="tile"><div class="num pri" id="tAns">0</div><div class="t"><b>Answered</b><span id="tAnsSub">of 0 tickets</span></div></div>
+    <div class="tile"><div class="num warn" id="tLeft">0</div><div class="t"><b>Still open</b><span>unanswered tickets</span></div></div>
+    <div class="tile"><div class="num ok" id="tLanded">0</div><div class="t"><b>Landed</b><span id="tLandedSub">written to GitHub</span></div></div>
+  </section>
+  <nav class="nav" aria-label="Repositories">
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <label for="repoSel" class="eyebrow" hidden>Repository</label>
+    <select id="repoSel" class="sel" aria-label="Repository"></select>
+  </nav>
+  <section id="panel"></section>
+</main>
+<footer class="foot"><div class="in">
+  <div class="s" id="saveState">connecting…</div>
+  <div class="row"><button class="btn" id="submitBtn" disabled>Submit rulings</button></div>
+</div>
+<div class="in" id="confirmBox" hidden></div>
+</footer>
+
+<script>
+const DATA = /*DATA*/null/*END*/;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+const short = r => r.split("/")[1];
+const mdOK = () => window.marked && window.DOMPurify;
+if (window.DOMPurify) DOMPurify.addHook("afterSanitizeAttributes", n => { if (n.tagName === "A") { n.setAttribute("target", "_blank"); n.setAttribute("rel", "noopener"); } });
+function md(s){ s = String(s || "").trim(); if (!s) return "<p><i>No description on GitHub.</i></p>"; return mdOK() ? DOMPurify.sanitize(marked.parse(s)) : "<pre>" + esc(s) + "</pre>"; }
+function explainHtml(t){
+  const e = t.explainer;
+  if (!e) return "<p>" + esc(t.plain) + "</p>";
+  return "<p><b>What this is.</b> " + esc(e.what) + "</p><p><b>How we got here.</b> " + esc(e.background) + "</p><p><b>Why it matters.</b> " + esc(e.stakes) + "</p>";
+}
+const wide = () => { try { return matchMedia("(min-width: 761px)").matches; } catch (e) { return true; } };
+
+const key = (repo, n) => short(repo) + "~" + n;
+const answers = {};   // key -> {choice, note, at}
+const landed = {};    // key -> {outcome, ok, at, detail}
+let db = null, comments = null;
+let active = null;
+try { active = localStorage.getItem("rfh-tab"); } catch (e) {}
+if (!DATA.repos.some(r => r.repo === active)) active = DATA.repos[0].repo;
+const total = DATA.repos.reduce((a, r) => a + r.tickets.length, 0);
+$("eyebrow").textContent = DATA.repos.length + " repositories / " + total + " tickets · drafted " + DATA.drafted;
+
+function isAnswered(k){ const a = answers[k]; return a && a.choice && (a.choice !== "other" || (a.note||"").trim()); }
+function repoCount(r){ return r.tickets.filter(t => isAnswered(key(r.repo, t.n))).length; }
+
+function renderNav(){
+  const tabs = $("tabs"), sel = $("repoSel");
+  tabs.innerHTML = ""; sel.innerHTML = "";
+  for (const r of DATA.repos){
+    const c = repoCount(r), done = c === r.tickets.length;
+    const b = document.createElement("button");
+    b.className = "tab" + (done ? " done" : ""); b.role = "tab"; b.id = "tab-" + short(r.repo);
+    b.setAttribute("aria-selected", r.repo === active ? "true" : "false");
+    b.innerHTML = esc(short(r.repo)) + '<span class="c">' + c + "/" + r.tickets.length + "</span>";
+    b.onclick = () => setActive(r.repo);
+    tabs.appendChild(b);
+    const o = document.createElement("option");
+    o.value = r.repo; o.textContent = short(r.repo) + " (" + c + "/" + r.tickets.length + ")"; o.selected = r.repo === active;
+    sel.appendChild(o);
+  }
+  sel.onchange = () => setActive(sel.value);
+}
+function setActive(repo){
+  active = repo; try { localStorage.setItem("rfh-tab", repo); } catch (e) {}
+  renderNav(); renderPanel(); window.scrollTo({top: $("tabs").offsetTop - 10});
+}
+function optLabel(o){
+  const l = o.landing || {};
+  const map = {"relabel":"relabel", "close-completed":"close as done", "close-wontfix":"close as won't do", "keep":"keep for you", "spawn-children":"split into new tickets"};
+  let s = map[l.action] || l.action || "";
+  if (l.action === "relabel" && l.addLabels && l.addLabels.length) s = "to " + l.addLabels.join(", ");
+  return s;
+}
+function renderPanel(){
+  const r = DATA.repos.find(x => x.repo === active);
+  const p = $("panel"); p.innerHTML = "";
+  const h = document.createElement("div"); h.className = "repohead";
+  h.innerHTML = "<h2>" + esc(short(r.repo)) + '</h2><div class="bulk"><button class="linkbtn" id="takeRec">Take every recommended pick on this page</button> <a href="https://github.com/' + esc(r.repo) + '/issues?q=is%3Aopen+label%3Aready-for-human" target="_blank" rel="noopener">Open queue on GitHub</a></div>';
+  p.appendChild(h);
+  $("takeRec").onclick = () => { for (const t of r.tickets){ const k = key(r.repo,t.n); if (!answers[k] || !answers[k].choice){ const rec = t.options.find(o => o.recommended) || t.options[0]; setAnswer(k, rec.id, (answers[k]||{}).note || ""); } } renderPanel(); };
+  for (const t of r.tickets){
+    const k = key(r.repo, t.n), a = answers[k] || {};
+    const c = document.createElement("article"); c.className = "card" + (isAnswered(k) ? " answered" : ""); c.id = "card-" + k.replace("~","-");
+    const chips = [];
+    if (t.blockedBy && t.blockedBy.length) chips.push('<span class="chip d">blocked by #' + t.blockedBy.join(", #") + "</span>");
+    if (t.blocks && t.blocks.length) chips.push('<span class="chip o">holding up #' + t.blocks.join(", #") + "</span>");
+    if (t.needsDanOnly) chips.push('<span class="chip">needs you: ' + esc(t.needsDanOnly) + "</span>");
+    const L = landed[k];
+    let html = '<div class="top"><span class="n">#' + t.n + '</span><a class="title" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.title) + "</a></div>"
+      + '<div class="cols"><section class="pane explain"><h3>Plain English</h3>' + explainHtml(t) + '</section>'
+      + '<details class="pane"' + (wide() ? " open" : "") + '><summary>Issue text on GitHub</summary><div class="issue">' + md(t.body) + "</div></details></div>"
+      + '<p class="q">' + esc(t.question) + "</p>"
+      + (chips.length ? '<div class="chips">' + chips.join("") + "</div>" : "")
+      + '<div class="opts" role="radiogroup" aria-label="Ruling for #' + t.n + '">';
+    for (const o of t.options.concat([{id:"other", label:"Other (write it in the note)", detail:"Your note becomes the ruling; Claude picks the matching label.", landing:{}}])){
+      const id = "r-" + k.replace("~","-") + "-" + o.id;
+      html += '<label class="pill" for="' + id + '"><input type="radio" id="' + id + '" name="r-' + esc(k) + '" value="' + esc(o.id) + '"' + (a.choice === o.id ? " checked" : "") + "><span><b>" + esc(o.label) + (o.recommended ? '<span class="rec">recommended</span>' : "") + "</b><i>" + esc(o.detail) + "</i>" + (optLabel(o) ? "<em>" + esc(optLabel(o)) + "</em>" : "") + "</span></label>";
+    }
+    html += "</div>"
+      + '<textarea id="note-' + k.replace("~","-") + '" placeholder="Note (optional; required for Other)">' + esc(a.note || "") + "</textarea>"
+      + (L ? '<div class="landed' + (L.ok ? "" : " fail") + '">' + (L.ok ? "Landed: " : "Landing failed: ") + esc(L.outcome || "") + (L.detail ? " · " + esc(L.detail) : "") + "</div>" : "");
+    c.innerHTML = html;
+    c.querySelectorAll("input[type=radio]").forEach(i => i.addEventListener("change", () => { setAnswer(k, i.value, c.querySelector("textarea").value); c.classList.toggle("answered", isAnswered(k)); }));
+    let tm; const ta = c.querySelector("textarea");
+    ta.addEventListener("input", () => { clearTimeout(tm); tm = setTimeout(() => { const ch = (c.querySelector("input:checked")||{}).value; setAnswer(k, ch || null, ta.value); c.classList.toggle("answered", isAnswered(k)); }, 600); });
+    p.appendChild(c);
+  }
+}
+function paintCounts(){
+  const ans = Object.keys(answers).filter(isAnswered).length;
+  $("tAns").textContent = ans; $("tAnsSub").textContent = "of " + total + " tickets";
+  $("tLeft").textContent = total - ans;
+  const lk = Object.values(landed).filter(x => x.ok).length;
+  $("tLanded").textContent = lk;
+  $("submitBtn").disabled = ans === 0;
+  $("submitBtn").textContent = ans ? "Submit " + ans + " ruling" + (ans === 1 ? "" : "s") : "Submit rulings";
+  renderNav();
+}
+const inflight = {};
+async function setAnswer(k, choice, note){
+  note = (note || "").trim();
+  const prev = answers[k] || {};
+  if (prev.choice === choice && (prev.note || "") === note) return;
+  const [repoShort, n] = k.split("~");
+  const repo = DATA.repos.find(r => short(r.repo) === repoShort).repo;
+  const body = {key: k, repo, n: Number(n), choice, note, at: new Date().toISOString()};
+  answers[k] = body; paintCounts();
+  if (!db){ $("saveState").textContent = "Not saving: storage unavailable in this view"; return; }
+  if (inflight[k]){ inflight[k].next = body; return; }
+  inflight[k] = {next: null};
+  try { $("saveState").textContent = "Saving…"; await db.doc("rulings/" + k).set(body); $("saveState").textContent = "Saved " + new Date().toLocaleTimeString(); }
+  catch (e) { $("saveState").textContent = "Save failed (" + ((e && e.code) || "unknown") + "). Click the option again."; }
+  const nx = inflight[k].next; delete inflight[k];
+  if (nx) { answers[k] = null; setAnswer(k, nx.choice, nx.note); }
+}
+
+// Submit: confirm in page, write a submission doc, then hand it to Claude.
+$("submitBtn").onclick = () => {
+  const box = $("confirmBox");
+  const keys = Object.keys(answers).filter(isAnswered).filter(k => !(landed[k] && landed[k].ok));
+  const per = {};
+  for (const k of keys){ const s = k.split("~")[0]; per[s] = (per[s]||0) + 1; }
+  box.innerHTML = '<div class="confirm"><b>Send ' + keys.length + " ruling" + (keys.length === 1 ? "" : "s") + " to Claude?</b><ul>" + Object.entries(per).map(([s,c]) => "<li>" + esc(s) + ": " + c + "</li>").join("") + '</ul><span style="font-size:13px;color:var(--muted)">Claude will comment on each ticket, change its labels or close it, and update blocked tickets. Unanswered tickets stay as they are.</span><div class="row"><button class="btn" id="goBtn">Send to Claude</button><button class="btn ghost" id="noBtn">Cancel</button></div><div id="sendState" style="font-size:13px"></div></div>';
+  box.hidden = false;
+  $("noBtn").onclick = () => { box.hidden = true; };
+  $("goBtn").onclick = () => submit(keys);
+};
+async function submit(keys){
+  const st = $("sendState"); $("goBtn").disabled = true;
+  if (!db){ st.textContent = "Storage unavailable in this view, so nothing was sent. Open the page on claude.ai."; return; }
+  const id = "s" + Date.now();
+  try {
+    await db.doc("submissions/" + id).set({id, keys, count: keys.length, at: new Date().toISOString(), status: "submitted"});
+  } catch (e) { st.textContent = "Could not record the submission (" + ((e&&e.code)||"unknown") + "). Try again."; $("goBtn").disabled = false; return; }
+  const text = "Rulings submitted: batch " + id + ", " + keys.length + " tickets. Land them now.";
+  let sent = false;
+  try {
+    if (comments && (await comments.canSendToClaude()) === "available"){
+      const anchor = await comments.anchorFor($("submitBtn"));
+      await comments.sendToClaude({anchor, text}); sent = true;
+    }
+  } catch (e) { sent = false; }
+  st.textContent = sent ? "Sent. Claude is landing them; each card shows “Landed” as it goes." : "Saved as batch " + id + ". The next landing run (every 30 minutes, weekdays 8 AM to 6 PM Central) writes them to GitHub; each card then shows “Landed”.";
+}
+
+(async () => {
+  renderNav(); renderPanel(); paintCounts();
+  try { db = await window.claude.use("db"); } catch (e) { db = null; }
+  try { comments = await window.claude.use("comments"); } catch (e) { comments = null; }
+  if (!db){ $("saveState").textContent = "Storage unavailable in this view: picks will not save"; return; }
+  $("saveState").textContent = "Connected · picks save as you click";
+  db.collection("rulings").onSnapshot(snap => {
+    for (const d of snap.docs){ const b = d.data(); if (b && b.key) answers[b.key] = b; }
+    paintCounts(); if (!document.activeElement || document.activeElement.tagName !== "TEXTAREA") renderPanel();
+  }, e => { $("saveState").textContent = "Live updates stopped (" + e.code + ")"; });
+  db.collection("landed").onSnapshot(snap => {
+    for (const d of snap.docs){ const b = d.data(); if (b && b.key) landed[b.key] = b; }
+    paintCounts(); if (!document.activeElement || document.activeElement.tagName !== "TEXTAREA") renderPanel();
+  }, () => {});
+})();
+</script>

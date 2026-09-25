@@ -1136,6 +1136,50 @@ class AskMattGateTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0)
         self.assertIn("lint clean", done.stdout)
 
+    def test_lint_never_requires_the_pylons_prefix_because_it_is_a_canary(self) -> None:
+        # Dan, 2026-09-25: the prefix lives only in the global CLAUDE.md so its absence shows him a
+        # session has started forgetting rules. A lint that required it would hide that signal.
+        body = "Queue empty. Tests pass. Deployed bytes match.\nNext: open the log."
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=body, text=True, capture_output=True, check=False,
+        )
+        self.assertNotIn("PYLONS", done.stdout)
+        self.assertNotIn("PREFIX", done.stdout)
+
+    def test_yes_lint_flags_absence_stated_after_a_refused_call(self) -> None:
+        # Dan, 2026-09-25: GraphQL and /users REST both refused a Projects board add, and the reply
+        # said "the issues are not on the Projects board". Board auto-add had placed all eleven.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_absence", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        claim = "The issues are not on the Projects board. Next: add them."
+        refused = ['{"message":"This GitHub API path is not available: sessions are bound"} 403']
+        self.assertTrue(any("YES absence" in v for v in gate._yes_lint(claim, {"Bash"}, refused)))
+        # The same sentence with no refused call this turn is not this rule's business.
+        self.assertFalse(any("YES absence" in v for v in gate._yes_lint(claim, {"Bash"}, [])))
+        # A refused call with no statement of absence is not flagged either.
+        self.assertFalse(any(
+            "YES absence" in v for v in gate._yes_lint("Board add refused with 403.", {"Bash"}, refused)
+        ))
+        # The transcript reader finds the refusal in this turn's tool results only.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "t.jsonl"
+            records = [
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "old", "content": "HTTP 403"}]}},
+                {"type": "user", "message": {"role": "user", "content": "add them to the board"}},
+                {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "a", "content": refused[0]}]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "b", "content": "201 Created"}]}},
+            ]
+            path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            self.assertEqual(len(gate._turn_refusals(str(path))), 1)
+
     def test_lint_exempts_the_mandated_pylons_prefix_but_no_other_fence(self) -> None:
         # ~/.claude/CLAUDE.md orders every reply to open with this diff fence. It is a directive,
         # not working material, so the lint ignores it - at the top only, and only that block.
