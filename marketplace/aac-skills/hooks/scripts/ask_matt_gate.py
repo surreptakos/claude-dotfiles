@@ -1054,6 +1054,11 @@ FENCE_PATTERN = re.compile(r"```")
 RUNNABLE_FENCE_PATTERN = re.compile(r"```bash\n.*?```", re.DOTALL)
 # The mandated reply prefix from ~/.claude/CLAUDE.md ("Standing directive — response prefix").
 # Leading whitespace only; anything else before it means it is not the prefix.
+# The PYLONS prefix is a CANARY, not a rule the gate enforces (Dan, 2026-09-25). It lives only in
+# the global CLAUDE.md so that a session which stops opening with it shows Dan, at a glance, that
+# it has started forgetting its rules. Never make the lint require it: a hook that forces the
+# prefix would keep it present exactly when the session has gone dumb, and kill the signal.
+# The lint strips it (so its fence is not counted as monospace) and that is all.
 PYLONS_PREFIX_PATTERN = re.compile(
     r"\A\s*```diff\r?\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\r?\n```[ \t]*\r?\n?"
 )
@@ -1316,6 +1321,57 @@ SOURCE_CHARACTERISATION_PATTERN = re.compile(
 )
 
 
+# A statement that something is absent or not in a state: "not on the board", "isn't merged",
+# "no review threads", "has not been shared". Dan, 2026-09-25: after a refused write (GraphQL and
+# /users REST both 403) the reply told him "the issues are not on the Projects board"; board
+# auto-add had placed all eleven. A refused write proves only that the write was refused.
+NEGATIVE_STATE_PATTERN = re.compile(
+    r"\b(is|are|was|were|has|have)(n'?t| not)( been)? (on|in|added|shared|merged|linked|attached|"
+    r"created|published|deployed|synced|there|present|visible|enabled)\b"
+    r"|\bnot (yet )?(on|in) the\b|\bno (review|reviews|review threads|comments|checks|cards?|items?)\b",
+    re.IGNORECASE,
+)
+# What a refused call looks like in a tool result: an HTTP 401/403/404/405/407, or the proxy's and
+# the tool layer's refusal wording. Read from the tool_result blocks of the current turn.
+REFUSED_RESULT_PATTERN = re.compile(
+    r"\b(40[1357])\b|not available|not permitted|permission denied|denied by|access denied"
+    r"|forbidden|refused|unauthori[sz]ed",
+    re.IGNORECASE,
+)
+
+
+def _turn_refusals(transcript_path: str) -> list[str] | None:
+    """Tool results since the last real user prompt that read as a refused call. None = unreadable."""
+    if not transcript_path:
+        return None
+    refused: list[str] = []
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("type") != "user":
+                    continue
+                content = (record.get("message") or {}).get("content")
+                blocks = content if isinstance(content, list) else []
+                results = [b for b in blocks if isinstance(b, dict) and b.get("type") == "tool_result"]
+                if not results:
+                    refused = []  # a real user prompt starts a new turn
+                    continue
+                for block in results:
+                    body = block.get("content")
+                    if isinstance(body, list):
+                        body = " ".join(str(part.get("text", "")) for part in body if isinstance(part, dict))
+                    body = str(body or "")
+                    if block.get("is_error") or REFUSED_RESULT_PATTERN.search(body):
+                        refused.append(body[:120])
+    except Exception:
+        return None
+    return refused
+
+
 def _turn_tool_names(transcript_path: str) -> set[str] | None:
     """Tools the assistant called since the last real user prompt. None when unreadable."""
     if not transcript_path:
@@ -1377,6 +1433,8 @@ YES_JEV_QUESTIONS = {
     "certainty": "Does `reply` state a root cause or diagnosis with certainty?" + YES_JEV_OWN_VOICE,
     "source": "Does `reply` describe what a named file, ticket, page or document contains or says?"
     + YES_JEV_OWN_VOICE,
+    "absence": "Does `reply` state that something is missing, absent or not in some state (not on a"
+    " board, not merged, no reviews) as a fact?" + YES_JEV_OWN_VOICE,
 }
 YES_JEV_FLOOR = 0.5  # below this Jev says the reply does not itself do it, and the hit is dropped
 YES_JEV_TIMEOUT = 3.0  # seconds; the Stop hook's whole budget is 5
@@ -1394,8 +1452,11 @@ def _yes_jev_verdicts(prose: str, rules: list[str]) -> dict[str, float] | None:
     )
 
 
-def _yes_lint(text: str, turn_tools: set[str] | None) -> list[str]:
-    """YES violations a script can see in a reply. `turn_tools` None = transcript unknown."""
+def _yes_lint(
+    text: str, turn_tools: set[str] | None, turn_refusals: list[str] | None = None
+) -> list[str]:
+    """YES violations a script can see in a reply. `turn_tools` None = transcript unknown.
+    `turn_refusals` holds this turn's refused tool results; None or empty means none were seen."""
     prose = _strip_code(PYLONS_PREFIX_PATTERN.sub("", text, count=1))
     found: list[tuple[str, str]] = []
     hedges = sorted({m.group(0).lower() for m in HEDGE_PATTERN.finditer(prose)})
@@ -1434,6 +1495,14 @@ def _yes_lint(text: str, turn_tools: set[str] | None) -> list[str]:
                 "source",
                 "YES unread source: \"" + snippet[:70]
                 + "\" — nothing was opened this turn; read it or say it is unread"
+            ))
+    if turn_refusals:
+        absent = NEGATIVE_STATE_PATTERN.search(prose)
+        if absent:
+            found.append((
+                "absence",
+                "YES absence stated after a refused call: \"" + absent.group(0)
+                + "\" — a refused write is not a read of state; read the state, or say you could not check"
             ))
     verdicts = _yes_jev_verdicts(prose, [rule for rule, _ in found])
     if verdicts is None:
@@ -1649,7 +1718,9 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     try:
         final_text = _last_assistant_text(transcript_path) if transcript_path else ""
         if final_text.strip():
-            violations = violations + _yes_lint(final_text, _turn_tool_names(transcript_path))
+            violations = violations + _yes_lint(
+                final_text, _turn_tool_names(transcript_path), _turn_refusals(transcript_path)
+            )
             violations = violations + _caveman_lint(final_text, mode)
     except Exception:
         pass  # lint must never wedge a session; the audit above still stands
@@ -1797,8 +1868,10 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     # ADHD shaping runs between the two: it is structure, so it stands at every caveman level,
     # off included, and it is the one rule set the reader can switch off (~/.claude/.adhd-off).
     adhd = _adhd_state()
+    transcript = _find_transcript(session_id) if session_id else ""
+    turn_refusals = _turn_refusals(transcript) if transcript else None
     violations = (
-        _yes_lint(text, turn_tools)
+        _yes_lint(text, turn_tools, turn_refusals)
         + (_adhd_lint(text) if adhd == "on" else [])
         + _caveman_lint(text, mode)
     )
