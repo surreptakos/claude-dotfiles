@@ -4,10 +4,10 @@ description: 'Parallel ticket runner: scout, pinned implementer per ticket, blin
 
   '
 metadata:
-  modified: '2026-09-24T14:17:43Z'
-  previous-modified: '2026-09-24T14:10:39Z'
-  revision: '41'
-  content-sha: f17731584484
+  modified: '2026-09-25T23:00:36Z'
+  previous-modified: '2026-09-24T14:17:43Z'
+  revision: '42'
+  content-sha: 06befca545aa
 ---
 
 # ticket-fleet
@@ -382,6 +382,15 @@ The scout classifies each ticket into one of three lanes; the wave runs them in 
   session** heading; the delivery moves the label to `ready-for-local-agent` unless the
   remaining steps are genuinely a person's judgment, credential or sign-off, in which
   case the label is `ready-for-human`. It never claims an owner step was done.
+
+**A blocked ticket can run in the same wave (issue 854).** When every open blocker of a ticket is
+a code ticket already in the wave, the ticket joins the wave on the lane of its latest blocker,
+outside the `maxTickets` cap, and chains resolve transitively. It starts only after each blocker's
+deliverer has merged its PR (STEP D); its implementer then rebuilds its branch from
+`origin/<defaultBranch>`, so it builds on the merged code. A blocker that did not merge skips the
+ticket, named with the blocker's outcome under `skippedChained`; a blocker outside the wave, a
+probe or human blocker, or a cycle still lands it in `skippedBlocked`. The Report pairs results
+by ticket number, since a lane can hold several tickets.
 
 The scout also sets `handoffPending` per ticket: true when the ticket's latest comment is a
 fleet handoff (a "Remaining for a local session" or "Remaining for a person" section and the

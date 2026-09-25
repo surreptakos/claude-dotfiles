@@ -423,7 +423,13 @@ function applyOpenPrs(tickets, withOpenPr) {
  * latest comment is a fleet handoff still waiting on the owner is parked, not run: re-running its
  * lane would post the same handoff comment again on every wave (issue 266).
  *
- * @param {Array<{number:number, blockedBy:Array, handoffPending?:boolean}>} tickets
+ * In-wave chaining (issue 854): a blocked ticket whose every open blocker is a code ticket already
+ * in the wave joins the wave too, carrying `chainedAfter` (the blocker numbers). It runs on a
+ * blocker's lane once the blockers have merged (STEP D), so it takes no concurrency slot and does
+ * not count against the cap. Chains resolve transitively (C after B after A); a blocker outside
+ * the wave, a probe or human blocker (neither merges) or a cycle leaves the ticket in `blocked`.
+ *
+ * @param {Array<{number:number, kind?:string, blockedBy:Array, handoffPending?:boolean}>} tickets
  * @param {number} maxTickets - the run's cap on concurrently implemented tickets
  * @returns {{wave:Array, blocked:Array, pendingHandoff:Array, overCap:Array}}
  */
@@ -432,7 +438,82 @@ function selectWave(tickets, maxTickets) {
   const eligible = tickets.filter((t) => t.blockedBy.length === 0);
   const pendingHandoff = eligible.filter((t) => t.handoffPending === true);
   const runnable = eligible.filter((t) => t.handoffPending !== true);
-  return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) };
+  const wave = runnable.slice(0, maxTickets);
+  const merges = (t) => t.kind !== 'probe' && t.kind !== 'human';
+  const mergingInWave = new Set(wave.filter(merges).map((t) => parseInt(t.number, 10)));
+  const chainedNumbers = new Set();
+  let waiting = blocked.filter((t) => t.handoffPending !== true);
+  for (let grew = true; grew;) {
+    grew = false;
+    waiting = waiting.filter((t) => {
+      const after = t.blockedBy.map((n) => parseInt(n, 10));
+      if (!after.every((n) => mergingInWave.has(n))) return true;
+      wave.push(Object.assign({}, t, { chainedAfter: after }));
+      chainedNumbers.add(parseInt(t.number, 10));
+      if (merges(t)) mergingInWave.add(parseInt(t.number, 10));
+      grew = true;
+      return false;
+    });
+  }
+  return {
+    wave,
+    blocked: blocked.filter((t) => !chainedNumbers.has(parseInt(t.number, 10))),
+    pendingHandoff,
+    overCap: runnable.slice(maxTickets),
+  };
+}
+
+/**
+ * Group the wave into lanes: each lane runs its tickets one after another, lanes run in parallel.
+ *
+ * A ticket with no `chainedAfter` opens a lane of its own. A chained ticket (issue 854) joins the
+ * lane of its blocker that sits latest in the wave, so it starts once that blocker's lane is done
+ * with it; blockers on other lanes are awaited before it starts (see `chainGate`). Discovery-triage
+ * chores share one lane, appended last, so each sees the tickets the previous one filed (issue 319).
+ *
+ * @param {Array<{number:number, chainedAfter?:Array<number>, discoveryTriage?:boolean}>} wave
+ * @returns {Array<Array<{ticket:object, workerIndex:number}>>}
+ */
+function buildLanes(wave) {
+  const lanes = [];
+  const chores = [];
+  const laneOf = new Map();
+  const indexOf = new Map();
+  (Array.isArray(wave) ? wave : []).forEach((ticket, workerIndex) => {
+    const n = parseInt(ticket.number, 10);
+    indexOf.set(n, workerIndex);
+    const after = Array.isArray(ticket.chainedAfter) ? ticket.chainedAfter.map((b) => parseInt(b, 10)) : [];
+    const host = after.filter((b) => laneOf.has(b)).sort((a, b) => indexOf.get(a) - indexOf.get(b)).pop();
+    let lane;
+    if (host !== undefined) lane = laneOf.get(host);
+    else if (ticket.discoveryTriage === true) lane = chores;
+    else { lane = []; lanes.push(lane); }
+    lane.push({ ticket, workerIndex });
+    laneOf.set(n, lane);
+  });
+  if (chores.length) lanes.push(chores);
+  return lanes;
+}
+
+/**
+ * Decide whether a chained ticket (issue 854) may start, from its blockers' results in this wave.
+ * Only a blocker the deliverer merged (`merged: true`) clears the edge; anything else - no result,
+ * a failed or unmerged PR - skips the ticket with a reason naming that blocker.
+ *
+ * @param {{chainedAfter?:Array<number>}} ticket
+ * @param {Map<number, object|null>} blockerResults - blocker number to its lane result
+ * @returns {string|null} null when every blocker merged, otherwise the skip reason
+ */
+function chainGate(ticket, blockerResults) {
+  for (const n of (Array.isArray(ticket && ticket.chainedAfter) ? ticket.chainedAfter : [])) {
+    const r = blockerResults && blockerResults.get(parseInt(n, 10));
+    if (!r) return `blocker #${n} produced no result in this wave`;
+    if (r.merged !== true) {
+      const why = r.prState || (r.done ? 'verified, not merged' : 'not verified');
+      return `blocker #${n} did not merge in this wave (${why})`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -815,7 +896,7 @@ function difficultyEvalSet(branchNames) {
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
   ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
+  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,

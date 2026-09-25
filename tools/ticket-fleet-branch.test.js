@@ -22,7 +22,7 @@ const { spawnSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
+  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
   classifyBranchLookup, classifyDelivery,
@@ -1362,6 +1362,50 @@ test('selectWave splits the candidates into the wave and the three reasons the r
   assert.deepEqual(out.overCap.map((x) => x.number), [5], 'the rest are reported over cap, not lost');
 });
 
+// ---- In-wave chaining (issue 854) ----
+// Run wf_3d285ebd-301 skipped #840-#844 (blocked by #839) and #826 (blocked by #825) although both
+// blockers were in the same wave and the deliverer merges its own PR. A blocked ticket whose every
+// open blocker is an in-wave code ticket now joins the wave on its blocker's lane.
+
+test('selectWave chains a ticket blocked only by in-wave code tickets onto the wave (issue 854)', () => {
+  const t = (number, blockedBy, kind = 'code') => ({ number, blockedBy, kind });
+  const out = selectWave([t(1, []), t(2, [1]), t(3, [2]), t(4, [99]), t(5, [1, 99])], 1);
+  assert.deepEqual(out.wave.map((x) => x.number), [1, 2, 3], 'B after A, and C after B, transitively');
+  assert.deepEqual(out.wave.map((x) => x.chainedAfter || []), [[], [1], [2]], 'each chained ticket names its blockers');
+  assert.deepEqual(out.blocked.map((x) => x.number), [4, 5], 'a blocker outside the wave still gates the ticket');
+  assert.deepEqual(out.overCap, [], 'chained tickets do not count against the cap');
+});
+
+test('selectWave does not chain behind a blocker that cannot merge or is over the cap', () => {
+  const t = (number, blockedBy, kind = 'code') => ({ number, blockedBy, kind });
+  const probe = selectWave([t(1, [], 'probe'), t(2, [1])], 3);
+  assert.deepEqual(probe.blocked.map((x) => x.number), [2], 'a probe blocker opens no PR, so nothing merges');
+  const capped = selectWave([t(1, []), t(2, []), t(3, [2])], 1);
+  assert.deepEqual(capped.wave.map((x) => x.number), [1]);
+  assert.deepEqual(capped.blocked.map((x) => x.number), [3], 'a blocker over the cap is not in the wave');
+  const cycle = selectWave([t(1, []), t(2, [3]), t(3, [2])], 3);
+  assert.deepEqual(cycle.blocked.map((x) => x.number), [2, 3], 'a blocker cycle never enters the wave');
+});
+
+test('buildLanes puts a chained ticket on its latest blocker\'s lane and chores in one lane', () => {
+  const wave = [
+    { number: 1 }, { number: 2 }, { number: 3, discoveryTriage: true }, { number: 4, discoveryTriage: true },
+    { number: 5, chainedAfter: [2, 1] }, { number: 6, chainedAfter: [5] },
+  ];
+  const lanes = buildLanes(wave).map((lane) => lane.map((w) => `${w.ticket.number}@${w.workerIndex}`));
+  assert.deepEqual(lanes, [['1@0'], ['2@1', '5@4', '6@5'], ['3@2', '4@3']]);
+});
+
+test('chainGate starts a chained ticket only when every blocker merged, else names the blocker', () => {
+  const ticket = { number: 2, chainedAfter: [1, 7] };
+  const merged = { merged: true, prState: 'merged', done: true };
+  assert.equal(chainGate(ticket, new Map([[1, merged], [7, merged]])), null);
+  assert.match(chainGate(ticket, new Map([[1, merged], [7, { merged: false, prState: 'ci-red', done: true }]])),
+    /blocker #7 did not merge in this wave \(ci-red\)/);
+  assert.match(chainGate(ticket, new Map([[1, null], [7, merged]])), /blocker #1 produced no result/);
+  assert.match(chainGate(ticket, new Map([[1, { done: false }], [7, merged]])), /blocker #1 .*not verified/);
+});
+
 // ---- Empty-label listing ends the run (issue 298) ----
 // A scout whose label listing matched nothing used to route around the dead end and hand back
 // every open ticket it could find, so the fleet spawned open-PR scans and implementer agents for work
@@ -2034,7 +2078,7 @@ test(`${FLEET_SCRIPT_REL} a pushed, verified branch the deliverer cannot find is
   assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'it is not a blocked merge, whatever mergeStatus the deliverer chose');
   assert.ok(logs.some((m) => /INCONSISTENCY/.test(m)), 'the inconsistency must be logged loudly');
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\)/,
+  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\b/,
     'the run result must keep an inconsistent ticket out of `failed`');
   assert.match(src, /inconsistent: clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent`');
 });
@@ -2590,4 +2634,71 @@ test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries 
   const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
   assert.match(revParseBody, /spelling:\s*\{\s*type:\s*'string'/, 'REV must carry a spelling field so the run can report which spelling answered');
   assert.match(revParseBody, /buildTipLookupCommand\(orchestratorCwd, ref\)/, 'the prompt must be built from the fallback-chain command, not a literal rev-parse');
+});
+
+// ---- In-wave chaining, driven through the script's own lane dispatch (issue 854) ----
+// The FLEET-LANES block runs with real buildLanes/chainGate and a pipeline that starts every lane
+// at once, as the Workflow runtime does; only the per-kind lanes are mocked.
+async function driveLanes(wave, codeResult) {
+  const body = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-LANES');
+  const started = [];
+  const logs = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn results;\n}`);
+  const results = await wrapper(laneScope({
+    wave, log: (m) => logs.push(m), scout: { defaultBranch: 'main' }, buildLanes, chainGate,
+    pipeline: (items, fn) => Promise.all(items.map((item) => fn(item))),
+    runCodeLane: async (t) => { started.push(t.number); return codeResult(t); },
+    runProbeLane: async () => { throw new Error('no probe here'); },
+    runHumanLane: async () => { throw new Error('no human here'); },
+  }));
+  const byTicket = new Map(results.filter(Boolean).map((r) => [r.ticket, r]));
+  return { started, logs, byTicket };
+}
+
+test(`${FLEET_SCRIPT_REL} runs a chained ticket after its in-wave blocker merges (issue 854)`, async () => {
+  const { wave } = selectWave([{ number: 839, kind: 'code', blockedBy: [] }, { number: 840, kind: 'code', blockedBy: [839] }], 5);
+  const { started, byTicket } = await driveLanes(wave, (t) => ({ ticket: t.number, done: true, merged: true, prState: 'merged' }));
+  assert.deepEqual(started, [839, 840], 'the chained ticket starts only after its blocker returned');
+  assert.equal(byTicket.get(840).merged, true);
+});
+
+test(`${FLEET_SCRIPT_REL} skips a chained ticket, naming the blocker, when the blocker did not merge (issue 854)`, async () => {
+  const { wave } = selectWave([{ number: 825, kind: 'code', blockedBy: [] }, { number: 826, kind: 'code', blockedBy: [825] }], 5);
+  const { started, logs, byTicket } = await driveLanes(wave, (t) => ({ ticket: t.number, done: true, merged: false, prState: 'ci-red' }));
+  assert.deepEqual(started, [825], 'no lane may start for a ticket whose blocker did not merge');
+  assert.match(byTicket.get(826).chainSkipped, /blocker #825 did not merge in this wave \(ci-red\)/);
+  assert.ok(logs.some((m) => m.includes('#826') && m.includes('#825')), 'the skip is logged naming ticket and blocker');
+});
+
+test(`${FLEET_SCRIPT_REL} a blocker whose stage threw still releases its chained ticket as skipped`, async () => {
+  const { wave } = selectWave([{ number: 1, kind: 'code', blockedBy: [] }, { number: 2, kind: 'code', blockedBy: [1] }], 5);
+  const { started, byTicket } = await driveLanes(wave, () => { throw new Error('tree guard breach'); });
+  assert.deepEqual(started, [1]);
+  assert.match(byTicket.get(2).chainSkipped, /blocker #1 produced no result/);
+});
+
+test(`${FLEET_SCRIPT_REL} a chained ticket's implementer starts from origin/<defaultBranch> (issue 854)`, async () => {
+  const prompts = [];
+  const agentMock = async (prompt, opts) => {
+    prompts.push([opts.label, prompt]);
+    if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ok', failures: [] };
+    return { pushed: true, prUrl: 'https://github.com/x/y/pull/1', merged: true, prState: 'merged' };
+  };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 840, title: 't', criteria: '', chainedAfter: [839] }, 1);
+  const impl = prompts.find(([label]) => label === 'impl:#840.1')[1];
+  assert.match(impl, /Chained ticket \(issue 854\): its blocker\(s\) #839 merged into main/);
+  assert.match(impl, /fetch origin main/);
+  assert.match(impl, /checkout -B agent\/issue-840-attempt1-wf_testrun-w1 origin\/main/);
+  prompts.length = 0;
+  await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 9, title: 't', criteria: '' }, 0);
+  assert.doesNotMatch(prompts.find(([label]) => label === 'impl:#9.1')[1], /Chained ticket/,
+    'an unchained ticket keeps its prompt byte-identical, so resume caches still hit');
+});
+
+test(`${FLEET_SCRIPT_REL} pairs Report results by ticket number, not wave position (issue 854)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const clean = wave\.map\(\(t\) => resultByTicket\.get\(parseInt\(t\.number, 10\)\)/);
+  assert.doesNotMatch(src, /results \|\| \[\]\)\[i\]/, 'positional pairing breaks once a lane holds several tickets');
+  assert.match(src, /skippedChained: clean\.filter\(r => r\.chainSkipped\)/);
 });
