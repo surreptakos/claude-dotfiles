@@ -158,6 +158,11 @@ if (!DATA.repos.some(r => r.repo === active)) active = DATA.repos[0].repo;
 const total = DATA.repos.reduce((a, r) => a + r.tickets.length, 0);
 $("eyebrow").textContent = DATA.repos.length + " repositories / " + total + " tickets · drafted " + DATA.drafted;
 
+// A ticket redrafted since a pick or a landing (it came back to the queue) starts fresh: an older
+// pick or "Landed" belongs to the previous round and must not block this one.
+const draftedAt = {};
+for (const r of DATA.repos) for (const t of r.tickets) draftedAt[key(r.repo, t.n)] = Date.parse(t.draftedAt || 0) || 0;
+const current = b => b && b.key && (Date.parse(b.at || 0) || 0) >= (draftedAt[b.key] || 0);
 function isAnswered(k){ const a = answers[k]; return a && a.choice && (a.choice !== "other" || (a.note||"").trim()); }
 function repoCount(r){ return r.tickets.filter(t => isAnswered(key(r.repo, t.n))).length; }
 
@@ -288,11 +293,11 @@ async function submit(keys){
   if (!db){ $("saveState").textContent = "Storage unavailable in this view: picks will not save"; return; }
   $("saveState").textContent = "Connected · picks save as you click";
   db.collection("rulings").onSnapshot(snap => {
-    for (const d of snap.docs){ const b = d.data(); if (b && b.key) answers[b.key] = b; }
+    for (const d of snap.docs){ const b = d.data(); if (current(b)) answers[b.key] = b; }
     paintCounts(); if (!document.activeElement || document.activeElement.tagName !== "TEXTAREA") renderPanel();
   }, e => { $("saveState").textContent = "Live updates stopped (" + e.code + ")"; });
   db.collection("landed").onSnapshot(snap => {
-    for (const d of snap.docs){ const b = d.data(); if (b && b.key) landed[b.key] = b; }
+    for (const d of snap.docs){ const b = d.data(); if (current(b)) landed[b.key] = b; }
     paintCounts(); if (!document.activeElement || document.activeElement.tagName !== "TEXTAREA") renderPanel();
   }, () => {});
 })();
