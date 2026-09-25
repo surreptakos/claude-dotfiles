@@ -2,10 +2,10 @@
 name: gas-deploy
 description: AAC Apps Script deploys with gas instead of clasp. Use when a repo's clasp credential died or it should move off clasp (adopt gas), to deploy the script, promote PROD or run a function on it, or when a gas/deploy or gas/promote status is red.
 metadata:
-  modified: "2026-09-16T04:44:25Z"
-  previous-modified: "2026-09-09T16:42:14Z"
-  revision: "2"
-  content-sha: "f199de0fbb13"
+  modified: "2026-09-25T23:18:11Z"
+  previous-modified: "2026-09-16T04:44:25Z"
+  revision: "3"
+  content-sha: "61b34ed0c34e"
 ---
 
 # gas-deploy

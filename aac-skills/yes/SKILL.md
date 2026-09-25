@@ -2,10 +2,10 @@
 name: "yes"
 description: "Evidence-first discipline. Use when modifying files, configs, databases or deployments; when debugging fails twice or spins on one approach; when about to hedge, guess or claim a root cause without data; when handing work or questions to the user that tools could answer; when closing a fix without a ripple check. Skip first-attempt failures and fixes already in progress."
 metadata:
-  modified: "2026-09-03T21:29:26Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "a75b2820b68c"
+  modified: "2026-09-25T23:14:17Z"
+  previous-modified: "2026-09-03T21:29:26Z"
+  revision: "2"
+  content-sha: "873fc7be8c01"
 ---
 
 # YES — evidence-first discipline

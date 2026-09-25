@@ -2,10 +2,10 @@
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin. Use when the session-end cloud-plugin sweep reports drift or no recorded upload, when cloud or Cowork sessions are missing a skill, after editing a skill that must reach claude.ai/code, or to upload a skill zip to a claude.ai Skills page.
 metadata:
-  modified: "2026-09-24T05:28:01Z"
-  previous-modified: "2026-09-18T04:29:15Z"
-  revision: "8"
-  content-sha: "4aa3004d4e83"
+  modified: "2026-09-25T23:18:11Z"
+  previous-modified: "2026-09-24T05:28:01Z"
+  revision: "9"
+  content-sha: "2c6f93038916"
 ---
 
 # Update the cloud plugin

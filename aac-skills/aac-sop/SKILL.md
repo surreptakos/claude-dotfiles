@@ -6,10 +6,10 @@ description: >
   checklist or doc into our SOP format; also for "write up how we handle X" or "document the X
   process". Prefer over generic docx or runbook output.
 metadata:
-  modified: "2026-09-16T04:48:08Z"
-  previous-modified: "2026-08-31T21:20:12Z"
-  revision: "2"
-  content-sha: "826114093903"
+  modified: "2026-09-25T23:17:42Z"
+  previous-modified: "2026-09-16T04:48:08Z"
+  revision: "3"
+  content-sha: "9654a3cd1ebb"
 ---
 
 # AAC SOP Builder

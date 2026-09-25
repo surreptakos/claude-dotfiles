@@ -2,10 +2,10 @@
 name: aac-contract-package
 description: AAC contract package (schedule, master agreement, rider). Use to create one, even from just a job folder; to rebuild one after a price, financing, designation or scope change; to review or sweep packages for defects; or for questions on clarifications, exclusions, RMR names and prices, SOW wording, the $5,000 deposit rule, permits or Schedule-to-Master mapping. Prefer over generic contract review.
 metadata:
-  modified: "2026-09-24T16:40:55Z"
-  previous-modified: "2026-09-24T14:21:24Z"
-  revision: "1"
-  content-sha: "171b76726bb0"
+  modified: "2026-09-25T23:17:42Z"
+  previous-modified: "2026-09-24T16:40:55Z"
+  revision: "2"
+  content-sha: "9f79512d69e7"
 ---
 
 # AAC Contract Package
