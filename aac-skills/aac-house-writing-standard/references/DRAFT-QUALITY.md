@@ -64,7 +64,7 @@ Do not end on a manufactured resonance, and do not close by restating what the r
 
 ## 163. Interpretive metadiscourse
 
-Do not narrate the writing. Delete **the key point is, this distinction matters, it is worth noting,** and **what this means is.** If a point is the key point, state it first under Rule 5.
+Do not narrate the writing. Delete **the key point is, this distinction matters, it is worth noting,** and **what this means is.** If a point is the key point, state it early under Rule 5.
 
 ## 164. Formulaic structures
 
