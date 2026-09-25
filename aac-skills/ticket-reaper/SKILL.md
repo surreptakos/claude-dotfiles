@@ -1,11 +1,11 @@
 ---
 name: ticket-reaper
-description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs as step 0 of the weekly /maintain-repo; a standalone weekly Routine is not created yet (issue 664).
+description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs as step 0 of the weekly /maintain-repo (no standalone Routine, owner ruling on issue 664).
 metadata:
-  modified: "2026-09-23T22:38:28Z"
-  previous-modified: "2026-09-23T15:12:08Z"
-  revision: "6"
-  content-sha: "a5278eef78e6"
+  modified: "2026-09-25T17:16:14Z"
+  previous-modified: "2026-09-23T22:38:28Z"
+  revision: "7"
+  content-sha: "973e509b2c96"
 ---
 
 # Ticket reaper
