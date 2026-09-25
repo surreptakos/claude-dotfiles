@@ -978,8 +978,30 @@ for (const file of RESUME_GUARD_PAIR) {
       'a stamp still stale after one re-run must block the push with a named reason, not arrive as a red PR');
     assert.match(prompt, /run A5\(i\)'s stamps check on the merge result/,
       'the clean-merge path has no regenerate behind it and still needs the check');
-    assert.match(src, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills --home '/,
-      "the default check must be the command CI runs, --home included: a stamp hashed against the container's home is the bug");
+  });
+
+  // ---- regenCheckCommands defaults empty; a fork gets no check unless it asks (issue 814) ----
+  // Line 99 used to default this to the concrete claude-dotfiles command, so a fork that copies
+  // this script and never passes regenCheckCommands sent every Deliver stage to A5(i) with a
+  // command naming a tool (tools/skill-stamps.py) it does not have. The check is a claude-dotfiles
+  // concern, not a fleet one: the default is now empty and claude-dotfiles' own launch recipe
+  // (SKILL.md) passes the concrete command explicitly.
+
+  test(`${rel} regenCheckCommands defaults empty, so a fork delivers without a stamps check (issue 814)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    assert.match(src, /regenCheckCommands: \[\],/,
+      'the default must be empty - the stamps check is a claude-dotfiles concern, not a fleet default');
+    assert.doesNotMatch(src, /regenCheckCommands: \[[^\]]*skill-stamps\.py/,
+      'the default must not name tools/skill-stamps.py: every fork lacks it (issue 814)');
+    const prompt = extractMarked(src, 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /this repo configures no stamps check - skip \(i\) and go to \(ii\)/,
+      'an empty regenCheckCommands must read as "no check configured", not as an empty command to run');
+  });
+
+  test(`claude-dotfiles' own launch recipe passes the concrete stamps check explicitly (issue 814)`, () => {
+    const skillDoc = fs.readFileSync(path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'SKILL.md'), 'utf8');
+    assert.match(skillDoc, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills --home '/,
+      "claude-dotfiles' own launch example must pass the stamps check by name, now that the script default is empty");
   });
 
   test(`${rel} deliver prompt repairs a pushed bad merge forward rather than force-pushing (issue 514)`, () => {

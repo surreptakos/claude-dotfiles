@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T14:17:43Z"
-  previous-modified: "2026-09-24T14:10:39Z"
-  revision: "41"
-  content-sha: "f17731584484"
+  modified: "2026-09-25T23:24:10Z"
+  previous-modified: "2026-09-24T14:17:43Z"
+  revision: "42"
+  content-sha: "ae13d530f28c"
 ---
 
 # ticket-fleet
@@ -88,9 +88,14 @@ cloud session in this repo, run `6aa99cb8`):
 ```
 Workflow({
   scriptPath: 'aac-skills/ticket-fleet/ticket-fleet.js',
-  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false }
+  args: { runId: '<hex from `printf %x $(date +%s)`>', tickets: [], deliver: false,
+          regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"] }
 })
 ```
+
+`regenCheckCommands` defaults to `[]` (issue 814): pass the concrete stamps check explicitly on
+every claude-dotfiles launch, the way this recipe does, or a Deliver stage that regenerates a
+skill's stamp pushes it unchecked.
 
 The reason is a test: `tools/ticket-fleet-branch.test.js` asserts `.claude/workflows/ticket-fleet.js`
 does not exist ("superseded by aac-skills/ticket-fleet/ticket-fleet.js in issue 138 and must
@@ -222,10 +227,12 @@ prompts before letting the fleet push branches and open PRs. Full args list:
   the paths the pre-push merge may resolve by taking the default branch's side.
 - `regenCommands` (array of shell commands, default `null`): what re-stamps and rebuilds those
   paths after such a merge. `null` tells the deliver stage to read the commands out of CLAUDE.md.
-- `regenCheckCommands` (array of shell commands, default the claude-dotfiles stamps check,
-  `python3 tools/skill-stamps.py check aac-skills --home 'C:\Users\Dan'`):
-  the read-only check that proves the regenerate took, run after it and before the push. An empty
-  array turns that gate off for a fork that has no such check.
+- `regenCheckCommands` (array of shell commands, default `[]`): the read-only check that proves
+  the regenerate took, run after it and before the push. Default empty (issue 814) - the check is
+  a claude-dotfiles concern, not a fleet one, so a fork launched without this arg gets no check
+  instead of one naming a tool (`tools/skill-stamps.py`) it does not have. claude-dotfiles' own
+  launch passes `["python3 tools/skill-stamps.py check aac-skills --home 'C:\Users\Dan'"]`
+  explicitly - see the launch recipe above.
 - `verifierAgent` (string, default `null`): the agent type the blind verifier launches under.
   `null` takes the default the env probe decides - `fleet-verifier` on a desktop session whose
   `~/.claude/agents/fleet-verifier.md` is on disk, unpinned in a cloud session (custom agent
