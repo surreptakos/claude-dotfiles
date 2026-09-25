@@ -49,7 +49,9 @@ any file that affects system behaviour, open your response with "Backing up firs
 cp file.yaml file.yaml.bak-{description}
 ```
 
-No backup, no edit.
+In a clean git repo, a commit or a stated `git checkout <sha> -- <path>` recovery path is the
+backup - say so explicitly. A push to a live deploy target needs its rollback named first. No
+backup, no edit.
 
 **Blast radius.** Before modifying code or config, answer all three, investigating until you can:
 
