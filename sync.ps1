@@ -64,6 +64,7 @@ if ($Mode -eq 'push') {
 
 . (Join-Path $RepoRoot 'lib\manifest.ps1')
 . (Join-Path $RepoRoot 'lib\personal.ps1')
+. (Join-Path $RepoRoot 'lib\caveman-install.ps1')
 
 $UserHome = $UserHome.TrimEnd('\', '/')
 Write-Host ("{0}  (home: {1}){2}" -f $Mode.ToUpper(), $UserHome, $(if ($DryRun) { '  [dry run]' } else { '' }))
@@ -263,6 +264,13 @@ if ((Test-Path $invariants) -and (Test-Path $liveSettings)) {
 Write-Host ''
 Write-Host 'Personal profile (~/.claude-personal)'
 Update-PersonalProfile -UserHome $UserHome -DryRun:$DryRun
+
+# Last of all: settings.json has its final shape by now (the merge above, the invariants, the
+# personal overlay), so `caveman enable claude` writes into what pull is actually leaving behind,
+# and a failed/offline install's fail-closed strip is the last word on the route (issue 825).
+Write-Host ''
+Write-Host 'Caveman CLI (pinned)'
+Install-CavemanCli -RepoRoot $RepoRoot -UserHome $UserHome -DryRun:$DryRun
 
 Write-Host ''
 if ($DryRun) {

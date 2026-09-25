@@ -16,7 +16,7 @@
 // An installed_plugins.json entry is identified by plugin key + scope + projectPath; a
 // known_marketplaces.json entry by its marketplace name.
 //
-// Usage: node tools/plugin-records-merge.js <installed|marketplaces> <committed.json> <live.json>
+// Usage: node tools/plugin-records-merge.js <installed|marketplaces|settings> <committed.json> <live.json>
 //   Writes the merge to <live.json>. A live file that is missing or does not parse is replaced by
 //   the committed one (sync.ps1 has already backed it up). Exit 2 when the committed file does not
 //   parse: the caller leaves the live file alone.
@@ -65,7 +65,42 @@ function mergeMarketplaces(committed, live) {
   return out;
 }
 
-const MERGERS = { installed: mergeInstalled, marketplaces: mergeMarketplaces };
+// settings.json (issue 825): `caveman enable claude` is the only writer of the caveman model
+// route and its proxy/shrink-hook entries, on the machine that runs the proxy. The committed
+// profile carries neither any more, so a plain copy on pull would wipe out a working proxy's own
+// entries every time. Keep the committed file as the base (so a real settings.json change in the
+// repo still lands) and carry over only what is caveman-owned from the live file: the two env
+// keys, and any hook group whose command names the proxy's native-hook or the shrink-hook rewrite.
+// De-duped by exact command text so a repeated pull never re-appends the same live group.
+const CAVEMAN_ENV_KEYS = ['ANTHROPIC_BASE_URL', '_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL'];
+const isCavemanCommand = (cmd) => typeof cmd === 'string' && /caveman-proxy|shrink-hook/.test(cmd);
+
+function mergeSettings(committed, live) {
+  const out = Object.assign({}, committed || {});
+
+  const liveEnv = (live && live.env) || {};
+  const outEnv = Object.assign({}, out.env || {});
+  for (const key of CAVEMAN_ENV_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(liveEnv, key)) outEnv[key] = liveEnv[key];
+  }
+  if (Object.keys(outEnv).length > 0) out.env = outEnv;
+
+  const liveHooks = (live && live.hooks) || {};
+  const outHooks = Object.assign({}, out.hooks || {});
+  for (const [eventName, groups] of Object.entries(liveHooks)) {
+    const cavemanGroups = (Array.isArray(groups) ? groups : []).filter((g) =>
+      Array.isArray(g && g.hooks) && g.hooks.some((h) => isCavemanCommand(h && h.command)));
+    if (cavemanGroups.length === 0) continue;
+    const existing = Array.isArray(outHooks[eventName]) ? outHooks[eventName] : [];
+    const seen = new Set(existing.flatMap((g) => (g.hooks || []).map((h) => h.command)));
+    const toAdd = cavemanGroups.filter((g) => !g.hooks.every((h) => seen.has(h.command)));
+    outHooks[eventName] = existing.concat(toAdd);
+  }
+  if (Object.keys(outHooks).length > 0) out.hooks = outHooks;
+  return out;
+}
+
+const MERGERS = { installed: mergeInstalled, marketplaces: mergeMarketplaces, settings: mergeSettings };
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^﻿/, ''));
@@ -74,7 +109,7 @@ function readJson(file) {
 function main(argv) {
   const [kind, committedPath, livePath] = argv;
   if (!MERGERS[kind] || !committedPath || !livePath) {
-    console.error('usage: plugin-records-merge.js <installed|marketplaces> <committed.json> <live.json>');
+    console.error('usage: plugin-records-merge.js <installed|marketplaces|settings> <committed.json> <live.json>');
     return 2;
   }
   let committed;
@@ -93,4 +128,4 @@ function main(argv) {
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
 
-module.exports = { mergeInstalled, mergeMarketplaces, main };
+module.exports = { mergeInstalled, mergeMarketplaces, mergeSettings, main };

@@ -77,10 +77,12 @@ param(
     #   sandbox-identity  the test suites' user.email is what this checkout would commit as -> check 0-pre2
     #   plugin-downgrade  pull copies the plugin records instead of merging them -> check 9e
     #   rules-copy   pull writes the rules text to the global CLAUDE.md, not the pointer -> check 6b5
+    #   dead-caveman-hook  a settings.json hook names a caveman binary that does not exist -> check 6e (issue 825)
     #   skill-tree   pull writes aac-skills/ to ~/.claude/skills again         -> check 6b
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
-                 'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree')]
+                 'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree',
+                 'dead-caveman-hook')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -471,6 +473,25 @@ if ($Fault -eq 'broken-hook') {
                 -Value 'import sys; sys.exit(3)  # restored hook is broken' -Encoding utf8
     Note 'fault: a restored hook is present but not runnable'
 }
+if ($Fault -eq 'dead-caveman-hook') {
+    # Plants exactly the shape issue 825 fixes: a hook entry naming a caveman binary that this
+    # machine never installed. Planted AFTER install so it survives regardless of whether the
+    # real caveman install this run just did succeeded or failed closed.
+    $deadSettings = Join-Path $FakeHome '.claude\settings.json'
+    $deadJson = Get-Content -LiteralPath $deadSettings -Raw | ConvertFrom-Json
+    if (-not $deadJson.PSObject.Properties['hooks']) {
+        $deadJson | Add-Member -NotePropertyName hooks -NotePropertyValue ([pscustomobject]@{})
+    }
+    $deadHook = [pscustomobject]@{ hooks = @([pscustomobject]@{
+        type = 'command'
+        # A path that can never coincide with a real install's proxy binary (even one this same
+        # run just fetched for real), so the fault is what turns the check red, not luck.
+        command = ("& '{0}\.caveman\bin\caveman-proxy-fault-planted.exe' native-hook claude" -f $FakeHome)
+    }) }
+    $deadJson.hooks | Add-Member -NotePropertyName Stop -NotePropertyValue @($deadHook) -Force
+    ($deadJson | ConvertTo-Json -Depth 40) | Set-Content -LiteralPath $deadSettings -Encoding UTF8
+    Note 'fault: planted a settings.json hook naming a caveman binary that does not exist'
+}
 if ($Fault -eq 'home-leak') {
     # What a copy that bypassed Copy-OneFile would leave behind: this machine's home, verbatim.
     # Planted AFTER the install, into the restored tree: planted in the clone it would go through
@@ -634,12 +655,51 @@ if ($null -ne $settings) {
         (($shipped.Count -gt 0) -and ($govEntries.Count -eq 0)) `
         (@(if ($shipped.Count -eq 0) { "no scripts under $shippedDir - the payload moved" }) + $govEntries)
 
-    # The other half: third-party entries are not the plugin's to carry and stay where they were.
-    $caveman = @($commands | Where-Object { $_ -like '*caveman-proxy.exe*' })
-    $shrink  = @($commands | Where-Object { $_ -like '*shrink-hook*' })
-    Check 'third-party hook entries stay in settings.json (caveman proxy, shrink hook)' `
-        (($caveman.Count -gt 0) -and ($shrink.Count -eq 1)) `
-        @(("caveman proxy entries {0}, shrink hook entries {1}" -f $caveman.Count, $shrink.Count))
+    # Issue 825: `caveman enable claude` owns the proxy/shrink-hook entries and the model route on
+    # this machine - the committed profile carries neither any more (issue 824), so whatever is
+    # here came from a real (or a fail-closed) run of install.ps1's caveman step. The commands are
+    # single-quoted, forward-slash paths ('__USERHOME_FWD__/.caveman/bin/caveman-proxy.exe' or a
+    # bare 'C:/nvm.../caveman.CMD'), a different shape from the double-quoted backslash paths the
+    # generic check above matches - which is exactly why that check never caught the observed
+    # failure (ten caveman-proxy.exe hook entries naming a binary nobody had fetched).
+    $cavemanCommands = @($commands | Where-Object { $_ -match 'caveman-proxy|shrink-hook' })
+    $cavemanDead = @()
+    foreach ($command in $cavemanCommands) {
+        foreach ($m in ([regex]"'([^']+\.(?:exe|CMD|cmd))'").Matches($command)) {
+            $p = $m.Groups[1].Value
+            if (-not (Test-Path $p)) { $cavemanDead += ("{0}  ({1})" -f $p, $command) }
+        }
+    }
+    Check ("every hook command naming a caveman binary resolves to a file that exists ({0} entries, issue 825)" -f $cavemanCommands.Count) `
+        ($cavemanDead.Count -eq 0) $cavemanDead
+
+    # The model route and the proxy binary rise and fall together: a route with nothing listening
+    # behind it is the other half of the same failure. Both env keys are caveman's to write.
+    $proxyBinary = Join-Path $FakeHome '.caveman\bin\caveman-proxy.exe'
+    $hasRoute = $settings.PSObject.Properties['env'] -and $settings.env.PSObject.Properties['ANTHROPIC_BASE_URL']
+    Check 'the caveman model route is present in settings.json iff the proxy binary exists (issue 825)' `
+        ([bool]$hasRoute -eq (Test-Path $proxyBinary)) `
+        @(("route present={0}, proxy binary exists={1}" -f [bool]$hasRoute, (Test-Path $proxyBinary)))
+}
+
+# ------------------------------------------------------------------ 6e. caveman CLI install step (issue 825)
+
+# lib\caveman-install.ps1's own behaviour - idempotent npm skip, -DryRun, the offline fail-closed
+# path, and the Remove/Test-Caveman* primitives - runs offline and deterministic against a stub
+# npm and caveman binary, so it needs no network and no real @caveman-ai/cli release. Runs
+# against the CLONE so the ship pass proves both the suite and the module travelled.
+$cavemanInstallTests = Join-Path $Clone 'tests\caveman-install.tests.ps1'
+if (Test-Path $cavemanInstallTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstallTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'caveman-install.tests.ps1 passes (idempotent npm skip, -DryRun, offline fail-closed)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 30)
+} else {
+    Check 'caveman-install.tests.ps1 shipped' $false @('tests/caveman-install.tests.ps1 missing from clone')
 }
 
 # ------------------------------------------------------------------ 6d. no live-tree hooks or tools (issue 733)

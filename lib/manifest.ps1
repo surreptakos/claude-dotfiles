@@ -37,7 +37,11 @@ function Get-DotfileItems {
         # stays the one source the packager copies from. The pointer must never carry that file's
         # first line: the hook stays silent when the global CLAUDE.md does.
         [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/global-pointer.md';        Local = (Join-Path $claude 'CLAUDE.md') }
-        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/settings.json';            Local = (Join-Path $claude 'settings.json') }
+        # Merge = 'settings' (issue 825): `caveman enable claude` owns the caveman model route and
+        # its proxy/shrink-hook entries on THIS machine, and the committed copy carries neither -
+        # a plain copy would otherwise wipe out a working proxy's own entries on every later pull.
+        # tools/plugin-records-merge.js keeps any such live entry the committed file lacks.
+        [pscustomobject]@{ Type = 'File'; Repo = 'profile/claude/settings.json';            Local = (Join-Path $claude 'settings.json'); Merge = 'settings' }
         # Claude Code's own plugin records (issue 717). A fresh machine needs them to register the
         # marketplaces and name what to install, but `claude plugin update` rewrites them live, so
         # pull MERGES rather than copies (tools/plugin-records-merge.js): a live entry newer than

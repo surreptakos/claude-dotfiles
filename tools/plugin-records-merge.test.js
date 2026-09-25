@@ -5,7 +5,7 @@ const assert = require('node:assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { mergeInstalled, mergeMarketplaces, main } = require('./plugin-records-merge.js');
+const { mergeInstalled, mergeMarketplaces, mergeSettings, main } = require('./plugin-records-merge.js');
 
 const rec = (version, lastUpdated, extra = {}) => Object.assign({ scope: 'user', version, lastUpdated }, extra);
 
@@ -34,6 +34,43 @@ test('marketplaces: newer live kept, committed-only registered', () => {
     { a: { lastUpdated: '2026-09-23T00:00:00Z', v: 'l' } });
   assert.strictEqual(out.a.v, 'l');
   assert.ok(out.b);
+});
+
+test('settings (issue 825): a live caveman route and hook entries survive a pull whose committed file carries neither', () => {
+  const committed = { env: { ENABLE_TOOL_SEARCH: 'auto' }, model: 'claude-fable-5-1[1m]' };
+  const live = {
+    env: { ENABLE_TOOL_SEARCH: 'auto', ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787/w/claude', _CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL: '1' },
+    model: 'claude-fable-5-1[1m]',
+    hooks: {
+      SessionStart: [{ hooks: [{ type: 'command', command: "& 'C:/x/caveman-proxy.exe' native-hook claude" }] }],
+      Stop: [{ hooks: [{ type: 'command', command: "& 'C:/x/caveman.CMD' shrink-hook" }] }],
+    },
+  };
+  const out = mergeSettings(committed, live);
+  assert.strictEqual(out.env.ANTHROPIC_BASE_URL, 'http://127.0.0.1:8787/w/claude');
+  assert.strictEqual(out.env._CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL, '1');
+  assert.strictEqual(out.hooks.SessionStart[0].hooks[0].command, "& 'C:/x/caveman-proxy.exe' native-hook claude");
+  assert.strictEqual(out.hooks.Stop[0].hooks[0].command, "& 'C:/x/caveman.CMD' shrink-hook");
+});
+
+test('settings (issue 825): a real repo change in the committed file still lands, and a repeat merge never duplicates the live caveman entries', () => {
+  const committed = { env: { ENABLE_TOOL_SEARCH: 'auto' }, theme: 'dark' };
+  const live = {
+    env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:8787/w/claude' },
+    theme: 'light',
+    hooks: { Stop: [{ hooks: [{ type: 'command', command: "& 'C:/x/caveman-proxy.exe' native-hook claude" }] }] },
+  };
+  const once = mergeSettings(committed, live);
+  assert.strictEqual(once.theme, 'dark', 'the committed value wins - only caveman-owned bits carry over from live');
+  const twice = mergeSettings(committed, once);
+  assert.strictEqual(twice.hooks.Stop.length, 1, 'a second merge must not re-append the same live hook group');
+});
+
+test('settings (issue 825): a live install with no caveman entries at all merges to just the committed file', () => {
+  const committed = { env: { ENABLE_TOOL_SEARCH: 'auto' } };
+  const live = { env: { ENABLE_TOOL_SEARCH: 'auto' }, permissions: { defaultMode: 'bypassPermissions' } };
+  const out = mergeSettings(committed, live);
+  assert.deepStrictEqual(out, { env: { ENABLE_TOOL_SEARCH: 'auto' } });
 });
 
 test('CLI: no live file means the committed copy is written (fresh machine)', () => {
