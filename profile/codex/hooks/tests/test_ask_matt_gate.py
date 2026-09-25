@@ -441,6 +441,32 @@ class AskMattGateTests(unittest.TestCase):
             self.assertTrue(state["yes"])
             self.assertEqual(state["caveman"], "ultra")
 
+    def test_claude_declare_refuses_direct_answer_for_a_build_shaped_prompt(self) -> None:
+        # Dan, 2026-09-25: "I need to be able to give feedback to the model ... not sure how best to
+        # do that" was declared direct-answer and answered with a build plan, skipping grill-with-docs.
+        # The route was self-declared and nothing checked it against the request.
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            prompt = ("I need to be able to give feedback to the model running the huddle draft tool. "
+                      "Not sure how best to do that.")
+            self.run_gate("claude-prompt", {"session_id": "s-build", "prompt": prompt}, state_dir)
+            nonce = self._state(state_dir, "s-build")["nonce"]
+            refused = self.run_claude_declare("s-build", nonce, "direct-answer", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("grill-with-docs", refused.stderr)
+            self.assertIsNone(self._state(state_dir, "s-build")["flow"])
+            accepted = self.run_claude_declare("s-build", nonce, "grill-with-docs", state_dir)
+            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+    def test_claude_declare_keeps_direct_answer_for_a_question(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
+            self.run_gate("claude-prompt", {"session_id": "s-q", "prompt": prompt}, state_dir)
+            nonce = self._state(state_dir, "s-q")["nonce"]
+            result = self.run_claude_declare("s-q", nonce, "direct-answer", state_dir)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_claude_gate_follows_the_caveman_flag_and_never_writes_it(self) -> None:
         # Dan, 2026-09-03: the tracker is the single writer. /caveman lite must survive the next
         # prompt, and /caveman off (flag deleted) must switch the lint requirement off entirely.

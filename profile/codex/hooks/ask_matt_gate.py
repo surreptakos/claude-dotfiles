@@ -485,6 +485,24 @@ def _is_correction(prompt: str) -> bool:
     return verdict["correction"] >= CORRECTION_JEV_FLOOR
 
 
+# Dan, 2026-09-25: the route is self-declared, so "I need to be able to ... not sure how best to do
+# that" went through as direct-answer and got a build plan without the grill the ask-matt map asks
+# for. A prompt that asks for something to be built or designed cannot be answered as direct-answer.
+BUILD_SHAPED = re.compile(
+    r"\b(?:i|we) (?:need|want) (?:to be able|a way|it to)\b"
+    r"|\bnot sure how (?:best )?to\b"
+    r"|\bhow (?:best|should (?:we|i)) (?:to )?(?:build|do|handle|set up|design)\b"
+    r"|\b(?:build|add|make) (?:me |us )?(?:a|an|it so|it able)\b"
+    r"|\bmake sure (?:they|it) (?:land|save|lands|saves)\b",
+    re.IGNORECASE,
+)
+DIRECT_ANSWER_REFUSAL = (
+    "Governance route rejected: direct-answer, but this prompt asks for something to be built or "
+    "designed. ask-matt map: grill-with-docs when the idea is not settled (codebase), grill-me with no "
+    "codebase, implement for a settled single-session build, to-spec for a multi-session one."
+)
+
+
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     session_id = str(event.get("session_id") or "")
     if not session_id:
@@ -509,6 +527,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
     correction = _is_correction(str(event.get("prompt") or ""))
     if correction:
         state["correction_nonce"] = nonce
+    if BUILD_SHAPED.search(str(event.get("prompt") or "")):
+        state["build_shaped"] = True
     # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
     # so the next user message clears it and the ticket-SET round applies again outside session-end.
     if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
@@ -944,6 +964,9 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
     if not state or state.get("nonce") != nonce:
         print("Governance route rejected: no matching Claude turn", file=sys.stderr)
         return 2
+    if flow == "direct-answer" and state.get("build_shaped"):
+        print(DIRECT_ANSWER_REFUSAL, file=sys.stderr)
+        return 2
     # The prompt hook already settled this turn's level (prompt switch or flag); keep it.
     mode = state.get("caveman")
     if mode not in CAVEMAN_PROSE_MODES + ("off",):
@@ -962,6 +985,7 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "correction_nonce": state.get("correction_nonce"),
             # Likewise the prompt's /session-end finding (issue 716).
             "session_end_invoked": state.get("session_end_invoked"),
+            "build_shaped": state.get("build_shaped"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
