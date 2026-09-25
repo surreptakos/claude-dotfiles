@@ -8,6 +8,8 @@
  *   node tools/rulings-page.js queue --page <page.html> [--owner surreptakos] > plan.json
  *       Current queue vs. the drafts already on the page: which drafts carry over, which tickets
  *       need drafting (new, or updated on GitHub since they were drafted).
+ *   node tools/rulings-page.js bodies --drafts <dir>
+ *       Put each ticket's own GitHub text in its draft (`body`), shown beside the explainer.
  *   node tools/rulings-page.js build --drafts <dir> --out <page.html>
  *       Merge <dir>/<repo-short>.json drafts into the page template.
  *   node tools/rulings-page.js land --page <page.html> --rulings <dir> --submission <id>
@@ -133,6 +135,25 @@ function executeLanding(p, submission, run = gh) {
     closed: after.state === 'CLOSED', blocks: p.blocks };
 }
 
+/**
+ * Fill each draft's `body` with the ticket's own GitHub text, so the page can show it beside the
+ * plain-English explainer. Long bodies are cut, marked as cut, and linked from the card.
+ */
+const BODY_CAP = 12000;
+function fillBodies(draftsDir, run = gh) {
+  let n = 0;
+  for (const f of fs.readdirSync(draftsDir).filter(x => x.endsWith('.json'))) {
+    const file = path.join(draftsDir, f), j = JSON.parse(fs.readFileSync(file, 'utf8'));
+    for (const t of j.tickets || []) {
+      const body = JSON.parse(run(['issue', 'view', String(t.n), '--repo', j.repo, '--json', 'body'])).body || '';
+      t.body = body.length > BODY_CAP ? body.slice(0, BODY_CAP) + '\n\n… (cut here; the rest is on GitHub)' : body;
+      n++;
+    }
+    fs.writeFileSync(file, JSON.stringify(j, null, 1));
+  }
+  return n;
+}
+
 function readRulings(dir) {
   const out = {};
   for (const f of fs.readdirSync(dir, { recursive: true })) {
@@ -162,6 +183,8 @@ function main(argv) {
     fs.writeFileSync(arg(argv, 'out'), html);
     console.log(data.repos.map(r => `${short(r.repo)} ${r.tickets.length}`).join('\n'));
     console.log('total', data.repos.reduce((a, r) => a + r.tickets.length, 0));
+  } else if (cmd === 'bodies') {
+    console.log('bodies filled', fillBodies(arg(argv, 'drafts')));
   } else if (cmd === 'land') {
     const data = readPageData(fs.readFileSync(arg(argv, 'page'), 'utf8'));
     const rulings = readRulings(arg(argv, 'rulings'));
@@ -188,4 +211,4 @@ function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { readPageData, planQueue, buildPage, planLanding, executeLanding, readRulings, keyOf, marker };
+module.exports = { readPageData, planQueue, buildPage, planLanding, executeLanding, fillBodies, readRulings, keyOf, marker };
