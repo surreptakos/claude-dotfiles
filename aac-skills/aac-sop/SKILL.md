@@ -1,17 +1,10 @@
 ---
 name: aac-sop
 description: >
-  Create or rewrite an Active Alarm Company (AAC) procedure or work instruction in AAC's house
-  format and writing standards, delivered as a styled Word (.docx). Two tiers: a full Procedure
-  (cross-role process) and a lean Work Instruction (one person, one task, usually one tool). Use
-  whenever the user asks to write, draft, standardize, or recast an SOP, "standard operating
-  procedure," "work instruction," or "WI" - or to put an existing process, checklist, or rough
-  document "into our SOP format." Also use when documenting any repeatable AAC process or task
-  (service calls, monitoring termination, billing, payroll, the Service-to-Sales handoff,
-  estimating, month-end close, or a tool how-to such as System Surveyor or Zoho). Trigger even
-  without the words "template," "SOP," or "work instruction" - "write up how we handle X,"
-  "document the X process," or "turn this into a procedure/checklist" all apply.
-  Prefer this over generic process-doc/runbook output for any AAC procedure or work instruction.
+  AAC SOP, as .docx: Procedure (cross-role process) or Work Instruction (one person, one task).
+  Use when asked to write or recast an SOP, procedure, work instruction or WI, or to put a process,
+  checklist or doc into our SOP format; also for "write up how we handle X" or "document the X
+  process". Prefer over generic docx or runbook output.
 metadata:
   modified: "2026-09-16T04:48:08Z"
   previous-modified: "2026-08-31T21:20:12Z"
@@ -21,21 +14,43 @@ metadata:
 
 # AAC SOP Builder
 
-Produces a single document - a **Procedure** or a **Work Instruction** - as a Word file in AAC's
-house format. A bundled generator renders it so every document comes out identical in structure and
-styling; your job is the content, the tier choice, and the judgment; the generator handles the layout.
+Produces one document, a **Procedure** or a **Work Instruction**, as a Word file in AAC's house
+format. The bundled generator owns structure and styling; you own the content, the tier choice, and
+the judgment.
 
-## Step 0 - Choose the tier
+## Workflow
 
-AAC documents come in two tiers. Decide which before writing; it sets the
-template and the `mode`.
+1. **Choose the tier** (see [Tiers](#tiers)). Done when `mode` is decided and any cross-role
+   hand-off inside a task-level instruction is named as a separate Procedure.
+2. **Run Discovery** (see [Discovery](#discovery)). Done when every item on its Establish list is
+   verified from a source, answered by the user, or marked as a red flag. When recasting an existing
+   SOP, read it first and **preserve its content** - only restructure, reformat, and clean wording.
+3. **Draft every line to the [writing standards](#writing-standards-the-voice) and the
+   [evidence rule](#evidence-rule).**
+4. **For a Procedure, run the [brainstorm - curate - draft loop](#brainstorm---curate---draft-procedure-judgment-sections)**
+   on every judgment section. A Work Instruction skips this step: its content is procedural and the
+   brainstorm cost outweighs the payoff.
+5. **Write the input JSON** for your tier, `mode` set, per `references/input-schema.md`: both
+   schemas, the body item kinds, what the generator renders, and the example file to pattern-match.
+6. **Generate the document:**
+   ```bash
+   npm install docx        # if not already present in the environment
+   node scripts/build_sop.js <input.json> <output.docx>
+   ```
+   Validate the file structure with the docx skill's `validate.py` if it is available.
+7. **Reader-test the `.docx`** as a cold performer (see [Reader Testing](#reader-testing)). Fix every
+   gap in the JSON, regenerate, re-read. Done when a full read answers every checkpoint "yes".
+8. **Deliver** the `.docx` with a short note listing every field still flagged in red (derived,
+   assumed, or unverified), so the user verifies it. The list is as long as the evidence leaves it.
+
+## Tiers
 
 - **Procedure** (full template, `mode: "procedure"`) - the higher-level process: who does what,
   when, where, with hand-offs between roles and business decisions. Example: Service → Sales lead
   progression.
 - **Work Instruction** (lean template, `mode: "work_instruction"`) - tells **one person how to
-  perform one task**, step by step, usually with a specific tool. It covers only **how**. It does
-  not span roles, route work between people, or decide *what / whether / when*. Example: how an AE
+  perform one task**, step by step, usually with a specific tool. It covers only **how**; routing
+  work between roles and deciding *what / whether / when* belong to a Procedure. Example: how an AE
   runs a site walk in System Surveyor.
 
 **Litmus:** one role + one task + "how" → Work Instruction. Multiple roles + a hand-off +
@@ -43,39 +58,33 @@ template and the `mode`.
 the instruction as a Work Instruction and reference the hand-off as a separate Procedure rather than
 bundling a procedure inside it.
 
-Most of what a field shop documents day to day is Work Instructions, so that is the common case: a
-single-task tool how-to stays one however important it feels. Reaching for the Procedure template
-there is the main over-documentation risk.
+**Work Instruction is the common case.** Most of what a field shop documents day to day is Work
+Instructions, and a single-task tool how-to stays one however important it feels. Reaching for the
+Procedure template there is the main over-documentation risk.
 
-## Step 1 - Discovery (before you write)
+## Discovery
 
-An SOP is only as good as the process behind it. Before writing anything, separate what you can
-verify from a system from what lives in someone's head, resolve the first yourself, and confirm the
-second from a source.
-
-**Split the content into two layers.**
+An SOP is only as good as the process behind it. Split the content into two layers:
 
 - *Config / data layer* - facts that live in a system: field names and picklist values, org and
-  account IDs, record owners, statuses in use, cycle times, counts. Resolve these directly from the
-  connectors and data. A fact the tools resolve is stated plainly, with no flag and no question
-  back to the user; going as far as the tools allow is the standard here.
+  account IDs, record owners, statuses in use, cycle times, counts. Resolve these yourself from the
+  connectors and data, as far as the tools allow.
 - *Process / tribal-knowledge layer* - how the work actually runs: the real sequence, what triggers
   each step, who does it and when, the required-vs-recommended calls, the sign-off gate, and the
-  exceptions ("usually X, but sometimes Y"). This lives in practice, not in a system. Verify it from
-  a source before stating it. If it stays unverified, it stays a red flag - never a committed default.
+  exceptions ("usually X, but sometimes Y"). This lives in practice, not in a system; the
+  [evidence rule](#evidence-rule) governs how it is stated.
 
-**Gather from sources in this order; asking a person is the last resort, and a red flag is what an
-unanswered item becomes.**
+**Gather from sources in this order:**
 
-1. This conversation, an attached document, or an existing SOP you are recasting (read it first;
-   preserve its content).
+1. This conversation, an attached document, or an existing SOP you are recasting.
 2. Connectors, for the config/data layer (e.g., Zoho for module fields, picklists, owners, statuses).
 3. Process evidence, for the tribal-knowledge layer: Fathom transcripts, email threads, and past
    chats where the team described how the work is actually done.
-4. Only what none of the above resolves: put the open items to the user in a single batch (see
-   below), or leave them as red flags.
+4. Only what none of the above resolves goes to the user, in **one batch**: a short numbered list
+   they can answer in shorthand, by pointing you to a transcript or thread, or with "flag it" to
+   leave the item as a red flag.
 
-**What to establish before writing** (from the sources above; only ask for what is still missing):
+**Establish** (from the sources; ask only for what is still missing):
 
 - The trigger - what starts this process or task.
 - The boundaries - where it starts and where it ends, and what is out of scope or a separate SOP.
@@ -83,60 +92,20 @@ unanswered item becomes.**
 - Each step's how, and for a Procedure its when and its output - captured into `steps`/`procedure`,
   `responsibilities`, and `done_when`, not into any new field.
 - The exceptions - the "usually X, but sometimes Y" cases. These are the highest-value content;
-  route them to `ifthen`, `watch_out`, or a Procedure `exceptions` row. In a Procedure, run each
-  through the brainstorm - curate - draft loop before committing the wording.
+  route them to `ifthen`, `watch_out`, or a Procedure `exceptions` row.
 - The completion criterion (`done_when`) and, only if performance over time matters, the metrics
   with targets.
 
-**If you must ask, ask once.** Batch the unresolved items into one short, numbered list. Tell the
-user they can answer in shorthand, point you to a transcript or thread, or say "flag it" to leave it
-as a red item. Exhaust the sources first, then make one consolidated pass.
-
 **Scale discovery to where the content lives.** A single-tool Work Instruction whose facts are all
 in-system or already in the conversation needs little or no elicitation - resolve and build. A
-multi-role process with judgment and exceptions gets the full pass. Match the effort to how much of
-the content lives in people's heads versus systems.
-
-## Workflow
-
-1. **Complete Discovery (Step 1 above).** You now have the verified content and, for anything on the
-   process layer that no source could confirm, the list of items still marked as red flags. If you
-   are recasting an existing SOP, you have read it and will **preserve its content** - only
-   restructure, reformat, and clean wording.
-2. **Apply the writing standards** (below) to every line.
-3. **Apply the evidence rule** (below).
-4. **For a Procedure, run the brainstorm - curate - draft loop** on every judgment section (Trigger,
-   Done when, Exceptions rows, Responsibilities rows, and each `ifthen` branch). See
-   [Brainstorm - curate - draft](#brainstorm---curate---draft-procedure-judgment-sections) below.
-   Work Instructions skip this step - their content is procedural and the brainstorm cost outweighs
-   the payoff.
-5. **Write the content into an input JSON file** matching the schema for the tier you chose, and set
-   `mode` accordingly. Pattern-match the shape of `references/example_input.json` (a Procedure) or
-   `references/example_wi_input.json` (a Work Instruction).
-6. **Generate the document.** Ensure the `docx` package is installed, then run the generator:
-   ```bash
-   npm install docx        # if not already present in the environment
-   node scripts/build_sop.js <input.json> <output.docx>
-   ```
-   Validate the file structure with the docx skill's `validate.py` if it is available; otherwise
-   the generator's output is already schema-valid.
-7. **Reader-test the `.docx`** as a cold performer. See [Reader Testing](#reader-testing) below. Fix
-   every gap in the JSON, regenerate, re-read. Deliver only after a clean pass.
-8. **Deliver.** Present the `.docx` and end with a short note listing every field still flagged in
-   red (derived, assumed, or unverified), so the user verifies it. The list is as long as the
-   evidence leaves it.
+multi-role process with judgment and exceptions gets the full pass.
 
 ## Brainstorm - curate - draft (Procedure judgment sections)
 
-Judgment sections carry the highest read-cost per line: the reader has to make a decision from them
-and get it right. A single glib wording misdirects. Run these through a three-pass internal loop
-before committing to the JSON.
-
-**Applies to a Procedure only, and only to these sections:** Trigger; Done when; each Exceptions
-row; each Responsibilities row; every `ifthen` branch in `procedure[]`. Ordinary `step` and `bullet`
-items skip the loop. A Work Instruction skips it entirely.
-
-**The loop:**
+Judgment sections carry the highest read-cost per line: the reader makes a decision from them, and
+a single glib wording misdirects. **Applies to a Procedure only, and only to these sections:**
+Trigger; Done when; each Exceptions row; each Responsibilities row; every `ifthen` branch in
+`procedure[]`. Ordinary `step` and `bullet` items skip the loop.
 
 1. **Brainstorm** - draft 2-4 candidate wordings for the section (or the row). Vary them along real
    interpretive axes: strictness of the trigger, what counts as "done", who owns an exception, how
@@ -155,10 +124,9 @@ The loop is internal: only the winner ships.
 
 ## Reader Testing
 
-Reader Testing is its own stage. A `.docx` that generates cleanly can
-still be unreadable to the person it was written for. The purpose is to catch what the author cannot
-see: assumptions, missing preconditions, undefined terms, and unstated decisions that a cold reader
-hits and stalls on.
+Catches what the author cannot see: assumptions, missing preconditions, undefined terms, and
+unstated decisions that a cold reader hits and stalls on. It runs at both tiers - a wrong SOP
+shipped costs more than the test does.
 
 Read the whole document from the first heading with **only what the document itself provides**, plus
 the named tools and a realistic input for the role - the discovery conversation, the source thread
@@ -180,12 +148,9 @@ the document and a role brief - the fresh context is exactly the reader you are 
 - **Cold-start** - a first-time performer with the document and the tools, no shadow, no
   phone-a-friend - can they complete this run?
 
-Any "no" is a defect, not a nit. Fix it in the JSON, regenerate, re-read. Deliver only after a clean
-pass.
-
-For a Work Instruction, apply the same checkpoints to Steps and Watch out for; read Sections and
-Appendices for reference value (does someone consulting this later find what they need). The stage
-runs at both tiers - a wrong SOP shipped costs more than the test does.
+Any "no" is a defect, not a nit. For a Work Instruction, apply the checkpoints to Steps and Watch
+out for; read Sections and Appendices for reference value (does someone consulting this later find
+what they need).
 
 ## Document layouts
 
@@ -203,11 +168,11 @@ Revision Log closes the document.
 A simple WI is just numbered steps. A rich, tool-based WI (like the System Surveyor example) can also
 carry - inside the Steps or in a Section - **reference tables** (e.g., required fields by device),
 **template blocks** (e.g., a handoff email, rendered monospace), **color-swatch tables** (e.g., a
-color-coding standard), and inline **notes**. Use the body item kinds listed under the schema.
+color-coding standard), and inline **notes**.
 
 Step numbering restarts at each `phase` header; without phases, steps number continuously. Keep a
-*simple* WI to about a page; a rich reference WI can run longer when the content earns it - drop
-sections and appendices that don't apply rather than padding them.
+*simple* WI to about a page; a rich reference WI can run longer when the content earns it. Include
+only the sections and appendices that apply.
 
 ### Sections and appendices in a Work Instruction (all optional)
 
@@ -225,13 +190,10 @@ render as appendices at the end of the document.
 
 ## Responsibilities (simple table)
 
-List who does what in a two-column table: **Role | Responsibility**. Include only the roles actually
-involved in the procedure. AAC is a small shop - a full RACI matrix is more structure than these
-procedures need, so keep this plain.
+List who does what in a two-column table, **Role | Responsibility**, with only the roles actually
+involved in the procedure. AAC is a small shop: the plain table is the standard, not a RACI matrix.
 
 ## Writing standards (the voice)
-
-These standards are what make it an AAC SOP. Hold the line on them:
 
 - **Plain, declarative procedure language: state the action or the standard and stop.** Commentary
   is what this catches - lines like "the goal is not paperwork" or "a stale procedure is worse than
@@ -247,7 +209,9 @@ These standards are what make it an AAC SOP. Hold the line on them:
   - *Done when* (required): the completion criterion for a single run - how the person performing
     the task confirms this instance is complete and correct.
   - *Success Metrics* (optional): aggregate performance over time, each with a target, reviewed by
-    the owner. A metric without a target does not show whether performance is acceptable. Include it only where tracking performance over time matters, such as a recurring process that affects revenue, quality, or customer experience; otherwise omit it.
+    the owner. A metric without a target does not show whether performance is acceptable. Include
+    it only where tracking performance over time matters, such as a recurring process that affects
+    revenue, quality, or customer experience.
 - **Name components precisely** - model plus part number where it reduces error (panels, cameras,
   controllers).
 
@@ -260,128 +224,16 @@ Every fact the document states traces to the user, a document, or a system.
 - When you **derive** a field (e.g., a Trigger or Done-when summarized from the steps) or
   **summarize or reassign** roles, attach a red flag so the user verifies it - set `trigger_flag`,
   `done_when_flag`, `responsibilities_note`, or `metrics_note`, and/or a top-level `banner`.
-- Leave genuinely unknown values as `"[ confirm ]"` rather than guessing - especially Effective
-  Date and metric Targets.
-- **Separate the two layers (see Step 1 - Discovery).** A config/data fact resolved from a system is
-  stated plainly. **A process/tribal-knowledge fact that no source confirmed stays a red flag for as
-  long as it stays unconfirmed** - a confidently stated wrong process is worse than a flagged gap,
-  because people follow it.
+- Leave genuinely unknown values as `"[ confirm ]"` - especially Effective Date and metric Targets.
+- **Keep the two layers apart (see [Discovery](#discovery)).** A config/data fact resolved from a
+  system is stated plainly, with no flag and no question back to the user. **A
+  process/tribal-knowledge fact that no source confirmed stays a red flag for as long as it stays
+  unconfirmed**, never a committed default - a confidently stated wrong process is worse than a
+  flagged gap, because people follow it.
 
 ## Review cadence
 
-Default Next Review to **6 months** for a Procedure or any high-risk document, and **12 months** for an ordinary Work Instruction, measured from the Effective Date. Review immediately after a major change: a change to a process, tool, legal or safety requirement, payroll, or anything customer-facing.
-
-## Procedure - input JSON schema
-
-```jsonc
-{
-  // Header (all strings)
-  "title": "", "department": "", "version": "1.0",
-  "effective_date": "", "next_review": "", "prepared_by": "", "approved_by": "",
-
-  "banner": null,                 // optional red note under the header (e.g. recast / verify)
-
-  "objective": "",                // one sentence, outcome-oriented
-  "scope": "",                    // what's included/excluded; sites, customers, system types
-
-  "responsibilities": [           // one row per role
-    { "role": "", "responsibility": "" }
-  ],
-  "responsibilities_note": null,  // optional red note (e.g. when mapping/recasting)
-
-  "trigger": "", "trigger_flag": null,    // flag = optional red "(derived - confirm)" marker
-
-  "procedure": [                  // ordered; mix the kinds below
-    { "kind": "phase",  "text": "Step 1 - ..." },     // bold sub-header
-    { "kind": "step",   "text": "..." },              // numbered (use for a flat numbered list)
-    { "kind": "bullet", "text": "..." },              // bullet (use under phase headers)
-    { "kind": "ifthen", "if": "...", "then": "..." }  // a decision branch
-  ],
-
-  "done_when": "", "done_when_flag": null,
-
-  "exceptions": [ { "situation": "", "action": "" } ],          // optional; [] = omit section
-  "troubleshooting": [ { "symptom": "", "cause": "", "fix": "" } ], // optional; [] = omit
-  "troubleshooting_na": null,     // optional: string reason -> renders "Troubleshooting - N/A (reason)"
-  "metrics": [ { "metric": "", "target": "", "method": "" } ],  // optional; [] = omit section
-  "metrics_note": null,           // optional red note (e.g. set targets)
-  "references": [ "" ],           // optional; [] = omit section
-
-  "revision_log": [ { "date": "", "ver": "1.0", "by": "", "change": "Created" } ]
-}
-```
-
-## Work Instruction - input JSON schema
-
-```jsonc
-{
-  "mode": "work_instruction",
-  "title": "", "department": "", "version": "1.0",
-  "owner": "", "last_updated": "", "approved_by": null,   // approved_by optional for a WI
-
-  "intro": null,                  // optional grey context line under the header
-  "banner": null,                 // optional red verify/recast note
-
-  "responsibilities": [ { "role": "", "responsibility": "" } ],   // optional Roles table (after the intro)
-
-  "tools": [ "" ],                // "Before you start" - tools/access/prereqs (string or array)
-
-  "steps": [ /* body items - see "Body item kinds" below */
-    { "kind": "phase",  "text": "Phase 1 - ..." },     // bold header; step numbering restarts here
-    { "kind": "step",   "text": "..." },               // numbered (restarts each phase)
-    { "kind": "ifthen", "if": "...", "then": "..." },  // decision branch (bullet)
-    { "kind": "table",  "title": "...", "headers": ["",""], "rows": [["",""]], "widths": [4680,4680] },
-    { "kind": "block",  "title": "...", "lines": ["line 1","line 2"] },   // monospace template box
-    { "kind": "note",   "text": "..." }                // grey italic caution / clarification
-  ],
-
-  "done_when": "", "done_when_flag": null,
-  "watch_out": [ "" ],            // optional - common mistakes / cautions
-
-  "sections": [                   // optional reference sections, rendered after the steps
-    { "heading": "Color Coding Standard", "items": [
-      { "kind": "text", "text": "..." },
-      { "kind": "swatch_table", "title": "...", "headers": ["Swatch","col","col"],
-        "rows": [ { "label": "ORANGE", "hex": "C55A11", "cells": ["",""] },
-                  { "label": "CATEGORY", "hex": null, "cells": ["",""] } ] },  // null hex = plain label
-      { "kind": "kv", "label": "Q1 - ...", "text": "..." }
-    ] }
-  ],
-
-  // Optional appendices (omit when empty)
-  "checklist": [ "" ],            // Appendix A - acceptance/sign-off items (NOT the steps restated)
-  "checklist_title": null,        // optional, e.g. "Pre-Handoff Quality Gate"
-  "quick_reference": [            // Appendix B - objects render a 2-col table; strings render bullets
-    { "step": "", "detail": "" }
-  ],
-
-  "revision_log": [ { "date": "", "ver": "1.0", "by": "", "change": "Created" } ]
-}
-```
-
-**Body item kinds** (usable in WI `steps` and in any `sections[].items`): `phase` (bold header;
-restarts step numbering), `step` (numbered), `bullet` (optionally with a bold `label`), `ifthen`
-(decision branch), `note` (grey italic), `flag` (red italic - for unconfirmed / decision items), `text` (plain paragraph), `kv` (bold `label` + `text`),
-`subhead` (bold sub-header), `table` (`headers` / `rows` / optional `widths`), `block` (monospace
-`lines`, for templates such as a handoff email), and `swatch_table` (color-coded rows, each
-`{ label, hex, cells }`; a null `hex` renders a plain label cell). Decision branches are always
-`ifthen`. In the Procedure `procedure` array use the basic kinds (`phase` / `step` / `ifthen` /
-`bullet`); the richer kinds are for Work Instructions.
-
-## Generator behavior
-
-`scripts/build_sop.js` reads the JSON and writes a US-Letter, Arial, navy-headed `.docx`. It renders
-the Procedure layout by default and the Work Instruction layout when `mode` is `"work_instruction"`.
-It omits any optional section or appendix whose array is empty; renders Troubleshooting as an
-"N/A (reason)" line when `troubleshooting_na` is set and `troubleshooting` is empty; renders
-`banner`, `*_flag`, `responsibilities_note`, and `metrics_note` in red; and defaults the Revision Log
-to a single "Created" row when none is supplied. It requires only the `docx` npm package.
-
-## Reference examples
-
-- `references/example_input.json` - a complete Procedure (the Service-to-Sales Lead Progression SOP),
-  with the red-flag and N/A patterns.
-- `references/example_wi_input.json` - a complete Work Instruction (System Surveyor site walk), with
-  both appendices and the cross-role hand-off referenced rather than bundled.
-
-Read the one matching your tier before building your first input file.
+Default Next Review to **6 months** for a Procedure or any high-risk document, and **12 months** for
+an ordinary Work Instruction, measured from the Effective Date. Review immediately after a major
+change: a change to a process, tool, legal or safety requirement, payroll, or anything
+customer-facing.
