@@ -20,5 +20,5 @@
   "test": "powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree && node --test tests/*.test.js tools/*.test.js aac-skills/session-check/*.test.js",
   "ticketLabel": "ready-for-agent",
   "releaseGates": [],
-  "note": "Release here is the push to origin/master - that is what a container installs and what a desktop restores from (sync.ps1 -Mode pull). Nothing here is generated from a live tree any more (issue 214): edit aac-skills/ for skills and profile/ for the consumer profile, on a branch, and let CI stamp and rebuild the plugin payload."
+  "note": "Release here is the push to origin/master - that is what a container installs; a desktop takes skills and rules through the aac-skills plugin (claude plugin marketplace update, then claude plugin update) and the rest of the profile through sync.ps1 -Mode pull. Nothing here is generated from a live tree any more (issue 214): edit aac-skills/ for skills and profile/ for the consumer profile, on a branch, and let CI stamp and rebuild the plugin payload."
 }
