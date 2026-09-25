@@ -1045,6 +1045,11 @@ FENCE_PATTERN = re.compile(r"```")
 RUNNABLE_FENCE_PATTERN = re.compile(r"```bash\n.*?```", re.DOTALL)
 # The mandated reply prefix from ~/.claude/CLAUDE.md ("Standing directive — response prefix").
 # Leading whitespace only; anything else before it means it is not the prefix.
+# The PYLONS prefix is a CANARY, not a rule the gate enforces (Dan, 2026-09-25). It lives only in
+# the global CLAUDE.md so that a session which stops opening with it shows Dan, at a glance, that
+# it has started forgetting its rules. Never make the lint require it: a hook that forces the
+# prefix would keep it present exactly when the session has gone dumb, and kill the signal.
+# The lint strips it (so its fence is not counted as monospace) and that is all.
 PYLONS_PREFIX_PATTERN = re.compile(
     r"\A\s*```diff\r?\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\r?\n```[ \t]*\r?\n?"
 )
@@ -1061,16 +1066,6 @@ PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|j
 # material he objected to. Caps sized to the ADHD skill's own five-item list cap.
 INLINE_SPAN_CAP = 4
 PATH_CAP = 3
-
-
-def _prefix_lint(text: str) -> list[str]:
-    """The global CLAUDE.md's first standing directive: every reply opens with the PYLONS fence.
-    Until 2026-09-25 the lint only stripped that fence, so a reply without it passed clean, and a
-    whole cloud session ran without it unnoticed."""
-    if PYLONS_PREFIX_PATTERN.match(text):
-        return []
-    return ["PREFIX missing: every reply opens with the ```diff / - YOU MUST CONSTRUCT ADDITIONAL "
-            "PYLONS / ``` block, then a blank line (global CLAUDE.md, standing directive)"]
 
 
 def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
@@ -1714,7 +1709,6 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     try:
         final_text = _last_assistant_text(transcript_path) if transcript_path else ""
         if final_text.strip():
-            violations = violations + _prefix_lint(final_text)
             violations = violations + _yes_lint(
                 final_text, _turn_tool_names(transcript_path), _turn_refusals(transcript_path)
             )
@@ -1868,8 +1862,7 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     transcript = _find_transcript(session_id) if session_id else ""
     turn_refusals = _turn_refusals(transcript) if transcript else None
     violations = (
-        _prefix_lint(text)
-        + _yes_lint(text, turn_tools, turn_refusals)
+        _yes_lint(text, turn_tools, turn_refusals)
         + (_adhd_lint(text) if adhd == "on" else [])
         + _caveman_lint(text, mode)
     )

@@ -44,15 +44,11 @@ function scratchHome(tag) {
   return { root, home };
 }
 
-// Every reply opens with this fence (global CLAUDE.md); since 2026-09-25 the lint fails a draft
-// without it, so the ADHD shapes are tested on otherwise-valid replies.
-const PYLONS = '```diff\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\n```\n\n';
-
 /** Run the pre-send lint over `text`. Returns the real exit code plus stdout. */
 function lint(text, { home, root } = {}) {
   const scratch = home ? { home, root } : scratchHome('lint');
   const draft = path.join(scratch.root, 'draft.txt');
-  fs.writeFileSync(draft, text.startsWith(PYLONS) ? text : PYLONS + text, 'utf-8');
+  fs.writeFileSync(draft, text, 'utf-8');
   const [bin, base] = pyCmd();
   const res = spawnSync(bin, [...base, 'lint', draft], {
     encoding: 'utf-8',
