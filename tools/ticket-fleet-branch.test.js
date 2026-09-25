@@ -2036,7 +2036,9 @@ test(`${FLEET_SCRIPT_REL} a pushed, verified branch the deliverer cannot find is
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\)/,
     'the run result must keep an inconsistent ticket out of `failed`');
-  assert.match(src, /inconsistent: clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent`');
+  assert.match(src, /\.concat\(clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent` (issue 811 prepends a run-level tree-guard entry ahead of the per-ticket ones)');
+  assert.match(src, /treeGuardUnusable \? \[\{ ticket: null, kind: 'tree-guard', branch: null, detail: treeGuardUnusable \}\] : \[\]/,
+    'issue 811: a tree-guard baseline that could not be taken must surface in the run report\'s `inconsistent` list, not only in a log line');
 });
 
 test(`${FLEET_SCRIPT_REL} finish mode reports a journal-pushed branch the deliverer cannot find as inconsistent (issue 654)`, async () => {
@@ -2437,6 +2439,69 @@ test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and
   await treeGuardCheck('implement-attempt1', 7);
   assert.equal(commands.length, 2, 'expected the baseline plus one check');
   for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// Issue 811: in a served repo with no copy of tools/orchestrator-tree-guard.js (a cloud container
+// running claude-dotfiles against itself - the guard tool ships in aac-routines only, see the
+// portability note above FLEET-TREE-GUARD-DEFS), `[ -f <script> ] || exit 3` reproduces exactly
+// this: exit 3, no stdout. Under the default treeGuard:'auto' that used to turn the guard off with
+// only a log line; the run's returned report had no trace of it. It must now log the run as
+// `tree-guard: unusable — <reason>` - not a silent exit code - so a log-blind reader still sees it.
+test('tree-guard baseline exit 3 (guard tool absent) logs "tree-guard: unusable" under treeGuard:auto (issue 811)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
+    if (opts.label === 'tree-guard:baseline') return { exitCode: 3, stdout: '', stderr: '' };
+    throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
+  };
+  const { logs } = await driveTreeGuard(agentMock);
+  const unusableLine = logs.find((l) => l.startsWith('tree-guard: unusable'));
+  assert.ok(unusableLine, `expected a log line starting "tree-guard: unusable", got: ${JSON.stringify(logs)}`);
+  assert.match(unusableLine, /tools\/orchestrator-tree-guard\.js is not in this repo/);
+  assert.match(unusableLine, /guard OFF for this run/);
+});
+
+// Same exit 3, but treeGuard:true - the absence must still hard-abort the run rather than being
+// swallowed, exactly as before this ticket (only the 'auto' path's silence was the bug).
+test('tree-guard baseline exit 3 aborts the run when treeGuard:true (issue 811)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
+    if (opts.label === 'tree-guard:baseline') return { exitCode: 3, stdout: '', stderr: '' };
+    throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
+  };
+  await assert.rejects(
+    () => driveTreeGuard(agentMock, { treeGuard: true }),
+    /treeGuard:true but tools\/orchestrator-tree-guard\.js is not in this repo/,
+  );
+});
+
+// Mutation test (issue 811): with a working baseline, a stage that writes into the orchestrator's
+// own tree must be caught, not just measured. `check`'s stdout reporting a fresh entry is exactly
+// what a scripted root-tree write during a run would produce; treeGuardCheck must throw naming the
+// checkpoint label and the ticket, not swallow it.
+test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint and the ticket (issue 811 mutation test)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
+    if (opts.label === 'tree-guard:baseline') {
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/measured/cwd/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label === 'tree-guard:implement-attempt1#99') {
+      // Stands in for a stage scripting `git checkout <branch> -- .` (or any other write) in the
+      // orchestrator's own checkout: the guard's `check` reports the new path it found.
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [{ status: 'M', path: 'CLAUDE.md' }] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label in mutation test: ${opts.label}`);
+  };
+  const { treeGuardCheck } = await driveTreeGuard(agentMock);
+  await assert.rejects(
+    () => treeGuardCheck('implement-attempt1', 99),
+    (err) => {
+      assert.match(err.message, /ISOLATION BREACH|isolation breached/);
+      assert.match(err.message, /implement-attempt1/);
+      assert.match(err.message, /#99/);
+      assert.match(err.message, /CLAUDE\.md/);
+      return true;
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
