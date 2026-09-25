@@ -27,6 +27,13 @@ CAVEMAN_PLUGIN_CONFIG = REPO / "aac-skills" / "project-harness" / "templates" / 
 # The YES rules put regex hits to TypeSafe Jev (issue 723). Tests never touch the network: every
 # spawned gate inherits "off" (Jev unavailable, regex verdicts stand) unless a test stubs answers.
 os.environ["TYPESAFE_JEV_STUB"] = "off"
+# Every reply opens with this fence (global CLAUDE.md), and since 2026-09-25 the lint fails a draft
+# without it. Helpers add it so the other rules are tested on otherwise-valid replies.
+PYLONS = "```diff\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\n```\n\n"
+
+
+def with_pylons(text: str) -> str:
+    return text if text.startswith(PYLONS) else PYLONS + text
 
 
 class AskMattGateTests(unittest.TestCase):
@@ -71,7 +78,7 @@ class AskMattGateTests(unittest.TestCase):
         env["GOVERNANCE_CLAUDE_HOME"] = str(state_dir / "claude-home")
         return subprocess.run(
             [sys.executable, str(SCRIPT), "lint", "-", session_id],
-            input=draft,
+            input=with_pylons(draft),
             text=True,
             capture_output=True,
             env=env,
@@ -797,7 +804,7 @@ class AskMattGateTests(unittest.TestCase):
             json.dumps(
                 {
                     "type": "assistant",
-                    "message": {"content": [{"type": "text", "text": text}]},
+                    "message": {"content": [{"type": "text", "text": with_pylons(text)}]},
                 }
             )
             + "\n",
@@ -1105,10 +1112,59 @@ class AskMattGateTests(unittest.TestCase):
         ])
         done = subprocess.run(
             [sys.executable, str(SCRIPT), "lint", "-"],
-            input=clean, text=True, capture_output=True, check=False,
+            input=with_pylons(clean), text=True, capture_output=True, check=False,
         )
         self.assertEqual(done.returncode, 0)
         self.assertIn("lint clean", done.stdout)
+
+    def test_lint_fails_a_draft_without_the_pylons_prefix(self) -> None:
+        # Dan, 2026-09-25: a whole cloud session answered without the prefix and every draft linted
+        # clean, because the lint only stripped the fence and never required it.
+        body = "Queue empty. Tests pass. Deployed bytes match.\nNext: open the log."
+        bare = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=body, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(bare.returncode, 1)
+        self.assertIn("PREFIX missing", bare.stdout)
+        prefixed = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=PYLONS + body, text=True, capture_output=True, check=False,
+        )
+        self.assertNotIn("PREFIX missing", prefixed.stdout)
+
+    def test_yes_lint_flags_absence_stated_after_a_refused_call(self) -> None:
+        # Dan, 2026-09-25: GraphQL and /users REST both refused the board add, and the reply said
+        # "the issues are not on the Projects board". Auto-add had placed all eleven.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_absence", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        claim = "The issues are not on the Projects board. Next: add them."
+        refused = ['{"message":"This GitHub API path is not available: sessions are bound"} 403']
+        self.assertTrue(any("YES absence" in v for v in gate._yes_lint(claim, {"Bash"}, refused)))
+        # The same sentence with no refused call this turn is not this rule's business.
+        self.assertFalse(any("YES absence" in v for v in gate._yes_lint(claim, {"Bash"}, [])))
+        # A refused call with no statement of absence is not flagged either.
+        self.assertFalse(any(
+            "YES absence" in v for v in gate._yes_lint("Board add refused with 403.", {"Bash"}, refused)
+        ))
+        # The transcript reader finds the refusal in this turn's tool results only.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "t.jsonl"
+            records = [
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "old", "content": "HTTP 403"}]}},
+                {"type": "user", "message": {"role": "user", "content": "add them to the board"}},
+                {"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Bash"}]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "a", "content": refused[0]}]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "b", "content": "201 Created"}]}},
+            ]
+            path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            self.assertEqual(len(gate._turn_refusals(str(path))), 1)
 
     def test_lint_exempts_the_mandated_pylons_prefix_but_no_other_fence(self) -> None:
         # ~/.claude/CLAUDE.md orders every reply to open with this diff fence. It is a directive,
@@ -1200,7 +1256,7 @@ class AskMattGateTests(unittest.TestCase):
                 "type": "user",
                 "message": {"content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]},
             })
-        records.append({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
+        records.append({"type": "assistant", "message": {"content": [{"type": "text", "text": with_pylons(text)}]}})
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
         return str(path)
 
@@ -1310,7 +1366,7 @@ class AskMattGateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             draft = Path(folder) / "draft.md"
             draft.write_text(
-                "Queue empty. Tests pass. Deployed bytes match.\nNext: open the log.",
+                with_pylons("Queue empty. Tests pass. Deployed bytes match.\nNext: open the log."),
                 encoding="utf-8",
             )
             done = subprocess.run(
@@ -1435,7 +1491,7 @@ class YesLintJevTests(unittest.TestCase):
             env["ASK_MATT_GATE_STATE_DIR"] = folder
             env["GOVERNANCE_CLAUDE_HOME"] = str(Path(folder) / "claude-home")
             return subprocess.run(
-                [sys.executable, str(SCRIPT), "lint", "-"], input=draft, text=True,
+                [sys.executable, str(SCRIPT), "lint", "-"], input=with_pylons(draft), text=True,
                 capture_output=True, env=env, check=False,
             )
 
