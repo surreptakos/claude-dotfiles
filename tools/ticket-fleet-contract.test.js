@@ -19,7 +19,10 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
 const FLEET_SKILL = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'SKILL.md');
 const contract = require('./ticket-fleet-contract.js');
-const { CONTRACT_VERSION, FORKS, RUNBOOKS, checkLaunchArgs, contractVersionOf, auditForkFiles } = contract;
+const {
+  CONTRACT_VERSION, FORKS, RUNBOOKS, checkLaunchArgs, contractVersionOf, auditForkFiles,
+  FLEET_SOURCE_REPO, decideFleetRefresh,
+} = contract;
 
 const GOOD = { contractVersion: CONTRACT_VERSION, runId: 'r1', invocationId: 'i1' };
 
@@ -79,6 +82,31 @@ test('the plugin-served script enforces the same contract this module describes'
   assert.match(src, /open-pr-scan@\$\{invocationId\}/, 'invocationId must key the open-PR scan (issue 430)');
   assert.match(src, /required: \['candidateNumbers', 'tickets'/, 'SCOUT must require candidateNumbers');
   assert.match(src, /'kindReason', 'discoveryTriage', 'handoffPending'\]/, 'SCOUT tickets must require discoveryTriage and handoffPending');
+});
+
+test('decideFleetRefresh skips every FORKS repo and the source repo before any refresh step (issue 804)', () => {
+  for (const fork of FORKS) {
+    assert.deepEqual(decideFleetRefresh(fork.repo), { skip: true, reason: 'fork keeps its own edits' },
+      `a served repo listed in FORKS (${fork.repo}) must never reach the refresh step`);
+  }
+  assert.deepEqual(decideFleetRefresh(FLEET_SOURCE_REPO), { skip: true, reason: 'source repo' });
+  assert.deepEqual(decideFleetRefresh('surreptakos/some-other-repo'), { skip: false },
+    'a repo that is neither the source nor a listed fork must be allowed to refresh');
+});
+
+test('the plugin-served script decides the fork skip in JS before spawning the refresh agent (issue 804)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /FLEET_FORKS\.includes\(servedRepo\)/,
+    'the skip must be a JS check against FLEET_FORKS, not a step inside the refresh agent\'s own prompt');
+  assert.match(src, /FLEET_FORK_MARKER = 'PROMPT_CONTRACT'/,
+    'the refresh agent must be told to refuse a copy carrying the cockpit fork marker, as a second rail');
+  const servedRepoLabelIdx = src.indexOf("label: 'fleet-refresh-repo'");
+  const decisionIdx = src.indexOf('FLEET_FORKS.includes(servedRepo)');
+  const refreshLabelIdx = src.indexOf("label: 'fleet-refresh'");
+  assert.ok(servedRepoLabelIdx > -1 && decisionIdx > servedRepoLabelIdx,
+    'the servedRepo-reporting agent must be spawned before the FLEET_FORKS check runs');
+  assert.ok(refreshLabelIdx > -1 && decisionIdx < refreshLabelIdx,
+    'the FLEET_FORKS check must precede the refresh agent spawn in source order, so a fork never reaches it');
 });
 
 test('the SKILL.md ripple table names every fork holder, runbook and the current version', () => {

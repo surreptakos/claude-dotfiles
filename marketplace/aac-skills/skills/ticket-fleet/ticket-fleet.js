@@ -1234,37 +1234,65 @@ phase('Setup')
 // The RUNNING script is the old copy (a script cannot reload itself mid-run); the next launch runs
 // the new one. Two repos keep an edited fork and are never overwritten: the FORKS list in
 // tools/ticket-fleet-contract.js, repeated here because the workflow runtime cannot require().
+//
+// Issue 804: that skip used to be step 2 of the SAME agent prompt that did the download and
+// overwrite, so an agent that misread or skipped step 2 under load fell straight through to the
+// overwrite step - which is exactly what happened to the aac-sales-cockpit fork. The skip is
+// decided IN THIS SCRIPT now, before any agent that can write a file is ever spawned: a first,
+// narrow agent reports nothing but servedRepo, this script compares it to FLEET_SOURCE_REPO and
+// FLEET_FORKS, and the refresh agent is spawned only when neither matches - a served repo listed
+// in FLEET_FORKS never reaches that agent (pinned by tools/ticket-fleet-contract.test.js). The
+// refresh agent is separately told to refuse overwriting any copy that carries a fork marker
+// (`PROMPT_CONTRACT` for the cockpit fork) as a second rail, in case a fork is missing from
+// FLEET_FORKS or its remote no longer matches the name recorded here.
 const FLEET_SOURCE_REPO = 'surreptakos/claude-dotfiles'
 const FLEET_SOURCE_RAW = 'https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/aac-skills/ticket-fleet'
 const FLEET_FORKS = ['surreptakos/aac-routines', 'surreptakos/aac-sales-cockpit']
+const FLEET_FORK_MARKER = 'PROMPT_CONTRACT' // aac-sales-cockpit's fork edit; the refresh agent's second rail
 const FLEET_REFRESH_FILES = ['ticket-fleet.js', 'editable-install-guard.js']
-const REFRESHED = { type: 'object', required: ['servedRepo', 'skipped', 'refreshed', 'unchanged', 'commit', 'errors'], properties: {
-  servedRepo: { type: 'string', description: 'owner/repo from `git remote get-url origin`' },
-  skipped: { type: 'string', description: 'why nothing was refreshed ("" when the refresh ran): the served repo is the source, a fork, or has no copy' },
+const SERVED_REPO = { type: 'object', required: ['servedRepo'], properties: {
+  servedRepo: { type: 'string', description: 'owner/repo from `git remote get-url origin` (https://github.com/<owner>/<repo>) - nothing else run' },
+} }
+const REFRESHED = { type: 'object', required: ['refreshed', 'unchanged', 'commit', 'errors'], properties: {
   refreshed: { type: 'array', items: { type: 'string' }, description: 'paths overwritten because their sha256 differed from master' },
   unchanged: { type: 'array', items: { type: 'string' }, description: 'paths whose sha256 already matched master' },
   commit: { type: 'string', description: 'the sha of the refresh commit, "" when nothing changed' },
-  errors: { type: 'array', items: { type: 'string' }, description: 'each curl or git failure verbatim, one per entry' },
+  errors: { type: 'array', items: { type: 'string' }, description: 'each curl/git failure or refused overwrite, one per entry, verbatim' },
 } }
-let refresh = null
+let servedRepo = null
 try {
-  refresh = await agent(
-    `Refresh this repository's copy of the ticket-fleet script from its source (claude-dotfiles issue 770). Run from the repository root; make no other change.
-1. \`git remote get-url origin\` - servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>).
-2. If servedRepo is ${FLEET_SOURCE_REPO}: skipped "source repo", stop. If it is one of ${FLEET_FORKS.join(', ')}: skipped "fork keeps its own edits", stop.
-3. For each of ${FLEET_REFRESH_FILES.map(f => '`.claude/workflows/' + f + '`').join(' and ')} that EXISTS (\`test -f\`; a missing one is simply not listed, never created): \`curl -fsSL ${FLEET_SOURCE_RAW}/<name> -o /tmp/fleet-refresh-<name>\` and compare \`sha256sum\` of the download with the file. Different: \`cp /tmp/fleet-refresh-<name> .claude/workflows/<name>\` and list it under refreshed; same: list it under unchanged. A curl exit other than 0 goes under errors verbatim and that file is left alone. Also refresh \`tools/editable-install-guard.js\` the same way when it exists.
-4. If refreshed is non-empty: \`git add\` exactly those paths and \`git commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"\`; commit is the sha \`git rev-parse HEAD\` prints. No push, no other path staged, no rebase. If nothing was refreshed: neither add nor commit, commit "".
-Return structured output only.`,
-    { label: 'fleet-refresh', phase: 'Setup', schema: REFRESHED, model: cfg.reportModel, effort: 'low' }
+  const served = await agent(
+    'Run exactly this one command and report its result: `git remote get-url origin`. servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>). Do not run anything else - no curl, no cp, no git add or commit.',
+    { label: 'fleet-refresh-repo', phase: 'Setup', schema: SERVED_REPO, model: cfg.reportModel, effort: 'low' }
   )
+  servedRepo = served && served.servedRepo
 } catch (err) {
-  log(`fleet-refresh did not run: ${unusableReason('fleet-refresh', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
+  log(`fleet-refresh-repo did not run: ${unusableReason('fleet-refresh-repo', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
 }
-if (refresh) {
-  if (refresh.skipped) log(`fleet-refresh: ${refresh.servedRepo || 'served repo'} - ${refresh.skipped}; the copy is left as it is.`)
-  else if (refresh.refreshed && refresh.refreshed.length) log(`fleet-refresh: ${refresh.refreshed.join(', ')} overwritten from ${FLEET_SOURCE_REPO} master and committed as ${refresh.commit || '(no commit reported)'} - THIS run still executes the copy it was launched from; the next launch runs the refreshed one (issue 770).`)
-  else log(`fleet-refresh: ${(refresh.unchanged || []).join(', ') || 'no copy present'} already match ${FLEET_SOURCE_REPO} master.`)
-  for (const e of refresh.errors || []) log(`fleet-refresh error: ${e}`)
+let refresh = null
+if (!servedRepo) {
+  log('fleet-refresh: could not measure servedRepo - the copy is left as it is (no refresh attempted).')
+} else if (servedRepo === FLEET_SOURCE_REPO) {
+  log(`fleet-refresh: ${servedRepo} - source repo; the copy is left as it is.`)
+} else if (FLEET_FORKS.includes(servedRepo)) {
+  log(`fleet-refresh: ${servedRepo} - fork keeps its own edits; the copy is left as it is.`)
+} else {
+  try {
+    refresh = await agent(
+      `Refresh this repository's copy of the ticket-fleet script from its source (claude-dotfiles issue 770). servedRepo is already confirmed as ${servedRepo}, neither the source repo nor a listed fork - do not re-check it. Run from the repository root; make no other change.
+1. For each of ${FLEET_REFRESH_FILES.map(f => '`.claude/workflows/' + f + '`').join(' and ')} that EXISTS (\`test -f\`; a missing one is simply not listed, never created): first read the file and check whether it contains the string \`${FLEET_FORK_MARKER}\` anywhere. If it does, REFUSE to touch it - list it under errors as "<path>: refused, contains ${FLEET_FORK_MARKER} fork marker" and leave it exactly as it is (a second rail behind the servedRepo check above, issue 804). Otherwise \`curl -fsSL ${FLEET_SOURCE_RAW}/<name> -o /tmp/fleet-refresh-<name>\` and compare \`sha256sum\` of the download with the file. Different: \`cp /tmp/fleet-refresh-<name> .claude/workflows/<name>\` and list it under refreshed; same: list it under unchanged. A curl exit other than 0 goes under errors verbatim and that file is left alone. Also refresh \`tools/editable-install-guard.js\` the same way when it exists, including the ${FLEET_FORK_MARKER} check.
+2. If refreshed is non-empty: \`git add\` exactly those paths and \`git commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"\`; commit is the sha \`git rev-parse HEAD\` prints. No push, no other path staged, no rebase. If nothing was refreshed: neither add nor commit, commit "".
+Return structured output only.`,
+      { label: 'fleet-refresh', phase: 'Setup', schema: REFRESHED, model: cfg.reportModel, effort: 'low' }
+    )
+  } catch (err) {
+    log(`fleet-refresh did not run: ${unusableReason('fleet-refresh', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
+  }
+  if (refresh) {
+    if (refresh.refreshed && refresh.refreshed.length) log(`fleet-refresh: ${refresh.refreshed.join(', ')} overwritten from ${FLEET_SOURCE_REPO} master and committed as ${refresh.commit || '(no commit reported)'} - THIS run still executes the copy it was launched from; the next launch runs the refreshed one (issue 770).`)
+    else log(`fleet-refresh: ${(refresh.unchanged || []).join(', ') || 'no copy present'} already match ${FLEET_SOURCE_REPO} master.`)
+    for (const e of refresh.errors || []) log(`fleet-refresh error: ${e}`)
+  }
 }
 // [FLEET-REFRESH-END]
 // [FLEET-TREE-GUARD-SETUP-START]

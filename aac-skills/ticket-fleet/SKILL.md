@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T14:17:43Z"
-  previous-modified: "2026-09-24T14:10:39Z"
-  revision: "41"
-  content-sha: "f17731584484"
+  modified: "2026-09-25T23:52:47Z"
+  previous-modified: "2026-09-24T14:17:43Z"
+  revision: "42"
+  content-sha: "1e2ef513604f"
 ---
 
 # ticket-fleet
@@ -161,13 +161,19 @@ Workflow({
 
 On a fork (aac-routines' auth/cleanup phases, aac-sales-cockpit's `PROMPT_CONTRACT`) the copy is
 edited in place. On every other repo the copy is a mirror of claude-dotfiles master, and **the run
-refreshes it itself** (issue 770): the first Setup agent, `fleet-refresh`, downloads
-`aac-skills/ticket-fleet/ticket-fleet.js` and `editable-install-guard.js` from master, overwrites
+refreshes it itself** (issue 770): a first, narrow Setup agent, `fleet-refresh-repo`, does nothing
+but report `servedRepo`; this script then compares it to `FLEET_SOURCE_REPO`/`FLEET_FORKS` and
+decides the skip itself, so a served repo listed in `FORKS` (`tools/ticket-fleet-contract.js`)
+never reaches an agent that could write a file (issue 804 - the skip used to be one step inside
+the same prompt that did the overwrite, and an agent that misread that step overwrote the cockpit
+fork). Only for a non-source, non-fork repo does a second agent, `fleet-refresh`, download
+`aac-skills/ticket-fleet/ticket-fleet.js` and `editable-install-guard.js` from master, overwrite
 each `.claude/workflows/` copy whose sha256 differs (and `tools/editable-install-guard.js` when
-present), and commits them as `chore(fleet): refresh ticket-fleet script from claude-dotfiles
-master (issue 770)` on the current branch - no push. The running script is still the old copy;
-the next launch runs the refreshed one, so a fix merged here reaches every fleeted repo one run
-later with no `cp` by hand. The fork list it skips is `FORKS` in `tools/ticket-fleet-contract.js`.
+present), and commit them as `chore(fleet): refresh ticket-fleet script from claude-dotfiles
+master (issue 770)` on the current branch - no push. That agent is also told to refuse
+overwriting any copy that contains the `PROMPT_CONTRACT` marker, as a second rail behind the
+servedRepo check. The running script is still the old copy; the next launch runs the refreshed
+one, so a fix merged here reaches every fleeted repo one run later with no `cp` by hand.
 
 **The deliverer merges its own PR (issue 770).** STEP D of the Deliver prompt waits for CI on the
 PR head (20 minutes at most), applies the runbook merge bar, squash-merges with the head sha the
