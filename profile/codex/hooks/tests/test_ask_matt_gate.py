@@ -1180,6 +1180,41 @@ class AskMattGateTests(unittest.TestCase):
             path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
             self.assertEqual(len(gate._turn_refusals(str(path))), 1)
 
+    def test_yes_lint_flags_review_absence_claimed_before_the_matching_read(self) -> None:
+        # A "no review threads" claim is premature until the reply actually read the reviews — no
+        # refusal need be involved, unlike the board-add case above.
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_review_read", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        claim = "No review threads on this PR. Next: merge."
+        self.assertTrue(any("review claim" in v for v in gate._yes_lint(claim, set(), [])))
+        self.assertTrue(any("review claim" in v for v in gate._yes_lint(claim, {"Bash"}, [])))
+        # A successful get_reviews or get_review_comments call this turn clears it.
+        self.assertFalse(
+            any("review claim" in v for v in gate._yes_lint(claim, {"get_reviews"}, []))
+        )
+        self.assertFalse(
+            any("review claim" in v for v in gate._yes_lint(claim, {"get_review_comments"}, []))
+        )
+        # Reading the method argument off a pull_request_read tool_use in the transcript.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "t.jsonl"
+            records = [
+                {"type": "user", "message": {"role": "user", "content": "any review threads?"}},
+                {"type": "assistant", "message": {"content": [{
+                    "type": "tool_use", "name": "mcp__github__pull_request_read",
+                    "input": {"method": "get_reviews", "pullNumber": 1},
+                }]}},
+                {"type": "user", "message": {"content": [
+                    {"type": "tool_result", "tool_use_id": "a", "content": "[]"}]}},
+            ]
+            path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            names = gate._turn_tool_names(str(path))
+            self.assertIn("get_reviews", names)
+            self.assertFalse(any("review claim" in v for v in gate._yes_lint(claim, names, [])))
+
     def test_lint_exempts_the_mandated_pylons_prefix_but_no_other_fence(self) -> None:
         # ~/.claude/CLAUDE.md orders every reply to open with this diff fence. It is a directive,
         # not working material, so the lint ignores it - at the top only, and only that block.
