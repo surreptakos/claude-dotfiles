@@ -1,428 +1,304 @@
 ---
 name: project-harness
-description: Bolt the production organization harness onto any repo — triage labels, issue forms, generated DASHBOARD.md + CI refresh, pre-commit test gate, ADR status lines, live tracker-drift audit, Projects board. Use when the user says "harness this repo", "set up the project harness", "make this repo organized like aac-cockpit", "upgrade the harness", or spins up a new project. Idempotent — safe to re-run, and carries a version marker so an existing install can be upgraded.
+description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-25T23:07:36Z"
-  previous-modified: "2026-09-24T16:34:56Z"
-  revision: "40"
-  content-sha: "6153685d7366"
+  modified: "2026-09-25T23:17:13Z"
+  previous-modified: "2026-09-25T23:07:36Z"
+  revision: "41"
+  content-sha: "4f551e40c4a3"
 ---
 
 # Project Harness
 
-Install **or upgrade** the organization harness proven on `aac-cockpit` (2026-07-28). Every piece is
-idempotent: skip what exists, update in place, never duplicate. Reference implementation if anything here is
-ambiguous: `Sales Data KPIs/aac-cockpit` on this machine.
+Install **or upgrade** the organization harness. Every piece is idempotent: skip what exists, update
+in place, add nothing twice. Where this file is ambiguous, the reference implementation is
+`Sales Data KPIs/aac-cockpit` on the owner's machine.
 
-**Step 0 decides which job this is. Read it before anything else** — most invocations after the
-first are upgrades, and step 7 is the whole upgrade path.
+To back this skill up while editing it, copy it to a temp directory. A copy anywhere under
+`~/.claude/skills/` loads as a second skill with an identical description.
 
-> **Never back this skill up inside `~/.claude/skills/`.** A copied folder there is loaded as a
-> second skill with an identical description, so skill selection has two indistinguishable
-> candidates. Copy to a temp directory instead. (Hit while editing this skill on 2026-07-28.)
-
-## 0 — Install or upgrade? Decide this FIRST
-
-**Before anything else, check whether this repo is already harnessed:**
+## 0 — Install or upgrade? Decide this first
 
 ```sh
 cat docs/agents/harness-version.md 2>/dev/null; ls scripts/build-dashboard.js 2>/dev/null
 ```
 
-- **Either one present → this is an UPGRADE. Go straight to step 7** and do only what that repo's
-  version lacks; step 7 carries the whole upgrade path.
-- **Neither present → fresh install.** Continue to step 1. (A `build-dashboard.js` with no marker file
-  means **version 1**, not unharnessed.)
+- **Either present → UPGRADE. Go straight to step 7** and install only what that repo's version
+  lacks. A `build-dashboard.js` with no marker file is **version 1**.
+- **Neither present → fresh install.** Continue to step 1.
 
-Why this gate is first: the steps below read as a fresh install, and running them against an existing
-install churns every file for nothing and can **destroy hand-tuned configuration** — step 3.3 would
-regenerate a `CONFIG` block that someone had corrected by hand, silently reverting it. Two real
-examples on this machine: `aac-bill-intake` needs an explicit `node --test <file> <file>` list because
-`node --test gas/` does not work there, and both it and `aac-task-management` carry comments explaining
-their test command. Detection would not reproduce any of that.
-
-**Upgrading is machine-wide, not per-repo.** Step 7 begins by finding every harnessed repo, so invoking
-this skill once — from any repo, or none — can upgrade all of them. There is no need to open a session
-per repo.
+Steps 1–6 read as a fresh install; run against an existing install they churn every file and revert
+hand-tuned configuration (a corrected test command, the comments explaining it) that detection cannot
+reproduce. Upgrading is machine-wide: step 7 finds every harnessed repo, so one invocation from any
+repo, or none, upgrades them all.
 
 ## 1 — Explore (before touching anything)
 
-- `git remote -v` — must be a GitHub repo for the tracker/CI pieces; if no remote, offer to `gh repo create` (private by default).
-- **Test command** — detect in order: `package.json` `scripts.test`; a repo-documented command in CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest. If nothing detectable, ask the user; if the repo genuinely has no tests, the hook and the dashboard's test line are installed as no-ops with a `TODO` and you say so. File that TODO as a `ready-for-agent` ticket, never `ready-for-human`: writing a suite is agent work, and `ready-for-human` is only for a step an agent cannot perform (credential, owner ruling, UI-only action). brazil-flights #1 sat on `ready-for-human` for three days and an agent then built the whole suite in one session (2026-09-24).
-- **ADR dir** — `docs/adr/` or `doc/adr/` or none. None is fine (section skipped).
-- **Deploy/CI workflow** — any existing `.github/workflows/*.yml` whose name suggests deploy/test; the dashboard reports the most deploy-like one, or skips.
-- Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to skip or merge.
-- Repo private? (`gh repo view --json isPrivate`) — private is expected; never suggest GitHub Pages for a private repo's dashboard.
-- **Apps Script repo?** `.clasp.json` at the root, in `gas/`, or in `src/` — or `gas.json`, which means it already deploys itself. Decides step 13 and the Releasing section of the session runbook.
+- `git remote -v` — the tracker/CI pieces need a GitHub repo; with no remote, offer `gh repo create`
+  (private by default).
+- **Default branch** — `git symbolic-ref refs/remotes/origin/HEAD`; a cloud clone may have no
+  `origin/HEAD`, so fall back to `git remote show origin`. Steps 3.4 and 3.8b substitute it.
+- **Test command** — detect in order: `package.json` `scripts.test`; a command documented in
+  CLAUDE.md/README (e.g. `node tests/run-all.js`); `pytest`/`cargo test`/`go test ./...` by manifest.
+  Undetectable → ask. A repo with no tests gets the hook and the dashboard's test line as no-ops with
+  a `TODO`, said aloud, and that TODO filed as a `ready-for-agent` ticket: writing a suite is agent
+  work, and `ready-for-human` is reserved for a step an agent cannot perform (credential, owner
+  ruling, UI-only action).
+- **ADR dir** — `docs/adr/`, `doc/adr/`, or none (section skipped).
+- **Deploy/CI workflow** — the most deploy-like `.github/workflows/*.yml`; the dashboard reports it,
+  or skips.
+- Existing labels, issue templates, `.githooks`, `DASHBOARD.md`, `docs/agents/` — to know what to
+  skip or merge.
+- **Visibility** — `gh repo view --json isPrivate`; private is expected, and dashboards stay in the
+  repo (see Scope limits).
+- **Apps Script repo?** `.clasp.json` at the root, in `gas/` or in `src/` — or `gas.json`, meaning it
+  already deploys itself. Decides step 3.13 and the session runbook's Releasing section.
 
 ## 2 — Confirm only genuine branches
 
-Usually zero questions. Ask only when: the test command is undetectable, or the user might want the shared
-cross-repo Projects board instead of per-repo (see step 6).
+Usually zero questions. Ask only when the test command is undetectable, or when the user might want
+the shared cross-repo Projects board instead of a per-repo one (step 5).
 
 ## 3 — Install
 
-1. **Labels** (`gh label create`, tolerate exists): the five triage roles `needs-triage`/`needs-info`/`ready-for-agent`/`ready-for-human`/`wontfix`, plus `prd` (#5319e7) and `chore` (#fef2c0). Reuse GitHub defaults (`bug`, `enhancement`, `documentation`) as they come. `prd` carries its own contract: a PRD issue is a first-class container (problem + locked decisions + sub-issue checklist) with its own reading of the five states and a close-with-children rule. The `triage-labels.md` seed in `setup-matt-pocock-skills` carries the lifecycle table — step 7 must land it in `docs/agents/triage-labels.md`.
-2. **Issue forms** — copy `templates/issue-forms/*` to `.github/ISSUE_TEMPLATE/`. They label `needs-triage` on arrival; that's the intake guarantee. Substitute `TEST_COMMAND` in `ticket.yml`'s "Done when" description with the repo's real test command (same substitution as the hook).
-3. **Dashboard generator** — copy `templates/build-dashboard.js` to `scripts/build-dashboard.js` and fill the `CONFIG` block at the top (testCommand, adrDir, deployWorkflow) from step 1's findings. **If the file already exists, PRESERVE its existing `CONFIG` verbatim** — splice the old block into the new template rather than re-deriving it; a hand-corrected test command and the comments explaining it are exactly what detection cannot reproduce. The splice, CRLF-tolerant because repo copies on Windows are CRLF and the template is LF (a `\n};\n` pattern silently fails to match):
+1. **Labels** (`gh label create`, tolerate exists): the five triage roles `needs-triage` /
+   `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`, plus `prd` (#5319e7) and `chore`
+   (#fef2c0); reuse GitHub's defaults (`bug`, `enhancement`, `documentation`). A `prd` issue is a
+   container (problem + locked decisions + sub-issue checklist) with its own reading of the five
+   states and a close-with-children rule; its lifecycle table is the `triage-labels.md` seed in
+   `setup-matt-pocock-skills`, which 3.7 lands in `docs/agents/triage-labels.md`.
+2. **Issue forms** — copy `templates/issue-forms/*` to `.github/ISSUE_TEMPLATE/` (they label
+   `needs-triage` on arrival: the intake guarantee). Substitute `TEST_COMMAND` in `ticket.yml`'s
+   "Done when" with the repo's test command.
+3. **Dashboard generator** — copy `templates/build-dashboard.js` to `scripts/build-dashboard.js` and
+   fill its `CONFIG` block (testCommand, adrDir, deployWorkflow) from step 1. **An existing file
+   keeps its `CONFIG` verbatim**: splice the old block into the new template. The regex is
+   CRLF-tolerant because Windows repo copies are CRLF and the template is LF:
    ```js
    const cfgRe = /const CONFIG = \{[\s\S]*?\r?\n\};\r?\n/;
    const mine = fs.readFileSync(P, 'utf8').match(cfgRe);        // P = scripts/build-dashboard.js
    if (!mine) throw new Error('no CONFIG in repo copy');        // fail loud; never fall through to the template's
    fs.writeFileSync(P, fs.readFileSync(T, 'utf8').replace(cfgRe, mine[0]));
    ```
-   Then assert the values survived (`grep` the title and test command) before moving on — a splice that silently produced the template's placeholder `REPO_TITLE` renders a perfectly valid dashboard for the wrong repo.
-4. **Dashboard workflow** — copy `templates/dashboard.yml` to `.github/workflows/dashboard.yml` (push to default branch + issue events + manual; force-pushes the regenerated `DASHBOARD.md` to a dedicated `dashboard` branch, never back to the default branch, so CI cannot advance origin on a file that has nothing to do with source state — claude-dotfiles issue 20, ported here as v15). The default branch stays untouched by CI; the artifact reads at a stable GitHub URL: `https://github.com/<owner>/<repo>/blob/dashboard/DASHBOARD.md`. Two substitutions the template marks inline:
-   - **Default branch.** `main` appears twice (`push.branches`, `checkout.ref`); on a `master` repo the un-substituted workflow never fires and the failure is silent — no run, no error. Read it from `git symbolic-ref refs/remotes/origin/HEAD`.
-   - **Test environment.** The job only has Node. If `testCommand` is another language, add the runtime setup and the dependency install (the template carries a commented Python example), and install the FULL set the suite imports — optional extras included. Symptom of getting this wrong: CI's health line says `FAILING — 1 error in ~2s` (collection/import error) while the suite is green locally, because local happens to have the extra installed (hit on aac-task-management: a test imports a script whose module top imports `anthropic`, which lives in a non-dev extra).
-5. **Pre-commit test gate** — copy `templates/pre-commit` to `.githooks/pre-commit`, substitute the test command, add a one-line `.githooks/README.md`, then `git config core.hooksPath .githooks`. Time the suite first; if it exceeds ~60s, put it in a pre-push hook instead of pre-commit and say so.
-6. **ADR status lines** — if an ADR dir exists, ensure every ADR has a `**Status:**` line after its title (default `accepted.`; superseded ones must say by what). The dashboard reads these.
-7. **Tracker + agents config** — if `docs/agents/issue-tracker.md` is absent, run the `setup-matt-pocock-skills` flow (GitHub tracker) or write the GitHub variant directly; add the Dashboard section pointing at `DASHBOARD.md` and the issue forms.
-8. **Live tracker audit** — copy `templates/tracker-audit.js` to `tools/tracker-audit.js`. No substitutions: it infers the repo from `gh repo view`. It reads live GitHub state (prose `Blocked by #N` with no native dependency edge, closed issues with unticked acceptance boxes, a `#N` that is neither an issue nor a PR, missing/conflicting triage labels, an open issue whose Projects card says Done, an open issue on no board at all, plus two advisory checks) — the drift no file-level test can see. Exit 0 clean / 1 drift / **2 could not audit**; preserve that third code in any edit, because a tracker query returning nothing must never read as a pass.
-   - It needs the network and an authenticated `gh`, so it lives at the command line, optionally as a CI step (a separate workflow, or a job in `dashboard.yml` kept clear of the test job) — a commit gate that needs the network breaks committing offline, which keeps it out of `.githooks/pre-commit`.
+   Then `grep` the title and test command to prove they survived: a splice that yields the
+   template's `REPO_TITLE` renders a valid dashboard for the wrong repo.
+4. **Dashboard workflow** — copy `templates/dashboard.yml` to `.github/workflows/dashboard.yml`. It
+   runs on push, issue events and manual dispatch, and force-pushes `DASHBOARD.md` to a dedicated
+   `dashboard` branch, so CI never advances the default branch; the artifact reads at
+   `https://github.com/<owner>/<repo>/blob/dashboard/DASHBOARD.md`. Two substitutions, marked inline:
+   - **Default branch** — `main` appears twice (`push.branches`, `checkout.ref`). Left wrong, the
+     workflow never fires and nothing reports it.
+   - **Test environment** — the job has only Node. For another language add the runtime setup and
+     install the FULL dependency set the suite imports, optional extras included (the template
+     carries a commented Python example). Tell-tale: CI's health line reads `FAILING — 1 error in ~2s`
+     (an import error) while the suite is green locally.
+5. **Pre-commit test gate** — copy `templates/pre-commit` to `.githooks/pre-commit`, substitute the
+   test command, add a one-line `.githooks/README.md`, then `git config core.hooksPath .githooks`.
+   Time the suite first; over ~60s, make it a pre-push hook instead and say so.
+6. **ADR status lines** — give every ADR a `**Status:**` line after its title (default `accepted.`;
+   a superseded one names its successor). The dashboard reads these.
+7. **Tracker + agents config** — if `docs/agents/issue-tracker.md` is absent, run the
+   `setup-matt-pocock-skills` flow (GitHub tracker) or write the GitHub variant directly; add a
+   Dashboard section pointing at `DASHBOARD.md` and the issue forms.
+8. **Live tracker audit** — copy `templates/tracker-audit.js` to `tools/tracker-audit.js`, no
+   substitutions (it infers the repo from `gh repo view`). It audits live GitHub state no file-level
+   test can see: prose `Blocked by #N` without a native dependency edge, closed issues with unticked
+   boxes, dangling `#N`, missing/conflicting triage labels, Projects-board mismatches.
+   - **Exit codes: 0 clean, 1 drift, 2 could not audit.** Preserve the third in any edit; exit 2 is
+     never a pass, because an empty tracker query must not read as clean.
+   - It needs the network and an authenticated `gh`, so it runs at the command line or in CI (3.8b),
+     and stays out of `.githooks/pre-commit` so committing works offline.
    - Record it in `docs/agents/issue-tracker.md` as the thing to run before trusting the tracker.
-   - In `claude-dotfiles` itself the template is **generated** from `tools/tracker-audit.js` by `tools/build-harness-tracker-audit.js`; never hand-edit `templates/tracker-audit.js` there. Fix the repo copy, re-run the generator, and `tools/tracker-audit-template.test.js` goes green (issue 336).
-8b. **The job that runs it** — copy `templates/tracker-audit.yml` to `.github/workflows/tracker-audit.yml`, `templates/tracker-audit-job.js` to `tools/tracker-audit-job.js`, and `templates/tracker-audit-job.test.js` to `tools/tracker-audit-job.test.js`. Until v33 the harness shipped the auditor and not the job, so a repo could hold `tools/tracker-audit.js` for weeks with nothing running it: `session-check` reads the workflow's latest run for the default-branch head, and with no workflow it prints `no .github/workflows/tracker-audit.yml` at both ends of every session (aac-sales-cockpit#645, zoho-source-of-truth#134 — the only `!!` standing between those repos and `Ready to archive`).
-   - **One substitution, and it fails silently.** `branches: [DEFAULT_BRANCH]` in the workflow's `push` trigger: read the real one from `git symbolic-ref refs/remotes/origin/HEAD` (`main` on most repos, `master` here; a cloud clone may have no `origin/HEAD`, so fall back to `git remote show origin`). The installed `tracker-audit-job.test.js` asserts a branch is named and that the placeholder is gone, and the workflow's first step runs it, so an un-substituted copy turns every issue-event run red rather than quietly never firing. It fails the repo's own suite only where that suite runs `tools/*.test.js`: aac-sales-cockpit's `tests/run-all.js` does not, so run `node --test tools/tracker-audit-job.test.js` by hand after substituting.
-   - **Do not rename the workflow file.** `TRACKER_AUDIT_WORKFLOW` in `aac-skills/session-check/check.js` names `tracker-audit.yml`; a different name reads as no job at all.
-   - The runner needs no substitution — it spawns the repo's own `tools/tracker-audit.js` and propagates its exit code (0 clean, 1 drift, 2 could not audit; both non-zero codes fail the run).
-   - All three files are **generated** in `claude-dotfiles` by `tools/build-harness-tracker-audit.js` except the workflow, which differs from this repo's copy by the `proof` job (issue 473's one-time acceptance evidence) and the branch placeholder. `tools/tracker-audit-template.test.js` pins both halves.
-9. **Harness version marker** — copy `templates/harness-version.md` to `docs/agents/harness-version.md` and set the date. A one-line `harness-version: N` in a dedicated file, rather than a constant in `scripts/build-dashboard.js`: the marker has to be readable with one `cat` in every harnessed repo, and aac-cockpit's dashboard script predates the template's `CONFIG` block, so a constant there would need the script restructured before the version could be read. **Current version: 33.** The `/session-start` check reads this marker every session and STOPs when the repo is behind (issue 139), so close an out-of-date harness before writing code — a repo without the v28 cloud bootstrap hook (v27 delivered it; v28 makes its failures loud, issue 483) or still carrying the narrow v19 auto-mode rule (v29 widened it to attended sessions and named every classifier category, issue 543) is exactly that state, and the STOP line is the only thing that says so.
-10. **Deploy-safety check** — if the repo has a packaging/deploy step that sweeps files (clasp, docker COPY, npm files field), confirm `scripts/`, `.githooks/`, `tools/`, `.github/` are excluded. This bit aac-cockpit: clasp would have pushed Node tooling into Apps Script.
-    - While here, make sure the harness's own files are excluded too — including `.caveman.json` from step 14.
-11. **CLAUDE.md** — add/refresh a short block: dashboard is generated (never hand-edit), hook activation command, tracker pointer, `node tools/tracker-audit.js`, and the session commands from step 12.
-12. **Session checks** — copy `templates/session.json` to `.claude/session.json`, substituting `TEST_COMMAND` (same value as the hook and `ticket.yml`). Copy `templates/session-runbook.md` to `docs/runbooks/session.md`; if the repo does not deploy, delete that template's Releasing section as its comment says.
-    - **PRESERVE an existing `.claude/session.json` verbatim.** Identical hazard to step 3.3's `CONFIG` block, and for the identical reason: this file carries the hand-corrected test command and the repo's release gates, and detection cannot reproduce either. Merge in missing keys; never regenerate the file.
-    - The engine lives once at `~/.claude/skills/session-check/check.js` rather than per repo, and `~/.claude/hooks/session-gate.js` runs it from the global `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks — so a harnessed repo gets the checks without anyone invoking a skill. `/session-start` and `/session-end` only re-print the cached result. Vendoring a copy into every repo would give five copies to drift, and a duplicated skill folder makes skill selection ambiguous (see this file's header).
-    - Fill `releaseGates` with what the repo actually gates on — `node tools/canary.js` where it exists, `[]` otherwise; never `clasp-auth` for a self-deploying repo. They run at `--end`.
-13. **Self-deploy (gas)** — an Apps Script repo adopts the gas package instead of a clasp credential: follow the `gas-deploy` team skill (claude-dotfiles `gas/README.md`): `gas init` (prefills `preserve` from the live script), `gas vendor`, the `deploy.yml` template with the repo's test command, one `gasEnsureTrigger_();` line in an existing trigger, then the one-time `gas push` + `gas seed`. The script then pulls every merge from GitHub and no credential exists in CI or on a machine. `templates/clasp-auth.js` is legacy — copy it to `tools/clasp-auth.js` only for a repo the owner explicitly keeps on clasp, and then:
-    - **It is AAC-hardcoded on purpose.** `CLIENT_ID` and `ACCOUNT` name the private OAuth client in `gpt-sheets-access-475817` and the account owning the bound scripts. A non-AAC repo needs both edited; there is no detection that could infer them, and a wrong guess yields a tool that confidently validates the wrong credential. Say so at handoff rather than installing it silently into a non-AAC project.
-    - Why it is worth a step: it checks the grant's **scopes**, not merely that it refreshes.
+   - In claude-dotfiles, `tools/build-harness-tracker-audit.js` generates `templates/tracker-audit.js`
+     from `tools/tracker-audit.js`: fix the repo copy and re-run the generator
+     (`tools/tracker-audit-template.test.js` pins them).
 
-14. **Session output intensity** — copy `templates/caveman.json` to `.caveman.json` at the repo root.
-    - The caveman plugin's SessionStart hook resolves its level as `CAVEMAN_DEFAULT_MODE` env > repo-local
-      `.caveman.json` / `.caveman/config.json` (walking up from cwd) > user config
-      (`%APPDATA%\caveman\config.json`, or `$XDG_CONFIG_HOME`/`~/.config` elsewhere) > `full`.
-    - **The repo file is the one that survives.** A user-level config lives on one machine and in no history,
-      so a repo that depends on the level being `ultra` gets `full` on any other checkout and nobody notices —
-      the session just reads more verbosely. Pinning it in the repo makes the intent reviewable.
-    - Default here is `ultra` (Dan, 2026-08-02). Keep an existing file's value if the repo already carries one;
-      only add the file where it is missing.
-    - If the repo has a packaging step that sweeps root files (the gas deployable set, docker COPY), exclude it — same list as
-      step 10 (`gas.json` `exclude` mirrors what `.claspignore` used to say).
-    - A repo still on clasp keeps the old rule: `~/.clasprc.json` is shared by every clasp project on the machine, so a bare `clasp login` produces a credential that pushes fine here while silently breaking Gmail and Drive work in another repo; wire `prepush` to `node tools/clasp-auth.js --quiet` where there is a `package.json`. A self-deploying repo has nothing credential-shaped to wire.
-
-15. **Ticket fleet** — the fleet is served by the `aac-skills` plugin; the harness copies no
-    script. In a session with the plugin installed (step 16 makes that so), invoke it via the
-    Workflow tool with `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js`
-    and the three required contract args `contractVersion: 2`, `runId` (`printf %x $(date +%s)`,
-    held across a resume) and `invocationId` (`printf %x%x $(date +%s) $$`, fresh on every launch,
-    never equal to `runId`) - the workflow runtime forbids `Date.now()`/`Math.random()`, so the
-    caller mints both ids, and a launch missing any of the three is refused with a
-    contract-mismatch error naming the version on both sides. One script serves local and cloud sessions - it picks between
-    the `gh` CLI and the GitHub MCP tools at run time (a cloud container sets
-    `CLAUDE_CODE_REMOTE_SESSION_ID`, or has no `gh` on PATH).
-    - **A repo needing a forked script keeps its own `.claude/workflows/ticket-fleet.js` copy**
-      (hand-tuned prompts, extra phases like aac-routines' auth/cleanup, aac-cockpit's
-      `PROMPT_CONTRACT`) and calls it by name; otherwise `scriptPath` at the plugin copy is the
-      default and the repo carries no fleet file. A fork goes stale the moment the plugin's
-      contract moves: `node tools/ticket-fleet-contract.js <fork>` in `claude-dotfiles` says
-      which forks are behind, and the ripple table in the ticket-fleet `INTERNALS.md` lists them.
-    - **First run in a repo: pass `deliver: false`** (verify-only dry run) before letting the
-      fleet push branches and open PRs.
-
-16. **Cloud bootstrap hook + plugin + auto-mode posture** — one command delivers all three, and it
-    is the whole cut-over of a repo to cloud sessions (issue 218, spec #207):
-    `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`.
-    - **The bootstrap hook is the one per-repo artefact** (issue 163). The script copies
-      `templates/session-start.sh` to `<repo>/.claude/hooks/session-start.sh`, stages it as
-      100755 in the git index (`fs.chmod` alone is invisible to git on Windows, issue 614), and
-      prepends one `hooks.SessionStart` entry
-      (`bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"`, timeout 120) so it runs before
-      any hook that needs gh, the skills or the rules text, whatever mode bit a commit gave the
-      file. A repo whose `session-start.sh` is
-      **not** a copy of the template (no `aac-bootstrap` marker: somebody's own hook, as in
-      aac-routines) is left byte-for-byte; the bootstrap lands beside it as
-      `.claude/hooks/session-start-bootstrap.sh` and that path is wired instead (issue 542). In a container
-      (`CLAUDE_CODE_REMOTE=true`) the hook shallow-clones dotfiles master, installs gh from the
-      pinned tarball onto PATH through `$CLAUDE_ENV_FILE`, copies the `aac-skills` payload into
-      `~/.claude/skills/`, merges the payload's hooks manifest into the container's user settings
-      with each command seated for settings.json (the payload's absolute path in place of
-      `${CLAUDE_PLUGIN_ROOT}`, which Claude Code refuses outside a plugin's own manifest, plus
-      `CLAUDE_PLUGIN_ROOT=<path> PLUGIN_HOOK_GUARD_DISABLE=1`) so governance fires on prompt 1,
-      writes the marker session-check reads, and emits one sub-2KB `additionalContext` line. A local session exits 0 immediately. **No repo carries
-      skill content** — the payload comes from master at session start, and the hook body itself
-      is generated in `claude-dotfiles` from the `.claude/hooks/session-start.sh` that repo runs
-      (`tools/build-harness-bootstrap-hook.js`), so the delivered body is the exercised one.
-    - **The plugin declaration** (`extraKnownMarketplaces`, `enabledPlugins`) makes a cloud
-      session install `aac-skills` at startup where the marketplace route cannot.
-    - **The posture** (`permissions.defaultMode` `auto` + the blanket `permissions.allow`, and the
-      widened `autoMode.allow` ruling — Dan, 2026-09-15, issue 245) keeps an unattended session
-      (cloud or Routine master) sanctioned to run every action its work requires, destructive and
-      irreversible included, instead of the classifier parking it.
-    - The script creates `.claude/settings.json` when absent (equivalent to copying
-      `templates/claude-settings.json`) and otherwise merges only those keys plus
-      `hooks.SessionStart`, leaving everything else verbatim. It detects an already-wired hook by
-      the command path, never by a tag, so a repo whose entry predates this step (claude-dotfiles)
-      gains no duplicate. Then confirm it still parses:
-      `node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`.
-    - **Idempotent, and prove it: run it twice and the second run prints
-      `already delivered: ...` and leaves `git status` clean.** That is the acceptance criterion of
-      issue 218, and it is the reason the template is a byte-identical copy of the hook rather than
-      a copy with a generated banner.
-    - **PRESERVE an existing `.claude/settings.json`.** Same hazard as step 12's session.json: repo
-      copies carry hand-built `permissions` allowlists (aac-bill-intake, aac-contract-builder) and
-      `hooks` (aac-sales-cockpit, claude-dotfiles). Never regenerate the file; the script only adds
-      keys and unions arrays. An existing `permissions.defaultMode` (e.g. `bypassPermissions` on a
-      desktop-only repo, or `acceptEdits` if a repo chose that) is preserved unchanged; only
-      absence gets filled with `auto`.
-    - **The widened autoMode.allow ruling** (Dan, 2026-09-15, issue 245) supersedes the 2026-09-14
-      acceptEdits ruling and the narrow prose rules that followed it. Recorded on master in
-      `docs/cloud-permission-posture-2026-09-15.md`; the 2026-09-14 doc is retained and marked
-      superseded so history is legible.
-    - Why here and not at the account or the environment: cloud sessions read only the repo. The
-      claude.ai account-level plugin sync returns zero plugins for the account even with the plugin
-      enabled there (`plugins_sync_no_changes count:0` in the session diag log), and the cloud
-      environment setup script runs before the session's git credentials exist, so
-      `claude plugin marketplace add` fails there on the private clone. Declared in project settings,
-      Claude Code clones the marketplace itself after credentials are wired up. Verified 2026-09-09 in
-      a cloud container (claude-dotfiles#100): a fresh startup with only these two keys loaded all 56
-      skills and ran the plugin's SessionStart hook.
-    - A local session that already has `aac-skills@claude-dotfiles` installed at user scope is
-      unaffected; the key names the same plugin id.
+   8b. **The job that runs it** — copy `templates/tracker-audit.yml` to
+   `.github/workflows/tracker-audit.yml`, `templates/tracker-audit-job.js` to
+   `tools/tracker-audit-job.js`, and `templates/tracker-audit-job.test.js` to
+   `tools/tracker-audit-job.test.js`. session-check reads this workflow's latest run on the
+   default-branch head; without it, every session warns `no .github/workflows/tracker-audit.yml`.
+   - **Substitute `branches: [DEFAULT_BRANCH]`** in the `push` trigger (step 1's default branch). The
+     workflow's first step runs the installed test, so an un-substituted copy turns every run red.
+     Run `node --test tools/tracker-audit-job.test.js` by hand afterwards: a repo suite that skips
+     `tools/*.test.js` never runs it.
+   - **Keep the file name `tracker-audit.yml`** — `TRACKER_AUDIT_WORKFLOW` in session-check's
+     `check.js` looks for exactly that.
+   - The runner spawns the repo's `tools/tracker-audit.js` and propagates its exit code; both
+     non-zero codes fail the run.
+   - In claude-dotfiles the generator also owns `tracker-audit-job.js` and its test; the workflow
+     template differs from the repo's own copy by the `proof` job and the branch placeholder, and
+     `tools/tracker-audit-template.test.js` pins both halves.
+9. **Harness version marker** — copy `templates/harness-version.md` to
+   `docs/agents/harness-version.md` and set the date. It is a dedicated file so one `cat` reads it in
+   every harnessed repo. **Current version: 33.** `/session-start` reads this marker every session and
+   STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
+10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
+    `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
+11. **CLAUDE.md** — add or refresh a short block: the dashboard is generated (edit the script, not
+    the file), the hook activation command, the tracker pointer, `node tools/tracker-audit.js`, and
+    the session commands from 3.12.
+12. **Session checks** — copy `templates/session.json` to `.claude/session.json`, substituting
+    `TEST_COMMAND` (same value as the hook and `ticket.yml`). Copy `templates/session-runbook.md` to
+    `docs/runbooks/session.md`; for a repo that does not deploy, delete its Releasing section as its
+    comment says.
+    - **An existing `.claude/session.json` is preserved verbatim** — it carries the hand-corrected
+      test command and the repo's release gates. Merge in missing keys only.
+    - Fill `releaseGates` with what the repo actually gates on: `node tools/canary.js` where it
+      exists, `[]` otherwise, and never `clasp-auth` for a self-deploying repo. They run at `--end`.
+    - The engine lives once at `~/.claude/skills/session-check/check.js`, run by the global
+      `SessionStart` / `SessionEnd` / `UserPromptSubmit` hooks through `~/.claude/hooks/session-gate.js`;
+      `/session-start` and `/session-end` only re-print its result. The repo gets config, never a
+      vendored engine.
+13. **Self-deploy (gas)** — an Apps Script repo adopts the gas package: follow the `gas-deploy` skill
+    (claude-dotfiles `gas/README.md`) — `gas init` (prefills `preserve` from the live script),
+    `gas vendor`, the `deploy.yml` template with the repo's test command, one `gasEnsureTrigger_();`
+    line in an existing trigger, then the one-time `gas push` + `gas seed`. The script then pulls
+    every merge from GitHub, with no credential in CI or on a machine. Only for a repo the owner
+    explicitly keeps on clasp, follow [`CLASP-LEGACY.md`](CLASP-LEGACY.md) instead.
+14. **Session output intensity** — copy `templates/caveman.json` to `.caveman.json` at the repo root
+    (default `ultra`, Dan 2026-08-02). A repo file already present keeps its value. The repo file is
+    what survives: the caveman hook falls back to a machine-local user config, so without it any
+    other checkout silently runs at `full`.
+15. **Ticket fleet** — served by the `aac-skills` plugin; the harness copies no script. With the
+    plugin installed (3.16), invoke it via the Workflow tool with
+    `scriptPath = ${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` and the three required
+    contract args `contractVersion: 2`, `runId` (`printf %x $(date +%s)`, held across a resume) and
+    `invocationId` (`printf %x%x $(date +%s) $$`, fresh on every launch, never equal to `runId`). The
+    workflow runtime forbids `Date.now()`/`Math.random()`, so the caller mints both ids; a launch
+    missing any of the three is refused with a contract-mismatch error. One script serves local and
+    cloud sessions, choosing `gh` or the GitHub MCP tools at run time.
+    - **A repo needing a forked script keeps its own `.claude/workflows/ticket-fleet.js`** (hand-tuned
+      prompts, extra phases) and calls it by name; every other repo carries no fleet file. A fork goes
+      stale when the plugin's contract moves: `node tools/ticket-fleet-contract.js <fork>` in
+      claude-dotfiles says which forks are behind, and the ripple table in the ticket-fleet
+      `INTERNALS.md` lists them.
+    - **First run in a repo: pass `deliver: false`** (verify-only) before letting the fleet push
+      branches and open PRs.
+16. **Cloud bootstrap hook + plugin + auto-mode posture** — one command is the whole cut-over of a
+    repo to cloud sessions: `node ~/.claude/skills/project-harness/templates/add-cloud-plugin.js <repo-root>`.
+    Its header documents the three deliveries; the `_comment` in `templates/claude-settings.json`
+    records why they live in project settings, and the posture ruling is the latest
+    `docs/cloud-permission-posture-*.md` on claude-dotfiles master.
+    - **The bootstrap hook** — copies `templates/session-start.sh` to `.claude/hooks/session-start.sh`,
+      stages it as 100755, and prepends one `hooks.SessionStart` entry
+      (`bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"`, timeout 120). A repo whose own
+      `session-start.sh` lacks the `aac-bootstrap` marker keeps it byte-for-byte; the bootstrap lands
+      beside it as `session-start-bootstrap.sh` and that path is wired instead. No repo carries skill
+      content: the hook installs the payload from dotfiles master in a container and exits 0 locally.
+      In claude-dotfiles the template is generated from the repo's own `.claude/hooks/session-start.sh`
+      by `tools/build-harness-bootstrap-hook.js`: edit the hook and re-run the generator.
+    - **Existing `.claude/settings.json` is preserved**: the script only adds keys and unions arrays
+      (`extraKnownMarketplaces`, `enabledPlugins`, `permissions`, `autoMode.allow`,
+      `hooks.SessionStart`). An existing `permissions.defaultMode` stays as it is; only absence gets
+      `auto`. It detects an already-wired hook by command path, so a pre-existing entry gains no
+      duplicate.
+    - **Done when:** the file parses
+      (`node -e "JSON.parse(require('fs').readFileSync('.claude/settings.json','utf8'))"`), and a
+      second run prints `already delivered: ...` and leaves `git status` clean.
 
 ## 4 — Verify every install
 
-- `node verify-dashboard-parse.js` (in this skill folder) — proves the dashboard's test-health line
-  reports pass/fail counts rather than whatever the runner printed last. Run it after ANY edit to
-  `templates/build-dashboard.js`. It exits 2 if the template was restructured enough that the check
-  can no longer find what it inspects, which is a signal to read before trusting.
-- `node scripts/build-dashboard.js` locally — DASHBOARD.md renders, sections with no data degrade to "n/a"/"None".
-- **Read the health line it produced.** A wrong line renders perfectly. Expect "N passing, N failing" — a duration, a `}`, or a bare timing string means the
-  parse missed this runner's summary shape. Then break a test on purpose, regenerate, and watch the
-  line go red before you restore it: a monitor you have only ever seen pass is not yet a monitor.
-- Compare the local health line against CI's. A lower count in CI usually means tests skipped
-  because their fixtures are git-ignored — legitimate, but the line must SAY skipped rather than
-  quietly reporting a smaller pass count.
-- `node --check tools/tracker-audit.js`, then **run it**: `node tools/tracker-audit.js`. Exit 1 on an
-  existing repo is the expected result, not a failure of the install — read the findings and hand them
-  to the owner rather than fixing them as part of the harness work. Exit 2 means it could not see the
-  tracker (`gh auth status`, wrong repo, dependencies endpoint unavailable); that is not a pass, and it
-  is the one outcome you must never report as clean.
-- Commit everything (the new hook fires — that's its first test), push, `gh run watch` the dashboard workflow to success, `git pull` the bot commit.
-- **Expect `DASHBOARD.md` to conflict eventually, and resolve it by regenerating, never by picking
-  a side.** Two writers commit that file: you locally, and the CI bot. Run a local generate, push
-  later, and the rebase stops on `UU DASHBOARD.md` where both versions are equally "right" and
-  neither is authoritative. `node scripts/build-dashboard.js && git add DASHBOARD.md` then continue.
-  Simplest habit: after the initial install, stop generating it locally and let CI own it — run the
-  script only to check output, and discard the result.
-- **Session checks** — `node ~/.claude/skills/session-check/check.js` from the repo. It must find the test command (via `.claude/session.json` or `npm test`) and report the tracker audit; a `no test command detected` line means the substitution did not land. On a clasp repo, confirm the Apps Script section reports the credential rather than `no tools/clasp-auth.js`.
-- Let the next real issue exercise the issue-event trigger.
-- **Cloud plugin** — `.claude/settings.json` parses and carries `enabledPlugins["aac-skills@claude-dotfiles"]`
-  plus the `claude-dotfiles` marketplace. The real test is a fresh cloud session on the repo: its
-  skill list shows `aac-skills:` entries and the plugin's SessionStart hook prints its marker line.
-- **Cloud bootstrap hook** — `.claude/hooks/session-start.sh` (or `session-start-bootstrap.sh`
-  beside a repo's own hook, issue 542) is present, `git ls-files -s` on it reads `100755`, one
-  `hooks.SessionStart` entry names it as `bash "$CLAUDE_PROJECT_DIR/..."` (issue 614), and a
-  second `add-cloud-plugin.js` run prints `already delivered` with nothing to commit. It exits 0 in a local session (no
-  `CLAUDE_CODE_REMOTE`), so running it here proves nothing beyond that; the real test is one cloud
-  session on the repo quoting the `AAC-BOOTSTRAP MARKER` line, `gh --version`, one
-  `gh api repos/<owner>/<repo>` call, and session-check's `Cloud bootstrap` block reading `ok`.
+Done when every line below holds.
 
-## 5 — Projects board (optional but default-yes)
+- After ANY edit to `templates/build-dashboard.js`: `node verify-dashboard-parse.js` (in this skill
+  folder) passes. Exit 2 means the template moved past what the check inspects — read it before
+  trusting.
+- `node scripts/build-dashboard.js` renders `DASHBOARD.md`; sections with no data degrade to
+  "n/a"/"None".
+- **The health line reads "N passing, N failing".** A duration, a `}` or a bare timing string means
+  the parse missed this runner's summary. Break a test on purpose, regenerate, watch the line go red,
+  then restore.
+- The local health line matches CI's. A lower CI count usually means tests skipped on git-ignored
+  fixtures; the line must SAY skipped.
+- `node --check tools/tracker-audit.js`, then run it. Exit 1 on an existing repo is expected: hand the
+  findings to the owner instead of fixing them as harness work. Exit 2 (`gh auth status`, wrong repo,
+  dependencies endpoint unavailable) is reported as a failure.
+- Commit everything (the new hook fires — its first test), push, `gh run watch` the dashboard
+  workflow to success. Let the next real issue exercise the issue-event trigger.
+- **After the install, CI owns `DASHBOARD.md`**: run the script only to check output, then discard
+  it. On a rebase conflict on it, regenerate (`node scripts/build-dashboard.js && git add
+  DASHBOARD.md`) and continue — neither side is authoritative.
+- `node ~/.claude/skills/session-check/check.js` from the repo finds the test command and reports the
+  tracker audit; `no test command detected` means the substitution did not land.
+- **Cloud** — `.claude/settings.json` carries `enabledPlugins["aac-skills@claude-dotfiles"]` and the
+  `claude-dotfiles` marketplace; the bootstrap hook file reads `100755` in `git ls-files -s`, and one
+  `hooks.SessionStart` entry names it. Locally the hook proves only that it exits 0; the real test is
+  a fresh cloud session on the repo showing `aac-skills:` skills, the `AAC-BOOTSTRAP MARKER` line,
+  `gh --version`, one `gh api repos/<owner>/<repo>` call, and session-check's `Cloud bootstrap` block
+  reading `ok`.
 
-Requires the `project` token scope (`gh auth status`; if missing, `gh auth refresh -s project` — the user
-completes the device code in their own browser; never enter their credentials).
+## 5 — Projects board (optional, default yes)
+
+Needs the `project` token scope (`gh auth status`; if missing, `gh auth refresh -s project` and the
+user completes the device code in their own browser).
 
 - Per-repo board: `gh project create --owner <user> --title "<repo title>"`, link it, add open issues.
-- OR the shared board (one board, every repo's issues): ask once; `gh project item-add <n>` works cross-repo.
+  Or the shared board (one board, every repo): ask once; `gh project item-add <n>` works cross-repo.
 - Record the item-add convention in `docs/agents/issue-tracker.md`.
-- **The "Auto-add to project" workflow is the difference between a board that maintains itself and a
-  queue of manual adds nobody remembers.** Adding today's open issues at install time is a snapshot,
-  not a subscription: every issue created afterward needs a manual `gh project item-add`, and
-  `tracker-audit.js` reports each one as `not-on-board`. Observed on aac-cockpit 2026-07-29 — seven
-  issues filed in one session, every one off the board. It is **owner-only** (project Settings →
-  Workflows), so **hand it to the owner as an explicit action at handoff**; a doc line saying the
-  toggle exists is not the same as it being on. Three things verified there the same day, each of
-  which had already produced a wrong conclusion:
-  - **Linking a project to a repo is NOT auto-add.** Separate features, and linking is the visible
-    one — it puts the board in the repo's Projects tab and makes `repository.projectsV2` return it,
-    so it reads as sufficient. An issue filed with linking active and the workflow off landed on no
-    board at all.
-  - **Enabling it is not one click.** A first toggle attempt still left a new issue off the board
-    through 60s of polling; the filter and scope have to be right, not merely present. After the fix,
-    a card appeared in under 8 seconds.
-  - **The toggle is readable, the filter is not.** `projectV2 { workflows(first: 20) { nodes { name enabled } } }`
-    over GraphQL returns each built-in workflow with its `enabled` flag (verified 2026-09-09); `gh project`
-    has no subcommand for it. The repo filter behind "Auto-add to project" is exposed nowhere, and a
-    wrong filter is the failure that matters: 2026-08-20 to 2026-08-26 the auto-add on two other repos'
-    boards also matched aac-sales-cockpit and pulled 52 of its issues onto them. So `enabled: true` is
-    a precondition, not the verification: file an issue and check `gh issue view <n> --json projectItems`,
-    and check that it landed on *only* the intended board. If `not-on-board` findings reappear later,
-    re-check the workflow rather than assuming it held.
-  - Auto-add catches only issues created **after** it was enabled, so the manual `item-add` stays the
-    backfill path for an existing queue.
-- **The board WRITES BACK to issues. Moving a card is not a read-only act.** Setting a card to `Done`
-  fires the board's Done→closed workflow and **closes the issue**; closing an issue moves its card to
-  `Done`; reopening moves it to `In Progress`. Learned by accidentally closing a live issue while
-  testing a drift check on 2026-07-29. Never nudge a card to see what happens — it edits the tracker.
-- **`gh issue view --json projectItems` does not return the item id**, only `status` and `title`. To
-  edit a card you need the `PVTI_…` id, which comes from GraphQL on the project node
-  (`node(id:"PVT_…"){... on ProjectV2{items(first:100){nodes{id content{... on Issue{number}}}}}}`).
-  Passing the empty string `gh issue view` yields gets you
-  `Could not resolve to a node with the global id of ''`.
-- **`repository.projectsV2` only lists projects LINKED to the repo.** An owner-level board holding
-  that repo's issues does not appear there, so discovery through it reports "no board" for a board
-  full of cards. Infer board use from the issues instead: if any issue carries a `projectItems`
-  entry, a board is in play.
-- **Verify an add with `gh issue view <n> --json projectItems`, not `gh project item-list`.**
-  Observed 2026-07-28 on a user-owned board: `item-add` succeeded and returned the issue JSON,
-  while `item-list` reported `totalCount: 0` for the same board. `issue view` showed the card
-  present with status `Todo`. A false zero from a listing tool is indistinguishable from "the add
-  did nothing", so it burns retries. `item-add` is idempotent per issue — a repeat does not create
-  a second card.
-- **Bulk adds drop silently — space them and verify the count.** Also observed 2026-07-28
-  (aac-task-management): 15 back-to-back `item-add` calls each exited 0 and returned the issue
-  JSON, yet only 2 cards landed on the board. Re-adding the missing 13 with ~1s between calls
-  landed all of them. So after any bulk add, verify the total independently (GraphQL on the
-  project node: `node(id:"<PVT_...>") { ... on ProjectV2 { items(first:N){ totalCount } } }`, or
-  `issue view --json projectItems` per issue) and re-add whatever is missing — idempotency makes
-  the retry safe.
+- **Hand the owner the "Auto-add to project" workflow as an explicit handoff action** (project
+  Settings → Workflows; owner-only). Without it every later issue is `not-on-board`.
+- **Moving a card writes to the tracker**: `Done` closes the issue, closing moves the card to `Done`,
+  reopening moves it to `In Progress`. Change a card only when you mean that change to the issue.
+- Before any other `gh project` work — verifying auto-add, editing a card, bulk adds, counting — read
+  [`PROJECTS-BOARD.md`](PROJECTS-BOARD.md); its listing tools report false zeros.
 
 ## 6 — Migrating an existing repo's backlog
 
-If the repo has a legacy tracker (markdown TODOs, `.scratch/`, stale issue files): classify before importing, because statuses
-lie. Judge each item against the code first (SHIPPED / SUPERSEDED / OPEN, with evidence — spawn an agent for
-bulk), file GitHub issues only for the genuinely OPEN, and mark the legacy location read-only archive in the
-tracker doc. On aac-cockpit this turned ~90 tickets into 4 issues.
+A legacy tracker (markdown TODOs, `.scratch/`, stale issue files) has lying statuses, so classify
+before importing: judge each item against the code (SHIPPED / SUPERSEDED / OPEN, with evidence — spawn
+an agent for bulk), file GitHub issues only for the OPEN ones, and mark the legacy location a
+read-only archive in the tracker doc.
 
 ## 7 — Upgrading an existing install
 
-A repo harnessed at an older version does not get new capabilities by itself. This is the path.
-
-**1. Find the harnessed repos.** The reliable signal is `scripts/build-dashboard.js` sitting next to
-`docs/agents/issue-tracker.md`; either alone gives false hits. Two traps:
-
-- **Paths with spaces.** `find` output fed to an unquoted `for` word-splits, and one repo really does
-  live under `Sales Data KPIs/` — an unquoted sweep reports it as three nonexistent directories, which
-  is how a scan concluded aac-cockpit was missing its tracker doc when the file was there all along.
-  Use `-print0` and quote every expansion:
-
-  ```sh
-  find "$HOME/Claude/Projects" -path '*/scripts/build-dashboard.js' \
-       -not -path '*/.claude/worktrees/*' -print0 |
-    while IFS= read -r -d '' f; do
-      r=$(dirname "$(dirname "$f")")
-      [ -f "$r/docs/agents/issue-tracker.md" ] || continue
-      if [ "$(cd "$r" && gh repo view --json isArchived -q .isArchived)" = true ]; then
-        echo "skip $r: archived on GitHub - read-only, the upgrade's push would be refused" >&2
-        continue
-      fi
-      echo "$r"
-    done
-  ```
-- **Agent worktrees.** `.claude/worktrees/*` holds full copies of the repo, so an unfiltered sweep
-  returns dozens of hits for two repos. Exclude them and upgrade the primary checkout only.
-- **Archived repos.** A local clone does not know its GitHub repo was archived, so it still looks
-  harnessed and behind. The loop above asks `gh repo view --json isArchived` and skips a `true`
-  with the reason on stderr: upgrading it is work its push throws away. Unarchiving is the owner's
-  call, so name each skipped repo at handoff rather than dropping it silently.
-
-**2. Read the version.** `cat docs/agents/harness-version.md` → `harness-version: N`. **File absent
-means version 1** (pre-marker), not "unharnessed".
-
-**3. Install only what that version lacks**, then bump the marker's number and date. A full re-run
-churns every file for nothing and can revert hand-tuned configuration, per step 0.
-
-The rows are in [`UPGRADES.md`](UPGRADES.md) — one per version, saying what it added and which
-step installs it. Read the rows above the repo's number and re-run only those steps.
-
-A row can mean "re-copy a file you already have". The marker answers *what a repo lacks*, and a
-template that changed is something the repo lacks just as much as a file it never had — so bump the
-version whenever a template changes materially, not only when a step is added. Anything else and a
-repo sits at the current version holding an old file, which is the exact drift the marker exists to
-stop.
-
-**An extended copy takes a three-way merge, not a re-copy.** When the repo's copy differs from the
-template it last received (the diff below), let git carry the template's delta onto it. The base is
-the template blob at the repo's version: the file as it stood just before the template marker first
-moved past the repo's number. Run from a pulled claude-dotfiles clone, `$r` the repo:
+**1. Find the harnessed repos** — `scripts/build-dashboard.js` beside `docs/agents/issue-tracker.md`
+(either alone gives false hits). The loop is NUL-delimited and quoted because a repo lives under
+`Sales Data KPIs/`; it upgrades primary checkouts only (agent worktrees are full copies) and skips
+repos archived on GitHub, whose push would be refused:
 
 ```sh
-f=tracker-audit.js     # any template the repo carries under tools/ or scripts/
-n=$(sed -n 's/^ *harness-version: *//p' "$r/docs/agents/harness-version.md" | head -1)
-tpl() { git show "$1:aac-skills/project-harness/templates/$2" 2>/dev/null ||
-        git show "$1:agents/skills/project-harness/templates/$2"; }   # path before issue 214
-bump=                  # the commit that took the template marker past $n
-for c in $(git log --first-parent --format=%H origin/master -- '*/project-harness/templates/harness-version.md'); do
-  v=$(tpl "$c" harness-version.md | sed -n 's/^ *harness-version: *//p' | head -1)
-  [ "${v:-0}" -le "$n" ] && break
-  bump=$c
-done
-w=$(mktemp -d)
-tpl "$bump^" "$f" > "$w/base"          # the template as the repo last received it
-tpl origin/master "$f" > "$w/theirs"   # the template now
-cp "$r/tools/$f" "$w/ours"
-git merge-file -L "repo" -L "template v$n" -L "template now" "$w/ours" "$w/base" "$w/theirs"
-echo "conflicts: $?"                   # 0 = clean; N = N conflict hunks; negative = error
-cp "$w/ours" "$r/tools/$f"
+find "$HOME/Claude/Projects" -path '*/scripts/build-dashboard.js' \
+     -not -path '*/.claude/worktrees/*' -print0 |
+  while IFS= read -r -d '' f; do
+    r=$(dirname "$(dirname "$f")")
+    [ -f "$r/docs/agents/issue-tracker.md" ] || continue
+    if [ "$(cd "$r" && gh repo view --json isArchived -q .isArchived)" = true ]; then
+      echo "skip $r: archived on GitHub - read-only, the upgrade's push would be refused" >&2
+      continue
+    fi
+    echo "$r"
+  done
 ```
 
-An empty `$bump` means the repo is already at the template's version: nothing to merge. Resolve
-every `<<<<<<<` hunk keeping BOTH sides — the repo's extension and the template's addition — then
-`node --check` and run the repo's own tests, which pin the extensions. The usual conflict sites in
-`tracker-audit.js` are the ones every added check touches: the header comment (the v20 generated
-banner against the repo's own notes), the `module.exports` list under `require.main !== module`
-(the repo exports its own helpers to its tests), the `ORDER` array of finding kinds before the
-report (resolve as the union), and the `NOTE:` blind-spot blocks after it.
+Name every skipped archived repo at handoff; unarchiving is the owner's call.
+
+**2. Read the version** — `harness-version: N` in `docs/agents/harness-version.md`; no file means
+version 1.
+
+**3. Install only what that version lacks**, then bump the marker's number and date. The rows are in
+[`UPGRADES.md`](UPGRADES.md), one per version with the step that installs it: re-run only the steps
+of rows above the repo's number. A row can mean "re-copy a file you already have". **Before
+re-copying any template a repo already carries, read [`MERGING-TEMPLATES.md`](MERGING-TEMPLATES.md)**
+— most repos extend template bodies, and an extended copy takes a three-way merge.
+
+**4. Verify and hand off.** `node --check` the new script, run `node tools/tracker-audit.js`, and give
+the owner its findings; on a repo with tracker history exit 1 is the expected result. The drift stays
+with the owner — closing an issue or adding a dependency edge is their judgment. Commit the tooling
+only, one commit, hooks honoured. Hand off two separate lists: code upgrades (done by the agent) and
+owner actions no tooling can perform (the Projects auto-add toggle is the standing example).
 
 ### Changing a template means sweeping, in the same session
 
-**A version bump is not propagation.** Bumping the marker records that older installs are behind; it
-does nothing to them. Every repo stays stale until someone runs the sweep, and nobody wakes up wanting
-to run a sweep.
+The marker answers what a repo lacks, and a changed template is lacking just as much as a missing
+file. So **bump the version whenever a template changes materially**, then immediately run the step-7
+sweep: find every install, read every marker, upgrade whatever is behind. A bump alone records
+staleness without fixing it, and a stale repo cannot detect its own staleness — its audit and marker
+are both old — so only this skill, looking across installs, can close the gap.
 
-**Diff before re-copying, even when the CONFIG splice preserved CONFIG.** Repos
-customize the template BODY too, and their own tests can pin those customizations:
-aac-task-management's `build-dashboard.js` carries a `CONFIG.milestonesDoc` feature its unit tests
-assert on (the sweep's re-copy broke its pre-push suite, which is the only reason it was caught),
-and aac-bill-intake carries a load-bearing Open-PRs section born from a real incident, which the
-same sweep silently deleted and pushed (2026-08-21, restored same day). Before re-copying into any
-repo, diff the repo copy against the PREVIOUS template revision — if anything beyond CONFIG and the
-changed region differs, merge the delta into the repo's copy (the `git merge-file` recipe in
-step 3 above) instead of re-copying. The v11 sweep
-measured how normal divergence is: FIVE of nine repos carried hand-extended `tracker-audit.js`
-bodies (aac-bill-intake, aac-routines, aac-task-management, aac-cockpit, zoho-source-of-truth) —
-"this template has no CONFIG so it copies verbatim" was already false for the majority. And **pull
-before diffing**: zoho's divergence existed only on origin (a merged PR the local clone hadn't
-pulled), so the local diff read clean and the clobber surfaced as a stash conflict. Also check
-whether the repo already implements the new check under its own name before porting it —
-aac-cockpit's `landed-but-open` pair is a superset of v11's `possibly-delivered?`, so that repo got
-only the `unmilestoned` half.
+## Scope limits
 
-So the bump and the sweep are one action, not two: **after any material template edit, immediately run
-the step-1 find command, read every marker, and upgrade whatever is behind.** Measured on 2026-07-29
-after the v4 edit — four harnessed repos, two of them still on v3, both silently holding the older
-`build-dashboard.js`.
-
-Note *why* the sweep has to live here rather than in the repos: **a stale repo cannot detect its own
-staleness.** Its `tracker-audit.js` and its marker are both old, so any self-check compares an old
-number against an old constant and reports health. Nothing local to a repo can know a newer template
-exists. Detection is only possible from the skill, looking across installs — which is what makes
-skipping the sweep permanent rather than merely delayed.
-
-Worth saying plainly at handoff which upgrades are code (an agent re-copies a file) and which are
-owner actions no tooling can perform — the Projects auto-add workflow being the standing example.
-Mixing them into one list is how the owner-only half gets read as done.
-
-**4. Verify and hand off.** `node --check` the new script, run `node tools/tracker-audit.js`, and give
-the owner its findings. On a repo with tracker history, expect exit 1 — that IS the point of the
-upgrade. Leave the drift with the owner: the audit is read-only, and closing an issue or adding a
-dependency edge is their judgment. Commit the tooling only, one commit, hooks honoured.
-
-## What this deliberately does not do
-
-- No branch protection / PR-required flow — solo direct-push repos are the norm; offer it only when multiple
-  agents/people commit in parallel.
-- No GitHub Pages for dashboards (private repos leak).
-- No auto-close bots — closing an issue is a judgment.
+- Repos push directly to the default branch; offer branch protection / a PR-required flow only when
+  several agents or people commit in parallel.
+- Dashboards live on the repo's `dashboard` branch, never GitHub Pages (private repos would leak).
+- Issues close by human judgment, never by bot.
