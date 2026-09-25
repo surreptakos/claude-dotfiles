@@ -490,7 +490,13 @@ function applyOpenPrs(tickets, withOpenPr) {
  * latest comment is a fleet handoff still waiting on the owner is parked, not run: re-running its
  * lane would post the same handoff comment again on every wave (issue 266).
  *
- * @param {Array<{number:number, blockedBy:Array, handoffPending?:boolean}>} tickets
+ * In-wave chaining (issue 854): a blocked ticket whose every open blocker is a code ticket already
+ * in the wave joins the wave too, carrying `chainedAfter` (the blocker numbers). It runs on a
+ * blocker's lane once the blockers have merged (STEP D), so it takes no concurrency slot and does
+ * not count against the cap. Chains resolve transitively (C after B after A); a blocker outside
+ * the wave, a probe or human blocker (neither merges) or a cycle leaves the ticket in `blocked`.
+ *
+ * @param {Array<{number:number, kind?:string, blockedBy:Array, handoffPending?:boolean}>} tickets
  * @param {number} maxTickets - the run's cap on concurrently implemented tickets
  * @returns {{wave:Array, blocked:Array, pendingHandoff:Array, overCap:Array}}
  */
@@ -499,7 +505,82 @@ function selectWave(tickets, maxTickets) {
   const eligible = tickets.filter((t) => t.blockedBy.length === 0);
   const pendingHandoff = eligible.filter((t) => t.handoffPending === true);
   const runnable = eligible.filter((t) => t.handoffPending !== true);
-  return { wave: runnable.slice(0, maxTickets), blocked, pendingHandoff, overCap: runnable.slice(maxTickets) };
+  const wave = runnable.slice(0, maxTickets);
+  const merges = (t) => t.kind !== 'probe' && t.kind !== 'human';
+  const mergingInWave = new Set(wave.filter(merges).map((t) => parseInt(t.number, 10)));
+  const chainedNumbers = new Set();
+  let waiting = blocked.filter((t) => t.handoffPending !== true);
+  for (let grew = true; grew;) {
+    grew = false;
+    waiting = waiting.filter((t) => {
+      const after = t.blockedBy.map((n) => parseInt(n, 10));
+      if (!after.every((n) => mergingInWave.has(n))) return true;
+      wave.push(Object.assign({}, t, { chainedAfter: after }));
+      chainedNumbers.add(parseInt(t.number, 10));
+      if (merges(t)) mergingInWave.add(parseInt(t.number, 10));
+      grew = true;
+      return false;
+    });
+  }
+  return {
+    wave,
+    blocked: blocked.filter((t) => !chainedNumbers.has(parseInt(t.number, 10))),
+    pendingHandoff,
+    overCap: runnable.slice(maxTickets),
+  };
+}
+
+/**
+ * Group the wave into lanes: each lane runs its tickets one after another, lanes run in parallel.
+ *
+ * A ticket with no `chainedAfter` opens a lane of its own. A chained ticket (issue 854) joins the
+ * lane of its blocker that sits latest in the wave, so it starts once that blocker's lane is done
+ * with it; blockers on other lanes are awaited before it starts (see `chainGate`). Discovery-triage
+ * chores share one lane, appended last, so each sees the tickets the previous one filed (issue 319).
+ *
+ * @param {Array<{number:number, chainedAfter?:Array<number>, discoveryTriage?:boolean}>} wave
+ * @returns {Array<Array<{ticket:object, workerIndex:number}>>}
+ */
+function buildLanes(wave) {
+  const lanes = [];
+  const chores = [];
+  const laneOf = new Map();
+  const indexOf = new Map();
+  (Array.isArray(wave) ? wave : []).forEach((ticket, workerIndex) => {
+    const n = parseInt(ticket.number, 10);
+    indexOf.set(n, workerIndex);
+    const after = Array.isArray(ticket.chainedAfter) ? ticket.chainedAfter.map((b) => parseInt(b, 10)) : [];
+    const host = after.filter((b) => laneOf.has(b)).sort((a, b) => indexOf.get(a) - indexOf.get(b)).pop();
+    let lane;
+    if (host !== undefined) lane = laneOf.get(host);
+    else if (ticket.discoveryTriage === true) lane = chores;
+    else { lane = []; lanes.push(lane); }
+    lane.push({ ticket, workerIndex });
+    laneOf.set(n, lane);
+  });
+  if (chores.length) lanes.push(chores);
+  return lanes;
+}
+
+/**
+ * Decide whether a chained ticket (issue 854) may start, from its blockers' results in this wave.
+ * Only a blocker the deliverer merged (`merged: true`) clears the edge; anything else - no result,
+ * a failed or unmerged PR - skips the ticket with a reason naming that blocker.
+ *
+ * @param {{chainedAfter?:Array<number>}} ticket
+ * @param {Map<number, object|null>} blockerResults - blocker number to its lane result
+ * @returns {string|null} null when every blocker merged, otherwise the skip reason
+ */
+function chainGate(ticket, blockerResults) {
+  for (const n of (Array.isArray(ticket && ticket.chainedAfter) ? ticket.chainedAfter : [])) {
+    const r = blockerResults && blockerResults.get(parseInt(n, 10));
+    if (!r) return `blocker #${n} produced no result in this wave`;
+    if (r.merged !== true) {
+      const why = r.prState || (r.done ? 'verified, not merged' : 'not verified');
+      return `blocker #${n} did not merge in this wave (${why})`;
+    }
+  }
+  return null;
 }
 
 /**
@@ -1733,6 +1814,8 @@ if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awai
 if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Scout listed ${(scout.candidateNumbers || []).length} candidate(s); ${scout.tickets.length} returned as tickets.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
+const chainedInWave = wave.filter(t => Array.isArray(t.chainedAfter) && t.chainedAfter.length)
+if (chainedInWave.length) log(`${chainedInWave.length} blocked ticket(s) chained into this wave, each running after its in-wave blockers merge (issue 854): ${chainedInWave.map(t => '#' + t.number + ' after ' + t.chainedAfter.map(n => '#' + n).join(', ')).join('; ')}.`)
 
 // ---- implementer model per ticket from a Jev difficulty Score (issue 725) ----
 // The Workflow runtime has no network and no env, so one cheap agent POSTs the request the pure
@@ -2217,6 +2300,12 @@ const runCodeLane = async (t, workerIndex) => {
     if (reuse) log(`#${t.number}: reusing prior implementer result from args.priorImpl (branch ${reuse.branch}); no impl agent started for attempt 1.`)
     branch = (reuse && reuse.branch) ? String(reuse.branch) : `agent/issue-${t.number}-attempt${attempt}-wf_${runId}-w${workerIndex}`
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these with a genuinely different approach, not a parameter tweak')
+    // Issue 854: a chained ticket's blockers merged earlier in this wave, after this worktree's
+    // base was taken, so the implementer builds its branch on the default branch as it is now.
+    const chainedAfter = stableList(t.chainedAfter)
+    const chainStart = chainedAfter.length
+      ? `\nChained ticket (issue 854): its blocker(s) ${chainedAfter.map(n => '#' + n).join(', ')} merged into ${scout.defaultBranch} earlier in this same wave, after your worktree was created. Before reading or editing anything, run ${gitSpelling(instrument, `fetch origin ${scout.defaultBranch}`)} and then ${gitSpelling(instrument, `checkout -B ${branch} origin/${scout.defaultBranch}`)} in your worktree, so your branch starts from origin/${scout.defaultBranch} and builds on the blockers' merged code.`
+      : ''
     // Wrapped (aac-routines issue 270): an implementer that blows the StructuredOutput retry cap
     // used to throw straight out of this stage, so `pipeline` nulled the ticket and it vanished
     // from both `delivered` and `failed`. It is now a failed attempt carrying the error text,
@@ -2231,7 +2320,7 @@ const runCodeLane = async (t, workerIndex) => {
     try {
       impl = reuse || await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
-You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.
+You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.${chainStart}
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 ${PYTHON_RAIL}
 ${SCRATCH_RAIL}
@@ -2446,31 +2535,67 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
 }
 // [FLEET-CODE-LANE-END]
 
-// Pre-annotate each ticket with a workerIndex (0-based position in the wave) so
-// the pipeline callback can build a collision-proof branch name without
-// relying on pipeline's callback signature to pass an index.
-const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
+// [FLEET-LANES-START]
+// Each ticket keeps a workerIndex (its 0-based position in the wave) so the lane can build a
+// collision-proof branch name without relying on pipeline's callback signature to pass an index.
+// buildLanes (generated block) groups the wave: one lane per unchained ticket, a chained ticket
+// on its latest blocker's lane (issue 854), every discovery-triage chore in one shared lane so
+// two of them cannot file the same finding twice (issue 319). Lanes run in parallel; a lane runs
+// its tickets in order.
+// Every ticket publishes its result the moment it settles, null included, so a chained ticket
+// can await blockers on other lanes; waiting holds no agent slot. chainGate lets it start only
+// when every blocker merged, and otherwise records it as skipped with the blocker's outcome.
+const settled = new Map(wave.map(t => {
+  let resolve = null
+  const promise = new Promise(r => { resolve = r })
+  return [parseInt(t.number, 10), { promise, resolve }]
+}))
 const runWorker = async ({ ticket, workerIndex }) => {
   const t = ticket
-  if (t.kind === 'probe') return await runProbeLane(t)
-  if (t.kind === 'human') return await runHumanLane(t)
-  return await runCodeLane(t, workerIndex)
+  let result = null
+  try {
+    const after = Array.isArray(t.chainedAfter) ? t.chainedAfter.map(n => parseInt(n, 10)) : []
+    if (after.length) {
+      const blockerResults = new Map()
+      for (const n of after) blockerResults.set(n, await settled.get(n).promise)
+      const reason = chainGate(t, blockerResults)
+      if (reason) {
+        log(`#${t.number}: chained ticket skipped - ${reason} (issue 854).`)
+        result = {
+          ticket: t.number, done: false, kind: t.kind, branch: null, chainSkipped: reason,
+          verdict: { pass: false, evidence: '', failures: [reason] },
+          prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
+        }
+        return result
+      }
+      log(`#${t.number}: in-wave blocker(s) ${after.map(n => '#' + n).join(', ')} merged - starting from origin/${scout.defaultBranch} (issue 854).`)
+    }
+    if (t.kind === 'probe') result = await runProbeLane(t)
+    else if (t.kind === 'human') result = await runHumanLane(t)
+    else result = await runCodeLane(t, workerIndex)
+    return result
+  } finally {
+    settled.get(parseInt(t.number, 10)).resolve(result)
+  }
 }
-// Discovery-triage chores are the one kind of ticket that writes to the tracker rather than to the
-// repository, so two of them running side by side cannot see each other's tickets and file the same
-// finding twice (issue 319). They go into ONE lane and run one after the other - the second reads a
-// tracker the first has already added to. Every other ticket still runs in parallel; a wave holding
-// at most one chore behaves exactly as before.
-const chores = workers.filter(w => w.ticket.discoveryTriage === true)
-const lanes = workers.filter(w => w.ticket.discoveryTriage !== true).map(w => [w])
-if (chores.length > 1) log(`${chores.length} discovery-triage chores in this wave (${chores.map(w => '#' + w.ticket.number).join(', ')}) - running them one after another so each sees the tickets the previous one filed.`)
-if (chores.length) lanes.push(chores)
+const lanes = buildLanes(wave)
+const chores = wave.filter(t => t.discoveryTriage === true)
+if (chores.length > 1) log(`${chores.length} discovery-triage chores in this wave (${chores.map(t => '#' + t.number).join(', ')}) - running them one after another so each sees the tickets the previous one filed.`)
+// A ticket that throws is caught here rather than left to `pipeline`, which would null the whole
+// lane and silently drop every ticket queued behind it; its slot stays null and the Report phase
+// names it as a failed per-ticket stage.
 const grouped = await pipeline(lanes, async (lane) => {
   const out = []
-  for (const w of lane) out.push(await runWorker(w))
+  for (const w of lane) {
+    try { out.push(await runWorker(w)) } catch (err) {
+      log(`#${w.ticket.number}: per-ticket stage threw - ${(err && err.message) || err}`)
+      out.push(null)
+    }
+  }
   return out
 })
 const results = (grouped || []).flat()
+// [FLEET-LANES-END]
 
 // Checkpoint 4 of 4 (aac-routines issue 192): the whole wave has drained. This is the one that
 // catches a leak no per-ticket checkpoint was still running to see - one from the last ticket
@@ -2578,8 +2703,10 @@ if (cfg.editableGuard === false) {
 phase('Report')
 // Reconcile against the wave rather than dropping falsy results (aac-routines issue 191): a ticket
 // whose per-ticket stage produced nothing at all still belongs in `failed` with a reason.
-// `pipeline` returns one slot per input, in order, and nulls the slot when the stage threw.
-const clean = wave.map((t, i) => (results || [])[i] || {
+// Paired by ticket number, not position (issue 854): a lane holds several tickets, so the
+// flattened results no longer line up with the wave's order.
+const resultByTicket = new Map((results || []).filter(Boolean).map(r => [parseInt(r.ticket, 10), r]))
+const clean = wave.map((t) => resultByTicket.get(parseInt(t.number, 10)) || {
   ticket: t.number, done: false, kind: t.kind, branch: null,
   verdict: { pass: false, evidence: '', failures: ['per-ticket stage produced no result; see the run log for the error that ended it'] },
   prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
@@ -2652,7 +2779,7 @@ return {
   })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
-  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency).map(r => ({
+  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency && !r.chainSkipped).map(r => ({
     ticket: r.ticket,
     kind: r.kind,
     failures: (r.done ? [] : failuresOf(r.verdict)).concat(r.deliveryFailure ? [r.deliveryFailure] : []),
@@ -2674,6 +2801,9 @@ return {
   // were still open after the run read their state, so a reader can tell a real edge from a
   // stale body note without opening the tracker.
   skippedBlocked: droppedBlocked,
+  // Issue 854: chained into this wave behind an in-wave blocker that did not merge, so never
+  // started; each names the blocker and its outcome. The next wave picks them up.
+  skippedChained: clean.filter(r => r.chainSkipped).map(r => ({ ticket: r.ticket, reason: r.chainSkipped })),
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,
   // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
