@@ -77,6 +77,7 @@
   "autoUpdatesChannel": "latest",
   "skipDangerousModePermissionPrompt": true,
   "skipWorkflowUsageWarning": true,
+  "workflowSizeGuideline": "large",
   "theme": "dark",
   "switchModelsOnFlag": false,
   "inputNeededNotifEnabled": true,
