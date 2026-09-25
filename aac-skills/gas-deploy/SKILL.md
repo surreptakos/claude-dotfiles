@@ -1,6 +1,6 @@
 ---
 name: gas-deploy
-description: Deploy, promote, run and diagnose an AAC Apps Script project without clasp, through the gas package in claude-dotfiles (a vendored SelfDeploy.js, deploy/* refs on GitHub, one time trigger). Use when a repo's clasp credential died again, when asked to "move this repo off clasp", "adopt gas", "deploy the script", "promote PROD", "run <function> on the script", or to read why a gas/deploy status is red.
+description: AAC Apps Script deploys with gas instead of clasp. Use when a repo's clasp credential died or it should move off clasp (adopt gas), to deploy the script, promote PROD or run a function on it, or when a gas/deploy or gas/promote status is red.
 metadata:
   modified: "2026-09-16T04:44:25Z"
   previous-modified: "2026-09-09T16:42:14Z"
@@ -10,8 +10,9 @@ metadata:
 
 # gas-deploy
 
-The package lives in `claude-dotfiles/gas/` (`gas/README.md` is the reference; read it once). Every
-command below is `node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` here.
+The package lives in `claude-dotfiles/gas/`: a vendored `SelfDeploy.js`, `deploy/*` refs on
+GitHub, one time trigger. `gas/README.md` is the reference; read it once. Every command below is
+`node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` here.
 
 ## Which job is this? Decide first
 
@@ -46,11 +47,11 @@ command below is `node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` 
 8. Copy `gas/templates/deploy.yml` (and `promote.yml`) into `.github/workflows/`, substitute the branch
    and the test command. Delete the clasp workflows and the `CLASPRC_JSON` secret's readers. Remove
    `tools/clasp-auth.js` and the `clasp-auth` release gate from `.claude/session.json` if present.
-9. Prove it: push a commit, then `gas status owner/repo` until `deploy/test` shows `success`. Read the
-   status description alongside the colour.
-
-Note in the repo's CLAUDE.md: the script deploys itself from `deploy/test`; `gas run` replaces `clasp run`;
-`gas logs --project <gcp>` replaces `clasp logs`.
+9. Note in the repo's CLAUDE.md: the script deploys itself from `deploy/test`; `gas run` replaces
+   `clasp run`; `gas logs --project <gcp>` replaces `clasp logs`.
+10. Prove it: push a commit, then `gas status owner/repo` until `deploy/test` shows `success`, and
+    read the status description alongside the colour. Adopt is done when that status is green
+    for the pushed commit.
 
 ## Diagnose
 
