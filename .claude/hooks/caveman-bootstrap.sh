@@ -52,6 +52,8 @@
 #   CAVEMAN_BOOTSTRAP_SKIP_CLI  1 = skip npm, binaries, proxy and enable (offline CI)
 #   CAVEMAN_BOOTSTRAP_AAC_WAIT  seconds to wait for the aac-skills marker (default 120; 0 = none)
 #   CAVEMAN_BOOTSTRAP_REF / CAVEMAN_BOOTSTRAP_REPO / CAVEMAN_BOOTSTRAP_CLI_VERSION   pins
+#   CAVEMAN_BOOTSTRAP_PIN_FILE  read the CLI version pin from here instead of
+#                               $CLAUDE_PROJECT_DIR/caveman-cli-version.txt (issue 825)
 #   CAVEMAN_CLOUD_PROXY         0 = install skills and CLI only; no proxy, no `enable claude`
 set -uo pipefail
 
@@ -69,11 +71,18 @@ AAC_MARKER="$CLAUDE_DIR/hook-state/aac-bootstrap/state.json"
 CHECKOUT="$HOME_DIR/.aac-caveman"
 REPO="${CAVEMAN_BOOTSTRAP_REPO:-https://github.com/JuliusBrussee/caveman.git}"
 REF="${CAVEMAN_BOOTSTRAP_REF:-v2.7.0}"
-CLI_VERSION="${CAVEMAN_BOOTSTRAP_CLI_VERSION:-1.3.4}"
 LOCAL_PREFIX="$HOME_DIR/.local"
 BIN_DIR="$LOCAL_PREFIX/bin"
 AAC_WAIT="${CAVEMAN_BOOTSTRAP_AAC_WAIT:-120}"
 PROXY_PORT=8787
+
+# Issue 825: the CLI version pin lives in one committed file, caveman-cli-version.txt at the repo
+# root, so the desktop install step (lib/caveman-install.ps1) and this hook cannot drift apart.
+# CAVEMAN_BOOTSTRAP_CLI_VERSION still overrides it (tests, an emergency pin bump before the file
+# lands); the literal default is the last resort when the pin file is missing entirely.
+PIN_FILE="${CAVEMAN_BOOTSTRAP_PIN_FILE:-${CLAUDE_PROJECT_DIR:-$PWD}/caveman-cli-version.txt}"
+PINNED_CLI_VERSION="$(tr -d '[:space:]' < "$PIN_FILE" 2>/dev/null || true)"
+CLI_VERSION="${CAVEMAN_BOOTSTRAP_CLI_VERSION:-${PINNED_CLI_VERSION:-1.3.4}}"
 
 # Hook payload from Claude Code (session_id, source, cwd) - forwarded to the plugin's activate hook.
 HOOK_INPUT=""

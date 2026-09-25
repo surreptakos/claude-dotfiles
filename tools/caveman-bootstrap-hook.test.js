@@ -152,6 +152,25 @@ test('second run is a no-op: nothing copied, still zero problems', () => {
   assert.match(ctx, /skills copied=0 of 3;.*problems=0/);
 });
 
+test('the CLI version pin is read from caveman-cli-version.txt at the repo root (issue 825)', () => {
+  const f = makeHome();
+  const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{}' }));
+  const pin = fs.readFileSync(path.join(REPO_ROOT, 'caveman-cli-version.txt'), 'utf8').trim();
+  assert.ok(pin, 'caveman-cli-version.txt must not be empty');
+  const marker = JSON.parse(fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8'));
+  assert.equal(marker.cli_version, pin);
+  assert.match(ctx, /skills copied=3 of 3/); // sanity: the run itself still succeeded
+});
+
+test('CAVEMAN_BOOTSTRAP_PIN_FILE overrides which pin file is read', () => {
+  const f = makeHome();
+  const pinFile = path.join(f.home, 'custom-pin.txt');
+  fs.writeFileSync(pinFile, '9.9.9\n');
+  contextOf(run(BOOTSTRAP, { ...f, stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_PIN_FILE: pinFile } }));
+  const marker = JSON.parse(fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8'));
+  assert.equal(marker.cli_version, '9.9.9');
+});
+
 test('a missing checkout is a named problem in the line, not a failed hook', () => {
   const f = makeHome();
   const r = run(BOOTSTRAP, { ...f, source: path.join(f.home, 'nowhere'), stdin: '{}' });
