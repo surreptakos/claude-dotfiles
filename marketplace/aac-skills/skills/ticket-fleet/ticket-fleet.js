@@ -858,6 +858,33 @@ function gitSpelling(instrument, args) {
   }
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
+
+/**
+ * Whether an agent() rejection's message is a quota or rate-limit failure (issue 812) - the
+ * account itself is out of budget, so retrying the identical attempt, or starting a fresh ticket,
+ * fails on the same message and only burns tokens escalating the model for nothing (issue 821's
+ * evidence: six implementer attempts across two tickets, all on "You've hit your session limit").
+ * Matches the exact messages seen in the wild plus the generic 429/rate-limit shapes a provider
+ * error can carry.
+ *
+ * @param {*} message - an Error's `.message`, or any value `String()` can read a message off
+ * @returns {{reason: string, resetAt: string|null}|null} resetAt is the text after "resets ",
+ *   verbatim, when the message names one - "9:20am (UTC)", "6pm (UTC)", "9pm (America/Chicago)".
+ */
+const QUOTA_PATTERNS = [
+  /hit your session limit/i,
+  /hit your weekly limit/i,
+  /api rate limit already exceeded/i,
+  /rate.?limit/i,
+  /\b429\b/,
+  /resource_exhausted/i,
+];
+function quotaMatch(message) {
+  const text = String(message == null ? '' : message).trim();
+  if (!text || !QUOTA_PATTERNS.some((p) => p.test(text))) return null;
+  const reset = /resets\s+(.+)$/i.exec(text);
+  return { reason: text, resetAt: reset ? reset[1].trim() : null };
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -1094,6 +1121,38 @@ function failuresOf(verdict) {
   const list = (Array.isArray(verdict.failures) ? verdict.failures : []).map(f => String(f).trim()).filter(Boolean)
   if (list.length) return list
   return [verdict.pass ? 'verifier passed and listed no failures' : 'verifier returned pass=false with no failures listed']
+}
+
+// ---- quota / rate-limit terminal stop (issue 812) ----
+// A quota or rate-limit rejection is not a per-ticket failure to retry: the account itself is out
+// of budget, so a retry - or a fresh ticket's first attempt - fails on the identical message and
+// only burns tokens escalating the model for nothing (issue 821's evidence: six implementer
+// attempts across two tickets, all "You've hit your session limit", attempts 2 and 3 escalating
+// the model each time; issue 812's own evidence: 17 sub-agents launched after the first one hit
+// the account's weekly limit). The first `agent()` rejection any per-ticket stage or the Report
+// writer sees that matches `quotaMatch` sets `runStop`; every attempt loop and every not-yet-
+// started ticket check it before starting new work, so in-flight agents still settle but nothing
+// new is scheduled. Recorded once, at the point it was first seen - a second ticket hitting the
+// same message is read as skipped by `runStop`, not as a second terminal reason.
+let runStop = null
+function checkQuotaStop(who, detail) {
+  const q = quotaMatch((detail && detail.message) || detail)
+  if (q && !runStop) {
+    runStop = { who, reason: q.reason, resetAt: q.resetAt }
+    log(`TERMINAL: ${who} failed on a quota/rate-limit message${q.resetAt ? ` (resets ${q.resetAt})` : ''} - ending the run: in-flight agents settle, no further attempts or tickets start.`)
+  }
+  return q
+}
+// The shared shape every lane returns for a ticket the terminal stop kept from running, or cut
+// short mid-attempt. `skippedLimit` is its own key (issue 821's ask) so the run report never reads
+// a quota stop as "no commit produced" or an ordinary failure.
+function skippedLimitResult(t) {
+  return {
+    ticket: t.number, done: false, kind: t.kind, branch: null,
+    verdict: { pass: false, evidence: '', failures: [`fleet stopped: ${(runStop && runStop.reason) || 'quota/rate-limit failure'}`] },
+    prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
+    skippedLimit: true,
+  }
 }
 
 // ---- the expected tip a verdict is cross-checked against (issue 404) ----
@@ -1797,7 +1856,11 @@ guardCandidates = wave
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
 const runProbeLane = async (t) => {
   let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null
+  let stoppedByLimit = false
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Issue 812: see runCodeLane's identical check - a quota/rate-limit stop, this ticket's own or
+    // another ticket's, keeps this ticket's next attempt from starting.
+    if (runStop) { lastVerdict = skippedLimitResult(t).verdict; stoppedByLimit = true; break }
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
     // Attempt 1 takes a recorded prober result when the caller supplied one (issue 317); the
     // `||` short-circuits, so no prober agent is started for it. Attempt 2+ always re-probes.
@@ -1805,6 +1868,7 @@ const runProbeLane = async (t) => {
     if (reuse) log(`#${t.number}: reusing prior prober result from args.priorProbe (${(reuse.items || []).length} item(s)); no probe agent started for attempt 1.`)
     // Wrapped (aac-routines issue 270).
     let probeError = null
+    let probeErrorRaw = null
     probe = null
     try {
       probe = reuse || await agent(
@@ -1827,14 +1891,20 @@ Return structured output only.`,
       { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: cfg.implModel, isolation: 'worktree' }
       )
     } catch (err) {
-      probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
+      probeErrorRaw = (err && err.message) || err
+      probeError = unusableReason(`probe:#${t.number}.${attempt}`, probeErrorRaw)
       probe = null
     }
+    const probeQuota = checkQuotaStop(`probe:#${t.number}.${attempt}`, probeErrorRaw)
     if (!probe || !probe.items.length) {
-      lastVerdict = probeError
-        ? unusableVerdict(probeError, `probe:#${t.number}.${attempt}`)
-        : { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }
+      if (probeQuota) stoppedByLimit = true
+      lastVerdict = probeQuota
+        ? skippedLimitResult(t).verdict
+        : probeError
+          ? unusableVerdict(probeError, `probe:#${t.number}.${attempt}`)
+          : { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }
       if (probeError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      if (probeQuota) break
       continue
     }
 
@@ -1921,12 +1991,14 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
       )
     } catch (err) {
-      deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
+      const deliverErrorRaw = (err && err.message) || err
+      deliveryFailure = unusableReason(`deliver:#${t.number}`, deliverErrorRaw)
       delivery = null
       log(deliveryFailure)
+      checkQuotaStop(`deliver:#${t.number}`, deliverErrorRaw)
     }
   }
-  return { ticket: t.number, done, kind: 'probe', deliveryFailure, branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
+  return { ticket: t.number, done, kind: 'probe', deliveryFailure, branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [], skippedLimit: stoppedByLimit }
 }
 
 // Human lane: a desktop session or a person performs the steps. The agent verifies only what
@@ -1956,9 +2028,11 @@ Return structured output only.`,
     { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
     )
   } catch (err) {
-    handoffError = unusableReason(`handoff:#${t.number}`, (err && err.message) || err)
+    const handoffErrorRaw = (err && err.message) || err
+    handoffError = unusableReason(`handoff:#${t.number}`, handoffErrorRaw)
     handoff = null
     log(handoffError)
+    checkQuotaStop(`handoff:#${t.number}`, handoffErrorRaw)
   }
   let delivery = null
   if (handoff && cfg.deliver) {
@@ -1986,9 +2060,11 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
       )
     } catch (err) {
-      deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
+      const deliverErrorRaw = (err && err.message) || err
+      deliveryFailure = unusableReason(`deliver:#${t.number}`, deliverErrorRaw)
       delivery = null
       log(deliveryFailure)
+      checkQuotaStop(`deliver:#${t.number}`, deliverErrorRaw)
     }
   }
   return {
@@ -1997,6 +2073,7 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       ? { pass: handoff.ready, evidence: handoff.agentSide, failures: handoff.ready ? [] : handoff.ownerSide }
       : unusableVerdict(handoffError, `handoff:#${t.number}`),
     prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: [],
+    skippedLimit: false,
   }
 }
 // [FLEET-HUMAN-LANE-END]
@@ -2196,6 +2273,10 @@ const runCodeLane = async (t, workerIndex) => {
   // was dropped in the Scout phase, before wave selection, so this lane only ever runs tickets
   // that have no PR. The guard's freshness rule (issue 291) moved with it.
   let lastVerdict = null, impl = null, branch = null
+  // Issue 812: true only when THIS ticket's own outcome is the terminal quota/rate-limit stop -
+  // never merely that `runStop` happens to be set (a ticket that already passed before the stop
+  // is not "skipped").
+  let stoppedByLimit = false
   // Issue 654: what the run itself recorded about the branch reaching origin - the implementer's
   // pushed:true, or the push agent's. A deliverer that then cannot find it is an inconsistency.
   let branchPushed = false
@@ -2205,6 +2286,10 @@ const runCodeLane = async (t, workerIndex) => {
   const difficulty = t.difficulty || null
   const implModels = []
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Issue 812: a quota/rate-limit failure anywhere in this run - this ticket's own attempt 1,
+    // or another ticket's - stops this ticket's next attempt from starting. The attempt already
+    // in flight when it was set is not touched here; it settles on its own.
+    if (runStop) { lastVerdict = skippedLimitResult(t).verdict; stoppedByLimit = true; break }
     const implModel = pickImplModel(difficulty, attempt, cfg)
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
     // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
@@ -2223,6 +2308,7 @@ const runCodeLane = async (t, workerIndex) => {
     // which the next attempt's prior-findings repeats and the run report prints. The checkpoint
     // below still runs: an implementer that died mid-run can still have left dirt behind.
     let implError = null
+    let implErrorRaw = null
     impl = null
     if (!reuse) {
       implModels.push({ attempt, model: implModel })
@@ -2247,9 +2333,14 @@ Return structured output only.`,
       { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: implModel, isolation: 'worktree' }
       )
     } catch (err) {
-      implError = unusableReason(`impl:#${t.number}.${attempt}`, (err && err.message) || err)
+      implErrorRaw = (err && err.message) || err
+      implError = unusableReason(`impl:#${t.number}.${attempt}`, implErrorRaw)
       impl = null
     }
+    // Issue 812: checked against the raw rejection, before it is folded into the wrapped
+    // "unusable" text above - a wrapped message still matches the same patterns, but its reset
+    // time would carry the wrapper's own trailing parenthesis.
+    const implQuota = checkQuotaStop(`impl:#${t.number}.${attempt}`, implErrorRaw)
 
     // Checkpoint 1 of 4 (aac-routines issue 192): the orchestrator's own tree, right after this
     // ticket's implementer returned. A throw here drops the ticket out of the pipeline, so its
@@ -2257,10 +2348,14 @@ Return structured output only.`,
     await treeGuardCheck(`implement-attempt${attempt}`, t.number)
 
     if (!impl || !impl.committed) {
-      lastVerdict = implError
-        ? unusableVerdict(implError, `impl:#${t.number}.${attempt}`)
-        : { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }
+      if (implQuota) stoppedByLimit = true
+      lastVerdict = implQuota
+        ? skippedLimitResult(t).verdict
+        : implError
+          ? unusableVerdict(implError, `impl:#${t.number}.${attempt}`)
+          : { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }
       if (implError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      if (implQuota) break
       continue
     }
     // The implementer's self-reported branch never reaches a prompt: it is an agent result, so
@@ -2293,7 +2388,9 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
         { label: `push:#${t.number}.${attempt}`, phase: 'Implement', schema: PUSHED, model: cfg.deliverModel, effort: 'low' }
         )
       } catch (err) {
-        log(`${unusableReason(`push:#${t.number}.${attempt}`, (err && err.message) || err)} - ${branch} may exist only in this container until Deliver pushes it.`)
+        const pushErrorRaw = (err && err.message) || err
+        log(`${unusableReason(`push:#${t.number}.${attempt}`, pushErrorRaw)} - ${branch} may exist only in this container until Deliver pushes it.`)
+        checkQuotaStop(`push:#${t.number}.${attempt}`, pushErrorRaw)
         pushBack = null
       }
       if (pushBack && pushBack.pushed) branchPushed = true
@@ -2341,7 +2438,9 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
         { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
         )
       } catch (err) {
-        lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
+        const verifyErrorRaw = (err && err.message) || err
+        lastVerdict = unusableVerdict(verifyErrorRaw, verifyLabel)
+        checkQuotaStop(verifyLabel, verifyErrorRaw)
       }
 
       // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
@@ -2364,6 +2463,10 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // tree, so passing its findings on to the next attempt would be passing on guesswork.
     if (mismatch) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: [mismatch] }
     if (lastVerdict.pass) break
+    // Issue 812: a quota/rate-limit failure just seen in this attempt's verifier - no retry of
+    // this ticket either; the next attempt's top-of-loop check would catch it too, but breaking
+    // here skips straight to Deliver's own runStop-driven no-op instead of one more wasted attempt.
+    if (runStop) { lastVerdict = skippedLimitResult(t).verdict; stoppedByLimit = true; break }
   }
 
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
@@ -2385,8 +2488,10 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
-      deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
+      const deliverErrorRaw = (err && err.message) || err
+      deliveryFailure = unusableReason(`deliver:#${t.number}`, deliverErrorRaw)
       delivery = null
+      checkQuotaStop(`deliver:#${t.number}`, deliverErrorRaw)
     }
     // Issue 654: a deliverer that could not SEE the branch is never a blocked merge. "Could not
     // tell" and "absent" are told apart by the ls-remote exit codes it reports, and a branch the
@@ -2442,6 +2547,9 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // Issue 654: non-null when the run recorded this branch pushed and verified but the deliverer
     // could not find it; the run result lists it under `inconsistent`, not `failed`.
     inconsistency: inconsistency ? { branch, detail: inconsistency } : null,
+    // Issue 812: true only when a quota/rate-limit terminal stop is why this ticket stopped short -
+    // a distinct key so the run result never reads it as "no commit produced" or an ordinary failure.
+    skippedLimit: stoppedByLimit,
   }
 }
 // [FLEET-CODE-LANE-END]
@@ -2452,6 +2560,10 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
 const workers = wave.map((ticket, workerIndex) => ({ ticket, workerIndex }))
 const runWorker = async ({ ticket, workerIndex }) => {
   const t = ticket
+  // Issue 812: a ticket whose worker had not yet started when the terminal stop was set never
+  // starts one - no implementer, no prober, no handoff reader, nothing that could burn the same
+  // quota/rate-limit message a second time.
+  if (runStop) return skippedLimitResult(t)
   if (t.kind === 'probe') return await runProbeLane(t)
   if (t.kind === 'human') return await runHumanLane(t)
   return await runCodeLane(t, workerIndex)
@@ -2610,7 +2722,9 @@ Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, d
       { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: 'low' }
     )
   } catch (err) {
-    return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', (err && err.message) || err) }
+    const writerErrorRaw = (err && err.message) || err
+    checkQuotaStop('followups-writer', writerErrorRaw)
+    return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', writerErrorRaw) }
   }
   return {
     branch: (written && written.branch) || branch,
@@ -2652,7 +2766,10 @@ return {
   })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
-  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency).map(r => ({
+  // Issue 812: a ticket the terminal quota/rate-limit stop kept from finishing is never listed
+  // here - it reads as an ordinary failure ("no commit produced") otherwise, which is exactly what
+  // issue 821 named as the defect. It is named once, by number, in `skippedLimit` below.
+  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency && !r.skippedLimit).map(r => ({
     ticket: r.ticket,
     kind: r.kind,
     failures: (r.done ? [] : failuresOf(r.verdict)).concat(r.deliveryFailure ? [r.deliveryFailure] : []),
@@ -2683,6 +2800,12 @@ return {
   // label-driven listing before the wave (issue 786); an explicit args.tickets number still runs.
   skippedParked,
   skippedOverCap: droppedCap,
+  // Issue 812: named, not counted - the tickets the terminal quota/rate-limit stop kept from
+  // finishing (never started at all, or cut short mid-attempt), by number.
+  skippedLimit: clean.filter(r => r.skippedLimit).map(r => r.ticket),
+  // Issue 812: the terminal reason quoted ONCE, here, rather than repeated on every skipped
+  // ticket - null when this run never hit one. `who` names the first agent that reported it.
+  terminalLimit: runStop ? { who: runStop.who, reason: runStop.reason, resetAt: runStop.resetAt } : null,
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
   implModels: clean.filter(r => r.kind === 'code').map(r => ({ ticket: r.ticket, difficulty: r.difficulty || null, models: r.implModels || [] })),

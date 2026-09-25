@@ -792,6 +792,33 @@ function gitSpelling(instrument, args) {
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
 
+/**
+ * Whether an agent() rejection's message is a quota or rate-limit failure (issue 812) - the
+ * account itself is out of budget, so retrying the identical attempt, or starting a fresh ticket,
+ * fails on the same message and only burns tokens escalating the model for nothing (issue 821's
+ * evidence: six implementer attempts across two tickets, all on "You've hit your session limit").
+ * Matches the exact messages seen in the wild plus the generic 429/rate-limit shapes a provider
+ * error can carry.
+ *
+ * @param {*} message - an Error's `.message`, or any value `String()` can read a message off
+ * @returns {{reason: string, resetAt: string|null}|null} resetAt is the text after "resets ",
+ *   verbatim, when the message names one - "9:20am (UTC)", "6pm (UTC)", "9pm (America/Chicago)".
+ */
+const QUOTA_PATTERNS = [
+  /hit your session limit/i,
+  /hit your weekly limit/i,
+  /api rate limit already exceeded/i,
+  /rate.?limit/i,
+  /\b429\b/,
+  /resource_exhausted/i,
+];
+function quotaMatch(message) {
+  const text = String(message == null ? '' : message).trim();
+  if (!text || !QUOTA_PATTERNS.some((p) => p.test(text))) return null;
+  const reset = /resets\s+(.+)$/i.exec(text);
+  return { reason: text, resetAt: reset ? reset[1].trim() : null };
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -821,4 +848,5 @@ module.exports = {
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  QUOTA_PATTERNS, quotaMatch,
 };

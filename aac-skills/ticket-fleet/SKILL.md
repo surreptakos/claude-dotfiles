@@ -10,10 +10,10 @@ description: >
   asks to run the ticket fleet, clear a wave of `ready-for-agent` tickets, or invoke the
   fleet from an orchestrator worker cycle.
 metadata:
-  modified: "2026-09-24T14:17:43Z"
-  previous-modified: "2026-09-24T14:10:39Z"
-  revision: "41"
-  content-sha: "f17731584484"
+  modified: "2026-09-25T23:47:37Z"
+  previous-modified: "2026-09-24T14:17:43Z"
+  revision: "42"
+  content-sha: "21182216b162"
 ---
 
 # ticket-fleet
@@ -418,6 +418,22 @@ tickets that stay in the wave despite the label rule. On aac-sales-commissions o
 reaper's first sweep parked #4 #5 #22 #38 #41 and a label-driven run would have implemented all
 five against the owner's speed-over-robustness ruling had the caller not passed `tickets: [...]`
 explicitly (issue 786).
+
+## A quota or rate-limit failure ends the run, not just the attempt
+
+An `agent()` rejection whose message matches a quota or rate-limit pattern (`hit your session
+limit`, `hit your weekly limit`, `API rate limit already exceeded`, a 429 shape) is terminal: the
+account is out of budget, so a retry - or a fresh ticket's first attempt - fails on the identical
+message and only burns tokens escalating the model for nothing (issue 812's evidence: a container
+that hit its weekly limit on the first implementer went on to launch 17 more sub-agents that all
+failed the same way; issue 821's: six implementer attempts across two tickets, attempts 2 and 3
+escalating the model each time). The first such rejection any per-ticket stage or the Report
+writer sees sets the run's terminal stop; every attempt loop and every ticket whose lane had not
+yet started checks it before starting new work, so in-flight agents still settle but nothing new
+is scheduled. A ticket the stop kept from finishing is recorded under its own result key,
+`skippedLimit` - never as an ordinary failure or "no commit produced" (issue 821) - and the run
+result names the reason and the reset time (when the message carries one) exactly once, at the
+top level, rather than repeating it per ticket.
 
 ## Blocker state is read, not believed
 

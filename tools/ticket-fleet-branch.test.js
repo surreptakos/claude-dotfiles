@@ -28,6 +28,7 @@ const {
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  quotaMatch,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -593,7 +594,7 @@ function generatedBlock(scriptPath = FLEET_SCRIPT) {
 // Evaluated out of the script's generated block so the lane body below resolves them.
 function loadStableHelpers(scriptPath) {
   // eslint-disable-next-line no-new-func
-  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf, gitSpelling };`)();
+  return new Function(`${generatedBlock(scriptPath)}\nreturn { stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf, gitSpelling, quotaMatch };`)();
 }
 
 // Evaluate a lane body and return its runCodeLane. `agent` is the spy the test drives; the rest are
@@ -607,7 +608,7 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
   // real one, not a stub.
   const deliverBody = extractMarked(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-DELIVER-PROMPT');
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${deliverBody}\n${body}\nreturn runCodeLane;\n}`);
-  return wrapper(laneScope(Object.assign({
+  const scopeObj = Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
     cfg: { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z' },
@@ -634,7 +635,36 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     revParse: async () => null,
     // Issue 654: the Deliver-result classifier is the module's own, the one the generated block carries.
     classifyDelivery,
-  }, stubs)));
+    // Issue 812: the terminal quota/rate-limit stop. `runStop` starts inert (null, falsy) so every
+    // pre-812 test is unaffected; a test that wants to drive the terminal path passes a quota-shaped
+    // message through the agent mock and lets `checkQuotaStop` below set it, or overrides `runStop`
+    // directly in `stubs` to start a lane already stopped.
+    runStop: null,
+  }, stubs);
+  // checkQuotaStop and skippedLimitResult are hand-written in the fleet script, not part of the
+  // FLEET-INLINE block loadStableHelpers reads (they close over `log` and `runStop`, which are not
+  // pure), so the harness reimplements their exact behavior here - closed over this SAME scope
+  // object, so a mutation to `runStop` is visible to every later read the lane body makes of it.
+  // `quotaMatch` itself IS the module's own (part of FLEET-INLINE), so classification is real.
+  if (!('checkQuotaStop' in stubs)) {
+    scopeObj.checkQuotaStop = (who, detail) => {
+      const q = quotaMatch((detail && detail.message) || detail);
+      if (q && !scopeObj.runStop) {
+        scopeObj.runStop = { who, reason: q.reason, resetAt: q.resetAt };
+        logs.push(`TERMINAL: ${who} failed on a quota/rate-limit message${q.resetAt ? ` (resets ${q.resetAt})` : ''} - ending the run: in-flight agents settle, no further attempts or tickets start.`);
+      }
+      return q;
+    };
+  }
+  if (!('skippedLimitResult' in stubs)) {
+    scopeObj.skippedLimitResult = (t) => ({
+      ticket: t.number, done: false, kind: t.kind, branch: null,
+      verdict: { pass: false, evidence: '', failures: [`fleet stopped: ${(scopeObj.runStop && scopeObj.runStop.reason) || 'quota/rate-limit failure'}`] },
+      prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
+      skippedLimit: true,
+    });
+  }
+  return wrapper(laneScope(scopeObj));
 }
 
 async function driveCodeLane(scriptPath, agentMock, ticket, workerIndex = 0, cfgOverrides = {}, invocationId = 'inv1', guardSpy = null, stubOverrides = {}) {
@@ -2034,7 +2064,7 @@ test(`${FLEET_SCRIPT_REL} a pushed, verified branch the deliverer cannot find is
   assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'it is not a blocked merge, whatever mergeStatus the deliverer chose');
   assert.ok(logs.some((m) => /INCONSISTENCY/.test(m)), 'the inconsistency must be logged loudly');
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\)/,
+  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency && !r\.skippedLimit\)/,
     'the run result must keep an inconsistent ticket out of `failed`');
   assert.match(src, /inconsistent: clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent`');
 });
@@ -2590,4 +2620,102 @@ test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries 
   const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
   assert.match(revParseBody, /spelling:\s*\{\s*type:\s*'string'/, 'REV must carry a spelling field so the run can report which spelling answered');
   assert.match(revParseBody, /buildTipLookupCommand\(orchestratorCwd, ref\)/, 'the prompt must be built from the fallback-chain command, not a literal rev-parse');
+});
+
+// ---- Quota / rate-limit terminal stop (issue 812) ----
+// A quota/rate-limit rejection is not a per-ticket failure to retry - the account itself is out of
+// budget, so a retry, or a fresh ticket, fails on the identical message. quotaMatch is what tells
+// that apart from an ordinary agent() rejection; the messages here are the exact ones the two
+// runs in issue 812's evidence hit.
+
+test('quotaMatch recognizes the exact messages issue 812 evidence quoted, and reads their reset time verbatim', () => {
+  assert.deepEqual(quotaMatch("You've hit your session limit · resets 9:20am (UTC)"),
+    { reason: "You've hit your session limit · resets 9:20am (UTC)", resetAt: '9:20am (UTC)' });
+  assert.deepEqual(quotaMatch("You've hit your weekly limit · resets 9pm (America/Chicago)"),
+    { reason: "You've hit your weekly limit · resets 9pm (America/Chicago)", resetAt: '9pm (America/Chicago)' });
+  assert.deepEqual(quotaMatch("You've hit your session limit · resets 6pm (UTC)"),
+    { reason: "You've hit your session limit · resets 6pm (UTC)", resetAt: '6pm (UTC)' });
+});
+
+test('quotaMatch recognizes a rate-limit or 429 shape with no reset time named', () => {
+  assert.deepEqual(quotaMatch('API rate limit already exceeded for this token'),
+    { reason: 'API rate limit already exceeded for this token', resetAt: null });
+  assert.deepEqual(quotaMatch('upstream request failed: 429 Too Many Requests'),
+    { reason: 'upstream request failed: 429 Too Many Requests', resetAt: null });
+});
+
+test('quotaMatch returns null for an ordinary failure, never mistaking ordinary text for a quota message', () => {
+  assert.equal(quotaMatch('StructuredOutput retry cap (5) exceeded'), null);
+  assert.equal(quotaMatch('no reply matching its schema'), null);
+  assert.equal(quotaMatch(''), null);
+  assert.equal(quotaMatch(null), null);
+  assert.equal(quotaMatch(undefined), null);
+});
+
+test('quotaMatch reads the .message an agent() rejection (an Error) carries, the same as a bare string', () => {
+  const err = new Error("You've hit your session limit · resets 6pm (UTC)");
+  assert.deepEqual(quotaMatch(err.message),
+    { reason: "You've hit your session limit · resets 6pm (UTC)", resetAt: '6pm (UTC)' });
+});
+
+test('the fleet script inlines the same quotaMatch tools/ticket-fleet-branch.js carries (issue 812)', () => {
+  const inlined = loadStableHelpers(FLEET_SCRIPT);
+  const cases = [
+    "You've hit your session limit · resets 9:20am (UTC)",
+    "You've hit your weekly limit · resets 9pm (America/Chicago)",
+    'API rate limit already exceeded',
+    'no reply matching its schema',
+    '',
+  ];
+  for (const message of cases) {
+    assert.deepEqual(inlined.quotaMatch(message), quotaMatch(message), `quotaMatch drifted on ${JSON.stringify(message)}`);
+  }
+});
+
+// Replay fixture (issue 812's own acceptance criterion): an implementer rejection carrying the
+// exact session-limit message issue 812 quotes drives the terminal path - the run stops trying
+// this ticket after the FIRST such failure, never burning attempt 2 or 3 escalating the model for
+// nothing (issue 821's evidence).
+test(`${FLEET_SCRIPT_REL} an implementer rejection matching a quota/rate-limit pattern ends the ticket after its first attempt, recorded under skippedLimit - not "no commit produced" (issue 812)`, async () => {
+  const calls = [];
+  const agentMock = async (_prompt, opts) => {
+    calls.push(opts.label);
+    if (opts.label === 'impl:#812.1') throw new Error("You've hit your session limit · resets 9:20am (UTC)");
+    throw new Error(`unexpected label: ${opts.label} - attempt 2 must never start after a quota failure`);
+  };
+  const { result, logs } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 812, title: 't', criteria: '-' }, 0, { maxAttempts: 3 });
+
+  assert.deepEqual(calls, ['impl:#812.1'], 'at most one attempt may run once the first one hits the quota/rate-limit message');
+  assert.equal(result.done, false);
+  assert.equal(result.skippedLimit, true, 'the ticket result must carry its own distinct key, not read as an ordinary failure');
+  assert.ok(!result.verdict.failures.some((f) => /no commit produced/.test(f)),
+    'a quota-stopped ticket must never be recorded as "no commit produced" (issue 821)');
+  assert.ok(logs.some((l) => /TERMINAL/.test(l) && /resets 9:20am \(UTC\)/.test(l)),
+    'the reset time from the message must reach the run log');
+});
+
+test(`${FLEET_SCRIPT_REL} a ticket started after another ticket already hit the quota/rate-limit stop never starts an implementer at all (issue 812)`, async () => {
+  const calls = [];
+  const agentMock = async (_prompt, opts) => { calls.push(opts.label); throw new Error('an agent must never run once runStop is set'); };
+  const { result } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 813, title: 't', criteria: '-' }, 0, { maxAttempts: 3 }, 'inv1', null, {
+    runStop: { who: 'impl:#812.1', reason: "You've hit your session limit · resets 9:20am (UTC)", resetAt: '9:20am (UTC)' },
+  });
+
+  assert.deepEqual(calls, [], 'a ticket whose lane starts after the stop must start no agent - not even attempt 1');
+  assert.equal(result.skippedLimit, true);
+  assert.equal(result.done, false);
+});
+
+test(`${FLEET_SCRIPT_REL} a verifier rejection matching a quota/rate-limit pattern also ends the ticket - no attempt 2 (issue 812)`, async () => {
+  const calls = [];
+  const agentMock = async (_prompt, opts) => {
+    calls.push(opts.label);
+    if (opts.label === 'impl:#814.1') return { branch: 'agent/issue-814-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label === 'verify:#814.1') throw new Error("You've hit your weekly limit · resets 9pm (America/Chicago)");
+    throw new Error(`unexpected label: ${opts.label}`);
+  };
+  const { result } = await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 814, title: 't', criteria: '-' }, 0, { maxAttempts: 3 });
+
+  assert.deepEqual(calls, ['impl:#814.1', 'verify:#814.1'], 'the verifier is not retried and attempt 2 never starts');
+  assert.equal(result.skippedLimit, true);
 });
