@@ -81,6 +81,18 @@ test('the plugin-served script enforces the same contract this module describes'
   assert.match(src, /'kindReason', 'discoveryTriage', 'handoffPending'\]/, 'SCOUT tickets must require discoveryTriage and handoffPending');
 });
 
+test('the gh-instrument scout drops pull requests from the labeled-issues listing (issue 813)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /issues\?labels=.*drop every entry that has a \\`pull_request\\` key/,
+    'the REST /issues?labels= listing returns PRs too, so the gh scout prompt must say to filter them out');
+});
+
+test('the mcp-instrument scout notes list_issues never returns pull requests (issue 813)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /mcp__github__list_issues.*never includes pull requests/,
+    'the mcp scout prompt must either filter PRs or record why list_issues cannot return them');
+});
+
 test('the SKILL.md ripple table names every fork holder, runbook and the current version', () => {
   const skill = fs.readFileSync(FLEET_SKILL, 'utf8');
   assert.match(skill, new RegExp(`contract v${CONTRACT_VERSION}\\b`),
