@@ -3,10 +3,10 @@ name: grill-ready-for-human
 description: Walk every ready-for-human ticket — read them all, ask every ruling in one batch, then land each as a comment and relabel or close.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-24T05:12:03Z'
-  previous-modified: '2026-09-18T20:01:13Z'
-  revision: '4'
-  content-sha: 02d4f52f5c17
+  modified: '2026-09-25T14:16:40Z'
+  previous-modified: '2026-09-24T05:12:03Z'
+  revision: '5'
+  content-sha: b34895afeb31
 ---
 
 # Grill ready-for-human
@@ -65,3 +65,10 @@ Every ticket open at start carries a landed ruling comment **and** a label/state
 ## In a cloud container
 
 A cloud session (claude.ai/code, Cowork) has no `gh`; `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Same steps, GitHub MCP instruments: read [`cloud.md`](cloud.md) for the substitution table before the first tracker call.
+
+## Across every repo: the rulings page
+
+For the whole queue across all of the owner's repos, the ask is a published page instead of
+`AskUserQuestion`, and a scheduled run lands what the owner submits: read
+[`rulings-page.md`](rulings-page.md). The ruling shapes and the verify step above still govern
+every landing it makes.
