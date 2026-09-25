@@ -1,4 +1,6 @@
 <title>Ticket Rulings Desk</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <style>
 :root{
   --bg:#f3f6fa;--surface:#ffffff;--ink:#172b42;--muted:#52647a;--line:#d4deea;--input:#b6c6d8;
@@ -58,6 +60,24 @@ h1{font-size:30px;line-height:1.15;margin:6px 0 8px;text-wrap:balance}
 .title{font-weight:700;color:var(--ink);text-decoration:none}
 .title:hover{text-decoration:underline}
 .plain{color:var(--ink);margin:0;max-width:72ch}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+@media (max-width:760px){.cols{grid-template-columns:1fr}}
+.pane{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--bg);min-width:0}
+.pane h3,.pane summary{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px;font-weight:700}
+.pane summary{cursor:pointer;margin:0}
+.pane[open] summary{margin-bottom:6px}
+.explain p{margin:0 0 8px;max-width:68ch}.explain p:last-child{margin-bottom:0}
+.explain b{color:var(--ink)}
+.issue{max-height:440px;overflow:auto;font-size:13.5px;line-height:1.45;overflow-wrap:anywhere}
+.issue h1,.issue h2,.issue h3,.issue h4{font-size:14px;margin:10px 0 4px}
+.issue p,.issue ul,.issue ol{margin:0 0 8px}
+.issue ul,.issue ol{padding-left:20px}
+.issue pre{white-space:pre-wrap;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12.5px}
+.issue code{font-family:var(--mono);font-size:12.5px;background:var(--surface);padding:0 3px;border-radius:3px}
+.issue table{border-collapse:collapse;font-size:12.5px;display:block;overflow-x:auto}
+.issue th,.issue td{border:1px solid var(--line);padding:3px 6px;text-align:left}
+.issue a{color:var(--primary)}
+.issue blockquote{margin:0 0 8px;padding-left:10px;border-left:3px solid var(--line);color:var(--muted)}
 .q{margin:0;font-weight:700;color:var(--soft-ink);background:var(--soft);border-radius:6px;padding:8px 10px}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
 .chip{font-size:12px;border-radius:999px;padding:2px 9px;background:var(--warn-soft);color:var(--warn)}
@@ -118,6 +138,16 @@ const DATA = /*DATA*/null/*END*/;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
 const short = r => r.split("/")[1];
+const mdOK = () => window.marked && window.DOMPurify;
+if (window.DOMPurify) DOMPurify.addHook("afterSanitizeAttributes", n => { if (n.tagName === "A") { n.setAttribute("target", "_blank"); n.setAttribute("rel", "noopener"); } });
+function md(s){ s = String(s || "").trim(); if (!s) return "<p><i>No description on GitHub.</i></p>"; return mdOK() ? DOMPurify.sanitize(marked.parse(s)) : "<pre>" + esc(s) + "</pre>"; }
+function explainHtml(t){
+  const e = t.explainer;
+  if (!e) return "<p>" + esc(t.plain) + "</p>";
+  return "<p><b>What this is.</b> " + esc(e.what) + "</p><p><b>How we got here.</b> " + esc(e.background) + "</p><p><b>Why it matters.</b> " + esc(e.stakes) + "</p>";
+}
+const wide = () => { try { return matchMedia("(min-width: 761px)").matches; } catch (e) { return true; } };
+
 const key = (repo, n) => short(repo) + "~" + n;
 const answers = {};   // key -> {choice, note, at}
 const landed = {};    // key -> {outcome, ok, at, detail}
@@ -175,7 +205,8 @@ function renderPanel(){
     if (t.needsDanOnly) chips.push('<span class="chip">needs you: ' + esc(t.needsDanOnly) + "</span>");
     const L = landed[k];
     let html = '<div class="top"><span class="n">#' + t.n + '</span><a class="title" href="' + esc(t.url) + '" target="_blank" rel="noopener">' + esc(t.title) + "</a></div>"
-      + '<p class="plain">' + esc(t.plain) + "</p>"
+      + '<div class="cols"><section class="pane explain"><h3>Plain English</h3>' + explainHtml(t) + '</section>'
+      + '<details class="pane"' + (wide() ? " open" : "") + '><summary>Issue text on GitHub</summary><div class="issue">' + md(t.body) + "</div></details></div>"
       + '<p class="q">' + esc(t.question) + "</p>"
       + (chips.length ? '<div class="chips">' + chips.join("") + "</div>" : "")
       + '<div class="opts" role="radiogroup" aria-label="Ruling for #' + t.n + '">';

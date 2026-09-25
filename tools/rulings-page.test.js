@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { readPageData, planQueue, buildPage, planLanding, executeLanding, marker } = require('./rulings-page.js');
+const { readPageData, planQueue, buildPage, planLanding, executeLanding, fillBodies, marker } = require('./rulings-page.js');
 
 const TEMPLATE = fs.readFileSync(path.join(__dirname, 'rulings-page-template.html'), 'utf8');
 const REPO = 'surreptakos/aac-routines';
@@ -119,4 +119,15 @@ test('re-running a landing does not repost the comment', () => {
   assert.equal(calls.filter(c => c.startsWith('issue close')).length, 1);
   assert.equal(r.ok, true);
   assert.equal(r.closed, true);
+});
+
+test('bodies puts each ticket\'s GitHub text in its draft, cutting a very long one', () => {
+  const dir = draftsDir([ticket(1), ticket(2)]);
+  const run = args => JSON.stringify({ body: args[2] === '1' ? 'Short **body**' : 'x'.repeat(20000) });
+  assert.equal(fillBodies(dir, run), 2);
+  const j = JSON.parse(fs.readFileSync(path.join(dir, 'aac-routines.json'), 'utf8'));
+  assert.equal(j.tickets[0].body, 'Short **body**');
+  assert.ok(j.tickets[1].body.length < 12100 && j.tickets[1].body.endsWith('the rest is on GitHub)'));
+  const data = readPageData(buildPage(dir, TEMPLATE).html);
+  assert.equal(data.repos[0].tickets[0].body, 'Short **body**');
 });

@@ -8,7 +8,7 @@ run by hand from any session.
 
 - Page: https://claude.ai/artifact/9wnfsMJFtUNGGoSh46bmDE (one URL for good; republish in place,
   never publish a second page, or the owner's saved picks stay behind on the old one).
-- Code: `tools/rulings-page.js` (`queue`, `build`, `land`) and `tools/rulings-page-template.html`
+- Code: `tools/rulings-page.js` (`queue`, `bodies`, `build`, `land`) and `tools/rulings-page-template.html`
   in claude-dotfiles. Run from a claude-dotfiles checkout.
 - Page database: `rulings/<repo-short>~<n>` (the owner's pick: `choice`, `note`), `submissions/<id>`
   (`keys`, `status`: `submitted` then `landed`), `landed/<repo-short>~<n>` (`ok`, `outcome`,
@@ -47,8 +47,9 @@ run by hand from any session.
    per repo that are new or changed. For each repo in `toDraft`, one `Agent` (read-only) with the
    drafting brief below, writing `<drafts dir>/<repo-short>.json` for exactly those numbers. Merge
    each repo's `keep` tickets into the same file.
-4. `node tools/rulings-page.js build --drafts <dir> --out <page.html>`; publish it with `url` set to
-   the page URL. The page's database, and the owner's saved picks, carry over.
+4. `node tools/rulings-page.js bodies --drafts <dir>` (each card shows the ticket's own GitHub text
+   beside the explainer), then `node tools/rulings-page.js build --drafts <dir> --out <page.html>`;
+   publish it with `url` set to the page URL. The page's database, and the owner's saved picks, carry over.
 5. Email with the Gmail connector `send_message` to dgatsakos@activealarm.com. Subject:
    `<N> tickets need your ruling`. HTML body: count per repo, up to five tickets whose drafts carry
    money, tax, customer-data or delete decisions (one line each: repo, number, the question), and
@@ -63,9 +64,12 @@ labels (`gh label list`) and whatever quick lookup makes the options concrete. F
 one decision in plain real-world English: the owner holds no coding context and never opens the
 ticket. 2-4 options, the ticket's own when it lists them, exactly one `recommended`; the id `other`
 is reserved. Write `{"repo","labels","tickets":[{"n","title","url","plain","question","blockedBy",
-"blocks","needsDanOnly","draftedAt","options":[{"id","label","detail","recommended","landing":
+"blocks","needsDanOnly","draftedAt","explainer":{"what","background","stakes"},"options":[{"id","label","detail","recommended","landing":
 {"action":"relabel|close-completed|close-wontfix|keep|spawn-children","addLabels","removeLabels",
-"ruling"}}]}]}`, `draftedAt` the ISO time drafting began. `ready-for-agent` for work a cloud agent
+"ruling"}}]}]}`, `draftedAt` the ISO time drafting began. `explainer` is the ticket itself in plain English, shown
+beside its GitHub text: `what` (what it is about, one breath), `background` (how we got here, what
+was found or already ruled), `stakes` (why it matters, what waits on it); 1-4 short sentences each,
+every code symbol, filename or ticket number replaced by what it does for the owner's business. `ready-for-agent` for work a cloud agent
 can do, `ready-for-local-agent` (only where the label exists) for work needing the owner's PC,
 `ready-for-human` kept only when owner-only work remains. `ruling` is the comment text an
 implementing agent acts on. Verify the file parses.

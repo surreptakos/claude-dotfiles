@@ -3,10 +3,10 @@ name: grill-ready-for-human
 description: Walk every ready-for-human ticket — read them all, ask every ruling in one batch, then land each as a comment and relabel or close.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-25T14:16:40Z'
-  previous-modified: '2026-09-24T05:12:03Z'
-  revision: '5'
-  content-sha: b34895afeb31
+  modified: '2026-09-25T14:33:53Z'
+  previous-modified: '2026-09-25T14:16:40Z'
+  revision: '6'
+  content-sha: 5391df028645
 ---
 
 # Grill ready-for-human
