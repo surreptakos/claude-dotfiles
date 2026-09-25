@@ -2328,10 +2328,11 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
   assert.match(guardBody, /'pwd'|`pwd`/, 'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
   assert.match(guardBody, /measured\.cwd\[0\] !== '\/'/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
 
-  // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
-  // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
+  // Every actual guard command - baseline, check, and the restore recheck (issue 807) - is built
+  // from `orchestratorCwd`, never from `cfg.orchestratorCwd` directly (which would still read '.'
+  // after a parent `cd`).
   const cwdFlags = guardBody.match(/--cwd \$\{orchestratorCwd\}/g) || [];
-  assert.equal(cwdFlags.length, 2, `expected the baseline and the check command to both pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
+  assert.equal(cwdFlags.length, 3, `expected the baseline, the check command and the restore recheck to all pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
   assert.ok(!guardBody.includes('--cwd .'), 'no guard command may hardcode the relative default');
   assert.ok(!guardBody.includes('--cwd ${cfg.orchestratorCwd}'), 'no guard command may read cfg.orchestratorCwd directly - only the measured orchestratorCwd');
   assert.match(guardBody, /\$\{GUARD_CMD\} baseline --cwd \$\{orchestratorCwd\}/, 'tree-guard:baseline must run node tools/orchestrator-tree-guard.js with the absolute path');
@@ -2437,6 +2438,69 @@ test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and
   await treeGuardCheck('implement-attempt1', 7);
   assert.equal(commands.length, 2, 'expected the baseline plus one check');
   for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// ---------------------------------------------------------------------------
+// Issue 807: one wave left the orchestrator's own checkout on a detached HEAD, and a checkpoint
+// that only ever threw could not tell that apart from a real leaked file. treeGuardCheck now tries
+// one restore first: measure the ref this run started on, check the orchestrator's tree back onto
+// it, and re-run the guard's check - continuing quietly when that clears the breach, and still
+// throwing when it does not (a leaked file survives a checkout unchanged).
+// ---------------------------------------------------------------------------
+
+test('treeGuardCheck: a bare HEAD drift is restored and the run continues (issue 807)', async () => {
+  const calls = [];
+  let checkCount = 0;
+  const agentMock = async (prompt, opts) => {
+    calls.push(opts.label);
+    if (opts.label === 'tree-guard:baseline') {
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/measured/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label === 'tree-guard:start-ref') {
+      return { ref: 'master' };
+    }
+    if (opts.label.startsWith('tree-guard:restore:')) {
+      assert.match(prompt, /git -C \/measured checkout master/, 'the restore command must check the orchestrator back out onto the measured start ref');
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:') && opts.label.endsWith('-restored#42')) {
+      // The recheck after a successful restore: clean this time.
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) {
+      checkCount++;
+      // The first real check reports the drift as a breach; only the first call sees it.
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: checkCount === 1 ? [{ path: 'somefile.txt', status: '??' }] : [] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  const { treeGuardCheck, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/measured' });
+  await treeGuardCheck('implement-attempt1', 42); // must not throw: the restore clears the breach
+  assert.ok(logs.some((l) => /Orchestrator-tree guard RESTORED/.test(l) && l.includes('issue 807')),
+    'a cleared breach must be logged as restored, not silently swallowed');
+  assert.ok(calls.includes('tree-guard:start-ref'), 'a real breach must measure the start ref');
+});
+
+test('treeGuardCheck: a breach a restore cannot clear still flags (issue 807)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'tree-guard:baseline') {
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/measured/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label === 'tree-guard:start-ref') {
+      return { ref: 'master' };
+    }
+    if (opts.label.startsWith('tree-guard:restore:')) {
+      return { exitCode: 0, stdout: '', stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) {
+      // Every check - the original and the post-restore recheck alike - still finds the leaked
+      // file: a `git checkout` never removes an untracked file, so this is not restorable.
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [{ path: 'leaked.py', status: '??' }] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  const { treeGuardCheck } = await driveTreeGuard(agentMock, { orchestratorCwd: '/measured' });
+  await assert.rejects(treeGuardCheck('implement-attempt1', 42), /ISOLATION BREACH|isolation breached/);
 });
 
 // ---------------------------------------------------------------------------

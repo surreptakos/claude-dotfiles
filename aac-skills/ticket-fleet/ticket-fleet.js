@@ -30,7 +30,7 @@ export const meta = {
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
-    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report (aac-routines issues 192, 270)' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report - each one restores a bare HEAD drift or flags the tree (aac-routines issues 192, 270; claude-dotfiles issue 807)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
@@ -1165,10 +1165,14 @@ which prints no marker of its own).`,
 // exactly this index. The Deliver phase runs unisolated for the same reason (aac-routines 270).
 //
 // So the guard is wired at four checkpoints - after Implement, after Verify, after Deliver, and
-// before Report - and each one THROWS. A throw inside a pipeline stage drops that ticket to null,
-// so its own Verify and Deliver never run; the `breaches` array then trips every other in-flight
-// ticket's next checkpoint and the Deliver gate, and the run itself fails before Report. The probe
-// and human lanes have no per-lane checkpoint of their own: they open no PR and push nothing, so
+// before Report - and each one either RESTORES or THROWS (claude-dotfiles issue 807). A breach
+// that turns out to be nothing more than the orchestrator's own HEAD drifted off the ref this run
+// started on is checked back onto it and the run continues; anything a plain `git checkout <ref>`
+// cannot undo - a real leaked file - still throws. A throw inside a pipeline stage drops that
+// ticket to null, so its own Verify and Deliver never run; the `breaches` array then trips every
+// other in-flight ticket's next checkpoint and the Deliver gate, and the run itself fails before
+// Report. The probe and human lanes have no per-lane checkpoint of their own: they open no PR and
+// push nothing, so
 // the pre-report checkpoint is the one that covers them.
 //
 // Concurrency: `pipeline()` interleaves tickets, so checkpoints overlap. Two design choices make
@@ -1191,6 +1195,14 @@ const attributed = new Set()
 let guardStatePath = null
 let guardCandidates = ''   // filled in once the wave is known, below
 let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
+// The ref the orchestrator's own checkout started this run on (claude-dotfiles issue 807) -
+// measured lazily, only the first time a breach actually needs it, so a clean run never spends an
+// agent call on a measurement nothing uses. Left null when the measurement itself fails, or when
+// there has been no breach yet; either way a restore is simply skipped and the breach flags as
+// before. `orchestratorStartRefTried` stops a failed measurement from being retried at every
+// later breach in the same run.
+let orchestratorStartRef = null
+let orchestratorStartRefTried = false
 
 // A guard agent runs ONE fixed command and hands back its exit code and stdout verbatim. Nothing
 // is left to its judgement, so a paraphrase is detectable: stdout that does not JSON.parse is
@@ -1211,6 +1223,31 @@ file. Do not interpret the output. Return the command's REAL exit code (0, 1, 2 
 code of a pipe) plus its stdout and stderr VERBATIM. When the guard ran at all its stdout is a
 single line of JSON: copy it character for character; do not reformat it, summarise it, or invent
 fields.`
+}
+
+// ---------------------------------------------------------------------------
+// Orchestrator HEAD restore (claude-dotfiles issue 807)
+// ---------------------------------------------------------------------------
+// A checkpoint used to have exactly one move on a breach: throw. One wave left the orchestrator's
+// own checkout on a detached `origin/<defaultBranch>` HEAD - no per-ticket agent is allowed to
+// `git checkout <ref>` there (the orchestrator-tree rail bans it), but the guard cannot tell "HEAD
+// quietly moved" from "a real file leaked" without asking. So the checkpoint below tries ONE
+// restore first: put HEAD back on the ref this run started on and check again. A leaked FILE
+// survives that checkout unchanged (a plain `git checkout <ref>` only moves tracked content back
+// to that ref's tree; it deletes nothing untracked), so the recheck still reports it and the run
+// still flags exactly as before - only a bare HEAD move is silently healed.
+const START_REF = { type: 'object', required: ['ref'], properties: {
+  ref: { type: 'string', description: 'the exact text the command printed, trimmed of a trailing newline - a branch name from symbolic-ref, or a commit sha from the rev-parse fallback when HEAD is detached' },
+} }
+
+function startRefPrompt(cwd) {
+  return `Run exactly this one bash command, from the repository root, and report its result: \`git -C ${cwd} symbolic-ref --quiet --short HEAD || git -C ${cwd} rev-parse HEAD\`
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any file. Report the exact text printed, trimmed of a trailing newline, as ref.`
+}
+
+function restorePrompt(cwd, ref) {
+  return `Run exactly this one bash command, from the repository root, and report its result: \`git -C ${cwd} checkout ${ref}\`
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any file beyond what that one checkout does. Return its REAL exit code plus stdout and stderr verbatim.`
 }
 
 function breachMessage() {
@@ -1356,10 +1393,12 @@ if (treeGuardOn) {
 
 // [FLEET-TREE-GUARD-CHECK-START]
 /**
- * One isolation checkpoint. Throws on a breach and on could-not-audit; returns quietly when the
- * orchestrator's tree holds nothing beyond the run baseline. `label` names the checkpoint (e.g.
- * `implement-attempt1`), `ticketNumber` is the ticket whose chain is being checked - which is who
- * OBSERVED a leak, not necessarily who caused it.
+ * One isolation checkpoint. Returns quietly when the orchestrator's tree holds nothing beyond the
+ * run baseline, or when a breach turns out to be a bare HEAD drift that a restore onto
+ * `orchestratorStartRef` clears (claude-dotfiles issue 807); throws on a breach a restore does not
+ * clear and on could-not-audit. `label` names the checkpoint (e.g. `implement-attempt1`),
+ * `ticketNumber` is the ticket whose chain is being checked - which is who OBSERVED a leak, not
+ * necessarily who caused it.
  */
 async function treeGuardCheck(label, ticketNumber) {
   if (!treeGuardOn) return
@@ -1396,6 +1435,54 @@ async function treeGuardCheck(label, ticketNumber) {
   const fresh = report.newEntries.filter(e => !attributed.has(e.path))
   for (const e of fresh) attributed.add(e.path)
   if (!fresh.length) return
+
+  // One restore attempt before flagging (claude-dotfiles issue 807): a breach that is nothing
+  // more than the orchestrator's own HEAD having drifted off the ref this run started on - no
+  // per-ticket agent is allowed to `git checkout <ref>` in the orchestrator's own tree, so this is
+  // the run's own check putting it back, not a worker's write. A restore that leaves entries
+  // behind (a real leaked file survives a checkout unchanged) still falls through to the flag
+  // below exactly as before.
+  if (!orchestratorStartRef && !orchestratorStartRefTried) {
+    orchestratorStartRefTried = true
+    let refRes = null
+    try {
+      refRes = await agent(
+        startRefPrompt(orchestratorCwd),
+        { label: 'tree-guard:start-ref', phase: 'Isolation guard', schema: START_REF, model: cfg.reportModel, effort: 'low' }
+      )
+    } catch (err) {
+      refRes = null
+    }
+    orchestratorStartRef = (refRes && refRes.ref) ? String(refRes.ref).trim() : null
+  }
+  if (orchestratorStartRef) {
+    let restoreRes = null
+    try {
+      restoreRes = await agent(
+        restorePrompt(orchestratorCwd, orchestratorStartRef),
+        { label: `tree-guard:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
+      )
+    } catch (err) {
+      restoreRes = null
+    }
+    if (restoreRes && restoreRes.exitCode === 0) {
+      let recheckRes = null
+      try {
+        recheckRes = await agent(
+          guardAgentPrompt(`${GUARD_CMD} check --cwd ${orchestratorCwd} --state ${guardStatePath} --label ${label}-restored --ticket ${ticketNumber} ${guardCandidates}`),
+          { label: `tree-guard:${label}-restored#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
+        )
+      } catch (err) {
+        recheckRes = null
+      }
+      let recheckReport = null
+      try { recheckReport = JSON.parse(String((recheckRes && recheckRes.stdout) || '')) } catch (e) { recheckReport = null }
+      if (recheckRes && recheckRes.exitCode === 0 && recheckReport && Array.isArray(recheckReport.newEntries) && !recheckReport.newEntries.length) {
+        log(`Orchestrator-tree guard RESTORED at ${label} (ticket #${ticketNumber}, claude-dotfiles issue 807): HEAD had drifted off ${orchestratorStartRef} and was checked back onto it; the tree is clean and this run continues.`)
+        return
+      }
+    }
+  }
 
   const blamed = [...new Set(fresh.flatMap(e => e.matchedTickets || []))]
   const who = blamed.length
@@ -2603,7 +2690,7 @@ async function runReport(discoveries, defaultBranch) {
 1. git -C ${orchestratorCwd} fetch origin ${defaultBranch} - ${orchestratorCwd} is the orchestrator's own checkout, measured absolute at Setup (issue 562), never wherever your shell happens to start.
 2. git -C ${orchestratorCwd} worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
 3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run <DATE> (ticket-fleet ${runId})" heading, where <DATE> is today's UTC date in ISO form as \`date -u +%F\` prints it - a run's section has to be tellable from every other run's at a glance (issue 322), then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
-4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
+4. \`git add -- ${cfg.followupsFile}\` - that exact path, never \`git add -A\`, \`git add .\` or \`git commit -a\`: a worktree cut fresh from origin/${defaultBranch} should hold nothing else, but a stray file from an earlier run of this same scratch path is a foreign file in your commit, not yours to carry (issue 807). Then \`git commit -m "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)"\`. Before committing, run \`git status --short\` and confirm the only line is \`${cfg.followupsFile}\`; if anything else is staged or untracked, unstage it (\`git restore --staged <path>\`) and leave it out of the commit.
 5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
 ${deliverStep}
 Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, do NOT touch any ticket. Return structured output only.`,
