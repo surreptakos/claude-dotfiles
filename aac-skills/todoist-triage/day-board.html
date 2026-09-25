@@ -3,12 +3,13 @@
 Dan's Day Board: https://claude.ai/artifact/PSr7LzYZqhtF8QHAyX8FGq
 Source of record for the artifact. Edit here, then republish to that URL with these capabilities:
 {"db": {}, "sample": {}, "mcp": {"servers": [
-  {"server": "Microsoft 365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search"]},
-  {"server": "ms365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search"]},
+  {"server": "Microsoft 365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search", "read_resource"]},
+  {"server": "ms365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search", "read_resource"]},
   {"server": "Todoist", "tools": ["find-tasks", "fetch-object", "find-comments", "add-comments", "add-tasks", "update-tasks", "delete-object", "complete-tasks", "uncomplete-tasks", "find-activity"]},
   {"server": "Granola", "tools": ["query_granola_meetings"]},
   {"server": "Google Drive", "tools": ["search_files", "read_file_content"]}]}}
 Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
+Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
 -->
 <html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Dan&#39;s Day Board</title>
@@ -898,7 +899,17 @@ footer{font-size:12px;color:var(--muted)}
     const mine = objectsOf(res).filter(o => o.from && o.from.userId === HUDDLE.danId && o.createdDateTime && o.messageType !== "systemEventMessage");
     mine.sort((a,b) => String(b.createdDateTime).localeCompare(String(a.createdDateTime)));
     const last = mine[0];
-    return last ? {at: new Date(last.createdDateTime), text: stripHtml(last.bodyPreview)} : null;
+    if (!last) return null;
+    // The listing's bodyPreview stops at 1000 characters (bodyTruncated), which cut the last risk line of
+    // Dan's 2026-09-23 post mid-word. Lines are copied word for word, so read the full body when it was cut.
+    let html = last.bodyPreview;
+    if (last.bodyTruncated){
+      if (!last.uri) throw {code:"tool_error", message:"last post was cut off and carries no uri to read in full"};
+      const full = objectsOf(await call("ms365", "read_resource", {uri:last.uri})).find(o => o.body && typeof o.body.content === "string");
+      if (!full) throw {code:"tool_error", message:"last post was cut off and the full read returned no body"};
+      html = full.body.content;
+    }
+    return {at: new Date(last.createdDateTime), text: stripHtml(html)};
   }
 
   // A tick is evidence only when it is not part of a bulk clear-out and not a subtask under an open parent.
@@ -950,9 +961,15 @@ footer{font-size:12px;color:var(--muted)}
       "- A completed task alone is NOT evidence. Use it only when a sent mail or a meeting note corroborates it; merge the task and its mail into one line. Otherwise drop it.",
       "- Outcomes from meeting notes that his last post never claimed DO count, even if they happened before the last post. Never re-report what the last post already claimed.",
       "- Four to seven report bullets when the evidence supports it; fewer is fine; never invent.",
-      "- Focus = one to three items, ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\"). Order: deadline first, then what blocks someone else, then priority.",
+      "- Focus = one to three items: his still-true focus lines kept verbatim, plus NEW lines ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\"). Order: deadline first, then what blocks someone else, then priority.",
       "- Risks = margin or capacity pressure, and anything that blocks another person, each naming what slips. A date alone is not a risk. If nothing real, the single line \"None today.\"",
-      "- Continuity: each item in his last post's focus is done (report), continued (focus), or a risk. None disappears silently.",
+      "- START FROM HIS LAST POST, not a fresh write (Dan, 2026-09-23; aac-huddle-notes skill). Copy its focus and risk lines, then change only what the evidence changed:",
+      "  - Still true: copy the line WORD FOR WORD, character for character, even where you would phrase it better. Rewording the same fact reads to his team as something new.",
+      "  - Moved: edit only the part that moved (\"due tomorrow\" becomes \"due today\"); the rest of the line stays exactly as he wrote it.",
+      "  - Done: drop it from focus and report it. Cleared risk: delete it.",
+      "  - New: add a line in his register.",
+      "- Continuity: each item in his last post's focus and risks is done (report), kept (verbatim), edited (only the moved part), or cleared. None disappears silently.",
+      "- For every focus or risk line, the evidence field starts with \"kept verbatim\", \"edited: <what moved>\" or \"new\".",
       "- Plain, blunt, short lines. No filler.",
       "",
       "HIS LAST POST (" + (ctx.last ? ctx.last.at.toISOString() : "none found") + "):",
@@ -1027,7 +1044,22 @@ footer{font-size:12px;color:var(--muted)}
       hudStatus("Drafting… (usually 20–60 seconds)");
       const d = await sample.json(hudPrompt({last, done, sent, notes, gaps}), {signal: hudCtl.signal, cache: false});
       renderHuddle(d || {});
-      hudStatus("Draft ready. Edit before you post" + (gaps.length ? ". Could not read: " + gaps.join("; ") + "." : " — every source answered."), gaps.length > 0);
+      // Every draft is kept in board storage so a Claude session can read exactly what was generated
+      // (Dan, 2026-09-25: a draft that lives only in the browser cannot be checked).
+      let saved = "", saveFailed = false;
+      try {
+        if (!db) throw {code:"db_unavailable"};
+        const now = new Date();
+        const id = ymd(now) + "T" + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+        await db.doc("huddle_drafts/" + id).set({
+          draftedAt: now.toISOString(), day: ymd(now), text: hudText,
+          reportHeading: String((d && d.reportHeading) || ""),
+          report: (d && d.report) || [], focus: (d && d.focus) || [], risks: (d && d.risks) || [], dropped: (d && d.dropped) || [],
+          lastPost: last ? {at: last.at.toISOString(), text: last.text} : null, gaps
+        });
+        saved = " Saved for review.";
+      } catch(e){ saved = " Not saved for review (" + ((e && e.code) || "failed") + ")."; saveFailed = true; }
+      hudStatus("Draft ready. Edit before you post" + (gaps.length ? ". Could not read: " + gaps.join("; ") + "." : " — every source answered.") + saved, gaps.length > 0 || saveFailed);
     } catch(e){
       if (e && e.code === "cancelled"){ hudStatus("Stopped."); }
       else hudStatus(SAMPLE_COPY[e && e.code] || ("Draft failed: " + ((e && (e.code || e.message)) || "unknown") + ". Try again."), true);
