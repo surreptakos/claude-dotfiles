@@ -28,6 +28,7 @@ const {
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  quotaFailure, createRunHalt, haltReport,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -662,6 +663,8 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     revParse: async () => null,
     // Issue 654: the Deliver-result classifier is the module's own, the one the generated block carries.
     classifyDelivery,
+    // Issue 812: a run that is never halted unless a test hands in its own.
+    runHalt: createRunHalt(() => {}),
   }, stubs)));
 }
 
@@ -2829,13 +2832,13 @@ test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries 
 // ---- In-wave chaining, driven through the script's own lane dispatch (issue 854) ----
 // The FLEET-LANES block runs with real buildLanes/chainGate and a pipeline that starts every lane
 // at once, as the Workflow runtime does; only the per-kind lanes are mocked.
-async function driveLanes(wave, codeResult) {
+async function driveLanes(wave, codeResult, runHalt = createRunHalt(() => {})) {
   const body = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-LANES');
   const started = [];
   const logs = [];
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn results;\n}`);
   const results = await wrapper(laneScope({
-    wave, log: (m) => logs.push(m), scout: { defaultBranch: 'main' }, buildLanes, chainGate,
+    wave, log: (m) => logs.push(m), scout: { defaultBranch: 'main' }, buildLanes, chainGate, runHalt,
     pipeline: (items, fn) => Promise.all(items.map((item) => fn(item))),
     runCodeLane: async (t) => { started.push(t.number); return codeResult(t); },
     runProbeLane: async () => { throw new Error('no probe here'); },
@@ -2891,6 +2894,96 @@ test(`${FLEET_SCRIPT_REL} pairs Report results by ticket number, not wave positi
   assert.match(src, /const clean = wave\.map\(\(t\) => resultByTicket\.get\(parseInt\(t\.number, 10\)\)/);
   assert.doesNotMatch(src, /results \|\| \[\]\)\[i\]/, 'positional pairing breaks once a lane holds several tickets');
   assert.match(src, /skippedChained: clean\.filter\(r => r\.chainSkipped\)/);
+});
+
+// ---- A quota or rate-limit failure ends the run (issue 812) ----
+test('quotaFailure recognises the limit messages runs have died on, with their reset time', () => {
+  assert.deepEqual(quotaFailure("You've hit your session limit · resets 9:20am (UTC)"),
+    { reason: 'session limit', resetsAt: '9:20am (UTC)', message: "You've hit your session limit · resets 9:20am (UTC)" });
+  assert.equal(quotaFailure("You've hit your weekly limit · resets 9pm (America/Chicago)").resetsAt, '9pm (America/Chicago)');
+  assert.equal(quotaFailure('gh: API rate limit already exceeded for user ID 1').reason, 'rate limit');
+  assert.equal(quotaFailure('HTTP 429 Too Many Requests').reason, 'rate limit');
+  assert.equal(quotaFailure('rate_limit_error: status 429').resetsAt, null);
+  for (const ordinary of ['no reply matching its schema', 'issue #429 is still open', '', null]) {
+    assert.equal(quotaFailure(ordinary), null, `${ordinary} is an ordinary failure, not a halt`);
+  }
+});
+
+// Replay of run wf_2e08b873-d92 (2026-09-16): the first implementer hit the weekly limit and the
+// run went on to launch 17 more sub-agents that all failed the same way. Four code tickets, two
+// lanes at a time; #201's implementer rejects on the limit while #202's is in flight and settles
+// after it. The real FLEET-CODE-LANE and FLEET-LANES blocks run against the script's own halt.
+const QUOTA_REPLAY = {
+  wave: [201, 202, 203, 204],
+  message: "You've hit your weekly limit · resets 9pm (America/Chicago)",
+  // label -> [delay ms, outcome]; anything else the account is asked for fails on the limit.
+  agents: {
+    'impl:#201.1': [5, 'reject'],
+    'impl:#202.1': [25, { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: ['202 found a thing'] }],
+  },
+};
+
+test(`${FLEET_SCRIPT_REL} a quota failure halts the run: at most one attempt per ticket, no new ticket starts (issue 812)`, async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const logs = [];
+  // The halt the fleet script builds for itself, from its own generated block.
+  // eslint-disable-next-line no-new-func
+  const scriptHalt = new Function(`${generatedBlock()}\nreturn { createRunHalt, haltReport };`)();
+  const runHalt = scriptHalt.createRunHalt((m) => logs.push(m));
+  const calls = [];
+  const agentMock = async (_prompt, opts) => {
+    calls.push(opts.label);
+    const [delay, outcome] = QUOTA_REPLAY.agents[opts.label] || [0, 'reject'];
+    await new Promise((r) => setTimeout(r, delay));
+    if (outcome === 'reject') throw new Error(QUOTA_REPLAY.message);
+    return outcome;
+  };
+  const helpers = loadStableHelpers(FLEET_SCRIPT);
+  const runCodeLane = await instantiateCodeLane(extractCodeLane(src), agentMock, logs, {
+    runHalt, stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
+    priorFindingsBlock: helpers.priorFindingsBlock, unmetCriteriaOf: helpers.unmetCriteriaOf,
+    gitSpelling: helpers.gitSpelling, worktreeMismatch,
+  });
+  const lanes = new AsyncFunction('scope', `with (scope) {\n${extractMarked(src, 'FLEET-LANES')}\nreturn results;\n}`);
+  const wave = QUOTA_REPLAY.wave.map((number) => ({ number, kind: 'code', title: 't', criteria: '', blockedBy: [] }));
+  const results = await lanes(laneScope({
+    wave, runHalt, buildLanes, chainGate, log: (m) => logs.push(m), scout: { defaultBranch: 'main' },
+    runCodeLane,
+    // Two lanes at a time, so #203 and #204 are still queued when the limit is hit.
+    pipeline: async (items, fn) => {
+      const out = [];
+      let next = 0;
+      const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]); } };
+      await Promise.all([worker(), worker()]);
+      return out;
+    },
+  }));
+
+  assert.deepEqual(calls, ['impl:#201.1', 'impl:#202.1'],
+    'after the quota failure no retry, verifier, push, deliverer or new ticket may start');
+  const byTicket = new Map(results.map((r) => [r.ticket, r]));
+  assert.ok(byTicket.get(201).verdict.failures.some((f) => /run halted on the weekly limit \(resets 9pm \(America\/Chicago\)\)/.test(f)));
+  assert.equal(byTicket.get(202).done, false, 'the in-flight implementer settles, and nothing is started on its branch');
+  assert.deepEqual(byTicket.get(202).discoveries, ['202 found a thing'], 'its discoveries still reach the run result');
+  const report = scriptHalt.haltReport(runHalt.get(), results);
+  assert.deepEqual(report.notAttempted, [203, 204]);
+  assert.deepEqual([report.halt.reason, report.halt.resetsAt, report.halt.who],
+    ['weekly limit', '9pm (America/Chicago)', 'impl:#201.1']);
+  assert.equal(logs.filter((m) => m.startsWith('RUN HALTED')).length, 1, 'the halt is logged once');
+});
+
+test(`${FLEET_SCRIPT_REL} a halted run does not start the discoveries writer and keeps the bullets in the result (issue 812)`, async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const discoveryReport = runHalt\.halted\(\) && allDiscoveries\.length\s*\n\s*\? \{[^}]*error: `followups-writer not started/,
+    'the writer must not be spawned once the run is halted');
+  assert.match(src, /discoveryList: followupsError \? allDiscoveries : undefined/, 'the bullets must travel in the run result');
+  assert.match(src, /\.\.\.haltReport\(runHalt\.get\(\), clean\)/, 'the run result names the halt and the tickets not attempted');
+  // A writer that dies on the limit itself is the halt too.
+  const runHalt = createRunHalt(() => {});
+  const { result } = await driveReport(FLEET_SCRIPT, async () => { throw new Error("You've hit your session limit · resets 6pm (UTC)"); },
+    ['a bullet'], {}, { runHalt, unusableReason: (who, detail) => `${who} output unusable: ${detail}` });
+  assert.match(result.error, /session limit/);
+  assert.equal(runHalt.get().resetsAt, '6pm (UTC)');
 });
 
 // ---------------------------------------------------------------------------

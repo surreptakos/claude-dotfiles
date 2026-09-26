@@ -876,6 +876,68 @@ function gitSpelling(instrument, args) {
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
 
+/**
+ * Issue 812: an agent() rejection that says the account is out of quota or rate-limited is
+ * terminal for the whole run - every later agent fails on the same message, so retrying burns the
+ * attempts and the report writers for nothing (runs wf_2e08b873-d92, wf_679047c4-1e0,
+ * wf_4dd3dfea-a31). Pure: the rejection's message in, null when it is an ordinary failure, else
+ * { reason, resetsAt, message } - reason is the limit named in the message ("session limit",
+ * "weekly limit", "rate limit"), resetsAt the reset time it carries or null, message its first
+ * line. A bare "429" is not enough (issue #429 is a ticket, not an HTTP status): it must read as
+ * a status or sit next to "Too Many Requests".
+ */
+function quotaFailure(message) {
+  const text = String(message == null ? '' : message);
+  let reason = null;
+  const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
+  if (hit) reason = hit[1].toLowerCase();
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
+  if (!reason) return null;
+  const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);
+  const resetsAt = reset ? reset[1].trim().replace(/[.,;]+$/, '').slice(0, 80) || null : null;
+  const first = text.split('\n').map((l) => l.trim()).find(Boolean) || '';
+  return { reason, resetsAt, message: first.slice(0, 300) };
+}
+
+/**
+ * Issue 812: the run-wide halt. `note(message, who)` records the first quota failure (logging it
+ * once through `log`) and answers whether this message was one; `halted()` is what every lane
+ * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
+ * is the line a ticket's failures carry when the halt stopped its retries.
+ */
+function createRunHalt(log) {
+  let halt = null;
+  return {
+    note(message, who) {
+      const q = quotaFailure(message);
+      if (!q) return false;
+      if (!halt) {
+        halt = Object.assign({ who: who || null }, q);
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      }
+      return true;
+    },
+    halted() { return halt !== null; },
+    get() { return halt; },
+    failure() {
+      return halt ? `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812` : '';
+    },
+  };
+}
+
+/**
+ * Issue 812: the run result's halt fields. Pure: the halt record (or null) and the per-ticket
+ * results in; the terminal reason and reset time named once, and the tickets that never started.
+ */
+function haltReport(halt, results) {
+  const list = Array.isArray(results) ? results.filter(Boolean) : [];
+  return {
+    halt: halt ? { reason: halt.reason, resetsAt: halt.resetsAt || null, message: halt.message, who: halt.who || null } : null,
+    notAttempted: list.filter((r) => r.notAttempted).map((r) => r.ticket),
+  };
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -905,4 +967,5 @@ module.exports = {
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  quotaFailure, createRunHalt, haltReport,
 };

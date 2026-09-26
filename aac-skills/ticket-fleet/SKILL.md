@@ -6,10 +6,10 @@ description: >
   asks to run the ticket fleet or clear a wave of ready-for-agent tickets, or an orchestrator
   worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-26T06:19:14Z"
-  previous-modified: "2026-09-26T06:15:25Z"
+  modified: "2026-09-26T06:26:08Z"
+  previous-modified: "2026-09-26T06:21:52Z"
   revision: "51"
-  content-sha: "ebe1a382abe1"
+  content-sha: "d16f24b25771"
 ---
 
 # ticket-fleet
@@ -102,6 +102,7 @@ behind them. Never launch a second wave while one is running in the same repo; w
    | `inconsistent` | verified and pushed, but the deliverer could not find the branch | deliver it by hand or via `finishRunId` |
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
+   | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time | relaunch after the reset; bullets are in `discoveryList` |
    | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / waiting on the owner after a handoff | nothing |
 
    Done when every ticket the scout listed sits in one row above.
