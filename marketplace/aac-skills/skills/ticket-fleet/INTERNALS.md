@@ -196,14 +196,22 @@ broken code because of it).
 
 Two halves:
 
-- **Prevention.** The implementer, prober and both verifier prompts share one rail (`PYTHON_RAIL`
-  in the script): never `pip install -e` from a worktree, and never run a bootstrap or SessionStart
-  script that does. The worktree's own code is what pytest reads; a test that *spawns* a
-  subprocess gets it from `PYTHONPATH=<worktree>/src` in that command's environment. The probe
+- **Prevention: seed, don't repair (issue 624).** The implementer, prober and both verifier
+  prompts share one rail (`PYTHON_RAIL` in the script): before any Python command, run
+  `editable-install-guard.js seed` from inside the worktree. The idea is `max-sixty/worktrunk`'s
+  (a new worktree is handed a copy of the build cache rather than building into a shared one),
+  not its binary: the seed makes `<worktree>/.venv` with `--system-site-packages` and copies the
+  shared install's pointer files and dist-info into it, rewritten to name the worktree. The code
+  then imports from the worktree with no `PYTHONPATH`, and an install through `.venv/bin/python`
+  lands in that venv and goes with the worktree. A `.gitignore` of `*` inside the venv keeps the
+  tree clean. `tools/editable-install-guard.test.js` reproduces the capture with a real `pip
+  install -e` from a real worktree first, then shows the same install from a seeded worktree
+  leaves the shared pointer alone. Bare-interpreter `pip install -e` from a worktree stays
+  forbidden; where no seed tool exists, the old `PYTHONPATH=<worktree>/src` rule applies. The probe
   lane's verifier carries it too (issue 435) and carries more besides: it is the one agent that is
   *not* worktree-isolated, so a probe criterion naming `pip install -e` is re-run as a read - it
   quotes what the prober got rather than installing into the orchestrator's own checkout.
-- **Repair.** Once the wave has drained, the run executes `editable-install-guard.js check --main
+- **Repair, now only the backstop for the SessionStart-hook path below.** Once the wave has drained, the run executes `editable-install-guard.js check --main
   . --repair` (the file alongside SKILL.md, exercised by
   `tools/editable-install-guard.test.js` in `claude-dotfiles`, which adds a worktree, repoints the
   pointer, deletes the worktree and shows the import break and come back). It rewrites a pointer

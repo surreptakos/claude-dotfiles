@@ -1499,6 +1499,57 @@ async function treeGuardCheck(label, ticketNumber) {
 // verifier would reach for first: the branch under review, or the tip a probe is about.
 const orchestratorTreeRail = (leakExample) => `Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${leakExample} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.`
 
+// [FLEET-EDITABLE-GUARD-START]
+// Every place a copy of the guard can be, in probe order, each with why it would be there. Literal
+// paths only - a $VAR in the command is refused by the Bash tool as an operand computed at run
+// time - so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's copy is reachable only once
+// somebody has copied it into the served repo. `.claude/workflows/` is the second entry because
+// that is where a served repo already copies the fleet script itself to launch it (SKILL.md,
+// "Copy-into-cwd step"): copying the guard in the same breath is the cheapest way for a fork with
+// no `tools/` convention to have one (issue 435).
+const EDITABLE_GUARD_HOMES = [
+  ['tools/editable-install-guard.js', "the served repo's own copy - the durable one, it survives every launch and every plugin update"],
+  ['.claude/workflows/editable-install-guard.js', 'beside the fleet script a served repo copies out of the plugin to launch a run - copy both files, not just ticket-fleet.js'],
+  ['aac-skills/ticket-fleet/editable-install-guard.js', 'the plugin source, present only when the served repo IS claude-dotfiles'],
+  ['~/.claude/skills/ticket-fleet/editable-install-guard.js', 'where a cloud bootstrap that installs this skill leaves it'],
+]
+
+/** The paths the post-wave probe tries, caller override first. */
+function editableGuardPaths(override) {
+  return [override].concat(EDITABLE_GUARD_HOMES.map(h => h[0])).filter(Boolean)
+}
+
+/** The one shell command that runs the first copy it finds, or exits 3 when there is none. */
+function editableGuardCommand(paths, main) {
+  return paths
+    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${main} --repair`)
+    .join('; ') + '; exit 3'
+}
+
+/**
+ * The same probe, run by a worktree agent from INSIDE its own worktree before any Python command
+ * (issue 624): `seed` gives that worktree a `.venv` holding a copy of the install that names it.
+ * The paths are the same relative ones - a worktree is a checkout of the served repo, so its copy
+ * of the tool sits where the main checkout's does.
+ */
+function editableSeedCommand(paths) {
+  return paths
+    .map(p => `[ -f ${p} ] && exec node ${p} seed`)
+    .join('; ') + '; exit 3'
+}
+
+/**
+ * What a run says when the probe found no copy. The old message said only that it had skipped and
+ * to "copy it into the served repo's tools/", which left the reader to work out which file, from
+ * where, and under what name - so on the repo the incident happened in, nothing was ever copied
+ * (issue 435). This names each exact path, in preference order, and the command that creates one.
+ */
+function editableGuardAbsentMessage(paths, main) {
+  const homes = EDITABLE_GUARD_HOMES.map(h => `  ${h[0]}   (${h[1]})`).join('\n')
+  return `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${paths.join(' or ')} (claude-dotfiles issue 413), so if a worktree of this wave captured this container's editable install it stays captured and the next session's imports fail for no visible reason.\nCreate ONE of these, relative to the repository root this run serves (--main ${main}), first for preference:\n${homes}\nFrom a session with the aac-skills plugin loaded, the first one is:\n  mkdir -p tools && cp "$CLAUDE_PLUGIN_ROOT/skills/ticket-fleet/editable-install-guard.js" tools/editable-install-guard.js\nOr point the next run straight at a copy you already have: editableGuardScript: '<path>'.`
+}
+// [FLEET-EDITABLE-GUARD-END]
+
 // ---------------------------------------------------------------------------
 // Python editable-install rail (claude-dotfiles issue 413)
 // ---------------------------------------------------------------------------
@@ -1509,12 +1560,18 @@ const orchestratorTreeRail = (leakExample) => `Orchestrator-tree rule (aac-routi
 // with ModuleNotFoundError on main while the code was fine, and three subprocess-spawning
 // tests read as broken code instead of a broken environment.
 //
-// Prevention is this one sentence in both worktree-facing prompts: tests find the package
-// through the repo's own pytest config and, for subprocess-spawning tests, PYTHONPATH - never
-// through an install. Repair is the guard that runs once the wave has drained, below, because
-// the served repo's own SessionStart hook can fire inside a fleet worktree and install from
-// there before any prompt of ours is read.
-const PYTHON_RAIL = `Python editable-install rail (claude-dotfiles issue 413, non-negotiable): this container has ONE interpreter and ONE editable-install pointer, shared with the main checkout - never run \`pip install -e\` / \`pip install --editable\` from your worktree, and never run a bootstrap or SessionStart script that does. It repoints that single install at your scratch path, and deleting the worktree then orphans it: every \`python -c 'import <pkg>'\` in the container fails with ModuleNotFoundError afterwards while the code on disk is fine. Your worktree's code is already what runs - pytest reads the repo's own config from it - and a test that SPAWNS a subprocess picks it up with \`PYTHONPATH=<your worktree>/src\` in that command's environment. If an import fails, set PYTHONPATH; do not install anything.`
+// Prevention is seeding, not a prohibition (issue 624, the idea taken from max-sixty/worktrunk,
+// whose new worktrees are handed a copy of the build cache instead of building into a shared
+// one): every agent that works in a worktree first runs `editable-install-guard.js seed` from
+// inside it, which gives that worktree its own `.venv` holding a copy of the install rewritten to
+// name the worktree. Its code imports from there with no PYTHONPATH, and an install run through
+// that venv lands in it and is deleted with the worktree - the shared pointer is never written.
+// tools/editable-install-guard.test.js reproduces the capture with a real pip first, then shows a
+// seeded worktree cannot cause it. Repair - the guard that runs once the wave has drained, below -
+// stays only as the backstop for the path no prompt reaches: the served repo's own SessionStart
+// hook firing inside a fleet worktree and installing with the shared interpreter before any
+// prompt of ours is read.
+const PYTHON_RAIL = `Python worktree seed (claude-dotfiles issues 413 and 624, non-negotiable): this container has ONE interpreter whose site-packages holds ONE editable-install pointer, shared with the main checkout. A \`pip install -e\` run with that bare interpreter from a worktree repoints it at the worktree, and deleting the worktree then orphans it: every \`python -c 'import <pkg>'\` in the container fails with ModuleNotFoundError while the code on disk is fine. So before any Python command, seed your worktree's own environment by running this from INSIDE that worktree: \`${editableSeedCommand(editableGuardPaths(cfg.editableGuardScript))}\`. It prints one line of JSON. When it names a \`python\`, your worktree now has a \`.venv\` holding a copy of the install that names YOUR worktree: run every Python command, pytest and any install as \`.venv/bin/python -m <module>\`, and put \`.venv/bin\` first on PATH for a test that spawns a subprocess - an install through that venv lands in it and goes with the worktree. \`project: null\` means this repo is not a Python package: carry on. Whatever it printed, never run \`pip install -e\` / \`pip install --editable\` with the bare \`python\`, \`python3\` or \`pip\`, and never run a bootstrap or SessionStart script that does. If it exited 3 (no seed tool in this checkout) or 2 (could not seed), install nothing at all: pytest reads the repo's own config from your worktree, and a test that SPAWNS a subprocess picks your code up with \`PYTHONPATH=<your worktree>/src\` in that command's environment.`
 
 // ---------------------------------------------------------------------------
 // Scratch files: one scratchpad per run, not one per worker (claude-dotfiles issue 439)
@@ -2607,50 +2664,13 @@ const results = (grouped || []).flat()
 await treeGuardCheck('pre-report', 0)
 assertNoBreach()
 
-// [FLEET-EDITABLE-GUARD-START]
-// Every place a copy of the guard can be, in probe order, each with why it would be there. Literal
-// paths only - a $VAR in the command is refused by the Bash tool as an operand computed at run
-// time - so `${CLAUDE_PLUGIN_ROOT}` cannot be probed and the plugin's copy is reachable only once
-// somebody has copied it into the served repo. `.claude/workflows/` is the second entry because
-// that is where a served repo already copies the fleet script itself to launch it (SKILL.md,
-// "Copy-into-cwd step"): copying the guard in the same breath is the cheapest way for a fork with
-// no `tools/` convention to have one (issue 435).
-const EDITABLE_GUARD_HOMES = [
-  ['tools/editable-install-guard.js', "the served repo's own copy - the durable one, it survives every launch and every plugin update"],
-  ['.claude/workflows/editable-install-guard.js', 'beside the fleet script a served repo copies out of the plugin to launch a run - copy both files, not just ticket-fleet.js'],
-  ['aac-skills/ticket-fleet/editable-install-guard.js', 'the plugin source, present only when the served repo IS claude-dotfiles'],
-  ['~/.claude/skills/ticket-fleet/editable-install-guard.js', 'where a cloud bootstrap that installs this skill leaves it'],
-]
-
-/** The paths the post-wave probe tries, caller override first. */
-function editableGuardPaths(override) {
-  return [override].concat(EDITABLE_GUARD_HOMES.map(h => h[0])).filter(Boolean)
-}
-
-/** The one shell command that runs the first copy it finds, or exits 3 when there is none. */
-function editableGuardCommand(paths, main) {
-  return paths
-    .map(p => `[ -f ${p} ] && exec node ${p} check --main ${main} --repair`)
-    .join('; ') + '; exit 3'
-}
-
-/**
- * What a run says when the probe found no copy. The old message said only that it had skipped and
- * to "copy it into the served repo's tools/", which left the reader to work out which file, from
- * where, and under what name - so on the repo the incident happened in, nothing was ever copied
- * (issue 435). This names each exact path, in preference order, and the command that creates one.
- */
-function editableGuardAbsentMessage(paths, main) {
-  const homes = EDITABLE_GUARD_HOMES.map(h => `  ${h[0]}   (${h[1]})`).join('\n')
-  return `Editable-install guard SKIPPED: no copy of editable-install-guard.js at ${paths.join(' or ')} (claude-dotfiles issue 413), so if a worktree of this wave captured this container's editable install it stays captured and the next session's imports fail for no visible reason.\nCreate ONE of these, relative to the repository root this run serves (--main ${main}), first for preference:\n${homes}\nFrom a session with the aac-skills plugin loaded, the first one is:\n  mkdir -p tools && cp "$CLAUDE_PLUGIN_ROOT/skills/ticket-fleet/editable-install-guard.js" tools/editable-install-guard.js\nOr point the next run straight at a copy you already have: editableGuardScript: '<path>'.`
-}
-// [FLEET-EDITABLE-GUARD-END]
 
 // ---- editable-install guard (claude-dotfiles issue 413) ----
 // Every worktree of this wave is gone by now, so this is the moment the damage is visible: a
-// pointer file in site-packages naming a scratch checkout that no longer exists. Prompts cannot
-// prevent all of it - the served repo's SessionStart hook installs before any agent of ours
-// reads a word - so the wave repairs what it caused instead of leaving the next session to
+// pointer file in site-packages naming a scratch checkout that no longer exists. Seeding (the
+// PYTHON_RAIL, issue 624) prevents every install an agent of ours runs; it cannot reach the
+// served repo's SessionStart hook, which installs with the shared interpreter before any agent
+// reads a word - so for that one path the wave still repairs what it caused instead of leaving the next session to
 // debug a ModuleNotFoundError that looks like broken code. The guard rewrites the pointer only;
 // it never runs pip here, because `pip install -e` writes .egg-info into the orchestrator's own
 // tree and that is exactly what checkpoint 4 above just cleared.

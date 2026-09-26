@@ -144,6 +144,9 @@ test('the fleet prompts carry the editable-install rail and no pip install -e ag
   assert.ok(rail, 'the rail both worktree-facing prompts share must be one named constant');
   assert.match(rail[0], /PYTHONPATH=<your worktree>\/src/, 'the rail must say how a test finds the package from a worktree');
   assert.match(rail[0], /never run \\`pip install -e\\`/, 'the rail must forbid the install outright');
+  assert.ok(rail[0].includes('${editableSeedCommand(editableGuardPaths(cfg.editableGuardScript))}'),
+    'the rail must have every worktree agent seed its worktree before any Python command (issue 624)');
+  assert.match(rail[0], /\.venv\/bin\/python -m <module>/, 'and say which interpreter runs in a seeded worktree');
   // Every agent the fleet runs inside a worktree: the two the ticket names, plus the prober,
   // which is worktree-isolated too and runs whatever commands its ticket asks for.
   for (const [prompt, tail] of [
@@ -199,7 +202,7 @@ function fleetEditableGuardBlock() {
     "the fleet script's editable-guard block");
   // eslint-disable-next-line no-new-func
   return new Function(`${block}
-return { editableGuardPaths, editableGuardCommand, editableGuardAbsentMessage };`)();
+return { editableGuardPaths, editableGuardCommand, editableSeedCommand, editableGuardAbsentMessage };`)();
 }
 
 // Issue 435: the wave repaired nothing on the repo the incident happened in, because none of the
@@ -231,5 +234,89 @@ test('a served repo with no guard copy is told the exact path to create, and the
     assert.equal(found.status, 0, `a repo with no pyproject.toml is a clean no-op: ${found.stdout}${found.stderr}`);
     assert.match(found.stdout, /nothing to guard/, 'and it reports it as JSON, not as a skip');
   }
+  // The seed command the rail hands every worktree agent probes the same homes (issue 624).
+  const seedProbe = spawnSync('sh', ['-c', fleetEditableGuardBlock().editableSeedCommand(paths)],
+    { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: repo }) });
+  assert.equal(seedProbe.status, 0, `the seed probe must find the same copy: ${seedProbe.stdout}${seedProbe.stderr}`);
+  assert.match(seedProbe.stdout, /nothing to seed/, 'and a repo with no Python package is a quiet no-op');
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+/** True when `exe` can run a real offline PEP 660 editable install: pip and setuptools >= 64. */
+function canPipEditable(exe) {
+  if (!exe) return false;
+  const r = spawnSync(exe, ['-c', 'import setuptools,pip,sys;sys.exit(int(setuptools.__version__.split(".")[0])<64)'], { encoding: 'utf8' });
+  return r.status === 0;
+}
+
+// Issue 624: seed the worktree instead of repairing afterwards. The ticket's order is followed
+// literally - the capture is reproduced first, with a real `pip install -e` from a real worktree
+// against a real interpreter (a venv standing in for the container's one shared interpreter, so
+// the machine's own site-packages is never touched), and only then is a seeded worktree shown to
+// install without capturing anything.
+test('a real pip install -e from a worktree captures the shared install; from a seeded worktree it cannot (issue 624)',
+  { skip: canPipEditable(PY) ? false : 'needs python with pip and setuptools>=64' }, () => {
+    const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'editable-seed-')));
+    const main = path.join(root, 'main');
+    fs.mkdirSync(path.join(main, 'src', 'fixturepkg'), { recursive: true });
+    fs.writeFileSync(path.join(main, 'pyproject.toml'), '[build-system]\nrequires = ["setuptools>=64"]\nbuild-backend = "setuptools.build_meta"\n\n[project]\nname = "fixture-pkg"\nversion = "0.1.0"\n');
+    fs.writeFileSync(path.join(main, 'src', 'fixturepkg', '__init__.py'), 'VALUE = "main"\n');
+    fs.writeFileSync(path.join(main, '.gitignore'), '*.egg-info/\nbuild/\n__pycache__/\n');
+    const git = (...a) => {
+      const r = spawnSync('git', ['-C', main, ...a], { encoding: 'utf8' });
+      assert.equal(r.status, 0, `git ${a.join(' ')} failed: ${r.stderr}`);
+      return r.stdout;
+    };
+    git('init', '-q');
+    git('config', 'user.email', 'test@example.invalid');
+    git('config', 'user.name', 'editable seed test');
+    git('add', '-A');
+    git('commit', '-qm', 'fixture');
+
+    // The shared interpreter: every checkout's `python -m pip` writes into its one site-packages.
+    const shared = path.join(root, 'shared');
+    assert.equal(spawnSync(PY, ['-m', 'venv', '--system-site-packages', '--without-pip', shared]).status, 0, 'shared venv');
+    const sharedPy = path.join(shared, process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+    const sharedSite = guard.sitePackagesOf(sharedPy)[0];
+    const pipEditable = (py, cwd) => {
+      const r = spawnSync(py, ['-m', 'pip', 'install', '-q', '--no-build-isolation', '--no-deps', '--no-index', '-e', '.'],
+        { cwd, encoding: 'utf8', env: Object.assign({}, process.env, { PIP_DISABLE_PIP_VERSION_CHECK: '1' }) });
+      assert.equal(r.status, 0, `pip install -e from ${cwd} failed: ${r.stdout}${r.stderr}`);
+    };
+    const importWith = (py) => spawnSync(py, ['-c', 'import fixturepkg;print(fixturepkg.__file__)'], { cwd: root, encoding: 'utf8' });
+    pipEditable(sharedPy, main);
+    assert.match(importWith(sharedPy).stdout, new RegExp(`^${escapeRegExp(main)}`), 'the main checkout is what the shared install names');
+
+    // 1. The capture, reproduced: install from a worktree, delete the worktree, main no longer imports.
+    const captured = path.join(root, 'wt-capture');
+    git('worktree', 'add', '-q', '--detach', captured);
+    pipEditable(sharedPy, captured);
+    assert.match(importWith(sharedPy).stdout, new RegExp(`^${escapeRegExp(captured)}`), 'the worktree install captured the shared pointer');
+    git('worktree', 'remove', '--force', captured);
+    const orphaned = importWith(sharedPy);
+    assert.notEqual(orphaned.status, 0, 'deleting the capturing worktree must orphan the install');
+    assert.match(orphaned.stderr, /ModuleNotFoundError/);
+    pipEditable(sharedPy, main); // put the shared install back the durable way before part 2
+
+    // 2. The seed: the same install from a seeded worktree lands in the worktree's own venv.
+    const seeded = path.join(root, 'wt-seeded');
+    git('worktree', 'add', '-q', '--detach', seeded);
+    const r = spawnSync(process.execPath, [GUARD, 'seed', '--worktree', seeded, '--python', PY, '--site-packages', sharedSite], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `seed must exit 0: ${r.stdout}${r.stderr}`);
+    const report = JSON.parse(r.stdout.trim());
+    assert.equal(report.python, path.join(seeded, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python'));
+    assert.deepEqual(report.seeded.map((s) => s.to), [path.join(seeded, 'src')], 'the copied pointer must name the worktree');
+    assert.match(importWith(report.python).stdout, new RegExp(`^${escapeRegExp(seeded)}`), 'before any install, the seeded venv already imports the worktree\'s code');
+    const show = spawnSync(report.python, ['-m', 'pip', 'show', 'fixture-pkg'], { encoding: 'utf8' });
+    assert.equal(show.status, 0, `the seeded venv must carry the install metadata too, so a dependency check passes: ${show.stderr}`);
+    assert.equal(git('-C', seeded, 'status', '--porcelain'), '', 'a seeded worktree must stay clean for the tree guard');
+
+    pipEditable(report.python, seeded);
+    assert.match(importWith(sharedPy).stdout, new RegExp(`^${escapeRegExp(main)}`), 'an install from the seeded worktree must not touch the shared pointer');
+    git('worktree', 'remove', seeded); // no --force: the seeded venv must not block the cleanup verifiers run
+    const after = importWith(sharedPy);
+    assert.equal(after.status, 0, `the main checkout must still import once the seeded worktree is gone: ${after.stderr}`);
+    const check = runGuard(['check', '--main', main, '--site-packages', sharedSite]);
+    assert.equal(check.status, 0, `nothing is left to repair: ${check.stdout}`);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
