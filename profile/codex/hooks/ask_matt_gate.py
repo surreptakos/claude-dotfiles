@@ -1479,6 +1479,15 @@ NEGATIVE_STATE_PATTERN = re.compile(
     r"|\bnot (yet )?(on|in) the\b|\bno (review|reviews|review threads|comments|checks|cards?|items?)\b",
     re.IGNORECASE,
 )
+# "No review threads", "no reviews left", "there are no review comments" said about a PR: this is
+# its own rule (not gated on a refusal, unlike NEGATIVE_STATE_PATTERN's "absence" above) because
+# nothing needs to have been refused for the claim to be premature — the reply just never read the
+# reviews. Dan, 2026-09-25: a draft said "no review threads" without ever calling get_reviews.
+REVIEW_ABSENCE_PATTERN = re.compile(
+    r"\bno review threads?\b|\breview threads?:?\s*none\b|\bno (unresolved )?review comments\b"
+    r"|\bno (open )?review(er)?s?( left| pending)?\b(?!\s*(process|policy|guideline))",
+    re.IGNORECASE,
+)
 # What a refused call looks like in a tool result: an HTTP 401/403/404/405/407, or the proxy's and
 # the tool layer's refusal wording. Read from the tool_result blocks of the current turn.
 REFUSED_RESULT_PATTERN = re.compile(
@@ -1520,8 +1529,17 @@ def _turn_refusals(transcript_path: str) -> list[str] | None:
     return refused
 
 
+# A "get_reviews"/"get_review_comments" call is the GitHub MCP tool `pull_request_read` (or the
+# equivalent `gh` wrapper) invoked with that method, not a distinct tool name — so _turn_tool_names
+# also folds the method argument in, as its own entry, whenever this tool is the one called.
+PR_REVIEW_READ_TOOL_NAMES = {"pull_request_read", "mcp__github__pull_request_read"}
+PR_REVIEW_READ_METHODS = {"get_reviews", "get_review_comments"}
+
+
 def _turn_tool_names(transcript_path: str) -> set[str] | None:
-    """Tools the assistant called since the last real user prompt. None when unreadable."""
+    """Tools the assistant called since the last real user prompt. None when unreadable.
+    For `pull_request_read`, the `method` argument is folded in too (e.g. "get_reviews"), so a
+    caller can tell a review read apart from any other use of that one multi-method tool."""
     if not transcript_path:
         return None
     names: set[str] = set()
@@ -1544,7 +1562,12 @@ def _turn_tool_names(transcript_path: str) -> set[str] | None:
                     continue
                 for item in content if isinstance(content, list) else []:
                     if isinstance(item, dict) and item.get("type") == "tool_use":
-                        names.add(str(item.get("name") or ""))
+                        name = str(item.get("name") or "")
+                        names.add(name)
+                        if name in PR_REVIEW_READ_TOOL_NAMES:
+                            method = str((item.get("input") or {}).get("method") or "")
+                            if method in PR_REVIEW_READ_METHODS:
+                                names.add(method)
     except Exception:
         return None
     return names
@@ -1583,6 +1606,8 @@ YES_JEV_QUESTIONS = {
     + YES_JEV_OWN_VOICE,
     "absence": "Does `reply` state that something is missing, absent or not in some state (not on a"
     " board, not merged, no reviews) as a fact?" + YES_JEV_OWN_VOICE,
+    "review-read": "Does `reply` claim there are no PR review threads, reviews or review comments,"
+    " as a fact about the PR's current state?" + YES_JEV_OWN_VOICE,
 }
 YES_JEV_FLOOR = 0.5  # below this Jev says the reply does not itself do it, and the hit is dropped
 YES_JEV_TIMEOUT = 3.0  # seconds; the Stop hook's whole budget is 5
@@ -1651,6 +1676,14 @@ def _yes_lint(
                 "absence",
                 "YES absence stated after a refused call: \"" + absent.group(0)
                 + "\" — a refused write is not a read of state; read the state, or say you could not check"
+            ))
+    if turn_tools is not None and not (turn_tools & PR_REVIEW_READ_METHODS):
+        review_absent = REVIEW_ABSENCE_PATTERN.search(prose)
+        if review_absent:
+            found.append((
+                "review-read",
+                "YES review claim before the read: \"" + review_absent.group(0)
+                + "\" — call get_reviews or get_review_comments before saying there are none"
             ))
     verdicts = _yes_jev_verdicts(prose, [rule for rule, _ in found])
     if verdicts is None:
