@@ -56,7 +56,9 @@ Extends Rule 8. Do not attribute a claim to an unnamed authority. **Experts agre
 
 ## 161. Synonym cycling
 
-Name one actor, system, or tool the same way throughout a document. Rotating synonyms to avoid repetition makes the reader check whether a new thing has been introduced. Rule 143 already governs model and part numbers; this rule extends the same discipline to people, roles, and systems.
+Name one actor, system, or tool the same way in a response or message written to another person — email, Teams, review feedback, and other correspondence a reader will answer. Rotating synonyms there makes the reader check whether a new thing has been introduced, and reads as padding. Rule 143 already governs model and part numbers; this rule extends the same discipline to people, roles, and systems.
+
+In prose deliverables — reports, proposals, scopes, procedures, and other narrative documents — synonym variation is not a fault.
 
 ## 162. Fake-profound kickers and summary recaps
 
