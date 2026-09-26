@@ -246,16 +246,25 @@ post-wave repair is what undoes it.
 
 Every lane returns out-of-scope findings. The Report phase is one writer, and it does not append
 into the session's own checkout: it cuts `agent/fleet-discoveries-wf_<runId>` from
-`origin/<defaultBranch>` in a scratch worktree, appends the bullets to `followupsFile` under a
-`## Run <YYYY-MM-DD> (ticket-fleet <runId>)` heading — the UTC date from `date -u +%F`, so two
-runs are tellable apart without `git log -p` (issue 322) — commits that file alone, and — when
-`deliver` is true —
-pushes the branch and opens a discoveries-only PR against the default branch.
+`origin/<defaultBranch>` in a scratch worktree, then runs `tools/followups-append.js` there to
+append the bullets to `followupsFile` under a `## Run <YYYY-MM-DD> (ticket-fleet <runId>)`
+heading — the UTC date, so two runs are tellable apart without `git log -p` (issue 322) — commits
+that file alone, and — when `deliver` is true — pushes the branch and opens a discoveries-only PR
+against the default branch.
 
 Before issue 360 the writer appended in place and committed nothing, so the bullets rode whatever
 branch the session was on. Run `6aa9c56e` left 136 bullets on an unrelated PR's branch, and the
 `6aa46942` / issue-120 block still on master cites four commits that were never landed — both
 triage chores filed against those bullets found nothing on the default branch.
+
+Even cut onto its own branch, the append itself was still a prose instruction ("append ... never
+rewrite") trusted to an agent editing the file by hand — and one run overwrote `FOLLOW-UPS.md`
+with only its own section, deleting seven earlier runs' worth of bullets (issue 882). The append
+is now `tools/followups-append.js`: a pure function (`appendFollowupsSection`) that only ever
+concatenates onto the end of the existing text, so its output starts with its input by
+construction, the same move `resolve-stamp-conflict.js` and `renumber-harness-upgrade.js` make for
+merge conflicts and upgrade rows. The writer's prompt hands it the bullets as a JSON file and runs
+the script instead of editing `followupsFile` itself.
 
 The run's return value carries `discoveryReport` (`{ branch, sha, prUrl, bullets }`), so a triage
 chore filed for the bullets can name the commit sha and branch even before the PR merges. The
