@@ -77,7 +77,7 @@ and a rebuilt marketplace payload — so the PRs open conflicted and the session
 the same conflict once per PR (run `wf_37f38305-f2e`, PRs #304-#314).
 
 So the deliver stage merges `origin/<defaultBranch>` into the verified branch **before** it
-pushes. A clean merge pushes as before. A conflicting merge has exactly three resolvable classes:
+pushes. A clean merge pushes as before. A conflicting merge has exactly four resolvable classes:
 
 - **Generated files** — a path matching `generatedPaths` (`.claude-plugin/marketplace.json`,
   `marketplace/**`). Resolved with `git checkout --theirs`: the default branch's copy is what
@@ -96,6 +96,14 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly three re
   bootstrap template is rebuilt. It exits non-zero when the branch changed that file by more
   than adding rows, which reclassifies it as a real merge. The same script runs after a CLEAN
   merge too — two rows appended far enough apart merge silently and still collide.
+- **Append-append** (issue 908) — any other file where both sides only added lines at one spot:
+  two tickets appending tests or functions at the end of the same file (run `6ab733a4` lost 840
+  and 812 to it). The stage rewrites the file with `git checkout --conflict=diff3 -- <path>` so
+  the markers carry the merge base, then runs `node tools/resolve-append-conflict.js <path>`: a
+  hunk that left every base line intact resolves as ours followed by theirs, and a hunk that
+  removed or changed a base line (813's two-sided edit) leaves the whole file untouched and exits
+  non-zero, which stops the ticket as before. The gate's full test run below is what proves the
+  two additions live together.
 
 After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
 the ones CLAUDE.md names), then passes a two-part gate before anything is pushed: the

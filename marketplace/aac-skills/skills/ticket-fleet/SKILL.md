@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-26T06:21:52Z'
-  previous-modified: '2026-09-26T06:10:58Z'
-  revision: '50'
-  content-sha: e8bbd0f8dcbe
+  modified: '2026-09-26T06:26:08Z'
+  previous-modified: '2026-09-26T06:21:52Z'
+  revision: '51'
+  content-sha: d16f24b25771
 ---
 
 # ticket-fleet
@@ -58,6 +58,10 @@ behind them. Never launch a second wave while one is running in the same repo; w
 3. **Set the args** (full list below). Always `contractVersion: 2`, `runId`, `invocationId`. Add:
    - `instrument: 'mcp'` from a cloud session. The `gh` instrument is desktop-only; a run that
      cannot measure its environment stops rather than guess (issue 322).
+   - A cloud session whose **root** is the repo checkout. A resumed session can come back rooted
+     at `/home/user`, beside the clones; every worktree agent then fails with `Cannot create agent
+     worktree: not in a git repository`, and a `cd` does not help. The `worktree-canary` agent
+     stops the run before Scout with that cause; start a new session on the repo (issue 892).
    - `deliver: false` on a repo's first wave, to read the scout, lane and verifier output before
      the fleet pushes anything.
    - `testCommand` when the repo's documented gate cannot run where the wave runs. In
@@ -147,8 +151,8 @@ A ticket whose latest comment is an unanswered fleet handoff is parked.
 
 Discovery-triage chores share one lane so two cannot file the same finding.
 
-**Delivery stops** on a merge conflict outside the three resolvable classes (generated files,
-`SKILL.md` stamp blocks, harness upgrade rows), a failing gate after the merge, red CI, or a
+**Delivery stops** on a merge conflict outside the four resolvable classes (generated files,
+`SKILL.md` stamp blocks, harness upgrade rows, append-append hunks), a failing gate after the merge, red CI, or a
 changes-requested review. A `git merge` the classifier refuses twice still delivers, with the
 refusal noted on the PR.
 
