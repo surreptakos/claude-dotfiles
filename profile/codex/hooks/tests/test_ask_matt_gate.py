@@ -541,6 +541,73 @@ class AskMattGateTests(unittest.TestCase):
                 declared = self.run_claude_declare("s-down", turn["state"]["nonce"], "direct-answer", state_dir)
                 self.assertEqual(declared.returncode, 0, declared.stderr)
 
+    # Issue 843: when Jev could not answer at all, the model picked the route itself, and the reply
+    # must say so with a fixed, checkable opener rather than staying silent about the fallback.
+    def test_jev_unavailable_marks_the_turn_route_unchecked(self) -> None:
+        prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-unchecked", prompt, "off")
+            self.assertTrue(turn["state"]["route_unchecked"])
+            self.assertIn("ROUTE UNCHECKED", turn["context"])
+            self.assertIn(self.gate_module().ROUTE_UNCHECKED_OPENER, turn["context"])
+            # Declaring a route must not erase the finding — the lint has to see it too.
+            declared = self.run_claude_declare(
+                "s-unchecked", turn["state"]["nonce"], "direct-answer", state_dir
+            )
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            self.assertTrue(self._state(state_dir, "s-unchecked")["route_unchecked"])
+
+    def test_jev_answering_leaves_the_turn_checked(self) -> None:
+        prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-checked", prompt, self._canned(kind="question"))
+            self.assertNotIn("route_unchecked", turn["state"])
+            self.assertNotIn("ROUTE UNCHECKED", turn["context"])
+
+    def gate_module(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test_843", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_lint_refuses_an_unchecked_reply_without_the_opener_and_accepts_it_with_one(self) -> None:
+        prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-lint-unchecked", prompt, "off")
+            self.run_claude_declare(
+                "s-lint-unchecked", turn["state"]["nonce"], "direct-answer", state_dir
+            )
+            missing = self.run_presend_lint(
+                "s-lint-unchecked", "Queue empty.\nNext: send it.", state_dir, caveman="keep"
+            )
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("route unchecked: Jev unavailable", missing.stdout)
+            present = self.run_presend_lint(
+                "s-lint-unchecked",
+                "Route unchecked: Jev unavailable.\nQueue empty.\nNext: send it.",
+                state_dir,
+                caveman="keep",
+            )
+            self.assertEqual(present.returncode, 0, present.stdout)
+
+    def test_lint_leaves_a_jev_answered_turn_unaffected(self) -> None:
+        prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-lint-checked", prompt, self._canned(kind="question"))
+            self.run_claude_declare(
+                "s-lint-checked", turn["state"]["nonce"], "direct-answer", state_dir
+            )
+            clean = self.run_presend_lint(
+                "s-lint-checked", "Queue empty.\nNext: send it.", state_dir, caveman="keep"
+            )
+            self.assertEqual(clean.returncode, 0, clean.stdout)
+
     # Issue 841: the model may appeal Jev's route once per turn, and the reply must show it.
     def run_appeal(self, sid: str, nonce: str, wanted: str, reason: str, state_dir: Path,
                    settings: Path | None = None) -> subprocess.CompletedProcess[str]:
@@ -657,6 +724,7 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir)
             # 60 words, article-heavy, one 30-word sentence: fails ultra, passes lite.
             wordy = (
+                "Route unchecked: Jev unavailable.\n"
                 "The relay refused the bill because the policy that owns the approver is the one "
                 "that the owner set to the waiting stage, and the owner agreed to that in chat. "
                 "The fix is in the router. The test covers it. The deploy is queued for the morning "
@@ -1178,7 +1246,9 @@ class AskMattGateTests(unittest.TestCase):
             nonce = self._state(state_dir, "s-clean")["nonce"]
             self.run_claude_declare("s-clean", nonce, "implement", state_dir)
             self.run_presend_lint(
-                "s-clean", "Hook wired. Tests pass.\nNext: reload the session.", state_dir
+                "s-clean",
+                "Route unchecked: Jev unavailable.\nHook wired. Tests pass.\nNext: reload the session.",
+                state_dir,
             )
             # "Tests pass" is a verification claim; it is clean only because a Bash run backs it.
             transcript = self._transcript_with_tools(state_dir, ["Bash"], "Hook wired. Tests pass.")
@@ -1225,7 +1295,9 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-stale"}, state_dir)
             first = self._state(state_dir, "s-stale")["nonce"]
             self.run_claude_declare("s-stale", first, "implement", state_dir)
-            self.run_presend_lint("s-stale", "Clean enough.\nNext: send it.", state_dir)
+            self.run_presend_lint(
+                "s-stale", "Route unchecked: Jev unavailable.\nClean enough.\nNext: send it.", state_dir
+            )
             self.assertEqual(self._state(state_dir, "s-stale")["lint_clean_nonce"], first)
             # Next turn: new nonce, same stamp, and the audit must not accept it.
             self.run_gate("claude-prompt", {"session_id": "s-stale"}, state_dir)
@@ -1430,6 +1502,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("caveman-off", declared.stdout)
             lint = self.run_presend_lint(
                 "s-switch",
+                "Route unchecked: Jev unavailable.\n"
                 "The queue is empty and the deploy is scheduled for the morning."
                 "\nNext: open the deploy log.",
                 state_dir,

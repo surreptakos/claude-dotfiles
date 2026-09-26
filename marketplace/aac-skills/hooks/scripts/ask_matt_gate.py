@@ -697,6 +697,12 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         if jev_route:
             state["jev_route"] = jev_route
             state["flow"] = jev_route
+    else:
+        # Issue 843: `pick` is None only when Jev could not answer at all (down, no credential,
+        # timeout, a malformed reply) — never for a deliberately unrouted prompt, which still gets
+        # a `pick` dict back. The model is picking the route itself this turn, and Dan ruled
+        # (2026-09-25 grill, question 2, answer A) that fallback must not be silent.
+        state["route_unchecked"] = True
     # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
     # so the next user message clears it and the ticket-SET round applies again outside session-end.
     if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
@@ -738,6 +744,12 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
             )
         else:
             context += "Appeals are off: Jev's pick is final. "
+    elif pick is None:
+        context += (
+            f"ROUTE UNCHECKED: Jev could not answer this turn, so you are picking the route "
+            f'yourself. Open your reply with the exact line "{ROUTE_UNCHECKED_OPENER}" — the '
+            "pre-send lint refuses a reply on this turn without it. "
+        )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
     # rules at every caveman level, off included, plus the style rules for the level in force. It is
     # the only enforcement point that can stop the offending message rather than report it: no hook
@@ -1183,6 +1195,9 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "jev_route": jev_route,
             "route_path": state.get("route_path"),
             "appeal": state.get("appeal"),
+            # Issue 843: the prompt hook's finding, not the model's — declaring a route must not
+            # erase it, or the lint never sees an unchecked turn.
+            "route_unchecked": state.get("route_unchecked"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
@@ -1359,6 +1374,28 @@ PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|j
 # material he objected to. Caps sized to the ADHD skill's own five-item list cap.
 INLINE_SPAN_CAP = 4
 PATH_CAP = 3
+
+
+# Issue 843: when Jev could not answer this turn's route Noul at all, the model picked the route
+# itself, and Dan ruled (2026-09-25 grill, question 2, answer A) that fallback must never be silent.
+# The lint is the one enforcement point that can stop the reply rather than report it, so the
+# opener is a checkable literal line, not a self-assertion the model could skip.
+ROUTE_UNCHECKED_OPENER = "route unchecked: Jev unavailable"
+ROUTE_UNCHECKED_PATTERN = re.compile(re.escape(ROUTE_UNCHECKED_OPENER), re.IGNORECASE)
+
+
+def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
+    """[] when Jev answered this turn (or answered nothing needs checking), or the required opener
+    is present; one violation when the turn is unchecked and the reply does not open with it."""
+    if not route_unchecked:
+        return []
+    body = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip()
+    if ROUTE_UNCHECKED_PATTERN.match(body):
+        return []
+    return [
+        f'missing required opener "{ROUTE_UNCHECKED_OPENER}": Jev could not answer this turn, so '
+        "the route was picked by the model, not checked — say so, do not let it pass silently"
+    ]
 
 
 def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
@@ -2263,6 +2300,7 @@ def _lint_draft(path: str, session_id: str = "") -> int:
         + _yes_lint(text, turn_tools, turn_refusals)
         + (_adhd_lint(shaped) if adhd == "on" else [])
         + _caveman_lint(text, mode)
+        + _route_unchecked_lint(text, bool(state.get("route_unchecked")))
     )
     if not violations:
         words = len(_strip_code(text).split())
