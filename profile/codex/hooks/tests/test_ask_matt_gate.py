@@ -611,6 +611,105 @@ class AskMattGateTests(unittest.TestCase):
                 declared = self.run_claude_declare("s-down", turn["state"]["nonce"], "direct-answer", state_dir)
                 self.assertEqual(declared.returncode, 0, declared.stderr)
 
+    # Issue 840: continuation. A turn ends through Stop (which keeps the last question), then the
+    # next message is routed with the continuation Choice riding the same canned request.
+    GRILL = dict(kind="build", settled="unsettled", codebase="repo")
+
+    def _then(self, state_dir: Path, sid: str, reply: str, prompt: str, stub: str) -> dict:
+        transcript = self._transcript(state_dir, reply)
+        self.run_gate("claude-stop", {"session_id": sid, "transcript_path": transcript,
+                                      "stop_hook_active": True}, state_dir)
+        return self._routed_turn(state_dir, sid, prompt, stub)
+
+    def _continuing(self, continuation: str, **picks: str) -> str:
+        answers = json.loads(self._canned(**picks))
+        answers["route.continuation"] = continuation
+        return json.dumps(answers)
+
+    def test_a_bare_letter_after_a_grill_question_keeps_grill_with_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._routed_turn(state_dir, "s-a", "I need a feedback loop, not sure how", self._canned(**self.GRILL))
+            question = "Where should feedback land? A) a file B) an issue"
+            # The tree alone would call "A" a question; continuation keeps the grill.
+            turn = self._then(state_dir, "s-a", question, "A", self._continuing("same", kind="question"))
+            self.assertEqual(turn["state"]["flow"], "grill-with-docs")
+            self.assertIn("continuation=same", turn["state"]["route_path"])
+            self.assertIn("ROUTE PICKED BY JEV: grill-with-docs", turn["context"])
+
+    def test_build_it_after_a_settled_grill_moves_one_step_and_never_further(self) -> None:
+        # The tree's settledness picks between the grill's two map moves; a foggy or unsettled
+        # tree answer still yields a listed move, never tickets or a skip.
+        for settled, route in (("single", "implement"), ("multi", "to-spec"), ("foggy", "to-spec")):
+            with self.subTest(settled=settled), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self._routed_turn(state_dir, "s-b", "I need a feedback loop", self._canned(**self.GRILL))
+                turn = self._then(state_dir, "s-b", "Settled. Anything else?", "build it",
+                                  self._continuing("next", kind="build", settled=settled))
+                self.assertEqual(turn["state"]["flow"], route)
+        moves = {"to-spec": "to-tickets", "to-tickets": "implement", "wayfinder": "to-spec"}
+        for previous, route in moves.items():
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self._routed_turn(state_dir, "s-m", "start", self._canned(kind="question"))
+                state = self._state(state_dir, "s-m")
+                state["flow"] = previous  # a picked route no tree leaf reaches (to-tickets)
+                (state_dir / "claude--s-m.json").write_text(json.dumps(state), encoding="utf-8")
+                turn = self._then(state_dir, "s-m", "Done.", "next", self._continuing("next", kind="question"))
+                self.assertEqual(turn["state"]["flow"], route)
+
+    def test_a_new_topic_routes_from_the_top_of_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._routed_turn(state_dir, "s-n", "I need a feedback loop", self._canned(**self.GRILL))
+            turn = self._then(state_dir, "s-n", "A or B?", "the sync script is crashing",
+                              self._continuing("new", kind="broken"))
+            self.assertEqual(turn["state"]["flow"], "diagnosing-bugs")
+            other = self._then(state_dir, "s-n", "Found it.", "draft the Smith contract",
+                               self._continuing("new", scope="other"))
+            self.assertIsNone(other["state"]["flow"])
+
+    def test_next_step_with_no_map_move_falls_back_to_the_tree(self) -> None:
+        # implement and direct-answer have no next step on the map; "next" never invents one.
+        for previous in (dict(kind="build", settled="single"), dict(kind="question")):
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self._routed_turn(state_dir, "s-x", "start", self._canned(**previous))
+                turn = self._then(state_dir, "s-x", "Built.", "tickets",
+                                  self._continuing("next", kind="review"))
+                self.assertEqual(turn["state"]["flow"], "code-review")
+
+    def test_a_route_stop_reconciled_is_not_continued(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            first = self._routed_turn(state_dir, "s-r", "fix it", "off")
+            self.run_claude_declare("s-r", first["state"]["nonce"], "implement", state_dir)
+            self._then(state_dir, "s-r", "Done.", "and?", "off")  # undeclared: Stop reconciles
+            transcript = self._transcript(state_dir, "Which one?")
+            self.run_gate("claude-stop", {"session_id": "s-r", "transcript_path": transcript}, state_dir)
+            self.assertTrue(self._state(state_dir, "s-r")["flow_reconciled"])
+            # No continuation question is asked: a stub without it still answers, from the top.
+            turn = self._routed_turn(state_dir, "s-r", "A", self._canned(kind="question"))
+            self.assertEqual(turn["state"]["flow"], "direct-answer")
+            self.assertNotIn("route_unchecked", turn["state"])
+
+    def test_continuation_rides_the_one_jev_request_with_the_tree(self) -> None:
+        # One request: a canned map missing either the continuation or a tree answer leaves Jev
+        # unavailable for the whole prompt, correction and route alike.
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._routed_turn(state_dir, "s-1", "I need a feedback loop", self._canned(**self.GRILL))
+            no_tree = json.loads(self._continuing("same"))
+            del no_tree["route.scope"]
+            for stub in (self._canned(), json.dumps(no_tree)):
+                with self.subTest(stub=stub):
+                    state = self._state(state_dir, "s-1")
+                    state["flow"] = "grill-with-docs"
+                    (state_dir / "claude--s-1.json").write_text(json.dumps(state), encoding="utf-8")
+                    turn = self._then(state_dir, "s-1", "A or B?", "A", stub)
+                    self.assertTrue(turn["state"]["route_unchecked"])
+                    self.assertIsNone(turn["state"]["flow"])
+
     # Issue 843: when Jev could not answer at all, the model picked the route itself, and the reply
     # must say so with a fixed, checkable opener rather than staying silent about the fallback.
     def test_jev_unavailable_marks_the_turn_route_unchecked(self) -> None:

@@ -697,8 +697,16 @@ const TRACKER_JOBS = [
   { file: 'board-sweep.yml', label: 'board sweep' },
   { file: 'issue-metadata-audit.yml', label: 'issue metadata audit' },
   { file: 'stale-ref-sweep.yml', label: 'stale-ref sweep' },
-  { file: 'tracker-audit.yml', label: 'tracker audit' },
+  { file: 'tracker-audit.yml', label: 'tracker audit', harness: true },
 ];
+
+/** Whether this repo is expected to run a job at all (issue 891): the harness ships a template
+ *  for it (`harness: true`, a project-harness `templates/` workflow), or this is claude-dotfiles,
+ *  the one repo that runs all five — known by the pull's two files, as the pull nudge knows it.
+ *  A missing workflow the repo was never meant to have is not a `!!`: nothing could clear it. */
+function expectsTrackerJob(j) {
+  return Boolean(j.harness) || (has('sync.ps1') && has('lib/manifest.ps1'));
+}
 
 /** Local sha of the default branch, without a network call: the fetch in gitChecks has already
  *  run, so the remote-tracking ref is current. `origin/HEAD` first (it names the default branch on
@@ -772,7 +780,10 @@ function trackerJobChecks() {
   let slug;
   let branch;
   for (const j of jobs) {
-    if (!has(wf(j))) { warn(`${j.label}: no ${wf(j)} in this repo — nothing runs this job here`); continue; }
+    if (!has(wf(j))) {
+      if (expectsTrackerJob(j)) warn(`${j.label}: no ${wf(j)} in this repo — nothing runs this job here`);
+      continue;
+    }
     if (slug === undefined) {
       slug = parseGithubSlug(tryRun('git', ['remote', 'get-url', 'origin']));
       branch = defaultBranchName();
