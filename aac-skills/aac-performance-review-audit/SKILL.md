@@ -1,44 +1,40 @@
 ---
 name: "aac-performance-review-audit"
-description: "Audit an AAC One Page performance review draft from a reviewing manager and produce the skip-level's email back. Use whenever Dan uploads or points at a performance review draft, revision, or self-appraisal, asks to \"audit,\" \"check,\" or \"gate\" a review, or asks for the rejection or coaching email for one."
+description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-09-24T21:31:18Z"
-  previous-modified: "2026-09-11T22:12:08Z"
-  revision: "2"
-  content-sha: "f5bfd6fde92a"
+  modified: "2026-09-25T23:17:31Z"
+  previous-modified: "2026-09-24T21:31:18Z"
+  revision: "3"
+  content-sha: "ce8418388ae2"
 ---
 
 # AAC performance review audit
 
-Dan Gatsakos (skip-level) receives a review draft from a reviewing manager (Mark Kurland, Nick Remblake, others) about a direct. The audit produces the email Dan sends back. Three gates, in order. Stop at the first gate that fails and produce only that gate's email. One class of problem per round; every fix line names the item (S3, W4, Core Message, Guidance Point 2) and the check it failed. Never mix gates. Never preview the next gate.
+Dan Gatsakos (skip-level) receives a review draft from a reviewing manager (Mark Kurland, Nick Remblake, others) about a direct. The audit produces the email Dan sends back. Three gates, in order. Stop at the first gate that fails and produce only that gate's email: one class of problem per round, and nothing from a later gate. Every fix line names the item (S3, W4, Core Message, Guidance Point 2) and the check it failed.
 
-This file holds the standards, Gate 1, and the style rules. Five files sit beside it: `wr001-lint.js` (the pinned WR-001 linter for the release gate), `review_gate_tools.py` (the Gate 1 check and the docx builder), `Format Rejection Template.docx` (Dan's canonical formatting, md5-checked when the builder reads it), `gate2.md`, and `gate3.md`. Read a gate file when you reach that gate, not before. The "Performance Review Audits" project folder, when mounted, holds prior reviews, self-appraisals, workbooks, comp plans, earlier audits, and loose copies of the same files; use it for evidence, not for procedure. If the folder's copy of the script carries a check this one does not, the folder copy is newer: use it, and bring this one up to match.
+**The standard is `standards.md` in the `aac-review-self-check` skill folder (`../aac-review-self-check/standards.md` from this one). Read it in full before Gate 1.** It is the controlling copy of the rules, the format tests, the meaning checks and the substance list, and the manager's self-check reads the same file.
+
+Beside this file: `review_gate_tools.py` (the Gate 1 check and the docx builder), `Format Rejection Template.docx` (Dan's canonical formatting, md5-checked when the builder reads it), `wr001-lint.js` (the pinned WR-001 linter for the release gate), `gate2.md`, `gate3.md` and `building-the-docx.md`. Read a gate file when you reach that gate, not before. Run the script from this directory so it finds the template:
+
+```
+python3 review_gate_tools.py check REVIEW.docx --end 7/23/2026 --start 7/24/2025 --direct FIRSTNAME
+python3 review_gate_tools.py build BODY.py OUT.docx
+python3 review_gate_tools.py template [OUT.docx]
+```
+
+The "Performance Review Audits" project folder, when mounted, holds prior reviews, self-appraisals, workbooks, comp plans, earlier audits, and loose copies of the same files; use it for evidence, not for procedure. If the folder's copy of the script carries a check this one does not, the folder copy is newer: use it, and bring this one up to match.
 
 ## Before anything
 
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the repeat check in Gate 2 cannot run without it.
-2. Review period: 12 months. First review runs from the start date. Every later review runs from the day after the prior review's period ended (not its delivery date). Compute start and end before running anything.
+2. Compute the period start and end by the review-period rule in `standards.md` before running anything.
 3. One output file: "[Direct] [Year] - Audit of Rev [N].md". Email on top. Below a line reading "Notes for Dan (delete before sending)": file identification, period, gate reached and result, the script output, anything parked for a later gate, and the reason behind every "please confirm." Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
 4. `pip install python-docx --break-system-packages` if the script cannot import it. Page count needs LibreOffice (`soffice`) and `pdfinfo`; if absent pass `--no-render` and count pages another way (say so).
 5. If the manager's draft arrives with its own unanswered "open items" or notes from a drafting tool, those are the manager's to answer. The Gate 1 opener may say so in one sentence, because they are his own document, not a preview of a later gate.
 
-## The standards (controlling)
-
-- Review is third person about the direct, first person for the manager, in every section including the Core Message. No "you" or "your" on the page, and no "his manager" for the reviewer. Guidance stays imperative with possessives removed.
-- SEER = Summarize, Elaborate ("Add details or explain further"), Example, Restate. Exactly four sentences. Sum-Ex = Summarize, Example. Exactly two. One example per item, ever. Example of SEER: "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos." Example of Sum-Ex: "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to." Avoid commas in review cells where possible.
-- Core Message: three sentences at most; Rating (Exceeded Expectations, Met Expectations, Did Not Meet Expectations); Result (Promotion, Vertical Growth, Horizontal Growth, No Change); Ramification (the broad outline of what manager and direct will do next year because of the Result: the target role for a promotion, the parts of the job that change for growth; it can be short, and details may be left to the planning part of the meeting). Form: "[Name]'s results have (exceeded expectations)/(met expectations)/(not met expectations) since (his/her) last review. I am recommending (he/she) (is ready for promotion to X)/(is ready for vertical growth in (his/her) role, in the areas of X)/(is ready for horizontal growth in (his/her) role, in the areas of X)/(maintain (his/her) current role and responsibilities at this time)."
-- Result definitions: Promotion, ready now or during the year. Vertical Growth, more responsibility in areas the direct already works in: the manager delegating his own work down (leadership tasks, meetings, administration, reporting, developing other reps). Horizontal Growth, tasks in areas the direct is not in today. No Change, current role held. A Ramification listing the direct's current accounts is No Change. A Ramification listing the Weaknesses is not a Ramification.
-- Guidance: each point a bullet that opens with an action verb (an older "Guidance Point N:" label is accepted) and names a behavior or work the manager wants next year. No details or measure required yet (Manager Tools, OnePage section 7). One to three sentences. Every Weakness has a Guidance point. Guidance may also carry new work or development no Weakness asked for.
-- Repeat Weaknesses say so in the body: "which was also noted in his last review."
-- One page. Nothing dated after the period end. "Opportunities" means Weaknesses.
-
 ## Gate 1: Format (mechanical)
 
-```
-python3 review_gate_tools.py check REVIEW.docx --end 7/23/2026 --start 7/24/2025 --direct Erich
-```
-
-Use its fix lines verbatim (merge two lines for one item into one line). Add nothing it did not flag. Known limits: an event with no date on the page cannot be caught as late (park it for Gate 3); "rather than" and "instead of" are not flagged (they are usually descriptive contrasts; Gate 2 reads each one for smuggled prescription); the Date field placeholder is a note, not a fix. The first-person check flags "his manager" and the like, and can misfire on a direct who manages people and legitimately reports to someone else.
+Run `review_gate_tools.py check`. Use its fix lines verbatim (merge two lines for one item into one line), and add only what it flagged. Known limits: an event with no date on the page cannot be caught as late (park it for Gate 3); "rather than" and "instead of" are not flagged (they are usually descriptive contrasts; Gate 2 reads each one for smuggled prescription); the Date field placeholder is a note, not a fix; the "his manager" check can misfire on a direct who manages people (see the format tests in `standards.md`).
 
 Gate 1 email:
 
@@ -73,15 +69,15 @@ python3 review_format_check.py verify REVIEW.docx --end END --start START --dire
 
 That script ships with the self-check skill; the project folder has a copy. Three outcomes:
 
-- **VALID.** The manager ran the checks on the version he sent. **Gate 2 is closed.** Do not send him a Gate 2 email, and do not send a fix list for anything Gate 2 would have caught. Carry every remaining finding into Gate 3 and raise it there, in Gate 3's voice, as part of one conversation. Dan's rule, 9/23/26: a manager who ran the check does not get sent back around the same loop.
+- **VALID.** The manager ran the checks on the version he sent. **Gate 2 is closed**: no Gate 2 email and no fix list for anything Gate 2 would have caught. Carry every remaining finding into Gate 3 and raise it there, in Gate 3's voice, as part of one conversation. Dan's rule, 9/23/26: a manager who ran the check does not get sent back around the same loop.
 - **STALE.** He edited the page after stamping. Say so and ask him to rerun the self-check on the version he wants reviewed. That is not a Gate 2 email; it is one line.
 - **NO STAMP.** He did not run it, or his copy predates stamping. Ask for the code. If he says he ran it and has no code, take him at his word, treat it as VALID, and tell Dan the stamp was claimed rather than verified.
 
-When a Gate 2 finding rolls into Gate 3, it also goes to the notes as a gap in the self-check: name the item, the check it failed, and whether the self-check states that check. If it does not, the rule is missing from the self-check and belongs there.
+When a Gate 2 finding rolls into Gate 3, it also goes to the notes as a gap in the self-check: name the item, the check it failed, and whether `standards.md` states that check. If it does not, the rule is missing from the standard both skills read and belongs there.
 
 ## Gate 2: Meaning
 
-Only when the stamp is absent or the manager did not run the self-check. **Read `gate2.md` in this skill directory before writing anything.** It holds every check and the email body.
+Only when the stamp is absent or the manager did not run the self-check. **Read `gate2.md` in this skill directory before writing anything.** It holds the fix-line form and the email body.
 
 ## Gate 3: Consistency
 
@@ -109,15 +105,3 @@ No em dashes. Curly quotes in deliverables. Banned words: land/landed/landing, c
 ## Ask before deviating
 
 If the review or the request does not fit this procedure, ask Dan rather than improvising. Filling a gap is fine; overriding a rule is not. When something was wrong, lead with what was wrong and what caused it.
-
-## The script
-
-`review_gate_tools.py` and `Format Rejection Template.docx` sit next to this file. Run the script from the skill directory so it finds the template:
-
-```
-python3 review_gate_tools.py check REVIEW.docx --end 7/23/2026 --start 7/24/2025 --direct FIRSTNAME
-python3 review_gate_tools.py build BODY.py OUT.docx
-python3 review_gate_tools.py template [OUT.docx]
-```
-
-Needs python-docx. The page count needs LibreOffice and pdfinfo; otherwise pass `--no-render`.
