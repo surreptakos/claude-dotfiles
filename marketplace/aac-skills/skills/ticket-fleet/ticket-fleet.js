@@ -1271,6 +1271,14 @@ const attributed = new Set()
 let guardStatePath = null
 let guardCandidates = ''   // filled in once the wave is known, below
 let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
+// Issue 811: non-null only on the auto+exit-3 path below - the guard tool is absent from the
+// served repo (a cloud container of claude-dotfiles itself has no aac-routines copy of it), so
+// `treeGuard:'auto'` turns the guard off and the run proceeds unwatched. That is a deliberate
+// choice, not a crash, but it used to live in a log line alone; a run whose log nobody reads then
+// looks identical to one where every checkpoint passed. Carrying the reason into the returned
+// report's `inconsistent` list (below) makes "this run had no tree guard" as visible as any other
+// inconsistency, without aborting the run the way `treeGuard:true` still does for the same exit.
+let treeGuardUnusable = null
 
 // A guard agent runs ONE fixed command and hands back its exit code and stdout verbatim. Nothing
 // is left to its judgement, so a paraphrase is detectable: stdout that does not JSON.parse is
@@ -1414,7 +1422,8 @@ if (treeGuardOn) {
   if (baseline && baseline.exitCode === 3) {
     if (cfg.treeGuard === 'auto') {
       treeGuardOn = false
-      log(`Orchestrator-tree guard OFF: ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192 ships the guard tool there). Pass treeGuard:true to make its absence abort instead.`)
+      treeGuardUnusable = `tree-guard: unusable — ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192 ships the guard tool there); guard OFF for this run, so no checkpoint below can catch a root-tree write. Pass treeGuard:true to make its absence abort instead.`
+      log(treeGuardUnusable)
     } else {
       throw new Error(`ticket-fleet run ABORTED before Scout - treeGuard:true but ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192). Add the guard tool to the served repo or run with treeGuard:'auto'.`)
     }
@@ -2784,10 +2793,13 @@ return {
   })),
   // Issue 654: verified, recorded as pushed, and still undelivered because the deliverer could not
   // find the branch. Not a failure - the work may be sitting on origin with no PR, invisible to a
-  // merge pass and re-implemented by the next wave unless someone delivers it by hand.
-  inconsistent: clean.filter(r => r.inconsistency).map(r => ({
-    ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
-  })),
+  // merge pass and re-implemented by the next wave unless someone delivers it by hand. Issue 811
+  // prepends a run-level entry (ticket: null) when the tree-guard baseline itself was unusable, so
+  // "this run had no isolation guard" is as visible as any per-ticket inconsistency.
+  inconsistent: (treeGuardUnusable ? [{ ticket: null, kind: 'tree-guard', branch: null, detail: treeGuardUnusable }] : [])
+    .concat(clean.filter(r => r.inconsistency).map(r => ({
+      ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
+    }))),
   discoveries: allDiscoveries.length,
   // Where the bullets actually live, so a triage chore filed for them can name the commit and
   // the reviewer can merge the discoveries PR without hunting for it (issue 360).
