@@ -1653,10 +1653,11 @@ def verify(job):
     # Repair Service / Inspection RMR (rmr_triggers, computed above for J-33)
     # is what makes a Covered Equipment / Covered Sites tab applicable.
     # WARN, not FAIL, on both halves: like item 30's filename check and
-    # item 33's drawings/placement-plan half, hiding a tab and clearing a
-    # template count are drafter export steps build_package.py does not
-    # automate, so a freshly built (not yet presend-reviewed) package
-    # always carries this until a human does that pass.
+    # item 33's drawings/placement-plan half, these are drafter export
+    # steps. build_package.py hides the inapplicable tabs (issue 376) but
+    # does not clear template counts, so a freshly built package that sells
+    # Repair Service / Inspection can still carry the second half until a
+    # human does that pass.
     tab_by_name = {ws.title: ws for ws in S.wb.worksheets}
     k27_seen = False
     k27_inapplicable = []
