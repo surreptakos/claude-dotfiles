@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-26T06:10:58Z'
-  previous-modified: '2026-09-26T05:08:58Z'
-  revision: '49'
-  content-sha: 53bb915a7fac
+  modified: '2026-09-26T06:21:52Z'
+  previous-modified: '2026-09-26T06:10:58Z'
+  revision: '50'
+  content-sha: e8bbd0f8dcbe
 ---
 
 # ticket-fleet
@@ -96,6 +96,7 @@ behind them. Never launch a second wave while one is running in the same repo; w
    | `inconsistent` | verified and pushed, but the deliverer could not find the branch | deliver it by hand or via `finishRunId` |
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
+   | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time | relaunch after the reset; bullets are in `discoveryList` |
    | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / waiting on the owner after a handoff | nothing |
 
    Done when every ticket the scout listed sits in one row above.

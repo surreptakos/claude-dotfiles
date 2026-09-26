@@ -941,6 +941,68 @@ function gitSpelling(instrument, args) {
   }
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
+
+/**
+ * Issue 812: an agent() rejection that says the account is out of quota or rate-limited is
+ * terminal for the whole run - every later agent fails on the same message, so retrying burns the
+ * attempts and the report writers for nothing (runs wf_2e08b873-d92, wf_679047c4-1e0,
+ * wf_4dd3dfea-a31). Pure: the rejection's message in, null when it is an ordinary failure, else
+ * { reason, resetsAt, message } - reason is the limit named in the message ("session limit",
+ * "weekly limit", "rate limit"), resetsAt the reset time it carries or null, message its first
+ * line. A bare "429" is not enough (issue #429 is a ticket, not an HTTP status): it must read as
+ * a status or sit next to "Too Many Requests".
+ */
+function quotaFailure(message) {
+  const text = String(message == null ? '' : message);
+  let reason = null;
+  const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
+  if (hit) reason = hit[1].toLowerCase();
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
+  if (!reason) return null;
+  const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);
+  const resetsAt = reset ? reset[1].trim().replace(/[.,;]+$/, '').slice(0, 80) || null : null;
+  const first = text.split('\n').map((l) => l.trim()).find(Boolean) || '';
+  return { reason, resetsAt, message: first.slice(0, 300) };
+}
+
+/**
+ * Issue 812: the run-wide halt. `note(message, who)` records the first quota failure (logging it
+ * once through `log`) and answers whether this message was one; `halted()` is what every lane
+ * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
+ * is the line a ticket's failures carry when the halt stopped its retries.
+ */
+function createRunHalt(log) {
+  let halt = null;
+  return {
+    note(message, who) {
+      const q = quotaFailure(message);
+      if (!q) return false;
+      if (!halt) {
+        halt = Object.assign({ who: who || null }, q);
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      }
+      return true;
+    },
+    halted() { return halt !== null; },
+    get() { return halt; },
+    failure() {
+      return halt ? `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812` : '';
+    },
+  };
+}
+
+/**
+ * Issue 812: the run result's halt fields. Pure: the halt record (or null) and the per-ticket
+ * results in; the terminal reason and reset time named once, and the tickets that never started.
+ */
+function haltReport(halt, results) {
+  const list = Array.isArray(results) ? results.filter(Boolean) : [];
+  return {
+    halt: halt ? { reason: halt.reason, resetsAt: halt.resetsAt || null, message: halt.message, who: halt.who || null } : null,
+    notAttempted: list.filter((r) => r.notAttempted).map((r) => r.ticket),
+  };
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -1180,6 +1242,16 @@ function failuresOf(verdict) {
   return [verdict.pass ? 'verifier passed and listed no failures' : 'verifier returned pass=false with no failures listed']
 }
 
+// ---- quota / rate-limit halt (issue 812) ----
+// An agent() rejection that says the account is out of quota or rate-limited ends the run: every
+// later agent fails on the same message, so a retry, a new ticket or a report writer started after
+// it only burns the run (wf_2e08b873-d92 launched 17 more sub-agents after the first weekly-limit
+// failure; two later runs lost FOLLOW-UPS.md to a session limit). Every wrapped agent() catch
+// below hands its error to runHalt.note; every lane asks runHalt.halted() before it starts another
+// attempt or ticket, and agents already in flight settle on their own. The run result then names
+// the reason and reset time once (halt) and the tickets that never started (notAttempted).
+const runHalt = createRunHalt(log)
+
 // ---- the expected tip a verdict is cross-checked against (issue 404) ----
 // A workflow script has no shell of its own, so the tip is read by an agent that runs ONE fixed
 // command and copies its output back - the shape the tree guard already uses, for the same reason:
@@ -1222,6 +1294,7 @@ which prints no marker of its own).`,
     { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
     )
   } catch (err) {
+    runHalt.note((err && err.message) || err, label)
     log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
     return null
   }
@@ -1504,6 +1577,13 @@ async function treeGuardCheck(label, ticketNumber) {
     )
   } catch (err) {
     agentError = unusableReason(`tree-guard:${label}#${ticketNumber}`, (err && err.message) || err)
+    // Issue 812: a guard agent that died on the quota is the run's halt, not an audit verdict. The
+    // run stops starting work and delivers nothing after a halt, so the checkpoint is logged as
+    // not audited instead of throwing the ticket (or, at pre-report, the whole run report) away.
+    if (runHalt.note((err && err.message) || err, `tree-guard:${label}#${ticketNumber}`) === true) {
+      log(`tree-guard:${label}#${ticketNumber} NOT AUDITED - its agent hit the limit the run halted on (issue 812); nothing is delivered after the halt, and the next session should run the guard before trusting this tree.`)
+      return
+    }
   }
   let report = null
   try { report = JSON.parse(String((res && res.stdout) || '')) } catch (e) { report = null }
@@ -1996,8 +2076,10 @@ guardCandidates = wave
 
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
 const runProbeLane = async (t) => {
-  let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null
+  let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null, haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Issue 812: no attempt starts once the run is halted on a quota or rate limit.
+    if (runHalt.halted()) { haltedAt = attempt; break }
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
     // Attempt 1 takes a recorded prober result when the caller supplied one (issue 317); the
     // `||` short-circuits, so no prober agent is started for it. Attempt 2+ always re-probes.
@@ -2028,6 +2110,7 @@ Return structured output only.`,
       { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: cfg.implModel, isolation: 'worktree' }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `probe:#${t.number}.${attempt}`)
       probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
       probe = null
     }
@@ -2073,6 +2156,7 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
         { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
         )
       } catch (err) {
+        runHalt.note((err && err.message) || err, verifyLabel)
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
 
@@ -2098,9 +2182,11 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
     if (lastVerdict.pass) break
   }
 
+  if (haltedAt) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([runHalt.failure()]) }
   const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
   let delivery = null
-  if (done && cfg.deliver) {
+  if (done && cfg.deliver && runHalt.halted()) deliveryFailure = `deliver:#${t.number} not started - ${runHalt.failure()}; the evidence is verified, re-run this probe after the reset`
+  else if (done && cfg.deliver) {
     const blocked = stableList(probe.blocked)
     const blockedList = blocked.length ? blocked.map(b => '- ' + b).join('\n') : ''
     // Wrapped (aac-routines issue 270).
@@ -2122,6 +2208,7 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
       log(deliveryFailure)
@@ -2157,6 +2244,7 @@ Return structured output only.`,
     { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
     )
   } catch (err) {
+    runHalt.note((err && err.message) || err, `handoff:#${t.number}`)
     handoffError = unusableReason(`handoff:#${t.number}`, (err && err.message) || err)
     handoff = null
     log(handoffError)
@@ -2187,6 +2275,7 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
       log(deliveryFailure)
@@ -2408,7 +2497,11 @@ const runCodeLane = async (t, workerIndex) => {
   // attempt so the run record names the level and the model each implementer ran on.
   const difficulty = t.difficulty || null
   const implModels = []
+  // Issue 812: the attempt a quota/rate-limit halt stopped this ticket at (0 = never stopped).
+  let haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Issue 812: no attempt starts once the run is halted on a quota or rate limit.
+    if (runHalt.halted()) { haltedAt = attempt; break }
     const implModel = pickImplModel(difficulty, attempt, cfg)
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
     // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
@@ -2467,6 +2560,7 @@ Return structured output only.`,
       { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: implModel, isolation: 'worktree' }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `impl:#${t.number}.${attempt}`)
       implError = unusableReason(`impl:#${t.number}.${attempt}`, (err && err.message) || err)
       impl = null
     }
@@ -2488,6 +2582,9 @@ Return structured output only.`,
     // and a wrong self-report would point the verifier at a branch nobody asked for. The
     // instructed branch is what gets verified and delivered; a mismatch is logged, loudly.
     branchPushed = impl.pushed === true
+    // Issue 812: this implementer settled after the run halted - no push, verifier or retry starts
+    // for it. Its branch (pushed or not) is named in the result so the next run can pick it up.
+    if (runHalt.halted()) { haltedAt = attempt; lastVerdict = null; break }
     if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Push the branch NOW, before the verifier, not at Deliver (issue 405). Three losses on
@@ -2513,6 +2610,7 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
         { label: `push:#${t.number}.${attempt}`, phase: 'Implement', schema: PUSHED, model: cfg.deliverModel, effort: 'low' }
         )
       } catch (err) {
+        runHalt.note((err && err.message) || err, `push:#${t.number}.${attempt}`)
         log(`${unusableReason(`push:#${t.number}.${attempt}`, (err && err.message) || err)} - ${branch} may exist only in this container until Deliver pushes it.`)
         pushBack = null
       }
@@ -2562,6 +2660,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
         { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
         )
       } catch (err) {
+        runHalt.note((err && err.message) || err, verifyLabel)
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
 
@@ -2587,12 +2686,18 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     if (lastVerdict.pass) break
   }
 
+  if (haltedAt) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([runHalt.failure()]) }
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
   let delivery = null
   let deliveryFailure = null
   // Issue 654: the classified Deliver result, and the message when it is an inconsistency.
   let outcome = null, inconsistency = null
-  if (done && cfg.deliver) {
+  // Issue 812: a branch that passed verification before the halt is not handed to a deliverer
+  // that would die on the same limit; the finish mode delivers it after the reset.
+  if (done && cfg.deliver && runHalt.halted()) {
+    deliveryFailure = `deliver:#${t.number} not started - ${runHalt.failure()}; ${branch} is verified: relaunch with finishRunId: '${runId}' after the reset to deliver it`
+    log(deliveryFailure)
+  } else if (done && cfg.deliver) {
     // Nothing gets pushed once any ticket in the wave has breached isolation (aac-routines issue
     // 192): the tree the verifier judged from is no longer trustworthy.
     assertNoBreach()
@@ -2606,6 +2711,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
     }
@@ -2687,9 +2793,20 @@ const runWorker = async ({ ticket, workerIndex }) => {
   let result = null
   try {
     const after = Array.isArray(t.chainedAfter) ? t.chainedAfter.map(n => parseInt(n, 10)) : []
+    const blockerResults = new Map()
+    for (const n of after) blockerResults.set(n, await settled.get(n).promise)
+    // Issue 812: once the run is halted on a quota or rate limit no ticket starts; it is listed
+    // under notAttempted so the next wave (after the reset) picks it up.
+    if (runHalt.halted()) {
+      log(`#${t.number}: not attempted - ${runHalt.failure()}.`)
+      result = {
+        ticket: t.number, done: false, kind: t.kind, branch: null, notAttempted: true,
+        verdict: { pass: false, evidence: '', failures: [runHalt.failure()] },
+        prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
+      }
+      return result
+    }
     if (after.length) {
-      const blockerResults = new Map()
-      for (const n of after) blockerResults.set(n, await settled.get(n).promise)
       const reason = chainGate(t, blockerResults)
       if (reason) {
         log(`#${t.number}: chained ticket skipped - ${reason} (issue 854).`)
@@ -2749,7 +2866,9 @@ assertNoBreach()
 // debug a ModuleNotFoundError that looks like broken code. The guard rewrites the pointer only;
 // it never runs pip here, because `pip install -e` writes .egg-info into the orchestrator's own
 // tree and that is exactly what checkpoint 4 above just cleared.
-if (cfg.editableGuard === false) {
+if (runHalt.halted()) {
+  log(`Editable-install guard NOT RUN - ${runHalt.failure()}. Run \`python -m pip show -f <dist>\` yourself before trusting this container's test results (claude-dotfiles issue 413).`)
+} else if (cfg.editableGuard === false) {
   log('Editable-install guard DISABLED by args (editableGuard:false) - a worktree that captured this container\'s editable install will stay captured (claude-dotfiles issue 413).')
 } else {
   // One `;`-joined probe per candidate, never a loop: the Bash tool refuses a loop whose body
@@ -2833,6 +2952,7 @@ Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, d
       { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: 'low' }
     )
   } catch (err) {
+    runHalt.note((err && err.message) || err, 'followups-writer')
     return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', (err && err.message) || err) }
   }
   return {
@@ -2843,7 +2963,12 @@ Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, d
   }
 }
 // [FLEET-REPORT-END]
-const discoveryReport = await runReport(allDiscoveries, scout.defaultBranch)
+// Issue 812: a halted run does not start the writer - it would die on the same limit. The bullets
+// travel in the run result's discoveryList instead, so the journal (and the run record distilled
+// from it) still carries every one of them.
+const discoveryReport = runHalt.halted() && allDiscoveries.length
+  ? { branch: null, sha: null, prUrl: null, bullets: allDiscoveries.length, error: `followups-writer not started - ${runHalt.failure()}` }
+  : await runReport(allDiscoveries, scout.defaultBranch)
 const followupsError = (discoveryReport && discoveryReport.error) || null
 if (followupsError) log(`${followupsError} - ${allDiscoveries.length} discovery string(s) were NOT committed to ${cfg.followupsFile}; they are in this report's discoveryList.`)
 else if (discoveryReport) log(`discoveries: ${discoveryReport.bullets} bullet(s) committed as ${discoveryReport.sha || 'unknown sha'} on ${discoveryReport.branch}${discoveryReport.prUrl ? ' (' + discoveryReport.prUrl + ')' : ''}`)
@@ -2875,7 +3000,7 @@ return {
   })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
-  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency && !r.chainSkipped).map(r => ({
+  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency && !r.chainSkipped && !r.notAttempted).map(r => ({
     ticket: r.ticket,
     kind: r.kind,
     failures: (r.done ? [] : failuresOf(r.verdict)).concat(r.deliveryFailure ? [r.deliveryFailure] : []),
@@ -2914,5 +3039,8 @@ return {
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
   implModels: clean.filter(r => r.kind === 'code').map(r => ({ ticket: r.ticket, difficulty: r.difficulty || null, models: r.implModels || [] })),
+  // Issue 812: halt names the quota/rate-limit reason and reset time once (null on a normal run);
+  // notAttempted lists the tickets the halt kept from starting at all.
+  ...haltReport(runHalt.get(), clean),
   recordCommand: RECORD_COMMAND,
 }
