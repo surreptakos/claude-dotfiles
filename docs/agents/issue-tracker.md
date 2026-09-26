@@ -83,7 +83,10 @@ Four gotchas, all four learned by paying for them:
 4. **`$env:TEMP` is unset in a stock fleet container.** A suite that joins its sandbox onto it dies
    at once with *"Cannot bind argument to parameter 'Path' because it is null"*, exit 1, before the
    first assertion. The five suites now fall back to `[System.IO.Path]::GetTempPath()`, so this bites
-   only a `.ps1` written since; `export TEMP=/tmp` is the one-line escape hatch.
+   only a `.ps1` written since. The escape hatch is an env prefix on the same command:
+   `TEMP=/tmp /tmp/ps7/shell7 -NoProfile -File <suite>.ps1`. Not a separate `export`: the Bash
+   tool keeps no shell state between calls, so the variable is gone before the next `shell7` call
+   (issue 920).
 
 Leave it off `PATH` and invoke `/tmp/ps7/shell7` by its full path. Anything that resolves a
 PowerShell engine by name gets 7.4.6 the moment `pwsh` is on PATH, and these suites are written for
