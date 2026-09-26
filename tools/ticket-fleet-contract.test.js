@@ -119,14 +119,15 @@ test('the script\'s own refresh block never spawns the refresh agent for a FORKS
   assert.deepEqual(scriptForks.sort(), FORKS.map((f) => f.repo).sort(),
     'the script\'s FLEET_FORKS must list exactly the FORKS of tools/ticket-fleet-contract.js');
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-  const run = new AsyncFunction('agent', 'log', 'cfg', 'unusableReason', src.slice(start, end));
+  // gitSpelling is the script's own helper (issue 883); the block calls it, so the sandbox supplies it.
+  const run = new AsyncFunction('agent', 'log', 'cfg', 'unusableReason', 'gitSpelling', src.slice(start, end));
   const spellings = (repo) => [repo, `${repo}.git`, repo.toUpperCase(), `https://github.com/${repo}.git`, `git@github.com:${repo}.git`];
   const reachesRefresh = async (reported) => {
     const labels = [];
     await run(async (_prompt, opts) => {
       labels.push(opts.label);
       return opts.label === 'fleet-refresh-repo' ? { servedRepo: reported } : { refreshed: [], unchanged: [], commit: '', errors: [] };
-    }, () => {}, { reportModel: 'm' }, (_label, msg) => msg);
+    }, () => {}, { reportModel: 'm' }, (_label, msg) => msg, (_instrument, args) => `git ${args}`);
     assert.equal(labels[0], 'fleet-refresh-repo', 'the servedRepo-only agent must be the first spawn');
     return labels.includes('fleet-refresh');
   };
