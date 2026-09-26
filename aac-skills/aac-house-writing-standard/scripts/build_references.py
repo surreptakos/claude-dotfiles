@@ -30,7 +30,8 @@ PARTS = [
      ["Part XXI ", "Part XXII ", "Part XXIII ", "Part XXIV ", "Appendix A",
       "Appendix B"]),
     ("DRAFT-QUALITY.md",
-     "Rules 153-166. AI tells, phrase register, structure register",
+     "Rules 153-167. AI tells, machine vocabulary, phrase register, "
+     "structure register",
      ["Part XXV ", "Appendix G", "Appendix H"]),
     ("TERMINOLOGY.md",
      "Terminology list, quick reference, style governance and decision register",
