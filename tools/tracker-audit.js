@@ -1253,12 +1253,13 @@ function report(kind, issue, detail) {
 }
 
 const TRIAGE = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-local-agent', 'ready-for-human', 'wontfix'];
-// A master-orchestrator state notebook carries `orchestrator` alone (a living document each master
-// rewrites every heartbeat, no pending ruling), so `orchestrator` counts as a triage state for the
-// untriaged check. It is a category, not a workflow state, so it does not participate in the
-// conflicting-triage check — a decision brief legitimately carries `orchestrator` AND
-// `ready-for-human`.
-const TRIAGED = TRIAGE.concat(['orchestrator']);
+// A master-orchestrator state notebook (`orchestrator`) or a wayfinder map (`wayfinder:map`) is a
+// permanent state container: living state a master or a wayfinder session reads and writes, open by
+// design and never closed. Neither carries a state role (owner ruling, issue 206 — "exempt by
+// existing tag"), so both count as triaged for the untriaged check. They are categories, not
+// workflow states, so neither participates in the conflicting-triage check — a decision brief
+// legitimately carries `orchestrator` AND `ready-for-human`.
+const TRIAGED = TRIAGE.concat(['orchestrator', 'wayfinder:map']);
 let edgesUnavailable = false;
 
 // ---- 1. A prose blocker with no native edge is an ungated dependency -----------------------------
