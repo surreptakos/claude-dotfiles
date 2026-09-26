@@ -22,7 +22,7 @@ const { spawnSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
   generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
-  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave,
+  applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
   classifyBranchLookup, classifyDelivery,
@@ -1180,7 +1180,7 @@ for (const file of RESUME_GUARD_PAIR) {
 // ---- The open-PR check runs once, in the Scout phase, before wave selection (issue 430) ----
 // It used to be the first agent of every code lane: twelve tickets meant twelve agents asking for
 // the same PR list, and a ticket that already had a PR was SELECTED and then skipped inside its
-// lane, so the wave ran fewer real tickets than `maxTickets` while runnable candidates sat
+// lane, so the wave ran fewer real tickets than its cap while runnable candidates sat
 // unselected. One listing now answers for the whole candidate set and the matches are dropped
 // before selectWave. Driven with a stubbed instrument rather than asserted by regex: what matters
 // is which agents run and which tickets survive.
@@ -1208,7 +1208,7 @@ const OPEN_PR_CANDIDATES = [
   { number: 103, blockedBy: [], handoffPending: false },
 ];
 
-test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before wave selection, so the cap runs maxTickets real tickets (issue 430)`, async () => {
+test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before wave selection, so the wave runs only tickets that will run (issue 430)`, async () => {
   const calls = [];
   const agentMock = async (prompt, opts) => {
     calls.push({ label: opts.label, phase: opts.phase, prompt });
@@ -1222,9 +1222,9 @@ test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before 
   }
   assert.match(calls[0].prompt, /repos\/\{owner\}\/\{repo\}\/pulls\?state=open/,
     'the gh instrument must list open PRs through REST, once');
-  const { wave } = selectWave(filtered.tickets, 2);
+  const { wave } = selectWave(filtered.tickets);
   assert.deepEqual(wave.map((t) => t.number), [102, 103],
-    'the wave cap must fill with tickets that will run - the ticket with a PR must not occupy a slot');
+    'the wave holds tickets that will run - the ticket with a PR is not in it');
   assert.deepEqual(filtered.skipped, [{ ticket: 101, prUrl: 'https://github.com/x/y/pull/137', branch: 'agent/issue-101-attempt1-wf_r1-w0' }],
     'the dropped ticket must be reported with the PR url that stopped it, for skippedOpenPR');
   assert.ok(logs.some((m) => m.includes('#101') && m.includes('https://github.com/x/y/pull/137')),
@@ -1268,7 +1268,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} files the open-PR check under Scout and n
   const scanIdx = src.indexOf('await dropTicketsWithOpenPr(');
   const selectIdx = src.indexOf('const selection = selectWave(');
   assert.ok(scanIdx > 0 && selectIdx > scanIdx, 'the filter must run before wave selection');
-  assert.match(src, /const selection = selectWave\(openPrFilter\.tickets, cfg\.maxTickets\)/,
+  assert.match(src, /const selection = selectWave\(openPrFilter\.tickets\)/,
     'wave selection must read the filtered candidate list');
   assert.match(src, /\n  skippedOpenPR,/,
     'the run result must name the dropped tickets under skippedOpenPR');
@@ -1352,14 +1352,54 @@ test('dropParkedTickets handles absent input', () => {
   assert.deepEqual(dropParkedTickets(undefined, []), { tickets: [], skipped: [] });
 });
 
-test('selectWave splits the candidates into the wave and the three reasons the rest do not run', () => {
+test('selectWave takes every runnable ticket - no cap - and names the two reasons the rest do not run', () => {
   const t = (number, blockedBy, handoffPending) => ({ number, blockedBy, handoffPending });
-  const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])], 2);
-  assert.deepEqual(out.wave.map((x) => x.number), [1, 4], 'the cap fills with runnable tickets only');
+  const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])]);
+  assert.deepEqual(out.wave.map((x) => x.number), [1, 4, 5], 'every runnable ticket runs (Dan, 2026-09-26: no wave cap)');
   assert.deepEqual(out.blocked.map((x) => x.number), [2], 'an open blocker gates the ticket');
   assert.deepEqual(out.pendingHandoff.map((x) => x.number), [3],
     'a ticket awaiting the owner after a handoff is parked, not re-run (issue 266)');
-  assert.deepEqual(out.overCap.map((x) => x.number), [5], 'the rest are reported over cap, not lost');
+  assert.equal('overCap' in out, false, 'there is no cap, so nothing is over it');
+});
+
+// ---- In-wave chaining (issue 854) ----
+// Run wf_3d285ebd-301 skipped #840-#844 (blocked by #839) and #826 (blocked by #825) although both
+// blockers were in the same wave and the deliverer merges its own PR. A blocked ticket whose every
+// open blocker is an in-wave code ticket now joins the wave on its blocker's lane.
+
+test('selectWave chains a ticket blocked only by in-wave code tickets onto the wave (issue 854)', () => {
+  const t = (number, blockedBy, kind = 'code') => ({ number, blockedBy, kind });
+  const out = selectWave([t(1, []), t(2, [1]), t(3, [2]), t(4, [99]), t(5, [1, 99])]);
+  assert.deepEqual(out.wave.map((x) => x.number), [1, 2, 3], 'B after A, and C after B, transitively');
+  assert.deepEqual(out.wave.map((x) => x.chainedAfter || []), [[], [1], [2]], 'each chained ticket names its blockers');
+  assert.deepEqual(out.blocked.map((x) => x.number), [4, 5], 'a blocker outside the wave still gates the ticket');
+});
+
+test('selectWave does not chain behind a blocker that cannot merge', () => {
+  const t = (number, blockedBy, kind = 'code') => ({ number, blockedBy, kind });
+  const probe = selectWave([t(1, [], 'probe'), t(2, [1])]);
+  assert.deepEqual(probe.blocked.map((x) => x.number), [2], 'a probe blocker opens no PR, so nothing merges');
+  const cycle = selectWave([t(1, []), t(2, [3]), t(3, [2])]);
+  assert.deepEqual(cycle.blocked.map((x) => x.number), [2, 3], 'a blocker cycle never enters the wave');
+});
+
+test('buildLanes puts a chained ticket on its latest blocker\'s lane and chores in one lane', () => {
+  const wave = [
+    { number: 1 }, { number: 2 }, { number: 3, discoveryTriage: true }, { number: 4, discoveryTriage: true },
+    { number: 5, chainedAfter: [2, 1] }, { number: 6, chainedAfter: [5] },
+  ];
+  const lanes = buildLanes(wave).map((lane) => lane.map((w) => `${w.ticket.number}@${w.workerIndex}`));
+  assert.deepEqual(lanes, [['1@0'], ['2@1', '5@4', '6@5'], ['3@2', '4@3']]);
+});
+
+test('chainGate starts a chained ticket only when every blocker merged, else names the blocker', () => {
+  const ticket = { number: 2, chainedAfter: [1, 7] };
+  const merged = { merged: true, prState: 'merged', done: true };
+  assert.equal(chainGate(ticket, new Map([[1, merged], [7, merged]])), null);
+  assert.match(chainGate(ticket, new Map([[1, merged], [7, { merged: false, prState: 'ci-red', done: true }]])),
+    /blocker #7 did not merge in this wave \(ci-red\)/);
+  assert.match(chainGate(ticket, new Map([[1, null], [7, merged]])), /blocker #1 produced no result/);
+  assert.match(chainGate(ticket, new Map([[1, { done: false }], [7, merged]])), /blocker #1 .*not verified/);
 });
 
 // ---- Empty-label listing ends the run (issue 298) ----
@@ -1544,7 +1584,7 @@ test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is 
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
   const fresh = { number: 267, kind: 'human', blockedBy: [], handoffPending: false };
   const blocked = { number: 268, kind: 'code', blockedBy: [10], handoffPending: false };
-  const { wave, pendingHandoff, blocked: gated } = selectWave([parked, fresh, blocked], 3);
+  const { wave, pendingHandoff, blocked: gated } = selectWave([parked, fresh, blocked]);
   assert.deepEqual(wave.map((t) => t.number), [267], 'only the ticket with no pending handoff may run');
   assert.deepEqual(pendingHandoff.map((t) => t.number), [266], 'the parked ticket must be reported as skipped by number');
   assert.deepEqual(gated.map((t) => t.number), [268], 'open blockers must still gate independently of the handoff skip');
@@ -1552,7 +1592,7 @@ test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is 
 
 test(`${FLEET_SCRIPT_REL} a run whose only ticket already carries a handoff comment starts no agents`, async () => {
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
-  const { wave, pendingHandoff } = selectWave([parked], 3);
+  const { wave, pendingHandoff } = selectWave([parked]);
   const calls = [];
   const agentMock = async (_prompt, opts) => { calls.push(opts.label); throw new Error('no agent may run for a parked ticket'); };
   for (const t of wave) { await driveHumanLane(FLEET_SCRIPT, agentMock, t, 'gh'); }
@@ -1820,7 +1860,7 @@ test(`${FLEET_SCRIPT_REL} runs a ticket whose only blocker is closed, with no bo
     'the blocker state must be read through the instrument, not inferred from the body');
   assert.deepEqual(resolved[0].blockedBy, [],
     'a blocker the tracker reports closed must stop gating the ticket');
-  assert.deepEqual(selectWave(resolved, 3).wave.map((t) => t.number), [305],
+  assert.deepEqual(selectWave(resolved).wave.map((t) => t.number), [305],
     'the ticket must be eligible without anyone rewriting its "Blocked by" section');
   assert.ok(logs.some((m) => m.includes('#305') && m.includes('#199') && m.includes('closed')),
     'the cleared blocker must appear in the run log, naming ticket and blocker');
@@ -1834,7 +1874,7 @@ test(`${FLEET_SCRIPT_REL} still skips a ticket whose blocker is open, naming the
   assert.match(prompts[0][1], /mcp__github__issue_read/,
     'the container instrument must read the blocker through the GitHub MCP tools');
   assert.deepEqual(resolved[0].blockedBy, [199], 'an open blocker must survive the resolution');
-  const selection = selectWave(resolved, 3);
+  const selection = selectWave(resolved);
   assert.deepEqual(selection.wave, [], 'a ticket with an open blocker must not run');
   assert.deepEqual(selection.blocked.map((t) => ({ ticket: t.number, blockedBy: t.blockedBy })),
     [{ ticket: 305, blockedBy: [199] }], 'the skipped ticket must carry the open blocker numbers');
@@ -2034,9 +2074,11 @@ test(`${FLEET_SCRIPT_REL} a pushed, verified branch the deliverer cannot find is
   assert.ok(!result.verdict.failures.some((f) => /pre-push merge/.test(f)), 'it is not a blocked merge, whatever mergeStatus the deliverer chose');
   assert.ok(logs.some((m) => /INCONSISTENCY/.test(m)), 'the inconsistency must be logged loudly');
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\)/,
+  assert.match(src, /failed: clean\.filter\(r => \(!r\.done \|\| r\.deliveryFailure\) && !r\.inconsistency\b/,
     'the run result must keep an inconsistent ticket out of `failed`');
-  assert.match(src, /inconsistent: clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent`');
+  assert.match(src, /\.concat\(clean\.filter\(r => r\.inconsistency\)/, 'and list it under `inconsistent` (issue 811 prepends a run-level tree-guard entry ahead of the per-ticket ones)');
+  assert.match(src, /treeGuardUnusable \? \[\{ ticket: null, kind: 'tree-guard', branch: null, detail: treeGuardUnusable \}\] : \[\]/,
+    'issue 811: a tree-guard baseline that could not be taken must surface in the run report\'s `inconsistent` list, not only in a log line');
 });
 
 test(`${FLEET_SCRIPT_REL} finish mode reports a journal-pushed branch the deliverer cannot find as inconsistent (issue 654)`, async () => {
@@ -2253,6 +2295,20 @@ function assertAcceptedPush(prompt, args, instrument, who) {
   }
 }
 
+// Issue 803: same shape as assertAcceptedPush, for a `git ls-remote ...` instruction instead of a
+// push - gitSpelling wraps any git args generically, so the accepted spelling and the leading
+// order are identical either way.
+function assertAcceptedLsRemote(prompt, args, instrument, who) {
+  const absolute = `/usr/bin/git ${args}`;
+  assert.ok(prompt.includes(`\`${absolute}\``), `${who} (${instrument}) must name the spelling the guard accepts: ${absolute}`);
+  if (instrument === 'mcp') {
+    assert.ok(prompt.indexOf(absolute) < prompt.indexOf(`\`git ${args}\``),
+      `${who}: in a cloud container the absolute path must lead, the bare spelling is only the fallback`);
+  } else {
+    assert.ok(prompt.includes(`\`git ${args}\``), `${who}: the desktop, where /usr/bin/git does not exist, must keep the bare spelling`);
+  }
+}
+
 test('gitSpelling names both spellings and leads with the one each instrument runs (issue 755)', () => {
   const cloud = gitSpelling('mcp', 'push -u origin b');
   assert.ok(cloud.startsWith('`/usr/bin/git push -u origin b`'), cloud);
@@ -2292,6 +2348,28 @@ test(`${FLEET_SCRIPT_REL} spells no push instruction as a bare \`git push\` lite
   const bare = src.split('\n').filter((l) => /(?<![/\w])git push (?!--force)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
   assert.deepEqual(bare, [], 'a push instruction must go through gitSpelling, which carries the spelling the guard accepts');
 });
+
+// Issue 803: the same caveman-wrapped-git refusal that hit push instructions (#755) also hits the
+// `git ls-remote --heads origin <branch>` check baked into the implementer's own done-condition and
+// into the issue-405 push-fallback agent's verification step - a worker that cannot run either
+// cannot confirm its own push landed. Both must go through gitSpelling too.
+for (const instrument of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} the implementer done-condition and the push-fallback agent use the accepted ls-remote spelling under ${instrument} (issue 803)`, async () => {
+    const branch = 'agent/issue-803-attempt1-wf_testrun-w0';
+    const prompts = {};
+    const agentMock = async (prompt, opts) => {
+      prompts[opts.label.split(':')[0]] = prompt;
+      if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('push:')) return { pushed: true, output: 'ok' };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/803', mergeStatus: 'clean', conflictPaths: [] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 803, title: 't', criteria: '' }, 0, {}, 'inv1', null, { instrument });
+    assertAcceptedLsRemote(prompts.impl, `ls-remote --heads origin ${branch}`, instrument, 'implementer done-condition');
+    assertAcceptedLsRemote(prompts.push, `ls-remote --heads origin ${branch}`, instrument, 'push-fallback agent');
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Issue 562: every sub-agent below is FRESH and starts wherever the orchestrating session's shell
@@ -2437,6 +2515,69 @@ test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and
   await treeGuardCheck('implement-attempt1', 7);
   assert.equal(commands.length, 2, 'expected the baseline plus one check');
   for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// Issue 811: in a served repo with no copy of tools/orchestrator-tree-guard.js (a cloud container
+// running claude-dotfiles against itself - the guard tool ships in aac-routines only, see the
+// portability note above FLEET-TREE-GUARD-DEFS), `[ -f <script> ] || exit 3` reproduces exactly
+// this: exit 3, no stdout. Under the default treeGuard:'auto' that used to turn the guard off with
+// only a log line; the run's returned report had no trace of it. It must now log the run as
+// `tree-guard: unusable — <reason>` - not a silent exit code - so a log-blind reader still sees it.
+test('tree-guard baseline exit 3 (guard tool absent) logs "tree-guard: unusable" under treeGuard:auto (issue 811)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
+    if (opts.label === 'tree-guard:baseline') return { exitCode: 3, stdout: '', stderr: '' };
+    throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
+  };
+  const { logs } = await driveTreeGuard(agentMock);
+  const unusableLine = logs.find((l) => l.startsWith('tree-guard: unusable'));
+  assert.ok(unusableLine, `expected a log line starting "tree-guard: unusable", got: ${JSON.stringify(logs)}`);
+  assert.match(unusableLine, /tools\/orchestrator-tree-guard\.js is not in this repo/);
+  assert.match(unusableLine, /guard OFF for this run/);
+});
+
+// Same exit 3, but treeGuard:true - the absence must still hard-abort the run rather than being
+// swallowed, exactly as before this ticket (only the 'auto' path's silence was the bug).
+test('tree-guard baseline exit 3 aborts the run when treeGuard:true (issue 811)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
+    if (opts.label === 'tree-guard:baseline') return { exitCode: 3, stdout: '', stderr: '' };
+    throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
+  };
+  await assert.rejects(
+    () => driveTreeGuard(agentMock, { treeGuard: true }),
+    /treeGuard:true but tools\/orchestrator-tree-guard\.js is not in this repo/,
+  );
+});
+
+// Mutation test (issue 811): with a working baseline, a stage that writes into the orchestrator's
+// own tree must be caught, not just measured. `check`'s stdout reporting a fresh entry is exactly
+// what a scripted root-tree write during a run would produce; treeGuardCheck must throw naming the
+// checkpoint label and the ticket, not swallow it.
+test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint and the ticket (issue 811 mutation test)', async () => {
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
+    if (opts.label === 'tree-guard:baseline') {
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/measured/cwd/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label === 'tree-guard:implement-attempt1#99') {
+      // Stands in for a stage scripting `git checkout <branch> -- .` (or any other write) in the
+      // orchestrator's own checkout: the guard's `check` reports the new path it found.
+      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [{ status: 'M', path: 'CLAUDE.md' }] }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label in mutation test: ${opts.label}`);
+  };
+  const { treeGuardCheck } = await driveTreeGuard(agentMock);
+  await assert.rejects(
+    () => treeGuardCheck('implement-attempt1', 99),
+    (err) => {
+      assert.match(err.message, /ISOLATION BREACH|isolation breached/);
+      assert.match(err.message, /implement-attempt1/);
+      assert.match(err.message, /#99/);
+      assert.match(err.message, /CLAUDE\.md/);
+      return true;
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -2590,4 +2731,71 @@ test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries 
   const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
   assert.match(revParseBody, /spelling:\s*\{\s*type:\s*'string'/, 'REV must carry a spelling field so the run can report which spelling answered');
   assert.match(revParseBody, /buildTipLookupCommand\(orchestratorCwd, ref\)/, 'the prompt must be built from the fallback-chain command, not a literal rev-parse');
+});
+
+// ---- In-wave chaining, driven through the script's own lane dispatch (issue 854) ----
+// The FLEET-LANES block runs with real buildLanes/chainGate and a pipeline that starts every lane
+// at once, as the Workflow runtime does; only the per-kind lanes are mocked.
+async function driveLanes(wave, codeResult) {
+  const body = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-LANES');
+  const started = [];
+  const logs = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn results;\n}`);
+  const results = await wrapper(laneScope({
+    wave, log: (m) => logs.push(m), scout: { defaultBranch: 'main' }, buildLanes, chainGate,
+    pipeline: (items, fn) => Promise.all(items.map((item) => fn(item))),
+    runCodeLane: async (t) => { started.push(t.number); return codeResult(t); },
+    runProbeLane: async () => { throw new Error('no probe here'); },
+    runHumanLane: async () => { throw new Error('no human here'); },
+  }));
+  const byTicket = new Map(results.filter(Boolean).map((r) => [r.ticket, r]));
+  return { started, logs, byTicket };
+}
+
+test(`${FLEET_SCRIPT_REL} runs a chained ticket after its in-wave blocker merges (issue 854)`, async () => {
+  const { wave } = selectWave([{ number: 839, kind: 'code', blockedBy: [] }, { number: 840, kind: 'code', blockedBy: [839] }]);
+  const { started, byTicket } = await driveLanes(wave, (t) => ({ ticket: t.number, done: true, merged: true, prState: 'merged' }));
+  assert.deepEqual(started, [839, 840], 'the chained ticket starts only after its blocker returned');
+  assert.equal(byTicket.get(840).merged, true);
+});
+
+test(`${FLEET_SCRIPT_REL} skips a chained ticket, naming the blocker, when the blocker did not merge (issue 854)`, async () => {
+  const { wave } = selectWave([{ number: 825, kind: 'code', blockedBy: [] }, { number: 826, kind: 'code', blockedBy: [825] }]);
+  const { started, logs, byTicket } = await driveLanes(wave, (t) => ({ ticket: t.number, done: true, merged: false, prState: 'ci-red' }));
+  assert.deepEqual(started, [825], 'no lane may start for a ticket whose blocker did not merge');
+  assert.match(byTicket.get(826).chainSkipped, /blocker #825 did not merge in this wave \(ci-red\)/);
+  assert.ok(logs.some((m) => m.includes('#826') && m.includes('#825')), 'the skip is logged naming ticket and blocker');
+});
+
+test(`${FLEET_SCRIPT_REL} a blocker whose stage threw still releases its chained ticket as skipped`, async () => {
+  const { wave } = selectWave([{ number: 1, kind: 'code', blockedBy: [] }, { number: 2, kind: 'code', blockedBy: [1] }]);
+  const { started, byTicket } = await driveLanes(wave, () => { throw new Error('tree guard breach'); });
+  assert.deepEqual(started, [1]);
+  assert.match(byTicket.get(2).chainSkipped, /blocker #1 produced no result/);
+});
+
+test(`${FLEET_SCRIPT_REL} a chained ticket's implementer starts from origin/<defaultBranch> (issue 854)`, async () => {
+  const prompts = [];
+  const agentMock = async (prompt, opts) => {
+    prompts.push([opts.label, prompt]);
+    if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ok', failures: [] };
+    return { pushed: true, prUrl: 'https://github.com/x/y/pull/1', merged: true, prState: 'merged' };
+  };
+  await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 840, title: 't', criteria: '', chainedAfter: [839] }, 1);
+  const impl = prompts.find(([label]) => label === 'impl:#840.1')[1];
+  assert.match(impl, /Chained ticket \(issue 854\): its blocker\(s\) #839 merged into main/);
+  assert.match(impl, /fetch origin main/);
+  assert.match(impl, /checkout -B agent\/issue-840-attempt1-wf_testrun-w1 origin\/main/);
+  prompts.length = 0;
+  await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 9, title: 't', criteria: '' }, 0);
+  assert.doesNotMatch(prompts.find(([label]) => label === 'impl:#9.1')[1], /Chained ticket/,
+    'an unchained ticket keeps its prompt byte-identical, so resume caches still hit');
+});
+
+test(`${FLEET_SCRIPT_REL} pairs Report results by ticket number, not wave position (issue 854)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const clean = wave\.map\(\(t\) => resultByTicket\.get\(parseInt\(t\.number, 10\)\)/);
+  assert.doesNotMatch(src, /results \|\| \[\]\)\[i\]/, 'positional pairing breaks once a lane holds several tickets');
+  assert.match(src, /skippedChained: clean\.filter\(r => r\.chainSkipped\)/);
 });

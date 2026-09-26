@@ -5,7 +5,7 @@
     "aac-skills/consistency-audit/claims-audit.js) via tests/docs-claims.test.js, chained",
     "into the session.json test command. tests/claims-audit.test.js is the ENGINE's unit suite;",
     "this file plus docs-claims.test.js is the repo's own docs tripwire. Adding a claim is a",
-    "JSON edit; see the consistency-audit SKILL.md 'Automate' section for the schema."
+    "JSON edit; see aac-skills/consistency-audit/claims-tripwire.md for the schema."
   ],
   "claims": [
     {

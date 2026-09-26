@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-24T22:21:18Z"
-  previous-modified: "2026-09-24T13:49:18Z"
-  revision: "38"
-  content-sha: "92a440bcccd4"
+  modified: "2026-09-25T23:16:27Z"
+  previous-modified: "2026-09-24T22:21:18Z"
+  revision: "39"
+  content-sha: "345b6ad10f3d"
 ---
 
 # Session check (engine)
@@ -23,8 +23,8 @@ node ~/.claude/skills/session-check/check.js --end    # adds release gates
 ```
 
 Everything is universal (git), auto-detected, or read from an optional `.claude/session.json`
-(`test`, `testTimeoutMs`, `ticketLabel`, `releaseGates`, `checks`, `note`). Exit 1 reports
-STOP-level findings from a run that completed.
+(`test`, `testTimeoutMs`, `ticketLabel`, `releaseGates`, `gateTimeoutMs`, `checks`, `note`). Exit 1
+reports STOP-level findings from a run that completed.
 
 At `--end` the test command is skipped on a committed, pushed head in a repo with
 `.github/workflows`: pre-commit ran the suite on each commit and CI runs it on the pushed head,
@@ -32,6 +32,12 @@ so a third run learns nothing. A dirty tree, an unpushed commit, or no upstream 
 so does a head whose pre-commit gate was never in force: `core.hooksPath` not pointing at the repo's
 `.githooks`, or a cloud container with no `aac-bootstrap` marker, where the gate is inert and the
 suite's dependencies are not installed.
+
+At `--end` each `releaseGates` command runs under a `gateTimeoutMs` timeout (default 300000 ms,
+issue 818): a gate that never exits is a STOP naming the timeout, unless it had already printed a
+`PASS` verdict line before hanging — a gas-run-driven gate that prints its verdict and then never
+returns — in which case it is a `!!` warning naming the timeout and quoting the PASS line, not a
+STOP on work the gate already passed.
 
 At `--end` an **End gate** section runs three checks nothing can talk past (issue 622), each
 skipped where the file it reads is absent, so only a repo carrying them pays for them:

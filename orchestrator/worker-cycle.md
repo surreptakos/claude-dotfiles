@@ -18,5 +18,5 @@
 Every fleet worker runs in an isolated worktree, where the Bash tool refuses shell shapes whose
 text it cannot prove is not git (looped or `;`-joined `gh` calls, heredocs, byte-level pipelines).
 The refused shapes and the working spelling for each are listed in
-`aac-skills/ticket-fleet/SKILL.md`, under "Shell shapes the worktree guard refuses" - read them
+`aac-skills/ticket-fleet/REFUSED-SHAPES.md`, under "Shell shapes the worktree guard refuses" - read them
 there; they are deliberately not repeated here.

@@ -1,11 +1,11 @@
 ---
 name: code-review
-description: Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/PRD asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to "review since X".
+description: Two-axis code review (Standards, Spec) of the diff since a fixed point. Use when the user wants a branch, a PR or work-in-progress changes reviewed, or asks to "review since X", or when another skill needs a Standards + Spec review.
 metadata:
-  modified: "2026-08-20T00:41:59Z"
-  previous-modified: "2026-08-12T21:14:59Z"
-  revision: "1"
-  content-sha: "775f2919e9b3"
+  modified: "2026-09-26T00:09:47Z"
+  previous-modified: "2026-09-25T23:18:11Z"
+  revision: "3"
+  content-sha: "6a4cf6237a91"
 ---
 
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
@@ -13,32 +13,32 @@ Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
 - **Standards** — does the code conform to this repo's documented coding standards?
 - **Spec** — does the code faithfully implement the originating issue / PRD / spec?
 
-Both axes run as **parallel sub-agents** so they don't pollute each other's context, then this skill aggregates their findings.
-
-The issue tracker should have been provided to you — run `/setup-matt-pocock-skills` if `docs/agents/issue-tracker.md` is missing.
+Both axes run as **parallel sub-agents**, each in its own clean context, then this skill aggregates their findings side by side.
 
 ## Process
 
 ### 1. Pin the fixed point
 
-Whatever the user said is the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, etc. If they didn't specify one, ask for it.
+Whatever the user named is the fixed point — a commit SHA, branch name, tag, `main`, `HEAD~5`, a merge-base. If they named none, ask for it.
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff should fail here — not inside two parallel sub-agents.
+Done when the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff stops the review here, before two sub-agents spend a run on it.
 
 ### 2. Identify the spec source
 
 Look for the originating spec, in this order:
 
-1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md`.
+1. Issue references in the commit messages (`#123`, `Closes #45`, GitLab `!67`, etc.) — fetch via the workflow in `docs/agents/issue-tracker.md` (missing → run `/setup-matt-pocock-skills`).
 2. A path the user passed as an argument.
 3. A PRD/spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
-4. If nothing is found, ask the user where the spec is. If they say there isn't one, the **Spec** sub-agent will skip and report "no spec available".
+4. If nothing is found, ask the user where the spec is. If there isn't one, the Spec axis reports "no spec available" (step 4).
 
 ### 3. Identify the standards sources
 
-Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
+**When the repo has `.code-review/rules.json`, resolve by script, not by judgment.** From the repo root run `node <this skill's dir>/resolve-rules.js <fixed-point>` (Node built-ins only). It maps each changed file to the standards files and inline rules whose `paths` globs match it, and prints JSON with `files`, `unmatched`, `ignored` and `missingStandards` (the rule file's shape is in the script's header). Use that mapping as the standards sources: per file, those standards and rules; `ignored` files are out of review; `unmatched` files get only the smell baseline below. Name each `missingStandards` entry in the report as a stale rule. Exit 2 means the rule file is malformed: say so and stop, rather than falling back to judgment.
+
+With no rule file, the script reports `ruleFile: null` and the sources are found by judgment: anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
@@ -67,7 +67,7 @@ Send a single message with two `Agent` tool calls. Use the `general-purpose` sub
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
-- The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
+- The list of standards-source files you found in step 3 — with a rule file, the resolver's per-file mapping verbatim — **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
 **Spec sub-agent prompt** — include:
@@ -76,19 +76,10 @@ Send a single message with two `Agent` tool calls. Use the `general-purpose` sub
 - The path or fetched contents of the spec.
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial; (b) behaviour in the diff that wasn't asked for (scope creep); (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
 
-If the spec is missing, skip the Spec sub-agent and note this in the final report.
+With no spec, spawn only the Standards sub-agent and write "no spec available" under `## Spec`.
 
 ### 5. Aggregate
 
-Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+Present the two reports under `## Standards` and `## Spec` headings, verbatim or lightly cleaned, each keeping its own findings in its own order. The axes stay separate because a change can pass one and fail the other — every standard followed but the wrong thing built (**Standards pass, Spec fail**), or exactly what the issue asked but the conventions broken (**Spec pass, Standards fail**) — and one merged ranking lets an axis mask the other.
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
-
-## Why two axes
-
-A change can pass one axis and fail the other:
-
-- Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
-- Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
-
-Reporting them separately stops one axis from masking the other.
+End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any) — one per axis, never one overall.

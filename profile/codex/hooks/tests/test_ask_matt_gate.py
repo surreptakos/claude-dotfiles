@@ -441,31 +441,105 @@ class AskMattGateTests(unittest.TestCase):
             self.assertTrue(state["yes"])
             self.assertEqual(state["caveman"], "ultra")
 
-    def test_claude_declare_refuses_direct_answer_for_a_build_shaped_prompt(self) -> None:
-        # Dan, 2026-09-25: "I need to be able to give feedback to the model ... not sure how best to
-        # do that" was declared direct-answer and answered with a build plan, skipping grill-with-docs.
-        # The route was self-declared and nothing checked it against the request.
-        with tempfile.TemporaryDirectory() as folder:
-            state_dir = Path(folder)
-            prompt = ("I need to be able to give feedback to the model running the huddle draft tool. "
-                      "Not sure how best to do that.")
-            self.run_gate("claude-prompt", {"session_id": "s-build", "prompt": prompt}, state_dir)
-            nonce = self._state(state_dir, "s-build")["nonce"]
-            refused = self.run_claude_declare("s-build", nonce, "direct-answer", state_dir)
-            self.assertEqual(refused.returncode, 2)
-            self.assertIn("grill-with-docs", refused.stderr)
-            self.assertIsNone(self._state(state_dir, "s-build")["flow"])
-            accepted = self.run_claude_declare("s-build", nonce, "grill-with-docs", state_dir)
-            self.assertEqual(accepted.returncode, 0, accepted.stderr)
+    # Issue 839: Jev picks the route. Canned answers stand in for TypeSafe: one map answers the
+    # correction Noul and every route-tree Choice, because the prompt hook asks them in ONE request.
+    ROUTE_DEFAULTS = {"route.scope": "software", "route.kind": "question",
+                      "route.settled": "single", "route.codebase": "repo"}
 
-    def test_claude_declare_keeps_direct_answer_for_a_question(self) -> None:
+    def _canned(self, correction: float = 0.02, **picks: str) -> str:
+        answers = {"correction": correction, **self.ROUTE_DEFAULTS}
+        answers.update({f"route.{level}": option for level, option in picks.items()})
+        return json.dumps(answers)
+
+    def _routed_turn(self, state_dir: Path, sid: str, prompt: str, stub: str) -> dict:
+        os.environ["TYPESAFE_JEV_STUB"] = stub
+        self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+        result = self.run_gate("claude-prompt", {"session_id": sid, "prompt": prompt}, state_dir)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+        return {"context": context, "state": self._state(state_dir, sid)}
+
+    def test_jev_routes_a_build_shaped_design_request_in_a_repo_to_grill_with_docs(self) -> None:
+        # Dan, 2026-09-25: this message was self-declared direct-answer and got a build plan.
+        prompt = ("I need to be able to give feedback to the model running the huddle draft tool. "
+                  "Not sure how best to do that.")
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
-            prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
-            self.run_gate("claude-prompt", {"session_id": "s-q", "prompt": prompt}, state_dir)
-            nonce = self._state(state_dir, "s-q")["nonce"]
-            result = self.run_claude_declare("s-q", nonce, "direct-answer", state_dir)
-            self.assertEqual(result.returncode, 0, result.stderr)
+            turn = self._routed_turn(state_dir, "s-grill", prompt,
+                                     self._canned(kind="build", settled="unsettled", codebase="repo"))
+            self.assertEqual(turn["state"]["flow"], "grill-with-docs")  # recorded by the gate
+            self.assertIn("ROUTE PICKED BY JEV: grill-with-docs", turn["context"])
+            nonce = turn["state"]["nonce"]
+            refused = self.run_claude_declare("s-grill", nonce, "direct-answer", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("Jev picked grill-with-docs", refused.stderr)
+            self.assertEqual(self._state(state_dir, "s-grill")["flow"], "grill-with-docs")
+            same = self.run_claude_declare("s-grill", nonce, "grill-with-docs", state_dir)
+            self.assertEqual(same.returncode, 0, same.stderr)
+
+    def test_jev_routes_a_plain_question_to_direct_answer_and_refuses_anything_else(self) -> None:
+        prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-q", prompt, self._canned(kind="question"))
+            self.assertEqual(turn["state"]["flow"], "direct-answer")
+            nonce = turn["state"]["nonce"]
+            refused = self.run_claude_declare("s-q", nonce, "implement", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("Jev picked direct-answer", refused.stderr)
+            self.assertEqual(self.run_claude_declare("s-q", nonce, "direct-answer", state_dir).returncode, 0)
+
+    def test_every_route_tree_leaf_is_reachable(self) -> None:
+        leaves = {
+            "grill-me": dict(kind="build", settled="unsettled", codebase="none"),
+            "implement": dict(kind="build", settled="single"),
+            "to-spec": dict(kind="build", settled="multi"),
+            "wayfinder": dict(kind="build", settled="foggy"),
+            "diagnosing-bugs": dict(kind="broken"),
+            "triage": dict(kind="issues"),
+            "code-review": dict(kind="review"),
+            "research": dict(kind="research"),
+        }
+        for route, picks in leaves.items():
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:
+                turn = self._routed_turn(Path(folder), "s-leaf", "do the thing", self._canned(**picks))
+                self.assertEqual(turn["state"]["flow"], route)
+
+    def test_other_work_and_scheduled_runs_get_no_route_and_no_refusal(self) -> None:
+        cases = {
+            "other": ("Put together the contract package for the Smith job.", self._canned(scope="other")),
+            # A scheduled run is routed by nothing: its request asks the correction question alone.
+            "scheduled": ("<scheduled-task name=\"triage\">Triage Todoist.</scheduled-task>",
+                          json.dumps({"correction": 0.01})),
+            # A route the user typed as a slash command is theirs; the tree has no session-end leaf.
+            "slash": ("/aac-skills:session-end", json.dumps({"correction": 0.01})),
+        }
+        for name, (prompt, stub) in cases.items():
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                turn = self._routed_turn(state_dir, f"s-{name}", prompt, stub)
+                self.assertIsNone(turn["state"]["flow"])
+                self.assertNotIn("jev_route", turn["state"])
+                self.assertNotIn("ROUTE PICKED BY JEV", turn["context"])
+                for flow in ("direct-answer", "implement"):
+                    declared = self.run_claude_declare(f"s-{name}", turn["state"]["nonce"], flow, state_dir)
+                    self.assertEqual(declared.returncode, 0, declared.stderr)
+
+    def test_jev_unavailable_declarations_behave_as_before(self) -> None:
+        prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
+        # "off", and a canned map missing one tree question: the whole request is one call, so a
+        # missing answer leaves Jev unavailable for the correction check and the route alike.
+        partial = json.loads(self._canned())
+        del partial["route.codebase"]
+        for stub in ("off", json.dumps(partial)):
+            with self.subTest(stub=stub), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                turn = self._routed_turn(state_dir, "s-down", prompt, stub)
+                self.assertIsNone(turn["state"]["flow"])
+                self.assertNotIn("jev_route", turn["state"])
+                self.assertNotIn("ROUTE PICKED BY JEV", turn["context"])
+                declared = self.run_claude_declare("s-down", turn["state"]["nonce"], "direct-answer", state_dir)
+                self.assertEqual(declared.returncode, 0, declared.stderr)
 
     def test_claude_gate_follows_the_caveman_flag_and_never_writes_it(self) -> None:
         # Dan, 2026-09-03: the tracker is the single writer. /caveman lite must survive the next
@@ -977,7 +1051,7 @@ class AskMattGateTests(unittest.TestCase):
         self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
 
     def test_the_observed_false_fires_are_not_corrections_when_jev_says_no(self) -> None:
-        self._with_jev('{"correction": 0.04}')
+        self._with_jev(self._canned(correction=0.04, scope="other"))
         for n, prompt in enumerate(self.FALSE_FIRES):
             with self.subTest(prompt=prompt), tempfile.TemporaryDirectory() as folder:
                 turn = self._correction_turn(Path(folder), f"s-ff{n}", prompt, ["Bash"])
@@ -985,7 +1059,7 @@ class AskMattGateTests(unittest.TestCase):
                 self.assertNotIn("pending_correction", turn["state"])
 
     def test_a_real_correction_still_fires_when_jev_says_yes(self) -> None:
-        self._with_jev('{"correction": 0.97}')
+        self._with_jev(self._canned(correction=0.97, scope="other"))
         with tempfile.TemporaryDirectory() as folder:
             turn = self._correction_turn(
                 Path(folder), "s-real", "that's wrong, you said X but it is Y", ["Bash"]
