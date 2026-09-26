@@ -2676,6 +2676,50 @@ test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint a
   );
 });
 
+// Issue 807: a wave ran `git stash` + `git checkout origin/main` in the orchestrator checkout. The
+// tree was clean afterwards, so the dirt guard passed; the HEAD watch measured at Setup must catch
+// the move, check the start branch back out, and flag it - or throw when the restore does not take.
+function headMock(heads, restores) {
+  const main = 'a'.repeat(40), origin = 'b'.repeat(40);
+  let reads = 0;
+  return async (prompt, opts) => {
+    if (opts.label === 'tree-guard:baseline') {
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label.startsWith('orchestrator-head:restore:')) { restores.push(prompt); return { exitCode: 0, stdout: '', stderr: '' }; }
+    if (opts.label.startsWith('orchestrator-head:')) {
+      assert.match(prompt, /git -C \/m symbolic-ref --quiet --short HEAD \|\| echo DETACHED; git -C \/m rev-parse HEAD/);
+      const h = heads[Math.min(reads++, heads.length - 1)];
+      return { exitCode: 0, stdout: h === 'main' ? `main\n${main}\n` : `DETACHED\n${origin}\n`, stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+}
+
+test('treeGuardCheck: a clean-tree HEAD move to detached origin/main is checked back onto the start branch and flagged (issue 807)', async () => {
+  const restores = [];
+  // Setup reads main; the checkpoint reads the detached move; the re-read after restore reads main.
+  const { treeGuardCheck, logs } = await driveTreeGuard(headMock(['main', 'detached', 'main'], restores), { orchestratorCwd: '/m' });
+  await treeGuardCheck('verify-attempt1', 5);
+  assert.equal(restores.length, 1);
+  assert.match(restores[0], /git -C \/m checkout main(?!\S)/);
+  assert.ok(!/stash|reset/.test(restores[0].split('\n')[2]), 'the restore command must be a plain checkout');
+  assert.ok(logs.some((l) => /Orchestrator HEAD RESTORED at verify-attempt1/.test(l) && /stash list/.test(l)));
+});
+
+test('treeGuardCheck: a HEAD move the restore cannot undo is an isolation breach (issue 807)', async () => {
+  const { treeGuardCheck } = await driveTreeGuard(headMock(['main', 'detached'], []), { orchestratorCwd: '/m' });
+  await assert.rejects(() => treeGuardCheck('deliver', 5), /isolation breached.*did not put it back/);
+});
+
+test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
+  const report = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-REPORT');
+  assert.ok(report.includes('gitSpelling(instrument, `add -- ${cfg.followupsFile}`)'), 'the writer must stage the follow-ups file by explicit path');
+  assert.match(report, /gitSpelling\(instrument, `commit -m "[^`]*" -- \$\{cfg\.followupsFile\}`\)/, 'the commit itself must be limited to that path');
+  assert.ok(report.includes("gitSpelling(instrument, 'show --name-only --format= HEAD')"), 'the writer must read back that the commit holds only that file');
+});
+
 // ---------------------------------------------------------------------------
 // Tip lookup fallback chain (issue 561): a branch present only as `origin/<branch>` - handed in
 // through `priorImpl` from an earlier run, or pushed by an implementer in another container - used
