@@ -541,6 +541,77 @@ class AskMattGateTests(unittest.TestCase):
                 declared = self.run_claude_declare("s-down", turn["state"]["nonce"], "direct-answer", state_dir)
                 self.assertEqual(declared.returncode, 0, declared.stderr)
 
+    # Issue 841: the model may appeal Jev's route once per turn, and the reply must show it.
+    def run_appeal(self, sid: str, nonce: str, wanted: str, reason: str, state_dir: Path,
+                   settings: Path | None = None) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ)
+        env["ASK_MATT_GATE_STATE_DIR"] = str(state_dir)
+        env["GOVERNANCE_CLAUDE_HOME"] = str(state_dir / "claude-home")
+        if settings is not None:
+            env["ASK_MATT_ROUTE_SETTINGS"] = str(settings)
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "appeal-claude", sid, nonce, wanted, reason],
+            text=True, capture_output=True, env=env, check=False,
+        )
+
+    def _appealed_turn(self, state_dir: Path, sid: str) -> str:
+        turn = self._routed_turn(state_dir, sid, "what does the gate do?", self._canned(kind="question"))
+        self.assertIn("appeal-claude", turn["context"])
+        nonce = turn["state"]["nonce"]
+        done = self.run_appeal(sid, nonce, "grill-with-docs", "it asks for a design", state_dir)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return nonce
+
+    def test_an_appeal_switches_the_route_and_logs_both_routes_and_the_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            nonce = self._appealed_turn(state_dir, "s-appeal")
+            self.assertEqual(self._state(state_dir, "s-appeal")["flow"], "grill-with-docs")
+            log = (state_dir / "route-appeals.log").read_text(encoding="utf-8")
+            self.assertIn("wanted=grill-with-docs\tjev=direct-answer\treason=it asks for a design", log)
+            refused = self.run_claude_declare("s-appeal", nonce, "direct-answer", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            declared = self.run_claude_declare("s-appeal", nonce, "grill-with-docs", state_dir)
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            # Declaring the appealed route keeps the appeal, so the lint still demands the line.
+            self.assertEqual(self._state(state_dir, "s-appeal")["appeal"]["nonce"], nonce)
+
+    def test_a_second_appeal_in_the_same_turn_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            nonce = self._appealed_turn(state_dir, "s-twice")
+            again = self.run_appeal("s-twice", nonce, "to-spec", "changed my mind", state_dir)
+            self.assertEqual(again.returncode, 2)
+            self.assertIn("already appealed", again.stderr)
+            self.assertEqual(self._state(state_dir, "s-twice")["flow"], "grill-with-docs")
+
+    def test_the_lint_refuses_an_appealed_reply_until_its_first_line_states_the_appeal(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._appealed_turn(state_dir, "s-line")
+            body = "Grill started.\nNext: answer question one."
+            refused = self.run_presend_lint("s-line", body, state_dir)
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("route appeal not shown", refused.stdout)
+            line = "Route appeal: grill-with-docs instead of direct-answer, because it asks for a design"
+            accepted = self.run_presend_lint("s-line", f"{line}\n{body}", state_dir)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout)
+
+    def test_appeals_off_in_the_settings_file_refuses_the_appeal(self) -> None:
+        committed = json.loads((SCRIPT.parent / "route-gate.json").read_text(encoding="utf-8"))
+        self.assertIs(committed["appeals"], True)  # the committed default
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            settings = state_dir / "route-gate.json"
+            settings.write_text(json.dumps({**committed, "appeals": False}), encoding="utf-8")
+            turn = self._routed_turn(state_dir, "s-off", "what does the gate do?", self._canned(kind="question"))
+            refused = self.run_appeal("s-off", turn["state"]["nonce"], "grill-with-docs", "design",
+                                      state_dir, settings)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("appeals are off", refused.stderr)
+            self.assertEqual(self._state(state_dir, "s-off")["flow"], "direct-answer")
+            self.assertFalse((state_dir / "route-appeals.log").exists())
+
     def test_claude_gate_follows_the_caveman_flag_and_never_writes_it(self) -> None:
         # Dan, 2026-09-03: the tracker is the single writer. /caveman lite must survive the next
         # prompt, and /caveman off (flag deleted) must switch the lint requirement off entirely.
@@ -1427,6 +1498,14 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-bak"}, state_dir)
             nonce = self._state(state_dir, "s-bak")["nonce"]
             self.run_claude_declare("s-bak", nonce, "implement", state_dir)
+            # implement is a build route (issue 842): open its skill before the backup gate's own
+            # edits are exercised, or the route-skill gate denies first and this test would be
+            # testing the wrong gate.
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-bak", "tool_name": "Skill", "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
             target = state_dir / "settings.json"
             target.write_text("{}", encoding="utf-8")
 
@@ -1449,6 +1528,72 @@ class AskMattGateTests(unittest.TestCase):
             plain.write_text("x", encoding="utf-8")
             self.assertEqual(edit(plain), {})
             self.assertEqual(edit(state_dir / "brand-new.env"), {})
+
+    # Issue 842: build routes must open their own skill before their first edit; helpers and talk
+    # routes are exempt.
+    def _declared(self, state_dir: Path, sid: str, flow: str) -> None:
+        self.run_gate("claude-prompt", {"session_id": sid}, state_dir)
+        nonce = self._state(state_dir, sid)["nonce"]
+        self.run_claude_declare(sid, nonce, flow, state_dir)
+
+    def _edit_call(self, state_dir: Path, sid: str, path: Path, agent_id: str | None = None) -> dict:
+        event = {
+            "session_id": sid, "tool_name": "Edit",
+            "tool_input": {"file_path": str(path), "old_string": "x", "new_string": "y"},
+        }
+        if agent_id is not None:
+            event["agent_id"] = agent_id
+        return json.loads(self.run_gate("claude-pre-tool", event, state_dir, caveman="keep").stdout)
+
+    def test_build_route_refuses_an_edit_before_its_skill_is_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-build", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            denied = self._edit_call(state_dir, "s-build", target)
+
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("implement", denied["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_build_route_allows_edits_once_its_skill_is_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-build-ok", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-build-ok", "tool_name": "Skill",
+                 "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
+
+            self.assertEqual(self._edit_call(state_dir, "s-build-ok", target), {})
+
+    def test_helper_calls_carrying_agent_id_skip_the_route_skill_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-helper", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            self.assertEqual(
+                self._edit_call(state_dir, "s-helper", target, agent_id="sub-1"), {}
+            )
+
+    def test_talk_routes_have_no_edit_limit_at_all(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            for flow in ("direct-answer", "grill-with-docs", "research"):
+                with self.subTest(flow=flow):
+                    sid = f"s-talk-{flow}"
+                    self._declared(state_dir, sid, flow)
+                    target = state_dir / f"{flow}.txt"
+                    target.write_text("x", encoding="utf-8")
+                    self.assertEqual(self._edit_call(state_dir, sid, target), {})
 
     def test_post_tool_failure_counter_drives_the_escalation_ladder(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

@@ -19,6 +19,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
 const FLEET_SKILL = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'INTERNALS.md');
 const contract = require('./ticket-fleet-contract.js');
+const { sliceBetween } = require('./source-slice.js');
 const {
   CONTRACT_VERSION, FORKS, RUNBOOKS, checkLaunchArgs, contractVersionOf, auditForkFiles,
   FLEET_SOURCE_REPO, decideFleetRefresh,
@@ -121,4 +122,65 @@ test('the INTERNALS.md ripple table names every fork holder, runbook and the cur
     const file = doc.split(' ').pop();
     assert.ok(skill.includes(file), `INTERNALS.md must list ${file} as a ripple target`);
   }
+});
+
+test('the SCOUT ticket schema has a body field, and the implementer prompt interpolates it (issue 886)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /body: \{ type: 'string', description: "the ticket's issue body, verbatim/,
+    'SCOUT tickets must declare a body field, distinct from the extracted criteria');
+
+  // Pull the implementer prompt's template literal out of the source and actually render it
+  // against a fixture ticket (issue 807: the implementer got only title + criteria and guessed the
+  // fix), rather than trusting that a `${t.body}` substring nearby means it is really threaded in.
+  const promptSrc = sliceBetween(
+    src,
+    'Implement GitHub issue #${t.number}: ${t.title}',
+    "Return structured output only.`,\n      { label: `impl:#",
+    "the implementer prompt template in ticket-fleet.js's code lane"
+  );
+
+  const fixtureBody = 'FIXTURE ISSUE BODY: reproduce with `foo --bar`, expected baz (issue 886 fixture)';
+  const t = { number: 886, title: 'Fixture ticket', criteria: 'Fixture acceptance criteria', body: fixtureBody };
+  const branch = 'agent/issue-886-fixture';
+  const scout = { repoMap: 'fixture repo map', defaultBranch: 'main' };
+  const chainStart = '';
+  const priorFindings = '';
+  const instrument = 'gh';
+  const testCommand = 'npm test';
+  const PYTHON_RAIL = '(python rail fixture)';
+  const SCRATCH_RAIL = '(scratch rail fixture)';
+  const HARNESS_RELAY_RAIL = '(harness relay rail fixture)';
+  const dedupeBrief = () => '';
+  const gitSpelling = (_instrument, cmd) => `git ${cmd}`;
+
+  // eslint-disable-next-line no-new-func
+  const render = new Function(
+    't', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand',
+    'PYTHON_RAIL', 'SCRATCH_RAIL', 'HARNESS_RELAY_RAIL', 'dedupeBrief', 'gitSpelling',
+    `return \`${promptSrc}\`;`
+  );
+  const rendered = render(t, branch, scout, chainStart, priorFindings, instrument, testCommand,
+    PYTHON_RAIL, SCRATCH_RAIL, HARNESS_RELAY_RAIL, dedupeBrief, gitSpelling);
+
+  assert.ok(rendered.includes(fixtureBody),
+    "the rendered implementer prompt must contain the fixture ticket's body text verbatim");
+});
+
+test('the implementer and prober prompts tell a worker not to file the harness-relayed launch request as a discovery (issue 885)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const railIdx = src.indexOf('const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885):');
+  assert.ok(railIdx > -1, 'the harness-relayed request rail must be defined as its own shared const, like PYTHON_RAIL and SCRATCH_RAIL');
+  const probeLabelIdx = src.indexOf("label: `probe:#");
+  const implLabelIdx = src.indexOf("label: `impl:#");
+  assert.ok(probeLabelIdx > -1 && implLabelIdx > -1, 'both the prober and implementer agent calls must still exist');
+  const probePromptStart = src.lastIndexOf('`Probe GitHub issue', probeLabelIdx);
+  const implPromptStart = src.lastIndexOf('`Implement GitHub issue', implLabelIdx);
+  assert.ok(probePromptStart > -1 && probePromptStart < probeLabelIdx,
+    'the prober prompt template must reference ${HARNESS_RELAY_RAIL} between its own start and its agent() call');
+  assert.ok(implPromptStart > -1 && implPromptStart < implLabelIdx,
+    'the implementer prompt template must reference ${HARNESS_RELAY_RAIL} between its own start and its agent() call');
+  assert.ok(src.slice(probePromptStart, probeLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
+    'the prober prompt must splice in HARNESS_RELAY_RAIL');
+  assert.ok(src.slice(implPromptStart, implLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
+    'the implementer prompt must splice in HARNESS_RELAY_RAIL');
 });
