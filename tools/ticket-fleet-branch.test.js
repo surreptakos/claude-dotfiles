@@ -25,7 +25,7 @@ const {
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
-  classifyBranchLookup, classifyDelivery,
+  classifyBranchLookup, classifyDelivery, quotaFailure, createRunHalt, haltSummary,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
 } = require('./ticket-fleet-branch.js');
@@ -593,6 +593,9 @@ const PERMISSIVE = new Proxy(function stub() {}, {
 // Adding a binding to the lane therefore needs no edit here. Bodies built by the Function
 // constructor are non-strict whatever the enclosing module says, so `with` is legal.
 function laneScope(stubs) {
+  // Issue 812: every driven block reads the run-wide halt latch; a fresh, un-halted one per
+  // instantiation unless the test supplies its own.
+  stubs = Object.assign({ runHalt: createRunHalt(), createRunHalt, haltSummary }, stubs);
   return new Proxy(stubs, {
     has: (_t, prop) => prop !== Symbol.unscopables,
     get(target, prop) {
@@ -2972,4 +2975,98 @@ test(`${FLEET_SCRIPT_REL} tells no worker to run a bare \`git remote get-url ori
     'the command must be built through gitSpelling so the accepted /usr/bin/git spelling leads in a cloud container, never hardcoded as a literal bare backtick');
   assert.match(src, /gitSpelling\((instrument|mode|'mcp'), 'remote get-url origin'\)/,
     'gitSpelling must be the thing that produces every remaining "git remote get-url origin" mention');
+});
+
+// ---- A quota or rate-limit failure ends the run (issue 812) ----
+// Run wf_2e08b873-d92 (2026-09-16): the first implementer hit a weekly limit and the run launched
+// 17 more sub-agents that failed on the same message; two 2026-09-24 runs lost their
+// followups-writer to a session limit. The first such agent() rejection now latches a run-wide halt.
+test('quotaFailure recognises session, weekly and rate limits and reads the reset time (issue 812)', () => {
+  assert.deepEqual(quotaFailure(new Error("You've hit your session limit · resets 9:20am (UTC)")),
+    { reason: 'quota', resetsAt: '9:20am (UTC)', message: "You've hit your session limit · resets 9:20am (UTC)" });
+  assert.equal(quotaFailure("You've hit your weekly limit · resets 9pm (America/Chicago)").resetsAt, '9pm (America/Chicago)');
+  assert.equal(quotaFailure('gh: API rate limit already exceeded for user ID 1').reason, 'rate-limit');
+  assert.equal(quotaFailure('Request failed with status 429 Too Many Requests').reason, 'rate-limit');
+  assert.equal(quotaFailure('{"type":"error","error":{"type":"rate_limit_error"}}').resetsAt, null);
+  for (const other of ['impl output unusable: no reply matching its schema', 'see issue 429 for context', '', null]) {
+    assert.equal(quotaFailure(other), null, `${JSON.stringify(other)} is an ordinary failure, not a halt`);
+  }
+});
+
+// Replay fixture: the wf_2e08b873-d92 shape, four code tickets on two slots. #101's implementer
+// dies on the weekly limit while #102's is in flight; #103 and #104 are still queued. Any label
+// the fixture does not name fails on the same limit, as every agent did in that run.
+const QUOTA_REPLAY = {
+  limit: "You've hit your weekly limit · resets 9pm (America/Chicago)",
+  wave: [101, 102, 103, 104].map((n) => ({ number: n, title: `ticket ${n}`, kind: 'code', criteria: '- do it', blockedBy: [] })),
+  agent: {
+    'impl:#101.1': { delayMs: 5, reject: true },
+    'impl:#102.1': { delayMs: 25, resolve: { branch: 'agent/issue-102-attempt1-wf_testrun-w1', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: ['finding-102'] } },
+  },
+};
+
+test(`${FLEET_SCRIPT_REL} a quota failure ends the run: in-flight agents settle, nothing further starts (issue 812)`, async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const body = ['FLEET-DELIVER-PROMPT', 'FLEET-HALT', 'FLEET-CODE-LANE', 'FLEET-LANES', 'FLEET-REPORT']
+    .map((name) => extractMarked(src, name)).join('\n');
+  const helpers = loadStableHelpers(FLEET_SCRIPT);
+  const calls = [];
+  const logs = [];
+  const agentMock = (_prompt, opts) => {
+    calls.push(opts.label);
+    const step = QUOTA_REPLAY.agent[opts.label] || { delayMs: 0, reject: true };
+    return new Promise((resolve, reject) => setTimeout(
+      () => (step.reject ? reject(new Error(QUOTA_REPLAY.limit)) : resolve(step.resolve)), step.delayMs));
+  };
+  // Two slots, as the runtime's pipeline caps concurrency: #103 and #104 wait for a free one.
+  const pipeline = async (items, fn) => {
+    const out = new Array(items.length);
+    let next = 0;
+    const slot = async () => { while (next < items.length) { const k = next++; out[k] = await fn(items[k]); } };
+    await Promise.all([slot(), slot()]);
+    return out;
+  };
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { results, runHalt, haltResult, runReport };\n}`);
+  const run = await wrapper(laneScope({
+    agent: agentMock, log: (m) => logs.push(m), wave: QUOTA_REPLAY.wave, pipeline, buildLanes, chainGate,
+    runProbeLane: async () => { throw new Error('no probe here'); },
+    runHumanLane: async () => { throw new Error('no human here'); },
+    cfg: { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z', reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' },
+    runId: 'testrun', invocationId: 'inv1', instrument: 'gh',
+    scout: { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' }, testCommand: 'echo ok',
+    rules: new Proxy({}, { get: () => () => '' }), dedupeBrief: () => '', verifierAgentType: 'fleet-verifier',
+    stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
+    priorFindingsBlock: helpers.priorFindingsBlock, unmetCriteriaOf: helpers.unmetCriteriaOf, gitSpelling: helpers.gitSpelling,
+    treeGuardCheck: async () => {}, assertNoBreach: () => {},
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+    unusableVerdict: (detail, who) => ({ pass: false, evidence: '', failures: [`${who} output unusable: ${detail}`], unusable: true }),
+    revParse: async () => null, worktreeMismatch, classifyDelivery,
+  }));
+
+  assert.deepEqual(calls, ['impl:#101.1', 'impl:#102.1'],
+    'only the two implementers already started run: no retry, no verifier or Deliver for #102, nothing for the queued tickets');
+  const after = calls.slice(calls.indexOf('impl:#101.1') + 1);
+  for (const t of QUOTA_REPLAY.wave) {
+    assert.ok(after.filter((l) => l.startsWith(`impl:#${t.number}.`)).length <= 1, `#${t.number} got more than one attempt after the quota failure`);
+  }
+  const byTicket = new Map(run.results.filter(Boolean).map((r) => [r.ticket, r]));
+  assert.equal(byTicket.get(101).done, false);
+  assert.equal(byTicket.get(102).done, false, 'a branch the halt left unverified is never delivered');
+  assert.match(byTicket.get(102).verdict.failures[0], /not verified - run halted on a quota limit at impl:#101\.1/);
+
+  const halted = run.haltResult(run.runHalt.current(), QUOTA_REPLAY.wave.map((t) => byTicket.get(t.number)));
+  assert.equal(halted.kind, 'quota');
+  assert.equal(halted.resetsAt, '9pm (America/Chicago)', 'the run result names the reset time the message carried');
+  assert.equal(halted.label, 'impl:#101.1');
+  assert.match(halted.reason, /weekly limit/);
+  assert.deepEqual(halted.notAttempted, [103, 104], 'the run result lists the tickets never attempted');
+  assert.equal(logs.filter((m) => /No further attempts or tickets start/.test(m)).length, 1, 'the halt is logged once');
+
+  const report = await run.runReport(['finding-102'], 'main');
+  assert.equal(calls.includes('followups-writer'), false, 'no report writer starts on a halted run');
+  assert.match(report.error, /followups-writer not started - run halted on a quota limit/);
+  const tail = src.slice(src.indexOf('// [FLEET-REPORT-END]'));
+  assert.match(tail, /discoveryList: followupsError \? allDiscoveries : undefined/, 'the discoveries then ride in the run result the record writer reads');
+  assert.match(tail, /halted: haltResult\(runHalt\.current\(\), clean\)/);
+  assert.match(tail, /!r\.chainSkipped && !r\.notAttempted\)/, 'a ticket never attempted is not listed as failed');
 });

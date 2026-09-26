@@ -876,6 +876,60 @@ function gitSpelling(instrument, args) {
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
 
+/**
+ * Pure (issue 812): is an agent() rejection a quota or rate-limit failure? Those are terminal for
+ * the whole run, not for one attempt - every agent started after one fails on the same message
+ * (2026-09-16: one weekly-limit implementer, then 17 more sub-agents that all failed the same way;
+ * 2026-09-24: the followups-writer lost to "You've hit your session limit"). Returns null for any
+ * other error, else {reason, resetsAt, message}: reason is 'quota' (a session, weekly or usage
+ * limit) or 'rate-limit' (an API rate limit or an HTTP 429), resetsAt the reset time the message
+ * names ("9:20am (UTC)") or null, message the first non-blank line of the error text.
+ */
+const QUOTA_PATTERNS = Object.freeze([
+  Object.freeze({ reason: 'quota', re: /\bhit your (?:[\w-]+ ){0,2}limit\b/i }),
+  Object.freeze({ reason: 'quota', re: /\b(?:usage|session|weekly) limit (?:reached|exceeded)\b/i }),
+  Object.freeze({ reason: 'rate-limit', re: /\bAPI rate limit (?:already )?exceeded\b/i }),
+  Object.freeze({ reason: 'rate-limit', re: /\brate_limit_error\b|\btoo many requests\b/i }),
+  Object.freeze({ reason: 'rate-limit', re: /\b(?:status|code|error|HTTP)[\s:=]*429\b|\b429\b[^\n]{0,40}\brate.?limit/i }),
+]);
+function quotaFailure(errOrMessage) {
+  const e = errOrMessage;
+  const text = String((e && typeof e === 'object' && e.message) || e || '');
+  const hit = QUOTA_PATTERNS.find((p) => p.re.test(text));
+  if (!hit) return null;
+  const m = /\bresets?\s+(?:at\s+|in\s+)?([^\n]+?)\s*[.;]?\s*(?:\n|$)/i.exec(text);
+  const message = (text.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || '').slice(0, 300);
+  return { reason: hit.reason, resetsAt: m ? m[1].trim() : null, message };
+}
+
+/**
+ * The run-wide halt latch (issue 812). `note(err, label)` records the FIRST quota or rate-limit
+ * failure any agent of the run hit and returns it (null for an ordinary error, and for a quota
+ * error once a halt is already recorded - the first one is the one named); `current()` is the
+ * recorded halt or null; `unaudited` collects the tree-guard checkpoints skipped once halted.
+ * `onHalt` runs exactly once, with the halt, so the run log names the reason and reset time once.
+ */
+function createRunHalt(onHalt) {
+  let halt = null;
+  return {
+    note(err, label) {
+      if (halt) return null;
+      const q = quotaFailure(err);
+      if (!q) return null;
+      halt = Object.assign({}, q, { label: String(label || ''), unaudited: [] });
+      if (typeof onHalt === 'function') onHalt(halt);
+      return halt;
+    },
+    current() { return halt; },
+  };
+}
+
+/** One line naming a halt: the reason, the reset time when known, and the agent that hit it. */
+function haltSummary(halt) {
+  if (!halt) return '';
+  const what = halt.reason === 'rate-limit' ? 'rate limit' : 'quota limit';
+  return `run halted on a ${what} at ${halt.label || 'an agent'}${halt.resetsAt ? ` - resets ${halt.resetsAt}` : ''}: ${halt.message}`;
+}
 // [FLEET-INLINE-END]
 
 /**
@@ -905,4 +959,5 @@ module.exports = {
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  QUOTA_PATTERNS, quotaFailure, createRunHalt, haltSummary,
 };

@@ -99,6 +99,7 @@ behind them. Never launch a second wave while one is running in the same repo; w
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
    | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / waiting on the owner after a handoff | nothing |
+   | `halted.notAttempted` | never started: an agent hit a quota or rate limit and the run stopped (`halted.reason`, `halted.resetsAt`) | re-run after the reset; verified work via `finishRunId` |
 
    Done when every ticket the scout listed sits in one row above.
 
