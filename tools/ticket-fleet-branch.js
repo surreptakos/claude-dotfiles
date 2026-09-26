@@ -416,7 +416,7 @@ function applyOpenPrs(tickets, withOpenPr) {
 }
 
 /**
- * Split the candidate tickets into the wave that runs and the three reasons the rest do not.
+ * Split the candidate tickets into the wave that runs and the two reasons the rest do not.
  *
  * Open blockers gate every lane. Kind does not: a human ticket named in `args.tickets` stays in
  * the wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose
@@ -425,20 +425,21 @@ function applyOpenPrs(tickets, withOpenPr) {
  *
  * In-wave chaining (issue 854): a blocked ticket whose every open blocker is a code ticket already
  * in the wave joins the wave too, carrying `chainedAfter` (the blocker numbers). It runs on a
- * blocker's lane once the blockers have merged (STEP D), so it takes no concurrency slot and does
- * not count against the cap. Chains resolve transitively (C after B after A); a blocker outside
- * the wave, a probe or human blocker (neither merges) or a cycle leaves the ticket in `blocked`.
+ * blocker's lane once the blockers have merged (STEP D). Chains resolve transitively (C after B
+ * after A); a blocker outside the wave, a probe or human blocker (neither merges) or a cycle leaves
+ * the ticket in `blocked`.
+ *
+ * No cap (Dan, 2026-09-26): one fleet runs at a time and it takes every runnable ticket.
  *
  * @param {Array<{number:number, kind?:string, blockedBy:Array, handoffPending?:boolean}>} tickets
- * @param {number} maxTickets - the run's cap on concurrently implemented tickets
- * @returns {{wave:Array, blocked:Array, pendingHandoff:Array, overCap:Array}}
+ * @returns {{wave:Array, blocked:Array, pendingHandoff:Array}}
  */
-function selectWave(tickets, maxTickets) {
+function selectWave(tickets) {
   const blocked = tickets.filter((t) => t.blockedBy.length > 0);
   const eligible = tickets.filter((t) => t.blockedBy.length === 0);
   const pendingHandoff = eligible.filter((t) => t.handoffPending === true);
   const runnable = eligible.filter((t) => t.handoffPending !== true);
-  const wave = runnable.slice(0, maxTickets);
+  const wave = runnable.slice();
   const merges = (t) => t.kind !== 'probe' && t.kind !== 'human';
   const mergingInWave = new Set(wave.filter(merges).map((t) => parseInt(t.number, 10)));
   const chainedNumbers = new Set();
@@ -459,7 +460,6 @@ function selectWave(tickets, maxTickets) {
     wave,
     blocked: blocked.filter((t) => !chainedNumbers.has(parseInt(t.number, 10))),
     pendingHandoff,
-    overCap: runnable.slice(maxTickets),
   };
 }
 
