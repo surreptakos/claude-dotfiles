@@ -2415,6 +2415,13 @@ const runCodeLane = async (t, workerIndex) => {
       impl = reuse || await agent(
       `Implement GitHub issue #${t.number}: ${t.title}
 You are in a fresh isolated git worktree. Read CLAUDE.md first - binding.${chainStart}
+Hard rules, in priority order (issue 628): each restates a rail this prompt spells out in full below, none is new, and where two pull against each other the lower number wins.
+1. Write nothing outside this worktree: not the shared checkout at the repository root (worktree rule), not ~/.claude, ~/.codex or ~/.agents (live-tree hard rail), not a bare path in the shared scratchpad (scratch-file rule); and never run \`pip install -e\` (Python editable-install rail).
+2. Never open a PR, never merge, never deploy, and never push any branch but ${branch}.
+3. Never leave committed work only in this container: push ${branch} as soon as a commit lands.
+4. Never write a closing keyword: reference the issue in commits as "issue ${t.number}", no #.
+5. Report faithfully: pushed: true only when the push exited 0, the REAL test exit code, a failed push quoted verbatim.
+6. Stay in scope: a pre-existing bug or behavior the ticket does not ask for becomes a discovery string, not a fix.
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 ${PYTHON_RAIL}
 ${SCRATCH_RAIL}
