@@ -30,7 +30,7 @@ export const meta = {
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
-    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report (aac-routines issues 192, 270)' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issue 807)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
@@ -1358,6 +1358,44 @@ let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
 // inconsistency, without aborting the run the way `treeGuard:true` still does for the same exit.
 let treeGuardUnusable = null
 
+// Issue 807: one wave ran `git stash` + `git checkout origin/main` in the orchestrator's own
+// checkout, leaving it on a detached HEAD with a CLEAN tree - and the guard tool above only ever
+// diffs dirt against the baseline, so every checkpoint passed. The ref itself is now watched too:
+// `orchestratorHead` is measured once at Setup (eagerly - a start ref measured on the first breach
+// would be the ALREADY-moved HEAD), and every checkpoint re-reads HEAD and compares. A moved HEAD
+// is checked back onto the start ref and flagged in the returned report; a restore that does not
+// take is a breach. It runs whether or not the served repo ships the guard tool (it needs only
+// git), and `treeGuard:false` turns it off with the rest.
+let headWatchOn = cfg.treeGuard !== false
+let orchestratorHead = null      // { branch: string|null, sha } at Setup
+let headWatchUnusable = null     // reason, when the Setup measurement failed
+const headRestores = []          // { label, observedBy, from, to } - one per restore, for the report
+const headRestoreSeen = new Set()
+
+// One command, one fixed two-line answer: the branch name (or DETACHED) and the full sha.
+// Joined like buildTipLookupCommand: the orchestrator checkout is not worktree-isolated, so no
+// caveman guard sits in front of these, and `instrument` (gitSpelling) is not known yet at Setup.
+const headCommand = (cwd) => ['git -C', cwd, 'symbolic-ref --quiet --short HEAD || echo DETACHED;', 'git -C', cwd, 'rev-parse HEAD'].join(' ')
+const restoreCommand = (cwd, target) => ['git -C', cwd, 'checkout', target].join(' ')
+
+function parseHeadState(stdout) {
+  const lines = String(stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  if (lines.length !== 2 || !/^[0-9a-f]{40,64}$/.test(lines[1])) return null
+  return { branch: lines[0] === 'DETACHED' ? null : lines[0], sha: lines[1] }
+}
+
+const describeHead = (h) => h.branch ? `${h.branch} (${h.sha.slice(0, 12)})` : `detached ${h.sha.slice(0, 12)}`
+
+function headAgentPrompt(command) {
+  return `Run exactly this one bash command and report its result:
+
+${command}
+
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
+file, and never run \`git stash\`, \`git reset\` or any other git command than the one above. Return
+its REAL exit code plus its stdout and stderr VERBATIM, character for character.`
+}
+
 // A guard agent runs ONE fixed command and hands back its exit code and stdout verbatim. Nothing
 // is left to its judgement, so a paraphrase is detectable: stdout that does not JSON.parse is
 // treated as could-not-audit, not as a pass.
@@ -1514,6 +1552,25 @@ if (orchestratorCwd === '.') {
 } else {
   log(`Orchestrator checkout path from args.orchestratorCwd: ${orchestratorCwd} (already absolute or caller-set - measurement skipped).`)
 }
+if (headWatchOn) {
+  // Issue 807: the ref the orchestrator's own checkout starts this run on, measured before any
+  // worker exists. Unmeasurable is flagged, not fatal: the dirt guard below still runs.
+  let headRes = null, headError = null
+  try {
+    headRes = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
+      { label: 'orchestrator-head:setup', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+  } catch (err) {
+    headError = unusableReason('orchestrator-head:setup', (err && err.message) || err)
+  }
+  orchestratorHead = headRes && headRes.exitCode === 0 ? parseHeadState(headRes.stdout) : null
+  if (orchestratorHead) {
+    log(`Orchestrator HEAD at Setup: ${describeHead(orchestratorHead)} - every checkpoint puts it back here if the wave moves it (issue 807).`)
+  } else {
+    headWatchOn = false
+    headWatchUnusable = `orchestrator-head: unusable - could not read the orchestrator checkout's HEAD at Setup (exit=${headRes ? headRes.exitCode : 'null'} stdout=${JSON.stringify(headRes ? headRes.stdout : '')} error=${headError || 'none'}); no checkpoint can catch or undo a moved HEAD this run (issue 807).`
+    log(headWatchUnusable)
+  }
+}
 if (treeGuardOn) {
   // Wrapped (aac-routines issue 270): a guard agent that blows the StructuredOutput retry cap
   // throws out of agent(...), and an unwrapped throw here would abort the run with the harness's
@@ -1561,10 +1618,12 @@ if (treeGuardOn) {
  * OBSERVED a leak, not necessarily who caused it.
  */
 async function treeGuardCheck(label, ticketNumber) {
-  if (!treeGuardOn) return
+  if (!treeGuardOn && !headWatchOn) return
   // A breach already recorded elsewhere in the wave fails this chain too, before it can spend
   // another sub-session or reach Deliver.
   assertNoBreach()
+  if (headWatchOn) await headCheck(label, ticketNumber)
+  if (!treeGuardOn) return
 
   // Wrapped (aac-routines issue 270): a guard agent that cannot produce schema-conformant output
   // throws out of agent(...) after the StructuredOutput retry cap. That throw is a
@@ -1611,6 +1670,56 @@ async function treeGuardCheck(label, ticketNumber) {
   breaches.push({ label, observedBy: ticketNumber, blamed, who, entries })
   log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}`)
   throw new Error(breachMessage())
+}
+
+/**
+ * Issue 807: re-read the orchestrator checkout's HEAD and put it back on the Setup ref if the wave
+ * moved it. Returns quietly when HEAD is where it started; a moved HEAD is restored and recorded
+ * in `headRestores` (the run report flags it); a HEAD that cannot be read or restored is a breach.
+ * A branch start is restored with `git checkout <branch>`, a detached start with `checkout
+ * --detach <sha>` - never `reset` (it would move the operator's branch) and never `stash pop`
+ * (the stash stack is shared with every worktree of the wave).
+ */
+async function headCheck(label, ticketNumber) {
+  const start = orchestratorHead
+  const read = async (tag) => {
+    let res = null
+    try {
+      res = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
+        { label: `orchestrator-head:${tag}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+    } catch (err) {
+      if (runHalt.note((err && err.message) || err, `orchestrator-head:${tag}#${ticketNumber}`) === true) return 'halted'
+    }
+    return res && res.exitCode === 0 ? parseHeadState(res.stdout) : null
+  }
+  const moved = (h) => start.branch ? h.branch !== start.branch : (h.branch !== null || h.sha !== start.sha)
+  const flag = (entry) => {
+    breaches.push({ label, observedBy: ticketNumber, blamed: [], who: `ticket #${ticketNumber} (observed at its checkpoint; the HEAD move names no author)`, entries: [entry] })
+    log(`ISOLATION BREACH (issue 807) at ${label} - ${entry}`)
+    throw new Error(breachMessage())
+  }
+
+  const now = await read(label)
+  if (now === 'halted') return
+  if (!now) flag(`orchestrator HEAD unreadable at ${label}; expected ${describeHead(start)}`)
+  if (!moved(now)) return
+
+  const target = start.branch ? start.branch : `--detach ${start.sha}`
+  let res = null
+  try {
+    res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, target)),
+      { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+  } catch (err) { res = null }
+  const after = await read(`${label}-restored`)
+  if (after === 'halted') return
+  if (!after || moved(after)) {
+    flag(`orchestrator HEAD moved to ${describeHead(now)} and a checkout of ${target} did not put it back (exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''}); restore it by hand`)
+  }
+  const key = `${now.branch}|${now.sha}`
+  if (headRestoreSeen.has(key)) return
+  headRestoreSeen.add(key)
+  headRestores.push({ label, observedBy: ticketNumber, from: describeHead(now), to: describeHead(after) })
+  log(`Orchestrator HEAD RESTORED at ${label} (ticket #${ticketNumber}, issue 807): the wave moved it to ${describeHead(now)}; checked back onto ${describeHead(after)}. If the checkout held uncommitted work before the run, look in the stash list of ${orchestratorCwd} - the fleet never pops a stash.`)
 }
 // [FLEET-TREE-GUARD-CHECK-END]
 
@@ -2991,7 +3100,7 @@ async function runReport(discoveries, defaultBranch) {
 2. git -C ${orchestratorCwd} worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
 3. Write this run's discovery bullets, exactly as given here and in this order, as a JSON array of strings to ${scratchFile('discoveries-bullets.json')}: ${JSON.stringify(discoveries)}
 4. From that worktree's repo root, run \`node tools/followups-append.js ${cfg.followupsFile} ${runId} ${scratchFile('discoveries-bullets.json')}\` (create ${cfg.followupsFile} if it does not exist; the script does that). Do NOT append, edit or reword ${cfg.followupsFile} by hand - a hand edit is what deleted seven earlier runs' worth of bullets before this script existed (issue 882); the script is append-only by construction and refuses to run if that were ever not true. It prints one line of JSON on success; if it exits non-zero, stop and return that stderr as the error.
-5. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
+5. Commit ${cfg.followupsFile} by explicit path and nothing else (issue 807 - a broad add once swept a CRLF-rewritten test file into this commit): ${gitSpelling(instrument, `add -- ${cfg.followupsFile}`)}, then ${gitSpelling(instrument, `commit -m "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)" -- ${cfg.followupsFile}`)}. Never add with -A, . or -u, and never commit with -a; the trailing \`-- ${cfg.followupsFile}\` commits that one path even if something else got staged. Then run ${gitSpelling(instrument, 'show --name-only --format= HEAD')}: it must print exactly \`${cfg.followupsFile}\`. If it prints any other path, stop - push nothing, open no PR - and return sha and prUrl as empty strings.
 6. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
 ${deliverStep}
 Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, do NOT touch any ticket. Return structured output only.`,
@@ -3058,6 +3167,10 @@ return {
   // prepends a run-level entry (ticket: null) when the tree-guard baseline itself was unusable, so
   // "this run had no isolation guard" is as visible as any per-ticket inconsistency.
   inconsistent: (treeGuardUnusable ? [{ ticket: null, kind: 'tree-guard', branch: null, detail: treeGuardUnusable }] : [])
+    // Issue 807: a HEAD the wave moved and a checkpoint put back is flagged here, not only logged.
+    .concat(headWatchUnusable ? [{ ticket: null, kind: 'orchestrator-head', branch: null, detail: headWatchUnusable }] : [])
+    .concat(headRestores.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
+      detail: `orchestrator HEAD moved to ${h.from} during the wave; restored onto ${h.to} at ${h.label} (issue 807). Check the orchestrator checkout's stash list for work the move stashed.` })))
     .concat(clean.filter(r => r.inconsistency).map(r => ({
       ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
     }))),
