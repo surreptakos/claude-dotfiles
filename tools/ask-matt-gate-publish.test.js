@@ -26,6 +26,10 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 
+// The prompt hook asks TypeSafe Jev for the correction verdict and the route (issues 727, 839);
+// tests never touch the network, so every spawned gate sees Jev as unavailable.
+process.env.TYPESAFE_JEV_STUB = 'off';
+
 const REPO = path.resolve(__dirname, '..');
 const GATE = path.join(REPO, 'profile', 'codex', 'hooks', 'ask_matt_gate.py');
 
