@@ -541,6 +541,68 @@ class AskMattGateTests(unittest.TestCase):
                 declared = self.run_claude_declare("s-down", turn["state"]["nonce"], "direct-answer", state_dir)
                 self.assertEqual(declared.returncode, 0, declared.stderr)
 
+    # Issue 840: continuation. Turn one is a grill Jev picked; Stop captures its route and last
+    # question; turn two's canned answers include the continuation Choices. The tree answers default
+    # to `question` (direct-answer), so any route other than direct-answer came from continuation.
+    GRILL = dict(kind="build", settled="unsettled", codebase="repo")
+
+    def _after_grill(self, state_dir: Path, sid: str, reply: str, stub: str) -> dict:
+        self._routed_turn(state_dir, sid, "I need a way to give the model feedback.", self._canned(**self.GRILL))
+        transcript = self._transcript(state_dir, "Which should feedback go to?\nA) the tool\nB) the model")
+        self.run_gate("claude-stop", {"session_id": sid, "transcript_path": transcript}, state_dir)
+        return self._routed_turn(state_dir, sid, reply, stub)
+
+    def test_a_one_letter_answer_to_a_grill_question_keeps_grill_with_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._after_grill(Path(folder), "s-a", "A", self._canned(continuation="same", next="implement"))
+            self.assertEqual(turn["state"]["flow"], "grill-with-docs")
+            self.assertIn("ROUTE PICKED BY JEV: grill-with-docs", turn["context"])
+            self.assertEqual(turn["state"]["route_path"], ["continuation=same (grill-with-docs)"])
+
+    def test_next_step_takes_only_a_move_the_map_lists(self) -> None:
+        cases = {"implement": "implement", "to-spec": "to-spec", "to-tickets": "direct-answer"}
+        for picked, route in cases.items():
+            with self.subTest(next=picked), tempfile.TemporaryDirectory() as folder:
+                turn = self._after_grill(Path(folder), "s-next", "build it",
+                                         self._canned(continuation="next", next=picked))
+                # grill-with-docs to to-tickets skips to-spec: not a map move, so the tree decides.
+                self.assertEqual(turn["state"]["flow"], route)
+                if picked == "to-tickets":
+                    self.assertIn("not on the map", " ".join(turn["state"]["route_path"]))
+
+    def test_a_new_topic_routes_from_the_top_of_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._after_grill(Path(folder), "s-new", "the build is failing on master",
+                                     self._canned(continuation="new", next="implement", kind="broken"))
+            self.assertEqual(turn["state"]["flow"], "diagnosing-bugs")
+            self.assertEqual(turn["state"]["route_path"][0], "continuation=new")
+
+    def test_a_route_stop_reconciled_is_not_continued(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            first = self._routed_turn(state_dir, "s-rec", "build the thing", "off")
+            self.run_claude_declare("s-rec", first["state"]["nonce"], "implement", state_dir)
+            self.run_gate("claude-stop", {"session_id": "s-rec"}, state_dir)
+            self._routed_turn(state_dir, "s-rec", "and the other thing", "off")  # never declared
+            self.run_gate("claude-stop", {"session_id": "s-rec"}, state_dir)
+            self.assertTrue(self._state(state_dir, "s-rec")["continuation"]["reconciled"])
+            turn = self._routed_turn(state_dir, "s-rec", "A", self._canned(continuation="same", next="implement"))
+            self.assertEqual(turn["state"]["flow"], "direct-answer")  # the tree, not `implement`
+            self.assertNotIn("continuation=same (implement)", turn["state"]["route_path"])
+
+    def test_continuation_rides_the_one_request_with_the_tree(self) -> None:
+        # One request: a map missing a continuation answer, or a tree answer, leaves Jev unavailable
+        # for the route and the correction check alike (the regex fires on "that's wrong").
+        missing_continuation = json.loads(self._canned(correction=0.01))
+        missing_tree = json.loads(self._canned(correction=0.01, continuation="same", next="implement"))
+        del missing_tree["route.kind"]
+        for name, stub in {"continuation": missing_continuation, "tree": missing_tree}.items():
+            with self.subTest(missing=name), tempfile.TemporaryDirectory() as folder:
+                turn = self._after_grill(Path(folder), f"s-one-{name}", "no, that's wrong", json.dumps(stub))
+                self.assertIsNone(turn["state"]["flow"])
+                self.assertNotIn("jev_route", turn["state"])
+                self.assertIn("correction_nonce", turn["state"])
+
     def test_claude_gate_follows_the_caveman_flag_and_never_writes_it(self) -> None:
         # Dan, 2026-09-03: the tracker is the single writer. /caveman lite must survive the next
         # prompt, and /caveman off (flag deleted) must switch the lint requirement off entirely.

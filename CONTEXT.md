@@ -46,7 +46,9 @@ previous route's work? Full transcripts are not sent, to stay inside the time bu
 Continuation has three answers (Dan, 2026-09-25): **same step** keeps the route; **next step**
 moves along the ask-matt map, and only to a move the map lists (grill-with-docs to to-spec or
 implement, to-spec to to-tickets, to-tickets to implement, wayfinder to to-spec); **new topic** walks
-the tree from the top. A move the map does not list is never taken as "next step".
+the tree from the top. A move the map does not list is never taken as "next step". The moves are
+the table `MAP_MOVES` beside `ROUTE_TREE`, and a previous route that Stop reconciled rather than
+picked is never continued (issue 840).
 
 ## Route tool limits
 
