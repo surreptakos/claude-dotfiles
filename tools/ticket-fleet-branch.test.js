@@ -2973,3 +2973,51 @@ test(`${FLEET_SCRIPT_REL} tells no worker to run a bare \`git remote get-url ori
   assert.match(src, /gitSpelling\((instrument|mode|'mcp'), 'remote get-url origin'\)/,
     'gitSpelling must be the thing that produces every remaining "git remote get-url origin" mention');
 });
+
+// Issue 892: a resumed cloud session rooted outside the repo refused every worktree agent, but only
+// after the scout and all three attempts per ticket had spent their tokens. The canary block runs
+// against a mocked agent whose worktree creation fails the way the runtime's did; a stand-in for
+// the lanes follows it, so an `impl:` spawn in `labels` would mean the run went on past Setup.
+async function driveWorktreeCanary(agentMock, cfgOverrides = {}) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const body = sliceBetweenTags(src, '// [FLEET-WORKTREE-CANARY-START]', '// [FLEET-WORKTREE-CANARY-END]', 'the worktree canary block');
+  const logs = [];
+  const wrapper = new AsyncFunction('agent', 'cfg', 'log', 'unusableReason',
+    `${body}\nawait agent('implement', { label: 'impl:#1.1', isolation: 'worktree' })`);
+  await wrapper(agentMock, Object.assign({ reportModel: 'r', finishRunId: null }, cfgOverrides),
+    (m) => logs.push(m), (who, detail) => `${who} output unusable: ${detail}`);
+  return logs;
+}
+
+test('worktree canary: a session root that is not a git repo stops the run before any impl: agent (issue 892)', async () => {
+  const labels = [];
+  const agentMock = async (_prompt, opts) => {
+    labels.push(opts.label);
+    if (opts.isolation === 'worktree') throw new Error('Cannot create agent worktree: not in a git repository and no WorktreeCreate hooks are configured.');
+    return {};
+  };
+  await assert.rejects(driveWorktreeCanary(agentMock), (err) => {
+    assert.match(err.message, /ABORTED before Scout/);
+    assert.match(err.message, /not a git repository/, 'the error must name the cause');
+    assert.match(err.message, /launch the fleet from a session whose root IS the repository checkout/, 'the error must name the fix');
+    return true;
+  });
+  assert.deepEqual(labels, ['worktree-canary']);
+  assert.ok(!labels.some((l) => l.startsWith('impl:')), 'no implementer may spawn after a refused worktree');
+});
+
+test('worktree canary: a created worktree, another canary failure, or finish mode lets the run go on (issue 892)', async () => {
+  const run = async (canaryResult, cfgOverrides) => {
+    const labels = [];
+    await driveWorktreeCanary(async (_prompt, opts) => {
+      labels.push(opts.label);
+      if (opts.label === 'worktree-canary') { if (canaryResult instanceof Error) throw canaryResult; return canaryResult; }
+      return {};
+    }, cfgOverrides);
+    return labels;
+  };
+  assert.deepEqual(await run({ head: 'a'.repeat(40) }), ['worktree-canary', 'impl:#1.1']);
+  assert.deepEqual(await run(new Error('StructuredOutput retry cap reached')), ['worktree-canary', 'impl:#1.1']);
+  assert.deepEqual(await run(new Error('not in a git repository'), { finishRunId: 'wf_x' }), ['impl:#1.1'],
+    'finish mode spawns no worktree agent, so it runs no canary');
+});

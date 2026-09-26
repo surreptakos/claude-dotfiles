@@ -6,10 +6,10 @@ description: >
   asks to run the ticket fleet or clear a wave of ready-for-agent tickets, or an orchestrator
   worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-26T04:50:44Z"
-  previous-modified: "2026-09-26T04:08:34Z"
-  revision: "47"
-  content-sha: "52183bf2d501"
+  modified: "2026-09-26T05:12:38Z"
+  previous-modified: "2026-09-26T04:50:44Z"
+  revision: "48"
+  content-sha: "6a98691a32e1"
 ---
 
 # ticket-fleet
@@ -60,6 +60,10 @@ behind them. Never launch a second wave while one is running in the same repo; w
 3. **Set the args** (full list below). Always `contractVersion: 2`, `runId`, `invocationId`. Add:
    - `instrument: 'mcp'` from a cloud session. The `gh` instrument is desktop-only; a run that
      cannot measure its environment stops rather than guess (issue 322).
+   - A cloud session whose **root** is the repo checkout. A resumed session can come back rooted
+     at `/home/user`, beside the clones; every worktree agent then fails with `Cannot create agent
+     worktree: not in a git repository`, and a `cd` does not help. The `worktree-canary` agent
+     stops the run before Scout with that cause; start a new session on the repo (issue 892).
    - `deliver: false` on a repo's first wave, to read the scout, lane and verifier output before
      the fleet pushes anything.
    - `testCommand` when the repo's documented gate cannot run where the wave runs. In

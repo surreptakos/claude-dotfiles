@@ -1652,6 +1652,42 @@ const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885): the harnes
 const dedupeBrief = (t) => t.discoveryTriage ? `
 Discovery-triage dedupe rail: this ticket turns findings into tracker items. Before creating ANY ticket, search the OPEN issues for the same file, symbol or failure - by what the finding is about, not just its wording - and list them fresh at the moment you are about to file, not once at the start: another chore in this same wave may have filed one minutes ago. On a match, comment on that existing ticket with the new evidence instead of creating a second one, and record that comment's URL as the finding's outcome. File a new ticket only when no open ticket covers the finding.` : ''
 
+// [FLEET-WORKTREE-CANARY-START]
+// Worktree canary (issue 892): every implementer and prober runs with `isolation: 'worktree'`, and
+// the runtime cuts that worktree from the SESSION's root directory - not from the parent shell's
+// cwd, so a `cd` into the repo does not help. A resumed cloud session whose root is `/home/user`
+// (the clones side by side, not a checkout) refused every one of them with "Cannot create agent
+// worktree: not in a git repository and no WorktreeCreate hooks are configured" - but only after
+// the scout and every attempt had spent their tokens (runs wf_c979322f-62f and wf_58a8fd09-12e).
+// One cheap worktree agent here fails the same way before anything else is spent. Finish mode
+// spawns no worktree agent, so it skips the canary. Only the worktree-creation refusal aborts: a
+// canary that dies of anything else is logged and the run goes on, as it did before this check.
+const WORKTREE_CANARY = { type: 'object', required: ['head'], properties: {
+  head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed, verbatim' },
+} }
+const WORKTREE_CREATE_REFUSAL = /cannot create agent worktree|not in a git repository/i
+if (!cfg.finishRunId) {
+  let canary = null
+  try {
+    canary = await agent(
+      'Run exactly this one bash command and report its result: `git rev-parse HEAD`. Do not cd anywhere first. Do not run any other command. Make no change. Return structured output only.',
+      { label: 'worktree-canary', phase: 'Setup', schema: WORKTREE_CANARY, model: cfg.reportModel, effort: 'low', isolation: 'worktree' }
+    )
+  } catch (err) {
+    const detail = String((err && err.message) || err)
+    if (WORKTREE_CREATE_REFUSAL.test(detail)) {
+      throw new Error(
+        'ticket-fleet run ABORTED before Scout - the runtime cannot create an agent worktree here (issue 892): '
+        + `"${detail}". Cause: this session's root directory is not a git repository (a resumed cloud session rooted at a parent folder such as /home/user, holding the clones side by side), and every implementer runs in a worktree cut from that root - a \`cd\` into the repo does not change it. `
+        + 'Fix: launch the fleet from a session whose root IS the repository checkout (start a new session on the repo), then re-run. No implementer was spawned.'
+      )
+    }
+    log(`worktree-canary did not run: ${unusableReason('worktree-canary', detail)} - the worktree was not refused, so the run continues.`)
+  }
+  if (canary && canary.head) log(`worktree-canary: an isolated worktree was created at HEAD ${canary.head} (issue 892).`)
+}
+// [FLEET-WORKTREE-CANARY-END]
+
 // ---- Scout ----
 phase('Scout')
 
