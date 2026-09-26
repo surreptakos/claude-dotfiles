@@ -6,10 +6,10 @@ description: >
   asks to run the ticket fleet or clear a wave of ready-for-agent tickets, or an orchestrator
   worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-26T06:15:25Z"
-  previous-modified: "2026-09-26T06:10:58Z"
-  revision: "50"
-  content-sha: "00a010372370"
+  modified: "2026-09-26T06:19:14Z"
+  previous-modified: "2026-09-26T06:15:25Z"
+  revision: "51"
+  content-sha: "ebe1a382abe1"
 ---
 
 # ticket-fleet
@@ -152,8 +152,8 @@ A ticket whose latest comment is an unanswered fleet handoff is parked.
 
 Discovery-triage chores share one lane so two cannot file the same finding.
 
-**Delivery stops** on a merge conflict outside the three resolvable classes (generated files,
-`SKILL.md` stamp blocks, harness upgrade rows), a failing gate after the merge, red CI, or a
+**Delivery stops** on a merge conflict outside the four resolvable classes (generated files,
+`SKILL.md` stamp blocks, harness upgrade rows, append-append hunks), a failing gate after the merge, red CI, or a
 changes-requested review. A `git merge` the classifier refuses twice still delivers, with the
 refusal noted on the PR.
 

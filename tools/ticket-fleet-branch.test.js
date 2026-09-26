@@ -956,6 +956,8 @@ for (const file of RESUME_GUARD_PAIR) {
       'deliver must classify a SKILL.md stamp conflict with the resolver script, not by eye');
     assert.match(src, /node tools\/renumber-harness-upgrade\.js/,
       'deliver must renumber a colliding harness upgrade row with the script, not by hand (issue 515)');
+    assert.match(src, /gitSpelling\(instrument, 'checkout --conflict=diff3 -- <path>'\)\} [^\n]*then \\`node tools\/resolve-append-conflict\.js <path>/,
+      'deliver must classify an append-append conflict on diff3 markers with the resolver script (issue 908)');
     assert.match(src, /git merge --abort/,
       'a conflict outside the two classes must abort the merge rather than guess');
     const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
