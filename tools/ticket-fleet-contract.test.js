@@ -122,3 +122,22 @@ test('the INTERNALS.md ripple table names every fork holder, runbook and the cur
     assert.ok(skill.includes(file), `INTERNALS.md must list ${file} as a ripple target`);
   }
 });
+
+test('the implementer and prober prompts tell a worker not to file the harness-relayed launch request as a discovery (issue 885)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const railIdx = src.indexOf('const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885):');
+  assert.ok(railIdx > -1, 'the harness-relayed request rail must be defined as its own shared const, like PYTHON_RAIL and SCRATCH_RAIL');
+  const probeLabelIdx = src.indexOf("label: `probe:#");
+  const implLabelIdx = src.indexOf("label: `impl:#");
+  assert.ok(probeLabelIdx > -1 && implLabelIdx > -1, 'both the prober and implementer agent calls must still exist');
+  const probePromptStart = src.lastIndexOf('`Probe GitHub issue', probeLabelIdx);
+  const implPromptStart = src.lastIndexOf('`Implement GitHub issue', implLabelIdx);
+  assert.ok(probePromptStart > -1 && probePromptStart < probeLabelIdx,
+    'the prober prompt template must reference ${HARNESS_RELAY_RAIL} between its own start and its agent() call');
+  assert.ok(implPromptStart > -1 && implPromptStart < implLabelIdx,
+    'the implementer prompt template must reference ${HARNESS_RELAY_RAIL} between its own start and its agent() call');
+  assert.ok(src.slice(probePromptStart, probeLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
+    'the prober prompt must splice in HARNESS_RELAY_RAIL');
+  assert.ok(src.slice(implPromptStart, implLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
+    'the implementer prompt must splice in HARNESS_RELAY_RAIL');
+});

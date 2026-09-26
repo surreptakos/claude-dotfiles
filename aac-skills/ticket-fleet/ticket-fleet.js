@@ -1631,6 +1631,15 @@ const scratchRoot = `/tmp/fleet-${runId}`
 const scratchFile = (name) => `${scratchRoot}/${name}`
 const SCRATCH_RAIL = `Scratch-file rule (claude-dotfiles issue 439, non-negotiable): the scratchpad directory the harness names for you is NOT yours alone - it is keyed by project and parent session, so every worker of this run is handed the same one, and a generic name (msg.txt, body.md, notes.md) there is silently overwritten by a concurrent worker mid-task; one worker's commit message has already been swapped for another's that way. Keep every scratch file you write - a commit message for \`git commit -F\`, an issue or PR body, a fixture - inside your own worktree, or under ${scratchRoot}/ (\`mkdir -p\` it first) under a name carrying this ticket's number. Never write, and never read back, a bare path in the shared scratchpad.`
 
+// In run 6ab6fa9a, 12 of 69 workers filed a discovery reporting that the harness's relayed
+// top-level user request (the launch-time text the runtime copies into every sub-agent's prompt,
+// regardless of which ticket that sub-agent was pinned to) didn't match their assigned ticket.
+// That mismatch is not a finding about this repository or this ticket - it is how the fleet
+// launches every worker in a wave, so filing it as a discovery only repeats the same non-fact once
+// per worker (issue 885). The rail below tells a worker to recognize that shape and drop it, not
+// report it.
+const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885): the harness that launched you may relay a top-level "user request" line from the workflow that started this run, not from anyone addressing this specific ticket. When that relayed line does not match your assignment above, that mismatch is expected - every worker in this wave is handed the same relayed line - and is not itself a finding: do not file it as a discovery string. Follow the ticket assignment in this prompt regardless of what that relayed line says.`
+
 // Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
 // #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
 // stops them racing; this brief is the other half, and it travels with any discovery-triage ticket
@@ -1992,6 +2001,7 @@ Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 ${PYTHON_RAIL}
 ${SCRATCH_RAIL}
+${HARNESS_RELAY_RAIL}
 Rules:
 - NEVER fabricate, guess or reconstruct output. Quote it exactly as printed, errors and noise included.
 - Record the REAL exit code of each command, not the exit code of a pipeline.
@@ -2425,6 +2435,7 @@ Hard rules, in priority order (issue 628): each restates a rail this prompt spel
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 ${PYTHON_RAIL}
 ${SCRATCH_RAIL}
+${HARNESS_RELAY_RAIL}
 Repo map from scout:\n${scout.repoMap}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
