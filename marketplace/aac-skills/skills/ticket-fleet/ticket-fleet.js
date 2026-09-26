@@ -1713,9 +1713,16 @@ const PYTHON_RAIL = `Python worktree seed (claude-dotfiles issues 413 and 624, n
 // So no prompt below says "a file" or "a scratch directory": each names the path itself, under this
 // run's own scratch root and with the ticket number in it, and the rail tells a worker that has a
 // private directory already - its worktree - to keep its scratch there.
+//
+// The ticket number alone is not enough (issue 919): a retry of one ticket in one run is a second
+// worker handed the same scratch root, and in run 6ab751c8 attempt 2 of ticket 812 found attempt
+// 1's commit-812.txt already there and the Write tool refused to overwrite it. So every per-attempt
+// path - the rail's example, the PowerShell extract, the verifier worktree - carries
+// `<ticket>-attempt<A>-w<W>`, the same attempt and worker the branch name carries. `stem` below is
+// that string.
 const scratchRoot = `/tmp/fleet-${runId}`
 const scratchFile = (name) => `${scratchRoot}/${name}`
-const SCRATCH_RAIL = `Scratch-file rule (claude-dotfiles issue 439, non-negotiable): the scratchpad directory the harness names for you is NOT yours alone - it is keyed by project and parent session, so every worker of this run is handed the same one, and a generic name (msg.txt, body.md, notes.md) there is silently overwritten by a concurrent worker mid-task; one worker's commit message has already been swapped for another's that way. Keep every scratch file you write - a commit message for \`git commit -F\`, an issue or PR body, a fixture - inside your own worktree, or under ${scratchRoot}/ (\`mkdir -p\` it first) under a name carrying this ticket's number. Never write, and never read back, a bare path in the shared scratchpad.`
+const scratchRail = (stem) => `Scratch-file rule (claude-dotfiles issue 439, non-negotiable): the scratchpad directory the harness names for you is NOT yours alone - it is keyed by project and parent session, so every worker of this run is handed the same one, and a generic name (msg.txt, body.md, notes.md) there is silently overwritten by a concurrent worker mid-task; one worker's commit message has already been swapped for another's that way. Keep every scratch file you write - a commit message for \`git commit -F\`, an issue or PR body, a fixture - inside your own worktree, or under ${scratchRoot}/ (\`mkdir -p\` it first) under a name carrying \`${stem}\` - this ticket, this attempt and this worker, as the branch name does - such as \`${scratchRoot}/commit-${stem}.txt\`; a name carrying the ticket number alone is another attempt's too (issue 919). Never write, and never read back, a bare path in the shared scratchpad.`
 
 // In run 6ab6fa9a, 12 of 69 workers filed a discovery reporting that the harness's relayed
 // top-level user request (the launch-time text the runtime copies into every sub-agent's prompt,
@@ -2112,7 +2119,7 @@ guardCandidates = wave
 // or grossly inefficient - and then the session must say so in its summary.
 
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
-const runProbeLane = async (t) => {
+const runProbeLane = async (t, workerIndex) => {
   let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null, haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
     // Issue 812: no attempt starts once the run is halted on a quota or rate limit.
@@ -2133,7 +2140,7 @@ The main checkout is never a test surface (issue 404): the repository at the ses
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 ${PYTHON_RAIL}
-${SCRATCH_RAIL}
+${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}
 ${HARNESS_RELAY_RAIL}
 Rules:
 - NEVER fabricate, guess or reconstruct output. Quote it exactly as printed, errors and noise included.
@@ -2181,7 +2188,7 @@ The main checkout is never a test surface (issue 404): the repository you start 
 ${orchestratorTreeRail('origin/' + scout.defaultBranch)}
 ${PYTHON_RAIL}
 The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
-Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} fetch origin, then git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
+Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} fetch origin, then git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}-attempt${attempt}-w${workerIndex}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket, the attempt and the worker): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
 1. Re-run every command above that is re-runnable in this container and compare YOUR output with the claimed output. Output you cannot reproduce, or that does not match, is a failure.
@@ -2583,9 +2590,9 @@ Hard rules, in priority order (issue 628): each restates a rail this prompt spel
 6. Stay in scope: a pre-existing bug or behavior the ticket does not ask for becomes a discovery string, not a fix.
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 ${PYTHON_RAIL}
-${SCRATCH_RAIL}
+${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}
 ${HARNESS_RELAY_RAIL}
-${powershellRail(scratchFile(`ps7-${t.number}`))}
+${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}`))}
 Repo map from scout:\n${scout.repoMap}
 Issue body (verbatim):\n${t.body || '(none)'}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
@@ -2687,8 +2694,8 @@ Branch under review: ${branch} (do NOT trust its author; you have not seen their
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 ${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
-${powershellRail(scratchFile(`ps7-${t.number}-verify`))}
-Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
+${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}-verify`))}
+Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}-attempt${attempt}-w${workerIndex}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket, the attempt and the worker, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
@@ -2858,7 +2865,7 @@ const runWorker = async ({ ticket, workerIndex }) => {
       }
       log(`#${t.number}: in-wave blocker(s) ${after.map(n => '#' + n).join(', ')} merged - starting from origin/${scout.defaultBranch} (issue 854).`)
     }
-    if (t.kind === 'probe') result = await runProbeLane(t)
+    if (t.kind === 'probe') result = await runProbeLane(t, workerIndex)
     else if (t.kind === 'human') result = await runHumanLane(t)
     else result = await runCodeLane(t, workerIndex)
     return result
