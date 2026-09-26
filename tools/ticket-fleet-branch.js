@@ -35,12 +35,15 @@
  * Generate a run identifier that is monotonically-ish increasing and hard to
  * collide across concurrent invocations. Not a UUID because the workflow
  * environment cannot `require('node:crypto')` reliably; a millisecond
- * timestamp plus 4 hex-ish chars of Math.random is enough - branch names are
+ * timestamp plus 8 base-36 chars of Math.random is enough - branch names are
  * short-lived and the workerN component adds another dimension of uniqueness.
+ * Four chars collided in CI: calls inside one millisecond share the timestamp,
+ * and `toString(36)` of a short float can yield fewer digits than asked for,
+ * so the suffix is padded to a fixed width.
  */
 function generateRunId() {
   const t = Date.now().toString(36);
-  const r = Math.random().toString(36).slice(2, 6);
+  const r = Math.random().toString(36).slice(2).padEnd(8, '0').slice(0, 8);
   return t + r;
 }
 
