@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-26T01:42:53Z'
-  previous-modified: '2026-09-25T23:24:10Z'
-  revision: '43'
-  content-sha: 5f6e08963934
+  modified: '2026-09-26T01:50:10Z'
+  previous-modified: '2026-09-26T01:44:47Z'
+  revision: '44'
+  content-sha: 85b8a0a4cf9a
 ---
 
 # ticket-fleet
@@ -40,9 +40,12 @@ behind them. Never launch a second wave while one is running in the same repo; w
      cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/editable-install-guard.js" .claude/workflows/editable-install-guard.js
      ```
 
-     After that the copy is kept fresh by the wave itself: its first agent, `fleet-refresh`,
-     overwrites a stale copy from claude-dotfiles master and commits it (no push), so the next
-     launch runs the fix. Forks listed in `FORKS` (`tools/ticket-fleet-contract.js`) are skipped.
+     After that the copy is kept fresh by the wave itself: a first agent, `fleet-refresh-repo`,
+     only reports `servedRepo`, and the script skips the source repo and every fork listed in
+     `FORKS` (`tools/ticket-fleet-contract.js`) in code (issue 804). For any other repo a second
+     agent, `fleet-refresh`, overwrites a stale copy from claude-dotfiles master and commits it (no
+     push), so the next launch runs the fix; it refuses any copy carrying the `PROMPT_CONTRACT`
+     fork marker.
 
    Done when the path resolves to a file whose bytes are LF only - the Workflow tool refuses a
    script holding a CR (issue 233).

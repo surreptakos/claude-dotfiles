@@ -118,9 +118,35 @@ function auditForkFiles(paths) {
   });
 }
 
+/** The source repo the fleet-refresh step never overwrites its own copy of. */
+const FLEET_SOURCE_REPO = 'surreptakos/claude-dotfiles';
+
+/**
+ * Decide, in JS, whether the fleet-refresh step must skip a served repo - never inside
+ * an agent prompt (issue 804). The script used to hand an agent both the servedRepo
+ * check and the download/overwrite in one prompt; an agent that misread or skipped
+ * the check step fell straight through to the overwrite and clobbered the
+ * aac-sales-cockpit fork's edited copy. The skip is decided here, before the agent
+ * that could write a file is ever spawned, so a servedRepo equal to the source repo
+ * or listed in `forks` never reaches that agent.
+ *
+ * @param {string} servedRepo - owner/repo from `git remote get-url origin`
+ * @param {Array<{repo: string}>} forks - defaults to this module's FORKS
+ * @param {string} sourceRepo - defaults to FLEET_SOURCE_REPO
+ * @returns {{skip: true, reason: string}|{skip: false}}
+ */
+function decideFleetRefresh(servedRepo, forks, sourceRepo) {
+  const list = forks || FORKS;
+  const source = sourceRepo || FLEET_SOURCE_REPO;
+  if (servedRepo === source) return { skip: true, reason: 'source repo' };
+  if (list.some((f) => f.repo === servedRepo)) return { skip: true, reason: 'fork keeps its own edits' };
+  return { skip: false };
+}
+
 module.exports = {
   CONTRACT_VERSION, REQUIRED_ARGS, SCOUT_REQUIRED, TICKET_REQUIRED, FORKS, RUNBOOKS,
   rippleNote, checkLaunchArgs, contractVersionOf, auditForkFiles,
+  FLEET_SOURCE_REPO, decideFleetRefresh,
 };
 
 if (require.main === module) {
