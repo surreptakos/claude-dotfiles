@@ -60,7 +60,7 @@ function rippleNote() {
   return 'Forks and runbooks that must move with the contract: '
     + FORKS.map((f) => `${f.repo} ${f.path}`).join(', ')
     + ', ' + RUNBOOKS.join(', ')
-    + '. Refresh a fork by re-copying the plugin script over it (keeping that fork\'s own edits) - see the ripple table in aac-skills/ticket-fleet/SKILL.md.';
+    + '. Refresh a fork by re-copying the plugin script over it (keeping that fork\'s own edits) - see the ripple table in aac-skills/ticket-fleet/INTERNALS.md.';
 }
 
 /**
