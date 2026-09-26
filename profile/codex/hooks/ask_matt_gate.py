@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import fnmatch
 import io
 import json
 import os
@@ -535,6 +536,96 @@ ROUTE_TREE: dict[str, dict[str, Any]] = {
 PROMPT_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
 # A scheduled run's prompt carries its task file inside this block; it gets no route (for now).
 SCHEDULED_TASK_PATTERN = re.compile(r"<scheduled-task\b", re.IGNORECASE)
+# Issue 844: nothing in a scheduled run's hook input, environment or transcript marks it as
+# scheduler-started (UserPromptSubmit carries session_id, transcript_path, cwd, permission_mode and
+# prompt only), so the block in the message text stays the signal and its spoofing risk is accepted.
+SCHEDULED_TASK_BLOCK = re.compile(
+    r"<scheduled-task\b(?P<attrs>[^>]*)>(?P<body>.*?)(?:</scheduled-task>|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+TASK_NAME_ATTR = re.compile(r"""\bname\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+TASK_ROUTE_LINE = re.compile(r"^\s*route:\s*`?([\w-]+)`?\s*$", re.IGNORECASE | re.MULTILINE)
+TASK_WRITES_LINE = re.compile(r"^\s*writes:[ \t]*(?P<inline>[^\n]*)$", re.IGNORECASE | re.MULTILINE)
+TASK_LIST_ITEM = re.compile(r"^\s*[-*]\s+`?([^`\n]+?)`?\s*$")
+# The route a routine run records when its task file names none on ALLOWED_FLOWS.
+ROUTINE_ROUTE = "routine"
+# The committed route gate settings (Dan, 2026-09-25: one file in this repository, never a
+# per-machine flag). It ships beside this script; ASK_MATT_GATE_SETTINGS points elsewhere for tests.
+ROUTE_GATE_SETTINGS = Path(
+    os.environ.get("ASK_MATT_GATE_SETTINGS") or SCRIPT.parent / "route_gate_settings.json"
+)
+ROUTE_GATE_DEFAULTS: dict[str, Any] = {"routine_route": False}
+
+
+def _route_gate_settings() -> dict[str, Any]:
+    """The settings file read fresh at each hook call; a missing or broken file means defaults."""
+    settings = dict(ROUTE_GATE_DEFAULTS)
+    try:
+        loaded = json.loads(ROUTE_GATE_SETTINGS.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return settings
+    if isinstance(loaded, dict):
+        settings.update({key: loaded[key] for key in ROUTE_GATE_DEFAULTS if key in loaded})
+    return settings
+
+
+def _routine_task(prompt: str) -> dict[str, Any] | None:
+    """The routine route a scheduled run's task file names: its route and the writes it lists.
+
+    `route: <flow>` names the route (ROUTINE_ROUTE when absent or not an allowed flow).
+    `writes:` lists the paths the run may write, inline (comma-separated) or as `- item` lines
+    under it; fnmatch patterns, relative ones resolved against the session's cwd. None lists
+    nothing, so every write is refused.
+    """
+    block = SCHEDULED_TASK_BLOCK.search(prompt or "")
+    if block is None:
+        return None
+    body = block.group("body")
+    name = TASK_NAME_ATTR.search(block.group("attrs"))
+    route = TASK_ROUTE_LINE.search(body)
+    writes: list[str] = []
+    listed = TASK_WRITES_LINE.search(body)
+    if listed:
+        writes = [item.strip().strip("`") for item in listed.group("inline").split(",") if item.strip()]
+        for line in body[listed.end():].lstrip("\r\n").splitlines():
+            item = TASK_LIST_ITEM.match(line)
+            if item is None:
+                break
+            writes.append(item.group(1).strip())
+    return {
+        "task": name.group(1) if name else "",
+        "route": route.group(1) if route and route.group(1) in ALLOWED_FLOWS else ROUTINE_ROUTE,
+        "writes": writes,
+    }
+
+
+def _routine_write_allowed(target: str, cwd: str, writes: list[str]) -> bool:
+    def spelled(value: str) -> str:
+        path = Path(os.path.expanduser(value))
+        if not path.is_absolute() and cwd:
+            path = Path(cwd) / path
+        return os.path.normpath(str(path)).replace("\\", "/")
+
+    wanted = spelled(target)
+    return any(fnmatch.fnmatchcase(wanted, spelled(pattern)) for pattern in writes)
+
+
+def _routine_gate(event: dict[str, Any], state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Refuse a routine run's file write that its task file does not list (issue 844)."""
+    routine = (state or {}).get("routine")
+    if not isinstance(routine, dict) or str(event.get("tool_name") or "") not in EDIT_TOOLS:
+        return None
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    writes = [w for w in routine.get("writes") or [] if isinstance(w, str) and w]
+    cwd = str(event.get("cwd") or routine.get("cwd") or "")
+    if isinstance(target, str) and target and _routine_write_allowed(target, cwd, writes):
+        return None
+    listed = ", ".join(writes) or "nothing"
+    return _deny(
+        f"Routine route: scheduled task {routine.get('task') or '(unnamed)'} may write only what "
+        f"its task file lists under `writes:` ({listed}); {target or 'this write'} is not listed."
+    )
 # A message that opens with a route's own slash command (`/to-spec`, `/aac-skills:session-end`), or
 # invokes /session-end anywhere, names its route itself: Jev is not asked for a route and the
 # declaration works as before. The tree has no leaf for session-end or project-harness, so a Jev
@@ -651,6 +742,16 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         if jev_route:
             state["jev_route"] = jev_route
             state["flow"] = jev_route
+    # Issue 844: with the routine route on, a scheduled run records the route its task file names
+    # and may write only what that file lists. Off (the default), it runs exactly as after #839.
+    prompt_text = str(event.get("prompt") or "")
+    routine = None
+    if SCHEDULED_TASK_PATTERN.search(prompt_text) and _route_gate_settings().get("routine_route") is True:
+        routine = _routine_task(prompt_text)
+    if routine is not None:
+        routine["cwd"] = str(event.get("cwd") or "")
+        state["routine"] = routine
+        state["flow"] = routine["route"]
     # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
     # so the next user message clears it and the ticket-SET round applies again outside session-end.
     if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
@@ -682,6 +783,12 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         context += (
             f"ROUTE PICKED BY JEV: {jev_route} (recorded; no declaration needed). Open and follow "
             f"the {jev_route} route; declaring any other route is refused. "
+        )
+    if routine is not None:
+        context += (
+            f"ROUTINE ROUTE: {routine['route']} (recorded for scheduled task "
+            f"{routine['task'] or '(unnamed)'}; no declaration needed). File writes are limited to "
+            f"what the task file lists under `writes:`: {', '.join(routine['writes']) or 'nothing'}. "
         )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
     # rules at every caveman level, off included, plus the style rules for the level in force. It is
@@ -1029,6 +1136,9 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     blocked = _backup_gate(event)
     if blocked is not None:
         return blocked
+    blocked = _routine_gate(event, state)
+    if blocked is not None:
+        return blocked
     if (
         state
         and state.get("flow")
@@ -1099,6 +1209,14 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             file=sys.stderr,
         )
         return 2
+    routine = state.get("routine")
+    if isinstance(routine, dict) and flow != state.get("flow"):
+        print(
+            f"Governance route rejected: {flow}. Scheduled task {routine.get('task') or '(unnamed)'} "
+            f"runs on the routine route {state.get('flow')}; it is recorded, declare nothing else.",
+            file=sys.stderr,
+        )
+        return 2
     # The prompt hook already settled this turn's level (prompt switch or flag); keep it.
     mode = state.get("caveman")
     if mode not in CAVEMAN_PROSE_MODES + ("off",):
@@ -1119,6 +1237,7 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "session_end_invoked": state.get("session_end_invoked"),
             "jev_route": jev_route,
             "route_path": state.get("route_path"),
+            "routine": routine,
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")

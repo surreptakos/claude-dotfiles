@@ -69,12 +69,22 @@ entirely: no Jev pick and no route tool limits. A switch must be able to turn on
 route instead, where the task file names the route and the run may make only the writes that file
 lists.
 
+Routine route (issue 844): `routine_route` in the settings file, off by default. On, a scheduled
+run records the route its task file names on a `route: <flow>` line (`routine` when none), and an
+Edit, Write, MultiEdit or NotebookEdit whose path matches no pattern under the file's `writes:`
+list is refused. Shell writes stay unchecked, as on every route. No scheduler-started signal
+exists: the hook input carries session id, transcript path, cwd, permission mode and prompt, none
+of which says who sent the prompt, so the `<scheduled-task>` block stays the signal and its
+spoofing risk is accepted.
+
 ## Route gate settings
 
 The switches that change how strict the route gate is: appeals on or off, and the routine route on
 or off for scheduled runs. They live in one committed settings file in this repository (Dan,
 2026-09-25), so a change is a commit, reaches every machine and cloud session alike, and shows in
-git history. Never a per-machine flag file.
+git history. Never a per-machine flag file. The file is
+`profile/codex/hooks/route_gate_settings.json`, shipped beside the gate in the plugin payload and
+read at each hook call.
 
 ## Appeal
 

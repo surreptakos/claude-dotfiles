@@ -202,6 +202,20 @@ if settings is not None:
     else:
         pass_('the Jev helper ships beside ask_matt_gate.py as a library (issue 723)')
 
+    # The route gate settings (issue 844) are read from the gate's own folder; missing, the gate
+    # falls back to defaults silently, so a committed switch would never reach a container.
+    settings_file = os.path.join(payload_abs, 'hooks', 'scripts', 'route_gate_settings.json')
+    try:
+        with open(settings_file, encoding='utf-8') as fh:
+            gate_settings = json.load(fh)
+    except (OSError, ValueError) as err:
+        fail(f'the payload carries no readable route gate settings at {settings_file}: {err}')
+    else:
+        if isinstance(gate_settings.get('routine_route'), bool):
+            pass_('the route gate settings ship beside ask_matt_gate.py (issue 844)')
+        else:
+            fail(f'{settings_file} carries no boolean routine_route')
+
 # ------------------------------------------ 3b. the home-anchored seat (issue 643) -------------
 # Delivery must not depend on which checkout Claude Code calls the project. The hook copies
 # itself to ~/.claude/hooks/aac-bootstrap.sh and seats THAT as a SessionStart entry in user

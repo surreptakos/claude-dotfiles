@@ -650,8 +650,9 @@ def main():
               "state-rehydrate.js", "state-stash.js")
     GOV_PY = ("ask_matt_gate.py",)
     # What ask_matt_gate.py imports from its own directory (issue 723). A library, not a hook: it
-    # is copied beside the gate as-is, WITHOUT the dedup guard GOV_PY scripts get prepended.
-    GOV_PY_LIB = ("jev.py",)
+    # is copied beside the gate as-is, WITHOUT the dedup guard GOV_PY scripts get prepended. The
+    # route gate settings file (issue 844) rides the same way: the gate reads it from its own folder.
+    GOV_PY_LIB = ("jev.py", "route_gate_settings.json")
     # The stop-slop linter: a PostToolUse hook over written .md/.txt and a Stop hook over the
     # final assistant message, both on the desktop since issue 620 and neither in a container, so
     # a cloud session wrote prose nothing checked. They live beside the other hook scripts and

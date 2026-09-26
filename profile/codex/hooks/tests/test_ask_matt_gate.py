@@ -525,6 +525,70 @@ class AskMattGateTests(unittest.TestCase):
                     declared = self.run_claude_declare(f"s-{name}", turn["state"]["nonce"], flow, state_dir)
                     self.assertEqual(declared.returncode, 0, declared.stderr)
 
+    # Issue 844: the routine route, a committed setting that is off by default.
+    ROUTINE_TASK = (
+        "<scheduled-task name=\"triage\">\n---\nname: triage\n---\nroute: direct-answer\n"
+        "writes:\n- notes/*.md\n- ~/triage-log.txt\n\nTriage Todoist.\n</scheduled-task>"
+    )
+
+    def _write(self, state_dir: Path, sid: str, path: str, cwd: str) -> dict:
+        return json.loads(self.run_gate(
+            "claude-pre-tool",
+            {"session_id": sid, "cwd": cwd, "tool_name": "Write",
+             "tool_input": {"file_path": path, "content": "x"}},
+            state_dir, caveman="keep",
+        ).stdout)
+
+    def _settings(self, folder: Path, routine_route: bool) -> None:
+        path = folder / "route_gate_settings.json"
+        path.write_text(json.dumps({"routine_route": routine_route}), encoding="utf-8")
+        os.environ["ASK_MATT_GATE_SETTINGS"] = str(path)
+        self.addCleanup(os.environ.pop, "ASK_MATT_GATE_SETTINGS", None)
+
+    def test_routine_route_off_by_default_leaves_scheduled_runs_as_before(self) -> None:
+        committed = json.loads((SCRIPT.parent / "route_gate_settings.json").read_text(encoding="utf-8"))
+        self.assertIs(committed["routine_route"], False)
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)  # no ASK_MATT_GATE_SETTINGS: the committed file is read
+            turn = self._routed_turn(state_dir, "s-off", self.ROUTINE_TASK, json.dumps({"correction": 0.01}))
+            self.assertIsNone(turn["state"]["flow"])
+            self.assertNotIn("routine", turn["state"])
+            self.assertNotIn("ROUTINE ROUTE", turn["context"])
+            declared = self.run_claude_declare("s-off", turn["state"]["nonce"], "implement", state_dir)
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            self.assertEqual(self._write(state_dir, "s-off", str(state_dir / "anything.py"), folder), {})
+
+    def test_routine_route_on_limits_a_scheduled_run_to_its_listed_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._settings(state_dir, True)
+            os.environ["TYPESAFE_JEV_STUB"] = json.dumps({"correction": 0.01})
+            self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+            result = self.run_gate("claude-prompt", {"session_id": "s-on", "cwd": folder,
+                                                     "prompt": self.ROUTINE_TASK}, state_dir)
+            context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+            state = self._state(state_dir, "s-on")
+            self.assertEqual(state["flow"], "direct-answer")  # the task file's route, recorded
+            self.assertIn("ROUTINE ROUTE: direct-answer", context)
+            self.assertEqual(self._write(state_dir, "s-on", str(state_dir / "notes" / "a.md"), folder), {})
+            self.assertEqual(self._write(state_dir, "s-on", "notes/b.md", folder), {})
+            self.assertEqual(self._write(state_dir, "s-on", os.path.expanduser("~/triage-log.txt"), folder), {})
+            denied = self._write(state_dir, "s-on", str(state_dir / "script.py"), folder)
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("Routine route", denied["hookSpecificOutput"]["permissionDecisionReason"])
+            refused = self.run_claude_declare("s-on", state["nonce"], "implement", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("routine route", refused.stderr)
+            # A task file naming no route and no writes runs as `routine` and may write nothing.
+            bare = "<scheduled-task name=\"digest\">Send the digest.</scheduled-task>"
+            self.run_gate("claude-prompt", {"session_id": "s-bare", "cwd": folder, "prompt": bare}, state_dir)
+            self.assertEqual(self._state(state_dir, "s-bare")["flow"], "routine")
+            denied = self._write(state_dir, "s-bare", str(state_dir / "notes" / "a.md"), folder)
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            # An ordinary message is untouched by the setting.
+            self.run_gate("claude-prompt", {"session_id": "s-user", "prompt": "hello"}, state_dir)
+            self.assertNotIn("routine", self._state(state_dir, "s-user"))
+
     def test_jev_unavailable_declarations_behave_as_before(self) -> None:
         prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
         # "off", and a canned map missing one tree question: the whole request is one call, so a
