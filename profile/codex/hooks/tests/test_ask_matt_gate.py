@@ -556,6 +556,12 @@ class AskMattGateTests(unittest.TestCase):
             self.assertNotIn("ROUTINE ROUTE", turn["context"])
             declared = self.run_claude_declare("s-off", turn["state"]["nonce"], "implement", state_dir)
             self.assertEqual(declared.returncode, 0, declared.stderr)
+            # implement is a build route (issue 842): it opens its skill before its first edit.
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-off", "tool_name": "Skill", "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
             self.assertEqual(self._write(state_dir, "s-off", str(state_dir / "anything.py"), folder), {})
 
     def test_routine_route_on_limits_a_scheduled_run_to_its_listed_writes(self) -> None:
