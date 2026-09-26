@@ -83,6 +83,7 @@ Table F1. House decision register
 | 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
 | 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
 | 5 | State the main point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. | Owner ruling, September 25, 2026. "Main point first" left no room for a courtesy opening. | 0.8 |
+| 161 | Consistent naming binding in responses and messages to people (email, Teams, review feedback); free in prose deliverables (reports, proposals, scopes, procedures). | Owner ruling, September 22, 2026, issue 627, superseding a September 21, 2026 draft ruling that split the rule by document type instead. `blader/humanizer` 3.0.0 dropped its equivalent pattern as an AI tell; Rule 161 answers a different question (precision, not machine detection), so the rule stands but is scoped to correspondence. | 0.9 |
 
 # References
 

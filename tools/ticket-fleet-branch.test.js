@@ -1002,8 +1002,30 @@ for (const file of RESUME_GUARD_PAIR) {
       'a stamp still stale after one re-run must block the push with a named reason, not arrive as a red PR');
     assert.match(prompt, /run A5\(i\)'s stamps check on the merge result/,
       'the clean-merge path has no regenerate behind it and still needs the check');
-    assert.match(src, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills --home '/,
-      "the default check must be the command CI runs, --home included: a stamp hashed against the container's home is the bug");
+  });
+
+  // ---- regenCheckCommands defaults empty; a fork gets no check unless it asks (issue 814) ----
+  // Line 99 used to default this to the concrete claude-dotfiles command, so a fork that copies
+  // this script and never passes regenCheckCommands sent every Deliver stage to A5(i) with a
+  // command naming a tool (tools/skill-stamps.py) it does not have. The check is a claude-dotfiles
+  // concern, not a fleet one: the default is now empty and claude-dotfiles' own launch recipe
+  // (SKILL.md) passes the concrete command explicitly.
+
+  test(`${rel} regenCheckCommands defaults empty, so a fork delivers without a stamps check (issue 814)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    assert.match(src, /regenCheckCommands: \[\],/,
+      'the default must be empty - the stamps check is a claude-dotfiles concern, not a fleet default');
+    assert.doesNotMatch(src, /regenCheckCommands: \[[^\]]*skill-stamps\.py/,
+      'the default must not name tools/skill-stamps.py: every fork lacks it (issue 814)');
+    const prompt = extractMarked(src, 'FLEET-DELIVER-PROMPT');
+    assert.match(prompt, /this repo configures no stamps check - skip \(i\) and go to \(ii\)/,
+      'an empty regenCheckCommands must read as "no check configured", not as an empty command to run');
+  });
+
+  test(`claude-dotfiles' own launch recipe passes the concrete stamps check explicitly (issue 814)`, () => {
+    const skillDoc = fs.readFileSync(path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'SKILL.md'), 'utf8');
+    assert.match(skillDoc, /regenCheckCommands: \["python3 tools\/skill-stamps\.py check aac-skills --home '/,
+      "claude-dotfiles' own launch example must pass the stamps check by name, now that the script default is empty");
   });
 
   test(`${rel} deliver prompt repairs a pushed bad merge forward rather than force-pushing (issue 514)`, () => {
@@ -2319,6 +2341,20 @@ function assertAcceptedPush(prompt, args, instrument, who) {
   }
 }
 
+// Issue 803: same shape as assertAcceptedPush, for a `git ls-remote ...` instruction instead of a
+// push - gitSpelling wraps any git args generically, so the accepted spelling and the leading
+// order are identical either way.
+function assertAcceptedLsRemote(prompt, args, instrument, who) {
+  const absolute = `/usr/bin/git ${args}`;
+  assert.ok(prompt.includes(`\`${absolute}\``), `${who} (${instrument}) must name the spelling the guard accepts: ${absolute}`);
+  if (instrument === 'mcp') {
+    assert.ok(prompt.indexOf(absolute) < prompt.indexOf(`\`git ${args}\``),
+      `${who}: in a cloud container the absolute path must lead, the bare spelling is only the fallback`);
+  } else {
+    assert.ok(prompt.includes(`\`git ${args}\``), `${who}: the desktop, where /usr/bin/git does not exist, must keep the bare spelling`);
+  }
+}
+
 test('gitSpelling names both spellings and leads with the one each instrument runs (issue 755)', () => {
   const cloud = gitSpelling('mcp', 'push -u origin b');
   assert.ok(cloud.startsWith('`/usr/bin/git push -u origin b`'), cloud);
@@ -2358,6 +2394,28 @@ test(`${FLEET_SCRIPT_REL} spells no push instruction as a bare \`git push\` lite
   const bare = src.split('\n').filter((l) => /(?<![/\w])git push (?!--force)/.test(l) && !/^\s*(\/\/|\*)/.test(l));
   assert.deepEqual(bare, [], 'a push instruction must go through gitSpelling, which carries the spelling the guard accepts');
 });
+
+// Issue 803: the same caveman-wrapped-git refusal that hit push instructions (#755) also hits the
+// `git ls-remote --heads origin <branch>` check baked into the implementer's own done-condition and
+// into the issue-405 push-fallback agent's verification step - a worker that cannot run either
+// cannot confirm its own push landed. Both must go through gitSpelling too.
+for (const instrument of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} the implementer done-condition and the push-fallback agent use the accepted ls-remote spelling under ${instrument} (issue 803)`, async () => {
+    const branch = 'agent/issue-803-attempt1-wf_testrun-w0';
+    const prompts = {};
+    const agentMock = async (prompt, opts) => {
+      prompts[opts.label.split(':')[0]] = prompt;
+      if (opts.label.startsWith('impl:')) return { branch, committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      if (opts.label.startsWith('push:')) return { pushed: true, output: 'ok' };
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) return { pushed: true, prUrl: 'https://github.com/x/y/pull/803', mergeStatus: 'clean', conflictPaths: [] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    await driveCodeLane(FLEET_SCRIPT, agentMock, { number: 803, title: 't', criteria: '' }, 0, {}, 'inv1', null, { instrument });
+    assertAcceptedLsRemote(prompts.impl, `ls-remote --heads origin ${branch}`, instrument, 'implementer done-condition');
+    assertAcceptedLsRemote(prompts.push, `ls-remote --heads origin ${branch}`, instrument, 'push-fallback agent');
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Issue 562: every sub-agent below is FRESH and starts wherever the orchestrating session's shell

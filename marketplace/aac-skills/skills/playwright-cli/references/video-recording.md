@@ -137,6 +137,16 @@ Embrace creativity, overlays are powerful.
 | Use case | Demos, documentation | Debugging, analysis |
 | Size | Larger | Smaller |
 
+## Recording Discipline
+
+- Keep the exact path a recording call returned (`video-start`'s argument, or the path
+  `video-stop` reports) and hand back that path. Do not reconstruct or rename it from memory.
+- Never reenact a task that already finished just to produce a recording of it. If the run
+  happened without recording, say so rather than replaying it silently to backfill a video.
+- Never guess a recording's location from `--latest` or a directory listing unless its timestamp
+  matches the run you actually performed — a stale or concurrent recording can sit in the same
+  folder.
+
 ## Limitations
 
 - Recording adds slight overhead to automation
