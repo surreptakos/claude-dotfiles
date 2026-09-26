@@ -732,7 +732,10 @@ class PayloadGateImportsJev(unittest.TestCase):
     def test_the_payload_gate_takes_jevs_correction_verdict(self):
         prompt = "what is wrong with the build?"
         self.assertIn("CORRECTION DETECTED", self._prompt("off", prompt))  # the regex fallback
-        self.assertNotIn("CORRECTION DETECTED", self._prompt('{"correction": 0.03}', prompt))
+        # Issue 839: the same request carries the route tree, so the canned map answers it too.
+        canned = json.dumps({"correction": 0.03, "route.scope": "other", "route.kind": "question",
+                             "route.settled": "single", "route.codebase": "repo"})
+        self.assertNotIn("CORRECTION DETECTED", self._prompt(canned, prompt))
 
 
 # Regression guard for issue 495: the per-turn reminder must point at rules that exist where it

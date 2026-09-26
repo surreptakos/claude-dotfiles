@@ -22,8 +22,8 @@
  *
  * The four claim types are declarative: adding a new fact to enforce is a JSON edit, never an
  * engine edit. That is the whole point - a per-repo `docs/claims.json` names doc-and-source
- * bindings, this engine reads them and verifies each. See SKILL.md's "Automate" section for the
- * per-repo wiring recipe.
+ * bindings, this engine reads them and verifies each. See claims-tripwire.md beside this file for
+ * the per-repo wiring recipe.
  *
  * Types:
  *   token-subset          every token in a doc matching `pattern` must also appear in `source`
