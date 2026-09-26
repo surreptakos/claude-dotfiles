@@ -472,35 +472,150 @@ def _jev_module() -> Any:
     return jev
 
 
-def _is_correction(prompt: str) -> bool:
+# Issue 839: Jev picks the ask-matt route, not the model (ADR 0002, glossary `CONTEXT.md`). The route
+# tree is this one table: each level is one pick-one (Choice) question, and each option either
+# names the next level ("then") or ends the walk at a route ("route"; None = no route, the gate
+# stays as it was before Jev). Every level is asked in the same request as the correction Noul and
+# the tree is walked in code afterwards, so the prompt hook spends one Jev call of at most
+# PROMPT_JEV_TIMEOUT seconds inside its 5-second budget. Adding a route or a level is one edit here.
+ROUTE_TREE_ROOT = "scope"
+ROUTE_TREE: dict[str, dict[str, Any]] = {
+    "scope": {
+        "instructions": "Is `prompt`, a message the user sent to an AI coding assistant, about software"
+        " work in a code repository (code, scripts, hooks, skills, tooling, tests, an app's behaviour),"
+        " or about other work?",
+        "options": {
+            "software": {"means": "Software work in a repository: building, changing, fixing, reviewing"
+                         " or asking about code, tooling or an app.", "then": "kind"},
+            "other": {"means": "Other work: business documents, contract packages, performance reviews,"
+                      " email, task lists, or anything that is not software work.", "route": None},
+        },
+    },
+    "kind": {
+        "instructions": "What does `prompt` ask the assistant for?",
+        "options": {
+            "question": {"means": "An answer or explanation only: a question about how something works,"
+                         " what happened, or what something means, with nothing to build or change.",
+                         "route": "direct-answer"},
+            "build": {"means": "Something to be built, designed, added or changed, including a need"
+                      " stated with no settled way to meet it (\"I need to be able to ...\").",
+                      "then": "settled"},
+            "broken": {"means": "Something is broken, failing, erroring or slow and needs diagnosing.",
+                       "route": "diagnosing-bugs"},
+            "issues": {"means": "Raw incoming issues or tickets to sort and make ready for work.",
+                       "route": "triage"},
+            "review": {"means": "A review of existing changes, a branch or a pull request.",
+                       "route": "code-review"},
+            "research": {"means": "Investigating a topic against outside sources and writing it up.",
+                         "route": "research"},
+        },
+    },
+    "settled": {
+        "instructions": "How settled is what `prompt` asks to build or change?",
+        "options": {
+            "unsettled": {"means": "The idea is not settled: how to do it, or what exactly is wanted,"
+                          " is still open.", "then": "codebase"},
+            "single": {"means": "Settled and small: what to do is clear and fits in one working"
+                       " session.", "route": "implement"},
+            "multi": {"means": "Settled and large: what to do is clear but it needs several working"
+                      " sessions.", "route": "to-spec"},
+            "foggy": {"means": "A huge, foggy effort with many open decisions before any deliverable"
+                      " is clear.", "route": "wayfinder"},
+        },
+    },
+    "codebase": {
+        "instructions": "Does the unsettled idea in `prompt` concern an existing codebase?"
+        " `in_repository` says whether the assistant is working inside a code repository.",
+        "options": {
+            "repo": {"means": "Yes: it changes or extends an existing repository.", "route": "grill-with-docs"},
+            "none": {"means": "No: there is no codebase yet.", "route": "grill-me"},
+        },
+    },
+}
+PROMPT_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
+# A scheduled run's prompt carries its task file inside this block; it gets no route (for now).
+SCHEDULED_TASK_PATTERN = re.compile(r"<scheduled-task\b", re.IGNORECASE)
+# A message that opens with a route's own slash command (`/to-spec`, `/aac-skills:session-end`), or
+# invokes /session-end anywhere, names its route itself: Jev is not asked for a route and the
+# declaration works as before. The tree has no leaf for session-end or project-harness, so a Jev
+# pick would refuse the very route the user typed.
+SLASH_ROUTE_PATTERN = re.compile(r"^\s*/(?:aac-skills:)?([\w-]+)")
+
+
+def _user_named_route(prompt: str) -> bool:
+    match = SLASH_ROUTE_PATTERN.match(prompt)
+    named = bool(match and match.group(1) in ALLOWED_FLOWS)
+    return named or SESSION_END_INVOKED.search(prompt) is not None
+
+
+def _route_questions() -> dict[str, Any]:
+    return {
+        f"route.{level}": {
+            "type": "choice",
+            "instructions": spec["instructions"],
+            "criteria": {option: leaf["means"] for option, leaf in spec["options"].items()},
+        }
+        for level, spec in ROUTE_TREE.items()
+    }
+
+
+def _walk_route_tree(answers: dict[str, Any]) -> dict[str, Any] | None:
+    """Jev's route from the answers, walked from the root; None when an answer is missing."""
+    level, path = ROUTE_TREE_ROOT, []
+    while level:
+        answer = answers.get(f"route.{level}")
+        option = answer.get("choice") if isinstance(answer, dict) else None
+        leaf = ROUTE_TREE[level]["options"].get(option)
+        if leaf is None:
+            return None
+        path.append(f"{level}={option}")
+        if "route" in leaf:
+            return {"route": leaf["route"], "path": path}
+        level = leaf["then"]
+    return None
+
+
+def _in_repository(cwd: str) -> bool:
+    """Whether the session's working directory is inside a git checkout (a `.git` above it)."""
+    try:
+        folder = Path(cwd).resolve() if cwd else None
+    except (OSError, RuntimeError):
+        return False
+    while folder is not None:
+        if (folder / ".git").exists():
+            return True
+        folder = folder.parent if folder.parent != folder else None
+    return False
+
+
+def _prompt_verdicts(prompt: str, in_repository: bool = False) -> tuple[bool, dict[str, Any] | None]:
+    """(correction?, Jev's route pick) from ONE Jev request; the pick is None when Jev is unavailable.
+
+    A scheduled run, or a message naming its route by slash command, is not routed, so its request
+    carries the correction question alone. When Jev cannot answer, the correction verdict is the
+    regex and there is no pick.
+    """
     prompt = prompt or ""
     if not prompt.strip():
-        return False
+        return False, None
+    unrouted = SCHEDULED_TASK_PATTERN.search(prompt) is not None or _user_named_route(prompt)
+    questions: dict[str, Any] = {"correction": CORRECTION_JEV_QUESTION}
+    if not unrouted:
+        questions.update(_route_questions())
     jev = _jev_module()
-    verdict = None if jev is None else jev.ask_nouls(
-        {"prompt": prompt}, {"correction": CORRECTION_JEV_QUESTION}, timeout=CORRECTION_JEV_TIMEOUT
+    answers = None if jev is None else jev.ask(
+        {"prompt": prompt, "in_repository": in_repository}, questions, timeout=PROMPT_JEV_TIMEOUT
     )
-    if verdict is None:
-        return CORRECTION_PATTERN.search(prompt) is not None
-    return verdict["correction"] >= CORRECTION_JEV_FLOOR
+    if answers is None:
+        return CORRECTION_PATTERN.search(prompt) is not None, None
+    correction = answers["correction"] >= CORRECTION_JEV_FLOOR
+    if unrouted:
+        return correction, {"route": None, "path": ["not routed"]}
+    return correction, _walk_route_tree(answers)
 
 
-# Dan, 2026-09-25: the route is self-declared, so "I need to be able to ... not sure how best to do
-# that" went through as direct-answer and got a build plan without the grill the ask-matt map asks
-# for. A prompt that asks for something to be built or designed cannot be answered as direct-answer.
-BUILD_SHAPED = re.compile(
-    r"\b(?:i|we) (?:need|want) (?:to be able|a way|it to)\b"
-    r"|\bnot sure how (?:best )?to\b"
-    r"|\bhow (?:best|should (?:we|i)) (?:to )?(?:build|do|handle|set up|design)\b"
-    r"|\b(?:build|add|make) (?:me |us )?(?:a|an|it so|it able)\b"
-    r"|\bmake sure (?:they|it) (?:land|save|lands|saves)\b",
-    re.IGNORECASE,
-)
-DIRECT_ANSWER_REFUSAL = (
-    "Governance route rejected: direct-answer, but this prompt asks for something to be built or "
-    "designed. ask-matt map: grill-with-docs when the idea is not settled (codebase), grill-me with no "
-    "codebase, implement for a settled single-session build, to-spec for a multi-session one."
-)
+def _is_correction(prompt: str) -> bool:
+    return _prompt_verdicts(prompt)[0]
 
 
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
@@ -524,11 +639,18 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         # Issue 608: the once-per-session release for a shell-less surface survives the turn.
         "unknown_tool_denied": (previous or {}).get("unknown_tool_denied"),
     }
-    correction = _is_correction(str(event.get("prompt") or ""))
+    correction, pick = _prompt_verdicts(
+        str(event.get("prompt") or ""), _in_repository(str(event.get("cwd") or ""))
+    )
     if correction:
         state["correction_nonce"] = nonce
-    if BUILD_SHAPED.search(str(event.get("prompt") or "")):
-        state["build_shaped"] = True
+    jev_route = (pick or {}).get("route")
+    if pick is not None:
+        # Recorded for the turn by the gate itself; the model's declaration cannot change it.
+        state["route_path"] = pick["path"]
+        if jev_route:
+            state["jev_route"] = jev_route
+            state["flow"] = jev_route
     # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
     # so the next user message clears it and the ticket-SET round applies again outside session-end.
     if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
@@ -556,6 +678,11 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         + ADHD_CONTEXT[_apply_adhd_switch(str(event.get("prompt") or ""))]
         + " "
     )
+    if jev_route:
+        context += (
+            f"ROUTE PICKED BY JEV: {jev_route} (recorded; no declaration needed). Open and follow "
+            f"the {jev_route} route; declaring any other route is refused. "
+        )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
     # rules at every caveman level, off included, plus the style rules for the level in force. It is
     # the only enforcement point that can stop the offending message rather than report it: no hook
@@ -964,8 +1091,13 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
     if not state or state.get("nonce") != nonce:
         print("Governance route rejected: no matching Claude turn", file=sys.stderr)
         return 2
-    if flow == "direct-answer" and state.get("build_shaped"):
-        print(DIRECT_ANSWER_REFUSAL, file=sys.stderr)
+    jev_route = state.get("jev_route")
+    if jev_route and flow != jev_route:
+        print(
+            f"Governance route rejected: {flow}. Jev picked {jev_route} for this message "
+            f"({' > '.join(state.get('route_path') or [])}); it is recorded, declare nothing else.",
+            file=sys.stderr,
+        )
         return 2
     # The prompt hook already settled this turn's level (prompt switch or flag); keep it.
     mode = state.get("caveman")
@@ -985,7 +1117,8 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "correction_nonce": state.get("correction_nonce"),
             # Likewise the prompt's /session-end finding (issue 716).
             "session_end_invoked": state.get("session_end_invoked"),
-            "build_shaped": state.get("build_shaped"),
+            "jev_route": jev_route,
+            "route_path": state.get("route_path"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")

@@ -2,10 +2,10 @@
 name: code-review
 description: Two-axis code review (Standards, Spec) of the diff since a fixed point. Use when the user wants a branch, a PR or work-in-progress changes reviewed, or asks to "review since X", or when another skill needs a Standards + Spec review.
 metadata:
-  modified: '2026-09-25T23:18:11Z'
-  previous-modified: '2026-08-20T00:41:59Z'
-  revision: '2'
-  content-sha: dbf244705359
+  modified: '2026-09-26T00:09:47Z'
+  previous-modified: '2026-09-25T23:18:11Z'
+  revision: '3'
+  content-sha: 6a4cf6237a91
 ---
 
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
@@ -36,7 +36,9 @@ Look for the originating spec, in this order:
 
 ### 3. Identify the standards sources
 
-Anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
+**When the repo has `.code-review/rules.json`, resolve by script, not by judgment.** From the repo root run `node <this skill's dir>/resolve-rules.js <fixed-point>` (Node built-ins only). It maps each changed file to the standards files and inline rules whose `paths` globs match it, and prints JSON with `files`, `unmatched`, `ignored` and `missingStandards` (the rule file's shape is in the script's header). Use that mapping as the standards sources: per file, those standards and rules; `ignored` files are out of review; `unmatched` files get only the smell baseline below. Name each `missingStandards` entry in the report as a stale rule. Exit 2 means the rule file is malformed: say so and stop, rather than falling back to judgment.
+
+With no rule file, the script reports `ruleFile: null` and the sources are found by judgment: anything in the repo that documents how code should be written, such as `CODING_STANDARDS.md` or `CONTRIBUTING.md`.
 
 On top of whatever the repo documents, the Standards axis always carries the **smell baseline** below — a fixed set of Fowler code smells (_Refactoring_, ch.3) that applies even when a repo documents nothing. Two rules bind it:
 
@@ -65,7 +67,7 @@ Send a single message with two `Agent` tool calls. Use the `general-purpose` sub
 **Standards sub-agent prompt** — include:
 
 - The full diff command and commit list.
-- The list of standards-source files you found in step 3, **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
+- The list of standards-source files you found in step 3 — with a rule file, the resolver's per-file mapping verbatim — **plus the smell baseline from step 3** pasted in full — the sub-agent has no other access to it.
 - The brief: "Report — per file/hunk where relevant — (a) every place the diff violates a documented standard: cite the standard (file + the rule); and (b) any baseline smell you spot: name it and quote the hunk. Distinguish hard violations from judgement calls — documented-standard breaches can be hard, but baseline smells are always judgement calls, and a documented repo standard overrides the baseline. Skip anything tooling enforces. Under 400 words."
 
 **Spec sub-agent prompt** — include:
