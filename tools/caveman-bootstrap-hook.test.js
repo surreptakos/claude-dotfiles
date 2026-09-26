@@ -168,6 +168,27 @@ test('prompt hook forwards /caveman lite to the mode tracker, which records the 
   assert.equal(fs.readFileSync(path.join(f.home, '.claude', '.caveman-active'), 'utf8'), 'lite');
 });
 
+test('CLI_VERSION comes from the shared pin (lib/caveman-cli.json), not a hardcoded default (issue 825)', () => {
+  const f = makeHome();
+  const npmLog = path.join(f.home, 'npm-invocations.log');
+  const stubDir = path.join(f.home, 'stub-bin');
+  fs.mkdirSync(stubDir, { recursive: true });
+  // A stub npm that just records its argv and exits 0 - real network install is out of scope for
+  // this test; only "which version did the hook ask for" is.
+  fs.writeFileSync(path.join(stubDir, 'npm'), `#!/bin/bash\necho "$@" >> "${npmLog}"\nexit 0\n`);
+  fs.chmodSync(path.join(stubDir, 'npm'), 0o755);
+  const pinnedVersion = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'lib', 'caveman-cli.json'), 'utf8')).cliVersion;
+  const r = run(BOOTSTRAP, {
+    ...f,
+    stdin: '{}',
+    extraEnv: { PATH: `${stubDir}:${process.env.PATH}`, CAVEMAN_BOOTSTRAP_SKIP_CLI: '' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const log = fs.readFileSync(npmLog, 'utf8');
+  assert.match(log, new RegExp(`@caveman-ai/cli@${pinnedVersion.replace(/\./g, '\\.')}`),
+    `expected npm to be asked for the pinned version ${pinnedVersion}, got: ${log}`);
+});
+
 test('prompt hook stays silent when the checkout is absent', () => {
   const f = makeHome();
   const r = run(PROMPT, { ...f, source: path.join(f.home, 'nowhere'), stdin: '{"prompt":"/caveman lite"}' });
