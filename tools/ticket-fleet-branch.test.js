@@ -1180,7 +1180,7 @@ for (const file of RESUME_GUARD_PAIR) {
 // ---- The open-PR check runs once, in the Scout phase, before wave selection (issue 430) ----
 // It used to be the first agent of every code lane: twelve tickets meant twelve agents asking for
 // the same PR list, and a ticket that already had a PR was SELECTED and then skipped inside its
-// lane, so the wave ran fewer real tickets than `maxTickets` while runnable candidates sat
+// lane, so the wave ran fewer real tickets than its cap while runnable candidates sat
 // unselected. One listing now answers for the whole candidate set and the matches are dropped
 // before selectWave. Driven with a stubbed instrument rather than asserted by regex: what matters
 // is which agents run and which tickets survive.
@@ -1208,7 +1208,7 @@ const OPEN_PR_CANDIDATES = [
   { number: 103, blockedBy: [], handoffPending: false },
 ];
 
-test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before wave selection, so the cap runs maxTickets real tickets (issue 430)`, async () => {
+test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before wave selection, so the wave runs only tickets that will run (issue 430)`, async () => {
   const calls = [];
   const agentMock = async (prompt, opts) => {
     calls.push({ label: opts.label, phase: opts.phase, prompt });
@@ -1222,9 +1222,9 @@ test(`fleet script ${FLEET_SCRIPT_REL} drops a candidate with an open PR before 
   }
   assert.match(calls[0].prompt, /repos\/\{owner\}\/\{repo\}\/pulls\?state=open/,
     'the gh instrument must list open PRs through REST, once');
-  const { wave } = selectWave(filtered.tickets, 2);
+  const { wave } = selectWave(filtered.tickets);
   assert.deepEqual(wave.map((t) => t.number), [102, 103],
-    'the wave cap must fill with tickets that will run - the ticket with a PR must not occupy a slot');
+    'the wave holds tickets that will run - the ticket with a PR is not in it');
   assert.deepEqual(filtered.skipped, [{ ticket: 101, prUrl: 'https://github.com/x/y/pull/137', branch: 'agent/issue-101-attempt1-wf_r1-w0' }],
     'the dropped ticket must be reported with the PR url that stopped it, for skippedOpenPR');
   assert.ok(logs.some((m) => m.includes('#101') && m.includes('https://github.com/x/y/pull/137')),
@@ -1268,7 +1268,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} files the open-PR check under Scout and n
   const scanIdx = src.indexOf('await dropTicketsWithOpenPr(');
   const selectIdx = src.indexOf('const selection = selectWave(');
   assert.ok(scanIdx > 0 && selectIdx > scanIdx, 'the filter must run before wave selection');
-  assert.match(src, /const selection = selectWave\(openPrFilter\.tickets, cfg\.maxTickets\)/,
+  assert.match(src, /const selection = selectWave\(openPrFilter\.tickets\)/,
     'wave selection must read the filtered candidate list');
   assert.match(src, /\n  skippedOpenPR,/,
     'the run result must name the dropped tickets under skippedOpenPR');
@@ -1352,14 +1352,14 @@ test('dropParkedTickets handles absent input', () => {
   assert.deepEqual(dropParkedTickets(undefined, []), { tickets: [], skipped: [] });
 });
 
-test('selectWave splits the candidates into the wave and the three reasons the rest do not run', () => {
+test('selectWave takes every runnable ticket - no cap - and names the two reasons the rest do not run', () => {
   const t = (number, blockedBy, handoffPending) => ({ number, blockedBy, handoffPending });
-  const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])], 2);
-  assert.deepEqual(out.wave.map((x) => x.number), [1, 4], 'the cap fills with runnable tickets only');
+  const out = selectWave([t(1, []), t(2, [99]), t(3, [], true), t(4, []), t(5, [])]);
+  assert.deepEqual(out.wave.map((x) => x.number), [1, 4, 5], 'every runnable ticket runs (Dan, 2026-09-26: no wave cap)');
   assert.deepEqual(out.blocked.map((x) => x.number), [2], 'an open blocker gates the ticket');
   assert.deepEqual(out.pendingHandoff.map((x) => x.number), [3],
     'a ticket awaiting the owner after a handoff is parked, not re-run (issue 266)');
-  assert.deepEqual(out.overCap.map((x) => x.number), [5], 'the rest are reported over cap, not lost');
+  assert.equal('overCap' in out, false, 'there is no cap, so nothing is over it');
 });
 
 // ---- In-wave chaining (issue 854) ----
@@ -1369,21 +1369,17 @@ test('selectWave splits the candidates into the wave and the three reasons the r
 
 test('selectWave chains a ticket blocked only by in-wave code tickets onto the wave (issue 854)', () => {
   const t = (number, blockedBy, kind = 'code') => ({ number, blockedBy, kind });
-  const out = selectWave([t(1, []), t(2, [1]), t(3, [2]), t(4, [99]), t(5, [1, 99])], 1);
+  const out = selectWave([t(1, []), t(2, [1]), t(3, [2]), t(4, [99]), t(5, [1, 99])]);
   assert.deepEqual(out.wave.map((x) => x.number), [1, 2, 3], 'B after A, and C after B, transitively');
   assert.deepEqual(out.wave.map((x) => x.chainedAfter || []), [[], [1], [2]], 'each chained ticket names its blockers');
   assert.deepEqual(out.blocked.map((x) => x.number), [4, 5], 'a blocker outside the wave still gates the ticket');
-  assert.deepEqual(out.overCap, [], 'chained tickets do not count against the cap');
 });
 
-test('selectWave does not chain behind a blocker that cannot merge or is over the cap', () => {
+test('selectWave does not chain behind a blocker that cannot merge', () => {
   const t = (number, blockedBy, kind = 'code') => ({ number, blockedBy, kind });
-  const probe = selectWave([t(1, [], 'probe'), t(2, [1])], 3);
+  const probe = selectWave([t(1, [], 'probe'), t(2, [1])]);
   assert.deepEqual(probe.blocked.map((x) => x.number), [2], 'a probe blocker opens no PR, so nothing merges');
-  const capped = selectWave([t(1, []), t(2, []), t(3, [2])], 1);
-  assert.deepEqual(capped.wave.map((x) => x.number), [1]);
-  assert.deepEqual(capped.blocked.map((x) => x.number), [3], 'a blocker over the cap is not in the wave');
-  const cycle = selectWave([t(1, []), t(2, [3]), t(3, [2])], 3);
+  const cycle = selectWave([t(1, []), t(2, [3]), t(3, [2])]);
   assert.deepEqual(cycle.blocked.map((x) => x.number), [2, 3], 'a blocker cycle never enters the wave');
 });
 
@@ -1588,7 +1584,7 @@ test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is 
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
   const fresh = { number: 267, kind: 'human', blockedBy: [], handoffPending: false };
   const blocked = { number: 268, kind: 'code', blockedBy: [10], handoffPending: false };
-  const { wave, pendingHandoff, blocked: gated } = selectWave([parked, fresh, blocked], 3);
+  const { wave, pendingHandoff, blocked: gated } = selectWave([parked, fresh, blocked]);
   assert.deepEqual(wave.map((t) => t.number), [267], 'only the ticket with no pending handoff may run');
   assert.deepEqual(pendingHandoff.map((t) => t.number), [266], 'the parked ticket must be reported as skipped by number');
   assert.deepEqual(gated.map((t) => t.number), [268], 'open blockers must still gate independently of the handoff skip');
@@ -1596,7 +1592,7 @@ test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is 
 
 test(`${FLEET_SCRIPT_REL} a run whose only ticket already carries a handoff comment starts no agents`, async () => {
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
-  const { wave, pendingHandoff } = selectWave([parked], 3);
+  const { wave, pendingHandoff } = selectWave([parked]);
   const calls = [];
   const agentMock = async (_prompt, opts) => { calls.push(opts.label); throw new Error('no agent may run for a parked ticket'); };
   for (const t of wave) { await driveHumanLane(FLEET_SCRIPT, agentMock, t, 'gh'); }
@@ -1864,7 +1860,7 @@ test(`${FLEET_SCRIPT_REL} runs a ticket whose only blocker is closed, with no bo
     'the blocker state must be read through the instrument, not inferred from the body');
   assert.deepEqual(resolved[0].blockedBy, [],
     'a blocker the tracker reports closed must stop gating the ticket');
-  assert.deepEqual(selectWave(resolved, 3).wave.map((t) => t.number), [305],
+  assert.deepEqual(selectWave(resolved).wave.map((t) => t.number), [305],
     'the ticket must be eligible without anyone rewriting its "Blocked by" section');
   assert.ok(logs.some((m) => m.includes('#305') && m.includes('#199') && m.includes('closed')),
     'the cleared blocker must appear in the run log, naming ticket and blocker');
@@ -1878,7 +1874,7 @@ test(`${FLEET_SCRIPT_REL} still skips a ticket whose blocker is open, naming the
   assert.match(prompts[0][1], /mcp__github__issue_read/,
     'the container instrument must read the blocker through the GitHub MCP tools');
   assert.deepEqual(resolved[0].blockedBy, [199], 'an open blocker must survive the resolution');
-  const selection = selectWave(resolved, 3);
+  const selection = selectWave(resolved);
   assert.deepEqual(selection.wave, [], 'a ticket with an open blocker must not run');
   assert.deepEqual(selection.blocked.map((t) => ({ ticket: t.number, blockedBy: t.blockedBy })),
     [{ ticket: 305, blockedBy: [199] }], 'the skipped ticket must carry the open blocker numbers');
@@ -2656,14 +2652,14 @@ async function driveLanes(wave, codeResult) {
 }
 
 test(`${FLEET_SCRIPT_REL} runs a chained ticket after its in-wave blocker merges (issue 854)`, async () => {
-  const { wave } = selectWave([{ number: 839, kind: 'code', blockedBy: [] }, { number: 840, kind: 'code', blockedBy: [839] }], 5);
+  const { wave } = selectWave([{ number: 839, kind: 'code', blockedBy: [] }, { number: 840, kind: 'code', blockedBy: [839] }]);
   const { started, byTicket } = await driveLanes(wave, (t) => ({ ticket: t.number, done: true, merged: true, prState: 'merged' }));
   assert.deepEqual(started, [839, 840], 'the chained ticket starts only after its blocker returned');
   assert.equal(byTicket.get(840).merged, true);
 });
 
 test(`${FLEET_SCRIPT_REL} skips a chained ticket, naming the blocker, when the blocker did not merge (issue 854)`, async () => {
-  const { wave } = selectWave([{ number: 825, kind: 'code', blockedBy: [] }, { number: 826, kind: 'code', blockedBy: [825] }], 5);
+  const { wave } = selectWave([{ number: 825, kind: 'code', blockedBy: [] }, { number: 826, kind: 'code', blockedBy: [825] }]);
   const { started, logs, byTicket } = await driveLanes(wave, (t) => ({ ticket: t.number, done: true, merged: false, prState: 'ci-red' }));
   assert.deepEqual(started, [825], 'no lane may start for a ticket whose blocker did not merge');
   assert.match(byTicket.get(826).chainSkipped, /blocker #825 did not merge in this wave \(ci-red\)/);
@@ -2671,7 +2667,7 @@ test(`${FLEET_SCRIPT_REL} skips a chained ticket, naming the blocker, when the b
 });
 
 test(`${FLEET_SCRIPT_REL} a blocker whose stage threw still releases its chained ticket as skipped`, async () => {
-  const { wave } = selectWave([{ number: 1, kind: 'code', blockedBy: [] }, { number: 2, kind: 'code', blockedBy: [1] }], 5);
+  const { wave } = selectWave([{ number: 1, kind: 'code', blockedBy: [] }, { number: 2, kind: 'code', blockedBy: [1] }]);
   const { started, byTicket } = await driveLanes(wave, () => { throw new Error('tree guard breach'); });
   assert.deepEqual(started, [1]);
   assert.match(byTicket.get(2).chainSkipped, /blocker #1 produced no result/);
