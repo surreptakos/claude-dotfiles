@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.8 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.9 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.8 |
+| **Version** | 0.9 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -39,6 +39,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
+| 0.9 | 2026-09-22 | Rule 161 scoped to responses and messages to people, not prose deliverables: Rule 161; Appendix F. | Pending |
 
 # How to use this standard
 
@@ -1046,7 +1047,9 @@ Extends Rule 8. Do not attribute a claim to an unnamed authority. **Experts agre
 
 ## 161. Synonym cycling
 
-Name one actor, system, or tool the same way throughout a document. Rotating synonyms to avoid repetition makes the reader check whether a new thing has been introduced. Rule 143 already governs model and part numbers; this rule extends the same discipline to people, roles, and systems.
+Name one actor, system, or tool the same way in a response or message written to another person — email, Teams, review feedback, and other correspondence a reader will answer. Rotating synonyms there makes the reader check whether a new thing has been introduced, and reads as padding. Rule 143 already governs model and part numbers; this rule extends the same discipline to people, roles, and systems.
+
+In prose deliverables — reports, proposals, scopes, procedures, and other narrative documents — synonym variation is not a fault.
 
 ## 162. Fake-profound kickers and summary recaps
 
@@ -1249,6 +1252,7 @@ Table F1. House decision register
 | 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
 | 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
 | 5 | State the main point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. | Owner ruling, September 25, 2026. "Main point first" left no room for a courtesy opening. | 0.8 |
+| 161 | Consistent naming binding in responses and messages to people (email, Teams, review feedback); free in prose deliverables (reports, proposals, scopes, procedures). | Owner ruling, September 22, 2026, issue 627, superseding a September 21, 2026 draft ruling that split the rule by document type instead. `blader/humanizer` 3.0.0 dropped its equivalent pattern as an AI tell; Rule 161 answers a different question (precision, not machine detection), so the rule stands but is scoped to correspondence. | 0.9 |
 
 # Appendix G - Phrase register
 

@@ -287,7 +287,7 @@ agent - keeps blocking: the gate opens only on positive evidence. The run result
 One `open-pr-scan@<invocationId>` agent runs in the **Scout** phase, after blocker state and before
 wave selection. It lists the repo's open PRs once through the instrument and reports which
 candidate numbers have one whose head ref starts with `agent/issue-<N>-`; those candidates are
-dropped, so the `maxTickets` cap fills with tickets that will actually run and the drops are named
+dropped, so the wave holds only tickets that will actually run and the drops are named
 in the run result under `skippedOpenPR` with their PR urls. It used to be the first agent of every
 code lane instead: twelve tickets meant twelve agents asking for the same list, and the ticket with
 a PR was selected and then skipped inside its lane, burning a wave slot while a runnable candidate
