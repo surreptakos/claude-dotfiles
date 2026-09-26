@@ -74,7 +74,8 @@ lists.
 The switches that change how strict the route gate is: appeals on or off, and the routine route on
 or off for scheduled runs. They live in one committed settings file in this repository (Dan,
 2026-09-25), so a change is a commit, reaches every machine and cloud session alike, and shows in
-git history. Never a per-machine flag file.
+git history. Never a per-machine flag file. The file is `profile/codex/hooks/route-gate.json`,
+beside the gate script it ships with.
 
 ## Appeal
 
