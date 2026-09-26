@@ -1358,7 +1358,11 @@ try {
     `Run exactly this one command and report its result: ${gitSpelling('mcp', 'remote get-url origin')}. servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>). Do not run anything else - no curl, no cp, no git add or commit.`,
     { label: 'fleet-refresh-repo', phase: 'Setup', schema: SERVED_REPO, model: cfg.reportModel, effort: 'low' }
   )
-  servedRepo = served && served.servedRepo
+  // Normalized before the JS check below, so a reply spelled `Owner/Repo.git` or as the full remote
+  // URL still matches FLEET_FORKS instead of falling through to the refresh agent (issue 804).
+  servedRepo = served && typeof served.servedRepo === 'string'
+    ? served.servedRepo.trim().replace(/^.*github\.com[:/]/i, '').replace(/\.git$/i, '').replace(/\/+$/, '').toLowerCase()
+    : null
 } catch (err) {
   log(`fleet-refresh-repo did not run: ${unusableReason('fleet-refresh-repo', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
 }
