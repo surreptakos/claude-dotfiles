@@ -156,6 +156,7 @@ function Invoke-SettingsInvariants {
 # When a live copy exists, the committed one is detokenized to a temp file and merged into it by
 # tools/plugin-records-merge.js, which keeps any live entry with a later lastUpdated. Without node
 # the live file is left alone: skipping a merge loses nothing, overwriting would downgrade.
+# settings.json takes the same path with its own merger (issue 826).
 function Merge-PluginRecords {
     param(
         [Parameter(Mandatory = $true)]$Item,
@@ -172,7 +173,12 @@ function Merge-PluginRecords {
     $ErrorActionPreference = 'Continue'
     try {
         Copy-OneFile -Source $Source -Destination $temp -Direction Detokenize -UserHome $UserHome
-        $out = & $node.Source (Join-Path $RepoRoot 'tools\plugin-records-merge.js') $Item.Merge $temp $Item.Local 2>&1
+        # Issue 826: settings.json has its own merger, which keeps caveman's live wiring.
+        if ($Item.Merge -eq 'settings') {
+            $out = & $node.Source (Join-Path $RepoRoot 'tools\settings-caveman-merge.js') $temp $Item.Local 2>&1
+        } else {
+            $out = & $node.Source (Join-Path $RepoRoot 'tools\plugin-records-merge.js') $Item.Merge $temp $Item.Local 2>&1
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Host ("  merge FAILED, live {0} left as it is:" -f $Item.Local) -ForegroundColor Yellow
             $out | ForEach-Object { Write-Host ("    " + $_) -ForegroundColor Yellow }
@@ -258,10 +264,10 @@ if ((Test-Path $invariants) -and (Test-Path $liveSettings)) {
 }
 
 # Issue 825: install the pinned @caveman-ai/cli and run `caveman enable claude`, or fail closed -
-# profile/claude/settings.json (just restored above) still carries whichever machine last ran
-# `enable` baked in, and a fresh machine must never carry that machine's hooks or model route
-# pointing at a binary this one never installed. Best-effort like Invoke-RepoMemoryPointer: a
-# caveman problem must never fail a pull.
+# a hook or model route naming a caveman binary this machine does not have is stripped. The
+# profile carries none since issue 826 (the merge above keeps only this machine's own), so a
+# working proxy's wiring stays. Best-effort like Invoke-RepoMemoryPointer: a caveman problem must
+# never fail a pull.
 $cavemanInstaller = Join-Path $RepoRoot 'tools\caveman-desktop-install.ps1'
 if (Test-Path $cavemanInstaller) {
     Write-Host ''

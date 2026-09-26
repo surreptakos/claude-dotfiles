@@ -24,9 +24,11 @@
          its own install paths, so this script never hand-authors those commands).
 
     Fail-closed path (offline skip, or any step above failing): Remove-CavemanWiring strips every
-    hook entry naming a caveman binary and the model route (ANTHROPIC_BASE_URL / the first-party
-    override, both only when they are the caveman ones) from the live settings.json, so a machine
-    that never got the CLI never carries a dead hook or a route with nothing listening on it. That
+    hook entry naming a caveman binary that is not on disk, and the model route (ANTHROPIC_BASE_URL
+    / the first-party override, both only when they are the caveman ones) when the proxy binary is
+    not, from the live settings.json, so a machine that never got the CLI never carries a dead hook
+    or a route with nothing listening on it. Wiring whose binaries are on disk is this machine's
+    working proxy and stays: a pull never breaks it (issue 826). That
     keeps the two invariants the restore suite checks true on every machine, not only the ones
     with working network: every hook command naming a caveman binary resolves to a file that
     exists, and the model route is present if and only if the proxy binary is.
@@ -75,13 +77,14 @@ function Get-InstalledCavemanVersion {
 
 function Remove-CavemanWiring {
     <#
-        Strip every hook entry whose command names a caveman binary, and the caveman model route,
-        from $Path. Idempotent: a settings.json already clean of caveman wiring round-trips with
-        no visible change other than re-serialization. Returns $true when it changed anything.
+        Strip every hook entry whose command names a caveman binary that is not on disk, and the
+        caveman model route when the proxy binary is not, from $Path. Idempotent, and it writes
+        nothing when nothing is dead. Returns $true when it changed anything.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$Path,
-        [Parameter(Mandatory = $true)][int]$ProxyPort
+        [Parameter(Mandatory = $true)][int]$ProxyPort,
+        [Parameter(Mandatory = $true)][string]$ProxyExe
     )
     if (-not (Test-Path $Path)) { return $false }
     # Read and write as UTF-8 explicitly: Windows PowerShell 5.1's Get-Content decodes a BOM-less file
@@ -89,11 +92,22 @@ function Remove-CavemanWiring {
     $json = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     $changed = $false
     $binaryPattern = 'caveman-proxy|caveman\.cmd|caveman\.CMD|shrink-hook|@caveman-ai'
+    # Issue 826: a caveman hook is dead - and stripped - when it names no quoted caveman path, or
+    # any one it names is missing. One whose paths all exist is this machine's working proxy.
+    $isDead = {
+        param([string]$Command)
+        if ($Command -notmatch $binaryPattern) { return $false }
+        $named = @(([regex]"(?i)['""]([^'""]*caveman[^'""]*)['""]").Matches($Command) |
+                   ForEach-Object { $_.Groups[1].Value })
+        if ($named.Count -eq 0) { return $true }
+        return (@($named | Where-Object { -not (Test-Path -LiteralPath $_) }).Count -gt 0)
+    }
 
     if ($json.PSObject.Properties['env']) {
         $routeKey = 'ANTHROPIC_BASE_URL'
         if ($json.env.PSObject.Properties[$routeKey] -and
-            ($json.env.$routeKey -match ("127\.0\.0\.1:{0}" -f $ProxyPort))) {
+            ($json.env.$routeKey -match ("127\.0\.0\.1:{0}" -f $ProxyPort)) -and
+            -not (Test-Path -LiteralPath $ProxyExe)) {
             $json.env.PSObject.Properties.Remove($routeKey)
             if ($json.env.PSObject.Properties['_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL']) {
                 $json.env.PSObject.Properties.Remove('_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL')
@@ -109,7 +123,7 @@ function Remove-CavemanWiring {
             $originalGroups = @($json.hooks.$eventName)
             $keptGroups = New-Object System.Collections.ArrayList
             foreach ($group in $originalGroups) {
-                $keptHooks = @($group.hooks | Where-Object { $_.command -notmatch $binaryPattern })
+                $keptHooks = @($group.hooks | Where-Object { -not (& $isDead ([string]$_.command)) })
                 if ($keptHooks.Count -eq 0) {
                     $changed = $true
                     continue
@@ -147,8 +161,8 @@ if ($DryRun) {
 }
 
 if ($env:CAVEMAN_DESKTOP_SKIP_CLI) {
-    Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort | Out-Null
-    Write-Host ("  caveman: offline skip (CAVEMAN_DESKTOP_SKIP_CLI set) - no route, no proxy hooks" )
+    Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort -ProxyExe $ProxyExe | Out-Null
+    Write-Host ("  caveman: offline skip (CAVEMAN_DESKTOP_SKIP_CLI set) - dead caveman hooks and route stripped")
     exit 0
 }
 
@@ -166,8 +180,8 @@ if ($installed -ne $Version) {
         $ErrorActionPreference = $previous
     }
     if ($npmExit -ne 0) {
-        Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort | Out-Null
-        Write-Host ("  caveman: npm install of @caveman-ai/cli@{0} FAILED - failing closed (no route, no proxy hooks)" -f $Version) -ForegroundColor Yellow
+        Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort -ProxyExe $ProxyExe | Out-Null
+        Write-Host ("  caveman: npm install of @caveman-ai/cli@{0} FAILED - failing closed (dead caveman hooks and route stripped)" -f $Version) -ForegroundColor Yellow
         exit 0
     }
     $npmState = "installed $Version"
@@ -197,15 +211,15 @@ if (Test-Path $ProxyExe) {
     if ("$enableOut" -match 'native Caveman enabled|already') {
         $enableState = 'enabled'
     } else {
-        Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort | Out-Null
-        $enableState = 'failed - failing closed (no route, no proxy hooks)'
+        Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort -ProxyExe $ProxyExe | Out-Null
+        $enableState = 'failed - failing closed (dead caveman hooks and route stripped)'
     }
 } else {
     # Binaries never landed (offline npm registry reached but the signed-binary fetch did not,
     # or a platform with no signed build): the same fail-closed rule applies - a hook naming a
     # binary that is not on disk is worse than no hook.
-    Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort | Out-Null
-    $enableState = 'skipped (no proxy binary) - failing closed (no route, no proxy hooks)'
+    Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort -ProxyExe $ProxyExe | Out-Null
+    $enableState = 'skipped (no proxy binary) - failing closed (dead caveman hooks and route stripped)'
 }
 
 Write-Host ("  caveman: cli {0}; setup {1}; enable {2}" -f $npmState, $setupState, $enableState)

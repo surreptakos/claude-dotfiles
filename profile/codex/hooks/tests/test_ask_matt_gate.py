@@ -1144,10 +1144,10 @@ class AskMattGateTests(unittest.TestCase):
         self.assertIn("session-gate.js", shipped)
         for name in sorted(shipped):
             self.assertNotIn(name, live, f"settings.json still dispatches {name}: double fire")
-        # Third-party entries are not the plugin's to carry and stay (the caveman proxy, the
-        # caveman shrink hook).
-        self.assertIn("caveman-proxy.exe", live)
-        self.assertIn("shrink-hook", live)
+        # Issue 826: caveman's entries are not the profile's to carry either - only
+        # `caveman enable claude` on the machine writes them, and pull keeps the live ones.
+        self.assertNotIn("caveman-proxy", live)
+        self.assertNotIn("shrink-hook", live)
 
     def test_global_instruction_files_pin_yes_and_caveman_default_ultra(self) -> None:
         codex_text = CODEX_INSTRUCTIONS.read_text(encoding="utf-8")
