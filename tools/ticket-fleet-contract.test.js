@@ -109,6 +109,35 @@ test('the plugin-served script decides the fork skip in JS before spawning the r
     'the FLEET_FORKS check must precede the refresh agent spawn in source order, so a fork never reaches it');
 });
 
+test('the script\'s own refresh block never spawns the refresh agent for a FORKS repo, however servedRepo is spelled (issue 804)', async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const start = src.indexOf('// [FLEET-REFRESH-START]');
+  const end = src.indexOf('// [FLEET-REFRESH-END]');
+  assert.ok(start > -1 && end > start, 'the FLEET-REFRESH marker pair must bracket the refresh block');
+  const scriptForks = JSON.parse(((src.match(/const FLEET_FORKS = (\[[^\]]*\])/) || [])[1] || '[]').replace(/'/g, '"'));
+  assert.deepEqual(scriptForks.sort(), FORKS.map((f) => f.repo).sort(),
+    'the script\'s FLEET_FORKS must list exactly the FORKS of tools/ticket-fleet-contract.js');
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const run = new AsyncFunction('agent', 'log', 'cfg', 'unusableReason', src.slice(start, end));
+  const spellings = (repo) => [repo, `${repo}.git`, repo.toUpperCase(), `https://github.com/${repo}.git`, `git@github.com:${repo}.git`];
+  const reachesRefresh = async (reported) => {
+    const labels = [];
+    await run(async (_prompt, opts) => {
+      labels.push(opts.label);
+      return opts.label === 'fleet-refresh-repo' ? { servedRepo: reported } : { refreshed: [], unchanged: [], commit: '', errors: [] };
+    }, () => {}, { reportModel: 'm' }, (_label, msg) => msg);
+    assert.equal(labels[0], 'fleet-refresh-repo', 'the servedRepo-only agent must be the first spawn');
+    return labels.includes('fleet-refresh');
+  };
+  for (const fork of FORKS) {
+    for (const reported of spellings(fork.repo)) {
+      assert.equal(await reachesRefresh(reported), false, `servedRepo "${reported}" is the fork ${fork.repo} and must never reach the refresh agent`);
+    }
+  }
+  for (const reported of spellings(FLEET_SOURCE_REPO)) assert.equal(await reachesRefresh(reported), false);
+  assert.equal(await reachesRefresh('surreptakos/some-other-repo'), true, 'a non-fork served repo must still be refreshed');
+});
+
 test('the INTERNALS.md ripple table names every fork holder, runbook and the current version', () => {
   const skill = fs.readFileSync(FLEET_SKILL, 'utf8');
   assert.match(skill, new RegExp(`contract v${CONTRACT_VERSION}\\b`),
