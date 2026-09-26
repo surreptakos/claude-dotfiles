@@ -427,6 +427,30 @@ test(`fleet script ${FLEET_SCRIPT_REL} carries the live-tree hard-rail sentence`
     `${FLEET_SCRIPT_REL} is missing the live-tree hard-rail sentence (issue 149)`);
 });
 
+// Issue 628: the implementer prompt opens with its existing rails as one ordered list, so a
+// conflict between two resolves by number. Each rule must restate a rail the prompt already
+// carries in full, so the full rails are pinned here beside the list.
+test(`fleet script ${FLEET_SCRIPT_REL} implementer prompt carries the ordered hard-rule list (issue 628)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const start = src.indexOf('Hard rules, in priority order (issue 628)');
+  assert.ok(start > 0, 'the implementer prompt must carry the ordered hard-rule list');
+  const list = src.slice(start, src.indexOf('\nWorktree rule (aac-routines issue 192', start));
+  const heads = ['1. Write nothing outside this worktree', '2. Never open a PR, never merge',
+    '3. Never leave committed work only in this container', '4. Never write a closing keyword',
+    '5. Report faithfully', '6. Stay in scope'];
+  let at = -1;
+  for (const h of heads) {
+    const i = list.indexOf('\n' + h);
+    assert.ok(i > at, `hard rule "${h}" must be present and in order`);
+    at = i;
+  }
+  for (const rail of ['NEVER open a PR, NEVER merge, NEVER push any branch but', 'Live-tree hard rail: ~/.claude',
+    '${SCRATCH_RAIL}', '${PYTHON_RAIL}',
+    '(no # - closing-keyword risk)', 'return pushed: true only when it exits 0']) {
+    assert.ok(src.indexOf(rail, start) > start, `the full rail "${rail}" must follow the list it is summarized in`);
+  }
+});
+
 test(`fleet script ${FLEET_SCRIPT_REL} verifier prompt still runs the live-tree check`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src,
