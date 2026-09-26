@@ -101,7 +101,9 @@ function Remove-CavemanWiring {
     }
 
     if ($json.PSObject.Properties['hooks']) {
-        foreach ($eventName in @($json.hooks.PSObject.Properties.Name)) {
+        # Enumerated, not .Properties.Name: strict mode throws on .Name of an empty hooks object,
+        # which is exactly what a second run after a full strip sees (issue 825).
+        foreach ($eventName in @($json.hooks.PSObject.Properties | ForEach-Object { $_.Name })) {
             $originalGroups = @($json.hooks.$eventName)
             $keptGroups = New-Object System.Collections.ArrayList
             foreach ($group in $originalGroups) {

@@ -269,9 +269,12 @@ if (Test-Path $cavemanInstaller) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
-            -UserHome $UserHome -RepoRoot $RepoRoot -DryRun:$DryRun 2>&1 |
-            ForEach-Object { Write-Host $_ }
+        # -DryRun only when set: Windows PowerShell 5.1's -File cannot bind -DryRun:False to a
+        # switch, so passing it always made the installer refuse to start (issue 825).
+        $cavemanArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $cavemanInstaller,
+                         '-UserHome', $UserHome, '-RepoRoot', $RepoRoot)
+        if ($DryRun) { $cavemanArgs += '-DryRun' }
+        & $Engine @cavemanArgs 2>&1 | ForEach-Object { Write-Host $_ }
     } catch {
         Write-Host ("  caveman install FAILED (pull continues): {0}" -f $_.Exception.Message) -ForegroundColor Yellow
     } finally {
