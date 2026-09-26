@@ -349,12 +349,16 @@ test(`fleet script ${FLEET_SCRIPT_REL} names a per-worker path for every file it
     'the implementer and prober prompts must carry the scratch-file rail');
 });
 
-test(`fleet script ${FLEET_SCRIPT_REL} dates the Report phase heading (issue 322)`, () => {
+test(`fleet script ${FLEET_SCRIPT_REL} hands the Report phase's heading and append to tools/followups-append.js (issues 322, 882)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /## Run <DATE> \(ticket-fleet \$\{runId\}\)/,
-    'the FOLLOW-UPS heading must carry both the ISO date and the run id so two runs are tellable apart');
-  assert.match(src, /date -u \+%F/,
-    'the writer has a shell, so the date comes from it - workflow scripts cannot call new Date()');
+  // Issue 882: the writer used to be told to append (and date) FOLLOW-UPS.md by hand, in prose,
+  // and one run overwrote seven earlier runs' bullets doing it. The heading's date-tagging (issue
+  // 322: "## Run <DATE> (ticket-fleet <runId>)", so two runs are tellable apart) and the append
+  // itself are now tools/followups-append.js's job - a pure, tested function - not the agent's.
+  assert.match(src, /tools\/followups-append\.js/,
+    'the Report phase must run tools/followups-append.js rather than editing followupsFile by hand');
+  assert.match(src, /Do NOT append, edit or reword \$\{cfg\.followupsFile\} by hand/,
+    'the writer prompt must forbid a hand edit of the follow-ups file, which is what issue 882 was');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} gates the verifier agentType on remoteness, not the instrument (issue 339)`, () => {
