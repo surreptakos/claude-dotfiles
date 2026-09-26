@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.8 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.9 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.8 |
+| **Version** | 0.9 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -39,6 +39,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
+| 0.9 | 2026-09-26 | Machine-vocabulary word ban list: Appendix G12. Straight-quote mandate rejected: Appendix F. | Pending |
 
 # How to use this standard
 
@@ -1249,6 +1250,8 @@ Table F1. House decision register
 | 5; 101; 104; 107; A | Delegation-email shape: goal and concern before the instruction; greeting on internal requests; a sequence may replace a clock deadline; report-back close; lists carry only what the prose has not said. | Wentworth demand-letter handoff, September 18, 2026. The compliant draft was rewritten before sending; this records the writer's shape for drafts started from nothing. | 0.6 |
 | 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
 | 5 | State the main point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. | Owner ruling, September 25, 2026. "Main point first" left no room for a courtesy opening. | 0.8 |
+| 9; G12 | Machine-vocabulary word ban list adopted company-wide, Appendix G12. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Wired into the stop-slop detector, issue 620. | 0.9 |
+| 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "Dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.9 |
 
 # Appendix G - Phrase register
 
@@ -1419,6 +1422,14 @@ Sentences that announce importance without naming the specific thing. Kill these
 - "The consequences are real"
 
 If a sentence says something is important/deep/structural without showing the specific thing, cut it or replace it with the specific thing.
+
+## G12. Machine vocabulary
+
+The words below appear in machine drafts far more often than in human ones, especially in groups. Cut or replace each: delve, foster, fostering, utilize, facilitate, empower, streamline, elevate, embark, supercharge, garner, enhance, bolstered, underscore, showcase, emphasize, highlight as a verb, tapestry, realm, landscape or interplay as abstract nouns, testament, multifaceted, meticulous, intricate, paramount, transformative, pivotal, crucial, enduring, vibrant, valuable, ever-evolving, cutting-edge, deep dive, align with, paradigm shift, game changer.
+
+Exempt when literal, not figurative: beacon, harness, gate and robust name AAC equipment and engineering properties. A wiring harness, a strobe beacon, a gate contact and a robust enclosure rating are the plain words for those things.
+
+A formal word outside this list is not a fault by itself. Adopted company-wide, not scoped to one document class; see Appendix F.
 
 # Appendix H - Structure register
 

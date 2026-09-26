@@ -248,6 +248,14 @@ Sentences that announce importance without naming the specific thing. Kill these
 
 If a sentence says something is important/deep/structural without showing the specific thing, cut it or replace it with the specific thing.
 
+## G12. Machine vocabulary
+
+The words below appear in machine drafts far more often than in human ones, especially in groups. Cut or replace each: delve, foster, fostering, utilize, facilitate, empower, streamline, elevate, embark, supercharge, garner, enhance, bolstered, underscore, showcase, emphasize, highlight as a verb, tapestry, realm, landscape or interplay as abstract nouns, testament, multifaceted, meticulous, intricate, paramount, transformative, pivotal, crucial, enduring, vibrant, valuable, ever-evolving, cutting-edge, deep dive, align with, paradigm shift, game changer.
+
+Exempt when literal, not figurative: beacon, harness, gate and robust name AAC equipment and engineering properties. A wiring harness, a strobe beacon, a gate contact and a robust enclosure rating are the plain words for those things.
+
+A formal word outside this list is not a fault by itself. Adopted company-wide, not scoped to one document class; see Appendix F.
+
 # Appendix H - Structure register
 
 Registers the structural patterns Rules 156 through 165 prohibit. Read with Rule 6, which governs the named actor, and Parts IX through XI, which control document layout where they conflict.
