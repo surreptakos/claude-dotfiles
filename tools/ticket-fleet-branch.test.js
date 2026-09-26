@@ -2263,6 +2263,18 @@ test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come fro
   assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
 });
 
+// Issue 813: the gh REST issues-list endpoint returns pull requests alongside issues (a PR entry
+// carries a `pull_request` key), so an unfiltered scout listing could hand the fleet a PR number
+// as if it were a ticket. Both instruments' scoutList rule must tell the scout to drop those.
+test(`${FLEET_SCRIPT_REL} scoutList rule filters out pull requests in both instruments (issue 813)`, () => {
+  const gh = loadTrackerRules(FLEET_SCRIPT, 'gh');
+  const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
+  assert.match(gh.scoutList('ready-for-agent'), /pull_request/,
+    'gh scoutList must name the pull_request key that marks a PR entry');
+  assert.match(mcp.scoutList('ready-for-agent'), /pull_request/,
+    'mcp scoutList must note that list_issues should not hand back pull requests');
+});
+
 // Issue 770: the deliverer merges the PR it opened, in the instrument the rest of the stage uses.
 test(`${FLEET_SCRIPT_REL} deliver rules carry the PR merge in both instruments (issue 770)`, () => {
   const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
