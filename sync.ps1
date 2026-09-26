@@ -257,6 +257,28 @@ if ((Test-Path $invariants) -and (Test-Path $liveSettings)) {
     Invoke-SettingsInvariants -ScriptArgs $args_ -Label 'live'
 }
 
+# Issue 825: install the pinned @caveman-ai/cli and run `caveman enable claude`, or fail closed -
+# profile/claude/settings.json (just restored above) still carries whichever machine last ran
+# `enable` baked in, and a fresh machine must never carry that machine's hooks or model route
+# pointing at a binary this one never installed. Best-effort like Invoke-RepoMemoryPointer: a
+# caveman problem must never fail a pull.
+$cavemanInstaller = Join-Path $RepoRoot 'tools\caveman-desktop-install.ps1'
+if (Test-Path $cavemanInstaller) {
+    Write-Host ''
+    Write-Host '  caveman CLI (desktop)'
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
+            -UserHome $UserHome -RepoRoot $RepoRoot -DryRun:$DryRun 2>&1 |
+            ForEach-Object { Write-Host $_ }
+    } catch {
+        Write-Host ("  caveman install FAILED (pull continues): {0}" -f $_.Exception.Message) -ForegroundColor Yellow
+    } finally {
+        $ErrorActionPreference = $previous
+    }
+}
+
 # Last, because it reads the ~/.claude the lines above just wrote. One-way overlay onto
 # ~/.claude-personal (issue #9): skipped entirely when the profile does not exist, and
 # personal-only content never flows back.

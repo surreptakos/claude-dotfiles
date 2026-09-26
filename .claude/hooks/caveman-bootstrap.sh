@@ -52,6 +52,7 @@
 #   CAVEMAN_BOOTSTRAP_SKIP_CLI  1 = skip npm, binaries, proxy and enable (offline CI)
 #   CAVEMAN_BOOTSTRAP_AAC_WAIT  seconds to wait for the aac-skills marker (default 120; 0 = none)
 #   CAVEMAN_BOOTSTRAP_REF / CAVEMAN_BOOTSTRAP_REPO / CAVEMAN_BOOTSTRAP_CLI_VERSION   pins
+#     (CLI_VERSION otherwise comes from the shared pin, lib/caveman-cli.json - issue 825)
 #   CAVEMAN_CLOUD_PROXY         0 = install skills and CLI only; no proxy, no `enable claude`
 set -uo pipefail
 
@@ -69,7 +70,17 @@ AAC_MARKER="$CLAUDE_DIR/hook-state/aac-bootstrap/state.json"
 CHECKOUT="$HOME_DIR/.aac-caveman"
 REPO="${CAVEMAN_BOOTSTRAP_REPO:-https://github.com/JuliusBrussee/caveman.git}"
 REF="${CAVEMAN_BOOTSTRAP_REF:-v2.7.0}"
-CLI_VERSION="${CAVEMAN_BOOTSTRAP_CLI_VERSION:-1.3.4}"
+
+# The CLI version is the one pin shared with the desktop installer (issue 825): both read
+# lib/caveman-cli.json so a version bump lands on cloud and desktop from a single edit. An env
+# var still wins, for a one-off pin during testing.
+REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+PIN_FILE="${CAVEMAN_BOOTSTRAP_PIN_FILE:-$REPO_ROOT/lib/caveman-cli.json}"
+PIN_CLI_VERSION=""
+if [ -f "$PIN_FILE" ]; then
+  PIN_CLI_VERSION="$(grep -o '"cliVersion" *: *"[^"]*"' "$PIN_FILE" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+fi
+CLI_VERSION="${CAVEMAN_BOOTSTRAP_CLI_VERSION:-${PIN_CLI_VERSION:-1.3.4}}"
 LOCAL_PREFIX="$HOME_DIR/.local"
 BIN_DIR="$LOCAL_PREFIX/bin"
 AAC_WAIT="${CAVEMAN_BOOTSTRAP_AAC_WAIT:-120}"
