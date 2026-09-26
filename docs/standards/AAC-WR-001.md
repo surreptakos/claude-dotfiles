@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.9 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.10 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.9 |
+| **Version** | 0.10 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -40,6 +40,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
 | 0.9 | 2026-09-22 | Rule 161 scoped to responses and messages to people, not prose deliverables: Rule 161; Appendix F. | Pending |
+| 0.10 | 2026-09-26 | Machine-vocabulary word list: Rule 167. Straight-quote mandate rejected: Appendix F. | Pending |
 
 # How to use this standard
 
@@ -1071,6 +1072,20 @@ Do not use emoji in headings, decorative bold inside a sentence, or a heading fo
 
 Before release, confirm the draft under Appendix A, then confirm this part: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. A draft that fails any item returns to the writer.
 
+## 167. Machine vocabulary
+
+Extends Rule 9. The words below appear in machine drafts far more often than in human ones, especially in groups. The list applies to original AAC prose in every deliverable Rule 1 covers, not to one document class. Cut or replace each:
+
+delve, foster, fostering, leverage, utilize, facilitate, empower, streamline, elevate, embark, supercharge, garner, enhance, bolstered, underscore, showcase, emphasize, **highlight** as a verb, tapestry, realm, **landscape** or **interplay** as abstract nouns, testament, multifaceted, meticulous, intricate, paramount, transformative, pivotal, crucial, enduring, vibrant, valuable, ever-evolving, cutting-edge, deep dive, align with, paradigm shift, game changer.
+
+Exempt when literal, not figurative: **beacon, harness, gate,** and **robust** name AAC equipment and engineering properties. A wiring harness, a strobe beacon, a gate contact, and a robust enclosure rating are the plain words for those things.
+
+A formal word outside this list is not a fault by itself.
+
+Preferred: The new panel cuts false alarms at the site and sends every trouble signal to one queue.
+
+Avoid: The new panel will enhance site security and streamline monitoring.
+
 # Appendix A - Writing and release checklist
 
 ## Pass 1 - content and logic
@@ -1253,6 +1268,8 @@ Table F1. House decision register
 | 37 | Run-in headings only in legal documents, ending with a colon. Elsewhere, write a full sentence or a standalone heading. | Owner ruling, September 23, 2026. A plain-text email opened paragraphs with run-in labels that read as fragments. | 0.7 |
 | 5 | State the main point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. | Owner ruling, September 25, 2026. "Main point first" left no room for a courtesy opening. | 0.8 |
 | 161 | Consistent naming binding in responses and messages to people (email, Teams, review feedback); free in prose deliverables (reports, proposals, scopes, procedures). | Owner ruling, September 22, 2026, issue 627, superseding a September 21, 2026 draft ruling that split the rule by document type instead. `blader/humanizer` 3.0.0 dropped its equivalent pattern as an AI tell; Rule 161 answers a different question (precision, not machine detection), so the rule stands but is scoped to correspondence. | 0.9 |
+| 167 | Machine-vocabulary word list adopted across the board, not scoped to one document class. Beacon, harness, gate, and robust stay exempt when literal. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Lists compared: `petergyang/no-ai-slop` and `blader/humanizer`. Checked by the stop-slop detector, issue 620. | 0.10 |
+| 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
 
 # Appendix G - Phrase register
 

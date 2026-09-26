@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 153-166. AI tells, phrase register, structure register
+# AAC-WR-001 - Rules 153-167. AI tells, machine vocabulary, phrase register, structure register
 
 # Part XXV - Draft quality and AI tells
 
@@ -79,6 +79,20 @@ Do not use emoji in headings, decorative bold inside a sentence, or a heading fo
 ## 166. Draft quality check before release
 
 Before release, confirm the draft under Appendix A, then confirm this part: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. A draft that fails any item returns to the writer.
+
+## 167. Machine vocabulary
+
+Extends Rule 9. The words below appear in machine drafts far more often than in human ones, especially in groups. The list applies to original AAC prose in every deliverable Rule 1 covers, not to one document class. Cut or replace each:
+
+delve, foster, fostering, leverage, utilize, facilitate, empower, streamline, elevate, embark, supercharge, garner, enhance, bolstered, underscore, showcase, emphasize, **highlight** as a verb, tapestry, realm, **landscape** or **interplay** as abstract nouns, testament, multifaceted, meticulous, intricate, paramount, transformative, pivotal, crucial, enduring, vibrant, valuable, ever-evolving, cutting-edge, deep dive, align with, paradigm shift, game changer.
+
+Exempt when literal, not figurative: **beacon, harness, gate,** and **robust** name AAC equipment and engineering properties. A wiring harness, a strobe beacon, a gate contact, and a robust enclosure rating are the plain words for those things.
+
+A formal word outside this list is not a fault by itself.
+
+Preferred: The new panel cuts false alarms at the site and sends every trouble signal to one queue.
+
+Avoid: The new panel will enhance site security and streamline monitoring.
 
 # Appendix G - Phrase register
 
