@@ -1074,6 +1074,34 @@ foreach ($skill in $workSkills) {
 Check ("all {0} work skills are overlaid byte-for-byte into the personal profile" -f $workSkills.Count) `
     (($workSkills.Count -gt 0) -and ($pSkillsBad.Count -eq 0)) $pSkillsBad
 
+# The same strip tools/caveman-desktop-install.ps1 applies when it fails closed (issue 825), on a
+# parsed object, so the fidelity check below can hold the live settings.json to the repo copy.
+function Remove-CavemanWiringFromObject {
+    param($Json)
+    $binaryPattern = 'caveman-proxy|caveman\.cmd|caveman\.CMD|shrink-hook|@caveman-ai'
+    if ($Json.PSObject.Properties['env'] -and $Json.env.PSObject.Properties['ANTHROPIC_BASE_URL'] -and
+        ($Json.env.ANTHROPIC_BASE_URL -match '127\.0\.0\.1:8787')) {
+        $Json.env.PSObject.Properties.Remove('ANTHROPIC_BASE_URL')
+        if ($Json.env.PSObject.Properties['_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL']) {
+            $Json.env.PSObject.Properties.Remove('_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL')
+        }
+    }
+    if ($Json.PSObject.Properties['hooks']) {
+        foreach ($eventName in @($Json.hooks.PSObject.Properties | ForEach-Object { $_.Name })) {
+            $kept = New-Object System.Collections.ArrayList
+            foreach ($group in @($Json.hooks.$eventName)) {
+                $keptHooks = @($group.hooks | Where-Object { $_.command -notmatch $binaryPattern })
+                if ($keptHooks.Count -eq 0) { continue }
+                $group.hooks = $keptHooks
+                [void]$kept.Add($group)
+            }
+            if ($kept.Count -eq 0) { $Json.hooks.PSObject.Properties.Remove($eventName) }
+            else { $Json.hooks.$eventName = $kept.ToArray() }
+        }
+    }
+    return $Json
+}
+
 # ------------------------------------------------------------------ 7. round trip is lossless
 
 Write-Host ''
@@ -1094,6 +1122,14 @@ foreach ($pair in $pairs) {
     # (issue 582) is committed that way and restored substituted, and both spell the same token.
     $back = ConvertTo-Tokens -Text ([System.IO.File]::ReadAllText($pair.Local)) -UserHome $FakeHome
     $want = ConvertTo-Tokens -Text ([System.IO.File]::ReadAllText($pair.Repo))  -UserHome $script:OwnerHome
+    if ($pair.Local -eq $liveSettingsPath) {
+        # Issue 825: the caveman step owns one edit to the live settings.json - it strips the
+        # caveman hooks and model route when this machine has no proxy binary - and re-serializes
+        # it. So compare meaning, not bytes: the repo copy with that same strip applied must equal
+        # what pull left. Anything else drifting still fails.
+        $back = ConvertTo-Json -Depth 20 -Compress ($back | ConvertFrom-Json)
+        $want = ConvertTo-Json -Depth 20 -Compress (Remove-CavemanWiringFromObject ($want | ConvertFrom-Json))
+    }
     if (-not ($back -ceq $want)) { $drift += $pair.Local }
 }
 Check ("all {0} files survive tokenize/detokenize byte-for-byte" -f $pairs.Count) ($drift.Count -eq 0) $drift
