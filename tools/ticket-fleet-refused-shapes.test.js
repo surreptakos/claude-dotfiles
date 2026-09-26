@@ -2,7 +2,7 @@
 /**
  * node --test tools/ticket-fleet-refused-shapes.test.js
  *
- * Issue 494. The ticket-fleet SKILL.md carries a table of command shapes the worktree-isolation
+ * Issue 494. The ticket-fleet REFUSED-SHAPES.md carries a table of command shapes the worktree-isolation
  * guard refuses, so a worker does not spend a turn rediscovering one. Every shape here cost a
  * fleet run or a triage pass a turn before it was written down; this test keeps the rows, and
  * the sentence that explains why a harmless command is still refused, in the table.
@@ -16,7 +16,7 @@ const { test } = require('node:test');
 
 const { sliceFrom } = require('./source-slice.js');
 
-const SKILL = path.join(__dirname, '..', 'aac-skills', 'ticket-fleet', 'SKILL.md');
+const SKILL = path.join(__dirname, '..', 'aac-skills', 'ticket-fleet', 'REFUSED-SHAPES.md');
 const HEADING = '## Shell shapes the worktree guard refuses';
 
 function refusedShapesSection(heading = HEADING) {
@@ -24,7 +24,7 @@ function refusedShapesSection(heading = HEADING) {
   // The section may be the file's last, so the tail is genuinely optional here: sliceFrom pins the
   // heading (a missing one would otherwise slice the file's last character) and the next heading,
   // when there is one, ends the section.
-  const rest = sliceFrom(text, heading, `SKILL.md's "${heading}" section`).slice(heading.length);
+  const rest = sliceFrom(text, heading, `REFUSED-SHAPES.md's "${heading}" section`).slice(heading.length);
   const next = rest.indexOf('\n## ');
   return next === -1 ? rest : rest.slice(0, next);
 }

@@ -27,20 +27,59 @@ $UserHome = $UserHome.TrimEnd('\', '/')
 
 Write-Host 'Prerequisites'
 $required = @(
-    @{ Name = 'git';    Command = 'git' },
-    @{ Name = 'node';   Command = 'node' },
-    @{ Name = 'python'; Command = 'py' },
-    @{ Name = 'claude'; Command = 'claude' },
-    @{ Name = 'gh';     Command = 'gh' }
+    @{ Name = 'git';      Command = 'git' },
+    @{ Name = 'node';     Command = 'node' },
+    @{ Name = 'python';   Command = 'py' },
+    @{ Name = 'claude';   Command = 'claude' },
+    @{ Name = 'gh';       Command = 'gh' },
+    @{ Name = 'PyYAML';   Command = $null }
 )
 $missing = @()
 foreach ($tool in $required) {
+    if ($tool.Command -eq $null) {
+        # PyYAML is a Python package, check it separately
+        continue
+    }
     $found = Get-Command $tool.Command -ErrorAction SilentlyContinue
     if ($null -eq $found) {
         Write-Host ("  MISSING  {0}" -f $tool.Name) -ForegroundColor Yellow
         $missing += $tool.Name
     } else {
         Write-Host ("  ok       {0}  ({1})" -f $tool.Name, $found.Source)
+    }
+}
+
+# Check for PyYAML Python package
+$pyyamlInstalled = $false
+try {
+    & py -3 -c "import yaml" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ok       PyYAML"
+        $pyyamlInstalled = $true
+    }
+} catch {
+    # Continue to install
+}
+
+if (-not $pyyamlInstalled) {
+    Write-Host "  MISSING  PyYAML" -ForegroundColor Yellow
+    if (-not $DryRun) {
+        Write-Host "    Installing PyYAML..." -ForegroundColor Cyan
+        try {
+            & py -3 -m pip install PyYAML 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "    PyYAML installed successfully" -ForegroundColor Green
+                $pyyamlInstalled = $true
+            } else {
+                Write-Host "    Failed to install PyYAML" -ForegroundColor Red
+                $missing += 'PyYAML'
+            }
+        } catch {
+            Write-Host "    Error installing PyYAML: $_" -ForegroundColor Red
+            $missing += 'PyYAML'
+        }
+    } else {
+        $missing += 'PyYAML'
     }
 }
 
