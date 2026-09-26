@@ -959,7 +959,7 @@ function trackerRules(mode) {
   const REPO = `owner and repo: take them from ${gitSpelling(mode, 'remote get-url origin')} (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).`
   if (mode === 'mcp') return {
     repoNote: REPO,
-    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
+    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap. list_issues reads GitHub's GraphQL issues connection, which never holds a pull request, so no PR filter is needed here; should an entry ever carry a pull_request key, drop it - it is a PR, not a ticket (issue 813) (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
     scoutExplicit: (nums) => `${REPO} Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
@@ -979,7 +979,7 @@ function trackerRules(mode) {
   }
   return {
     repoNote: REPO,
-    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100&page=P"\` for P = 1, 2, ... until a page returns fewer than 100 entries - take EVERY matching ticket, the wave has no cap - then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
+    scoutList: (label) => `\`gh api --paginate "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100" --jq '.[] | select(.pull_request == null)'\` (one issue object per line, every page) - REST /issues returns pull requests too, so the --jq filter drops every entry carrying a pull_request key: a labelled PR is not a ticket (issue 813) - take EVERY matching ticket, the wave has no cap - then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number N: \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\`.`,
     scoutNotes: `{owner}/{repo} come from ${gitSpelling(mode, 'remote get-url origin')} - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,

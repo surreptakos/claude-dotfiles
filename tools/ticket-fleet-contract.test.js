@@ -214,3 +214,21 @@ test('the implementer and prober prompts tell a worker not to file the harness-r
   assert.ok(src.slice(implPromptStart, implLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
     'the implementer prompt must splice in HARNESS_RELAY_RAIL');
 });
+
+test('the scout listing drops pull requests: gh filters pull_request entries, mcp notes list_issues never returns PRs (issue 813)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const { sliceBetweenTags } = require('./source-slice.js');
+  const block = (name) => sliceBetweenTags(src, `// [${name}-START]`, `// [${name}-END]`, `the ${name} block`);
+  // trackerRules calls gitSpelling, which lives in the generated block (issue 883).
+  // eslint-disable-next-line no-new-func
+  const trackerRules = new Function(`${block('FLEET-GENERATED')}\n${block('FLEET-TRACKER-RULES')}\nreturn trackerRules;`)();
+
+  const gh = trackerRules('gh').scoutList('ready-for-agent');
+  assert.ok(gh.includes("--jq '.[] | select(.pull_request == null)'"),
+    'the gh scout listing must filter out entries carrying a pull_request key');
+  assert.match(gh, /issues\?labels=ready-for-agent/, 'the gh scout still lists by label over REST');
+
+  const mcp = trackerRules('mcp').scoutList('ready-for-agent');
+  assert.match(mcp, /never holds a pull request/, 'the mcp scout must record that list_issues returns no PRs');
+  assert.match(mcp, /pull_request key, drop it/, 'the mcp scout must still drop any entry carrying pull_request');
+});
