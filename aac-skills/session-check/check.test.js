@@ -496,65 +496,99 @@ test('host: desktop runs as usual on the desktop', () => {
   assert.doesNotMatch(output, /skipped \(desktop-only\)/);
 });
 
-/* ------------------------------------------------------ tracker audit job (issue 473) ---------
- * The audit runs as `.github/workflows/tracker-audit.yml` now; this engine reads that job's
- * latest run for the default branch's head instead of spawning `tools/tracker-audit.js` (which
- * needs gh, absent in every container — so the report there read "the tracker audit could not
- * run" twice per session, forever). Four states, four tests, driven through the pure reporter.
+/* ------------------------------------------------------ tracker jobs (issues 473, 583) --------
+ * The five tracker jobs run as workflows; this engine reads each one's newest run on the default
+ * branch over REST instead of spawning anything. One line per job: `ok` on success, `STOP` on a
+ * failed run, `!!` for no verdict or a workflow file the repo lacks.
  */
 
-const { trackerAuditReport } = require('./check.js');
+const { trackerJobReport } = require('./check.js');
 
-const AUDIT_HEAD = 'abc1234def5678901234567890abcdef12345678';
-const auditRun = (over) => Object.assign({
-  head_sha: AUDIT_HEAD, status: 'completed', conclusion: 'success',
+const jobRun = (over) => Object.assign({
+  status: 'completed', conclusion: 'success',
   html_url: 'https://github.com/surreptakos/claude-dotfiles/actions/runs/4242',
 }, over);
 
-test('tracker audit: a green run for this head reads as clean, with the run url', () => {
-  const r = trackerAuditReport([auditRun()], AUDIT_HEAD, null);
-  assert.equal(r.state, 'clean');
+test('tracker jobs: a green run is ok, naming the conclusion and the run url', () => {
+  const r = trackerJobReport('closure guard', jobRun(), null);
   assert.equal(r.level, 'ok');
-  assert.equal(r.text, 'tracker audit clean');
-  assert.match(r.notes.join('\n'), /actions\/runs\/4242/);
+  assert.equal(r.text, 'closure guard: success — https://github.com/surreptakos/claude-dotfiles/actions/runs/4242');
 });
 
-test('tracker audit: a red run for this head reads as drift, naming the run', () => {
-  const r = trackerAuditReport([auditRun({ conclusion: 'failure' })], AUDIT_HEAD, null);
-  assert.equal(r.state, 'drift');
-  assert.equal(r.level, 'warn');
-  assert.equal(r.text,
-    'tracker audit: drift — https://github.com/surreptakos/claude-dotfiles/actions/runs/4242');
+test('tracker jobs: a failed run is a STOP, naming the conclusion and the run url', () => {
+  const r = trackerJobReport('board sweep', jobRun({ conclusion: 'failure' }), null);
+  assert.equal(r.level, 'stop');
+  assert.equal(r.text, 'board sweep: failure — https://github.com/surreptakos/claude-dotfiles/actions/runs/4242');
 });
 
-test('tracker audit: no run for this head is not a pass, and a pending or cancelled one is no verdict', () => {
-  const older = auditRun({ head_sha: 'f'.repeat(40) });
-  assert.equal(trackerAuditReport([older], AUDIT_HEAD, null).state, 'no-run');
-  assert.match(trackerAuditReport([older], AUDIT_HEAD, null).text, /no run for this head/);
-  // Still running, and cancelled by the next event's run: neither carries a verdict to read.
-  const pending = trackerAuditReport([auditRun({ status: 'in_progress', conclusion: null })], AUDIT_HEAD, null);
-  assert.equal(pending.state, 'no-run');
-  assert.match(pending.notes.join('\n'), /in_progress/);
-  assert.equal(trackerAuditReport([auditRun({ conclusion: 'cancelled' })], AUDIT_HEAD, null).state, 'no-run');
-  // The newest run that DOES carry a verdict wins over a cancelled one in front of it.
-  const after = trackerAuditReport(
-    [auditRun({ conclusion: 'cancelled' }), auditRun({ conclusion: 'failure' })], AUDIT_HEAD, null);
-  assert.equal(after.state, 'drift');
+test('tracker jobs: no run, one in flight, a cancelled one or an unreadable job is !!, never a pass', () => {
+  assert.equal(trackerJobReport('tracker audit', null, null).level, 'warn');
+  const pending = trackerJobReport('tracker audit', jobRun({ status: 'in_progress', conclusion: null }), null);
+  assert.equal(pending.level, 'warn');
+  assert.match(pending.text, /in_progress — https:\/\/github\.com\/.*\/runs\/4242/);
+  assert.equal(trackerJobReport('tracker audit', jobRun({ conclusion: 'cancelled' }), null).level, 'warn');
+  const blind = trackerJobReport('tracker audit', undefined, 'GitHub did not answer for tracker-audit.yml');
+  assert.equal(blind.level, 'warn');
+  assert.match(blind.text, /could not read the job — that is not a pass/);
 });
 
-test('tracker audit: an unreadable job says so rather than passing', () => {
-  for (const [runs, head, error] of [
-    [null, AUDIT_HEAD, 'GitHub did not answer for the tracker audit job'],
-    [[auditRun()], null, null],
-    ['not-an-array', AUDIT_HEAD, null],
-  ]) {
-    const r = trackerAuditReport(runs, head, error);
-    assert.equal(r.state, 'unreadable');
-    assert.equal(r.level, 'warn');
-    assert.match(r.text, /could not read the tracker audit job — that is not a pass/);
-    assert.ok(r.notes[0], 'an unreadable job has to say what stopped it');
-  }
-});
+// The criteria end to end: check.js --end spawned in a real clone whose GitHub remote answers from
+// a stubbed `gh` on PATH. lib/manifest.ps1 is there too so the end gate's and pull nudge's reads of
+// the default branch run in the same process — a branch that broke them crashed before these lines.
+test('tracker jobs: --end prints one line per job — ok, STOP, and a single !! for a missing file',
+  { skip: process.platform === 'win32' && 'the stub gh is a POSIX shell script' }, () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'session-check-jobs-'));
+    const bin = path.join(root, 'bin');
+    const work = path.join(root, 'work');
+    const git = (...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a],
+      { cwd: work, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    try {
+      fs.mkdirSync(bin);
+      const runs = (conclusion, status, id) => JSON.stringify({ total_count: 1, workflow_runs: [{
+        status, conclusion, html_url: `https://github.com/o/r/actions/runs/${id}` }] });
+      fs.writeFileSync(path.join(bin, 'gh'), [
+        '#!/bin/sh',
+        'case "$*" in',
+        '  --version) echo "gh version 9.9.9"; exit 0 ;;',
+        `  *workflows/closure-guard.yml/runs*) echo '${runs('success', 'completed', 1)}' ;;`,
+        `  *workflows/board-sweep.yml/runs*) echo '${runs('failure', 'completed', 2)}' ;;`,
+        `  *workflows/issue-metadata-audit.yml/runs*) echo '${runs(null, 'in_progress', 3)}' ;;`,
+        `  *workflows/tracker-audit.yml/runs*) echo '${runs('success', 'completed', 5)}' ;;`,
+        '  *) exit 1 ;;',
+        'esac',
+      ].join('\n') + '\n', { mode: 0o755 });
+      fs.mkdirSync(path.join(work, '.github', 'workflows'), { recursive: true });
+      fs.mkdirSync(path.join(work, 'lib'));
+      fs.writeFileSync(path.join(work, 'lib', 'manifest.ps1'), '# stub\n');
+      for (const f of ['closure-guard', 'board-sweep', 'issue-metadata-audit', 'tracker-audit']) {
+        fs.writeFileSync(path.join(work, '.github', 'workflows', `${f}.yml`), 'on: push\n');
+      }
+      git('init', '--quiet');
+      git('remote', 'add', 'origin', 'https://github.com/o/r.git');
+      git('add', '.');
+      git('commit', '--quiet', '-m', 'init');
+      let output;
+      try {
+        output = execFileSync(process.execPath, [CHECKER, '--end'], {
+          cwd: work, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+          // file-only transport keeps gitChecks' fetch of the github remote off the network.
+          env: localEnv({ PATH: `${bin}${path.delimiter}${process.env.PATH}`, GIT_ALLOW_PROTOCOL: 'file' }),
+        });
+      } catch (error) {
+        output = String(error.stdout || '') + String(error.stderr || '');
+      }
+      const plain = output.replace(/\x1b\[[0-9;]*m/g, '');
+      assert.doesNotMatch(plain, /ReferenceError|TypeError/);
+      assert.match(plain, /^\s*ok\s+closure guard: success — https:\/\/github\.com\/o\/r\/actions\/runs\/1$/m);
+      assert.match(plain, /^\s*STOP\s*board sweep: failure — https:\/\/github\.com\/o\/r\/actions\/runs\/2$/m);
+      assert.match(plain, /^\s*!!\s+issue metadata audit: in_progress — https:\/\/github\.com\/o\/r\/actions\/runs\/3$/m);
+      assert.equal((plain.match(/stale-ref sweep/g) || []).length, 1);
+      assert.match(plain, /^\s*!!\s+stale-ref sweep: no \.github\/workflows\/stale-ref-sweep\.yml in this repo/m);
+      assert.match(plain, /^\s*ok\s+tracker audit: success — https:\/\/github\.com\/o\/r\/actions\/runs\/5$/m);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
 
 // Issue 473's third criterion, executed: in a container the engine must not spawn the audit, and
 // the old "could not run" line must be gone. The stub audit writes a marker if it is ever run.

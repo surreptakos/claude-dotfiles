@@ -16,9 +16,10 @@
  *                          a merge to the default branch is the release; no credential to check
  *   tools/clasp-auth.js     Apps Script credential: alive AND correctly scoped (repos still on clasp)
  *   .clasp.json            Apps Script project — warns that `clasp push` is a release
- *   .github/workflows/tracker-audit.yml
- *                           tracker drift — read off that job's latest run for the default
- *                           branch's head, never audited here (issue 473)
+ *   .github/workflows/{closure-guard,board-sweep,issue-metadata-audit,stale-ref-sweep,
+ *   tracker-audit}.yml      the tracker jobs — one line each off the job's newest run on the
+ *                           default branch, never audited here (issues 473, 583); --end reads
+ *                           all five, the start only tracker-audit
  *   tools/canary.js         pre-release gate, run at --end
  *   tools/skill-stamps.py, lib/manifest.ps1, profile/claude/settings.json
  *                           the --end mechanical gate (issue 622): stale skill stamps, credential
@@ -482,7 +483,7 @@ async function workChecks() {
     }
   }
 
-  trackerAuditChecks();
+  trackerJobChecks();
 
   for (const c of (CFG.checks || [])) {
     if (c.when === 'end' && !END) continue;
@@ -680,27 +681,29 @@ function endGateChecks() {
   if (wantHooks) hookScriptGate(py);
 }
 
-/* ---------------------------------------------------------- tracker audit -------------------- */
+/* ---------------------------------------------------------- tracker jobs --------------------- */
 
-/** The tracker audit is a JOB now, not something this checker spawns (issue 473).
+/** The tracker jobs are JOBS, not something this checker spawns (issue 473), and there are five of
+ *  them (issue 583): `/session-end` promises the last run of every one, so a red job shows up here
+ *  as a line. Each runs on issue events, pushes to the default branch or a cron, and this reads the
+ *  newest run on the default branch over REST (`runs?per_page=1`) — gh when it is there, curl
+ *  through a container's egress proxy when it is not. A container and the desktop print the same
+ *  lines. The start of a session reads only the tracker audit, as it always has; `--end` reads all
+ *  five.
  *
- *  `tools/tracker-audit.js` needs `gh` and the network, and both halves of the setup used to pay
- *  for it: a container that had not run the bootstrap hook yet had no `gh`, so the audit exited 2
- *  and the report carried "the tracker audit could not run — that is not a pass" at both ends; on
- *  the desktop it was a full live read of the tracker twice per session. (With the bootstrap hook's
- *  gh in place the audit does run in a container — measured 2026-09-17, exit 0 with its ProjectsV2
- *  board checks degraded to a NOTE — which is why the job's value is one verdict per head for every
- *  host, not a container's missing binary.) `.github/workflows/tracker-audit.yml` runs it on every issue
- *  event and every push to the default branch, and this reads that job's latest run for the head
- *  the default branch is on — the way the session-end check reads Board sweep. A container and
- *  the desktop print the same line.
- *
- *  The workflow's filename is the contract between the two halves. Renaming one renames both. */
-const TRACKER_AUDIT_WORKFLOW = 'tracker-audit.yml';
+ *  A workflow's filename is the contract between the two halves. Renaming one renames both. */
+const TRACKER_JOBS = [
+  { file: 'closure-guard.yml', label: 'closure guard' },
+  { file: 'board-sweep.yml', label: 'board sweep' },
+  { file: 'issue-metadata-audit.yml', label: 'issue metadata audit' },
+  { file: 'stale-ref-sweep.yml', label: 'stale-ref sweep' },
+  { file: 'tracker-audit.yml', label: 'tracker audit' },
+];
 
 /** Local sha of the default branch, without a network call: the fetch in gitChecks has already
  *  run, so the remote-tracking ref is current. `origin/HEAD` first (it names the default branch on
- *  any clone made by `git clone`), then the two conventional names for a clone that has none. */
+ *  any clone made by `git clone`), then the two conventional names for a clone that has none.
+ *  The end gate and the pull nudge read it. */
 function defaultBranchHead() {
   const sym = tryRun('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
   for (const ref of [sym, 'origin/main', 'origin/master'].filter(Boolean)) {
@@ -710,82 +713,75 @@ function defaultBranchHead() {
   return null;
 }
 
-/** The workflow's runs, newest first. gh when it is there, curl through the container's egress
- *  proxy when it is not — the same transport pair the ticket listing uses, and the reason this
- *  check works in a container at all. `runner` is injected so a test can drive it. */
-function fetchTrackerAuditRuns(slug, runner) {
-  const rest = `repos/${slug.owner}/${slug.repo}/actions/workflows/${TRACKER_AUDIT_WORKFLOW}/runs?per_page=20`;
+/** The default branch's name off `origin/HEAD`, or null when the clone records none; the runs
+ *  read is then unfiltered, which for jobs that never run off the default branch is the same. */
+function defaultBranchName() {
+  const sym = tryRun('git', ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']);
+  return sym ? sym.replace(/^origin\//, '') : null;
+}
+
+/** One workflow's newest run: `{ run }` (null when it has none) or `{ error }`. */
+function fetchLatestRun(slug, file, branch) {
+  const q = branch ? `branch=${encodeURIComponent(branch)}&per_page=1` : 'per_page=1';
+  const rest = `repos/${slug.owner}/${slug.repo}/actions/workflows/${file}/runs?${q}`;
   let raw;
-  if (runner) raw = runner(rest);
-  else if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
+  if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
     raw = tryRun('gh', ['api', rest], { timeout: 25000 });
   } else {
     const r = runReadingOutput('curl', ['-sS', '--fail', '--max-time', '25',
       '-H', 'Accept: application/vnd.github+json', '-H', 'User-Agent: session-check',
       `https://api.github.com/${rest}`], { timeout: 30000 });
     raw = r.code === 0 ? r.out : null;
-    if (raw === null) return { error: `no gh, and curl exited ${r.code === null ? 'unknown' : r.code} reading the job's runs` };
+    if (raw === null) return { error: `no gh, and curl exited ${r.code === null ? 'unknown' : r.code} reading ${file}'s runs` };
   }
   if (raw === null || raw === undefined) {
     // A 404 is the commonest cause and reads the same as an outage: the endpoint exists only once
     // the file is on the default branch, so a session on the branch that ADDS it lands here.
-    return { error: `GitHub did not answer for the tracker audit job — is ${TRACKER_AUDIT_WORKFLOW} on the default branch yet?` };
+    return { error: `GitHub did not answer for ${file} — is it on the default branch yet?` };
   }
   let body;
-  try { body = JSON.parse(raw); } catch (e) { return { error: 'GitHub returned unparseable JSON for the tracker audit job' }; }
-  if (!body || !Array.isArray(body.workflow_runs)) {
-    return { error: `the tracker audit job has no runs listing — is ${TRACKER_AUDIT_WORKFLOW} on the default branch?` };
-  }
-  return { runs: body.workflow_runs };
+  try { body = JSON.parse(raw); } catch (e) { return { error: `GitHub returned unparseable JSON for ${file}` }; }
+  if (!body || !Array.isArray(body.workflow_runs)) return { error: `${file} has no runs listing` };
+  return { run: body.workflow_runs[0] || null };
 }
 
-/** Pure: the line the report prints for this job, out of the runs listing (newest first), the local
- *  head of the default branch, and whatever stopped the fetch. Exported for the tests.
- *
- *  Four states, and no fifth. A run that is still queued or in progress carries no verdict to read,
- *  so it reports as "no run" with its url in a note; so does a cancelled one — the job cancels in
- *  flight when a wave of issue events arrives, and reading `cancelled` as a conclusion would print
- *  drift that nothing found. */
-function trackerAuditReport(runs, head, error) {
-  const unreadable = (why) => ({ state: 'unreadable', level: 'warn',
-    text: 'could not read the tracker audit job — that is not a pass', notes: [why] });
-  if (error) return unreadable(error);
-  if (!head) return unreadable('could not resolve the default branch head locally (no origin/HEAD, origin/main or origin/master)');
-  if (!Array.isArray(runs)) return unreadable('the runs listing was not an array');
-
-  const short = head.slice(0, 7);
-  const mine = runs.filter((r) => r && String(r.head_sha) === head);
-  const verdict = mine.find((r) => r.status === 'completed'
-    && r.conclusion !== 'cancelled' && r.conclusion !== 'skipped' && r.conclusion !== 'stale');
-  if (!verdict) {
-    const pending = mine.find((r) => r.status !== 'completed');
-    return { state: 'no-run', level: 'warn', text: 'tracker audit: no run for this head', notes: [
-      pending
-        ? `run ${pending.html_url} is ${pending.status} on ${short} — re-read the report when it finishes`
-        : `nothing has audited ${short} yet — \`gh workflow run ${TRACKER_AUDIT_WORKFLOW}\`, or push`,
-    ] };
+/** Pure: the one line for one job, out of its label, its newest run and whatever stopped the
+ *  fetch. Exported for the tests. `ok` on a completed success; `STOP` on a completed run whose
+ *  conclusion is a verdict against it (failure, timed_out, action_required...); `!!` for anything
+ *  that carries no verdict — no run, one queued or in progress, one cancelled or skipped, or a
+ *  fetch that failed. Every line with a run names its conclusion (or status) and its URL. */
+function trackerJobReport(label, run, error) {
+  if (error) return { level: 'warn', text: `${label}: could not read the job — that is not a pass`, notes: [error] };
+  if (!run) return { level: 'warn', text: `${label}: no run on the default branch yet`, notes: [] };
+  const url = run.html_url || '(no url)';
+  if (run.status !== 'completed') return { level: 'warn', text: `${label}: ${run.status} — ${url}`, notes: [] };
+  const c = run.conclusion || 'none';
+  if (c === 'success') return { level: 'ok', text: `${label}: success — ${url}`, notes: [] };
+  if (['cancelled', 'skipped', 'stale', 'neutral', 'none'].includes(c)) {
+    return { level: 'warn', text: `${label}: ${c} — ${url}`, notes: ['no verdict to read; the next run gives one'] };
   }
-  if (verdict.conclusion === 'success') {
-    return { state: 'clean', level: 'ok', text: 'tracker audit clean', notes: [`${short} — ${verdict.html_url}`] };
-  }
-  return { state: 'drift', level: 'warn', text: `tracker audit: drift — ${verdict.html_url}`, notes: [
-    `the run summary names every finding (exit 1 = drift, 2 = the audit went blind); head ${short}`,
-    'check none are yours before you add work on top of them',
-  ] };
+  return { level: 'stop', text: `${label}: ${c} — ${url}`, notes: ['the run summary names every finding'] };
 }
 
-function trackerAuditChecks() {
-  if (!has(`.github/workflows/${TRACKER_AUDIT_WORKFLOW}`)) {
-    if (!has('tools/tracker-audit.js')) return;
-    warn(`the tracker audit is a job now, and this repo has no .github/workflows/${TRACKER_AUDIT_WORKFLOW}`);
-    note('copy it from claude-dotfiles (issue 473) — until it exists nothing audits this tracker on its own');
-    return;
+function trackerJobChecks() {
+  const jobs = END ? TRACKER_JOBS : TRACKER_JOBS.filter((j) => j.file === 'tracker-audit.yml');
+  const wf = (j) => `.github/workflows/${j.file}`;
+  // A repo with none of the jobs and none of the tracker tooling has no tracker to read.
+  if (!jobs.some((j) => has(wf(j))) && !has('tools/tracker-audit.js')
+    && !has('docs/agents/issue-tracker.md')) return;
+  let slug;
+  let branch;
+  for (const j of jobs) {
+    if (!has(wf(j))) { warn(`${j.label}: no ${wf(j)} in this repo — nothing runs this job here`); continue; }
+    if (slug === undefined) {
+      slug = parseGithubSlug(tryRun('git', ['remote', 'get-url', 'origin']));
+      branch = defaultBranchName();
+    }
+    const fetched = slug ? fetchLatestRun(slug, j.file, branch) : { error: 'no github remote to read the job from' };
+    const r = trackerJobReport(j.label, fetched.run, fetched.error);
+    ({ ok, warn, stop })[r.level](r.text);
+    r.notes.forEach((n) => note(n));
   }
-  const slug = parseGithubSlug(tryRun('git', ['remote', 'get-url', 'origin']));
-  const fetched = slug ? fetchTrackerAuditRuns(slug) : { error: 'no github remote to read the job from' };
-  const r = trackerAuditReport(fetched.runs, defaultBranchHead(), fetched.error);
-  (r.level === 'ok' ? ok : warn)(r.text);
-  (r.notes || []).forEach((n) => note(n));
 }
 
 /* --------------------------------------------------------- cloud skills ---------------------- */
@@ -1299,5 +1295,5 @@ if (require.main === module) {
   });
 } else {
   // Required by a test: hand out the pure helpers and run nothing.
-  module.exports = { curlTicketRows, paginateTicketPages, parseGithubSlug, trackerAuditReport };
+  module.exports = { curlTicketRows, paginateTicketPages, parseGithubSlug, trackerJobReport };
 }
