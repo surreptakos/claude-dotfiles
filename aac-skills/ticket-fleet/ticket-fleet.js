@@ -93,9 +93,12 @@ const cfg = Object.assign({
   // run 6aac4a53 delivered #550 and #552 with every stamp hashed against the CONTAINER's home
   // instead of the owner's, so the regenerate ran, the tests passed, skill-stamps.yml's
   // `pull_request` run (which tests the merge ref) was green - and the push-event run of the same
-  // `check` job was red the moment the PR opened. An empty array turns the gate off for a fork
-  // that has no such check.
-  regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"],
+  // `check` job was red the moment the PR opened. Default empty (issue 814): the check itself is a
+  // claude-dotfiles concern, not a fleet one, so a fork copying this script with the default intact
+  // gets no check instead of one naming a tool (tools/skill-stamps.py) it does not have - a launch
+  // that never passes this arg used to send every Deliver stage to A5(i) with a command that could
+  // not exist. claude-dotfiles' own launch passes the concrete command explicitly (SKILL.md).
+  regenCheckCommands: [],
   verifierAgent: null,     // null = default (`fleet-verifier` on a desktop that has the agent file, unpinned in a cloud session); '' = unpinned
   // ---- orchestrator-tree isolation guard (aac-routines issue 192) ----
   // 'auto' (default) turns the guard on wherever the served repo ships the guard tool and off
