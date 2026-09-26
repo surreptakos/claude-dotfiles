@@ -28,10 +28,11 @@ const {
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  quotaFailureOf, createRunHalt,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
-const { sliceBetween, sliceBetweenTags } = require('./source-slice.js');
+const { sliceBetween, sliceBetweenTags, sliceFrom } = require('./source-slice.js');
 
 test('generateRunId returns non-empty strings', () => {
   const id = generateRunId();
@@ -589,6 +590,9 @@ const PERMISSIVE = new Proxy(function stub() {}, {
 // Adding a binding to the lane therefore needs no edit here. Bodies built by the Function
 // constructor are non-strict whatever the enclosing module says, so `with` is legal.
 function laneScope(stubs) {
+  // Issue 812: the run's quota-halt latch is read by every lane, and PERMISSIVE is truthy, so an
+  // unmodelled one would read as "halted". Each scope gets a fresh, unlatched one unless stubbed.
+  const defaults = { runHalt: createRunHalt(null) };
   return new Proxy(stubs, {
     has: (_t, prop) => prop !== Symbol.unscopables,
     get(target, prop) {
@@ -596,6 +600,7 @@ function laneScope(stubs) {
       // object: answering PERMISSIVE there marks every name unscopable and blocks the binding.
       if (typeof prop === 'symbol') return undefined;
       if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
+      if (Object.prototype.hasOwnProperty.call(defaults, prop)) return defaults[prop];
       if (prop in globalThis) return globalThis[prop];
       return PERMISSIVE;
     },
@@ -2844,4 +2849,103 @@ test(`${FLEET_SCRIPT_REL} pairs Report results by ticket number, not wave positi
   assert.match(src, /const clean = wave\.map\(\(t\) => resultByTicket\.get\(parseInt\(t\.number, 10\)\)/);
   assert.doesNotMatch(src, /results \|\| \[\]\)\[i\]/, 'positional pairing breaks once a lane holds several tickets');
   assert.match(src, /skippedChained: clean\.filter\(r => r\.chainSkipped\)/);
+});
+
+// ---- issue 812: a quota or rate-limit failure ends the run ----------------------------------
+test('quotaFailureOf recognises the limit shapes, reads the reset time, and ignores other failures (issue 812)', () => {
+  assert.deepEqual(quotaFailureOf("You've hit your session limit · resets 9:20am (UTC)"),
+    { reason: "You've hit your session limit · resets 9:20am (UTC)", resetsAt: '9:20am (UTC)' });
+  assert.equal(quotaFailureOf(new Error("You've hit your weekly limit · resets 9pm (America/Chicago)")).resetsAt, '9pm (America/Chicago)');
+  assert.deepEqual(quotaFailureOf('gh: API rate limit already exceeded for user ID 1.'),
+    { reason: 'gh: API rate limit already exceeded for user ID 1.', resetsAt: null });
+  assert.ok(quotaFailureOf('HTTP 429 Too Many Requests'));
+  assert.equal(quotaFailureOf('no reply matching its schema within the StructuredOutput retry cap'), null);
+  assert.equal(quotaFailureOf('no commit produced'), null);
+  const logs = [];
+  const halt = createRunHalt((m) => logs.push(m));
+  assert.equal(halt.note('a schema miss', 'impl:#1.1'), false);
+  assert.equal(halt.note("You've hit your session limit · resets 6pm (UTC)", 'verify:#2.1'), true);
+  assert.equal(halt.note("You've hit your weekly limit", 'impl:#3.1'), false, 'the first limit is the one the run names');
+  assert.deepEqual(halt.state(), { reason: "You've hit your session limit · resets 6pm (UTC)", resetsAt: '6pm (UTC)', trippedBy: 'verify:#2.1' });
+  assert.equal(logs.length, 1, 'the halt is logged once');
+});
+
+// Replay of wf_2e08b873-d92 (2026-09-16): the first implementer hit the weekly limit and the run
+// went on to launch 17 more sub-agents, all failing the same way. Four code tickets, two lanes
+// at a time: #101's implementer is refused, #102's is in flight and settles with a commit, #103
+// and #104 have not started. Once the account is out every later agent() is refused too.
+const QUOTA_RUN_REPLAY = {
+  wave: [101, 102, 103, 104].map((number) => ({ number, title: `ticket ${number}`, criteria: '- x', kind: 'code', keepOpen: false })),
+  limit: "You've hit your weekly limit · resets 9pm (America/Chicago)",
+  firstRefused: 'impl:#101.1',
+  inFlight: { 'impl:#102.1': { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: ['a finding from #102'] } },
+};
+
+async function driveQuotaRun(replay) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const helpers = loadStableHelpers(FLEET_SCRIPT);
+  // The real latch and unusableReason, the real lanes and the real Report tail through `return`.
+  const body = [
+    extractMarked(src, 'FLEET-UNUSABLE'),
+    extractMarked(src, 'FLEET-DELIVER-PROMPT'),
+    extractCodeLane(src),
+    sliceFrom(src, '// [FLEET-LANES-START]', 'the lanes-to-result tail'),
+  ].join('\n');
+  const started = [];
+  let out = false, firstFailureAt = -1;
+  const agentMock = async (_prompt, opts) => {
+    started.push(opts.label);
+    if (out) throw new Error(replay.limit);
+    // Every agent takes a turn to answer, so the next lane's agent is in flight when the first refusal lands.
+    await new Promise((r) => setImmediate(r));
+    if (opts.label === replay.firstRefused) {
+      firstFailureAt = started.length;
+      out = true;
+      throw new Error(replay.limit);
+    }
+    if (replay.inFlight[opts.label]) return replay.inFlight[opts.label];
+    throw new Error(`replay has no result for ${opts.label}`);
+  };
+  // Two lanes at a time, so #103 and #104 queue behind the first two.
+  const pipeline = async (items, fn) => {
+    const results = []; let next = 0;
+    await Promise.all([0, 1].map(async () => { while (next < items.length) { const k = next++; results[k] = await fn(items[k]); } }));
+    return results;
+  };
+  const logs = [];
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\n}`);
+  const result = await wrapper(laneScope({
+    agent: agentMock, log: (m) => logs.push(m), pipeline, createRunHalt, buildLanes, chainGate,
+    wave: replay.wave, runId: 'testrun', invocationId: 'inv1', instrument: 'gh',
+    cfg: { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z', reportModel: 'r', followupsFile: 'FOLLOW-UPS.md' },
+    scout: { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' },
+    rules: new Proxy({}, { get: () => () => '' }),
+    dedupeBrief: () => '', testCommand: 'echo ok',
+    treeGuardCheck: async () => {}, assertNoBreach: () => {}, treeGuardOn: true, treeGuardUnusable: null,
+    revParse: async () => null, worktreeMismatch, classifyDelivery, failuresOf: (v) => v.failures,
+    ...helpers,
+  }));
+  return { result, started, firstFailureAt, logs };
+}
+
+test(`${FLEET_SCRIPT_REL} a quota failure ends the run: in-flight agents settle, nothing new starts (issue 812)`, async () => {
+  const { result, started, firstFailureAt } = await driveQuotaRun(QUOTA_RUN_REPLAY);
+  assert.ok(firstFailureAt > 0, 'the replay must reach its first quota failure');
+  const after = started.slice(firstFailureAt);
+  for (const n of [101, 102, 103, 104]) {
+    const attempts = after.filter((l) => l.startsWith(`impl:#${n}.`)).length;
+    assert.ok(attempts <= 1, `#${n} had ${attempts} implementer attempts after the first quota failure`);
+  }
+  assert.deepEqual(started, ['impl:#101.1', 'impl:#102.1'],
+    'only the two agents already in flight may start - no retry, verifier, deliverer, writer or queued ticket');
+  assert.deepEqual(result.halt && {
+    reason: result.halt.reason, resetsAt: result.halt.resetsAt, trippedBy: result.halt.trippedBy, notAttempted: result.halt.notAttempted,
+  }, {
+    reason: QUOTA_RUN_REPLAY.limit, resetsAt: '9pm (America/Chicago)', trippedBy: 'impl:#101.1', notAttempted: [103, 104],
+  });
+  assert.equal(result.ran, 2);
+  assert.deepEqual(result.failed.map((f) => f.ticket), [101, 102], 'not-attempted tickets are listed under halt, not failed');
+  assert.ok(result.failed[1].failures.some((f) => /run halted on a quota or rate limit/.test(f)), `#102 names the halt that stopped it: ${JSON.stringify(result.failed[1])}`);
+  assert.match(result.followupsError, /followups-writer not started/);
+  assert.deepEqual(result.discoveryList, ['a finding from #102'], 'the bullets survive in the run result for the record writer');
 });

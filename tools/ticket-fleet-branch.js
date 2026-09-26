@@ -873,6 +873,59 @@ function gitSpelling(instrument, args) {
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
 
+/**
+ * Issue 812: an agent() rejection on a quota or rate limit is terminal for the run. Every later
+ * agent fails on the same message, so retrying it only burns the remaining attempts, tickets and
+ * report writers (wf_2e08b873-d92 launched 17 sub-agents after its first "weekly limit").
+ * QUOTA_PATTERNS is the one list of shapes; quotaFailureOf is pure: an error or its message in,
+ * `{reason, resetsAt}` out (resetsAt null when the message names no reset), or null for any other
+ * failure - a schema miss, a crash - which stays a per-attempt failure as before.
+ */
+const QUOTA_PATTERNS = [
+  /\bhit your [\w -]{0,24}?limit\b/i,
+  /\b(?:API )?rate[ -]limit(?:ed| (?:already )?exceeded| reached)\b/i,
+  /\brate_limit_error\b/i,
+  /\b(?:usage|session|weekly) limit (?:reached|exceeded)\b/i,
+  /\bquota (?:exceeded|exhausted)\b/i,
+  /\btoo many requests\b/i,
+  /\b(?:HTTP|status(?: code)?:?|error:?)\s*429\b/i,
+];
+const QUOTA_RESET_RE = /\bresets?\s+(?:at\s+|on\s+|in\s+)?([^\n·;]*?\d[^\n·;()]*(?:\([^)\n]*\))?)/i;
+function quotaFailureOf(detail) {
+  const text = String((detail && detail.message) || detail || '');
+  const pattern = QUOTA_PATTERNS.find(re => re.test(text));
+  if (!pattern) return null;
+  const line = text.split('\n').find(l => pattern.test(l)) || text;
+  const reset = QUOTA_RESET_RE.exec(text);
+  return { reason: line.trim().slice(0, 300), resetsAt: reset ? reset[1].trim().replace(/[.,]+$/, '') : null };
+}
+
+/**
+ * The run's halt latch (issue 812). `note(detail, who)` is fed every agent failure; the first one
+ * quotaFailureOf recognises latches the halt and logs it ONCE, later ones change nothing. The
+ * lanes read `halted()` before every agent they would start, so in-flight agents settle and
+ * nothing new begins; `state()` is what the run result names.
+ */
+function createRunHalt(logFn) {
+  let state = null;
+  return {
+    note(detail, who) {
+      if (state) return false;
+      const q = quotaFailureOf(detail);
+      if (!q) return false;
+      state = { reason: q.reason, resetsAt: q.resetsAt, trippedBy: who ? String(who) : null };
+      if (typeof logFn === 'function') {
+        logFn(`RUN HALTED (issue 812): ${state.trippedBy || 'an agent'} failed on a quota or rate limit - ${state.reason}${state.resetsAt && !state.reason.includes(state.resetsAt) ? ` (resets ${state.resetsAt})` : ''}. In-flight agents settle; no further attempt, ticket or report writer starts.`);
+      }
+      return true;
+    },
+    halted() { return state !== null; },
+    state() { return state ? Object.assign({}, state) : null; },
+    // The one failure line every stage the halt stopped records, so the report reads the same everywhere.
+    message() { return state ? `run halted on a quota or rate limit (issue 812): ${state.reason}` : null; },
+  };
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -902,4 +955,5 @@ module.exports = {
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  QUOTA_PATTERNS, quotaFailureOf, createRunHalt,
 };
