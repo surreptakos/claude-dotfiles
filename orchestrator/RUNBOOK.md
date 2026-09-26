@@ -341,7 +341,7 @@ markers). The JSON block shape:
   "decisionBriefIssue": null,
   "config": {
     "maxWavesPerRepoPerDay": 6,
-    "fleetArgs": { "maxTickets": 3, "maxAttempts": 3, "verifierAgent": "" }
+    "fleetArgs": { "maxAttempts": 3, "verifierAgent": "" }
   }
 }
 ```

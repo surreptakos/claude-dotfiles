@@ -25,7 +25,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, implPins ({mechanical, multi-file, design}: the implementer model per Jev difficulty level for attempt 1; a level with no pin uses implModel, and every retry uses the design pin, default implModel - issue 725), difficulty (default true; false skips the Jev difficulty Score and runs every implementer on implModel), verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement, and pass `mcp` from a cloud session whose probe cannot run - the gh path is desktop-only, issue 322), remote (true|false, optional: what the caller itself knows about the session shape, read only when the probe returns nothing; without it or an explicit instrument an unmeasured run stops instead of defaulting to gh), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, scoutModel, implModel, implPins ({mechanical, multi-file, design}: the implementer model per Jev difficulty level for attempt 1; a level with no pin uses implModel, and every retry uses the design pin, default implModel - issue 725), difficulty (default true; false skips the Jev difficulty Score and runs every implementer on implModel), verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement, and pass `mcp` from a cloud session whose probe cannot run - the gh path is desktop-only, issue 322), remote (true|false, optional: what the caller itself knows about the session shape, read only when the probe returns nothing; without it or an explicit instrument an unmeasured run stops instead of defaulting to gh), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -44,7 +44,6 @@ const cfg = Object.assign({
   invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   tickets: null,            // explicit issue numbers; overrides label listing (any label, any state)
   label: 'ready-for-agent',
-  maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
   // Per-stage model pins. Frontier only where errors compound (implement); the orchestrator is the
   // main session's own model. Mid-tier for bounded, checkable work; cheap tier for pure mechanics.
   scoutModel: 'claude-sonnet-5',            // structured extraction from gh issues
@@ -483,7 +482,7 @@ function applyOpenPrs(tickets, withOpenPr) {
 }
 
 /**
- * Split the candidate tickets into the wave that runs and the three reasons the rest do not.
+ * Split the candidate tickets into the wave that runs and the two reasons the rest do not.
  *
  * Open blockers gate every lane. Kind does not: a human ticket named in `args.tickets` stays in
  * the wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose
@@ -492,20 +491,21 @@ function applyOpenPrs(tickets, withOpenPr) {
  *
  * In-wave chaining (issue 854): a blocked ticket whose every open blocker is a code ticket already
  * in the wave joins the wave too, carrying `chainedAfter` (the blocker numbers). It runs on a
- * blocker's lane once the blockers have merged (STEP D), so it takes no concurrency slot and does
- * not count against the cap. Chains resolve transitively (C after B after A); a blocker outside
- * the wave, a probe or human blocker (neither merges) or a cycle leaves the ticket in `blocked`.
+ * blocker's lane once the blockers have merged (STEP D). Chains resolve transitively (C after B
+ * after A); a blocker outside the wave, a probe or human blocker (neither merges) or a cycle leaves
+ * the ticket in `blocked`.
+ *
+ * No cap (Dan, 2026-09-26): one fleet runs at a time and it takes every runnable ticket.
  *
  * @param {Array<{number:number, kind?:string, blockedBy:Array, handoffPending?:boolean}>} tickets
- * @param {number} maxTickets - the run's cap on concurrently implemented tickets
- * @returns {{wave:Array, blocked:Array, pendingHandoff:Array, overCap:Array}}
+ * @returns {{wave:Array, blocked:Array, pendingHandoff:Array}}
  */
-function selectWave(tickets, maxTickets) {
+function selectWave(tickets) {
   const blocked = tickets.filter((t) => t.blockedBy.length > 0);
   const eligible = tickets.filter((t) => t.blockedBy.length === 0);
   const pendingHandoff = eligible.filter((t) => t.handoffPending === true);
   const runnable = eligible.filter((t) => t.handoffPending !== true);
-  const wave = runnable.slice(0, maxTickets);
+  const wave = runnable.slice();
   const merges = (t) => t.kind !== 'probe' && t.kind !== 'human';
   const mergingInWave = new Set(wave.filter(merges).map((t) => parseInt(t.number, 10)));
   const chainedNumbers = new Set();
@@ -526,7 +526,6 @@ function selectWave(tickets, maxTickets) {
     wave,
     blocked: blocked.filter((t) => !chainedNumbers.has(parseInt(t.number, 10))),
     pendingHandoff,
-    overCap: runnable.slice(maxTickets),
   };
 }
 
@@ -957,7 +956,7 @@ function trackerRules(mode) {
   const REPO = 'owner and repo: take them from `git remote get-url origin` (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).'
   if (mode === 'mcp') return {
     repoNote: REPO,
-    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
+    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
     scoutExplicit: (nums) => `${REPO} Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
@@ -977,7 +976,7 @@ function trackerRules(mode) {
   }
   return {
     repoNote: '{owner}/{repo} come from `git remote get-url origin`.',
-    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100"\`, then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
+    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100&page=P"\` for P = 1, 2, ... until a page returns fewer than 100 entries - take EVERY matching ticket, the wave has no cap - then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number N: \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\`.`,
     scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
@@ -1737,10 +1736,10 @@ const resolvedTickets = await resolveBlockerStates(eligibleTickets)
 // ---- open-PR filter: one listing per launch, before wave selection (issue 430) ----
 // The same question the code lane used to ask per ticket, asked once for the whole candidate set.
 // Per lane it cost an agent per ticket AND a wave slot: a ticket with an open PR was selected,
-// then skipped inside its lane, so the wave ran fewer real tickets than `maxTickets` while
+// then skipped inside its lane, so the wave ran fewer real tickets than its cap while
 // runnable candidates sat unselected, and the blocker-state and discovery-triage chaining spent
 // effort on tickets that were then skipped anyway. Here every candidate that already has an open
-// `agent/issue-<N>-` PR is dropped BEFORE selectWave, so the cap fills with tickets that will run,
+// `agent/issue-<N>-` PR is dropped BEFORE selectWave, so the wave holds only tickets that will run,
 // and the dropped ones are named in the run result under `skippedOpenPR` with their PR urls.
 // The freshness rule of issue 291 is unchanged and still load-bearing: this is an agent() call and
 // the runtime replays cached agent results on resume, so `invocationId` (fresh on EVERY launch,
@@ -1803,15 +1802,13 @@ const skippedOpenPR = openPrFilter.skipped
 // comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
 // would post the same handoff comment again on every wave (issue 266). The selection is a pure
 // function and lives in the generated block above, unit-tested in tools/ticket-fleet-branch.js
-// (issue 486).
-const selection = selectWave(openPrFilter.tickets, cfg.maxTickets)
+// (issue 486). No cap (Dan, 2026-09-26): one fleet runs at a time and takes every runnable ticket.
+const selection = selectWave(openPrFilter.tickets)
 const wave = selection.wave
 const droppedBlocked = selection.blocked.map(t => ({ ticket: t.number, blockedBy: t.blockedBy }))
-const droppedCap = selection.overCap.length
 const skippedHandoff = selection.pendingHandoff.map(t => t.number)
 if (droppedBlocked.length) log(`${droppedBlocked.length} ticket(s) skipped: open blockers - ${droppedBlocked.map(b => '#' + b.ticket + ' (blocked by ' + b.blockedBy.map(n => '#' + n).join(', ') + ')').join('; ')}.`)
 if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awaiting the owner after a fleet handoff comment - ${skippedHandoff.map(n => '#' + n).join(', ')}.`)
-if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Scout listed ${(scout.candidateNumbers || []).length} candidate(s); ${scout.tickets.length} returned as tickets.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 const chainedInWave = wave.filter(t => Array.isArray(t.chainedAfter) && t.chainedAfter.length)
@@ -2807,12 +2804,11 @@ return {
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,
   // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
-  // (issue 430): they never entered the wave, so the cap ran this many real tickets more.
+  // (issue 430): they never entered the wave.
   skippedOpenPR,
   // Candidates parked in the Maybe Someday milestone by the ticket reaper, dropped from a
   // label-driven listing before the wave (issue 786); an explicit args.tickets number still runs.
   skippedParked,
-  skippedOverCap: droppedCap,
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
   implModels: clean.filter(r => r.kind === 'code').map(r => ({ ticket: r.ticket, difficulty: r.difficulty || null, models: r.implModels || [] })),
