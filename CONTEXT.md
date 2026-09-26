@@ -36,7 +36,8 @@ whether the message is software work in a repository or other work. Other work (
 review audits, Todoist triage and the like) runs as it does today, with no route tool limits.
 
 The TypeSafe Jev questions that pick a route: one pick-one question per level, walked from the top
-(question or change?) down to one route.
+(question or change?) down to one route. The tree is the one table `ROUTE_TREE` in
+`profile/codex/hooks/ask_matt_gate.py` (issue 839).
 
 What Jev reads (Dan, 2026-09-25): the user's message, the previous turn's route, and the model's
 last question to the user. The first question is **continuation**: does this message continue the

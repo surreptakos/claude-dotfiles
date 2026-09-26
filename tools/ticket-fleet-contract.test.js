@@ -6,7 +6,7 @@
  * runbooks that launch them went stale silently whenever the plugin's arg list
  * moved. The contract is versioned now, so a launch at the wrong version fails
  * naming both sides and the ripple list - and the ripple list itself is pinned
- * here against the SKILL.md that documents it and the script that enforces it.
+ * here against the INTERNALS.md ripple table that documents it and the script that enforces it.
  */
 'use strict';
 
@@ -17,7 +17,7 @@ const { test } = require('node:test');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
-const FLEET_SKILL = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'SKILL.md');
+const FLEET_SKILL = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'INTERNALS.md');
 const contract = require('./ticket-fleet-contract.js');
 const { CONTRACT_VERSION, FORKS, RUNBOOKS, checkLaunchArgs, contractVersionOf, auditForkFiles } = contract;
 
@@ -81,16 +81,16 @@ test('the plugin-served script enforces the same contract this module describes'
   assert.match(src, /'kindReason', 'discoveryTriage', 'handoffPending'\]/, 'SCOUT tickets must require discoveryTriage and handoffPending');
 });
 
-test('the SKILL.md ripple table names every fork holder, runbook and the current version', () => {
+test('the INTERNALS.md ripple table names every fork holder, runbook and the current version', () => {
   const skill = fs.readFileSync(FLEET_SKILL, 'utf8');
   assert.match(skill, new RegExp(`contract v${CONTRACT_VERSION}\\b`),
-    'SKILL.md must state the contract version a caller has to declare');
+    'INTERNALS.md must state the contract version a caller has to declare');
   for (const fork of FORKS) {
     assert.ok(skill.includes(fork.repo) && skill.includes(fork.path),
-      `SKILL.md must list the fork at ${fork.repo} ${fork.path} as a ripple target`);
+      `INTERNALS.md must list the fork at ${fork.repo} ${fork.path} as a ripple target`);
   }
   for (const doc of RUNBOOKS) {
     const file = doc.split(' ').pop();
-    assert.ok(skill.includes(file), `SKILL.md must list ${file} as a ripple target`);
+    assert.ok(skill.includes(file), `INTERNALS.md must list ${file} as a ripple target`);
   }
 });
