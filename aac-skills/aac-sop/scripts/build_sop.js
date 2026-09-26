@@ -5,7 +5,7 @@
  * in AAC's house format. Requires the `docx` npm package (npm install docx).
  *
  * See references/example_input.json for a complete input example and the
- * schema documented in SKILL.md. Optional sections (exceptions,
+ * schema in references/input-schema.md. Optional sections (exceptions,
  * troubleshooting, metrics, references) are omitted automatically when empty.
  */
 const fs = require('fs');
