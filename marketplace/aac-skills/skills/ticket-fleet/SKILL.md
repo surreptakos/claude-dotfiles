@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-26T04:34:11Z'
-  previous-modified: '2026-09-26T04:31:08Z'
-  revision: '48'
-  content-sha: b30a3ea85bad
+  modified: '2026-09-26T05:10:16Z'
+  previous-modified: '2026-09-26T04:34:11Z'
+  revision: '49'
+  content-sha: 75df778bd793
 ---
 
 # ticket-fleet
@@ -146,8 +146,8 @@ A ticket whose latest comment is an unanswered fleet handoff is parked.
 
 Discovery-triage chores share one lane so two cannot file the same finding.
 
-**Delivery stops** on a merge conflict outside the three resolvable classes (generated files,
-`SKILL.md` stamp blocks, harness upgrade rows), a failing gate after the merge, red CI, or a
+**Delivery stops** on a merge conflict outside the four resolvable classes (generated files,
+`SKILL.md` stamp blocks, harness upgrade rows, append-append hunks), a failing gate after the merge, red CI, or a
 changes-requested review. A `git merge` the classifier refuses twice still delivers, with the
 refusal noted on the PR.
 
