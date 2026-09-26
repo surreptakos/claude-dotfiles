@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stopslop - the deterministic half of AAC-WR-001 Part XXV (Rules 153-166).
+stopslop - the deterministic half of AAC-WR-001 Part XXV (Rules 153-167).
 
 `profile/claude/hooks/stopslop-write.py` and `stopslop-stop.py` import this
 module and call `scan(text, technical=False)`. Both were written against a
@@ -16,7 +16,7 @@ this reason, and the reference index says so. A judgment rule - Rule 154
 
 Every pattern here is transcribed from the controlled copy at
 `aac-skills/aac-house-writing-standard/references/DRAFT-QUALITY.md`: Rules 153
-to 166, Appendix G (phrase register) and Appendix H (structure register). The
+to 167, Appendix G (phrase register) and Appendix H (structure register). The
 register is a reference, not an exhaustive list, so a clean scan is not a
 passing draft. Rule 166 decides that.
 
@@ -46,12 +46,13 @@ Hit shape (the keys the two hooks read)
     message   what to do about it
     source    where in the controlled copy the pattern is registered
 
-Pinned to AAC-WR-001 v0.5, the version TERMINOLOGY.md records for Part XXV.
+Pinned to AAC-WR-001 v0.10, the version TERMINOLOGY.md records for Rule 167,
+the latest change to Part XXV.
 """
 import re
 import sys
 
-STANDARD_VERSION = "0.5"
+STANDARD_VERSION = "0.10"
 
 # ' and the curly apostrophe, since Claude writes both.
 _APOS = "['’]?"
@@ -155,20 +156,8 @@ CHECKS = [
        "business jargon; use 'accept' or 'commit to'",
        "Appendix G3"),
     _c("G3", 9, "WARN",
-       r"\b(?:the|this|that|current|evolving|changing)\s+landscape\b",
-       "business jargon; use 'situation' or 'field'",
-       "Appendix G3"),
-    _c("G3", 9, "WARN",
-       r"\bgame[- ]changer\b|\bgame[- ]changing\b",
-       "business jargon; use 'significant' or 'important'",
-       "Appendix G3"),
-    _c("G3", 9, "WARN",
        r"\bdouble(?:s|d)?\s+down\b",
        "business jargon; use 'commit' or 'increase'",
-       "Appendix G3"),
-    _c("G3", 9, "WARN",
-       r"\bdeep[- ]dive\b|\bdeep dive\b",
-       "business jargon; use 'analysis' or 'examination'",
        "Appendix G3"),
     _c("G3", 9, "WARN",
        r"\btake a step back\b",
@@ -602,6 +591,177 @@ CHECKS = [
        r"\bNothing else matters\b",
        "fake-profound kicker; end on the last real point",
        "Appendix H11"),
+
+    # ------------------------------------------------------------- Rule 167
+    # Machine vocabulary. The controlled copy enumerates the list in Rule 167
+    # and says "cut or replace each", across every deliverable (issue 626).
+    # beacon, harness, gate and robust are AAC equipment and engineering
+    # terms the rule exempts, so they are not here at all. Every other word on
+    # the list is here. Two of them the rule limits to one sense, which a
+    # regex cannot decide, so those two report as WARN on the forms that
+    # usually carry that sense: highlight as a verb, landscape as an abstract
+    # noun.
+    _c("R167", 167, "ERROR",
+       r"\bdelv(?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bfoster(?:s|ed|ing)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bleverag(?:e|es|ed|ing)\b",
+       "machine vocabulary; use 'use'",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\butiliz(?:e|es|ed|ing|ation)\b|\butilis(?:e|es|ed|ing|ation)\b",
+       "machine vocabulary; use 'use'",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bfacilitat(?:e|es|ed|ing|ion)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bempower(?:s|ed|ing|ment)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bstreamlin(?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\belevat(?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bembark(?:s|ed|ing)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bsupercharg(?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bgarner(?:s|ed|ing)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\benhanc(?:e|es|ed|ing|ement|ements)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bbolster(?:s|ed|ing)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bunderscor(?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bshowcas(?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bemphasi[sz](?:e|es|ed|ing)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\btapestr(?:y|ies)\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\brealms?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\binterplay\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\btestament\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bmultifaceted\b|\bmulti-faceted\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bmeticulous(?:ly)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bintricate(?:ly)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bparamount\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\btransformative\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bpivotal\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bcrucial(?:ly)?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\benduring\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bvibrant\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bvaluable\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bever[- ]evolving\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bcutting[- ]edge\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bdeep[- ]dives?\b",
+       "machine vocabulary; use 'analysis' or 'review'",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\balign(?:s|ed|ing)?\s+with\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bparadigm shifts?\b",
+       "machine vocabulary; cut it or say the specific thing",
+       "Rule 167"),
+    _c("R167", 167, "ERROR",
+       r"\bgame[- ]?chang(?:er|ers|ing)\b",
+       "machine vocabulary; use 'significant' or state the change",
+       "Rule 167"),
+    _c("R167", 167, "WARN",
+       r"\bhighlight(?:ed|ing)\b"
+       r"|\b(?:to|will|would|can|could|should|may|might|must|we|I|they|you"
+       r"|also|further|help|helps)\s+highlight\b"
+       r"|" + "".join(r"(?<!\b%s )" % w for w in (
+           "the", "these", "those", "its", "our", "their", "your", "his",
+           "her", "my", "key", "main", "some", "and", "with", "of", "for",
+           "tour", "season", "game")) + r"\bhighlights\b",
+       "machine vocabulary if 'highlight' is a verb; say what it shows",
+       "Rule 167"),
+    _c("R167", 167, "WARN",
+       r"\b(?:the|this|that|today" + _APOS + r"s|current|evolving|changing"
+       r"|competitive|regulatory|business|market|threat|industry|digital"
+       r"|technology|security)\s+landscape\b|\blandscape\s+of\b",
+       "machine vocabulary if 'landscape' is abstract; name the situation "
+       "or field",
+       "Rule 167"),
 
     # ------------------------------------------------------------- Rule 165
     # Formatting slop. Same check wr001-lint.js already makes, kept here so
