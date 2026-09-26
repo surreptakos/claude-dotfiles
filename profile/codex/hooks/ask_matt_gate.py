@@ -533,6 +533,30 @@ ROUTE_TREE: dict[str, dict[str, Any]] = {
         },
     },
 }
+# Issue 840: whether the message continues the current work. Asked in the same Jev request as the
+# tree, only when the previous turn has a picked route; its state is that route and the tail of the
+# model's last message to the user (the question a bare "A" answers). "same" keeps the route; "next"
+# takes a move MAP_MOVES lists for it and nothing else; any other answer walks the tree from the top.
+CONTINUATION_QUESTION = {
+    "type": "choice",
+    "instructions": "`previous_route` is the step the assistant was on and `last_question` the end of"
+    " its last message to the user. Does `prompt`, the user's new message, continue that work?",
+    "criteria": {
+        "same": "Same step: it answers the assistant's last question (even a bare letter such as"
+                " \"A\" or \"yes\") or carries on the same step of the same work.",
+        "next": "Next step: the same work, moved on to its next step (\"spec it\", \"tickets\","
+                " \"build it\" once the current step is settled).",
+        "new": "New topic: the message is about different work from the previous route.",
+    },
+}
+# The ask-matt map's next-step moves; a route missing here has no "next step".
+MAP_MOVES: dict[str, tuple[str, ...]] = {
+    "grill-with-docs": ("to-spec", "implement"),
+    "to-spec": ("to-tickets",),
+    "to-tickets": ("implement",),
+    "wayfinder": ("to-spec",),
+}
+LAST_QUESTION_CHARS = 1500  # the tail of the last message kept for the continuation question
 PROMPT_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
 # A scheduled run's prompt carries its task file inside this block; it gets no route (for now).
 SCHEDULED_TASK_PATTERN = re.compile(r"<scheduled-task\b", re.IGNORECASE)
@@ -685,6 +709,24 @@ def _walk_route_tree(answers: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _continued_route(answers: dict[str, Any], previous_route: str) -> dict[str, Any] | None:
+    """Jev's route when the continuation answer keeps or advances the previous one, else the tree's."""
+    answer = answers.get("route.continuation")
+    option = answer.get("choice") if isinstance(answer, dict) else None
+    tree = _walk_route_tree(answers)
+    if option == "same":
+        return {"route": previous_route, "path": ["continuation=same", f"previous={previous_route}"]}
+    moves = MAP_MOVES.get(previous_route, ())
+    if option == "next" and moves:
+        # Where the map offers two moves (grill-with-docs: to-spec or implement), the tree's
+        # settledness answer picks between them; a tree leaf off the map never wins.
+        route = tree["route"] if tree and tree["route"] in moves else moves[0]
+        return {"route": route, "path": ["continuation=next", f"{previous_route}>{route}"]}
+    if tree is not None:
+        tree = {"route": tree["route"], "path": [f"continuation={option}"] + tree["path"]}
+    return tree
+
+
 def _in_repository(cwd: str) -> bool:
     """Whether the session's working directory is inside a git checkout (a `.git` above it)."""
     try:
@@ -698,30 +740,52 @@ def _in_repository(cwd: str) -> bool:
     return False
 
 
-def _prompt_verdicts(prompt: str, in_repository: bool = False) -> tuple[bool, dict[str, Any] | None]:
+def _prompt_verdicts(
+    prompt: str, in_repository: bool = False, previous: dict[str, Any] | None = None
+) -> tuple[bool, dict[str, Any] | None]:
     """(correction?, Jev's route pick) from ONE Jev request; the pick is None when Jev is unavailable.
 
     A scheduled run, or a message naming its route by slash command, is not routed, so its request
     carries the correction question alone. When Jev cannot answer, the correction verdict is the
-    regex and there is no pick.
+    regex and there is no pick. `previous` ({"route", "last_question"}, issue 840) adds the
+    continuation question to the same request.
     """
     prompt = prompt or ""
     if not prompt.strip():
         return False, None
     unrouted = SCHEDULED_TASK_PATTERN.search(prompt) is not None or _user_named_route(prompt)
     questions: dict[str, Any] = {"correction": CORRECTION_JEV_QUESTION}
+    state: dict[str, Any] = {"prompt": prompt, "in_repository": in_repository}
+    previous_route = None if unrouted else (previous or {}).get("route")
     if not unrouted:
         questions.update(_route_questions())
+    if previous_route:
+        questions["route.continuation"] = CONTINUATION_QUESTION
+        state["previous_route"] = previous_route
+        state["last_question"] = str((previous or {}).get("last_question") or "")
     jev = _jev_module()
-    answers = None if jev is None else jev.ask(
-        {"prompt": prompt, "in_repository": in_repository}, questions, timeout=PROMPT_JEV_TIMEOUT
-    )
+    answers = None if jev is None else jev.ask(state, questions, timeout=PROMPT_JEV_TIMEOUT)
     if answers is None:
         return CORRECTION_PATTERN.search(prompt) is not None, None
     correction = answers["correction"] >= CORRECTION_JEV_FLOOR
     if unrouted:
         return correction, {"route": None, "path": ["not routed"]}
+    if previous_route:
+        return correction, _continued_route(answers, previous_route)
     return correction, _walk_route_tree(answers)
+
+
+def _previous_route(previous: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The previous turn's picked route and last question, or None (issue 840).
+
+    Only a route the previous turn picked (Jev, a declaration or an appeal) counts: one Stop
+    reconciled onto an undeclared turn, or a scheduled run's routine route, is not continued.
+    """
+    previous = previous or {}
+    route = previous.get("flow")
+    if route not in ALLOWED_FLOWS or previous.get("flow_reconciled") or previous.get("routine"):
+        return None
+    return {"route": route, "last_question": previous.get("last_question") or ""}
 
 
 def _is_correction(prompt: str) -> bool:
@@ -750,7 +814,9 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         "unknown_tool_denied": (previous or {}).get("unknown_tool_denied"),
     }
     correction, pick = _prompt_verdicts(
-        str(event.get("prompt") or ""), _in_repository(str(event.get("cwd") or ""))
+        str(event.get("prompt") or ""),
+        _in_repository(str(event.get("cwd") or "")),
+        _previous_route(previous),
     )
     if correction:
         state["correction_nonce"] = nonce
@@ -2210,6 +2276,9 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
                 "last_flow": carried,
                 "yes": True,
                 "caveman": mode,
+                # Issue 840: a reconciled route was never picked; the next message does not
+                # continue it.
+                "flow_reconciled": True,
             },
         )
         _log_governance(session_id, f"undeclared turn reconciled to last route: {carried}")
@@ -2217,6 +2286,7 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
             f"GOVERNANCE: this turn ended with no route declared — recorded as `{carried}`. "
             "Declare explicitly next turn."
         )
+    _record_last_question(session_id, str(event.get("transcript_path") or ""))
     if event.get("stop_hook_active"):
         return {"systemMessage": " ".join(notes)} if notes else {}
     # The pre-send audit runs on EVERY path below, including the ones that used to return early: a
@@ -2256,6 +2326,19 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         + f". Logged to {_lint_log_path()}; enforced on your next message."
     )
     return {"systemMessage": " ".join(notes)}
+
+
+def _record_last_question(session_id: str, transcript_path: str) -> None:
+    """Keep the tail of the turn's final message for the next prompt's continuation question."""
+    try:
+        text = _last_assistant_text(transcript_path).strip() if transcript_path else ""
+    except Exception:
+        text = ""
+    current = _read_state("claude", session_id)
+    if current is None:
+        return
+    current["last_question"] = text[-LAST_QUESTION_CHARS:]
+    _write_state("claude", session_id, current)
 
 
 def _correction_audit(state: dict[str, Any] | None, transcript_path: str) -> str:

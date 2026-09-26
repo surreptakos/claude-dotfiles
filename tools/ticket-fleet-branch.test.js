@@ -948,7 +948,7 @@ for (const file of RESUME_GUARD_PAIR) {
 
   test(`${rel} deliver prompt merges the default branch before pushing`, () => {
     const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /git merge --no-edit origin\/\$\{defaultBranch\}/,
+    assert.match(src, /gitSpelling\(instrument, `merge --no-edit origin\/\$\{defaultBranch\}`\)/,
       'deliver must merge origin/<defaultBranch> into the verified branch');
     assert.match(src, /git checkout --theirs/,
       'deliver must take the default branch side for a generated-file conflict');
@@ -1226,6 +1226,44 @@ for (const file of RESUME_GUARD_PAIR) {
       'the run result must carry the refusal text, so the orchestrator merges master instead of re-implementing');
     assert.ok(logs.some((m) => /WITHOUT the pre-push merge/.test(m)),
       'the log must say the PR still owes the default-branch merge');
+  });
+
+  // ---- The merge spelling a live probe accepted (issue 907) ----
+  // Run 6ab733a4's deliverer had `git merge origin/master` refused twice and left PR #897 dirty.
+  // The probe on issue 907 ran the gitSpelling form from inside a fleet worktree without a refusal.
+  test(`${rel} deliver prompt merges with the probed spelling, from inside the checkout (issue 907)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.ok(prompt.includes('never \\`git -C\\` into it: ${gitSpelling(instrument, `merge --no-edit origin/${defaultBranch}`)}'),
+      'A1 must spell the merge through gitSpelling, run from inside the checkout - the spelling issue 907 probed');
+    assert.match(loadStableHelpers(file).gitSpelling('mcp', 'merge --no-edit origin/master'), /^`\/usr\/bin\/git merge --no-edit origin\/master`/,
+      'in a container the merge leads with the absolute git path');
+    assert.match(prompt, /A merge the classifier refuses in a D3 round does NOT go to A8/,
+      'a refused re-merge of an open PR must not re-deliver it unmerged');
+    assert.match(prompt, /return merged false, prState "dirty-unresolved", conflictPaths those paths, blockedReason "merge of origin\/\$\{defaultBranch\} refused by the classifier: <the refusal text VERBATIM/,
+      'a refused re-merge must come back dirty-unresolved, naming the refusal and the conflict paths');
+  });
+
+  test(`${rel} runCodeLane reports a PR left dirty by a refused re-merge (issue 907)`, async () => {
+    const refusal = 'Permission denied to execute git merge by Claude Code auto mode classifier - Auto-Mode Bypass';
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-907-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) {
+        return { pushed: true, prUrl: 'https://github.com/x/y/pull/907', mergeStatus: 'clean', conflictPaths: ['marketplace/aac-skills/.claude-plugin/plugin.json'],
+          merged: false, mergeSha: '', prState: 'dirty-unresolved', blockedReason: `merge of origin/master refused by the classifier: ${refusal}` };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 907, title: 't', criteria: '' }, 0);
+    assert.equal(result.prState, 'dirty-unresolved', 'the orchestrator must see the PR is still dirty');
+    assert.equal(result.merged, false);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/907', 'a dirty PR is still a delivered PR, not a blocked merge');
+    const line = logs.find((m) => m.startsWith('deliver:#907'));
+    assert.ok(line && line.includes(refusal), 'the run log must name the refusal');
+    assert.ok(line.includes('dirty-unresolved (conflicts: marketplace/aac-skills/.claude-plugin/plugin.json)'),
+      'the run log must name the conflict paths the orchestrator has to merge');
   });
 }
 
