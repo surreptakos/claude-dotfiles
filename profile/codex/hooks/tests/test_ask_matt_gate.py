@@ -1571,6 +1571,14 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-bak"}, state_dir)
             nonce = self._state(state_dir, "s-bak")["nonce"]
             self.run_claude_declare("s-bak", nonce, "implement", state_dir)
+            # implement is a build route (issue 842): open its skill before the backup gate's own
+            # edits are exercised, or the route-skill gate denies first and this test would be
+            # testing the wrong gate.
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-bak", "tool_name": "Skill", "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
             target = state_dir / "settings.json"
             target.write_text("{}", encoding="utf-8")
 
@@ -1593,6 +1601,72 @@ class AskMattGateTests(unittest.TestCase):
             plain.write_text("x", encoding="utf-8")
             self.assertEqual(edit(plain), {})
             self.assertEqual(edit(state_dir / "brand-new.env"), {})
+
+    # Issue 842: build routes must open their own skill before their first edit; helpers and talk
+    # routes are exempt.
+    def _declared(self, state_dir: Path, sid: str, flow: str) -> None:
+        self.run_gate("claude-prompt", {"session_id": sid}, state_dir)
+        nonce = self._state(state_dir, sid)["nonce"]
+        self.run_claude_declare(sid, nonce, flow, state_dir)
+
+    def _edit_call(self, state_dir: Path, sid: str, path: Path, agent_id: str | None = None) -> dict:
+        event = {
+            "session_id": sid, "tool_name": "Edit",
+            "tool_input": {"file_path": str(path), "old_string": "x", "new_string": "y"},
+        }
+        if agent_id is not None:
+            event["agent_id"] = agent_id
+        return json.loads(self.run_gate("claude-pre-tool", event, state_dir, caveman="keep").stdout)
+
+    def test_build_route_refuses_an_edit_before_its_skill_is_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-build", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            denied = self._edit_call(state_dir, "s-build", target)
+
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("implement", denied["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_build_route_allows_edits_once_its_skill_is_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-build-ok", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-build-ok", "tool_name": "Skill",
+                 "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
+
+            self.assertEqual(self._edit_call(state_dir, "s-build-ok", target), {})
+
+    def test_helper_calls_carrying_agent_id_skip_the_route_skill_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-helper", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            self.assertEqual(
+                self._edit_call(state_dir, "s-helper", target, agent_id="sub-1"), {}
+            )
+
+    def test_talk_routes_have_no_edit_limit_at_all(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            for flow in ("direct-answer", "grill-with-docs", "research"):
+                with self.subTest(flow=flow):
+                    sid = f"s-talk-{flow}"
+                    self._declared(state_dir, sid, flow)
+                    target = state_dir / f"{flow}.txt"
+                    target.write_text("x", encoding="utf-8")
+                    self.assertEqual(self._edit_call(state_dir, sid, target), {})
 
     def test_post_tool_failure_counter_drives_the_escalation_ladder(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

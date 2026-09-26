@@ -1093,6 +1093,10 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
         and state.get("yes") is True
         and state.get("caveman") in CAVEMAN_PROSE_MODES + ("off",)
     ):
+        _record_build_skill_open(session_id, state, event)
+        blocked = _route_skill_gate(event, state)
+        if blocked is not None:
+            return blocked
         return {}
     if nonce and _is_claude_declaration_command(event, session_id, nonce):
         return {}
@@ -1858,6 +1862,76 @@ CONFIG_FILE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+
+
+# Issue 842 (CONTEXT.md "Route tool limits", ADR 0002): a build route must open its own skill with
+# the Skill tool before its first edit. Talk routes (direct-answer, grill-with-docs, research and
+# the rest of ALLOWED_FLOWS) write too — this glossary, the pre-send lint draft, tickets — but carry
+# no gate on it; the adversarial pass that settled this found a read-only limit either blocked
+# correct work or was trivially bypassed by a shell command. "And the like" in CONTEXT.md is these:
+# the routes whose skill hands the model working instructions before code changes, not the ones that
+# settle or interview what to build.
+BUILD_FLOWS = {
+    "implement",
+    "tdd",
+    "diagnosing-bugs",
+    "project-harness",
+    "prototype",
+    "improve-codebase-architecture",
+}
+SKILL_TOOL_NAME = "Skill"
+
+
+def _skill_name_from_input(tool_input: Any) -> str:
+    """The bare skill name a Skill tool call names ("aac-skills:implement" -> "implement"), or ""
+    when `tool_input` is not a Skill call's shape."""
+    if not isinstance(tool_input, dict):
+        return ""
+    name = tool_input.get("skill")
+    if not isinstance(name, str):
+        return ""
+    return name.rsplit(":", 1)[-1].strip()
+
+
+def _route_skill_gate(event: dict[str, Any], state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Build-route gate (issue 842): an Edit/Write/MultiEdit/NotebookEdit call on a build route is
+    refused until the Skill tool has opened that route's own skill this turn, naming the skill in
+    the deny. A helper call (hook input carries `agent_id`, set only for subagent calls per the
+    Claude Code hooks docs) is exempt — starting the helper already passed the gate. Every other
+    route (talk routes included) is never touched by this gate."""
+    if event.get("agent_id"):
+        return None
+    flow = (state or {}).get("flow")
+    if flow not in BUILD_FLOWS:
+        return None
+    tool_name = str(event.get("tool_name") or "")
+    if tool_name == SKILL_TOOL_NAME or tool_name not in EDIT_TOOLS:
+        return None
+    if (state or {}).get("build_skill_opened"):
+        return None
+    return _deny(
+        f"Build route `{flow}`: open the {flow} skill with the Skill tool before editing "
+        "(issue 842's route gate). A subagent call (agent_id set) is exempt."
+    )
+
+
+def _record_build_skill_open(
+    session_id: str, state: dict[str, Any] | None, event: dict[str, Any]
+) -> None:
+    """Marks THIS turn's build route as having opened its own skill, the moment the Skill tool is
+    called with a matching name. Persisted per turn (declare-claude writes a fresh state each turn),
+    so a build route opens its skill again each turn before its first edit."""
+    if not state or state.get("build_skill_opened"):
+        return
+    if state.get("flow") not in BUILD_FLOWS:
+        return
+    if str(event.get("tool_name") or "") != SKILL_TOOL_NAME:
+        return
+    if _skill_name_from_input(event.get("tool_input")) != state.get("flow"):
+        return
+    current = dict(state)
+    current["build_skill_opened"] = True
+    _write_state("claude", session_id, current)
 
 
 BACKUP_MAX_AGE_SECONDS = 24 * 3600
