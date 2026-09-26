@@ -34,3 +34,19 @@ Rules that follow:
 - **A decomposed PRD's real status is its children.** The umbrella state only says whose move it is on the umbrella itself.
 - **Close rule:** a PRD closes when all children are closed (done or `wontfix`). State the close rule in a comment at decomposition time.
 - `prd` + one state label, always — same one-category-one-state invariant as atomic issues.
+
+## Permanent state containers carry no state role
+
+An open issue labelled `orchestrator` or `wayfinder:map` is a permanent state container: living
+state a master orchestrator or a wayfinder session reads and writes, open by design and never
+closed. It is not a work item, so none of the five state roles fits — `ready-for-agent` and
+`ready-for-human` put permanent infrastructure in a grabbable or working queue, `needs-triage` and
+`needs-info` both imply someone owes an action, and `wontfix` would close it.
+
+Ruling (Dan, from grill session 2026-09-18, issue 206): **exempt by existing tag, not a sixth
+state role.** Either label alone is enough to satisfy the state-role check — the `/session-end`
+state-role audit (`tools/tracker-audit.js`'s untriaged check) and the session-check queue queries
+both treat `orchestrator` and `wayfinder:map` as a triage state on their own, without suppressing a
+genuine miss on any other issue. The label is still a category, not a workflow state, so it never
+counts toward the conflicting-triage check — a decision brief legitimately carries `orchestrator`
+(or `wayfinder:map`) AND `ready-for-human`.

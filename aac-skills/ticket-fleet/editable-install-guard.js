@@ -29,9 +29,17 @@
  * main checkout. Legacy `setup.py develop` installs (`<dist>.egg-link` plus
  * `easy-install.pth`) are out of scope; pip has not written those since 21.3.
  *
+ * `seed` is the prevention half (issue 624): run first thing inside a new worktree, it gives
+ * that worktree its own `.venv` holding a copy of the install that names the worktree, so an
+ * install from there has somewhere of its own to land. `check --repair` stays as the backstop
+ * for the one path seeding cannot reach: a served repo's SessionStart hook that installs with
+ * the shared interpreter before any agent has read a word.
+ *
  * Usage:
  *   node editable-install-guard.js check [--main <dir>] [--python <exe>]
  *                                        [--site-packages <dir>]... [--repair]
+ *   node editable-install-guard.js seed  [--worktree <dir>] [--python <exe>]
+ *                                        [--site-packages <dir>]...
  *
  * Exit codes (the ticket-fleet guard-agent convention):
  *   0  clean - the pointers name the main checkout, or this repo has no editable
@@ -200,11 +208,113 @@ function inspect(opts) {
   return { code: report.ok ? 0 : 1, report };
 }
 
+/** The dist-info directories in `dir` that belong to distribution `dist`. */
+function distInfosFor(dir, dist) {
+  let names = [];
+  try { names = fs.readdirSync(dir); } catch (e) { return []; }
+  return names.filter((n) => /\.dist-info$/.test(n) && normalizeDist(n.split('-')[0]) === dist);
+}
+
+/**
+ * The root a pointer target hangs off, once `mapped` (its twin in the worktree) is known:
+ * `/repo/src/pkg` mapped to `/wt/src/pkg` shares the tail `src/pkg`, so the root is `/repo`.
+ */
+function sharedRoot(target, mapped, worktree) {
+  const t = path.resolve(target).split(path.sep);
+  const tail = path.relative(path.resolve(worktree), mapped).split(path.sep).filter(Boolean);
+  return t.slice(0, t.length - tail.length).join(path.sep) || path.sep;
+}
+
+/**
+ * Seed a new worktree's own Python environment (claude-dotfiles issue 624), the idea taken from
+ * max-sixty/worktrunk: a new worktree is handed a copy of the build state it needs instead of
+ * building its own into a place every checkout shares. Here that state is the editable install.
+ *
+ * `<worktree>/.venv` is created with --system-site-packages (every dependency the shared
+ * interpreter has stays visible: no network, no download) and the shared install's pointer files
+ * and dist-info for THIS project are copied into it, rewritten to name the worktree. Inside that
+ * venv the package imports from the worktree, `pip show` finds it, and a `pip install -e` run
+ * through `.venv/bin/python` writes into the venv - never into the shared site-packages - so it
+ * cannot capture the main checkout's install, and it goes when the worktree goes. A project that
+ * is not installed editable at all gets one fresh pointer instead.
+ *
+ * @param {{worktree: string, sitePackages: string[], python?: string}} opts
+ * @returns {{code: number, report: object}}
+ */
+function seed(opts) {
+  const wt = path.resolve(opts.worktree);
+  const dist = projectDist(wt);
+  if (!dist) {
+    return { code: 0, report: { ok: true, worktree: wt, project: null, seeded: [], note: 'no [project].name in a pyproject.toml here - nothing to seed' } };
+  }
+  const venv = path.join(wt, '.venv');
+  const bin = process.platform === 'win32' ? path.join(venv, 'Scripts', 'python.exe') : path.join(venv, 'bin', 'python');
+  if (!fs.existsSync(bin)) {
+    let made = null;
+    for (const exe of [opts.python, 'python3', 'python'].filter(Boolean)) {
+      made = spawnSync(exe, ['-m', 'venv', '--system-site-packages', '--without-pip', venv], { encoding: 'utf8' });
+      if (made.status === 0) break;
+    }
+    if (!made || made.status !== 0 || !fs.existsSync(bin)) {
+      return { code: 2, report: { ok: false, worktree: wt, project: dist, error: `could not create ${venv}: ${made ? String(made.stderr || made.error || '').trim() : 'no interpreter'}` } };
+    }
+  }
+  // A venv inside a checkout must never show as untracked: the tree guard would read it as dirt.
+  fs.writeFileSync(path.join(venv, '.gitignore'), '*\n');
+  const venvSite = (sitePackagesOf(bin) || [])[0];
+  if (!venvSite || !fs.existsSync(venvSite)) {
+    return { code: 2, report: { ok: false, worktree: wt, project: dist, error: `no site-packages inside ${venv}` } };
+  }
+
+  const seeded = [];
+  const roots = new Set();
+  for (const dir of (opts.sitePackages || []).filter((d) => path.resolve(d) !== path.resolve(venvSite))) {
+    let names = [];
+    try { names = fs.readdirSync(dir); } catch (e) { continue; }
+    for (const name of names.filter((n) => isPointerFor(n, dist))) {
+      let text;
+      try { text = fs.readFileSync(path.join(dir, name), 'utf8'); } catch (e) { continue; }
+      const from = extractPaths(text);
+      if (!from.length) continue;
+      for (const target of from) {
+        const to = repairTarget(wt, target);
+        roots.add(sharedRoot(target, to, wt));
+        text = text.split(target).join(to);
+        seeded.push({ file: path.join(venvSite, name), from: target, to });
+      }
+      fs.writeFileSync(path.join(venvSite, name), text);
+    }
+    for (const info of distInfosFor(dir, dist)) {
+      const dest = path.join(venvSite, info);
+      fs.cpSync(path.join(dir, info), dest, { recursive: true });
+      for (const f of fs.readdirSync(dest)) {
+        const file = path.join(dest, f);
+        let text;
+        try { text = fs.readFileSync(file, 'utf8'); } catch (e) { continue; }
+        let out = text;
+        for (const root of roots) out = out.split(root).join(wt);
+        if (out !== text) fs.writeFileSync(file, out);
+      }
+    }
+  }
+  if (!seeded.length) {
+    const to = fs.existsSync(path.join(wt, 'src')) ? path.join(wt, 'src') : wt;
+    const file = path.join(venvSite, `__editable__.${dist}-seed.pth`);
+    fs.writeFileSync(file, to + '\n');
+    seeded.push({ file, from: null, to });
+  }
+  return { code: 0, report: {
+    ok: true, worktree: wt, project: dist, venv, python: bin, seeded,
+    note: `seeded ${venv} for ${dist}: run Python as ${bin}; an install through it lands in this worktree's venv, never in the shared site-packages (claude-dotfiles issue 624)`,
+  } };
+}
+
 function parseArgs(argv) {
-  const opts = { main: process.cwd(), python: null, sitePackages: [], repair: false };
+  const opts = { command: 'check', main: process.cwd(), worktree: process.cwd(), python: null, sitePackages: [], repair: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === 'check') continue;
+    if (a === 'check' || a === 'seed') opts.command = a;
+    else if (a === '--worktree') opts.worktree = argv[++i];
     else if (a === '--main') opts.main = argv[++i];
     else if (a === '--python') opts.python = argv[++i];
     else if (a === '--site-packages') opts.sitePackages.push(argv[++i]);
@@ -222,7 +332,8 @@ function main(argv) {
     return 2;
   }
   if (opts.help) {
-    process.stdout.write('usage: editable-install-guard.js check [--main <dir>] [--python <exe>] [--site-packages <dir>]... [--repair]\n');
+    process.stdout.write('usage: editable-install-guard.js check [--main <dir>] [--python <exe>] [--site-packages <dir>]... [--repair]\n'
+      + '       editable-install-guard.js seed [--worktree <dir>] [--python <exe>] [--site-packages <dir>]...\n');
     return 0;
   }
   if (!opts.sitePackages.length) {
@@ -233,11 +344,11 @@ function main(argv) {
     }
     opts.sitePackages = dirs;
   }
-  const { code, report } = inspect(opts);
+  const { code, report } = opts.command === 'seed' ? seed(opts) : inspect(opts);
   process.stdout.write(JSON.stringify(report) + '\n');
   return code;
 }
 
-module.exports = { normalizeDist, projectDist, isPointerFor, extractPaths, isInside, repairTarget, sitePackagesOf, inspect, main };
+module.exports = { normalizeDist, projectDist, isPointerFor, extractPaths, isInside, repairTarget, sitePackagesOf, inspect, seed, main };
 
 if (require.main === module) process.exit(main(process.argv.slice(2)));
