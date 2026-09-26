@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-26T00:23:30Z"
-  previous-modified: "2026-09-25T23:17:13Z"
-  revision: "42"
-  content-sha: "0c7e89a3a360"
+  modified: "2026-09-26T05:15:47Z"
+  previous-modified: "2026-09-26T00:23:30Z"
+  revision: "43"
+  content-sha: "d956d0483db6"
 ---
 
 # Project Harness
