@@ -202,18 +202,20 @@ if settings is not None:
     else:
         pass_('the Jev helper ships beside ask_matt_gate.py as a library (issue 723)')
 
-    # The route gate settings (issue 841) are read from the gate's own directory; missing, the
-    # gate falls back to appeals on, so a committed "off" would never reach a container.
+    # The route gate settings (issues 841, 844) are read from the gate's own directory; missing,
+    # the gate falls back to its defaults, so a committed switch would never reach a container.
     route_settings = os.path.join(payload_abs, 'hooks', 'scripts', 'route-gate.json')
     try:
         with open(route_settings, encoding='utf-8') as handle:
-            appeals = json.load(handle).get('appeals')
+            gate_settings = json.load(handle)
     except (OSError, ValueError):
-        appeals = None
-    if not isinstance(appeals, bool):
-        fail(f'the payload carries no route gate settings with a boolean appeals at {route_settings}')
+        gate_settings = {}
+    appeals = gate_settings.get('appeals') if isinstance(gate_settings, dict) else None
+    routine_route = gate_settings.get('routine_route') if isinstance(gate_settings, dict) else None
+    if not isinstance(appeals, bool) or not isinstance(routine_route, bool):
+        fail(f'the payload carries no route gate settings with boolean appeals and routine_route at {route_settings}')
     else:
-        pass_(f'the route gate settings ship beside ask_matt_gate.py (appeals {appeals}, issue 841)')
+        pass_(f'the route gate settings ship beside ask_matt_gate.py (appeals {appeals}, routine_route {routine_route}, issues 841, 844)')
 
 # ------------------------------------------ 3b. the home-anchored seat (issue 643) -------------
 # Delivery must not depend on which checkout Claude Code calls the project. The hook copies

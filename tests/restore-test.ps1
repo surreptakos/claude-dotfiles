@@ -23,6 +23,9 @@
       7  round trip is lossless: re-tokenizing each restored file reproduces the repo file
       8  nothing credential-shaped was restored (the guard, pointed at the output)
       9  the restored hooks actually RUN from their new home, and the payload's skills from the clone
+      6e the caveman desktop installer (issue 825): -DryRun, the offline fail-closed path, the
+         no-op second install, and settings.json carries a caveman hook or route only when the
+         binary it names is on disk
      10  two overlapping runs do not delete each other's scratch directory
 
     Check 9 is the one that separates this from a file-copy test. Everything up to 8 proves
@@ -78,9 +81,12 @@ param(
     #   plugin-downgrade  pull copies the plugin records instead of merging them -> check 9e
     #   rules-copy   pull writes the rules text to the global CLAUDE.md, not the pointer -> check 6b5
     #   skill-tree   pull writes aac-skills/ to ~/.claude/skills again         -> check 6b
+    #   dead-caveman-hook  plants a hook entry naming a caveman binary at a path that does not
+    #                exist -> check 6e1 (issue 825)
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
-                 'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree')]
+                 'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree',
+                 'dead-caveman-hook')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -447,9 +453,21 @@ $StaleSkillText = "---`nname: pre-734-stale`ndescription: written by a pull from
 # ------------------------------------------------------------------ 1. run the installer
 
 $log = Join-Path $FakeRoot 'install.log'
-& $Engine -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Clone 'install.ps1') `
-    -UserHome $FakeHome *> $log
-$installExit = $LASTEXITCODE
+# Issue 825: the caveman CLI step this install now runs is real npm + a signed-binary fetch, the
+# same shape tools/caveman-bootstrap-hook.test.js keeps offline for its own automated run
+# (CAVEMAN_BOOTSTRAP_SKIP_CLI=1). This suite's main install is the automated, always-run gate too,
+# so it takes the same offline path here - deterministic, no network flake in the way of the 20
+# checks that follow. The caveman installer's own behaviour (real npm, -DryRun, the no-op run) is
+# exercised directly and hermetically in section 6e below.
+$previousCavemanSkip = $env:CAVEMAN_DESKTOP_SKIP_CLI
+$env:CAVEMAN_DESKTOP_SKIP_CLI = '1'
+try {
+    & $Engine -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Clone 'install.ps1') `
+        -UserHome $FakeHome *> $log
+    $installExit = $LASTEXITCODE
+} finally {
+    $env:CAVEMAN_DESKTOP_SKIP_CLI = $previousCavemanSkip
+}
 
 Write-Host 'Install'
 Check 'install.ps1 exits 0' ($installExit -eq 0) @(Get-Content $log -Tail 15)
@@ -470,6 +488,23 @@ if ($Fault -eq 'broken-hook') {
     Set-Content -Path (Join-Path $FakeHome '.codex\hooks\ask_matt_gate.py') `
                 -Value 'import sys; sys.exit(3)  # restored hook is broken' -Encoding utf8
     Note 'fault: a restored hook is present but not runnable'
+}
+if ($Fault -eq 'dead-caveman-hook') {
+    # What a caveman install that failed silently, rather than failing closed, would leave behind:
+    # a hook entry naming a caveman binary at a path nothing put there. Section 6e1 asserts every
+    # such command resolves to a file that exists; this plants one that does not.
+    $settingsPath = Join-Path $FakeHome '.claude\settings.json'
+    $faultSettings = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
+    if (-not ($faultSettings.PSObject.Properties.Name -contains 'hooks')) {
+        $faultSettings | Add-Member -NotePropertyName 'hooks' -NotePropertyValue ([pscustomobject]@{}) -Force
+    }
+    $deadCommand = "& '{0}\.caveman\bin\caveman-proxy.exe' native-hook claude" -f $FakeHome
+    $deadEntry = [pscustomobject]@{
+        hooks = @([pscustomobject]@{ type = 'command'; command = $deadCommand; timeout = 30 })
+    }
+    $faultSettings.hooks | Add-Member -NotePropertyName 'FaultDeadCavemanHook' -NotePropertyValue @($deadEntry) -Force
+    ($faultSettings | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath $settingsPath -Encoding UTF8
+    Note ("fault: planted a hook entry naming a caveman binary that does not exist - {0}" -f $deadCommand)
 }
 if ($Fault -eq 'home-leak') {
     # What a copy that bypassed Copy-OneFile would leave behind: this machine's home, verbatim.
@@ -634,12 +669,32 @@ if ($null -ne $settings) {
         (($shipped.Count -gt 0) -and ($govEntries.Count -eq 0)) `
         (@(if ($shipped.Count -eq 0) { "no scripts under $shippedDir - the payload moved" }) + $govEntries)
 
-    # The other half: third-party entries are not the plugin's to carry and stay where they were.
-    $caveman = @($commands | Where-Object { $_ -like '*caveman-proxy.exe*' })
-    $shrink  = @($commands | Where-Object { $_ -like '*shrink-hook*' })
-    Check 'third-party hook entries stay in settings.json (caveman proxy, shrink hook)' `
-        (($caveman.Count -gt 0) -and ($shrink.Count -eq 1)) `
-        @(("caveman proxy entries {0}, shrink hook entries {1}" -f $caveman.Count, $shrink.Count))
+    # The other half is third-party, and issue 825 made it conditional rather than assumed: the
+    # caveman CLI step installs for real (or fails closed and strips its own entries), so nothing
+    # here is baked in the way the committed profile/claude/settings.json snapshot is. Two
+    # invariants must hold on every machine, install succeeded or not:
+    #   1. every hook command naming a caveman binary points at a file that actually exists -
+    #      never a hook left dangling at wherever a DIFFERENT machine's `caveman enable` wrote it;
+    #   2. the model route (ANTHROPIC_BASE_URL at the caveman proxy port) is present exactly when
+    #      the proxy binary the route depends on is on disk - never a route with nothing listening.
+    $cavemanCommands = @($commands | Where-Object { $_ -match 'caveman' })
+    $cavemanPaths = @()
+    foreach ($command in $cavemanCommands) {
+        foreach ($m in ([regex]"(?i)'([^']*caveman[^']*)'").Matches($command)) { $cavemanPaths += $m.Groups[1].Value }
+    }
+    $cavemanPaths = @($cavemanPaths | Select-Object -Unique)
+    $cavemanAbsent = @($cavemanPaths | Where-Object { -not (Test-Path $_) })
+    Check ("every hook command naming a caveman binary resolves to a file that exists ({0} named, issue 825)" -f $cavemanPaths.Count) `
+        ($cavemanAbsent.Count -eq 0) $cavemanAbsent
+
+    $proxyExe = Join-Path $FakeHome '.caveman\bin\caveman-proxy.exe'
+    $proxyPresent = [bool](Test-Path $proxyExe)
+    $routePresent = ($settings.PSObject.Properties.Name -contains 'env') -and
+        ($settings.env.PSObject.Properties.Name -contains 'ANTHROPIC_BASE_URL') -and
+        ($settings.env.ANTHROPIC_BASE_URL -match '127\.0\.0\.1:8787')
+    Check 'the caveman model route is present in settings.json iff the proxy binary exists (issue 825)' `
+        ($routePresent -eq $proxyPresent) `
+        @(("route present: {0}, proxy binary present: {1}" -f $routePresent, $proxyPresent))
 }
 
 # ------------------------------------------------------------------ 6d. no live-tree hooks or tools (issue 733)
@@ -656,6 +711,84 @@ foreach ($dir in 'hooks', 'tools') {
     Check ("pull writes no ~/.claude/{0} folder" -f $dir) (-not (Test-Path $live)) `
         @(("{0} exists - lib/manifest.ps1 whitelists profile/claude/{1} again" -f $live, $dir))
 }
+
+# ------------------------------------------------------------------ 6e. caveman desktop installer (issue 825)
+
+# The main install above ran the caveman step offline (CAVEMAN_DESKTOP_SKIP_CLI=1, same reasoning
+# as the automated hook test), so its own behaviour - -DryRun, the fail-closed offline path, and
+# the no-op second install - gets exercised directly here, against tools/caveman-desktop-install.ps1
+# in the clone, hermetically: a stub npm on PATH proves the no-op case never shells out, and
+# nothing here touches a real registry.
+Write-Host ''
+Write-Host 'Caveman desktop installer (issue 825)'
+$cavemanInstaller = Join-Path $Clone 'tools\caveman-desktop-install.ps1'
+$liveSettingsPath = Join-Path $FakeHome '.claude\settings.json'
+
+# 6e1. -DryRun reports the step and touches neither npm nor settings.json.
+$beforeBytes = [System.IO.File]::ReadAllText($liveSettingsPath)
+$dryLog = Join-Path $FakeRoot 'caveman-dryrun.log'
+& $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
+    -UserHome $FakeHome -RepoRoot $Clone -DryRun *> $dryLog
+$dryExit = $LASTEXITCODE
+$dryText = Get-Content -Raw $dryLog
+$afterBytes = [System.IO.File]::ReadAllText($liveSettingsPath)
+Check '-DryRun reports the caveman step, runs no npm and changes no settings.json bytes' `
+    (($dryExit -eq 0) -and ($dryText -match 'caveman:.*dry run') -and ($beforeBytes -ceq $afterBytes)) `
+    @($dryText)
+
+# 6e2. the offline skip variable: fail-closed holds - no route, no proxy hooks, one status line.
+$previousSkip = $env:CAVEMAN_DESKTOP_SKIP_CLI
+$env:CAVEMAN_DESKTOP_SKIP_CLI = '1'
+$skipLog = Join-Path $FakeRoot 'caveman-skip.log'
+try {
+    & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
+        -UserHome $FakeHome -RepoRoot $Clone *> $skipLog
+    $skipExit = $LASTEXITCODE
+} finally {
+    $env:CAVEMAN_DESKTOP_SKIP_CLI = $previousSkip
+}
+$skipSettings = Get-Content -Raw $liveSettingsPath | ConvertFrom-Json
+$skipRoute = ($skipSettings.PSObject.Properties.Name -contains 'env') -and
+    ($skipSettings.env.PSObject.Properties.Name -contains 'ANTHROPIC_BASE_URL')
+$skipCavemanHooks = 0
+if ($skipSettings.PSObject.Properties.Name -contains 'hooks') {
+    foreach ($event in $skipSettings.hooks.PSObject.Properties) {
+        foreach ($group in $event.Value) { foreach ($hook in $group.hooks) { if ($hook.command -match 'caveman') { $skipCavemanHooks++ } } }
+    }
+}
+$skipLines = @(Get-Content $skipLog | Where-Object { $_.Trim().Length -gt 0 })
+Check 'offline skip variable: fail-closed holds (no route, no proxy hooks, one status line)' `
+    (($skipExit -eq 0) -and (-not $skipRoute) -and ($skipCavemanHooks -eq 0) -and ($skipLines.Count -eq 1)) `
+    (@(("route present: {0}, caveman hook entries: {1}, status lines: {2}" -f $skipRoute, $skipCavemanHooks, $skipLines.Count)) + $skipLines)
+
+# 6e3. second install is a no-op for the CLI step: no npm run when the pinned version is already
+# installed. Seed a fake node_modules/@caveman-ai/cli at the pinned version, then put a stub npm
+# on PATH that fails this check if it is ever invoked - the direct proof nothing shelled out to it.
+$pin = Get-Content -Raw (Join-Path $Clone 'lib\caveman-cli.json') | ConvertFrom-Json
+$fakeCliDir = Join-Path $FakeHome '.local\node_modules\@caveman-ai\cli'
+New-Item -ItemType Directory -Path $fakeCliDir -Force | Out-Null
+(@{ version = $pin.cliVersion } | ConvertTo-Json) |
+    Set-Content -LiteralPath (Join-Path $fakeCliDir 'package.json') -Encoding UTF8
+
+$noopStubDir = Join-Path $FakeRoot 'caveman-npm-stub'
+New-Item -ItemType Directory -Path $noopStubDir -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $noopStubDir 'npm.cmd') `
+    -Value '@echo FAULT: npm ran when the pinned version was already installed 1>&2' -Encoding ascii
+
+$previousPath = $env:Path
+$env:Path = "$noopStubDir;$previousPath"
+$noopLog = Join-Path $FakeRoot 'caveman-noop.log'
+try {
+    & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
+        -UserHome $FakeHome -RepoRoot $Clone *> $noopLog
+    $noopExit = $LASTEXITCODE
+} finally {
+    $env:Path = $previousPath
+}
+$noopText = Get-Content -Raw $noopLog
+Check 'second install is a no-op for the caveman step (no npm run when the pinned version is present)' `
+    (($noopExit -eq 0) -and ($noopText -notmatch 'FAULT: npm ran') -and ($noopText -match 'no npm run')) `
+    @($noopText)
 
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
 
@@ -941,6 +1074,34 @@ foreach ($skill in $workSkills) {
 Check ("all {0} work skills are overlaid byte-for-byte into the personal profile" -f $workSkills.Count) `
     (($workSkills.Count -gt 0) -and ($pSkillsBad.Count -eq 0)) $pSkillsBad
 
+# The same strip tools/caveman-desktop-install.ps1 applies when it fails closed (issue 825), on a
+# parsed object, so the fidelity check below can hold the live settings.json to the repo copy.
+function Remove-CavemanWiringFromObject {
+    param($Json)
+    $binaryPattern = 'caveman-proxy|caveman\.cmd|caveman\.CMD|shrink-hook|@caveman-ai'
+    if ($Json.PSObject.Properties['env'] -and $Json.env.PSObject.Properties['ANTHROPIC_BASE_URL'] -and
+        ($Json.env.ANTHROPIC_BASE_URL -match '127\.0\.0\.1:8787')) {
+        $Json.env.PSObject.Properties.Remove('ANTHROPIC_BASE_URL')
+        if ($Json.env.PSObject.Properties['_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL']) {
+            $Json.env.PSObject.Properties.Remove('_CLAUDE_CODE_ASSUME_FIRST_PARTY_BASE_URL')
+        }
+    }
+    if ($Json.PSObject.Properties['hooks']) {
+        foreach ($eventName in @($Json.hooks.PSObject.Properties | ForEach-Object { $_.Name })) {
+            $kept = New-Object System.Collections.ArrayList
+            foreach ($group in @($Json.hooks.$eventName)) {
+                $keptHooks = @($group.hooks | Where-Object { $_.command -notmatch $binaryPattern })
+                if ($keptHooks.Count -eq 0) { continue }
+                $group.hooks = $keptHooks
+                [void]$kept.Add($group)
+            }
+            if ($kept.Count -eq 0) { $Json.hooks.PSObject.Properties.Remove($eventName) }
+            else { $Json.hooks.$eventName = $kept.ToArray() }
+        }
+    }
+    return $Json
+}
+
 # ------------------------------------------------------------------ 7. round trip is lossless
 
 Write-Host ''
@@ -961,6 +1122,14 @@ foreach ($pair in $pairs) {
     # (issue 582) is committed that way and restored substituted, and both spell the same token.
     $back = ConvertTo-Tokens -Text ([System.IO.File]::ReadAllText($pair.Local)) -UserHome $FakeHome
     $want = ConvertTo-Tokens -Text ([System.IO.File]::ReadAllText($pair.Repo))  -UserHome $script:OwnerHome
+    if ($pair.Local -eq $liveSettingsPath) {
+        # Issue 825: the caveman step owns one edit to the live settings.json - it strips the
+        # caveman hooks and model route when this machine has no proxy binary - and re-serializes
+        # it. So compare meaning, not bytes: the repo copy with that same strip applied must equal
+        # what pull left. Anything else drifting still fails.
+        $back = ConvertTo-Json -Depth 20 -Compress ($back | ConvertFrom-Json)
+        $want = ConvertTo-Json -Depth 20 -Compress (Remove-CavemanWiringFromObject ($want | ConvertFrom-Json))
+    }
     if (-not ($back -ceq $want)) { $drift += $pair.Local }
 }
 Check ("all {0} files survive tokenize/detokenize byte-for-byte" -f $pairs.Count) ($drift.Count -eq 0) $drift
