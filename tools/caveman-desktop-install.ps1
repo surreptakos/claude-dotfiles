@@ -84,7 +84,9 @@ function Remove-CavemanWiring {
         [Parameter(Mandatory = $true)][int]$ProxyPort
     )
     if (-not (Test-Path $Path)) { return $false }
-    $json = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+    # Read and write as UTF-8 explicitly: Windows PowerShell 5.1's Get-Content decodes a BOM-less file
+    # as ANSI, so the em dashes in settings.json came back as mojibake (issue 825).
+    $json = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
     $changed = $false
     $binaryPattern = 'caveman-proxy|caveman\.cmd|caveman\.CMD|shrink-hook|@caveman-ai'
 
@@ -126,7 +128,7 @@ function Remove-CavemanWiring {
     }
 
     if ($changed) {
-        ($json | ConvertTo-Json -Depth 20) | Set-Content -LiteralPath $Path -Encoding UTF8
+        [System.IO.File]::WriteAllText($Path, ($json | ConvertTo-Json -Depth 20), (New-Object System.Text.UTF8Encoding($false)))
     }
     return $changed
 }
