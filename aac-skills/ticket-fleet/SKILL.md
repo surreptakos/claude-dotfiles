@@ -6,10 +6,10 @@ description: >
   asks to run the ticket fleet or clear a wave of ready-for-agent tickets, or an orchestrator
   worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-26T01:44:47Z"
-  previous-modified: "2026-09-25T23:52:47Z"
-  revision: "43"
-  content-sha: "d18ba3a5eee4"
+  modified: "2026-09-26T01:50:10Z"
+  previous-modified: "2026-09-26T01:44:47Z"
+  revision: "44"
+  content-sha: "85b8a0a4cf9a"
 ---
 
 # ticket-fleet
@@ -69,6 +69,14 @@ behind them. Never launch a second wave while one is running in the same repo; w
      testCommand: "node --test tools/*.test.js tests/*.test.js && python3 tools/skill-stamps.test.py && python3 tests/build-cloud-plugin.test.py && python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"
      ```
 
+   - The stamps check in `claude-dotfiles`: `regenCheckCommands` defaults to `[]` (issue 814), so
+     every launch here adds it, or a Deliver stage that regenerates a skill's stamp pushes it
+     unchecked:
+
+     ```
+     regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"]
+     ```
+
    ```
    Workflow({
      scriptPath: '<from step 1>',
@@ -112,8 +120,9 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
   a cloud session cannot load custom agent types (issue 339). `''` forces unpinned.
 - `followupsFile` (default `FOLLOW-UPS.md`): where discoveries are appended.
 - `generatedPaths`, `regenCommands`, `regenCheckCommands`: what the pre-push merge may resolve by
-  regeneration, and how. The defaults fit `claude-dotfiles`; `regenCheckCommands: []` for a fork
-  with no stamps check.
+  regeneration, and how. `regenCheckCommands` defaults to `[]` (issue 814): the stamps check is a
+  `claude-dotfiles` concern, so a fork gets no check naming a tool it lacks, and `claude-dotfiles`
+  passes it explicitly (step 3).
 - `priorImpl` / `priorProbe`, `finishRunId`: recovery - see [RECOVERY.md](RECOVERY.md).
 - `treeGuard`, `treeGuardScript`, `treeGuardStateDir`, `orchestratorCwd`, `editableGuard`,
   `editableGuardScript`: isolation guards, on by default where the repo ships them.
