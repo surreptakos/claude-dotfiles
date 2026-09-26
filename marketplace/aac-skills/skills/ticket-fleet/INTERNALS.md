@@ -185,10 +185,13 @@ the collision-prone ones: a commit message for `git commit -F`, a comment or PR 
 
 The working rule: **a path two workers could name the same way is a path they will overwrite.**
 Write scratch inside your own worktree where you have one - the implementer and the prober always
-do - and otherwise under `/tmp/fleet-<runId>/`, with the ticket number in the name. In the script
+do - and otherwise under `/tmp/fleet-<runId>/`, with the ticket number in the name - and, for anything one attempt
+writes, the attempt and worker too (`<ticket>-attempt<A>-w<W>`, as the branch name carries them):
+a retry of one ticket is a second writer of the same run, and in run 6ab751c8 attempt 2 of ticket
+812 found attempt 1's `commit-812.txt` in its way (issue 919). In the script
 that is `scratchFile(...)`, and every prompt that asks for a file names the path itself instead of
 leaving the choice to the worker: the comment and PR bodies behind `-F body=@…`, the verifier,
-deliver and discoveries worktrees. `SCRATCH_RAIL` carries the rule itself to the implementer and
+deliver and discoveries worktrees. `scratchRail(stem)` carries the rule itself to the implementer and
 the prober, the two agents that write files nobody named for them.
 `tools/ticket-fleet-branch.test.js` fails the script if a prompt goes back to `<file>` or
 `<scratch dir>`, or if a per-ticket scratch path drops the ticket number.

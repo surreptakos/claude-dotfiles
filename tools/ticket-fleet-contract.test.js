@@ -178,7 +178,9 @@ test('the SCOUT ticket schema has a body field, and the implementer prompt inter
   const instrument = 'gh';
   const testCommand = 'npm test';
   const PYTHON_RAIL = '(python rail fixture)';
-  const SCRATCH_RAIL = '(scratch rail fixture)';
+  const scratchRail = () => '(scratch rail fixture)';
+  const attempt = 1;
+  const workerIndex = 0;
   const HARNESS_RELAY_RAIL = '(harness relay rail fixture)';
   const powershellRail = () => '(powershell rail fixture)';
   const scratchFile = (name) => `/tmp/fleet-fixture/${name}`;
@@ -188,11 +190,12 @@ test('the SCOUT ticket schema has a body field, and the implementer prompt inter
   // eslint-disable-next-line no-new-func
   const render = new Function(
     't', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand',
-    'PYTHON_RAIL', 'SCRATCH_RAIL', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling',
+    'PYTHON_RAIL', 'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling',
+    'attempt', 'workerIndex',
     `return \`${promptSrc}\`;`
   );
   const rendered = render(t, branch, scout, chainStart, priorFindings, instrument, testCommand,
-    PYTHON_RAIL, SCRATCH_RAIL, HARNESS_RELAY_RAIL, powershellRail, scratchFile, dedupeBrief, gitSpelling);
+    PYTHON_RAIL, scratchRail, HARNESS_RELAY_RAIL, powershellRail, scratchFile, dedupeBrief, gitSpelling, attempt, workerIndex);
 
   assert.ok(rendered.includes(fixtureBody),
     "the rendered implementer prompt must contain the fixture ticket's body text verbatim");
@@ -201,7 +204,7 @@ test('the SCOUT ticket schema has a body field, and the implementer prompt inter
 test('the implementer and prober prompts tell a worker not to file the harness-relayed launch request as a discovery (issue 885)', () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const railIdx = src.indexOf('const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885):');
-  assert.ok(railIdx > -1, 'the harness-relayed request rail must be defined as its own shared const, like PYTHON_RAIL and SCRATCH_RAIL');
+  assert.ok(railIdx > -1, 'the harness-relayed request rail must be defined as its own shared const, like PYTHON_RAIL');
   const probeLabelIdx = src.indexOf("label: `probe:#");
   const implLabelIdx = src.indexOf("label: `impl:#");
   assert.ok(probeLabelIdx > -1 && implLabelIdx > -1, 'both the prober and implementer agent calls must still exist');
@@ -235,12 +238,46 @@ test('the implementer and code-lane verifier prompts tell a worker how to run Po
   const implLabelIdx = src.indexOf("label: `impl:#");
   const implStart = src.lastIndexOf('`Implement GitHub issue', implLabelIdx);
   assert.ok(implStart > -1 && implLabelIdx > implStart, 'the implementer prompt and its agent() call must still exist');
-  assert.ok(src.slice(implStart, implLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}`))}'),
+  assert.ok(src.slice(implStart, implLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}`))}'),
     'the implementer prompt must splice in powershellRail');
 
   const verifyStart = src.indexOf('`You are an independent verifier. Your job is to REFUTE');
   const verifyLabelIdx = src.indexOf('{ label: verifyLabel', verifyStart);
   assert.ok(verifyStart > -1 && verifyLabelIdx > verifyStart, 'the code-lane verifier prompt and its agent() call must still exist');
-  assert.ok(src.slice(verifyStart, verifyLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}-verify`))}'),
+  assert.ok(src.slice(verifyStart, verifyLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}-verify`))}'),
     'the code-lane verifier prompt must splice in powershellRail');
+});
+
+test('two attempts of one ticket render disjoint scratch paths in the implementer prompt (issue 919)', () => {
+  // Run 6ab751c8: attempt 2 of ticket 812 found attempt 1's /tmp/fleet-<run>/commit-812.txt in its
+  // way. Render the real prompt, with the real scratch and PowerShell rails, for two attempts.
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const promptSrc = sliceBetween(src, 'Implement GitHub issue #${t.number}: ${t.title}',
+    "Return structured output only.`,\n      { label: `impl:#", 'the implementer prompt template');
+  const railSrc = (head) => sliceBetween(src, head, '`\n', head).slice(head.length);
+  const scratchRoot = '/tmp/fleet-fixture';
+  // eslint-disable-next-line no-new-func
+  const scratchRail = new Function('scratchRoot', 'stem', `return \`${railSrc('const scratchRail = (stem) => `')}\`;`).bind(null, scratchRoot);
+  // eslint-disable-next-line no-new-func
+  const powershellRail = new Function('dir', `return \`${railSrc('const powershellRail = (dir) => `')}\`;`);
+  const scratchFile = (name) => `${scratchRoot}/${name}`;
+  const names = ['t', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand', 'PYTHON_RAIL',
+    'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling', 'attempt', 'workerIndex'];
+  // eslint-disable-next-line no-new-func
+  const render = new Function(...names, `return \`${promptSrc}\`;`);
+  const t = { number: 919, title: 'Fixture', criteria: 'c', body: 'b' };
+  const paths = (attempt, workerIndex) => {
+    const out = render(t, `agent/issue-919-attempt${attempt}-wf_fixture-w${workerIndex}`, { repoMap: 'm', defaultBranch: 'main' },
+      '', '', 'gh', 'npm test', '', scratchRail, '', powershellRail, scratchFile, () => '', (_i, c) => `git ${c}`,
+      attempt, workerIndex);
+    return new Set(out.match(/\/tmp\/fleet-fixture\/[^\s`'")]+/g) || []);
+  };
+  const first = paths(1, 3);
+  const second = paths(2, 3);
+  assert.ok(first.size > 0 && second.size > 0, 'the implementer prompt must name per-ticket scratch paths');
+  assert.ok([...first].some(p => p.includes('commit-919-attempt1-w3')), 'the scratch rail must give an attempt- and worker-stamped example path');
+  for (const p of first) {
+    assert.ok(p.includes('919-attempt1-w3'), `${p} must carry the ticket, attempt and worker`);
+    assert.ok(!second.has(p), `${p} is named by both attempt 1 and attempt 2`);
+  }
 });
