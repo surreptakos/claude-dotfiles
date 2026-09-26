@@ -23,6 +23,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - cloud-containers-can-run-powershell: 7.4.6 tarball
 - cloud-home-snapshot: image state; seat the bootstrap in $HOME; curl the public hook
 - cloud-only-criteria-stall-the-desktop-fleet: cloud proof
+- cowork-plugin-cache-can-go-stale: account-side, not packager
 - cowork-runs-plugin-hooks: mcp__workspace__bash
 - cowork-scheduled-tasks-live-in-session-uploads: uploads
 - cowork-transcripts-not-local: server-side

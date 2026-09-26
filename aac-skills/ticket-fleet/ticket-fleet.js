@@ -25,7 +25,7 @@
 export const meta = {
   name: 'ticket-fleet',
   description: 'Parallel ticket runner: scout, pinned implementer per ticket, blind refuting verifier, PR on pass, discovery collection',
-  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, maxTickets, scoutModel, implModel, implPins ({mechanical, multi-file, design}: the implementer model per Jev difficulty level for attempt 1; a level with no pin uses implModel, and every retry uses the design pin, default implModel - issue 725), difficulty (default true; false skips the Jev difficulty Score and runs every implementer on implModel), verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement, and pass `mcp` from a cloud session whose probe cannot run - the gh path is desktop-only, issue 322), remote (true|false, optional: what the caller itself knows about the session shape, read only when the probe returns nothing; without it or an explicit instrument an unmeasured run stops instead of defaulting to gh), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
+  whenToUse: 'Drive open ready-for-agent tickets to verified PRs in parallel; also runs probe tickets (evidence in a comment) and ready-for-human tickets (verify what a container can, hand the rest to the owner). args: {contractVersion (required, must equal the version this script implements - a launcher that omits it is at an older contract), runId (required, caller-minted unique token, kept the SAME across a resume), invocationId (required, a DIFFERENT fresh token per launch including every resume - it keeps the open-PR resume guard out of the agent cache), tickets (array of issue numbers; when given the scout takes exactly those, any label or state), label, scoutModel, implModel, implPins ({mechanical, multi-file, design}: the implementer model per Jev difficulty level for attempt 1; a level with no pin uses implModel, and every retry uses the design pin, default implModel - issue 725), difficulty (default true; false skips the Jev difficulty Score and runs every implementer on implModel), verifyModel, deliverModel, reportModel, maxAttempts, deliver, followupsFile, instrument (auto|gh|mcp, default auto: measured by the env-probe agent - mcp when CLAUDE_CODE_REMOTE_SESSION_ID is set or `gh` is absent, gh otherwise; pass a value only to override the measurement, and pass `mcp` from a cloud session whose probe cannot run - the gh path is desktop-only, issue 322), remote (true|false, optional: what the caller itself knows about the session shape, read only when the probe returns nothing; without it or an explicit instrument an unmeasured run stops instead of defaulting to gh), verifierAgent (agent type for the blind verifier; default: `fleet-verifier` on a desktop session whose ~/.claude/agents/fleet-verifier.md exists, unpinned in a cloud session because custom agent types are desktop-only (issue 339); empty string forces unpinned), testCommand (overrides the test command the scout reports), priorImpl/priorProbe ({ticketNumber: prior IMPL/PROBE result} reused for attempt 1 instead of spawning an implementer or prober), finishRunId (the id of an earlier run: this launch runs delivery ONLY - it reads the journal of that run, opens a PR for every verified-but-undelivered branch, skips the delivered ones and runs the report writer; no scout, no implementers, no verifiers), treeGuard (auto|true|false), treeGuardScript, orchestratorCwd, treeGuardStateDir, editableGuard (auto|true|false, post-wave repair of a captured Python editable install - issue 413), editableGuardScript}',
   phases: [
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
@@ -44,7 +44,6 @@ const cfg = Object.assign({
   invocationId: null,       // REQUIRED from the caller, re-minted on EVERY launch; see the resume guard below
   tickets: null,            // explicit issue numbers; overrides label listing (any label, any state)
   label: 'ready-for-agent',
-  maxTickets: 3,            // wave cap; keeps run near the 15-agent guideline
   // Per-stage model pins. Frontier only where errors compound (implement); the orchestrator is the
   // main session's own model. Mid-tier for bounded, checkable work; cheap tier for pure mechanics.
   scoutModel: 'claude-sonnet-5',            // structured extraction from gh issues
@@ -94,9 +93,12 @@ const cfg = Object.assign({
   // run 6aac4a53 delivered #550 and #552 with every stamp hashed against the CONTAINER's home
   // instead of the owner's, so the regenerate ran, the tests passed, skill-stamps.yml's
   // `pull_request` run (which tests the merge ref) was green - and the push-event run of the same
-  // `check` job was red the moment the PR opened. An empty array turns the gate off for a fork
-  // that has no such check.
-  regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"],
+  // `check` job was red the moment the PR opened. Default empty (issue 814): the check itself is a
+  // claude-dotfiles concern, not a fleet one, so a fork copying this script with the default intact
+  // gets no check instead of one naming a tool (tools/skill-stamps.py) it does not have - a launch
+  // that never passes this arg used to send every Deliver stage to A5(i) with a command that could
+  // not exist. claude-dotfiles' own launch passes the concrete command explicitly (SKILL.md).
+  regenCheckCommands: [],
   verifierAgent: null,     // null = default (`fleet-verifier` on a desktop that has the agent file, unpinned in a cloud session); '' = unpinned
   // ---- orchestrator-tree isolation guard (aac-routines issue 192) ----
   // 'auto' (default) turns the guard on wherever the served repo ships the guard tool and off
@@ -483,7 +485,7 @@ function applyOpenPrs(tickets, withOpenPr) {
 }
 
 /**
- * Split the candidate tickets into the wave that runs and the three reasons the rest do not.
+ * Split the candidate tickets into the wave that runs and the two reasons the rest do not.
  *
  * Open blockers gate every lane. Kind does not: a human ticket named in `args.tickets` stays in
  * the wave (its lane is the handoff), and label listing keeps today's behaviour. A ticket whose
@@ -492,20 +494,21 @@ function applyOpenPrs(tickets, withOpenPr) {
  *
  * In-wave chaining (issue 854): a blocked ticket whose every open blocker is a code ticket already
  * in the wave joins the wave too, carrying `chainedAfter` (the blocker numbers). It runs on a
- * blocker's lane once the blockers have merged (STEP D), so it takes no concurrency slot and does
- * not count against the cap. Chains resolve transitively (C after B after A); a blocker outside
- * the wave, a probe or human blocker (neither merges) or a cycle leaves the ticket in `blocked`.
+ * blocker's lane once the blockers have merged (STEP D). Chains resolve transitively (C after B
+ * after A); a blocker outside the wave, a probe or human blocker (neither merges) or a cycle leaves
+ * the ticket in `blocked`.
+ *
+ * No cap (Dan, 2026-09-26): one fleet runs at a time and it takes every runnable ticket.
  *
  * @param {Array<{number:number, kind?:string, blockedBy:Array, handoffPending?:boolean}>} tickets
- * @param {number} maxTickets - the run's cap on concurrently implemented tickets
- * @returns {{wave:Array, blocked:Array, pendingHandoff:Array, overCap:Array}}
+ * @returns {{wave:Array, blocked:Array, pendingHandoff:Array}}
  */
-function selectWave(tickets, maxTickets) {
+function selectWave(tickets) {
   const blocked = tickets.filter((t) => t.blockedBy.length > 0);
   const eligible = tickets.filter((t) => t.blockedBy.length === 0);
   const pendingHandoff = eligible.filter((t) => t.handoffPending === true);
   const runnable = eligible.filter((t) => t.handoffPending !== true);
-  const wave = runnable.slice(0, maxTickets);
+  const wave = runnable.slice();
   const merges = (t) => t.kind !== 'probe' && t.kind !== 'human';
   const mergingInWave = new Set(wave.filter(merges).map((t) => parseInt(t.number, 10)));
   const chainedNumbers = new Set();
@@ -526,7 +529,6 @@ function selectWave(tickets, maxTickets) {
     wave,
     blocked: blocked.filter((t) => !chainedNumbers.has(parseInt(t.number, 10))),
     pendingHandoff,
-    overCap: runnable.slice(maxTickets),
   };
 }
 
@@ -957,7 +959,7 @@ function trackerRules(mode) {
   const REPO = 'owner and repo: take them from `git remote get-url origin` (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).'
   if (mode === 'mcp') return {
     repoNote: REPO,
-    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
+    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
     scoutExplicit: (nums) => `${REPO} Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
@@ -977,7 +979,7 @@ function trackerRules(mode) {
   }
   return {
     repoNote: '{owner}/{repo} come from `git remote get-url origin`.',
-    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100"\`, then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
+    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100&page=P"\` for P = 1, 2, ... until a page returns fewer than 100 entries - take EVERY matching ticket, the wave has no cap - then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number N: \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\`.`,
     scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
@@ -1272,6 +1274,14 @@ const attributed = new Set()
 let guardStatePath = null
 let guardCandidates = ''   // filled in once the wave is known, below
 let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
+// Issue 811: non-null only on the auto+exit-3 path below - the guard tool is absent from the
+// served repo (a cloud container of claude-dotfiles itself has no aac-routines copy of it), so
+// `treeGuard:'auto'` turns the guard off and the run proceeds unwatched. That is a deliberate
+// choice, not a crash, but it used to live in a log line alone; a run whose log nobody reads then
+// looks identical to one where every checkpoint passed. Carrying the reason into the returned
+// report's `inconsistent` list (below) makes "this run had no tree guard" as visible as any other
+// inconsistency, without aborting the run the way `treeGuard:true` still does for the same exit.
+let treeGuardUnusable = null
 
 // A guard agent runs ONE fixed command and hands back its exit code and stdout verbatim. Nothing
 // is left to its judgement, so a paraphrase is detectable: stdout that does not JSON.parse is
@@ -1415,7 +1425,8 @@ if (treeGuardOn) {
   if (baseline && baseline.exitCode === 3) {
     if (cfg.treeGuard === 'auto') {
       treeGuardOn = false
-      log(`Orchestrator-tree guard OFF: ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192 ships the guard tool there). Pass treeGuard:true to make its absence abort instead.`)
+      treeGuardUnusable = `tree-guard: unusable — ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192 ships the guard tool there); guard OFF for this run, so no checkpoint below can catch a root-tree write. Pass treeGuard:true to make its absence abort instead.`
+      log(treeGuardUnusable)
     } else {
       throw new Error(`ticket-fleet run ABORTED before Scout - treeGuard:true but ${cfg.treeGuardScript} is not in this repo (aac-routines issue 192). Add the guard tool to the served repo or run with treeGuard:'auto'.`)
     }
@@ -1737,10 +1748,10 @@ const resolvedTickets = await resolveBlockerStates(eligibleTickets)
 // ---- open-PR filter: one listing per launch, before wave selection (issue 430) ----
 // The same question the code lane used to ask per ticket, asked once for the whole candidate set.
 // Per lane it cost an agent per ticket AND a wave slot: a ticket with an open PR was selected,
-// then skipped inside its lane, so the wave ran fewer real tickets than `maxTickets` while
+// then skipped inside its lane, so the wave ran fewer real tickets than its cap while
 // runnable candidates sat unselected, and the blocker-state and discovery-triage chaining spent
 // effort on tickets that were then skipped anyway. Here every candidate that already has an open
-// `agent/issue-<N>-` PR is dropped BEFORE selectWave, so the cap fills with tickets that will run,
+// `agent/issue-<N>-` PR is dropped BEFORE selectWave, so the wave holds only tickets that will run,
 // and the dropped ones are named in the run result under `skippedOpenPR` with their PR urls.
 // The freshness rule of issue 291 is unchanged and still load-bearing: this is an agent() call and
 // the runtime replays cached agent results on resume, so `invocationId` (fresh on EVERY launch,
@@ -1803,15 +1814,13 @@ const skippedOpenPR = openPrFilter.skipped
 // comment is a fleet handoff still waiting on the owner is parked, not run: re-running its lane
 // would post the same handoff comment again on every wave (issue 266). The selection is a pure
 // function and lives in the generated block above, unit-tested in tools/ticket-fleet-branch.js
-// (issue 486).
-const selection = selectWave(openPrFilter.tickets, cfg.maxTickets)
+// (issue 486). No cap (Dan, 2026-09-26): one fleet runs at a time and takes every runnable ticket.
+const selection = selectWave(openPrFilter.tickets)
 const wave = selection.wave
 const droppedBlocked = selection.blocked.map(t => ({ ticket: t.number, blockedBy: t.blockedBy }))
-const droppedCap = selection.overCap.length
 const skippedHandoff = selection.pendingHandoff.map(t => t.number)
 if (droppedBlocked.length) log(`${droppedBlocked.length} ticket(s) skipped: open blockers - ${droppedBlocked.map(b => '#' + b.ticket + ' (blocked by ' + b.blockedBy.map(n => '#' + n).join(', ') + ')').join('; ')}.`)
 if (skippedHandoff.length) log(`${skippedHandoff.length} ticket(s) skipped: awaiting the owner after a fleet handoff comment - ${skippedHandoff.map(n => '#' + n).join(', ')}.`)
-if (droppedCap) log(`${droppedCap} eligible ticket(s) beyond maxTickets=${cfg.maxTickets} cap - run again for the rest.`)
 log(`Scout listed ${(scout.candidateNumbers || []).length} candidate(s); ${scout.tickets.length} returned as tickets.`)
 log(`Wave: ${wave.map(t => '#' + t.number + ' (' + t.kind + ')').join(', ')}`)
 const chainedInWave = wave.filter(t => Array.isArray(t.chainedAfter) && t.chainedAfter.length)
@@ -2329,7 +2338,7 @@ Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
 Rules: one branch named ${branch}; commit your work, then push that branch and nothing else: run ${gitSpelling(instrument, `push -u origin ${branch}`)} as soon as the commit lands, and return pushed: true only when it exits 0 (a pushed branch survives a dead container, a killed Deliver step and an interrupt - issue 405). If the push fails, return pushed: false and quote the git output verbatim at the end of testTail, after the test tail; the run then pushes the branch for you. NEVER open a PR, NEVER merge, NEVER push any branch but ${branch}, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
 Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are read-only production paths - never write to them, never leave .bak files there; a change that would need a live-tree edit to land is committed to the branch only and named as a discovery.
-Done-condition (machine-checkable, all required): branch exists with your commits and is on origin (\`git ls-remote --heads origin ${branch}\` prints a ref); \`${testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
+Done-condition (machine-checkable, all required): branch exists with your commits and is on origin (${gitSpelling(instrument, `ls-remote --heads origin ${branch}`)} prints a ref); \`${testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
 Scope: if, while working or testing, you find a pre-existing bug, a performance concern, or behavior the ticket doesn't mention, don't fix, optimize or extend it in this change unless the requested behavior cannot work without it; report it as a self-contained discovery string instead. Where the ticket is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in a discovery string, and don't build for the other readings as well. Verify your work however you like; scratch scripts and quick checks need not be kept. Commit tests only where the ticket asks for them or this repository already keeps tests for this kind of change, sized like the neighboring test files - roughly one focused test per stated behavior - and don't turn scratch checks into additional permanent test files. This is about extras only: implement every behavior the ticket asks for, completely.
 Edits: the number of tokens used to edit files is best minimized, all else being equal, so when it will not affect the end result, surgically edit a file rather than rewrite the entire thing.
 Return structured output only.`,
@@ -2376,7 +2385,7 @@ Run this one push from the repository root - the spelling below, or the other on
 
 ${gitSpelling(instrument, `push -u origin ${branch}`)}
 
-Then run \`git ls-remote --heads origin ${branch}\` and report pushed: true only when it prints a ref.
+Then run ${gitSpelling(instrument, `ls-remote --heads origin ${branch}`)} and report pushed: true only when it prints a ref.
 If the push fails for any reason, that is the answer: return pushed: false with the git output VERBATIM. Never conclude that the branch "does not exist" and never invent a reason - when git says the ref is missing, run \`git branch -a --list '*${branch}*'\` and \`git worktree list\` and quote their output too.
 Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or delete anything. Do not push any other branch, do not push to the default branch, do not open a PR, do not comment on any ticket. Return structured output only.`,
         { label: `push:#${t.number}.${attempt}`, phase: 'Implement', schema: PUSHED, model: cfg.deliverModel, effort: 'low' }
@@ -2787,10 +2796,13 @@ return {
   })),
   // Issue 654: verified, recorded as pushed, and still undelivered because the deliverer could not
   // find the branch. Not a failure - the work may be sitting on origin with no PR, invisible to a
-  // merge pass and re-implemented by the next wave unless someone delivers it by hand.
-  inconsistent: clean.filter(r => r.inconsistency).map(r => ({
-    ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
-  })),
+  // merge pass and re-implemented by the next wave unless someone delivers it by hand. Issue 811
+  // prepends a run-level entry (ticket: null) when the tree-guard baseline itself was unusable, so
+  // "this run had no isolation guard" is as visible as any per-ticket inconsistency.
+  inconsistent: (treeGuardUnusable ? [{ ticket: null, kind: 'tree-guard', branch: null, detail: treeGuardUnusable }] : [])
+    .concat(clean.filter(r => r.inconsistency).map(r => ({
+      ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
+    }))),
   discoveries: allDiscoveries.length,
   // Where the bullets actually live, so a triage chore filed for them can name the commit and
   // the reviewer can merge the discoveries PR without hunting for it (issue 360).
@@ -2807,12 +2819,11 @@ return {
   // Named, not counted: the reader has to know WHICH ticket is parked on the owner (issue 266).
   skippedAwaitingOwner: skippedHandoff,
   // Candidates dropped by the one Scout-phase open-PR listing, each with the PR that stopped it
-  // (issue 430): they never entered the wave, so the cap ran this many real tickets more.
+  // (issue 430): they never entered the wave.
   skippedOpenPR,
   // Candidates parked in the Maybe Someday milestone by the ticket reaper, dropped from a
   // label-driven listing before the wave (issue 786); an explicit args.tickets number still runs.
   skippedParked,
-  skippedOverCap: droppedCap,
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
   implModels: clean.filter(r => r.kind === 'code').map(r => ({ ticket: r.ticket, difficulty: r.difficulty || null, models: r.implModels || [] })),

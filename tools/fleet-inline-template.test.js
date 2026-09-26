@@ -76,7 +76,7 @@ test('the generated block runs the module\'s helpers, not a copy that has drifte
   assert.deepStrictEqual(inlined.applyOpenPrs([{ number: 101 }, { number: 102 }], withOpenPr),
     module_.applyOpenPrs([{ number: 101 }, { number: 102 }], withOpenPr));
   const wave = [{ number: 1, blockedBy: [] }, { number: 2, blockedBy: [9] }, { number: 3, blockedBy: [], handoffPending: true }];
-  assert.deepStrictEqual(inlined.selectWave(wave, 1), module_.selectWave(wave, 1));
+  assert.deepStrictEqual(inlined.selectWave(wave), module_.selectWave(wave));
 
   const verdict = { failures: ['a\r\nb ', null, 42] };
   assert.strictEqual(inlined.priorFindingsBlock(verdict, 'fix it'),

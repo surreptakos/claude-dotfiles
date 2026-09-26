@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-25T23:07:36Z'
-  previous-modified: '2026-09-25T23:00:36Z'
+  modified: '2026-09-26T01:42:53Z'
+  previous-modified: '2026-09-25T23:24:10Z'
   revision: '43'
-  content-sha: 80171d849193
+  content-sha: 5f6e08963934
 ---
 
 # ticket-fleet
@@ -17,6 +17,10 @@ tickets, each ticket gets an implementer in an isolated worktree, a blind verifi
 refute it, and a deliverer that opens the PR and merges it once CI is green. One report writer
 files the wave's discoveries. The orchestrating session only launches the wave and reads its
 result; every ticket is worked by subagents.
+
+**One fleet at a time, and it takes every ticket it can (Dan, 2026-09-26).** A wave has no cap:
+every runnable candidate enters it, and a blocked ticket whose blockers are in the wave chains
+behind them. Never launch a second wave while one is running in the same repo; wait for its result.
 
 ## Launch a wave
 
@@ -60,6 +64,14 @@ result; every ticket is worked by subagents.
      testCommand: "node --test tools/*.test.js tests/*.test.js && python3 tools/skill-stamps.test.py && python3 tests/build-cloud-plugin.test.py && python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"
      ```
 
+   - The stamps check in `claude-dotfiles`: `regenCheckCommands` defaults to `[]` (issue 814), so
+     every launch here adds it, or a Deliver stage that regenerates a skill's stamp pushes it
+     unchecked:
+
+     ```
+     regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"]
+     ```
+
    ```
    Workflow({
      scriptPath: '<from step 1>',
@@ -72,7 +84,7 @@ result; every ticket is worked by subagents.
    the repo gitignores `state/`, post the record's digest on the repo's tracking issue.
 
 5. **Account for every ticket.** The run log has one line per ticket, `MERGED <sha>` or
-   `open, not merged: <prState>`, and the result sorts every candidate into one row below (`skippedOverCap` is a count):
+   `open, not merged: <prState>`, and the result sorts every candidate into one row below:
 
    | Result key | Meaning | Next |
    | --- | --- | --- |
@@ -81,7 +93,7 @@ result; every ticket is worked by subagents.
    | `inconsistent` | verified and pushed, but the deliverer could not find the branch | deliver it by hand or via `finishRunId` |
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
-   | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` / `skippedOverCap` | already has a PR / in Maybe Someday / waiting on the owner after a handoff / beyond `maxTickets` | nothing, or run again for over-cap |
+   | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / waiting on the owner after a handoff | nothing |
 
    Done when every ticket the scout listed sits in one row above.
 
@@ -91,7 +103,6 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
 
 - `tickets` (issue numbers): exactly those, any label or state. Empty: open tickets carrying
   `label` (default `ready-for-agent`).
-- `maxTickets` (default 3): tickets implemented at once. Chained tickets ride outside it.
 - `deliver` (default true): `false` stops after verify - no push, no PR, no comment.
 - `maxAttempts` (default 3): implement-verify rounds per ticket, fresh context each.
 - `instrument` (`auto` | `gh` | `mcp`) and `remote` (boolean): the tracker route. `auto` is
@@ -104,8 +115,9 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
   a cloud session cannot load custom agent types (issue 339). `''` forces unpinned.
 - `followupsFile` (default `FOLLOW-UPS.md`): where discoveries are appended.
 - `generatedPaths`, `regenCommands`, `regenCheckCommands`: what the pre-push merge may resolve by
-  regeneration, and how. The defaults fit `claude-dotfiles`; `regenCheckCommands: []` for a fork
-  with no stamps check.
+  regeneration, and how. `regenCheckCommands` defaults to `[]` (issue 814): the stamps check is a
+  `claude-dotfiles` concern, so a fork gets no check naming a tool it lacks, and `claude-dotfiles`
+  passes it explicitly (step 3).
 - `priorImpl` / `priorProbe`, `finishRunId`: recovery - see [RECOVERY.md](RECOVERY.md).
 - `treeGuard`, `treeGuardScript`, `treeGuardStateDir`, `orchestratorCwd`, `editableGuard`,
   `editableGuardScript`: isolation guards, on by default where the repo ships them.
