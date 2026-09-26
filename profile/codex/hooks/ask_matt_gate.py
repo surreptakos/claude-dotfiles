@@ -542,6 +542,43 @@ SCHEDULED_TASK_PATTERN = re.compile(r"<scheduled-task\b", re.IGNORECASE)
 SLASH_ROUTE_PATTERN = re.compile(r"^\s*/(?:aac-skills:)?([\w-]+)")
 
 
+# Issue 841: the route gate settings (glossary `CONTEXT.md`) are ONE committed file beside this
+# script, so a change is a commit that reaches every machine and cloud session alike, never a
+# per-machine flag. `appeals` (default on) lets the model appeal Jev's route once per turn; off
+# makes Jev's pick final. A missing or unreadable file means the committed default.
+ROUTE_GATE_SETTINGS = Path(
+    os.environ.get("ASK_MATT_ROUTE_SETTINGS") or SCRIPT.parent / "route-gate.json"
+)
+ROUTE_GATE_DEFAULTS = {"appeals": True}
+
+
+def _route_gate_setting(name: str) -> Any:
+    try:
+        value = json.loads(ROUTE_GATE_SETTINGS.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        value = {}
+    if not isinstance(value, dict) or name not in value:
+        return ROUTE_GATE_DEFAULTS[name]
+    return value[name]
+
+
+def _appeal_line(appeal: dict[str, Any]) -> str:
+    """The reply's first line on an appealed turn, as the lint demands it and Dan reads it."""
+    return (
+        f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, "
+        f"because {appeal['reason']}"
+    )
+
+
+def _current_appeal(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """This turn's appeal, or None. Keyed to the nonce so an earlier turn's appeal never counts."""
+    state = state or {}
+    appeal = state.get("appeal")
+    if isinstance(appeal, dict) and appeal.get("nonce") and appeal["nonce"] == state.get("nonce"):
+        return appeal
+    return None
+
+
 def _user_named_route(prompt: str) -> bool:
     match = SLASH_ROUTE_PATTERN.match(prompt)
     named = bool(match and match.group(1) in ALLOWED_FLOWS)
@@ -683,6 +720,15 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
             f"ROUTE PICKED BY JEV: {jev_route} (recorded; no declaration needed). Open and follow "
             f"the {jev_route} route; declaring any other route is refused. "
         )
+        if _route_gate_setting("appeals"):
+            context += (
+                "Jev wrong? Appeal ONCE this turn: `"
+                f'{_runner_spelling()} "{SCRIPT}" appeal-claude "{session_id}" "{nonce}" <route> "<reason>"'
+                "`; the reply's first line must then read `Route appeal: <route> instead of "
+                f"{jev_route}, because <reason>`. "
+            )
+        else:
+            context += "Appeals are off: Jev's pick is final. "
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
     # rules at every caveman level, off included, plus the style rules for the level in force. It is
     # the only enforcement point that can stop the offending message rather than report it: no hook
@@ -1096,9 +1142,13 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
         print("Governance route rejected: no matching Claude turn", file=sys.stderr)
         return 2
     jev_route = state.get("jev_route")
-    if jev_route and flow != jev_route:
+    appeal = _current_appeal(state)
+    # An appeal replaces Jev's route for the rest of the turn (issue 841).
+    settled = appeal["wanted"] if appeal else jev_route
+    if settled and flow != settled:
+        how = f"The appeal settled {settled}" if appeal else f"Jev picked {jev_route}"
         print(
-            f"Governance route rejected: {flow}. Jev picked {jev_route} for this message "
+            f"Governance route rejected: {flow}. {how} for this message "
             f"({' > '.join(state.get('route_path') or [])}); it is recorded, declare nothing else.",
             file=sys.stderr,
         )
@@ -1123,10 +1173,83 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "session_end_invoked": state.get("session_end_invoked"),
             "jev_route": jev_route,
             "route_path": state.get("route_path"),
+            "appeal": state.get("appeal"),
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
     return 0
+
+
+def _appeal_log_path() -> Path:
+    return STATE_DIR / "route-appeals.log"
+
+
+def _claude_appeal(session_id: str, nonce: str, wanted: str, reason: str) -> int:
+    """Issue 841: the model's one appeal of Jev's route this turn (ADR 0002). Switches the turn's
+    route, logs both routes and the reason, and arms the pre-send lint to refuse the reply until
+    its first line states the appeal, so Dan always sees it."""
+    reason = " ".join(reason.split())
+    if not _route_gate_setting("appeals"):
+        print(
+            f"Route appeal refused: appeals are off in {ROUTE_GATE_SETTINGS.name}; "
+            "Jev's pick is final.",
+            file=sys.stderr,
+        )
+        return 2
+    if wanted not in ALLOWED_FLOWS:
+        print(f"Route appeal refused: {wanted} is not a route", file=sys.stderr)
+        return 2
+    if not reason:
+        print("Route appeal refused: give the reason Jev's route is wrong", file=sys.stderr)
+        return 2
+    state = _read_state("claude", session_id)
+    if not state or not nonce or state.get("nonce") != nonce:
+        print("Route appeal refused: no matching Claude turn", file=sys.stderr)
+        return 2
+    jev_route = state.get("jev_route")
+    if not jev_route:
+        print("Route appeal refused: Jev picked no route this turn; declare yours", file=sys.stderr)
+        return 2
+    appeal = _current_appeal(state)
+    if appeal:
+        print(
+            f"Route appeal refused: this turn already appealed ({_appeal_line(appeal)}); "
+            "one appeal per turn.",
+            file=sys.stderr,
+        )
+        return 2
+    if wanted == jev_route:
+        print(f"Route appeal refused: Jev already picked {wanted}", file=sys.stderr)
+        return 2
+    appeal = {"nonce": nonce, "wanted": wanted, "jev_route": jev_route, "reason": reason}
+    current = dict(state)
+    current["appeal"] = appeal
+    current["flow"] = wanted
+    _write_state("claude", session_id, current)
+    _append_log(
+        _appeal_log_path(), session_id, f"wanted={wanted}\tjev={jev_route}\treason={reason}"
+    )
+    print(
+        f"Route appeal recorded: {wanted} instead of {jev_route}. Open and follow {wanted}. "
+        f"The reply's first line must read: {_appeal_line(appeal)}"
+    )
+    return 0
+
+
+def _appeal_lint(text: str, appeal: dict[str, Any] | None) -> tuple[list[str], str]:
+    """(violations, text left for the ADHD shape). On an appealed turn the first line after the
+    PYLONS canary must state the appeal; the ADHD opener rule then applies to the line after it."""
+    if not appeal:
+        return [], text
+    lines = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().splitlines()
+    first = lines[0].strip() if lines else ""
+    prefix = f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, because "
+    if first.startswith(prefix) and first[len(prefix):].strip():
+        return [], "\n".join(lines[1:])
+    return [
+        "route appeal not shown: this turn appealed Jev's route, so the reply's first line must "
+        f'read "{_appeal_line(appeal)}"'
+    ], text
 
 
 FILLER_PATTERN = re.compile(
@@ -2125,9 +2248,11 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     adhd = _adhd_state()
     transcript = _find_transcript(session_id) if session_id else ""
     turn_refusals = _turn_refusals(transcript) if transcript else None
+    appeal_violations, shaped = _appeal_lint(text, _current_appeal(state))
     violations = (
-        _yes_lint(text, turn_tools, turn_refusals)
-        + (_adhd_lint(text) if adhd == "on" else [])
+        appeal_violations
+        + _yes_lint(text, turn_tools, turn_refusals)
+        + (_adhd_lint(shaped) if adhd == "on" else [])
         + _caveman_lint(text, mode)
     )
     if not violations:
@@ -2164,6 +2289,9 @@ def main() -> int:
         nonce = sys.argv[3] if len(sys.argv) > 3 else ""
         flow = sys.argv[4] if len(sys.argv) > 4 else ""
         return _claude_declare(session_id, nonce, flow)
+    if mode == "appeal-claude":
+        session_id, nonce, wanted = (sys.argv[2:5] + ["", "", ""])[:3]
+        return _claude_appeal(session_id, nonce, wanted, " ".join(sys.argv[5:]))
     try:
         event = _read_event()
     except (json.JSONDecodeError, OSError, ValueError) as error:

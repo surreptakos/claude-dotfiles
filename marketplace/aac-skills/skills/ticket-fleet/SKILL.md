@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-26T02:00:21Z'
-  previous-modified: '2026-09-26T01:28:33Z'
-  revision: '45'
-  content-sha: 4e514c7457e0
+  modified: '2026-09-26T04:26:01Z'
+  previous-modified: '2026-09-26T04:20:26Z'
+  revision: '48'
+  content-sha: 8e53eb63e0ac
 ---
 
 # ticket-fleet
