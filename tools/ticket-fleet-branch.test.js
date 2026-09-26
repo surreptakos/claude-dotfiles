@@ -346,7 +346,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} names a per-worker path for every file it
     assert.match(call, /\$\{t\.number\}/,
       `${call} must carry the ticket number, not a name every worker of the wave would pick`);
   }
-  assert.match(src, /SCRATCH_RAIL/,
+  assert.match(src, /scratchRail\(/,
     'the implementer and prober prompts must carry the scratch-file rail');
 });
 
@@ -450,7 +450,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} implementer prompt carries the ordered ha
     at = i;
   }
   for (const rail of ['NEVER open a PR, NEVER merge, NEVER push any branch but', 'Live-tree hard rail: ~/.claude',
-    '${SCRATCH_RAIL}', '${PYTHON_RAIL}',
+    '${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}', '${PYTHON_RAIL}',
     '(no # - closing-keyword risk)', 'return pushed: true only when it exits 0']) {
     assert.ok(src.indexOf(rail, start) > start, `the full rail "${rail}" must follow the list it is summarized in`);
   }
@@ -2313,6 +2313,14 @@ test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come fro
   assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
 });
 
+// Issue 813: REST /issues?labels= returns pull requests too, so a labelled PR was scouted as a ticket.
+test(`${FLEET_SCRIPT_REL} scoutList drops pull requests in both instruments (issue 813)`, () => {
+  const gh = loadTrackerRules(FLEET_SCRIPT, 'gh').scoutList('ready-for-agent');
+  assert.match(gh, /--jq '\[\.\[\] \| select\(\.pull_request == null\)\]'/, 'gh scoutList must filter out pull_request entries');
+  const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp').scoutList('ready-for-agent');
+  assert.match(mcp, /drop any entry that carries a pull_request key/, 'mcp scoutList must drop pull_request entries');
+});
+
 // Issue 770: the deliverer merges the PR it opened, in the instrument the rest of the stage uses.
 test(`${FLEET_SCRIPT_REL} deliver rules carry the PR merge in both instruments (issue 770)`, () => {
   const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
@@ -3078,7 +3086,7 @@ const GIT_GUARD_ALLOWLIST = [
   'apply',
   'checkout ${leakExample} -- .',
   '-C',
-  // SCRATCH_RAIL (issue 439): names `git commit -F` only as an example of what a scratch file
+  // scratchRail (issue 439): names `git commit -F` only as an example of what a scratch file
   // might hold, not an instruction to run it now.
   'commit -F',
   // fleet-refresh's own Setup-phase prompt (issue 770), which runs before `instrument` is known -
