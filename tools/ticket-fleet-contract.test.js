@@ -180,17 +180,19 @@ test('the SCOUT ticket schema has a body field, and the implementer prompt inter
   const PYTHON_RAIL = '(python rail fixture)';
   const SCRATCH_RAIL = '(scratch rail fixture)';
   const HARNESS_RELAY_RAIL = '(harness relay rail fixture)';
+  const powershellRail = () => '(powershell rail fixture)';
+  const scratchFile = (name) => `/tmp/fleet-fixture/${name}`;
   const dedupeBrief = () => '';
   const gitSpelling = (_instrument, cmd) => `git ${cmd}`;
 
   // eslint-disable-next-line no-new-func
   const render = new Function(
     't', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand',
-    'PYTHON_RAIL', 'SCRATCH_RAIL', 'HARNESS_RELAY_RAIL', 'dedupeBrief', 'gitSpelling',
+    'PYTHON_RAIL', 'SCRATCH_RAIL', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling',
     `return \`${promptSrc}\`;`
   );
   const rendered = render(t, branch, scout, chainStart, priorFindings, instrument, testCommand,
-    PYTHON_RAIL, SCRATCH_RAIL, HARNESS_RELAY_RAIL, dedupeBrief, gitSpelling);
+    PYTHON_RAIL, SCRATCH_RAIL, HARNESS_RELAY_RAIL, powershellRail, scratchFile, dedupeBrief, gitSpelling);
 
   assert.ok(rendered.includes(fixtureBody),
     "the rendered implementer prompt must contain the fixture ticket's body text verbatim");
@@ -213,4 +215,32 @@ test('the implementer and prober prompts tell a worker not to file the harness-r
     'the prober prompt must splice in HARNESS_RELAY_RAIL');
   assert.ok(src.slice(implPromptStart, implLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
     'the implementer prompt must splice in HARNESS_RELAY_RAIL');
+});
+
+test('the implementer and code-lane verifier prompts tell a worker how to run PowerShell 7 under the worktree guard (issue 906)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const railHead = 'const powershellRail = (dir) => `';
+  const railSrc = sliceBetween(src, railHead, '`\n', 'the PowerShell rail in ticket-fleet.js').slice(railHead.length);
+  // eslint-disable-next-line no-new-func
+  const rail = new Function('dir', `return \`${railSrc}\`;`)('/tmp/fleet-r1/ps7-906');
+  assert.match(rail, /issue 454/, 'the rail must name the issue that records the recipe');
+  assert.match(rail, /ONE plain command per tool call, nothing chained/, 'the rail must say one plain command per line');
+  assert.ok(rail.includes('cp /tmp/fleet-r1/ps7-906/pwsh /tmp/fleet-r1/ps7-906/shell7'),
+    'the rail must copy pwsh to the neutral shell7 name inside the per-ticket dir');
+  assert.ok(rail.includes('/tmp/fleet-r1/ps7-906/shell7 -NoProfile -ExecutionPolicy Bypass -File'),
+    'the rail must invoke the suite through shell7 by its full path');
+  assert.match(rail, /Language\.Parser\]::ParseFile/, 'the rail must give the parser check for a changed .ps1 file');
+  assert.match(rail, /discovery string/, 'the rail must tell a worker that cannot run PowerShell to say so in its discoveries');
+
+  const implLabelIdx = src.indexOf("label: `impl:#");
+  const implStart = src.lastIndexOf('`Implement GitHub issue', implLabelIdx);
+  assert.ok(implStart > -1 && implLabelIdx > implStart, 'the implementer prompt and its agent() call must still exist');
+  assert.ok(src.slice(implStart, implLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}`))}'),
+    'the implementer prompt must splice in powershellRail');
+
+  const verifyStart = src.indexOf('`You are an independent verifier. Your job is to REFUTE');
+  const verifyLabelIdx = src.indexOf('{ label: verifyLabel', verifyStart);
+  assert.ok(verifyStart > -1 && verifyLabelIdx > verifyStart, 'the code-lane verifier prompt and its agent() call must still exist');
+  assert.ok(src.slice(verifyStart, verifyLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}-verify`))}'),
+    'the code-lane verifier prompt must splice in powershellRail');
 });
