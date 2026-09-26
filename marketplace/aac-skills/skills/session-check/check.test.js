@@ -120,6 +120,52 @@ test('cloud fallback: outside a cloud container, a missing interpreter still STO
   assert.match(output, /STOP tests FAIL/);
 });
 
+/* ------------------------------------------------------- release gate timeout (issue 818) ----- */
+
+test('release gate: default timeout is 300000 ms when gateTimeoutMs is not configured', () => {
+  const output = runChecker({
+    releaseGates: [`${JSON.stringify(process.execPath)} -e "console.log('no-verdict-marker')"`],
+  }, { args: ['--end'] });
+  assert.match(output, /release gate passes/);
+  assert.doesNotMatch(output, /STOP release gate TIMEOUT/);
+});
+
+test('release gate: an invalid gateTimeoutMs falls back to the 300000 ms default and says so', () => {
+  const output = runChecker({
+    gateTimeoutMs: 'soon',
+    releaseGates: [`${JSON.stringify(process.execPath)} -e "console.log('no-verdict-marker')"`],
+  }, { args: ['--end'] });
+  assert.match(output, /gateTimeoutMs must be a positive integer — using 300000 ms/);
+});
+
+test('release gate: a configured gateTimeoutMs finishes inside it and reports a pass', () => {
+  const output = runChecker({
+    gateTimeoutMs: 900000,
+    releaseGates: [`${JSON.stringify(process.execPath)} -e "console.log('PASS release gate ok')"`],
+  }, { args: ['--end'] });
+  assert.match(output, /release gate passes/);
+  assert.doesNotMatch(output, /STOP release gate TIMEOUT/);
+});
+
+test('release gate: a gate that prints nothing and never exits still STOPs with TIMEOUT', () => {
+  const output = runChecker({
+    gateTimeoutMs: 50,
+    releaseGates: [`${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 5000)"`],
+  }, { args: ['--end'] });
+  assert.match(output, /STOP release gate TIMEOUT after 50 ms/);
+});
+
+test('release gate: a gate that prints a PASS verdict then hangs warns, quoting the PASS line, not a STOP', () => {
+  const output = runChecker({
+    gateTimeoutMs: 50,
+    releaseGates: [`${JSON.stringify(process.execPath)}`
+      + ` -e "console.log('PASS release gate ok'); setTimeout(() => {}, 5000)"`],
+  }, { args: ['--end'] });
+  assert.match(output, /!!\s*release gate TIMEOUT after 50 ms/);
+  assert.match(output, /"PASS release gate ok"/);
+  assert.doesNotMatch(output, /STOP release gate/);
+});
+
 test('prints captured diagnostics for a failing custom check', () => {
   const output = runChecker({
     checks: [{

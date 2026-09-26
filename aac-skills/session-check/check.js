@@ -39,6 +39,7 @@
  *     "testTimeoutMs": 300000,                       // optional per-repo test timeout
  *     "ticketLabel": "ready-for-agent",
  *     "releaseGates":[ "node tools/canary.js" ],     // run at --end
+ *     "gateTimeoutMs": 300000,                       // per-gate timeout for releaseGates (default)
  *     "checks":      [ { "name": "...", "run": "...", "when": "end",
  *                        "host": "desktop" } ],                // only on that host; see HOST
  *     "note":        "anything to print every time",
@@ -446,12 +447,22 @@ async function workChecks() {
 
   if (END) {
     const gates = CFG.releaseGates || (has('tools/canary.js') ? ['node tools/canary.js'] : []);
+    const gateTimeout = configuredTimeout('gateTimeoutMs', 300000);
     for (const g of gates) {
-      const r = await runReadingOutputAsync(g, [], { timeout: 300000, shell: true });
+      const r = await runReadingOutputAsync(g, [], { timeout: gateTimeout, shell: true });
       if (r.code === 0) ok(`release gate passes — \`${g}\``);
       else if (r.timedOut) {
-        stop(`release gate TIMEOUT after 300000 ms — \`${g}\``);
-        noteDiagnostics(r.out);
+        // A gate can print its verdict and then hang (a gas-run-driven gate that already wrote
+        // PASS but never exits) — that already-printed verdict is not a STOP, it's the timeout
+        // that needs fixing. Quote the PASS line rather than discard it as a failure.
+        const passLine = (String(r.out || '').match(/^PASS\b.*$/m) || [])[0];
+        if (passLine) {
+          warn(`release gate TIMEOUT after ${gateTimeout} ms — \`${g}\` — but it had already printed a PASS verdict`);
+          note(`"${passLine}"`);
+        } else {
+          stop(`release gate TIMEOUT after ${gateTimeout} ms — \`${g}\``);
+          noteDiagnostics(r.out);
+        }
       } else if (r.code === 2) {
         // The house convention: exit 1 = found a failure, exit 2 = could not check. Neither is
         // a pass, but "could not check" is not "FAILS" — in a cloud container a gate that needs
