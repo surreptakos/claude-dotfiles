@@ -1573,7 +1573,10 @@ test(`fleet script ${FLEET_SCRIPT_REL} scout prompt calls the listing the whole 
 const extractBetween = extractMarked;
 
 function loadTrackerRules(scriptPath, mode) {
-  const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-TRACKER-RULES');
+  // Issue 883: trackerRules now calls gitSpelling (`git remote get-url origin` goes through it
+  // too), which lives in the generated block, not the FLEET-TRACKER-RULES one - prepend it so the
+  // isolated eval below still resolves the name.
+  const body = generatedBlock(scriptPath) + '\n' + extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-TRACKER-RULES');
   // eslint-disable-next-line no-new-func
   const make = new Function(body + '\nreturn trackerRules;')();
   return make(mode);
@@ -2844,4 +2847,125 @@ test(`${FLEET_SCRIPT_REL} pairs Report results by ticket number, not wave positi
   assert.match(src, /const clean = wave\.map\(\(t\) => resultByTicket\.get\(parseInt\(t\.number, 10\)\)/);
   assert.doesNotMatch(src, /results \|\| \[\]\)\[i\]/, 'positional pairing breaks once a lane holds several tickets');
   assert.match(src, /skippedChained: clean\.filter\(r => r\.chainSkipped\)/);
+});
+
+// ---------------------------------------------------------------------------
+// Issue 883: issues 755 and 803 fixed the caveman worktree guard's refusal of a bare `git ...` for
+// push and ls-remote specifically, one instruction at a time - but the guard refuses ANY bare git
+// invocation, and other prompt text in the fleet script still names one literally (most visibly
+// `git remote get-url origin` in trackerRules, run unconditionally to learn {owner}/{repo}). This
+// generalizes the regression guard: any backticked command that starts with bare `git ` (not
+// `/usr/bin/git`) must either be built through gitSpelling, or be a mention this test is told by
+// name is not an instruction to run it - a forbidden-spelling reference ("never `git push
+// --force`"), a past-tense description of a refused command, internal orchestrator-log prose
+// (never sent to a worker), or JSON-schema `description` text describing what a field means. A
+// literal "run `git ...`" instruction is never on this list - it must go through gitSpelling, the
+// way `git remote get-url origin` was fixed here.
+//
+// The remaining entries below are pre-existing (STEP A-D of the deliver prompt, the verify
+// prompt's worktree report, and a few others) and are OUT OF SCOPE for issue 883 itself, which
+// asked only for this regression test plus the `git remote get-url origin` fix - converting the
+// rest is tracked as a follow-up discovery, not fixed here. Removing an entry (by converting its
+// site through gitSpelling) is welcome at any time; adding one for a NEW literal "run `git ...`"
+// instruction is not - convert it instead.
+const GIT_GUARD_ALLOWLIST = [
+  // Internal orchestrator log prose (classifyBranchLookup/classifyDelivery `message` fields) -
+  // read only by `log()` in this script, never sent to any agent as a prompt.
+  'ls-remote --heads origin ${branch}',
+  'ls-remote --exit-code',
+  // JSON-schema `description` text (REV/PUSHED/DELIVERED/worktree schemas) - describes what an
+  // output field means; the instruction to actually run the command lives elsewhere in the prompt.
+  'ls-remote --heads origin <branch>',
+  'rev-parse HEAD',
+  'ls-remote --exit-code --heads origin <branch>',
+  // revParse's own prompt (issue 561): a "do not substitute" caution naming the shortcut it
+  // forbids, not an instruction to run it.
+  'rev-parse',
+  'ls-remote',
+  // orchestratorTreeRail (aac-routines issue 192) and the worktree rule it shares text with: both
+  // document which git subcommands the ORCHESTRATOR (never a worker) may run against its own
+  // checkout, or name a forbidden spelling - not an instruction handed to a worker to execute.
+  'fetch',
+  'worktree add',
+  'worktree remove',
+  'log',
+  'add',
+  "checkout <branch> -- <path>",
+  'restore',
+  'stash',
+  'reset',
+  'apply',
+  'checkout ${leakExample} -- .',
+  '-C',
+  // SCRATCH_RAIL (issue 439): names `git commit -F` only as an example of what a scratch file
+  // might hold, not an instruction to run it now.
+  'commit -F',
+  // fleet-refresh's own Setup-phase prompt (issue 770), which runs before `instrument` is known -
+  // a real run instruction, pre-existing, tracked as an issue-883 follow-up like STEP A-D below.
+  'commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"',
+  // STEP A-D of the deliver prompt (issues 514/544/562/654) and the verify prompt's worktree
+  // report - real run instructions, pre-existing, tracked as an issue-883 follow-up rather than
+  // converted here (see the note above).
+  'ls-remote --exit-code --heads origin ${branch}',
+  'fetch origin',
+  'fetch origin ${defaultBranch} ${branch}',
+  '-C ${orchestratorCwd} worktree add ${scratchFile(',
+  'merge --no-edit origin/${defaultBranch}',
+  'rev-parse --show-toplevel',
+  'add -A',
+  'diff --name-only --diff-filter=U',
+  'checkout --theirs -- <path>',
+  'add -- <path>',
+  'commit --no-edit',
+  'commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"',
+  "grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD",
+  'commit --amend --no-edit',
+  'reset --hard HEAD~1',
+  'merge --abort',
+  "branch -a --list '*${branch}*'",
+  'fetch origin ${branch}',
+  'checkout -B ${branch} origin/${branch}',
+  'read-tree -u --reset <corrected-commit>',
+  'commit -m "repair merge <bad-sha> (issue ${t.number}): conflict markers removed"',
+  'worktree list',
+  'log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1',
+  // Forbidden-spelling / past-tense-refusal mentions (STEP C's "out of bounds here", mergeNote's
+  // "the classifier refused `git merge` twice") - never an instruction to run them.
+  'push --force',
+  'push --force-with-lease',
+  'merge',
+  'merge origin/${scout.defaultBranch}',
+  // A trailing `//` comment fragment ("the baseline never shows in `git status`"), caught because
+  // this line's code half is not itself a comment.
+  'status',
+];
+
+test(`${FLEET_SCRIPT_REL} names no bare backticked git command outside gitSpelling or the explicit allowlist (issue 883)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const fnStart = src.indexOf('function gitSpelling(instrument, args) {');
+  assert.ok(fnStart > -1, 'gitSpelling must still be defined for this scan to exempt its own body');
+  const fnEnd = src.indexOf('\n}', fnStart);
+  let offset = 0;
+  const violations = [];
+  for (const line of src.split('\n')) {
+    const lineStart = offset;
+    offset += line.length + 1;
+    if (lineStart >= fnStart && lineStart <= fnEnd) continue; // gitSpelling's own definition
+    if (/^\s*(\/\/|\*)/.test(line)) continue; // full-line comments and JSDoc
+    const norm = line.replace(/\\`/g, '`');
+    const re = /`git ([^`]*)`/g;
+    let m;
+    while ((m = re.exec(norm))) {
+      if (!GIT_GUARD_ALLOWLIST.includes(m[1])) violations.push(`${JSON.stringify(m[1])} (line starts: ${JSON.stringify(line.slice(0, 60))})`);
+    }
+  }
+  assert.deepEqual(violations, [], 'every bare backticked `git ...` mention must go through gitSpelling or be named in GIT_GUARD_ALLOWLIST with a reason');
+});
+
+test(`${FLEET_SCRIPT_REL} tells no worker to run a bare \`git remote get-url origin\` (issue 883)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(!src.includes('`git remote get-url origin`'),
+    'the command must be built through gitSpelling so the accepted /usr/bin/git spelling leads in a cloud container, never hardcoded as a literal bare backtick');
+  assert.match(src, /gitSpelling\((instrument|mode|'mcp'), 'remote get-url origin'\)/,
+    'gitSpelling must be the thing that produces every remaining "git remote get-url origin" mention');
 });
