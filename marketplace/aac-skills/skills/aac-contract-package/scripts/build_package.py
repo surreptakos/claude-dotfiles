@@ -30,6 +30,12 @@ from verify_package import RS_START_SUFFIX
 import aac_paths
 
 SHEET = 'Equip & Services'
+# The Covered Equipment / Covered Sites tabs, hidden when the deal sells no
+# Repair Service or Inspection RMR (DRAFTER-PRESEND-CHECKLIST.md item 27;
+# same tab list and trigger verify_package.py K-27 checks). The CO tab is
+# left alone (issue 376).
+COVERED_TABS = ('Covered Equipment - Security', 'Covered Equipment - Fire',
+                'Covered Sites')
 CR = '\r\n'
 
 # Schedule template coordinates after the 50/20 expansion (issue 38).
@@ -1649,6 +1655,18 @@ def build_schedule(job, f, L, R):
 
     body = lambda items, tail=1: CR + CR.join('• ' + t for t in items) + CR * tail
     w.set_runs(SHEET, CLAR_CELL, {1: body(clar, 2), 3: body(ex)})
+
+    # Checklist item 27: the Covered Equipment / Covered Sites tabs apply
+    # only when a service line sells Repair Service or Inspection RMR — the
+    # rmr_triggers test verify_package.py uses for J-33 and K-27.
+    rmr_triggers = any(('inspection' in svc['description'].lower()
+                        or 'repair service' in svc['description'].lower())
+                       for st in sites for s in st['systems']
+                       for svc in s['services'])
+    if not rmr_triggers:
+        for tab in COVERED_TABS:
+            if tab in w.sheets:
+                w.set_sheet_hidden(tab)
     w.save(out + '.tmp'); os.replace(out + '.tmp', out)
 
     changed = _verify_zip_parts(bak, out)

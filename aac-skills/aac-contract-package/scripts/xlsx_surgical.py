@@ -556,6 +556,45 @@ class Workbook:
             out.append(_fmt_area(moved))
         return ' '.join(out)
 
+    def set_sheet_hidden(self, name, hidden=True):
+        """Hide (or show) a worksheet tab. Rewrites only the ``state``
+        attribute of that sheet's ``<sheet>`` element in xl/workbook.xml;
+        every worksheet part stays byte-for-byte as it was.
+
+        Idempotent: any existing ``state="..."`` is dropped before the new
+        one is written, and showing a sheet removes the attribute (visible
+        is the OOXML default). Refuses to hide the workbook's active tab
+        (``<workbookView activeTab>``, default 0), since Excel would open on
+        a hidden sheet."""
+        if name not in self.sheets:
+            raise KeyError('no sheet named %r' % name)
+        wb = self.parts['xl/workbook.xml'].decode('utf8')
+        pat = re.compile(r'(<sheet\s+)([^>]*?)(\s*/?>)')
+        esc = _esc(name)
+        idx, found = [0], [None]
+
+        def _sub(m):
+            attrs = m.group(2)
+            name_m = re.search(r'\bname="([^"]+)"', attrs)
+            i = idx[0]; idx[0] += 1
+            if not name_m or name_m.group(1) != esc:
+                return m.group(0)
+            found[0] = i
+            attrs = re.sub(r'\s+state="[^"]*"', '', attrs)
+            if hidden:
+                attrs += ' state="hidden"'
+            return m.group(1) + attrs + m.group(3)
+        wb2 = pat.sub(_sub, wb)
+        if found[0] is None:
+            raise RuntimeError('could not locate <sheet name=%r> in workbook.xml' % name)
+        if hidden:
+            at = re.search(r'<workbookView\b[^>]*?\bactiveTab="(\d+)"', wb)
+            if found[0] == (int(at.group(1)) if at else 0):
+                raise RuntimeError('%r is the active tab; refusing to hide it' % name)
+        if wb2 != wb:
+            self.parts['xl/workbook.xml'] = wb2.encode('utf8')
+            self.dirty.add('xl/workbook.xml')
+
     def save(self, out):
         if 'xl/sharedStrings.xml' in self.dirty:
             self.parts['xl/sharedStrings.xml'] = self.ss.encode('utf8')
