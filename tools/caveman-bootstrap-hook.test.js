@@ -154,6 +154,16 @@ test('the newest release tag is resolved, skipping pre-releases, and an unreacha
   assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'an offline run must not delete the checkout');
 });
 
+test('a failed clone never deletes the checkout a previous run left, whatever its HEAD is tagged', () => {
+  const f = makeHome();
+  const upstream = path.join(f.home, 'upstream');
+  gitRepoWithTags(upstream, ['v1.10.0-rc1']);
+  contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: upstream, CAVEMAN_BOOTSTRAP_REF: 'v1.10.0-rc1' } }));
+  const offline = contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: path.join(f.home, 'gone') } }));
+  assert.match(offline, /skills copied=0 of 3;.*problems=0/);
+  assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'the checkout must survive a clone that failed');
+});
+
 test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', () => {
   const f = makeHome();
   const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{"session_id":"t","source":"startup"}' }));

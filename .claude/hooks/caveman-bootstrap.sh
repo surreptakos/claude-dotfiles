@@ -75,7 +75,11 @@ if [ -z "$REF" ] && [ -z "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
   # Release tags only: a pre-release (v2.8.0-rc1) sorts above its release.
   REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null | sed 's#.*refs/tags/##' | grep -v -- '-' | head -1)"
   # Remote unreachable: stay on the release the last run checked out instead of wiping it.
-  [ -n "$REF" ] || REF="$(git -C "$CHECKOUT" tag --points-at HEAD --sort=-v:refname 2>/dev/null | grep -v -- '-' | head -1)"
+  if [ -z "$REF" ]; then
+    at_head="$(git -C "$CHECKOUT" tag --points-at HEAD --sort=-v:refname 2>/dev/null || true)"
+    REF="$(printf '%s\n' "$at_head" | grep -v -- '-' | head -1)"
+    [ -n "$REF" ] || REF="$(printf '%s\n' "$at_head" | head -1)"
+  fi
 fi
 REF="${REF:-local}"
 
@@ -124,9 +128,15 @@ else
   if [ -n "$have" ] && [ -n "${tagged:-}" ] && [ "$have" = "$tagged" ] && { [ -z "$want" ] || [ -n "$have" ]; }; then
     :
   else
-    rm -rf "$CHECKOUT"
-    if git clone -q --depth 1 --branch "$REF" "$REPO" "$CHECKOUT" 2>&1 | sed 's/^/caveman-bootstrap: git: /' >&2; then
-      :
+    # Clone beside the checkout and swap only on success: a failed clone (offline, bad ref) keeps
+    # the previous run's checkout instead of leaving the session with none.
+    rm -rf "$CHECKOUT.new"
+    git clone -q --depth 1 --branch "$REF" "$REPO" "$CHECKOUT.new" 2>&1 | sed 's/^/caveman-bootstrap: git: /' >&2
+    if [ -d "$CHECKOUT.new/skills" ]; then
+      rm -rf "$CHECKOUT"
+      mv "$CHECKOUT.new" "$CHECKOUT"
+    else
+      rm -rf "$CHECKOUT.new"
     fi
   fi
   SRC="$CHECKOUT"
