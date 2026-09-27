@@ -51,7 +51,11 @@ REQUIRED_HOOKS = [
 
 # Skills the governance and the fleet dispatch by name; a payload missing one of these is not a
 # governed container even if every other skill copied.
-REQUIRED_SKILLS = ['session-check', 'project-harness', 'ticket-fleet', 'caveman']
+REQUIRED_SKILLS = ['session-check', 'project-harness', 'ticket-fleet']
+# Upstream plugins a container installs from their own marketplace (.claude/settings.json
+# enabledPlugins, with caveman-bootstrap.sh as the cloud fallback). A vendored copy in the payload
+# would pin an old release and shadow the upstream one, so the payload must not carry them.
+UPSTREAM_SKILLS = ['caveman', 'i-have-adhd']
 
 fails = []
 
@@ -112,6 +116,12 @@ if marker is not None:
         fail('load-bearing skill(s) not installed: ' + ', '.join(missing_core))
     else:
         pass_('load-bearing skills installed: ' + ', '.join(REQUIRED_SKILLS))
+
+    vendored = [s for s in UPSTREAM_SKILLS if s in named]
+    if vendored:
+        fail('payload vendors upstream plugin skill(s): ' + ', '.join(vendored))
+    else:
+        pass_('payload vendors no upstream plugin skill: ' + ', '.join(UPSTREAM_SKILLS))
 
 # ------------------------------------------------------ 3. governance hooks in user settings ----
 settings = None

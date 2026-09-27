@@ -5,18 +5,17 @@
 # the @caveman-ai/cli proxy. A cloud container on claude.ai/code has neither: the account-level
 # plugin sync installs nothing here (installed_plugins.json stays empty, same as the aac-skills
 # marketplace entry - see .claude/settings.json), so the only deterministic path is the same one
-# session-start.sh uses for the aac-skills payload: install at SessionStart, every session, pinned.
+# session-start.sh uses for the aac-skills payload: install at SessionStart, every session, at the newest release tag.
 #
 # What this hook delivers, in order (every step idempotent, none may fail the session):
 #
-#   1. a checkout of JuliusBrussee/caveman at the pinned tag under ~/.aac-caveman - the plugin's own
+#   1. a checkout of JuliusBrussee/caveman at its newest release tag under ~/.aac-caveman - the plugin's own
 #      hooks read their skills and agents relative to that tree, so it stays plugin-shaped;
 #   2. the "small rock": every skill in the checkout (caveman, caveman-commit, caveman-review,
 #      caveman-compress, caveman-stats, caveman-help, cavecrew, caveman-setup/discover/learn/
 #      manage/optimize/explore/evidence-review and the six work patterns) copied into
-#      ~/.claude/skills/<name>/, AFTER the aac-skills bootstrap has finished copying its payload:
-#      that payload carries the desktop's older copy of `caveman`, and the plugin's newer one has
-#      to land second so it wins;
+#      ~/.claude/skills/<name>/, AFTER the aac-skills bootstrap has finished copying its payload
+#      (the payload no longer vendors a `caveman` copy; the wait still orders the settings writes);
 #   3. the "big rock": @caveman-ai/cli installed under ~/.local (on PATH through $CLAUDE_ENV_FILE),
 #      its signed Go binaries fetched by `caveman setup --install` into ~/.caveman/bin, the local
 #      proxy started in compress mode, and `caveman enable claude` run - which wires the shrink
@@ -69,7 +68,20 @@ MARKER_FILE="$STATE_DIR/state.json"
 AAC_MARKER="$CLAUDE_DIR/hook-state/aac-bootstrap/state.json"
 CHECKOUT="$HOME_DIR/.aac-caveman"
 REPO="${CAVEMAN_BOOTSTRAP_REPO:-https://github.com/JuliusBrussee/caveman.git}"
-REF="${CAVEMAN_BOOTSTRAP_REF:-v2.7.0}"
+# The newest release tag, resolved every run so the skills track upstream the way the
+# caveman@caveman plugin (.claude/settings.json) does. A local source override has no remote to ask.
+REF="${CAVEMAN_BOOTSTRAP_REF:-}"
+if [ -z "$REF" ] && [ -z "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
+  # Release tags only: a pre-release (v2.8.0-rc1) sorts above its release.
+  REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null | sed 's#.*refs/tags/##' | grep -v -- '-' | head -1)"
+  # Remote unreachable: stay on the release the last run checked out instead of wiping it.
+  if [ -z "$REF" ]; then
+    at_head="$(git -C "$CHECKOUT" tag --points-at HEAD --sort=-v:refname 2>/dev/null || true)"
+    REF="$(printf '%s\n' "$at_head" | grep -v -- '-' | head -1)"
+    [ -n "$REF" ] || REF="$(printf '%s\n' "$at_head" | head -1)"
+  fi
+fi
+REF="${REF:-local}"
 
 # The CLI version is the one pin shared with the desktop installer (issue 825): both read
 # lib/caveman-cli.json so a version bump lands on cloud and desktop from a single edit. An env
@@ -99,12 +111,13 @@ note() { echo "caveman-bootstrap: $*" >&2; }
 problem() { problems+=("$1"); note "$1"; }
 
 # ---------------------------------------------------------------------------
-# 1. checkout at the pinned tag (or the local source override).
+# 1. checkout at the newest release tag (or the local source override).
 # ---------------------------------------------------------------------------
 SRC=""
 if [ -n "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
   SRC="$CAVEMAN_BOOTSTRAP_SOURCE"
 else
+  rm -rf "$CHECKOUT.new"  # a clone a killed run left half-done
   want="$(git ls-remote --tags "$REPO" "refs/tags/$REF" 2>/dev/null | head -1 | cut -f1 || true)"
   have=""
   if [ -d "$CHECKOUT/.git" ]; then
@@ -116,9 +129,14 @@ else
   if [ -n "$have" ] && [ -n "${tagged:-}" ] && [ "$have" = "$tagged" ] && { [ -z "$want" ] || [ -n "$have" ]; }; then
     :
   else
-    rm -rf "$CHECKOUT"
-    if git clone -q --depth 1 --branch "$REF" "$REPO" "$CHECKOUT" 2>&1 | sed 's/^/caveman-bootstrap: git: /' >&2; then
-      :
+    # Clone beside the checkout and swap only on success: a failed clone (offline, bad ref) keeps
+    # the previous run's checkout instead of leaving the session with none.
+    git clone -q --depth 1 --branch "$REF" "$REPO" "$CHECKOUT.new" 2>&1 | sed 's/^/caveman-bootstrap: git: /' >&2
+    if [ -d "$CHECKOUT.new/skills" ] && [ -f "$CHECKOUT.new/src/hooks/caveman-activate.js" ]; then
+      rm -rf "$CHECKOUT"
+      mv "$CHECKOUT.new" "$CHECKOUT"
+    else
+      rm -rf "$CHECKOUT.new"
     fi
   fi
   SRC="$CHECKOUT"

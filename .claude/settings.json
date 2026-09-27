@@ -18,6 +18,13 @@
     "runs the plugin's SessionStart hook. Not reproduced 2026-09-11: that session's",
     "installed_plugins.json was empty (evidence on issue 106).",
     "",
+    "The same two keys declare the third-party plugins a desktop runs (profile/claude/settings.json):",
+    "caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, and pyright-lsp and",
+    "typescript-lsp from claude-plugins-official. Each installs from its upstream marketplace, so a",
+    "session gets the current release; none is vendored into the aac-skills payload. The caveman",
+    "proxy is not part of the plugin: caveman-bootstrap.sh below installs the CLI and starts it.",
+    "The LSP plugins carry config only; .claude/hooks/lsp-servers.sh installs the binaries they launch.",
+    "",
     ".claude/hooks/session-start.sh runs first on SessionStart and only in a cloud",
     "container (CLAUDE_CODE_REMOTE=true): installs gh so the session has the same",
     "GitHub instrument a local one has. Only `gh api` works through the cloud proxy;",
@@ -50,8 +57,8 @@
     "repo by project-harness step 16 (issue 218).",
     "",
     ".claude/hooks/caveman-bootstrap.sh (SessionStart) and caveman-prompt.sh",
-    "(UserPromptSubmit) install the full caveman suite (JuliusBrussee/caveman, pinned",
-    "tag) in a cloud container, where neither the caveman@caveman plugin the desktop",
+    "(UserPromptSubmit) install the full caveman suite (JuliusBrussee/caveman, newest",
+    "release tag) in a cloud container, where neither the caveman@caveman plugin the desktop",
     "runs nor the @caveman-ai/cli proxy exists: the twenty plugin skills, the plugin's",
     "activate and mode-tracker hooks, the CLI with its signed Go binaries, the local",
     "proxy, and `caveman enable claude` (shrink hook, native hooks, recovery MCP in",
@@ -96,11 +103,33 @@
         "source": "github",
         "repo": "typesafe-ai/skills"
       }
+    },
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    },
+    "i-have-adhd": {
+      "source": {
+        "source": "github",
+        "repo": "ayghri/i-have-adhd"
+      }
+    },
+    "claude-plugins-official": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/anthropics/claude-plugins-official.git"
+      }
     }
   },
   "enabledPlugins": {
     "aac-skills@claude-dotfiles": true,
-    "typesafe@typesafe-ai": true
+    "typesafe@typesafe-ai": true,
+    "caveman@caveman": true,
+    "i-have-adhd@i-have-adhd": true,
+    "pyright-lsp@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true
   },
   "hooks": {
     "SessionStart": [
@@ -121,6 +150,16 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/caveman-bootstrap.sh\"",
             "timeout": 600,
             "statusMessage": "Cloud container: installing the caveman suite..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/lsp-servers.sh\"",
+            "timeout": 180,
+            "statusMessage": "Cloud container: installing language servers..."
           }
         ]
       }

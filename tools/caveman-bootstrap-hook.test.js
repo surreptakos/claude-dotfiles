@@ -8,7 +8,7 @@
  *
  *   - a local session (no CLAUDE_CODE_REMOTE) exits 0 and prints nothing from either hook;
  *   - every skill dir carrying a SKILL.md lands in ~/.claude/skills/<name>/, and the plugin's
- *     `caveman` copy replaces the one the aac-skills payload put there first;
+ *     `caveman` copy replaces any older copy already there;
  *   - the additionalContext is one JSON line under the 2 KB cap (probe #175) that carries the
  *     marker sentence and the plugin's own activation banner, with the statusline nudge cut;
  *   - a second run copies nothing and still reports 0 problems (idempotent);
@@ -108,7 +108,7 @@ test('skills land under ~/.claude/skills and the plugin copy of caveman replaces
       `---\nname: ${name}\n---\nplugin copy of ${name}\n`);
   }
   assert.ok(!fs.existsSync(path.join(f.home, '.claude', 'skills', 'generated')), 'a dir without SKILL.md is not a skill');
-  assert.match(ctx, /^CAVEMAN-BOOTSTRAP MARKER: ref v[\d.]+; skills copied=3 of 3; cli: skipped; proxy: skipped; enable: skipped; problems=0/);
+  assert.match(ctx, /^CAVEMAN-BOOTSTRAP MARKER: ref local; skills copied=3 of 3; cli: skipped; proxy: skipped; enable: skipped; problems=0/);
   assert.doesNotMatch(ctx, /PROBLEMS:/);
   const marker = JSON.parse(fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8'));
   assert.deepEqual([...marker.skills].sort(), ['caveman', 'caveman-commit', 'lean-build']);
@@ -131,7 +131,37 @@ test('a checkout path holding backslashes lands in the marker escaped, so the ma
   const raw = fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8');
   const marker = JSON.parse(raw);
   assert.equal(marker.source, source);
-  assert.equal(marker.ref, 'v2.7.0');
+  assert.equal(marker.ref, 'local', 'a local source override has no remote tag to resolve');
+});
+
+// No CAVEMAN_BOOTSTRAP_SOURCE and no _REF: the hook asks the remote for its newest release tag.
+function gitRepoWithTags(dir, tags) {
+  fixtureCheckout(dir);
+  const g = (...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('add', '-A');
+  g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'fixture');
+  for (const t of tags) g('tag', t);
+}
+
+test('the newest release tag is resolved, skipping pre-releases, and an unreachable remote keeps the last checkout', () => {
+  const f = makeHome();
+  const upstream = path.join(f.home, 'upstream');
+  gitRepoWithTags(upstream, ['v1.0.0', 'v1.2.0', 'v1.10.0-rc1']);
+  const online = contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: upstream } }));
+  assert.match(online, /ref v1\.2\.0; skills copied=\d+ of 3;.*problems=0/);
+  const offline = contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: path.join(f.home, 'gone') } }));
+  assert.match(offline, /ref v1\.2\.0; skills copied=0 of 3;.*problems=0/);
+  assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'an offline run must not delete the checkout');
+});
+
+test('a failed clone never deletes the checkout a previous run left, whatever its HEAD is tagged', () => {
+  const f = makeHome();
+  const upstream = path.join(f.home, 'upstream');
+  gitRepoWithTags(upstream, ['v1.10.0-rc1']);
+  contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: upstream, CAVEMAN_BOOTSTRAP_REF: 'v1.10.0-rc1' } }));
+  const offline = contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: path.join(f.home, 'gone') } }));
+  assert.match(offline, /skills copied=0 of 3;.*problems=0/);
+  assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'the checkout must survive a clone that failed');
 });
 
 test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', () => {

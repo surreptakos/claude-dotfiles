@@ -3,10 +3,10 @@ name: grill-me
 description: A relentless interview to sharpen a plan or design.
 disable-model-invocation: true
 metadata:
-  modified: "2026-08-20T00:41:59Z"
-  previous-modified: "2026-08-12T21:14:59Z"
-  revision: "1"
-  content-sha: "18b9a1c92745"
+  modified: "2026-09-27T19:31:03Z"
+  previous-modified: "2026-08-20T00:41:59Z"
+  revision: "2"
+  content-sha: "c5615e1b2631"
 ---
 
-Run a `/grilling` session.
+Call the Skill tool with "grilling".
