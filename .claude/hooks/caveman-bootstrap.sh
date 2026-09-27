@@ -5,7 +5,7 @@
 # the @caveman-ai/cli proxy. A cloud container on claude.ai/code has neither: the account-level
 # plugin sync installs nothing here (installed_plugins.json stays empty, same as the aac-skills
 # marketplace entry - see .claude/settings.json), so the only deterministic path is the same one
-# session-start.sh uses for the aac-skills payload: install at SessionStart, every session, pinned.
+# session-start.sh uses for the aac-skills payload: install at SessionStart, every session, at the newest release tag.
 #
 # What this hook delivers, in order (every step idempotent, none may fail the session):
 #
@@ -72,7 +72,10 @@ REPO="${CAVEMAN_BOOTSTRAP_REPO:-https://github.com/JuliusBrussee/caveman.git}"
 # caveman@caveman plugin (.claude/settings.json) does. A local source override has no remote to ask.
 REF="${CAVEMAN_BOOTSTRAP_REF:-}"
 if [ -z "$REF" ] && [ -z "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
-  REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null | head -1 | sed 's#.*refs/tags/##')"
+  # Release tags only: a pre-release (v2.8.0-rc1) sorts above its release.
+  REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null | sed 's#.*refs/tags/##' | grep -v -- '-' | head -1)"
+  # Remote unreachable: stay on the release the last run checked out instead of wiping it.
+  [ -n "$REF" ] || REF="$(git -C "$CHECKOUT" tag --points-at HEAD --sort=-v:refname 2>/dev/null | grep -v -- '-' | head -1)"
 fi
 REF="${REF:-local}"
 

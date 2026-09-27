@@ -134,6 +134,26 @@ test('a checkout path holding backslashes lands in the marker escaped, so the ma
   assert.equal(marker.ref, 'local', 'a local source override has no remote tag to resolve');
 });
 
+// No CAVEMAN_BOOTSTRAP_SOURCE and no _REF: the hook asks the remote for its newest release tag.
+function gitRepoWithTags(dir, tags) {
+  fixtureCheckout(dir);
+  const g = (...a) => spawnSync('git', ['-C', dir, ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('add', '-A');
+  g('-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'fixture');
+  for (const t of tags) g('tag', t);
+}
+
+test('the newest release tag is resolved, skipping pre-releases, and an unreachable remote keeps the last checkout', () => {
+  const f = makeHome();
+  const upstream = path.join(f.home, 'upstream');
+  gitRepoWithTags(upstream, ['v1.0.0', 'v1.2.0', 'v1.10.0-rc1']);
+  const online = contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: upstream } }));
+  assert.match(online, /ref v1\.2\.0; skills copied=\d+ of 3;.*problems=0/);
+  const offline = contextOf(run(BOOTSTRAP, { ...f, source: '', stdin: '{}', extraEnv: { CAVEMAN_BOOTSTRAP_REPO: path.join(f.home, 'gone') } }));
+  assert.match(offline, /ref v1\.2\.0; skills copied=0 of 3;.*problems=0/);
+  assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'an offline run must not delete the checkout');
+});
+
 test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', () => {
   const f = makeHome();
   const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{"session_id":"t","source":"startup"}' }));
