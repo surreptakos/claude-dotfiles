@@ -57,7 +57,9 @@ never from an intermediate one, so `previous-modified` names the published versi
 
 - `aac-skills/` — every skill, one tree, hand-edited. The packager builds the plugin payload from
   it, and that plugin is how a desktop gets the skills too: pull no longer writes `~/.claude/skills`
-  (issue 734), so a skill named by short name must ship in the payload.
+  (issue 734), so a skill named by short name must ship in the payload. Skills copied from another
+  repo (the matt-pocock set) are resynced only after diffing each file against every upstream
+  revision: lines matching no revision are local edits to re-apply, not drift (PR 928).
 - `profile/` — what a desktop consumer needs beyond the skills: `profile/claude/CLAUDE.md` (the
   global rules, and the one source the payload's rules text is copied from; pull does not restore
   it - a desktop gets the rules from the plugin hook and pull writes `global-pointer.md` to
