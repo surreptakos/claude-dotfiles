@@ -117,6 +117,7 @@ SRC=""
 if [ -n "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
   SRC="$CAVEMAN_BOOTSTRAP_SOURCE"
 else
+  rm -rf "$CHECKOUT.new"  # a clone a killed run left half-done
   want="$(git ls-remote --tags "$REPO" "refs/tags/$REF" 2>/dev/null | head -1 | cut -f1 || true)"
   have=""
   if [ -d "$CHECKOUT/.git" ]; then
@@ -130,9 +131,8 @@ else
   else
     # Clone beside the checkout and swap only on success: a failed clone (offline, bad ref) keeps
     # the previous run's checkout instead of leaving the session with none.
-    rm -rf "$CHECKOUT.new"
     git clone -q --depth 1 --branch "$REF" "$REPO" "$CHECKOUT.new" 2>&1 | sed 's/^/caveman-bootstrap: git: /' >&2
-    if [ -d "$CHECKOUT.new/skills" ]; then
+    if [ -d "$CHECKOUT.new/skills" ] && [ -f "$CHECKOUT.new/src/hooks/caveman-activate.js" ]; then
       rm -rf "$CHECKOUT"
       mv "$CHECKOUT.new" "$CHECKOUT"
     else
