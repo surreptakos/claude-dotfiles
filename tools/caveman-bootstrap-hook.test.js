@@ -8,7 +8,7 @@
  *
  *   - a local session (no CLAUDE_CODE_REMOTE) exits 0 and prints nothing from either hook;
  *   - every skill dir carrying a SKILL.md lands in ~/.claude/skills/<name>/, and the plugin's
- *     `caveman` copy replaces the one the aac-skills payload put there first;
+ *     `caveman` copy replaces any older copy already there;
  *   - the additionalContext is one JSON line under the 2 KB cap (probe #175) that carries the
  *     marker sentence and the plugin's own activation banner, with the statusline nudge cut;
  *   - a second run copies nothing and still reports 0 problems (idempotent);
@@ -108,7 +108,7 @@ test('skills land under ~/.claude/skills and the plugin copy of caveman replaces
       `---\nname: ${name}\n---\nplugin copy of ${name}\n`);
   }
   assert.ok(!fs.existsSync(path.join(f.home, '.claude', 'skills', 'generated')), 'a dir without SKILL.md is not a skill');
-  assert.match(ctx, /^CAVEMAN-BOOTSTRAP MARKER: ref v[\d.]+; skills copied=3 of 3; cli: skipped; proxy: skipped; enable: skipped; problems=0/);
+  assert.match(ctx, /^CAVEMAN-BOOTSTRAP MARKER: ref local; skills copied=3 of 3; cli: skipped; proxy: skipped; enable: skipped; problems=0/);
   assert.doesNotMatch(ctx, /PROBLEMS:/);
   const marker = JSON.parse(fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8'));
   assert.deepEqual([...marker.skills].sort(), ['caveman', 'caveman-commit', 'lean-build']);
@@ -131,7 +131,7 @@ test('a checkout path holding backslashes lands in the marker escaped, so the ma
   const raw = fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8');
   const marker = JSON.parse(raw);
   assert.equal(marker.source, source);
-  assert.equal(marker.ref, 'v2.7.0');
+  assert.equal(marker.ref, 'local', 'a local source override has no remote tag to resolve');
 });
 
 test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', () => {

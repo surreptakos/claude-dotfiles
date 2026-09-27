@@ -9,14 +9,13 @@
 #
 # What this hook delivers, in order (every step idempotent, none may fail the session):
 #
-#   1. a checkout of JuliusBrussee/caveman at the pinned tag under ~/.aac-caveman - the plugin's own
+#   1. a checkout of JuliusBrussee/caveman at its newest release tag under ~/.aac-caveman - the plugin's own
 #      hooks read their skills and agents relative to that tree, so it stays plugin-shaped;
 #   2. the "small rock": every skill in the checkout (caveman, caveman-commit, caveman-review,
 #      caveman-compress, caveman-stats, caveman-help, cavecrew, caveman-setup/discover/learn/
 #      manage/optimize/explore/evidence-review and the six work patterns) copied into
-#      ~/.claude/skills/<name>/, AFTER the aac-skills bootstrap has finished copying its payload:
-#      that payload carries the desktop's older copy of `caveman`, and the plugin's newer one has
-#      to land second so it wins;
+#      ~/.claude/skills/<name>/, AFTER the aac-skills bootstrap has finished copying its payload
+#      (the payload no longer vendors a `caveman` copy; the wait still orders the settings writes);
 #   3. the "big rock": @caveman-ai/cli installed under ~/.local (on PATH through $CLAUDE_ENV_FILE),
 #      its signed Go binaries fetched by `caveman setup --install` into ~/.caveman/bin, the local
 #      proxy started in compress mode, and `caveman enable claude` run - which wires the shrink
@@ -69,7 +68,13 @@ MARKER_FILE="$STATE_DIR/state.json"
 AAC_MARKER="$CLAUDE_DIR/hook-state/aac-bootstrap/state.json"
 CHECKOUT="$HOME_DIR/.aac-caveman"
 REPO="${CAVEMAN_BOOTSTRAP_REPO:-https://github.com/JuliusBrussee/caveman.git}"
-REF="${CAVEMAN_BOOTSTRAP_REF:-v2.7.0}"
+# The newest release tag, resolved every run so the skills track upstream the way the
+# caveman@caveman plugin (.claude/settings.json) does. A local source override has no remote to ask.
+REF="${CAVEMAN_BOOTSTRAP_REF:-}"
+if [ -z "$REF" ] && [ -z "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
+  REF="$(git ls-remote --tags --refs --sort=-v:refname "$REPO" 'v*' 2>/dev/null | head -1 | sed 's#.*refs/tags/##')"
+fi
+REF="${REF:-local}"
 
 # The CLI version is the one pin shared with the desktop installer (issue 825): both read
 # lib/caveman-cli.json so a version bump lands on cloud and desktop from a single edit. An env
@@ -99,7 +104,7 @@ note() { echo "caveman-bootstrap: $*" >&2; }
 problem() { problems+=("$1"); note "$1"; }
 
 # ---------------------------------------------------------------------------
-# 1. checkout at the pinned tag (or the local source override).
+# 1. checkout at the newest release tag (or the local source override).
 # ---------------------------------------------------------------------------
 SRC=""
 if [ -n "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
