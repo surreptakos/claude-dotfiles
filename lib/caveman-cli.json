@@ -1,0 +1,12 @@
+{
+  "_comment": [
+    "The one pin for the @caveman-ai/cli npm package version, shared by every installer that",
+    "wires caveman into a Claude Code home: the cloud bootstrap hook",
+    "(.claude/hooks/caveman-bootstrap.sh) and the desktop installer",
+    "(tools/caveman-desktop-install.ps1, run from sync.ps1 -Mode pull). Bump cliVersion here and",
+    "both pick it up on their next run - no more editing the version in two languages (issue 825).",
+    "An env var still wins on either side (CAVEMAN_BOOTSTRAP_CLI_VERSION, -CliVersion) for a",
+    "one-off pin during testing."
+  ],
+  "cliVersion": "1.3.4"
+}

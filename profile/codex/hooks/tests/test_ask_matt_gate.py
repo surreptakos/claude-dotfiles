@@ -525,6 +525,76 @@ class AskMattGateTests(unittest.TestCase):
                     declared = self.run_claude_declare(f"s-{name}", turn["state"]["nonce"], flow, state_dir)
                     self.assertEqual(declared.returncode, 0, declared.stderr)
 
+    # Issue 844: the routine route, a committed setting that is off by default.
+    ROUTINE_TASK = (
+        "<scheduled-task name=\"triage\">\n---\nname: triage\n---\nroute: direct-answer\n"
+        "writes:\n- notes/*.md\n- ~/triage-log.txt\n\nTriage Todoist.\n</scheduled-task>"
+    )
+
+    def _write(self, state_dir: Path, sid: str, path: str, cwd: str) -> dict:
+        return json.loads(self.run_gate(
+            "claude-pre-tool",
+            {"session_id": sid, "cwd": cwd, "tool_name": "Write",
+             "tool_input": {"file_path": path, "content": "x"}},
+            state_dir, caveman="keep",
+        ).stdout)
+
+    def _settings(self, folder: Path, routine_route: bool) -> None:
+        path = folder / "route-gate.json"
+        path.write_text(json.dumps({"routine_route": routine_route}), encoding="utf-8")
+        os.environ["ASK_MATT_ROUTE_SETTINGS"] = str(path)
+        self.addCleanup(os.environ.pop, "ASK_MATT_ROUTE_SETTINGS", None)
+
+    def test_routine_route_off_by_default_leaves_scheduled_runs_as_before(self) -> None:
+        committed = json.loads((SCRIPT.parent / "route-gate.json").read_text(encoding="utf-8"))
+        self.assertIs(committed["routine_route"], False)
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)  # no ASK_MATT_ROUTE_SETTINGS: the committed file is read
+            turn = self._routed_turn(state_dir, "s-off", self.ROUTINE_TASK, json.dumps({"correction": 0.01}))
+            self.assertIsNone(turn["state"]["flow"])
+            self.assertNotIn("routine", turn["state"])
+            self.assertNotIn("ROUTINE ROUTE", turn["context"])
+            declared = self.run_claude_declare("s-off", turn["state"]["nonce"], "implement", state_dir)
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            # implement is a build route (issue 842): it opens its skill before its first edit.
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-off", "tool_name": "Skill", "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
+            self.assertEqual(self._write(state_dir, "s-off", str(state_dir / "anything.py"), folder), {})
+
+    def test_routine_route_on_limits_a_scheduled_run_to_its_listed_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._settings(state_dir, True)
+            os.environ["TYPESAFE_JEV_STUB"] = json.dumps({"correction": 0.01})
+            self.addCleanup(os.environ.__setitem__, "TYPESAFE_JEV_STUB", "off")
+            result = self.run_gate("claude-prompt", {"session_id": "s-on", "cwd": folder,
+                                                     "prompt": self.ROUTINE_TASK}, state_dir)
+            context = json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
+            state = self._state(state_dir, "s-on")
+            self.assertEqual(state["flow"], "direct-answer")  # the task file's route, recorded
+            self.assertIn("ROUTINE ROUTE: direct-answer", context)
+            self.assertEqual(self._write(state_dir, "s-on", str(state_dir / "notes" / "a.md"), folder), {})
+            self.assertEqual(self._write(state_dir, "s-on", "notes/b.md", folder), {})
+            self.assertEqual(self._write(state_dir, "s-on", os.path.expanduser("~/triage-log.txt"), folder), {})
+            denied = self._write(state_dir, "s-on", str(state_dir / "script.py"), folder)
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("Routine route", denied["hookSpecificOutput"]["permissionDecisionReason"])
+            refused = self.run_claude_declare("s-on", state["nonce"], "implement", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("routine route", refused.stderr)
+            # A task file naming no route and no writes runs as `routine` and may write nothing.
+            bare = "<scheduled-task name=\"digest\">Send the digest.</scheduled-task>"
+            self.run_gate("claude-prompt", {"session_id": "s-bare", "cwd": folder, "prompt": bare}, state_dir)
+            self.assertEqual(self._state(state_dir, "s-bare")["flow"], "routine")
+            denied = self._write(state_dir, "s-bare", str(state_dir / "notes" / "a.md"), folder)
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            # An ordinary message is untouched by the setting.
+            self.run_gate("claude-prompt", {"session_id": "s-user", "prompt": "hello"}, state_dir)
+            self.assertNotIn("routine", self._state(state_dir, "s-user"))
+
     def test_jev_unavailable_declarations_behave_as_before(self) -> None:
         prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
         # "off", and a canned map missing one tree question: the whole request is one call, so a
@@ -540,6 +610,243 @@ class AskMattGateTests(unittest.TestCase):
                 self.assertNotIn("ROUTE PICKED BY JEV", turn["context"])
                 declared = self.run_claude_declare("s-down", turn["state"]["nonce"], "direct-answer", state_dir)
                 self.assertEqual(declared.returncode, 0, declared.stderr)
+
+    # Issue 840: continuation. A turn ends through Stop (which keeps the last question), then the
+    # next message is routed with the continuation Choice riding the same canned request.
+    GRILL = dict(kind="build", settled="unsettled", codebase="repo")
+
+    def _then(self, state_dir: Path, sid: str, reply: str, prompt: str, stub: str) -> dict:
+        transcript = self._transcript(state_dir, reply)
+        self.run_gate("claude-stop", {"session_id": sid, "transcript_path": transcript,
+                                      "stop_hook_active": True}, state_dir)
+        return self._routed_turn(state_dir, sid, prompt, stub)
+
+    def _continuing(self, continuation: str, **picks: str) -> str:
+        answers = json.loads(self._canned(**picks))
+        answers["route.continuation"] = continuation
+        return json.dumps(answers)
+
+    def test_a_bare_letter_after_a_grill_question_keeps_grill_with_docs(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._routed_turn(state_dir, "s-a", "I need a feedback loop, not sure how", self._canned(**self.GRILL))
+            question = "Where should feedback land? A) a file B) an issue"
+            # The tree alone would call "A" a question; continuation keeps the grill.
+            turn = self._then(state_dir, "s-a", question, "A", self._continuing("same", kind="question"))
+            self.assertEqual(turn["state"]["flow"], "grill-with-docs")
+            self.assertIn("continuation=same", turn["state"]["route_path"])
+            self.assertIn("ROUTE PICKED BY JEV: grill-with-docs", turn["context"])
+
+    def test_build_it_after_a_settled_grill_moves_one_step_and_never_further(self) -> None:
+        # The tree's settledness picks between the grill's two map moves; a foggy or unsettled
+        # tree answer still yields a listed move, never tickets or a skip.
+        for settled, route in (("single", "implement"), ("multi", "to-spec"), ("foggy", "to-spec")):
+            with self.subTest(settled=settled), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self._routed_turn(state_dir, "s-b", "I need a feedback loop", self._canned(**self.GRILL))
+                turn = self._then(state_dir, "s-b", "Settled. Anything else?", "build it",
+                                  self._continuing("next", kind="build", settled=settled))
+                self.assertEqual(turn["state"]["flow"], route)
+        moves = {"to-spec": "to-tickets", "to-tickets": "implement", "wayfinder": "to-spec"}
+        for previous, route in moves.items():
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self._routed_turn(state_dir, "s-m", "start", self._canned(kind="question"))
+                state = self._state(state_dir, "s-m")
+                state["flow"] = previous  # a picked route no tree leaf reaches (to-tickets)
+                (state_dir / "claude--s-m.json").write_text(json.dumps(state), encoding="utf-8")
+                turn = self._then(state_dir, "s-m", "Done.", "next", self._continuing("next", kind="question"))
+                self.assertEqual(turn["state"]["flow"], route)
+
+    def test_a_new_topic_routes_from_the_top_of_the_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._routed_turn(state_dir, "s-n", "I need a feedback loop", self._canned(**self.GRILL))
+            turn = self._then(state_dir, "s-n", "A or B?", "the sync script is crashing",
+                              self._continuing("new", kind="broken"))
+            self.assertEqual(turn["state"]["flow"], "diagnosing-bugs")
+            other = self._then(state_dir, "s-n", "Found it.", "draft the Smith contract",
+                               self._continuing("new", scope="other"))
+            self.assertIsNone(other["state"]["flow"])
+
+    def test_next_step_with_no_map_move_falls_back_to_the_tree(self) -> None:
+        # implement and direct-answer have no next step on the map; "next" never invents one.
+        for previous in (dict(kind="build", settled="single"), dict(kind="question")):
+            with self.subTest(previous=previous), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self._routed_turn(state_dir, "s-x", "start", self._canned(**previous))
+                turn = self._then(state_dir, "s-x", "Built.", "tickets",
+                                  self._continuing("next", kind="review"))
+                self.assertEqual(turn["state"]["flow"], "code-review")
+
+    def test_a_route_stop_reconciled_is_not_continued(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            first = self._routed_turn(state_dir, "s-r", "fix it", "off")
+            self.run_claude_declare("s-r", first["state"]["nonce"], "implement", state_dir)
+            self._then(state_dir, "s-r", "Done.", "and?", "off")  # undeclared: Stop reconciles
+            transcript = self._transcript(state_dir, "Which one?")
+            self.run_gate("claude-stop", {"session_id": "s-r", "transcript_path": transcript}, state_dir)
+            self.assertTrue(self._state(state_dir, "s-r")["flow_reconciled"])
+            # No continuation question is asked: a stub without it still answers, from the top.
+            turn = self._routed_turn(state_dir, "s-r", "A", self._canned(kind="question"))
+            self.assertEqual(turn["state"]["flow"], "direct-answer")
+            self.assertNotIn("route_unchecked", turn["state"])
+
+    def test_continuation_rides_the_one_jev_request_with_the_tree(self) -> None:
+        # One request: a canned map missing either the continuation or a tree answer leaves Jev
+        # unavailable for the whole prompt, correction and route alike.
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._routed_turn(state_dir, "s-1", "I need a feedback loop", self._canned(**self.GRILL))
+            no_tree = json.loads(self._continuing("same"))
+            del no_tree["route.scope"]
+            for stub in (self._canned(), json.dumps(no_tree)):
+                with self.subTest(stub=stub):
+                    state = self._state(state_dir, "s-1")
+                    state["flow"] = "grill-with-docs"
+                    (state_dir / "claude--s-1.json").write_text(json.dumps(state), encoding="utf-8")
+                    turn = self._then(state_dir, "s-1", "A or B?", "A", stub)
+                    self.assertTrue(turn["state"]["route_unchecked"])
+                    self.assertIsNone(turn["state"]["flow"])
+
+    # Issue 843: when Jev could not answer at all, the model picked the route itself, and the reply
+    # must say so with a fixed, checkable opener rather than staying silent about the fallback.
+    def test_jev_unavailable_marks_the_turn_route_unchecked(self) -> None:
+        prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-unchecked", prompt, "off")
+            self.assertTrue(turn["state"]["route_unchecked"])
+            self.assertIn("ROUTE UNCHECKED", turn["context"])
+            self.assertIn(self.gate_module().ROUTE_UNCHECKED_OPENER, turn["context"])
+            # Declaring a route must not erase the finding — the lint has to see it too.
+            declared = self.run_claude_declare(
+                "s-unchecked", turn["state"]["nonce"], "direct-answer", state_dir
+            )
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            self.assertTrue(self._state(state_dir, "s-unchecked")["route_unchecked"])
+
+    def test_jev_answering_leaves_the_turn_checked(self) -> None:
+        prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-checked", prompt, self._canned(kind="question"))
+            self.assertNotIn("route_unchecked", turn["state"])
+            self.assertNotIn("ROUTE UNCHECKED", turn["context"])
+
+    def gate_module(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test_843", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_lint_refuses_an_unchecked_reply_without_the_opener_and_accepts_it_with_one(self) -> None:
+        prompt = "I need to be able to give feedback to the model. Not sure how best to do that."
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-lint-unchecked", prompt, "off")
+            self.run_claude_declare(
+                "s-lint-unchecked", turn["state"]["nonce"], "direct-answer", state_dir
+            )
+            missing = self.run_presend_lint(
+                "s-lint-unchecked", "Queue empty.\nNext: send it.", state_dir, caveman="keep"
+            )
+            self.assertEqual(missing.returncode, 1)
+            self.assertIn("route unchecked: Jev unavailable", missing.stdout)
+            present = self.run_presend_lint(
+                "s-lint-unchecked",
+                "Route unchecked: Jev unavailable.\nQueue empty.\nNext: send it.",
+                state_dir,
+                caveman="keep",
+            )
+            self.assertEqual(present.returncode, 0, present.stdout)
+
+    def test_lint_leaves_a_jev_answered_turn_unaffected(self) -> None:
+        prompt = "what does /ask-matt tell you to do, and why didn't it force you into /to-spec?"
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            turn = self._routed_turn(state_dir, "s-lint-checked", prompt, self._canned(kind="question"))
+            self.run_claude_declare(
+                "s-lint-checked", turn["state"]["nonce"], "direct-answer", state_dir
+            )
+            clean = self.run_presend_lint(
+                "s-lint-checked", "Queue empty.\nNext: send it.", state_dir, caveman="keep"
+            )
+            self.assertEqual(clean.returncode, 0, clean.stdout)
+
+    # Issue 841: the model may appeal Jev's route once per turn, and the reply must show it.
+    def run_appeal(self, sid: str, nonce: str, wanted: str, reason: str, state_dir: Path,
+                   settings: Path | None = None) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ)
+        env["ASK_MATT_GATE_STATE_DIR"] = str(state_dir)
+        env["GOVERNANCE_CLAUDE_HOME"] = str(state_dir / "claude-home")
+        if settings is not None:
+            env["ASK_MATT_ROUTE_SETTINGS"] = str(settings)
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "appeal-claude", sid, nonce, wanted, reason],
+            text=True, capture_output=True, env=env, check=False,
+        )
+
+    def _appealed_turn(self, state_dir: Path, sid: str) -> str:
+        turn = self._routed_turn(state_dir, sid, "what does the gate do?", self._canned(kind="question"))
+        self.assertIn("appeal-claude", turn["context"])
+        nonce = turn["state"]["nonce"]
+        done = self.run_appeal(sid, nonce, "grill-with-docs", "it asks for a design", state_dir)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return nonce
+
+    def test_an_appeal_switches_the_route_and_logs_both_routes_and_the_reason(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            nonce = self._appealed_turn(state_dir, "s-appeal")
+            self.assertEqual(self._state(state_dir, "s-appeal")["flow"], "grill-with-docs")
+            log = (state_dir / "route-appeals.log").read_text(encoding="utf-8")
+            self.assertIn("wanted=grill-with-docs\tjev=direct-answer\treason=it asks for a design", log)
+            refused = self.run_claude_declare("s-appeal", nonce, "direct-answer", state_dir)
+            self.assertEqual(refused.returncode, 2)
+            declared = self.run_claude_declare("s-appeal", nonce, "grill-with-docs", state_dir)
+            self.assertEqual(declared.returncode, 0, declared.stderr)
+            # Declaring the appealed route keeps the appeal, so the lint still demands the line.
+            self.assertEqual(self._state(state_dir, "s-appeal")["appeal"]["nonce"], nonce)
+
+    def test_a_second_appeal_in_the_same_turn_is_refused(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            nonce = self._appealed_turn(state_dir, "s-twice")
+            again = self.run_appeal("s-twice", nonce, "to-spec", "changed my mind", state_dir)
+            self.assertEqual(again.returncode, 2)
+            self.assertIn("already appealed", again.stderr)
+            self.assertEqual(self._state(state_dir, "s-twice")["flow"], "grill-with-docs")
+
+    def test_the_lint_refuses_an_appealed_reply_until_its_first_line_states_the_appeal(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._appealed_turn(state_dir, "s-line")
+            body = "Grill started.\nNext: answer question one."
+            refused = self.run_presend_lint("s-line", body, state_dir)
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("route appeal not shown", refused.stdout)
+            line = "Route appeal: grill-with-docs instead of direct-answer, because it asks for a design"
+            accepted = self.run_presend_lint("s-line", f"{line}\n{body}", state_dir)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout)
+
+    def test_appeals_off_in_the_settings_file_refuses_the_appeal(self) -> None:
+        committed = json.loads((SCRIPT.parent / "route-gate.json").read_text(encoding="utf-8"))
+        self.assertIs(committed["appeals"], True)  # the committed default
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            settings = state_dir / "route-gate.json"
+            settings.write_text(json.dumps({**committed, "appeals": False}), encoding="utf-8")
+            turn = self._routed_turn(state_dir, "s-off", "what does the gate do?", self._canned(kind="question"))
+            refused = self.run_appeal("s-off", turn["state"]["nonce"], "grill-with-docs", "design",
+                                      state_dir, settings)
+            self.assertEqual(refused.returncode, 2)
+            self.assertIn("appeals are off", refused.stderr)
+            self.assertEqual(self._state(state_dir, "s-off")["flow"], "direct-answer")
+            self.assertFalse((state_dir / "route-appeals.log").exists())
 
     def test_claude_gate_follows_the_caveman_flag_and_never_writes_it(self) -> None:
         # Dan, 2026-09-03: the tracker is the single writer. /caveman lite must survive the next
@@ -586,6 +893,7 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-scale"}, state_dir)
             # 60 words, article-heavy, one 30-word sentence: fails ultra, passes lite.
             wordy = (
+                "Route unchecked: Jev unavailable.\n"
                 "The relay refused the bill because the policy that owns the approver is the one "
                 "that the owner set to the waiting stage, and the owner agreed to that in chat. "
                 "The fix is in the router. The test covers it. The deploy is queued for the morning "
@@ -836,10 +1144,10 @@ class AskMattGateTests(unittest.TestCase):
         self.assertIn("session-gate.js", shipped)
         for name in sorted(shipped):
             self.assertNotIn(name, live, f"settings.json still dispatches {name}: double fire")
-        # Third-party entries are not the plugin's to carry and stay (the caveman proxy, the
-        # caveman shrink hook).
-        self.assertIn("caveman-proxy.exe", live)
-        self.assertIn("shrink-hook", live)
+        # Issue 826: caveman's entries are not the profile's to carry either - only
+        # `caveman enable claude` on the machine writes them, and pull keeps the live ones.
+        self.assertNotIn("caveman-proxy", live)
+        self.assertNotIn("shrink-hook", live)
 
     def test_global_instruction_files_pin_yes_and_caveman_default_ultra(self) -> None:
         codex_text = CODEX_INSTRUCTIONS.read_text(encoding="utf-8")
@@ -1107,7 +1415,9 @@ class AskMattGateTests(unittest.TestCase):
             nonce = self._state(state_dir, "s-clean")["nonce"]
             self.run_claude_declare("s-clean", nonce, "implement", state_dir)
             self.run_presend_lint(
-                "s-clean", "Hook wired. Tests pass.\nNext: reload the session.", state_dir
+                "s-clean",
+                "Route unchecked: Jev unavailable.\nHook wired. Tests pass.\nNext: reload the session.",
+                state_dir,
             )
             # "Tests pass" is a verification claim; it is clean only because a Bash run backs it.
             transcript = self._transcript_with_tools(state_dir, ["Bash"], "Hook wired. Tests pass.")
@@ -1154,7 +1464,9 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-stale"}, state_dir)
             first = self._state(state_dir, "s-stale")["nonce"]
             self.run_claude_declare("s-stale", first, "implement", state_dir)
-            self.run_presend_lint("s-stale", "Clean enough.\nNext: send it.", state_dir)
+            self.run_presend_lint(
+                "s-stale", "Route unchecked: Jev unavailable.\nClean enough.\nNext: send it.", state_dir
+            )
             self.assertEqual(self._state(state_dir, "s-stale")["lint_clean_nonce"], first)
             # Next turn: new nonce, same stamp, and the audit must not accept it.
             self.run_gate("claude-prompt", {"session_id": "s-stale"}, state_dir)
@@ -1359,6 +1671,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("caveman-off", declared.stdout)
             lint = self.run_presend_lint(
                 "s-switch",
+                "Route unchecked: Jev unavailable.\n"
                 "The queue is empty and the deploy is scheduled for the morning."
                 "\nNext: open the deploy log.",
                 state_dir,
@@ -1427,6 +1740,14 @@ class AskMattGateTests(unittest.TestCase):
             self.run_gate("claude-prompt", {"session_id": "s-bak"}, state_dir)
             nonce = self._state(state_dir, "s-bak")["nonce"]
             self.run_claude_declare("s-bak", nonce, "implement", state_dir)
+            # implement is a build route (issue 842): open its skill before the backup gate's own
+            # edits are exercised, or the route-skill gate denies first and this test would be
+            # testing the wrong gate.
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-bak", "tool_name": "Skill", "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
             target = state_dir / "settings.json"
             target.write_text("{}", encoding="utf-8")
 
@@ -1449,6 +1770,72 @@ class AskMattGateTests(unittest.TestCase):
             plain.write_text("x", encoding="utf-8")
             self.assertEqual(edit(plain), {})
             self.assertEqual(edit(state_dir / "brand-new.env"), {})
+
+    # Issue 842: build routes must open their own skill before their first edit; helpers and talk
+    # routes are exempt.
+    def _declared(self, state_dir: Path, sid: str, flow: str) -> None:
+        self.run_gate("claude-prompt", {"session_id": sid}, state_dir)
+        nonce = self._state(state_dir, sid)["nonce"]
+        self.run_claude_declare(sid, nonce, flow, state_dir)
+
+    def _edit_call(self, state_dir: Path, sid: str, path: Path, agent_id: str | None = None) -> dict:
+        event = {
+            "session_id": sid, "tool_name": "Edit",
+            "tool_input": {"file_path": str(path), "old_string": "x", "new_string": "y"},
+        }
+        if agent_id is not None:
+            event["agent_id"] = agent_id
+        return json.loads(self.run_gate("claude-pre-tool", event, state_dir, caveman="keep").stdout)
+
+    def test_build_route_refuses_an_edit_before_its_skill_is_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-build", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            denied = self._edit_call(state_dir, "s-build", target)
+
+            self.assertEqual(denied["hookSpecificOutput"]["permissionDecision"], "deny")
+            self.assertIn("implement", denied["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_build_route_allows_edits_once_its_skill_is_opened(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-build-ok", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            self.run_gate(
+                "claude-pre-tool",
+                {"session_id": "s-build-ok", "tool_name": "Skill",
+                 "tool_input": {"skill": "implement"}},
+                state_dir, caveman="keep",
+            )
+
+            self.assertEqual(self._edit_call(state_dir, "s-build-ok", target), {})
+
+    def test_helper_calls_carrying_agent_id_skip_the_route_skill_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._declared(state_dir, "s-helper", "implement")
+            target = state_dir / "file.txt"
+            target.write_text("x", encoding="utf-8")
+
+            self.assertEqual(
+                self._edit_call(state_dir, "s-helper", target, agent_id="sub-1"), {}
+            )
+
+    def test_talk_routes_have_no_edit_limit_at_all(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            for flow in ("direct-answer", "grill-with-docs", "research"):
+                with self.subTest(flow=flow):
+                    sid = f"s-talk-{flow}"
+                    self._declared(state_dir, sid, flow)
+                    target = state_dir / f"{flow}.txt"
+                    target.write_text("x", encoding="utf-8")
+                    self.assertEqual(self._edit_call(state_dir, sid, target), {})
 
     def test_post_tool_failure_counter_drives_the_escalation_ladder(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

@@ -23,8 +23,8 @@ a restored machine without a running caveman proxy sends every model call to a d
 
 **How to apply:** caveman's `enable` writes the base URL into the settings of the session that
 started the proxy, and that is the only place it may live. Never set it in a cloud environment's
-variables, never let `profile/claude/settings.json` carry it (it still does today; issue 479 closed
-wontfix on 2026-09-18, so strip the key by hand on a machine without the proxy), never put it in a
+variables, never let `profile/claude/settings.json` carry it (it has not since issue 826: pull
+merges settings.json and keeps a machine's own caveman route and hooks), never put it in a
 project `.claude/settings.json`.
 When a container shows `git` refusing github.com with `could not read Username` and an empty
 `~/.claude/hook-state/aac-bootstrap/`, check `env | grep ANTHROPIC_BASE_URL` before blaming the

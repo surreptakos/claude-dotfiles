@@ -77,7 +77,7 @@ and a rebuilt marketplace payload — so the PRs open conflicted and the session
 the same conflict once per PR (run `wf_37f38305-f2e`, PRs #304-#314).
 
 So the deliver stage merges `origin/<defaultBranch>` into the verified branch **before** it
-pushes. A clean merge pushes as before. A conflicting merge has exactly three resolvable classes:
+pushes. A clean merge pushes as before. A conflicting merge has exactly four resolvable classes:
 
 - **Generated files** — a path matching `generatedPaths` (`.claude-plugin/marketplace.json`,
   `marketplace/**`). Resolved with `git checkout --theirs`: the default branch's copy is what
@@ -96,6 +96,14 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly three re
   bootstrap template is rebuilt. It exits non-zero when the branch changed that file by more
   than adding rows, which reclassifies it as a real merge. The same script runs after a CLEAN
   merge too — two rows appended far enough apart merge silently and still collide.
+- **Append-append** (issue 908) — any other file where both sides only added lines at one spot:
+  two tickets appending tests or functions at the end of the same file (run `6ab733a4` lost 840
+  and 812 to it). The stage rewrites the file with `git checkout --conflict=diff3 -- <path>` so
+  the markers carry the merge base, then runs `node tools/resolve-append-conflict.js <path>`: a
+  hunk that left every base line intact resolves as ours followed by theirs, and a hunk that
+  removed or changed a base line (813's two-sided edit) leaves the whole file untouched and exits
+  non-zero, which stops the ticket as before. The gate's full test run below is what proves the
+  two additions live together.
 
 After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
 the ones CLAUDE.md names), then passes a two-part gate before anything is pushed: the
@@ -177,10 +185,13 @@ the collision-prone ones: a commit message for `git commit -F`, a comment or PR 
 
 The working rule: **a path two workers could name the same way is a path they will overwrite.**
 Write scratch inside your own worktree where you have one - the implementer and the prober always
-do - and otherwise under `/tmp/fleet-<runId>/`, with the ticket number in the name. In the script
+do - and otherwise under `/tmp/fleet-<runId>/`, with the ticket number in the name - and, for anything one attempt
+writes, the attempt and worker too (`<ticket>-attempt<A>-w<W>`, as the branch name carries them):
+a retry of one ticket is a second writer of the same run, and in run 6ab751c8 attempt 2 of ticket
+812 found attempt 1's `commit-812.txt` in its way (issue 919). In the script
 that is `scratchFile(...)`, and every prompt that asks for a file names the path itself instead of
 leaving the choice to the worker: the comment and PR bodies behind `-F body=@…`, the verifier,
-deliver and discoveries worktrees. `SCRATCH_RAIL` carries the rule itself to the implementer and
+deliver and discoveries worktrees. `scratchRail(stem)` carries the rule itself to the implementer and
 the prober, the two agents that write files nobody named for them.
 `tools/ticket-fleet-branch.test.js` fails the script if a prompt goes back to `<file>` or
 `<scratch dir>`, or if a per-ticket scratch path drops the ticket number.
@@ -246,16 +257,25 @@ post-wave repair is what undoes it.
 
 Every lane returns out-of-scope findings. The Report phase is one writer, and it does not append
 into the session's own checkout: it cuts `agent/fleet-discoveries-wf_<runId>` from
-`origin/<defaultBranch>` in a scratch worktree, appends the bullets to `followupsFile` under a
-`## Run <YYYY-MM-DD> (ticket-fleet <runId>)` heading — the UTC date from `date -u +%F`, so two
-runs are tellable apart without `git log -p` (issue 322) — commits that file alone, and — when
-`deliver` is true —
-pushes the branch and opens a discoveries-only PR against the default branch.
+`origin/<defaultBranch>` in a scratch worktree, then runs `tools/followups-append.js` there to
+append the bullets to `followupsFile` under a `## Run <YYYY-MM-DD> (ticket-fleet <runId>)`
+heading — the UTC date, so two runs are tellable apart without `git log -p` (issue 322) — commits
+that file alone, and — when `deliver` is true — pushes the branch and opens a discoveries-only PR
+against the default branch.
 
 Before issue 360 the writer appended in place and committed nothing, so the bullets rode whatever
 branch the session was on. Run `6aa9c56e` left 136 bullets on an unrelated PR's branch, and the
 `6aa46942` / issue-120 block still on master cites four commits that were never landed — both
 triage chores filed against those bullets found nothing on the default branch.
+
+Even cut onto its own branch, the append itself was still a prose instruction ("append ... never
+rewrite") trusted to an agent editing the file by hand — and one run overwrote `FOLLOW-UPS.md`
+with only its own section, deleting seven earlier runs' worth of bullets (issue 882). The append
+is now `tools/followups-append.js`: a pure function (`appendFollowupsSection`) that only ever
+concatenates onto the end of the existing text, so its output starts with its input by
+construction, the same move `resolve-stamp-conflict.js` and `renumber-harness-upgrade.js` make for
+merge conflicts and upgrade rows. The writer's prompt hands it the bullets as a JSON file and runs
+the script instead of editing `followupsFile` itself.
 
 The run's return value carries `discoveryReport` (`{ branch, sha, prUrl, bullets }`), so a triage
 chore filed for the bullets can name the commit sha and branch even before the PR merges. The

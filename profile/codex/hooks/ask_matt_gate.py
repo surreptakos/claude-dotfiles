@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import fnmatch
 import io
 import json
 import os
@@ -532,14 +533,147 @@ ROUTE_TREE: dict[str, dict[str, Any]] = {
         },
     },
 }
+# Issue 840: whether the message continues the current work. Asked in the same Jev request as the
+# tree, only when the previous turn has a picked route; its state is that route and the tail of the
+# model's last message to the user (the question a bare "A" answers). "same" keeps the route; "next"
+# takes a move MAP_MOVES lists for it and nothing else; any other answer walks the tree from the top.
+CONTINUATION_QUESTION = {
+    "type": "choice",
+    "instructions": "`previous_route` is the step the assistant was on and `last_question` the end of"
+    " its last message to the user. Does `prompt`, the user's new message, continue that work?",
+    "criteria": {
+        "same": "Same step: it answers the assistant's last question (even a bare letter such as"
+                " \"A\" or \"yes\") or carries on the same step of the same work.",
+        "next": "Next step: the same work, moved on to its next step (\"spec it\", \"tickets\","
+                " \"build it\" once the current step is settled).",
+        "new": "New topic: the message is about different work from the previous route.",
+    },
+}
+# The ask-matt map's next-step moves; a route missing here has no "next step".
+MAP_MOVES: dict[str, tuple[str, ...]] = {
+    "grill-with-docs": ("to-spec", "implement"),
+    "to-spec": ("to-tickets",),
+    "to-tickets": ("implement",),
+    "wayfinder": ("to-spec",),
+}
+LAST_QUESTION_CHARS = 1500  # the tail of the last message kept for the continuation question
 PROMPT_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
 # A scheduled run's prompt carries its task file inside this block; it gets no route (for now).
 SCHEDULED_TASK_PATTERN = re.compile(r"<scheduled-task\b", re.IGNORECASE)
+# Issue 844: nothing in a scheduled run's hook input, environment or transcript marks it as
+# scheduler-started (UserPromptSubmit carries session_id, transcript_path, cwd, permission_mode and
+# prompt only), so the block in the message text stays the signal and its spoofing risk is accepted.
+SCHEDULED_TASK_BLOCK = re.compile(
+    r"<scheduled-task\b(?P<attrs>[^>]*)>(?P<body>.*?)(?:</scheduled-task>|\Z)",
+    re.IGNORECASE | re.DOTALL,
+)
+TASK_NAME_ATTR = re.compile(r"""\bname\s*=\s*["']([^"']*)["']""", re.IGNORECASE)
+TASK_ROUTE_LINE = re.compile(r"^\s*route:\s*`?([\w-]+)`?\s*$", re.IGNORECASE | re.MULTILINE)
+TASK_WRITES_LINE = re.compile(r"^\s*writes:[ \t]*(?P<inline>[^\n]*)$", re.IGNORECASE | re.MULTILINE)
+TASK_LIST_ITEM = re.compile(r"^\s*[-*]\s+`?([^`\n]+?)`?\s*$")
+# The route a routine run records when its task file names none on ALLOWED_FLOWS.
+ROUTINE_ROUTE = "routine"
+def _routine_task(prompt: str) -> dict[str, Any] | None:
+    """The routine route a scheduled run's task file names: its route and the writes it lists.
+
+    `route: <flow>` names the route (ROUTINE_ROUTE when absent or not an allowed flow).
+    `writes:` lists the paths the run may write, inline (comma-separated) or as `- item` lines
+    under it; fnmatch patterns, relative ones resolved against the session's cwd. None lists
+    nothing, so every write is refused.
+    """
+    block = SCHEDULED_TASK_BLOCK.search(prompt or "")
+    if block is None:
+        return None
+    body = block.group("body")
+    name = TASK_NAME_ATTR.search(block.group("attrs"))
+    route = TASK_ROUTE_LINE.search(body)
+    writes: list[str] = []
+    listed = TASK_WRITES_LINE.search(body)
+    if listed:
+        writes = [item.strip().strip("`") for item in listed.group("inline").split(",") if item.strip()]
+        for line in body[listed.end():].lstrip("\r\n").splitlines():
+            item = TASK_LIST_ITEM.match(line)
+            if item is None:
+                break
+            writes.append(item.group(1).strip())
+    return {
+        "task": name.group(1) if name else "",
+        "route": route.group(1) if route and route.group(1) in ALLOWED_FLOWS else ROUTINE_ROUTE,
+        "writes": writes,
+    }
+
+
+def _routine_write_allowed(target: str, cwd: str, writes: list[str]) -> bool:
+    def spelled(value: str) -> str:
+        path = Path(os.path.expanduser(value))
+        if not path.is_absolute() and cwd:
+            path = Path(cwd) / path
+        return os.path.normpath(str(path)).replace("\\", "/")
+
+    wanted = spelled(target)
+    return any(fnmatch.fnmatchcase(wanted, spelled(pattern)) for pattern in writes)
+
+
+def _routine_gate(event: dict[str, Any], state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Refuse a routine run's file write that its task file does not list (issue 844)."""
+    routine = (state or {}).get("routine")
+    if not isinstance(routine, dict) or str(event.get("tool_name") or "") not in EDIT_TOOLS:
+        return None
+    tool_input = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+    writes = [w for w in routine.get("writes") or [] if isinstance(w, str) and w]
+    cwd = str(event.get("cwd") or routine.get("cwd") or "")
+    if isinstance(target, str) and target and _routine_write_allowed(target, cwd, writes):
+        return None
+    listed = ", ".join(writes) or "nothing"
+    return _deny(
+        f"Routine route: scheduled task {routine.get('task') or '(unnamed)'} may write only what "
+        f"its task file lists under `writes:` ({listed}); {target or 'this write'} is not listed."
+    )
 # A message that opens with a route's own slash command (`/to-spec`, `/aac-skills:session-end`), or
 # invokes /session-end anywhere, names its route itself: Jev is not asked for a route and the
 # declaration works as before. The tree has no leaf for session-end or project-harness, so a Jev
 # pick would refuse the very route the user typed.
 SLASH_ROUTE_PATTERN = re.compile(r"^\s*/(?:aac-skills:)?([\w-]+)")
+
+
+# Issue 841: the route gate settings (glossary `CONTEXT.md`) are ONE committed file beside this
+# script, so a change is a commit that reaches every machine and cloud session alike, never a
+# per-machine flag. `appeals` (default on) lets the model appeal Jev's route once per turn; off
+# makes Jev's pick final. `routine_route` (issue 844, default off) lets a scheduled run
+# record the route its task file names and write only what that file lists. A missing or
+# unreadable file means the committed default.
+ROUTE_GATE_SETTINGS = Path(
+    os.environ.get("ASK_MATT_ROUTE_SETTINGS") or SCRIPT.parent / "route-gate.json"
+)
+ROUTE_GATE_DEFAULTS = {"appeals": True, "routine_route": False}
+
+
+def _route_gate_setting(name: str) -> Any:
+    try:
+        value = json.loads(ROUTE_GATE_SETTINGS.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        value = {}
+    if not isinstance(value, dict) or name not in value:
+        return ROUTE_GATE_DEFAULTS[name]
+    return value[name]
+
+
+def _appeal_line(appeal: dict[str, Any]) -> str:
+    """The reply's first line on an appealed turn, as the lint demands it and Dan reads it."""
+    return (
+        f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, "
+        f"because {appeal['reason']}"
+    )
+
+
+def _current_appeal(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """This turn's appeal, or None. Keyed to the nonce so an earlier turn's appeal never counts."""
+    state = state or {}
+    appeal = state.get("appeal")
+    if isinstance(appeal, dict) and appeal.get("nonce") and appeal["nonce"] == state.get("nonce"):
+        return appeal
+    return None
 
 
 def _user_named_route(prompt: str) -> bool:
@@ -575,6 +709,24 @@ def _walk_route_tree(answers: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _continued_route(answers: dict[str, Any], previous_route: str) -> dict[str, Any] | None:
+    """Jev's route when the continuation answer keeps or advances the previous one, else the tree's."""
+    answer = answers.get("route.continuation")
+    option = answer.get("choice") if isinstance(answer, dict) else None
+    tree = _walk_route_tree(answers)
+    if option == "same":
+        return {"route": previous_route, "path": ["continuation=same", f"previous={previous_route}"]}
+    moves = MAP_MOVES.get(previous_route, ())
+    if option == "next" and moves:
+        # Where the map offers two moves (grill-with-docs: to-spec or implement), the tree's
+        # settledness answer picks between them; a tree leaf off the map never wins.
+        route = tree["route"] if tree and tree["route"] in moves else moves[0]
+        return {"route": route, "path": ["continuation=next", f"{previous_route}>{route}"]}
+    if tree is not None:
+        tree = {"route": tree["route"], "path": [f"continuation={option}"] + tree["path"]}
+    return tree
+
+
 def _in_repository(cwd: str) -> bool:
     """Whether the session's working directory is inside a git checkout (a `.git` above it)."""
     try:
@@ -588,30 +740,52 @@ def _in_repository(cwd: str) -> bool:
     return False
 
 
-def _prompt_verdicts(prompt: str, in_repository: bool = False) -> tuple[bool, dict[str, Any] | None]:
+def _prompt_verdicts(
+    prompt: str, in_repository: bool = False, previous: dict[str, Any] | None = None
+) -> tuple[bool, dict[str, Any] | None]:
     """(correction?, Jev's route pick) from ONE Jev request; the pick is None when Jev is unavailable.
 
     A scheduled run, or a message naming its route by slash command, is not routed, so its request
     carries the correction question alone. When Jev cannot answer, the correction verdict is the
-    regex and there is no pick.
+    regex and there is no pick. `previous` ({"route", "last_question"}, issue 840) adds the
+    continuation question to the same request.
     """
     prompt = prompt or ""
     if not prompt.strip():
         return False, None
     unrouted = SCHEDULED_TASK_PATTERN.search(prompt) is not None or _user_named_route(prompt)
     questions: dict[str, Any] = {"correction": CORRECTION_JEV_QUESTION}
+    state: dict[str, Any] = {"prompt": prompt, "in_repository": in_repository}
+    previous_route = None if unrouted else (previous or {}).get("route")
     if not unrouted:
         questions.update(_route_questions())
+    if previous_route:
+        questions["route.continuation"] = CONTINUATION_QUESTION
+        state["previous_route"] = previous_route
+        state["last_question"] = str((previous or {}).get("last_question") or "")
     jev = _jev_module()
-    answers = None if jev is None else jev.ask(
-        {"prompt": prompt, "in_repository": in_repository}, questions, timeout=PROMPT_JEV_TIMEOUT
-    )
+    answers = None if jev is None else jev.ask(state, questions, timeout=PROMPT_JEV_TIMEOUT)
     if answers is None:
         return CORRECTION_PATTERN.search(prompt) is not None, None
     correction = answers["correction"] >= CORRECTION_JEV_FLOOR
     if unrouted:
         return correction, {"route": None, "path": ["not routed"]}
+    if previous_route:
+        return correction, _continued_route(answers, previous_route)
     return correction, _walk_route_tree(answers)
+
+
+def _previous_route(previous: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The previous turn's picked route and last question, or None (issue 840).
+
+    Only a route the previous turn picked (Jev, a declaration or an appeal) counts: one Stop
+    reconciled onto an undeclared turn, or a scheduled run's routine route, is not continued.
+    """
+    previous = previous or {}
+    route = previous.get("flow")
+    if route not in ALLOWED_FLOWS or previous.get("flow_reconciled") or previous.get("routine"):
+        return None
+    return {"route": route, "last_question": previous.get("last_question") or ""}
 
 
 def _is_correction(prompt: str) -> bool:
@@ -640,7 +814,9 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         "unknown_tool_denied": (previous or {}).get("unknown_tool_denied"),
     }
     correction, pick = _prompt_verdicts(
-        str(event.get("prompt") or ""), _in_repository(str(event.get("cwd") or ""))
+        str(event.get("prompt") or ""),
+        _in_repository(str(event.get("cwd") or "")),
+        _previous_route(previous),
     )
     if correction:
         state["correction_nonce"] = nonce
@@ -651,6 +827,22 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         if jev_route:
             state["jev_route"] = jev_route
             state["flow"] = jev_route
+    else:
+        # Issue 843: `pick` is None only when Jev could not answer at all (down, no credential,
+        # timeout, a malformed reply) — never for a deliberately unrouted prompt, which still gets
+        # a `pick` dict back. The model is picking the route itself this turn, and Dan ruled
+        # (2026-09-25 grill, question 2, answer A) that fallback must not be silent.
+        state["route_unchecked"] = True
+    # Issue 844: with the routine route on, a scheduled run records the route its task file names
+    # and may write only what that file lists. Off (the default), it runs exactly as after #839.
+    prompt_text = str(event.get("prompt") or "")
+    routine = None
+    if SCHEDULED_TASK_PATTERN.search(prompt_text) and _route_gate_setting("routine_route") is True:
+        routine = _routine_task(prompt_text)
+    if routine is not None:
+        routine["cwd"] = str(event.get("cwd") or "")
+        state["routine"] = routine
+        state["flow"] = routine["route"]
     # Issue 716: typing /session-end is the approval for its ticket batch (#704). Recorded per turn,
     # so the next user message clears it and the ticket-SET round applies again outside session-end.
     if SESSION_END_INVOKED.search(str(event.get("prompt") or "")):
@@ -682,6 +874,27 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         context += (
             f"ROUTE PICKED BY JEV: {jev_route} (recorded; no declaration needed). Open and follow "
             f"the {jev_route} route; declaring any other route is refused. "
+        )
+        if _route_gate_setting("appeals"):
+            context += (
+                "Jev wrong? Appeal ONCE this turn: `"
+                f'{_runner_spelling()} "{SCRIPT}" appeal-claude "{session_id}" "{nonce}" <route> "<reason>"'
+                "`; the reply's first line must then read `Route appeal: <route> instead of "
+                f"{jev_route}, because <reason>`. "
+            )
+        else:
+            context += "Appeals are off: Jev's pick is final. "
+    elif pick is None:
+        context += (
+            f"ROUTE UNCHECKED: Jev could not answer this turn, so you are picking the route "
+            f'yourself. Open your reply with the exact line "{ROUTE_UNCHECKED_OPENER}" — the '
+            "pre-send lint refuses a reply on this turn without it. "
+        )
+    if routine is not None:
+        context += (
+            f"ROUTINE ROUTE: {routine['route']} (recorded for scheduled task "
+            f"{routine['task'] or '(unnamed)'}; no declaration needed). File writes are limited to "
+            f"what the task file lists under `writes:`: {', '.join(routine['writes']) or 'nothing'}. "
         )
     # The pre-send lint, standing on every turn (owner instruction, 2026-08-12). It carries the YES
     # rules at every caveman level, off included, plus the style rules for the level in force. It is
@@ -1029,12 +1242,19 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     blocked = _backup_gate(event)
     if blocked is not None:
         return blocked
+    blocked = _routine_gate(event, state)
+    if blocked is not None:
+        return blocked
     if (
         state
         and state.get("flow")
         and state.get("yes") is True
         and state.get("caveman") in CAVEMAN_PROSE_MODES + ("off",)
     ):
+        _record_build_skill_open(session_id, state, event)
+        blocked = _route_skill_gate(event, state)
+        if blocked is not None:
+            return blocked
         return {}
     if nonce and _is_claude_declaration_command(event, session_id, nonce):
         return {}
@@ -1092,10 +1312,22 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
         print("Governance route rejected: no matching Claude turn", file=sys.stderr)
         return 2
     jev_route = state.get("jev_route")
-    if jev_route and flow != jev_route:
+    appeal = _current_appeal(state)
+    # An appeal replaces Jev's route for the rest of the turn (issue 841).
+    settled = appeal["wanted"] if appeal else jev_route
+    if settled and flow != settled:
+        how = f"The appeal settled {settled}" if appeal else f"Jev picked {jev_route}"
         print(
-            f"Governance route rejected: {flow}. Jev picked {jev_route} for this message "
+            f"Governance route rejected: {flow}. {how} for this message "
             f"({' > '.join(state.get('route_path') or [])}); it is recorded, declare nothing else.",
+            file=sys.stderr,
+        )
+        return 2
+    routine = state.get("routine")
+    if isinstance(routine, dict) and flow != state.get("flow"):
+        print(
+            f"Governance route rejected: {flow}. Scheduled task {routine.get('task') or '(unnamed)'} "
+            f"runs on the routine route {state.get('flow')}; it is recorded, declare nothing else.",
             file=sys.stderr,
         )
         return 2
@@ -1119,10 +1351,87 @@ def _claude_declare(session_id: str, nonce: str, flow: str) -> int:
             "session_end_invoked": state.get("session_end_invoked"),
             "jev_route": jev_route,
             "route_path": state.get("route_path"),
+            "appeal": state.get("appeal"),
+            # Issue 843: the prompt hook's finding, not the model's — declaring a route must not
+            # erase it, or the lint never sees an unchecked turn.
+            "route_unchecked": state.get("route_unchecked"),
+            "routine": routine,
         },
     )
     print(f"Governance recorded: {flow}; yes; caveman-{mode}")
     return 0
+
+
+def _appeal_log_path() -> Path:
+    return STATE_DIR / "route-appeals.log"
+
+
+def _claude_appeal(session_id: str, nonce: str, wanted: str, reason: str) -> int:
+    """Issue 841: the model's one appeal of Jev's route this turn (ADR 0002). Switches the turn's
+    route, logs both routes and the reason, and arms the pre-send lint to refuse the reply until
+    its first line states the appeal, so Dan always sees it."""
+    reason = " ".join(reason.split())
+    if not _route_gate_setting("appeals"):
+        print(
+            f"Route appeal refused: appeals are off in {ROUTE_GATE_SETTINGS.name}; "
+            "Jev's pick is final.",
+            file=sys.stderr,
+        )
+        return 2
+    if wanted not in ALLOWED_FLOWS:
+        print(f"Route appeal refused: {wanted} is not a route", file=sys.stderr)
+        return 2
+    if not reason:
+        print("Route appeal refused: give the reason Jev's route is wrong", file=sys.stderr)
+        return 2
+    state = _read_state("claude", session_id)
+    if not state or not nonce or state.get("nonce") != nonce:
+        print("Route appeal refused: no matching Claude turn", file=sys.stderr)
+        return 2
+    jev_route = state.get("jev_route")
+    if not jev_route:
+        print("Route appeal refused: Jev picked no route this turn; declare yours", file=sys.stderr)
+        return 2
+    appeal = _current_appeal(state)
+    if appeal:
+        print(
+            f"Route appeal refused: this turn already appealed ({_appeal_line(appeal)}); "
+            "one appeal per turn.",
+            file=sys.stderr,
+        )
+        return 2
+    if wanted == jev_route:
+        print(f"Route appeal refused: Jev already picked {wanted}", file=sys.stderr)
+        return 2
+    appeal = {"nonce": nonce, "wanted": wanted, "jev_route": jev_route, "reason": reason}
+    current = dict(state)
+    current["appeal"] = appeal
+    current["flow"] = wanted
+    _write_state("claude", session_id, current)
+    _append_log(
+        _appeal_log_path(), session_id, f"wanted={wanted}\tjev={jev_route}\treason={reason}"
+    )
+    print(
+        f"Route appeal recorded: {wanted} instead of {jev_route}. Open and follow {wanted}. "
+        f"The reply's first line must read: {_appeal_line(appeal)}"
+    )
+    return 0
+
+
+def _appeal_lint(text: str, appeal: dict[str, Any] | None) -> tuple[list[str], str]:
+    """(violations, text left for the ADHD shape). On an appealed turn the first line after the
+    PYLONS canary must state the appeal; the ADHD opener rule then applies to the line after it."""
+    if not appeal:
+        return [], text
+    lines = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().splitlines()
+    first = lines[0].strip() if lines else ""
+    prefix = f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, because "
+    if first.startswith(prefix) and first[len(prefix):].strip():
+        return [], "\n".join(lines[1:])
+    return [
+        "route appeal not shown: this turn appealed Jev's route, so the reply's first line must "
+        f'read "{_appeal_line(appeal)}"'
+    ], text
 
 
 FILLER_PATTERN = re.compile(
@@ -1223,6 +1532,28 @@ PATH_PATTERN = re.compile(r"(?:[A-Za-z]:\\|\./|/)[\w.\\/-]{6,}|\b[\w-]+\.(?:py|j
 # material he objected to. Caps sized to the ADHD skill's own five-item list cap.
 INLINE_SPAN_CAP = 4
 PATH_CAP = 3
+
+
+# Issue 843: when Jev could not answer this turn's route Noul at all, the model picked the route
+# itself, and Dan ruled (2026-09-25 grill, question 2, answer A) that fallback must never be silent.
+# The lint is the one enforcement point that can stop the reply rather than report it, so the
+# opener is a checkable literal line, not a self-assertion the model could skip.
+ROUTE_UNCHECKED_OPENER = "route unchecked: Jev unavailable"
+ROUTE_UNCHECKED_PATTERN = re.compile(re.escape(ROUTE_UNCHECKED_OPENER), re.IGNORECASE)
+
+
+def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
+    """[] when Jev answered this turn (or answered nothing needs checking), or the required opener
+    is present; one violation when the turn is unchecked and the reply does not open with it."""
+    if not route_unchecked:
+        return []
+    body = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip()
+    if ROUTE_UNCHECKED_PATTERN.match(body):
+        return []
+    return [
+        f'missing required opener "{ROUTE_UNCHECKED_OPENER}": Jev could not answer this turn, so '
+        "the route was picked by the model, not checked — say so, do not let it pass silently"
+    ]
 
 
 def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
@@ -1700,6 +2031,76 @@ CONFIG_FILE_PATTERN = re.compile(
 EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
 
 
+# Issue 842 (CONTEXT.md "Route tool limits", ADR 0002): a build route must open its own skill with
+# the Skill tool before its first edit. Talk routes (direct-answer, grill-with-docs, research and
+# the rest of ALLOWED_FLOWS) write too — this glossary, the pre-send lint draft, tickets — but carry
+# no gate on it; the adversarial pass that settled this found a read-only limit either blocked
+# correct work or was trivially bypassed by a shell command. "And the like" in CONTEXT.md is these:
+# the routes whose skill hands the model working instructions before code changes, not the ones that
+# settle or interview what to build.
+BUILD_FLOWS = {
+    "implement",
+    "tdd",
+    "diagnosing-bugs",
+    "project-harness",
+    "prototype",
+    "improve-codebase-architecture",
+}
+SKILL_TOOL_NAME = "Skill"
+
+
+def _skill_name_from_input(tool_input: Any) -> str:
+    """The bare skill name a Skill tool call names ("aac-skills:implement" -> "implement"), or ""
+    when `tool_input` is not a Skill call's shape."""
+    if not isinstance(tool_input, dict):
+        return ""
+    name = tool_input.get("skill")
+    if not isinstance(name, str):
+        return ""
+    return name.rsplit(":", 1)[-1].strip()
+
+
+def _route_skill_gate(event: dict[str, Any], state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Build-route gate (issue 842): an Edit/Write/MultiEdit/NotebookEdit call on a build route is
+    refused until the Skill tool has opened that route's own skill this turn, naming the skill in
+    the deny. A helper call (hook input carries `agent_id`, set only for subagent calls per the
+    Claude Code hooks docs) is exempt — starting the helper already passed the gate. Every other
+    route (talk routes included) is never touched by this gate."""
+    if event.get("agent_id"):
+        return None
+    flow = (state or {}).get("flow")
+    if flow not in BUILD_FLOWS:
+        return None
+    tool_name = str(event.get("tool_name") or "")
+    if tool_name == SKILL_TOOL_NAME or tool_name not in EDIT_TOOLS:
+        return None
+    if (state or {}).get("build_skill_opened"):
+        return None
+    return _deny(
+        f"Build route `{flow}`: open the {flow} skill with the Skill tool before editing "
+        "(issue 842's route gate). A subagent call (agent_id set) is exempt."
+    )
+
+
+def _record_build_skill_open(
+    session_id: str, state: dict[str, Any] | None, event: dict[str, Any]
+) -> None:
+    """Marks THIS turn's build route as having opened its own skill, the moment the Skill tool is
+    called with a matching name. Persisted per turn (declare-claude writes a fresh state each turn),
+    so a build route opens its skill again each turn before its first edit."""
+    if not state or state.get("build_skill_opened"):
+        return
+    if state.get("flow") not in BUILD_FLOWS:
+        return
+    if str(event.get("tool_name") or "") != SKILL_TOOL_NAME:
+        return
+    if _skill_name_from_input(event.get("tool_input")) != state.get("flow"):
+        return
+    current = dict(state)
+    current["build_skill_opened"] = True
+    _write_state("claude", session_id, current)
+
+
 BACKUP_MAX_AGE_SECONDS = 24 * 3600
 
 
@@ -1875,6 +2276,9 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
                 "last_flow": carried,
                 "yes": True,
                 "caveman": mode,
+                # Issue 840: a reconciled route was never picked; the next message does not
+                # continue it.
+                "flow_reconciled": True,
             },
         )
         _log_governance(session_id, f"undeclared turn reconciled to last route: {carried}")
@@ -1882,6 +2286,7 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
             f"GOVERNANCE: this turn ended with no route declared — recorded as `{carried}`. "
             "Declare explicitly next turn."
         )
+    _record_last_question(session_id, str(event.get("transcript_path") or ""))
     if event.get("stop_hook_active"):
         return {"systemMessage": " ".join(notes)} if notes else {}
     # The pre-send audit runs on EVERY path below, including the ones that used to return early: a
@@ -1921,6 +2326,19 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         + f". Logged to {_lint_log_path()}; enforced on your next message."
     )
     return {"systemMessage": " ".join(notes)}
+
+
+def _record_last_question(session_id: str, transcript_path: str) -> None:
+    """Keep the tail of the turn's final message for the next prompt's continuation question."""
+    try:
+        text = _last_assistant_text(transcript_path).strip() if transcript_path else ""
+    except Exception:
+        text = ""
+    current = _read_state("claude", session_id)
+    if current is None:
+        return
+    current["last_question"] = text[-LAST_QUESTION_CHARS:]
+    _write_state("claude", session_id, current)
 
 
 def _correction_audit(state: dict[str, Any] | None, transcript_path: str) -> str:
@@ -2051,10 +2469,13 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     adhd = _adhd_state()
     transcript = _find_transcript(session_id) if session_id else ""
     turn_refusals = _turn_refusals(transcript) if transcript else None
+    appeal_violations, shaped = _appeal_lint(text, _current_appeal(state))
     violations = (
-        _yes_lint(text, turn_tools, turn_refusals)
-        + (_adhd_lint(text) if adhd == "on" else [])
+        appeal_violations
+        + _yes_lint(text, turn_tools, turn_refusals)
+        + (_adhd_lint(shaped) if adhd == "on" else [])
         + _caveman_lint(text, mode)
+        + _route_unchecked_lint(text, bool(state.get("route_unchecked")))
     )
     if not violations:
         words = len(_strip_code(text).split())
@@ -2090,6 +2511,9 @@ def main() -> int:
         nonce = sys.argv[3] if len(sys.argv) > 3 else ""
         flow = sys.argv[4] if len(sys.argv) > 4 else ""
         return _claude_declare(session_id, nonce, flow)
+    if mode == "appeal-claude":
+        session_id, nonce, wanted = (sys.argv[2:5] + ["", "", ""])[:3]
+        return _claude_appeal(session_id, nonce, wanted, " ".join(sys.argv[5:]))
     try:
         event = _read_event()
     except (json.JSONDecodeError, OSError, ValueError) as error:

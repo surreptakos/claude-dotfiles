@@ -19,6 +19,7 @@ const REPO_ROOT = path.resolve(__dirname, '..');
 const FLEET_SCRIPT = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'ticket-fleet.js');
 const FLEET_SKILL = path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'INTERNALS.md');
 const contract = require('./ticket-fleet-contract.js');
+const { sliceBetween } = require('./source-slice.js');
 const {
   CONTRACT_VERSION, FORKS, RUNBOOKS, checkLaunchArgs, contractVersionOf, auditForkFiles,
   FLEET_SOURCE_REPO, decideFleetRefresh,
@@ -109,6 +110,36 @@ test('the plugin-served script decides the fork skip in JS before spawning the r
     'the FLEET_FORKS check must precede the refresh agent spawn in source order, so a fork never reaches it');
 });
 
+test('the script\'s own refresh block never spawns the refresh agent for a FORKS repo, however servedRepo is spelled (issue 804)', async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const start = src.indexOf('// [FLEET-REFRESH-START]');
+  const end = src.indexOf('// [FLEET-REFRESH-END]');
+  assert.ok(start > -1 && end > start, 'the FLEET-REFRESH marker pair must bracket the refresh block');
+  const scriptForks = JSON.parse(((src.match(/const FLEET_FORKS = (\[[^\]]*\])/) || [])[1] || '[]').replace(/'/g, '"'));
+  assert.deepEqual(scriptForks.sort(), FORKS.map((f) => f.repo).sort(),
+    'the script\'s FLEET_FORKS must list exactly the FORKS of tools/ticket-fleet-contract.js');
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  // gitSpelling is the script's own helper (issue 883); the block calls it, so the sandbox supplies it.
+  const run = new AsyncFunction('agent', 'log', 'cfg', 'unusableReason', 'gitSpelling', src.slice(start, end));
+  const spellings = (repo) => [repo, `${repo}.git`, repo.toUpperCase(), `https://github.com/${repo}.git`, `git@github.com:${repo}.git`];
+  const reachesRefresh = async (reported) => {
+    const labels = [];
+    await run(async (_prompt, opts) => {
+      labels.push(opts.label);
+      return opts.label === 'fleet-refresh-repo' ? { servedRepo: reported } : { refreshed: [], unchanged: [], commit: '', errors: [] };
+    }, () => {}, { reportModel: 'm' }, (_label, msg) => msg, (_instrument, args) => `git ${args}`);
+    assert.equal(labels[0], 'fleet-refresh-repo', 'the servedRepo-only agent must be the first spawn');
+    return labels.includes('fleet-refresh');
+  };
+  for (const fork of FORKS) {
+    for (const reported of spellings(fork.repo)) {
+      assert.equal(await reachesRefresh(reported), false, `servedRepo "${reported}" is the fork ${fork.repo} and must never reach the refresh agent`);
+    }
+  }
+  for (const reported of spellings(FLEET_SOURCE_REPO)) assert.equal(await reachesRefresh(reported), false);
+  assert.equal(await reachesRefresh('surreptakos/some-other-repo'), true, 'a non-fork served repo must still be refreshed');
+});
+
 test('the INTERNALS.md ripple table names every fork holder, runbook and the current version', () => {
   const skill = fs.readFileSync(FLEET_SKILL, 'utf8');
   assert.match(skill, new RegExp(`contract v${CONTRACT_VERSION}\\b`),
@@ -120,5 +151,133 @@ test('the INTERNALS.md ripple table names every fork holder, runbook and the cur
   for (const doc of RUNBOOKS) {
     const file = doc.split(' ').pop();
     assert.ok(skill.includes(file), `INTERNALS.md must list ${file} as a ripple target`);
+  }
+});
+
+test('the SCOUT ticket schema has a body field, and the implementer prompt interpolates it (issue 886)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /body: \{ type: 'string', description: "the ticket's issue body, verbatim/,
+    'SCOUT tickets must declare a body field, distinct from the extracted criteria');
+
+  // Pull the implementer prompt's template literal out of the source and actually render it
+  // against a fixture ticket (issue 807: the implementer got only title + criteria and guessed the
+  // fix), rather than trusting that a `${t.body}` substring nearby means it is really threaded in.
+  const promptSrc = sliceBetween(
+    src,
+    'Implement GitHub issue #${t.number}: ${t.title}',
+    "Return structured output only.`,\n      { label: `impl:#",
+    "the implementer prompt template in ticket-fleet.js's code lane"
+  );
+
+  const fixtureBody = 'FIXTURE ISSUE BODY: reproduce with `foo --bar`, expected baz (issue 886 fixture)';
+  const t = { number: 886, title: 'Fixture ticket', criteria: 'Fixture acceptance criteria', body: fixtureBody };
+  const branch = 'agent/issue-886-fixture';
+  const scout = { repoMap: 'fixture repo map', defaultBranch: 'main' };
+  const chainStart = '';
+  const priorFindings = '';
+  const instrument = 'gh';
+  const testCommand = 'npm test';
+  const PYTHON_RAIL = '(python rail fixture)';
+  const scratchRail = () => '(scratch rail fixture)';
+  const attempt = 1;
+  const workerIndex = 0;
+  const HARNESS_RELAY_RAIL = '(harness relay rail fixture)';
+  const powershellRail = () => '(powershell rail fixture)';
+  const scratchFile = (name) => `/tmp/fleet-fixture/${name}`;
+  const dedupeBrief = () => '';
+  const gitSpelling = (_instrument, cmd) => `git ${cmd}`;
+
+  // eslint-disable-next-line no-new-func
+  const render = new Function(
+    't', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand',
+    'PYTHON_RAIL', 'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling',
+    'attempt', 'workerIndex',
+    `return \`${promptSrc}\`;`
+  );
+  const rendered = render(t, branch, scout, chainStart, priorFindings, instrument, testCommand,
+    PYTHON_RAIL, scratchRail, HARNESS_RELAY_RAIL, powershellRail, scratchFile, dedupeBrief, gitSpelling, attempt, workerIndex);
+
+  assert.ok(rendered.includes(fixtureBody),
+    "the rendered implementer prompt must contain the fixture ticket's body text verbatim");
+});
+
+test('the implementer and prober prompts tell a worker not to file the harness-relayed launch request as a discovery (issue 885)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const railIdx = src.indexOf('const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885):');
+  assert.ok(railIdx > -1, 'the harness-relayed request rail must be defined as its own shared const, like PYTHON_RAIL');
+  const probeLabelIdx = src.indexOf("label: `probe:#");
+  const implLabelIdx = src.indexOf("label: `impl:#");
+  assert.ok(probeLabelIdx > -1 && implLabelIdx > -1, 'both the prober and implementer agent calls must still exist');
+  const probePromptStart = src.lastIndexOf('`Probe GitHub issue', probeLabelIdx);
+  const implPromptStart = src.lastIndexOf('`Implement GitHub issue', implLabelIdx);
+  assert.ok(probePromptStart > -1 && probePromptStart < probeLabelIdx,
+    'the prober prompt template must reference ${HARNESS_RELAY_RAIL} between its own start and its agent() call');
+  assert.ok(implPromptStart > -1 && implPromptStart < implLabelIdx,
+    'the implementer prompt template must reference ${HARNESS_RELAY_RAIL} between its own start and its agent() call');
+  assert.ok(src.slice(probePromptStart, probeLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
+    'the prober prompt must splice in HARNESS_RELAY_RAIL');
+  assert.ok(src.slice(implPromptStart, implLabelIdx).includes('${HARNESS_RELAY_RAIL}'),
+    'the implementer prompt must splice in HARNESS_RELAY_RAIL');
+});
+
+test('the implementer and code-lane verifier prompts tell a worker how to run PowerShell 7 under the worktree guard (issue 906)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const railHead = 'const powershellRail = (dir) => `';
+  const railSrc = sliceBetween(src, railHead, '`\n', 'the PowerShell rail in ticket-fleet.js').slice(railHead.length);
+  // eslint-disable-next-line no-new-func
+  const rail = new Function('dir', `return \`${railSrc}\`;`)('/tmp/fleet-r1/ps7-906');
+  assert.match(rail, /issue 454/, 'the rail must name the issue that records the recipe');
+  assert.match(rail, /ONE plain command per tool call, nothing chained/, 'the rail must say one plain command per line');
+  assert.ok(rail.includes('cp /tmp/fleet-r1/ps7-906/pwsh /tmp/fleet-r1/ps7-906/shell7'),
+    'the rail must copy pwsh to the neutral shell7 name inside the per-ticket dir');
+  assert.ok(rail.includes('/tmp/fleet-r1/ps7-906/shell7 -NoProfile -ExecutionPolicy Bypass -File'),
+    'the rail must invoke the suite through shell7 by its full path');
+  assert.match(rail, /Language\.Parser\]::ParseFile/, 'the rail must give the parser check for a changed .ps1 file');
+  assert.match(rail, /discovery string/, 'the rail must tell a worker that cannot run PowerShell to say so in its discoveries');
+
+  const implLabelIdx = src.indexOf("label: `impl:#");
+  const implStart = src.lastIndexOf('`Implement GitHub issue', implLabelIdx);
+  assert.ok(implStart > -1 && implLabelIdx > implStart, 'the implementer prompt and its agent() call must still exist');
+  assert.ok(src.slice(implStart, implLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}`))}'),
+    'the implementer prompt must splice in powershellRail');
+
+  const verifyStart = src.indexOf('`You are an independent verifier. Your job is to REFUTE');
+  const verifyLabelIdx = src.indexOf('{ label: verifyLabel', verifyStart);
+  assert.ok(verifyStart > -1 && verifyLabelIdx > verifyStart, 'the code-lane verifier prompt and its agent() call must still exist');
+  assert.ok(src.slice(verifyStart, verifyLabelIdx).includes('${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}-verify`))}'),
+    'the code-lane verifier prompt must splice in powershellRail');
+});
+
+test('two attempts of one ticket render disjoint scratch paths in the implementer prompt (issue 919)', () => {
+  // Run 6ab751c8: attempt 2 of ticket 812 found attempt 1's /tmp/fleet-<run>/commit-812.txt in its
+  // way. Render the real prompt, with the real scratch and PowerShell rails, for two attempts.
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const promptSrc = sliceBetween(src, 'Implement GitHub issue #${t.number}: ${t.title}',
+    "Return structured output only.`,\n      { label: `impl:#", 'the implementer prompt template');
+  const railSrc = (head) => sliceBetween(src, head, '`\n', head).slice(head.length);
+  const scratchRoot = '/tmp/fleet-fixture';
+  // eslint-disable-next-line no-new-func
+  const scratchRail = new Function('scratchRoot', 'stem', `return \`${railSrc('const scratchRail = (stem) => `')}\`;`).bind(null, scratchRoot);
+  // eslint-disable-next-line no-new-func
+  const powershellRail = new Function('dir', `return \`${railSrc('const powershellRail = (dir) => `')}\`;`);
+  const scratchFile = (name) => `${scratchRoot}/${name}`;
+  const names = ['t', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand', 'PYTHON_RAIL',
+    'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling', 'attempt', 'workerIndex'];
+  // eslint-disable-next-line no-new-func
+  const render = new Function(...names, `return \`${promptSrc}\`;`);
+  const t = { number: 919, title: 'Fixture', criteria: 'c', body: 'b' };
+  const paths = (attempt, workerIndex) => {
+    const out = render(t, `agent/issue-919-attempt${attempt}-wf_fixture-w${workerIndex}`, { repoMap: 'm', defaultBranch: 'main' },
+      '', '', 'gh', 'npm test', '', scratchRail, '', powershellRail, scratchFile, () => '', (_i, c) => `git ${c}`,
+      attempt, workerIndex);
+    return new Set(out.match(/\/tmp\/fleet-fixture\/[^\s`'")]+/g) || []);
+  };
+  const first = paths(1, 3);
+  const second = paths(2, 3);
+  assert.ok(first.size > 0 && second.size > 0, 'the implementer prompt must name per-ticket scratch paths');
+  assert.ok([...first].some(p => p.includes('commit-919-attempt1-w3')), 'the scratch rail must give an attempt- and worker-stamped example path');
+  for (const p of first) {
+    assert.ok(p.includes('919-attempt1-w3'), `${p} must carry the ticket, attempt and worker`);
+    assert.ok(!second.has(p), `${p} is named by both attempt 1 and attempt 2`);
   }
 });

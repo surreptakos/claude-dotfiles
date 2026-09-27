@@ -28,6 +28,7 @@ const {
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  quotaFailure, createRunHalt, haltReport,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -345,16 +346,20 @@ test(`fleet script ${FLEET_SCRIPT_REL} names a per-worker path for every file it
     assert.match(call, /\$\{t\.number\}/,
       `${call} must carry the ticket number, not a name every worker of the wave would pick`);
   }
-  assert.match(src, /SCRATCH_RAIL/,
+  assert.match(src, /scratchRail\(/,
     'the implementer and prober prompts must carry the scratch-file rail');
 });
 
-test(`fleet script ${FLEET_SCRIPT_REL} dates the Report phase heading (issue 322)`, () => {
+test(`fleet script ${FLEET_SCRIPT_REL} hands the Report phase's heading and append to tools/followups-append.js (issues 322, 882)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
-  assert.match(src, /## Run <DATE> \(ticket-fleet \$\{runId\}\)/,
-    'the FOLLOW-UPS heading must carry both the ISO date and the run id so two runs are tellable apart');
-  assert.match(src, /date -u \+%F/,
-    'the writer has a shell, so the date comes from it - workflow scripts cannot call new Date()');
+  // Issue 882: the writer used to be told to append (and date) FOLLOW-UPS.md by hand, in prose,
+  // and one run overwrote seven earlier runs' bullets doing it. The heading's date-tagging (issue
+  // 322: "## Run <DATE> (ticket-fleet <runId>)", so two runs are tellable apart) and the append
+  // itself are now tools/followups-append.js's job - a pure, tested function - not the agent's.
+  assert.match(src, /tools\/followups-append\.js/,
+    'the Report phase must run tools/followups-append.js rather than editing followupsFile by hand');
+  assert.match(src, /Do NOT append, edit or reword \$\{cfg\.followupsFile\} by hand/,
+    'the writer prompt must forbid a hand edit of the follow-ups file, which is what issue 882 was');
 });
 
 test(`fleet script ${FLEET_SCRIPT_REL} gates the verifier agentType on remoteness, not the instrument (issue 339)`, () => {
@@ -445,7 +450,7 @@ test(`fleet script ${FLEET_SCRIPT_REL} implementer prompt carries the ordered ha
     at = i;
   }
   for (const rail of ['NEVER open a PR, NEVER merge, NEVER push any branch but', 'Live-tree hard rail: ~/.claude',
-    '${SCRATCH_RAIL}', '${PYTHON_RAIL}',
+    '${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}', '${PYTHON_RAIL}',
     '(no # - closing-keyword risk)', 'return pushed: true only when it exits 0']) {
     assert.ok(src.indexOf(rail, start) > start, `the full rail "${rail}" must follow the list it is summarized in`);
   }
@@ -658,6 +663,8 @@ async function instantiateCodeLane(body, agentMock, logs = [], stubs = {}, scrip
     revParse: async () => null,
     // Issue 654: the Deliver-result classifier is the module's own, the one the generated block carries.
     classifyDelivery,
+    // Issue 812: a run that is never halted unless a test hands in its own.
+    runHalt: createRunHalt(() => {}),
   }, stubs)));
 }
 
@@ -944,7 +951,7 @@ for (const file of RESUME_GUARD_PAIR) {
 
   test(`${rel} deliver prompt merges the default branch before pushing`, () => {
     const src = fs.readFileSync(file, 'utf8');
-    assert.match(src, /git merge --no-edit origin\/\$\{defaultBranch\}/,
+    assert.match(src, /gitSpelling\(instrument, `merge --no-edit origin\/\$\{defaultBranch\}`\)/,
       'deliver must merge origin/<defaultBranch> into the verified branch');
     assert.match(src, /git checkout --theirs/,
       'deliver must take the default branch side for a generated-file conflict');
@@ -952,6 +959,8 @@ for (const file of RESUME_GUARD_PAIR) {
       'deliver must classify a SKILL.md stamp conflict with the resolver script, not by eye');
     assert.match(src, /node tools\/renumber-harness-upgrade\.js/,
       'deliver must renumber a colliding harness upgrade row with the script, not by hand (issue 515)');
+    assert.match(src, /gitSpelling\(instrument, 'checkout --conflict=diff3 -- <path>'\)\} [^\n]*then \\`node tools\/resolve-append-conflict\.js <path>/,
+      'deliver must classify an append-append conflict on diff3 markers with the resolver script (issue 908)');
     assert.match(src, /git merge --abort/,
       'a conflict outside the two classes must abort the merge rather than guess');
     const deliverIdx = src.indexOf('STEP A - merge the default branch BEFORE pushing');
@@ -1220,6 +1229,44 @@ for (const file of RESUME_GUARD_PAIR) {
       'the run result must carry the refusal text, so the orchestrator merges master instead of re-implementing');
     assert.ok(logs.some((m) => /WITHOUT the pre-push merge/.test(m)),
       'the log must say the PR still owes the default-branch merge');
+  });
+
+  // ---- The merge spelling a live probe accepted (issue 907) ----
+  // Run 6ab733a4's deliverer had `git merge origin/master` refused twice and left PR #897 dirty.
+  // The probe on issue 907 ran the gitSpelling form from inside a fleet worktree without a refusal.
+  test(`${rel} deliver prompt merges with the probed spelling, from inside the checkout (issue 907)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    assert.ok(prompt.includes('never \\`git -C\\` into it: ${gitSpelling(instrument, `merge --no-edit origin/${defaultBranch}`)}'),
+      'A1 must spell the merge through gitSpelling, run from inside the checkout - the spelling issue 907 probed');
+    assert.match(loadStableHelpers(file).gitSpelling('mcp', 'merge --no-edit origin/master'), /^`\/usr\/bin\/git merge --no-edit origin\/master`/,
+      'in a container the merge leads with the absolute git path');
+    assert.match(prompt, /A merge the classifier refuses in a D3 round does NOT go to A8/,
+      'a refused re-merge of an open PR must not re-deliver it unmerged');
+    assert.match(prompt, /return merged false, prState "dirty-unresolved", conflictPaths those paths, blockedReason "merge of origin\/\$\{defaultBranch\} refused by the classifier: <the refusal text VERBATIM/,
+      'a refused re-merge must come back dirty-unresolved, naming the refusal and the conflict paths');
+  });
+
+  test(`${rel} runCodeLane reports a PR left dirty by a refused re-merge (issue 907)`, async () => {
+    const refusal = 'Permission denied to execute git merge by Claude Code auto mode classifier - Auto-Mode Bypass';
+    const agentMock = async (_prompt, opts) => {
+      if (opts.label.startsWith('impl:')) {
+        return { branch: 'agent/issue-907-attempt1-wf_testrun-w0', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+      }
+      if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+      if (opts.label.startsWith('deliver:')) {
+        return { pushed: true, prUrl: 'https://github.com/x/y/pull/907', mergeStatus: 'clean', conflictPaths: ['marketplace/aac-skills/.claude-plugin/plugin.json'],
+          merged: false, mergeSha: '', prState: 'dirty-unresolved', blockedReason: `merge of origin/master refused by the classifier: ${refusal}` };
+      }
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    const { result, logs } = await driveCodeLane(file, agentMock, { number: 907, title: 't', criteria: '' }, 0);
+    assert.equal(result.prState, 'dirty-unresolved', 'the orchestrator must see the PR is still dirty');
+    assert.equal(result.merged, false);
+    assert.equal(result.prUrl, 'https://github.com/x/y/pull/907', 'a dirty PR is still a delivered PR, not a blocked merge');
+    const line = logs.find((m) => m.startsWith('deliver:#907'));
+    assert.ok(line && line.includes(refusal), 'the run log must name the refusal');
+    assert.ok(line.includes('dirty-unresolved (conflicts: marketplace/aac-skills/.claude-plugin/plugin.json)'),
+      'the run log must name the conflict paths the orchestrator has to merge');
   });
 }
 
@@ -1573,7 +1620,10 @@ test(`fleet script ${FLEET_SCRIPT_REL} scout prompt calls the listing the whole 
 const extractBetween = extractMarked;
 
 function loadTrackerRules(scriptPath, mode) {
-  const body = extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-TRACKER-RULES');
+  // Issue 883: trackerRules now calls gitSpelling (`git remote get-url origin` goes through it
+  // too), which lives in the generated block, not the FLEET-TRACKER-RULES one - prepend it so the
+  // isolated eval below still resolves the name.
+  const body = generatedBlock(scriptPath) + '\n' + extractBetween(fs.readFileSync(scriptPath, 'utf8'), 'FLEET-TRACKER-RULES');
   // eslint-disable-next-line no-new-func
   const make = new Function(body + '\nreturn trackerRules;')();
   return make(mode);
@@ -2263,6 +2313,14 @@ test(`${FLEET_SCRIPT_REL} MCP tracker prompts name where owner and repo come fro
   assert.match(fn, /instrument === 'mcp'\s*\?\s*`[^`]*\$\{rules\.repoNote\}/, 'open-pr-scan MCP steps must embed rules.repoNote');
 });
 
+// Issue 813: REST /issues?labels= returns pull requests too, so a labelled PR was scouted as a ticket.
+test(`${FLEET_SCRIPT_REL} scoutList drops pull requests in both instruments (issue 813)`, () => {
+  const gh = loadTrackerRules(FLEET_SCRIPT, 'gh').scoutList('ready-for-agent');
+  assert.match(gh, /--jq '\[\.\[\] \| select\(\.pull_request == null\)\]'/, 'gh scoutList must filter out pull_request entries');
+  const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp').scoutList('ready-for-agent');
+  assert.match(mcp, /drop any entry that carries a pull_request key/, 'mcp scoutList must drop pull_request entries');
+});
+
 // Issue 770: the deliverer merges the PR it opened, in the instrument the rest of the stage uses.
 test(`${FLEET_SCRIPT_REL} deliver rules carry the PR merge in both instruments (issue 770)`, () => {
   const mcp = loadTrackerRules(FLEET_SCRIPT, 'mcp');
@@ -2626,6 +2684,50 @@ test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint a
   );
 });
 
+// Issue 807: a wave ran `git stash` + `git checkout origin/main` in the orchestrator checkout. The
+// tree was clean afterwards, so the dirt guard passed; the HEAD watch measured at Setup must catch
+// the move, check the start branch back out, and flag it - or throw when the restore does not take.
+function headMock(heads, restores) {
+  const main = 'a'.repeat(40), origin = 'b'.repeat(40);
+  let reads = 0;
+  return async (prompt, opts) => {
+    if (opts.label === 'tree-guard:baseline') {
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    }
+    if (opts.label.startsWith('orchestrator-head:restore:')) { restores.push(prompt); return { exitCode: 0, stdout: '', stderr: '' }; }
+    if (opts.label.startsWith('orchestrator-head:')) {
+      assert.match(prompt, /git -C \/m symbolic-ref --quiet --short HEAD \|\| echo DETACHED; git -C \/m rev-parse HEAD/);
+      const h = heads[Math.min(reads++, heads.length - 1)];
+      return { exitCode: 0, stdout: h === 'main' ? `main\n${main}\n` : `DETACHED\n${origin}\n`, stderr: '' };
+    }
+    if (opts.label.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+}
+
+test('treeGuardCheck: a clean-tree HEAD move to detached origin/main is checked back onto the start branch and flagged (issue 807)', async () => {
+  const restores = [];
+  // Setup reads main; the checkpoint reads the detached move; the re-read after restore reads main.
+  const { treeGuardCheck, logs } = await driveTreeGuard(headMock(['main', 'detached', 'main'], restores), { orchestratorCwd: '/m' });
+  await treeGuardCheck('verify-attempt1', 5);
+  assert.equal(restores.length, 1);
+  assert.match(restores[0], /git -C \/m checkout main(?!\S)/);
+  assert.ok(!/stash|reset/.test(restores[0].split('\n')[2]), 'the restore command must be a plain checkout');
+  assert.ok(logs.some((l) => /Orchestrator HEAD RESTORED at verify-attempt1/.test(l) && /stash list/.test(l)));
+});
+
+test('treeGuardCheck: a HEAD move the restore cannot undo is an isolation breach (issue 807)', async () => {
+  const { treeGuardCheck } = await driveTreeGuard(headMock(['main', 'detached'], []), { orchestratorCwd: '/m' });
+  await assert.rejects(() => treeGuardCheck('deliver', 5), /isolation breached.*did not put it back/);
+});
+
+test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
+  const report = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-REPORT');
+  assert.ok(report.includes('gitSpelling(instrument, `add -- ${cfg.followupsFile}`)'), 'the writer must stage the follow-ups file by explicit path');
+  assert.match(report, /gitSpelling\(instrument, `commit -m "[^`]*" -- \$\{cfg\.followupsFile\}`\)/, 'the commit itself must be limited to that path');
+  assert.ok(report.includes("gitSpelling(instrument, 'show --name-only --format= HEAD')"), 'the writer must read back that the commit holds only that file');
+});
+
 // ---------------------------------------------------------------------------
 // Tip lookup fallback chain (issue 561): a branch present only as `origin/<branch>` - handed in
 // through `priorImpl` from an earlier run, or pushed by an implementer in another container - used
@@ -2782,13 +2884,13 @@ test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries 
 // ---- In-wave chaining, driven through the script's own lane dispatch (issue 854) ----
 // The FLEET-LANES block runs with real buildLanes/chainGate and a pipeline that starts every lane
 // at once, as the Workflow runtime does; only the per-kind lanes are mocked.
-async function driveLanes(wave, codeResult) {
+async function driveLanes(wave, codeResult, runHalt = createRunHalt(() => {})) {
   const body = extractMarked(fs.readFileSync(FLEET_SCRIPT, 'utf8'), 'FLEET-LANES');
   const started = [];
   const logs = [];
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn results;\n}`);
   const results = await wrapper(laneScope({
-    wave, log: (m) => logs.push(m), scout: { defaultBranch: 'main' }, buildLanes, chainGate,
+    wave, log: (m) => logs.push(m), scout: { defaultBranch: 'main' }, buildLanes, chainGate, runHalt,
     pipeline: (items, fn) => Promise.all(items.map((item) => fn(item))),
     runCodeLane: async (t) => { started.push(t.number); return codeResult(t); },
     runProbeLane: async () => { throw new Error('no probe here'); },
@@ -2844,4 +2946,263 @@ test(`${FLEET_SCRIPT_REL} pairs Report results by ticket number, not wave positi
   assert.match(src, /const clean = wave\.map\(\(t\) => resultByTicket\.get\(parseInt\(t\.number, 10\)\)/);
   assert.doesNotMatch(src, /results \|\| \[\]\)\[i\]/, 'positional pairing breaks once a lane holds several tickets');
   assert.match(src, /skippedChained: clean\.filter\(r => r\.chainSkipped\)/);
+});
+
+// ---- A quota or rate-limit failure ends the run (issue 812) ----
+test('quotaFailure recognises the limit messages runs have died on, with their reset time', () => {
+  assert.deepEqual(quotaFailure("You've hit your session limit · resets 9:20am (UTC)"),
+    { reason: 'session limit', resetsAt: '9:20am (UTC)', message: "You've hit your session limit · resets 9:20am (UTC)" });
+  assert.equal(quotaFailure("You've hit your weekly limit · resets 9pm (America/Chicago)").resetsAt, '9pm (America/Chicago)');
+  assert.equal(quotaFailure('gh: API rate limit already exceeded for user ID 1').reason, 'rate limit');
+  assert.equal(quotaFailure('HTTP 429 Too Many Requests').reason, 'rate limit');
+  assert.equal(quotaFailure('rate_limit_error: status 429').resetsAt, null);
+  for (const ordinary of ['no reply matching its schema', 'issue #429 is still open', '', null]) {
+    assert.equal(quotaFailure(ordinary), null, `${ordinary} is an ordinary failure, not a halt`);
+  }
+});
+
+// Replay of run wf_2e08b873-d92 (2026-09-16): the first implementer hit the weekly limit and the
+// run went on to launch 17 more sub-agents that all failed the same way. Four code tickets, two
+// lanes at a time; #201's implementer rejects on the limit while #202's is in flight and settles
+// after it. The real FLEET-CODE-LANE and FLEET-LANES blocks run against the script's own halt.
+const QUOTA_REPLAY = {
+  wave: [201, 202, 203, 204],
+  message: "You've hit your weekly limit · resets 9pm (America/Chicago)",
+  // label -> [delay ms, outcome]; anything else the account is asked for fails on the limit.
+  agents: {
+    'impl:#201.1': [5, 'reject'],
+    'impl:#202.1': [25, { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: ['202 found a thing'] }],
+  },
+};
+
+test(`${FLEET_SCRIPT_REL} a quota failure halts the run: at most one attempt per ticket, no new ticket starts (issue 812)`, async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const logs = [];
+  // The halt the fleet script builds for itself, from its own generated block.
+  // eslint-disable-next-line no-new-func
+  const scriptHalt = new Function(`${generatedBlock()}\nreturn { createRunHalt, haltReport };`)();
+  const runHalt = scriptHalt.createRunHalt((m) => logs.push(m));
+  const calls = [];
+  const agentMock = async (_prompt, opts) => {
+    calls.push(opts.label);
+    const [delay, outcome] = QUOTA_REPLAY.agents[opts.label] || [0, 'reject'];
+    await new Promise((r) => setTimeout(r, delay));
+    if (outcome === 'reject') throw new Error(QUOTA_REPLAY.message);
+    return outcome;
+  };
+  const helpers = loadStableHelpers(FLEET_SCRIPT);
+  const runCodeLane = await instantiateCodeLane(extractCodeLane(src), agentMock, logs, {
+    runHalt, stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
+    priorFindingsBlock: helpers.priorFindingsBlock, unmetCriteriaOf: helpers.unmetCriteriaOf,
+    gitSpelling: helpers.gitSpelling, worktreeMismatch,
+  });
+  const lanes = new AsyncFunction('scope', `with (scope) {\n${extractMarked(src, 'FLEET-LANES')}\nreturn results;\n}`);
+  const wave = QUOTA_REPLAY.wave.map((number) => ({ number, kind: 'code', title: 't', criteria: '', blockedBy: [] }));
+  const results = await lanes(laneScope({
+    wave, runHalt, buildLanes, chainGate, log: (m) => logs.push(m), scout: { defaultBranch: 'main' },
+    runCodeLane,
+    // Two lanes at a time, so #203 and #204 are still queued when the limit is hit.
+    pipeline: async (items, fn) => {
+      const out = [];
+      let next = 0;
+      const worker = async () => { while (next < items.length) { const i = next++; out[i] = await fn(items[i]); } };
+      await Promise.all([worker(), worker()]);
+      return out;
+    },
+  }));
+
+  assert.deepEqual(calls, ['impl:#201.1', 'impl:#202.1'],
+    'after the quota failure no retry, verifier, push, deliverer or new ticket may start');
+  const byTicket = new Map(results.map((r) => [r.ticket, r]));
+  assert.ok(byTicket.get(201).verdict.failures.some((f) => /run halted on the weekly limit \(resets 9pm \(America\/Chicago\)\)/.test(f)));
+  assert.equal(byTicket.get(202).done, false, 'the in-flight implementer settles, and nothing is started on its branch');
+  assert.deepEqual(byTicket.get(202).discoveries, ['202 found a thing'], 'its discoveries still reach the run result');
+  const report = scriptHalt.haltReport(runHalt.get(), results);
+  assert.deepEqual(report.notAttempted, [203, 204]);
+  assert.deepEqual([report.halt.reason, report.halt.resetsAt, report.halt.who],
+    ['weekly limit', '9pm (America/Chicago)', 'impl:#201.1']);
+  assert.equal(logs.filter((m) => m.startsWith('RUN HALTED')).length, 1, 'the halt is logged once');
+});
+
+test(`${FLEET_SCRIPT_REL} a halted run does not start the discoveries writer and keeps the bullets in the result (issue 812)`, async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /const discoveryReport = runHalt\.halted\(\) && allDiscoveries\.length\s*\n\s*\? \{[^}]*error: `followups-writer not started/,
+    'the writer must not be spawned once the run is halted');
+  assert.match(src, /discoveryList: followupsError \? allDiscoveries : undefined/, 'the bullets must travel in the run result');
+  assert.match(src, /\.\.\.haltReport\(runHalt\.get\(\), clean\)/, 'the run result names the halt and the tickets not attempted');
+  // A writer that dies on the limit itself is the halt too.
+  const runHalt = createRunHalt(() => {});
+  const { result } = await driveReport(FLEET_SCRIPT, async () => { throw new Error("You've hit your session limit · resets 6pm (UTC)"); },
+    ['a bullet'], {}, { runHalt, unusableReason: (who, detail) => `${who} output unusable: ${detail}` });
+  assert.match(result.error, /session limit/);
+  assert.equal(runHalt.get().resetsAt, '6pm (UTC)');
+});
+
+// ---------------------------------------------------------------------------
+// Issue 883: issues 755 and 803 fixed the caveman worktree guard's refusal of a bare `git ...` for
+// push and ls-remote specifically, one instruction at a time - but the guard refuses ANY bare git
+// invocation, and other prompt text in the fleet script still names one literally (most visibly
+// `git remote get-url origin` in trackerRules, run unconditionally to learn {owner}/{repo}). This
+// generalizes the regression guard: any backticked command that starts with bare `git ` (not
+// `/usr/bin/git`) must either be built through gitSpelling, or be a mention this test is told by
+// name is not an instruction to run it - a forbidden-spelling reference ("never `git push
+// --force`"), a past-tense description of a refused command, internal orchestrator-log prose
+// (never sent to a worker), or JSON-schema `description` text describing what a field means. A
+// literal "run `git ...`" instruction is never on this list - it must go through gitSpelling, the
+// way `git remote get-url origin` was fixed here.
+//
+// The remaining entries below are pre-existing (STEP A-D of the deliver prompt, the verify
+// prompt's worktree report, and a few others) and are OUT OF SCOPE for issue 883 itself, which
+// asked only for this regression test plus the `git remote get-url origin` fix - converting the
+// rest is tracked as a follow-up discovery, not fixed here. Removing an entry (by converting its
+// site through gitSpelling) is welcome at any time; adding one for a NEW literal "run `git ...`"
+// instruction is not - convert it instead.
+const GIT_GUARD_ALLOWLIST = [
+  // Internal orchestrator log prose (classifyBranchLookup/classifyDelivery `message` fields) -
+  // read only by `log()` in this script, never sent to any agent as a prompt.
+  'ls-remote --heads origin ${branch}',
+  'ls-remote --exit-code',
+  // JSON-schema `description` text (REV/PUSHED/DELIVERED/worktree schemas) - describes what an
+  // output field means; the instruction to actually run the command lives elsewhere in the prompt.
+  'ls-remote --heads origin <branch>',
+  'rev-parse HEAD',
+  'ls-remote --exit-code --heads origin <branch>',
+  // revParse's own prompt (issue 561): a "do not substitute" caution naming the shortcut it
+  // forbids, not an instruction to run it.
+  'rev-parse',
+  'ls-remote',
+  // orchestratorTreeRail (aac-routines issue 192) and the worktree rule it shares text with: both
+  // document which git subcommands the ORCHESTRATOR (never a worker) may run against its own
+  // checkout, or name a forbidden spelling - not an instruction handed to a worker to execute.
+  'fetch',
+  'worktree add',
+  'worktree remove',
+  'log',
+  'add',
+  "checkout <branch> -- <path>",
+  'restore',
+  'stash',
+  'reset',
+  'apply',
+  'checkout ${leakExample} -- .',
+  '-C',
+  // scratchRail (issue 439): names `git commit -F` only as an example of what a scratch file
+  // might hold, not an instruction to run it now.
+  'commit -F',
+  // fleet-refresh's own Setup-phase prompt (issue 770), which runs before `instrument` is known -
+  // a real run instruction, pre-existing, tracked as an issue-883 follow-up like STEP A-D below.
+  'commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"',
+  // STEP A-D of the deliver prompt (issues 514/544/562/654) and the verify prompt's worktree
+  // report - real run instructions, pre-existing, tracked as an issue-883 follow-up rather than
+  // converted here (see the note above).
+  'ls-remote --exit-code --heads origin ${branch}',
+  'fetch origin',
+  'fetch origin ${defaultBranch} ${branch}',
+  '-C ${orchestratorCwd} worktree add ${scratchFile(',
+  'merge --no-edit origin/${defaultBranch}',
+  'rev-parse --show-toplevel',
+  'add -A',
+  'diff --name-only --diff-filter=U',
+  'checkout --theirs -- <path>',
+  'add -- <path>',
+  'commit --no-edit',
+  'commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"',
+  "grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD",
+  'commit --amend --no-edit',
+  'reset --hard HEAD~1',
+  'merge --abort',
+  "branch -a --list '*${branch}*'",
+  'fetch origin ${branch}',
+  'checkout -B ${branch} origin/${branch}',
+  'read-tree -u --reset <corrected-commit>',
+  'commit -m "repair merge <bad-sha> (issue ${t.number}): conflict markers removed"',
+  'worktree list',
+  'log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1',
+  // Forbidden-spelling / past-tense-refusal mentions (STEP C's "out of bounds here", mergeNote's
+  // "the classifier refused `git merge` twice") - never an instruction to run them.
+  'push --force',
+  'push --force-with-lease',
+  'merge',
+  'merge origin/${scout.defaultBranch}',
+  // A trailing `//` comment fragment ("the baseline never shows in `git status`"), caught because
+  // this line's code half is not itself a comment.
+  'status',
+];
+
+test(`${FLEET_SCRIPT_REL} names no bare backticked git command outside gitSpelling or the explicit allowlist (issue 883)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const fnStart = src.indexOf('function gitSpelling(instrument, args) {');
+  assert.ok(fnStart > -1, 'gitSpelling must still be defined for this scan to exempt its own body');
+  const fnEnd = src.indexOf('\n}', fnStart);
+  let offset = 0;
+  const violations = [];
+  for (const line of src.split('\n')) {
+    const lineStart = offset;
+    offset += line.length + 1;
+    if (lineStart >= fnStart && lineStart <= fnEnd) continue; // gitSpelling's own definition
+    if (/^\s*(\/\/|\*)/.test(line)) continue; // full-line comments and JSDoc
+    const norm = line.replace(/\\`/g, '`');
+    const re = /`git ([^`]*)`/g;
+    let m;
+    while ((m = re.exec(norm))) {
+      if (!GIT_GUARD_ALLOWLIST.includes(m[1])) violations.push(`${JSON.stringify(m[1])} (line starts: ${JSON.stringify(line.slice(0, 60))})`);
+    }
+  }
+  assert.deepEqual(violations, [], 'every bare backticked `git ...` mention must go through gitSpelling or be named in GIT_GUARD_ALLOWLIST with a reason');
+});
+
+test(`${FLEET_SCRIPT_REL} tells no worker to run a bare \`git remote get-url origin\` (issue 883)`, () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(!src.includes('`git remote get-url origin`'),
+    'the command must be built through gitSpelling so the accepted /usr/bin/git spelling leads in a cloud container, never hardcoded as a literal bare backtick');
+  assert.match(src, /gitSpelling\((instrument|mode|'mcp'), 'remote get-url origin'\)/,
+    'gitSpelling must be the thing that produces every remaining "git remote get-url origin" mention');
+});
+
+// Issue 892: a resumed cloud session rooted outside the repo refused every worktree agent, but only
+// after the scout and all three attempts per ticket had spent their tokens. The canary block runs
+// against a mocked agent whose worktree creation fails the way the runtime's did; a stand-in for
+// the lanes follows it, so an `impl:` spawn in `labels` would mean the run went on past Setup.
+async function driveWorktreeCanary(agentMock, cfgOverrides = {}) {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const body = sliceBetweenTags(src, '// [FLEET-WORKTREE-CANARY-START]', '// [FLEET-WORKTREE-CANARY-END]', 'the worktree canary block');
+  const logs = [];
+  const wrapper = new AsyncFunction('agent', 'cfg', 'log', 'unusableReason',
+    `${body}\nawait agent('implement', { label: 'impl:#1.1', isolation: 'worktree' })`);
+  await wrapper(agentMock, Object.assign({ reportModel: 'r', finishRunId: null }, cfgOverrides),
+    (m) => logs.push(m), (who, detail) => `${who} output unusable: ${detail}`);
+  return logs;
+}
+
+test('worktree canary: a session root that is not a git repo stops the run before any impl: agent (issue 892)', async () => {
+  const labels = [];
+  const agentMock = async (_prompt, opts) => {
+    labels.push(opts.label);
+    if (opts.isolation === 'worktree') throw new Error('Cannot create agent worktree: not in a git repository and no WorktreeCreate hooks are configured.');
+    return {};
+  };
+  await assert.rejects(driveWorktreeCanary(agentMock), (err) => {
+    assert.match(err.message, /ABORTED before Scout/);
+    assert.match(err.message, /not a git repository/, 'the error must name the cause');
+    assert.match(err.message, /launch the fleet from a session whose root IS the repository checkout/, 'the error must name the fix');
+    return true;
+  });
+  assert.deepEqual(labels, ['worktree-canary']);
+  assert.ok(!labels.some((l) => l.startsWith('impl:')), 'no implementer may spawn after a refused worktree');
+});
+
+test('worktree canary: a created worktree, another canary failure, or finish mode lets the run go on (issue 892)', async () => {
+  const run = async (canaryResult, cfgOverrides) => {
+    const labels = [];
+    await driveWorktreeCanary(async (_prompt, opts) => {
+      labels.push(opts.label);
+      if (opts.label === 'worktree-canary') { if (canaryResult instanceof Error) throw canaryResult; return canaryResult; }
+      return {};
+    }, cfgOverrides);
+    return labels;
+  };
+  assert.deepEqual(await run({ head: 'a'.repeat(40) }), ['worktree-canary', 'impl:#1.1']);
+  assert.deepEqual(await run(new Error('StructuredOutput retry cap reached')), ['worktree-canary', 'impl:#1.1']);
+  assert.deepEqual(await run(new Error('not in a git repository'), { finishRunId: 'wf_x' }), ['impl:#1.1'],
+    'finish mode spawns no worktree agent, so it runs no canary');
 });

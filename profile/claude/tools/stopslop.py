@@ -784,10 +784,40 @@ SYNONYM_GROUPS = [
 ]
 
 
+_AVOID_PREFERRED = re.compile(r"\s*(?:Avoid|Preferred):")
+
+
+def _is_word_register_line(line):
+    """True for a paragraph that is nothing but a comma-separated word list
+    ending in a period - e.g. Rule 167's own vocabulary register ("delve,
+    foster, ..., game changer."). That is a citation, not prose a person
+    wrote to communicate something, so it is data the same way a table row
+    is: many short items (average two words or fewer) and enough of them
+    (twenty-plus) that a normal sentence would not shape up this way."""
+    clean = re.sub(r"\*\*", "", line).strip()
+    if not clean.endswith("."):
+        return False
+    segments = [s.strip() for s in clean.rstrip(".").split(",") if s.strip()]
+    if len(segments) < 20:
+        return False
+    lengths = [len(s.split()) for s in segments]
+    return (sum(lengths) / len(lengths)) <= 1.5
+
+
 def _blank_uncheckable(lines):
     """Blank what Rule 2 and Rule 153 put out of reach, keeping line numbers
     and column offsets true: fenced code, block quotes, table rows, inline
-    code spans, and link targets."""
+    code spans, link targets, and quotations.
+
+    Rule 153 scopes this whole part to "original AAC prose" and says outright
+    it "does not reach ... quotations". A controlled copy of the standard
+    itself (issue 887) quotes the very phrases Part XXV prohibits, to say
+    what the reader must not write: a bulleted phrase register in Appendix G
+    and H ('- "here's why that matters"'), an "Avoid: ..." example under each
+    numbered rule, a bold-marked citation inline ("Delete **the key point
+    is**"), and Rule 167's own vocabulary list written out as a single
+    sentence. None of that is a person's prose; it is the pattern being
+    named, so none of it should ever fire the checks below."""
     out = []
     fenced = False
     for line in lines:
@@ -798,11 +828,21 @@ def _blank_uncheckable(lines):
         if fenced or re.match(r"\s*>", line) or re.match(r"\s*\|", line):
             out.append("")
             continue
+        if _AVOID_PREFERRED.match(line) or _is_word_register_line(line):
+            out.append("")
+            continue
         # Inline code and link targets are not AAC prose. Replace with spaces
         # so every column to the right of them still reports truthfully.
         line = re.sub(r"`[^`]*`", lambda m: " " * len(m.group(0)), line)
         line = re.sub(r"\]\([^)]*\)", lambda m: " " * len(m.group(0)), line)
         line = re.sub(r"https?://\S+", lambda m: " " * len(m.group(0)), line)
+        # A quotation (Rule 153) - straight or curly double quotes - and a
+        # bold span, this standard's own convention for citing a register
+        # phrase (Appendix G/H, Rules 155-163) rather than using it.
+        line = re.sub(r"\*\*[^*]*\*\*", lambda m: " " * len(m.group(0)), line)
+        line = re.sub(r'"[^"]*"', lambda m: " " * len(m.group(0)), line)
+        line = re.sub(r"“[^”]*”",
+                       lambda m: " " * len(m.group(0)), line)
         out.append(line)
     return out
 

@@ -47,6 +47,7 @@ const {
   matchDeletedPath,
   deletedSubjectFindings,
   duplicateTitleFindings,
+  isUntriaged,
   commentDatesByNumber,
   fetchCommentDates,
 } = require('./tracker-audit.js');
@@ -718,4 +719,18 @@ test('duplicateTitleFindings pairs open tickets whose titles differ only by a st
     { number: 1, title: 'Fetch swallows a short page' },
     { number: 2, title: 'Fetch swallows a long page' },
   ]), []);
+});
+
+// ---- isUntriaged: check 4, with Maybe Someday parked (issue 889) ------------
+
+test('isUntriaged: a label-less ticket parked in Maybe Someday is not untriaged; any other one still is', () => {
+  const TRIAGED = ['needs-triage', 'ready-for-agent', 'ready-for-human', 'orchestrator'];
+  const parked = normalizeIssue({ number: 327, state: 'open', labels: [{ name: 'enhancement' }], milestone: { title: 'Maybe Someday' } });
+  assert.equal(isUntriaged(parked, TRIAGED), false, 'the owner parked it with no state label on purpose');
+  const otherMilestone = normalizeIssue({ number: 5, state: 'open', labels: [{ name: 'enhancement' }], milestone: { title: 'v2' } });
+  const noMilestone = normalizeIssue({ number: 6, state: 'open', labels: [] });
+  assert.equal(isUntriaged(otherMilestone, TRIAGED), true);
+  assert.equal(isUntriaged(noMilestone, TRIAGED), true);
+  const labelled = normalizeIssue({ number: 7, state: 'open', labels: ['ready-for-agent'] });
+  assert.equal(isUntriaged(labelled, TRIAGED), false);
 });

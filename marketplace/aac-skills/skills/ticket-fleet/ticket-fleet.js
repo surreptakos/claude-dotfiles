@@ -30,7 +30,7 @@ export const meta = {
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
-    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report (aac-routines issues 192, 270)' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issue 807)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
@@ -78,8 +78,9 @@ const cfg = Object.assign({
   // ---- pre-push merge (issue 318) ----
   // The deliver stage merges origin/<defaultBranch> into the verified branch before pushing, so
   // the PR opens mergeable instead of landing the same generated-file conflict on the session
-  // once per PR. Only two conflict classes are resolvable without judgment: a path the packager
-  // generates, and a SKILL.md conflict confined to the four-key metadata stamp block. Anything
+  // once per PR. Only four conflict classes are resolvable without judgment: a path the packager
+  // generates, a SKILL.md conflict confined to the four-key metadata stamp block, a harness
+  // upgrade row (issue 515), and a hunk where both sides only added lines (issue 908). Anything
   // else stops delivery for that ticket. A marker scan of the merge result gates the push either
   // way, and a bad commit that already reached origin is repaired by a follow-up commit carrying
   // the corrected tree, never by a force push (issue 514).
@@ -941,6 +942,68 @@ function gitSpelling(instrument, args) {
   }
   return `\`${bare}\` (if the worktree guard refuses it with "${GIT_GUARD_REFUSAL}", run \`${absolute}\` instead - the absolute path it accepts; on the Windows desktop ${GIT_ABSOLUTE_PATH} does not exist and the bare spelling is the one that runs)`;
 }
+
+/**
+ * Issue 812: an agent() rejection that says the account is out of quota or rate-limited is
+ * terminal for the whole run - every later agent fails on the same message, so retrying burns the
+ * attempts and the report writers for nothing (runs wf_2e08b873-d92, wf_679047c4-1e0,
+ * wf_4dd3dfea-a31). Pure: the rejection's message in, null when it is an ordinary failure, else
+ * { reason, resetsAt, message } - reason is the limit named in the message ("session limit",
+ * "weekly limit", "rate limit"), resetsAt the reset time it carries or null, message its first
+ * line. A bare "429" is not enough (issue #429 is a ticket, not an HTTP status): it must read as
+ * a status or sit next to "Too Many Requests".
+ */
+function quotaFailure(message) {
+  const text = String(message == null ? '' : message);
+  let reason = null;
+  const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
+  if (hit) reason = hit[1].toLowerCase();
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
+  if (!reason) return null;
+  const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);
+  const resetsAt = reset ? reset[1].trim().replace(/[.,;]+$/, '').slice(0, 80) || null : null;
+  const first = text.split('\n').map((l) => l.trim()).find(Boolean) || '';
+  return { reason, resetsAt, message: first.slice(0, 300) };
+}
+
+/**
+ * Issue 812: the run-wide halt. `note(message, who)` records the first quota failure (logging it
+ * once through `log`) and answers whether this message was one; `halted()` is what every lane
+ * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
+ * is the line a ticket's failures carry when the halt stopped its retries.
+ */
+function createRunHalt(log) {
+  let halt = null;
+  return {
+    note(message, who) {
+      const q = quotaFailure(message);
+      if (!q) return false;
+      if (!halt) {
+        halt = Object.assign({ who: who || null }, q);
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      }
+      return true;
+    },
+    halted() { return halt !== null; },
+    get() { return halt; },
+    failure() {
+      return halt ? `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812` : '';
+    },
+  };
+}
+
+/**
+ * Issue 812: the run result's halt fields. Pure: the halt record (or null) and the per-ticket
+ * results in; the terminal reason and reset time named once, and the tickets that never started.
+ */
+function haltReport(halt, results) {
+  const list = Array.isArray(results) ? results.filter(Boolean) : [];
+  return {
+    halt: halt ? { reason: halt.reason, resetsAt: halt.resetsAt || null, message: halt.message, who: halt.who || null } : null,
+    notAttempted: list.filter((r) => r.notAttempted).map((r) => r.ticket),
+  };
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -956,10 +1019,10 @@ function gitSpelling(instrument, args) {
 function trackerRules(mode) {
   // Every MCP tool here takes owner and repo as arguments; a prompt that never names them leaves
   // the agent to guess, and a guessed owner stalled run 6ab4840f for 106 minutes (issue 757).
-  const REPO = 'owner and repo: take them from `git remote get-url origin` (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).'
+  const REPO = `owner and repo: take them from ${gitSpelling(mode, 'remote get-url origin')} (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).`
   if (mode === 'mcp') return {
     repoNote: REPO,
-    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
+    scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap; list_issues reads GraphQL issues and should never return a pull request, but drop any entry that carries a pull_request key or links to a /pull/ URL - a labelled PR is not a ticket (issue 813) (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
     scoutExplicit: (nums) => `${REPO} Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number: mcp__github__issue_read with method get, then method get_comments.`,
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
@@ -978,19 +1041,19 @@ function trackerRules(mode) {
     issueClose: (n, prUrl) => `${REPO} mcp__github__add_issue_comment (issue_number ${n}) with the one line "Merged in ${prUrl}; closing." then mcp__github__issue_write (method "update", issue_number ${n}, state "closed", state_reason "completed").`,
   }
   return {
-    repoNote: '{owner}/{repo} come from `git remote get-url origin`.',
-    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100&page=P"\` for P = 1, 2, ... until a page returns fewer than 100 entries - take EVERY matching ticket, the wave has no cap - then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
+    repoNote: REPO,
+    scoutList: (label) => `\`gh api "repos/{owner}/{repo}/issues?labels=${label}&state=open&per_page=100&page=P" --jq '[.[] | select(.pull_request == null)]'\` for P = 1, 2, ... until the unfiltered page would hold fewer than 100 entries (check with \`--jq length\` on the same URL when the filtered page is short) - the REST /issues endpoint returns pull requests too, and the jq filter drops them: a labelled PR is not a ticket (issue 813) - take EVERY matching ticket, the wave has no cap - then per ticket N \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\` - comments carry criteria the body lacks.`,
     scoutExplicit: (nums) => `Take EXACTLY these issues, whatever their labels or state: ${nums.join(', ')}. Per number N: \`gh api repos/{owner}/{repo}/issues/N\` and \`gh api repos/{owner}/{repo}/issues/N/comments\`.`,
-    scoutNotes: `{owner}/{repo} come from \`git remote get-url origin\` - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
-    handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from \`git remote get-url origin\`); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
-    commentPost: (bodyFile) => `Write the comment body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first: the scratchpad the harness names for you is shared with every other worker of this run, so a bare name there is overwritten mid-task and you post another worker's text (issue 439). Then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\` with {owner}/{repo} from \`git remote get-url origin\`; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from \`git remote get-url origin\`): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
-    blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from \`git remote get-url origin\`), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
+    scoutNotes: `{owner}/{repo} come from ${gitSpelling(mode, 'remote get-url origin')} - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
+    handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
+    commentPost: (bodyFile) => `Write the comment body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first: the scratchpad the harness names for you is shared with every other worker of this run, so a bare name there is overwritten mid-task and you post another worker's text (issue 439). Then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\` with {owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
+    labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
+    blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: (bodyFile) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
     prComment: (bodyFile) => `write the comment to \`${bodyFile}\` (that exact path - issue 439), then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\``,
     // Issue 770: REST only - `gh pr checks`, `gh pr view` and `gh pr merge` are GraphQL-backed and
     // HTTP 403 through the proxy (issue 130).
-    prState: (n) => `\`gh api repos/{owner}/{repo}/pulls/${n} --jq '{head: .head.sha, mergeable_state, state}'\` ({owner}/{repo} from \`git remote get-url origin\`; never \`gh pr view\`).`,
+    prState: (n) => `\`gh api repos/{owner}/{repo}/pulls/${n} --jq '{head: .head.sha, mergeable_state, state}'\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}; never \`gh pr view\`).`,
     prChecks: (n) => `\`gh api repos/{owner}/{repo}/commits/<head sha>/check-runs --jq '[.check_runs[]|{name,status,conclusion}]'\` for the head sha of PR ${n} (never \`gh pr checks\`).`,
     prReviews: (n) => `\`gh api repos/{owner}/{repo}/pulls/${n}/reviews --jq '[.[]|.state]'\`.`,
     prMerge: (n, title) => `\`gh api --method PUT repos/{owner}/{repo}/pulls/${n}/merge -f merge_method=squash -f sha=<head sha the checks ran on> -f commit_title=${JSON.stringify(title)}\` (never \`gh pr merge\`). The response's "sha" is mergeSha.`,
@@ -1035,6 +1098,7 @@ const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoM
     handoffPending: { type: 'boolean', description: 'true when the ticket\'s LATEST comment is a fleet handoff (a "Remaining for a local session" or "Remaining for a person" section (older handoffs say "Remaining for the owner") and the "_Generated by [Claude Code](https://claude.ai/code)_" footer) and no later comment from the owner follows it: the ticket is parked on a human, so this run must skip it rather than repeat the handoff' },
     discoveryTriage: { type: 'boolean', description: 'true when the ticket is a discovery-triage chore: it asks for a list of findings (FOLLOW-UPS.md discoveries, a fleet run\'s follow-ups, a review list) to be turned into tracker items - tickets filed, doc fixes landed, noise struck. Two of these in one wave file the same finding twice if they run concurrently, so the fleet chains them.' },
     criteria: { type: 'string', description: 'acceptance criteria, verbatim from issue + comments' },
+    body: { type: 'string', description: "the ticket's issue body, verbatim from the tracker (not the extracted criteria) - the implementer prompt shows this beside criteria so an implementer is not left guessing the fix from criteria alone (issue 886); \"\" only when the issue truly has no body" },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'every blocker issue number the ticket names, whatever its state - the run resolves open vs closed itself (issue 403)' },
     milestone: { type: 'string', description: 'the ticket\'s milestone title, verbatim from the tracker (mcp list_issues/issue_read or gh api both return milestone.title); "" when the ticket has none. A milestone of "Maybe Someday" parks the ticket - dropped from a label-driven listing before the wave (issue 786) - so report it even when nothing else here reads it' },
   } } },
@@ -1103,10 +1167,10 @@ const VERDICT = { type: 'object', required: ['pass', 'evidence', 'worktree'], pr
 
 const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus', 'conflictPaths', 'merged', 'mergeSha', 'prState'], properties: {
   pushed: { type: 'boolean' }, prUrl: { type: 'string' },
-  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked', 'unmerged-by-classifier', 'branch-unconfirmed'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: branch-unconfirmed = the branch could not be SEEN on origin, so no merge ran - branchLookup carries every ls-remote run and the run decides whether that is "absent", "could not determine" or an inconsistency (issue 654), never a blocked merge; clean = merged with no conflict; resolved = conflicts were confined to generated files or SKILL.md stamp blocks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened; unmerged-by-classifier = the auto-mode classifier refused the merge command itself twice, so the branch was pushed and the PR opened WITHOUT the merge (issue 544) - the branch is verified, pushed is true, prUrl is real, and blockedReason carries the refusal text for the orchestrator to merge the default branch itself' },
-  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp resolver refused, and any path the pre-push marker scan found conflict markers in; empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
+  mergeStatus: { type: 'string', enum: ['clean', 'resolved', 'blocked', 'unmerged-by-classifier', 'branch-unconfirmed'], description: 'outcome of the pre-push merge of origin/<defaultBranch>: branch-unconfirmed = the branch could not be SEEN on origin, so no merge ran - branchLookup carries every ls-remote run and the run decides whether that is "absent", "could not determine" or an inconsistency (issue 654), never a blocked merge; clean = merged with no conflict; resolved = conflicts were confined to generated files, SKILL.md stamp blocks, harness upgrade rows or append-append hunks and were resolved, regenerated, re-tested and committed; blocked = a conflict outside those classes, the test command failed after the merge, or the pre-push marker scan still found conflict markers in the merge result (issue 514) - nothing was pushed and no PR was opened; unmerged-by-classifier = the auto-mode classifier refused the merge command itself twice, so the branch was pushed and the PR opened WITHOUT the merge (issue 544) - the branch is verified, pushed is true, prUrl is real, and blockedReason carries the refusal text for the orchestrator to merge the default branch itself' },
+  conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp or append resolver refused, and any path the pre-push marker scan found conflict markers in; when prState is dirty-unresolved, the paths the PR still conflicts on (issue 907); empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
   branchLookup: { type: 'array', items: { type: 'object', required: ['exitCode', 'output'], properties: { exitCode: { type: 'integer', description: 'REAL exit code of `git ls-remote --exit-code --heads origin <branch>`, not a pipeline\'s' }, output: { type: 'string', description: 'its stdout and stderr, verbatim' } } }, description: 'issue 654: every `git ls-remote --exit-code --heads origin <branch>` this stage ran, in order; [] when it never had to look. Exit 2 is git\'s own "no matching ref"; any other non-zero, or an exit 0 that printed nothing, means "could not tell", not "absent"' },
-  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed; when prState is ci-red or changes-requested, the failing check names or the reviewer' },
+  blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed; when prState is ci-red or changes-requested, the failing check names or the reviewer; when prState is dirty-unresolved because the re-merge was refused, the refusal text VERBATIM (issue 907)' },
   // Issue 770: STEP D merges the PR the deliverer opened. These say whether it did and why not.
   merged: { type: 'boolean', description: 'true only when the merge call in STEP D returned merged:true for THIS PR' },
   mergeSha: { type: 'string', description: 'the sha the merge call returned; "" when not merged' },
@@ -1179,6 +1243,16 @@ function failuresOf(verdict) {
   return [verdict.pass ? 'verifier passed and listed no failures' : 'verifier returned pass=false with no failures listed']
 }
 
+// ---- quota / rate-limit halt (issue 812) ----
+// An agent() rejection that says the account is out of quota or rate-limited ends the run: every
+// later agent fails on the same message, so a retry, a new ticket or a report writer started after
+// it only burns the run (wf_2e08b873-d92 launched 17 more sub-agents after the first weekly-limit
+// failure; two later runs lost FOLLOW-UPS.md to a session limit). Every wrapped agent() catch
+// below hands its error to runHalt.note; every lane asks runHalt.halted() before it starts another
+// attempt or ticket, and agents already in flight settle on their own. The run result then names
+// the reason and reset time once (halt) and the tickets that never started (notAttempted).
+const runHalt = createRunHalt(log)
+
 // ---- the expected tip a verdict is cross-checked against (issue 404) ----
 // A workflow script has no shell of its own, so the tip is read by an agent that runs ONE fixed
 // command and copies its output back - the shape the tree guard already uses, for the same reason:
@@ -1221,6 +1295,7 @@ which prints no marker of its own).`,
     { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
     )
   } catch (err) {
+    runHalt.note((err && err.message) || err, label)
     log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
     return null
   }
@@ -1283,6 +1358,44 @@ let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
 // inconsistency, without aborting the run the way `treeGuard:true` still does for the same exit.
 let treeGuardUnusable = null
 
+// Issue 807: one wave ran `git stash` + `git checkout origin/main` in the orchestrator's own
+// checkout, leaving it on a detached HEAD with a CLEAN tree - and the guard tool above only ever
+// diffs dirt against the baseline, so every checkpoint passed. The ref itself is now watched too:
+// `orchestratorHead` is measured once at Setup (eagerly - a start ref measured on the first breach
+// would be the ALREADY-moved HEAD), and every checkpoint re-reads HEAD and compares. A moved HEAD
+// is checked back onto the start ref and flagged in the returned report; a restore that does not
+// take is a breach. It runs whether or not the served repo ships the guard tool (it needs only
+// git), and `treeGuard:false` turns it off with the rest.
+let headWatchOn = cfg.treeGuard !== false
+let orchestratorHead = null      // { branch: string|null, sha } at Setup
+let headWatchUnusable = null     // reason, when the Setup measurement failed
+const headRestores = []          // { label, observedBy, from, to } - one per restore, for the report
+const headRestoreSeen = new Set()
+
+// One command, one fixed two-line answer: the branch name (or DETACHED) and the full sha.
+// Joined like buildTipLookupCommand: the orchestrator checkout is not worktree-isolated, so no
+// caveman guard sits in front of these, and `instrument` (gitSpelling) is not known yet at Setup.
+const headCommand = (cwd) => ['git -C', cwd, 'symbolic-ref --quiet --short HEAD || echo DETACHED;', 'git -C', cwd, 'rev-parse HEAD'].join(' ')
+const restoreCommand = (cwd, target) => ['git -C', cwd, 'checkout', target].join(' ')
+
+function parseHeadState(stdout) {
+  const lines = String(stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+  if (lines.length !== 2 || !/^[0-9a-f]{40,64}$/.test(lines[1])) return null
+  return { branch: lines[0] === 'DETACHED' ? null : lines[0], sha: lines[1] }
+}
+
+const describeHead = (h) => h.branch ? `${h.branch} (${h.sha.slice(0, 12)})` : `detached ${h.sha.slice(0, 12)}`
+
+function headAgentPrompt(command) {
+  return `Run exactly this one bash command and report its result:
+
+${command}
+
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
+file, and never run \`git stash\`, \`git reset\` or any other git command than the one above. Return
+its REAL exit code plus its stdout and stderr VERBATIM, character for character.`
+}
+
 // A guard agent runs ONE fixed command and hands back its exit code and stdout verbatim. Nothing
 // is left to its judgement, so a paraphrase is detectable: stdout that does not JSON.parse is
 // treated as could-not-audit, not as a pass.
@@ -1342,7 +1455,7 @@ const FLEET_FORKS = ['surreptakos/aac-routines', 'surreptakos/aac-sales-cockpit'
 const FLEET_FORK_MARKER = 'PROMPT_CONTRACT' // aac-sales-cockpit's fork edit; the refresh agent's second rail
 const FLEET_REFRESH_FILES = ['ticket-fleet.js', 'editable-install-guard.js']
 const SERVED_REPO = { type: 'object', required: ['servedRepo'], properties: {
-  servedRepo: { type: 'string', description: 'owner/repo from `git remote get-url origin` (https://github.com/<owner>/<repo>) - nothing else run' },
+  servedRepo: { type: 'string', description: `owner/repo from ${gitSpelling('mcp', 'remote get-url origin')} (https://github.com/<owner>/<repo>) - nothing else run` },
 } }
 const REFRESHED = { type: 'object', required: ['refreshed', 'unchanged', 'commit', 'errors'], properties: {
   refreshed: { type: 'array', items: { type: 'string' }, description: 'paths overwritten because their sha256 differed from master' },
@@ -1353,10 +1466,14 @@ const REFRESHED = { type: 'object', required: ['refreshed', 'unchanged', 'commit
 let servedRepo = null
 try {
   const served = await agent(
-    'Run exactly this one command and report its result: `git remote get-url origin`. servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>). Do not run anything else - no curl, no cp, no git add or commit.',
+    `Run exactly this one command and report its result: ${gitSpelling('mcp', 'remote get-url origin')}. servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>). Do not run anything else - no curl, no cp, no git add or commit.`,
     { label: 'fleet-refresh-repo', phase: 'Setup', schema: SERVED_REPO, model: cfg.reportModel, effort: 'low' }
   )
-  servedRepo = served && served.servedRepo
+  // Normalized before the JS check below, so a reply spelled `Owner/Repo.git` or as the full remote
+  // URL still matches FLEET_FORKS instead of falling through to the refresh agent (issue 804).
+  servedRepo = served && typeof served.servedRepo === 'string'
+    ? served.servedRepo.trim().replace(/^.*github\.com[:/]/i, '').replace(/\.git$/i, '').replace(/\/+$/, '').toLowerCase()
+    : null
 } catch (err) {
   log(`fleet-refresh-repo did not run: ${unusableReason('fleet-refresh-repo', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
 }
@@ -1435,6 +1552,25 @@ if (orchestratorCwd === '.') {
 } else {
   log(`Orchestrator checkout path from args.orchestratorCwd: ${orchestratorCwd} (already absolute or caller-set - measurement skipped).`)
 }
+if (headWatchOn) {
+  // Issue 807: the ref the orchestrator's own checkout starts this run on, measured before any
+  // worker exists. Unmeasurable is flagged, not fatal: the dirt guard below still runs.
+  let headRes = null, headError = null
+  try {
+    headRes = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
+      { label: 'orchestrator-head:setup', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+  } catch (err) {
+    headError = unusableReason('orchestrator-head:setup', (err && err.message) || err)
+  }
+  orchestratorHead = headRes && headRes.exitCode === 0 ? parseHeadState(headRes.stdout) : null
+  if (orchestratorHead) {
+    log(`Orchestrator HEAD at Setup: ${describeHead(orchestratorHead)} - every checkpoint puts it back here if the wave moves it (issue 807).`)
+  } else {
+    headWatchOn = false
+    headWatchUnusable = `orchestrator-head: unusable - could not read the orchestrator checkout's HEAD at Setup (exit=${headRes ? headRes.exitCode : 'null'} stdout=${JSON.stringify(headRes ? headRes.stdout : '')} error=${headError || 'none'}); no checkpoint can catch or undo a moved HEAD this run (issue 807).`
+    log(headWatchUnusable)
+  }
+}
 if (treeGuardOn) {
   // Wrapped (aac-routines issue 270): a guard agent that blows the StructuredOutput retry cap
   // throws out of agent(...), and an unwrapped throw here would abort the run with the harness's
@@ -1482,10 +1618,12 @@ if (treeGuardOn) {
  * OBSERVED a leak, not necessarily who caused it.
  */
 async function treeGuardCheck(label, ticketNumber) {
-  if (!treeGuardOn) return
+  if (!treeGuardOn && !headWatchOn) return
   // A breach already recorded elsewhere in the wave fails this chain too, before it can spend
   // another sub-session or reach Deliver.
   assertNoBreach()
+  if (headWatchOn) await headCheck(label, ticketNumber)
+  if (!treeGuardOn) return
 
   // Wrapped (aac-routines issue 270): a guard agent that cannot produce schema-conformant output
   // throws out of agent(...) after the StructuredOutput retry cap. That throw is a
@@ -1499,6 +1637,13 @@ async function treeGuardCheck(label, ticketNumber) {
     )
   } catch (err) {
     agentError = unusableReason(`tree-guard:${label}#${ticketNumber}`, (err && err.message) || err)
+    // Issue 812: a guard agent that died on the quota is the run's halt, not an audit verdict. The
+    // run stops starting work and delivers nothing after a halt, so the checkpoint is logged as
+    // not audited instead of throwing the ticket (or, at pre-report, the whole run report) away.
+    if (runHalt.note((err && err.message) || err, `tree-guard:${label}#${ticketNumber}`) === true) {
+      log(`tree-guard:${label}#${ticketNumber} NOT AUDITED - its agent hit the limit the run halted on (issue 812); nothing is delivered after the halt, and the next session should run the guard before trusting this tree.`)
+      return
+    }
   }
   let report = null
   try { report = JSON.parse(String((res && res.stdout) || '')) } catch (e) { report = null }
@@ -1525,6 +1670,56 @@ async function treeGuardCheck(label, ticketNumber) {
   breaches.push({ label, observedBy: ticketNumber, blamed, who, entries })
   log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}`)
   throw new Error(breachMessage())
+}
+
+/**
+ * Issue 807: re-read the orchestrator checkout's HEAD and put it back on the Setup ref if the wave
+ * moved it. Returns quietly when HEAD is where it started; a moved HEAD is restored and recorded
+ * in `headRestores` (the run report flags it); a HEAD that cannot be read or restored is a breach.
+ * A branch start is restored with `git checkout <branch>`, a detached start with `checkout
+ * --detach <sha>` - never `reset` (it would move the operator's branch) and never `stash pop`
+ * (the stash stack is shared with every worktree of the wave).
+ */
+async function headCheck(label, ticketNumber) {
+  const start = orchestratorHead
+  const read = async (tag) => {
+    let res = null
+    try {
+      res = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
+        { label: `orchestrator-head:${tag}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+    } catch (err) {
+      if (runHalt.note((err && err.message) || err, `orchestrator-head:${tag}#${ticketNumber}`) === true) return 'halted'
+    }
+    return res && res.exitCode === 0 ? parseHeadState(res.stdout) : null
+  }
+  const moved = (h) => start.branch ? h.branch !== start.branch : (h.branch !== null || h.sha !== start.sha)
+  const flag = (entry) => {
+    breaches.push({ label, observedBy: ticketNumber, blamed: [], who: `ticket #${ticketNumber} (observed at its checkpoint; the HEAD move names no author)`, entries: [entry] })
+    log(`ISOLATION BREACH (issue 807) at ${label} - ${entry}`)
+    throw new Error(breachMessage())
+  }
+
+  const now = await read(label)
+  if (now === 'halted') return
+  if (!now) flag(`orchestrator HEAD unreadable at ${label}; expected ${describeHead(start)}`)
+  if (!moved(now)) return
+
+  const target = start.branch ? start.branch : `--detach ${start.sha}`
+  let res = null
+  try {
+    res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, target)),
+      { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+  } catch (err) { res = null }
+  const after = await read(`${label}-restored`)
+  if (after === 'halted') return
+  if (!after || moved(after)) {
+    flag(`orchestrator HEAD moved to ${describeHead(now)} and a checkout of ${target} did not put it back (exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''}); restore it by hand`)
+  }
+  const key = `${now.branch}|${now.sha}`
+  if (headRestoreSeen.has(key)) return
+  headRestoreSeen.add(key)
+  headRestores.push({ label, observedBy: ticketNumber, from: describeHead(now), to: describeHead(after) })
+  log(`Orchestrator HEAD RESTORED at ${label} (ticket #${ticketNumber}, issue 807): the wave moved it to ${describeHead(now)}; checked back onto ${describeHead(after)}. If the checkout held uncommitted work before the run, look in the stash list of ${orchestratorCwd} - the fleet never pops a stash.`)
 }
 // [FLEET-TREE-GUARD-CHECK-END]
 
@@ -1627,9 +1822,34 @@ const PYTHON_RAIL = `Python worktree seed (claude-dotfiles issues 413 and 624, n
 // So no prompt below says "a file" or "a scratch directory": each names the path itself, under this
 // run's own scratch root and with the ticket number in it, and the rail tells a worker that has a
 // private directory already - its worktree - to keep its scratch there.
+//
+// The ticket number alone is not enough (issue 919): a retry of one ticket in one run is a second
+// worker handed the same scratch root, and in run 6ab751c8 attempt 2 of ticket 812 found attempt
+// 1's commit-812.txt already there and the Write tool refused to overwrite it. So every per-attempt
+// path - the rail's example, the PowerShell extract, the verifier worktree - carries
+// `<ticket>-attempt<A>-w<W>`, the same attempt and worker the branch name carries. `stem` below is
+// that string.
 const scratchRoot = `/tmp/fleet-${runId}`
 const scratchFile = (name) => `${scratchRoot}/${name}`
-const SCRATCH_RAIL = `Scratch-file rule (claude-dotfiles issue 439, non-negotiable): the scratchpad directory the harness names for you is NOT yours alone - it is keyed by project and parent session, so every worker of this run is handed the same one, and a generic name (msg.txt, body.md, notes.md) there is silently overwritten by a concurrent worker mid-task; one worker's commit message has already been swapped for another's that way. Keep every scratch file you write - a commit message for \`git commit -F\`, an issue or PR body, a fixture - inside your own worktree, or under ${scratchRoot}/ (\`mkdir -p\` it first) under a name carrying this ticket's number. Never write, and never read back, a bare path in the shared scratchpad.`
+const scratchRail = (stem) => `Scratch-file rule (claude-dotfiles issue 439, non-negotiable): the scratchpad directory the harness names for you is NOT yours alone - it is keyed by project and parent session, so every worker of this run is handed the same one, and a generic name (msg.txt, body.md, notes.md) there is silently overwritten by a concurrent worker mid-task; one worker's commit message has already been swapped for another's that way. Keep every scratch file you write - a commit message for \`git commit -F\`, an issue or PR body, a fixture - inside your own worktree, or under ${scratchRoot}/ (\`mkdir -p\` it first) under a name carrying \`${stem}\` - this ticket, this attempt and this worker, as the branch name does - such as \`${scratchRoot}/commit-${stem}.txt\`; a name carrying the ticket number alone is another attempt's too (issue 919). Never write, and never read back, a bare path in the shared scratchpad.`
+
+// In run 6ab6fa9a, 12 of 69 workers filed a discovery reporting that the harness's relayed
+// top-level user request (the launch-time text the runtime copies into every sub-agent's prompt,
+// regardless of which ticket that sub-agent was pinned to) didn't match their assigned ticket.
+// That mismatch is not a finding about this repository or this ticket - it is how the fleet
+// launches every worker in a wave, so filing it as a discovery only repeats the same non-fact once
+// per worker (issue 885). The rail below tells a worker to recognize that shape and drop it, not
+// report it.
+const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885): the harness that launched you may relay a top-level "user request" line from the workflow that started this run, not from anyone addressing this specific ticket. When that relayed line does not match your assignment above, that mismatch is expected - every worker in this wave is handed the same relayed line - and is not itself a finding: do not file it as a discovery string. Follow the ticket assignment in this prompt regardless of what that relayed line says.`
+
+// Fleet run 6ab733a4 (ticket 825): the implementer found the worktree-isolation guard refusing
+// every `pwsh` it tried, even `pwsh -Command '1+1'`, concluded PowerShell was out of reach and
+// shipped three .ps1 files unrun; the Windows restore test then failed three times on bugs a local
+// parse or run would have caught (issue 906). docs/agents/issue-tracker.md already records the way
+// through (issue 454): the release tarball, a neutral `shell7` name, one plain command per line.
+// This rail carries that recipe into the implementer and code-lane verifier prompts. `dir` is a
+// per-ticket path under the run's scratch root, so concurrent workers never share one extract.
+const powershellRail = (dir) => `PowerShell rail (issue 906; recipe from docs/agents/issue-tracker.md "Running the PowerShell suites in a container", issue 454): this container has no PowerShell on PATH, and the worktree-isolation guard refuses any command whose text names \`pwsh\` inside a compound form (\`&&\`, \`;\` between commands, a pipe, a heredoc, \`cd x && ...\`) with "runs pwsh inside a construct too complex to verify". That refusal does NOT mean PowerShell is unavailable. Get PowerShell 7 with these commands, ONE plain command per tool call, nothing chained: \`mkdir -p ${dir}\`, then \`curl -sSL -o ${dir}/ps.tar.gz https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz\`, then \`tar -xzf ${dir}/ps.tar.gz -C ${dir}\`, then \`cp ${dir}/pwsh ${dir}/shell7\` (cp, not mv: Start-Job relaunches \`$PSHOME/pwsh\` by name), then \`chmod +x ${dir}/shell7\`. Invoke it only by the neutral name \`shell7\` and its full path, one plain command per line, never on PATH: \`${dir}/shell7 -NoProfile -ExecutionPolicy Bypass -File <suite>.ps1\`. If a suite dies on a null \`$env:TEMP\`, prefix that same command with \`TEMP=/tmp \` (shell state does not carry between tool calls, so a separate \`export\` is lost). Every \`.ps1\` file the branch changes must at least go through the PowerShell parser - one plain command per file: \`${dir}/shell7 -NoProfile -Command '$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "<file>.ps1"), [ref]$null, [ref]$e); $e | ForEach-Object { $_.ToString() }; exit $e.Count'\` (exit 0 is a clean parse) - and, where one exists and runs off Windows, the suite that covers it; report each command, its exit code and its decisive output (an implementer in testTail, a verifier in evidence). When PowerShell genuinely cannot be obtained or run here, say so in a discovery string (a verifier: in evidence), quoting the exact refusal or error - never ship or pass a changed \`.ps1\` silently unrun.`
 
 // Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
 // #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
@@ -1637,6 +1857,42 @@ const SCRATCH_RAIL = `Scratch-file rule (claude-dotfiles issue 439, non-negotiab
 // so a lone chore also dedupes against what earlier waves already filed.
 const dedupeBrief = (t) => t.discoveryTriage ? `
 Discovery-triage dedupe rail: this ticket turns findings into tracker items. Before creating ANY ticket, search the OPEN issues for the same file, symbol or failure - by what the finding is about, not just its wording - and list them fresh at the moment you are about to file, not once at the start: another chore in this same wave may have filed one minutes ago. On a match, comment on that existing ticket with the new evidence instead of creating a second one, and record that comment's URL as the finding's outcome. File a new ticket only when no open ticket covers the finding.` : ''
+
+// [FLEET-WORKTREE-CANARY-START]
+// Worktree canary (issue 892): every implementer and prober runs with `isolation: 'worktree'`, and
+// the runtime cuts that worktree from the SESSION's root directory - not from the parent shell's
+// cwd, so a `cd` into the repo does not help. A resumed cloud session whose root is `/home/user`
+// (the clones side by side, not a checkout) refused every one of them with "Cannot create agent
+// worktree: not in a git repository and no WorktreeCreate hooks are configured" - but only after
+// the scout and every attempt had spent their tokens (runs wf_c979322f-62f and wf_58a8fd09-12e).
+// One cheap worktree agent here fails the same way before anything else is spent. Finish mode
+// spawns no worktree agent, so it skips the canary. Only the worktree-creation refusal aborts: a
+// canary that dies of anything else is logged and the run goes on, as it did before this check.
+const WORKTREE_CANARY = { type: 'object', required: ['head'], properties: {
+  head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed, verbatim' },
+} }
+const WORKTREE_CREATE_REFUSAL = /cannot create agent worktree|not in a git repository/i
+if (!cfg.finishRunId) {
+  let canary = null
+  try {
+    canary = await agent(
+      'Run exactly this one bash command and report its result: `git rev-parse HEAD`. Do not cd anywhere first. Do not run any other command. Make no change. Return structured output only.',
+      { label: 'worktree-canary', phase: 'Setup', schema: WORKTREE_CANARY, model: cfg.reportModel, effort: 'low', isolation: 'worktree' }
+    )
+  } catch (err) {
+    const detail = String((err && err.message) || err)
+    if (WORKTREE_CREATE_REFUSAL.test(detail)) {
+      throw new Error(
+        'ticket-fleet run ABORTED before Scout - the runtime cannot create an agent worktree here (issue 892): '
+        + `"${detail}". Cause: this session's root directory is not a git repository (a resumed cloud session rooted at a parent folder such as /home/user, holding the clones side by side), and every implementer runs in a worktree cut from that root - a \`cd\` into the repo does not change it. `
+        + 'Fix: launch the fleet from a session whose root IS the repository checkout (start a new session on the repo), then re-run. No implementer was spawned.'
+      )
+    }
+    log(`worktree-canary did not run: ${unusableReason('worktree-canary', detail)} - the worktree was not refused, so the run continues.`)
+  }
+  if (canary && canary.head) log(`worktree-canary: an isolated worktree was created at HEAD ${canary.head} (issue 892).`)
+}
+// [FLEET-WORKTREE-CANARY-END]
 
 // ---- Scout ----
 phase('Scout')
@@ -1738,7 +1994,7 @@ const scout = await agent(
 2. Collect the tickets: ${scoutSource}
    That one listing is the WHOLE candidate set. Do not widen it under any circumstances: not another label, not a sweep of open issues, not a search, not a ticket you happened to read elsewhere. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it.
    A listing that comes back with zero tickets is a valid and complete answer, not a cue to go looking: return candidateNumbers: [] and tickets: [] and stop. The run ending with nothing to do is the correct outcome there.
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false. Report the ticket's milestone title verbatim (mcp list_issues/issue_read and gh api both return milestone.title; "" when it has none) - this run drops a Maybe Someday ticket from a label-driven listing before the wave (issue 786).
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report the ticket's full issue body verbatim as body ("" only when the issue truly has none) - the implementer is pinned to a fresh worktree with no other access to the tracker, so a body left out of the scout's report is a body the implementer never sees. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false. Report the ticket's milestone title verbatim (mcp list_issues/issue_read and gh api both return milestone.title; "" when it has none) - this run drops a Maybe Someday ticket from a label-driven listing before the wave (issue 786).
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
@@ -1864,7 +2120,7 @@ async function dropTicketsWithOpenPr(tickets) {
   const listSteps = instrument === 'mcp'
     ? `There is no gh CLI here. ${rules.repoNote} Call mcp__github__list_pull_requests ONCE with that owner and repo, state="open" and per_page=100, and read head.ref (each PR's head branch name) off the entries it returns.`
     : `Steps:
-1. Read the repo slug from \`git remote get-url origin\`: the {owner}/{repo} used below.
+1. Read the repo slug from ${gitSpelling(instrument, 'remote get-url origin')}: the {owner}/{repo} used below.
 2. Run \`gh api "repos/{owner}/{repo}/pulls?state=open&per_page=100"\` ONCE. Never \`gh pr list\`, \`gh pr view\`, \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 in cloud containers (issue 130).
 3. Read head.ref off each entry it returns.`
   let found = null
@@ -1972,9 +2228,11 @@ guardCandidates = wave
 // or grossly inefficient - and then the session must say so in its summary.
 
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
-const runProbeLane = async (t) => {
-  let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null
+const runProbeLane = async (t, workerIndex) => {
+  let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null, haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Issue 812: no attempt starts once the run is halted on a quota or rate limit.
+    if (runHalt.halted()) { haltedAt = attempt; break }
     const priorFindings = priorFindingsBlock(lastVerdict, 'fix these by actually running the commands, not by rewording')
     // Attempt 1 takes a recorded prober result when the caller supplied one (issue 317); the
     // `||` short-circuits, so no prober agent is started for it. Attempt 2+ always re-probes.
@@ -1991,7 +2249,8 @@ The main checkout is never a test surface (issue 404): the repository at the ses
 Criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 Run every command the ticket asks for, in this container, and report exactly what happened - one item per criterion.
 ${PYTHON_RAIL}
-${SCRATCH_RAIL}
+${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}
+${HARNESS_RELAY_RAIL}
 Rules:
 - NEVER fabricate, guess or reconstruct output. Quote it exactly as printed, errors and noise included.
 - Record the REAL exit code of each command, not the exit code of a pipeline.
@@ -2004,6 +2263,7 @@ Return structured output only.`,
       { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: cfg.implModel, isolation: 'worktree' }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `probe:#${t.number}.${attempt}`)
       probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
       probe = null
     }
@@ -2037,7 +2297,7 @@ The main checkout is never a test surface (issue 404): the repository you start 
 ${orchestratorTreeRail('origin/' + scout.defaultBranch)}
 ${PYTHON_RAIL}
 The prober ran the ticket's commands under that rail and so do you (issue 435), and you have less room than it did: unlike the prober you are NOT worktree-isolated, so never run a criterion's \`pip install -e\` yourself - it would land in the orchestrator's own checkout, repoint this container's one editable install and leave .egg-info in the very tree the isolation checkpoint watches. Quote what the prober got for that item and record that you did not re-run the install.
-Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} fetch origin, then git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket and the attempt): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
+Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} fetch origin, then git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}-attempt${attempt}-w${workerIndex}-p${pass}`)} --detach origin/${scout.defaultBranch}, and re-run every command below from inside that worktree. That path is yours alone (it carries this run's id, the ticket, the attempt and the worker): every other worker of this run shares your scratchpad directory, so a generic scratch path is another worker's too (issue 439).
 Criteria (verbatim):\n${t.criteria}
 Commands and output claimed:\n${evidenceBlocks}
 1. Re-run every command above that is re-runnable in this container and compare YOUR output with the claimed output. Output you cannot reproduce, or that does not match, is a failure.
@@ -2049,6 +2309,7 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
         { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
         )
       } catch (err) {
+        runHalt.note((err && err.message) || err, verifyLabel)
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
 
@@ -2074,9 +2335,11 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
     if (lastVerdict.pass) break
   }
 
+  if (haltedAt) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([runHalt.failure()]) }
   const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
   let delivery = null
-  if (done && cfg.deliver) {
+  if (done && cfg.deliver && runHalt.halted()) deliveryFailure = `deliver:#${t.number} not started - ${runHalt.failure()}; the evidence is verified, re-run this probe after the reset`
+  else if (done && cfg.deliver) {
     const blocked = stableList(probe.blocked)
     const blockedList = blocked.length ? blocked.map(b => '- ' + b).join('\n') : ''
     // Wrapped (aac-routines issue 270).
@@ -2098,6 +2361,7 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
       log(deliveryFailure)
@@ -2133,6 +2397,7 @@ Return structured output only.`,
     { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
     )
   } catch (err) {
+    runHalt.note((err && err.message) || err, `handoff:#${t.number}`)
     handoffError = unusableReason(`handoff:#${t.number}`, (err && err.message) || err)
     handoff = null
     log(handoffError)
@@ -2163,6 +2428,7 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
       log(deliveryFailure)
@@ -2202,13 +2468,16 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
 // wf_e4ed8077-1d1 lost all five of its deliveries to "Cannot access 'CLASSIFIER_CATEGORIES_SEEN'
 // before initialization" that way.
 function classifierCategoriesSeen() {
-  return '"Modify Shared Resources", "Interfere With Workloads", "External System Writes", "Instruction Poisoning" and "Self-Modification"'
+  return '"Modify Shared Resources", "Interfere With Workloads", "External System Writes", "Instruction Poisoning", "Self-Modification" and "Auto-Mode Bypass"'
 }
 // Issue 770: one clause for the run log saying what STEP D did with the PR.
 function mergeNote(delivery) {
   if (!delivery || !delivery.prUrl) return ''
   if (delivery.merged === true) return ` - MERGED ${delivery.mergeSha || ''}${delivery.ticketState ? ` (ticket ${delivery.ticketState})` : ''}`
-  return ` - open, not merged: ${delivery.prState || 'prState not reported'}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
+  // Issue 907: a PR left dirty names the paths the orchestrator has to merge by hand.
+  const paths = delivery.prState === 'dirty-unresolved' && Array.isArray(delivery.conflictPaths) && delivery.conflictPaths.length
+    ? ` (conflicts: ${delivery.conflictPaths.join(', ')})` : ''
+  return ` - open, not merged: ${delivery.prState || 'prState not reported'}${paths}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
 }
 
 function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
@@ -2236,9 +2505,10 @@ function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, test
   // merge workflow, that workflow ticks the boxes on the `pull_request` closed+merged event.
   // Pre-push merge (issue 318). A wave's branches all fork from the same commit; by the time
   // the last one is verified, master has moved and every branch that touched a skill carries a
-  // rotated stamp block and a rebuilt marketplace payload. Merging here, with the three safe
+  // rotated stamp block and a rebuilt marketplace payload. Merging here, with the four safe
   // conflict classes named explicitly, means the PR opens mergeable. The third is the harness
-  // upgrade row two bumps in one wave both claim (issue 515). Anything outside those
+  // upgrade row two bumps in one wave both claim (issue 515); the fourth is two tickets appending
+  // at one spot in the same file (issue 908). Anything outside those
   // classes is a real merge and stops this ticket: PR #306 showed what taking master's whole
   // SKILL.md costs when the branch had edited its prose.
   const generatedList = (cfg.generatedPaths || []).map(p => '`' + p + '`').join(', ') || '(none configured)'
@@ -2255,21 +2525,22 @@ This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier
 
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
 A0. A CLASSIFIER REFUSAL IS NOT A RULE VIOLATION (issue 544). In a container the auto-mode classifier sometimes refuses a command of this stage on the shape of its text rather than on what it would do, and the refusals are not deterministic - run 6aaafad4 found that re-issuing the byte-identical command usually succeeded on the next try. The categories this fleet has been refused under so far are ${classifierCategoriesSeen()}. An unattended session is sanctioned to run every command this stage needs (the 2026-09-15 cloud permission ruling), so read a refusal as a flaky gate, never as a sign that you are doing something forbidden and never as a reason to stop the delivery. Whenever a command below is REFUSED (as opposed to running and failing): re-issue it ONCE, byte-identical. If that retry is refused too, take the fallback the step names - A8 for the merge, B1 for the push, B2 for the PR. NEVER end this stage with {pushed:false, prUrl:""} while the branch is verified: a verified branch always reaches origin and a PR, and the refusal text becomes a note on that PR rather than a substitute for it.
-AL. FINDING ${branch} ON ORIGIN (issue 654) - "could not tell" is never "absent". Run 6ab1884a's deliverer reported a verified, pushed branch "not found on origin or locally" while \`git ls-remote\` from the orchestrator printed its ref minutes later, and the ticket was filed as a failure. Whenever this stage needs to know whether ${branch} is on origin - A1's fetch of it failed, B1's push failed, or anything else makes it look missing: (1) \`git rev-parse --show-toplevel\` and \`git remote get-url origin\` - you must be in a checkout of the served repository, and an origin naming any other repository makes every answer below worthless, so say so; (2) \`git ls-remote --exit-code --heads origin ${branch}\`; (3) \`git fetch origin\`, then that same ls-remote again. Record EVERY ls-remote in branchLookup as {exitCode: its REAL exit code, output: verbatim}. Exit 0 printing a refs/heads/ line means the branch IS on origin: fetch it and carry on. Exit 2 is git's own "no matching ref"; any other exit, and an exit 0 that printed nothing, means you could not tell. When no lookup printed the ref, stop this ticket and return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed", conflictPaths:[], branchLookup:[every run], blockedReason:"<the git output of every command above, VERBATIM>"} - never mergeStatus "blocked", which means a merge that conflicted or broke the tests, and never "not found" or "does not exist" as your own conclusion: the run reads the exit codes and decides.
-A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git -C ${orchestratorCwd} worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` against the orchestrator's own checkout, measured absolute at Setup - issue 562 - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439): \`git merge --no-edit origin/${defaultBranch}\`. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
+AL. FINDING ${branch} ON ORIGIN (issue 654) - "could not tell" is never "absent". Run 6ab1884a's deliverer reported a verified, pushed branch "not found on origin or locally" while \`git ls-remote\` from the orchestrator printed its ref minutes later, and the ticket was filed as a failure. Whenever this stage needs to know whether ${branch} is on origin - A1's fetch of it failed, B1's push failed, or anything else makes it look missing: (1) \`git rev-parse --show-toplevel\` and ${gitSpelling(instrument, 'remote get-url origin')} - you must be in a checkout of the served repository, and an origin naming any other repository makes every answer below worthless, so say so; (2) \`git ls-remote --exit-code --heads origin ${branch}\`; (3) \`git fetch origin\`, then that same ls-remote again. Record EVERY ls-remote in branchLookup as {exitCode: its REAL exit code, output: verbatim}. Exit 0 printing a refs/heads/ line means the branch IS on origin: fetch it and carry on. Exit 2 is git's own "no matching ref"; any other exit, and an exit 0 that printed nothing, means you could not tell. When no lookup printed the ref, stop this ticket and return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed", conflictPaths:[], branchLookup:[every run], blockedReason:"<the git output of every command above, VERBATIM>"} - never mergeStatus "blocked", which means a merge that conflicted or broke the tests, and never "not found" or "does not exist" as your own conclusion: the run reads the exit codes and decides.
+A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git -C ${orchestratorCwd} worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` against the orchestrator's own checkout, measured absolute at Setup - issue 562 - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439), and from INSIDE that checkout - \`cd\` into it, never \`git -C\` into it: ${gitSpelling(instrument, `merge --no-edit origin/${defaultBranch}`)}. That is the spelling a live probe ran in a fleet worktree without a refusal, as a fast-forward and as a true merge commit (issue 907, recorded on that ticket); run 6ab733a4's deliverer lost the merge on #897 to "Interfere With Workloads" and then "Auto-Mode Bypass", so do not re-spell it into anything else. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
 A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`aac-skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - run A5(i)'s stamps check on the merge result before going on, because a clean merge that folded this branch's skill edit into the default branch's leaves the stamp stale with no conflict to resolve (issue 553), and if it fails do A4's regenerate, \`git add -A\`, commit it and run the check again. Then go to STEP A7, which runs on this path too.
-A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly three classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
+A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly four classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
-    (b) SKILL.md STAMP BLOCK - a SKILL.md whose conflict sits entirely inside the four-key metadata stamp block (modified, previous-modified, revision, content-sha). Do NOT judge this by eye and do NOT take the default branch's whole file: run \`node tools/resolve-stamp-conflict.js <path>\`. Exit 0 means every hunk in that file was stamp-only and was resolved to the default branch's side - then \`git add -- <path>\`. A NON-ZERO exit means the file conflicts outside the stamp block; that path belongs to class (c). If this repo has no such script, class (b) does not apply here: treat the path as class (c).
-    (c) HARNESS UPGRADE ROW - the path is \`aac-skills/project-harness/UPGRADES.md\`. Two tickets in one wave that both bump the harness version both write the NEXT \`| N |\` row, so the conflict is a numbering collision, not a disagreement (issue 515). Do NOT pick a side and do NOT renumber by hand: run \`node tools/renumber-harness-upgrade.js\`. Exit 0 means the branch's row took the next free number, every other place the branch wrote that number moved with it, and the generated bootstrap template was rebuilt - then \`git add -A\`. A NON-ZERO exit means the branch changed that file by more than adding rows; that path belongs to class (d). If this repo has no such script, class (c) does not apply here. If the script names a file that is still conflicted, resolve that file by these same classes and re-run it before A4.
-    (d) ANYTHING ELSE - any other path, and any SKILL.md the resolver refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
-A4. Once every conflicted path was class (a), (b) or (c): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Run each of them EXACTLY as written, every flag included: \`--home\` names the OWNER's home, and a stamp hashed against the container's home instead is what sent #550 and #552 out red (issue 553). Then \`git add -A\`.
+    (b) SKILL.md STAMP BLOCK - a SKILL.md whose conflict sits entirely inside the four-key metadata stamp block (modified, previous-modified, revision, content-sha). Do NOT judge this by eye and do NOT take the default branch's whole file: run \`node tools/resolve-stamp-conflict.js <path>\`. Exit 0 means every hunk in that file was stamp-only and was resolved to the default branch's side - then \`git add -- <path>\`. A NON-ZERO exit means the file conflicts outside the stamp block (the stamp hunks it could resolve are resolved); that path goes on to class (d). If this repo has no such script, class (b) does not apply here: treat the path as class (d).
+    (c) HARNESS UPGRADE ROW - the path is \`aac-skills/project-harness/UPGRADES.md\`. Two tickets in one wave that both bump the harness version both write the NEXT \`| N |\` row, so the conflict is a numbering collision, not a disagreement (issue 515). Do NOT pick a side and do NOT renumber by hand: run \`node tools/renumber-harness-upgrade.js\`. Exit 0 means the branch's row took the next free number, every other place the branch wrote that number moved with it, and the generated bootstrap template was rebuilt - then \`git add -A\`. A NON-ZERO exit means the branch changed that file by more than adding rows; that path belongs to class (e). If this repo has no such script, class (c) does not apply here. If the script names a file that is still conflicted, resolve that file by these same classes and re-run it before A4.
+    (d) APPEND-APPEND (issue 908) - any other path, and a SKILL.md the stamp resolver refused, whose conflict hunks are both sides only ADDING lines at one spot (the commonest real conflict: two tickets appending new tests or new functions at the end of one file). Do NOT judge this by eye: first ${gitSpelling(instrument, 'checkout --conflict=diff3 -- <path>')} (it rewrites the markers with the merge base, which the classifier needs), then \`node tools/resolve-append-conflict.js <path>\`. Exit 0 means every hunk in that file left every base line intact and was resolved as ours followed by theirs - then \`git add -- <path>\`; A5's full test run is what proves the two additions live together, and a red suite blocks this ticket there. A NON-ZERO exit means some hunk removed or changed a base line (a real two-sided edit) and the file was left untouched; that path belongs to class (e). If this repo has no such script, class (d) does not apply here.
+    (e) ANYTHING ELSE - any other path, and any path the resolvers above refused. Stop this ticket: \`git merge --abort\`, do NOT push, do NOT open a PR, do NOT post a comment, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every such path], blockedReason:"one line naming the conflicting hunk"}.
+A4. Once every conflicted path was class (a), (b), (c) or (d): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Run each of them EXACTLY as written, every flag included: \`--home\` names the OWNER's home, and a stamp hashed against the container's home instead is what sent #550 and #552 out red (issue 553). Then \`git add -A\`.
 A5. THE GATE - both halves run AFTER A4's regenerate and BEFORE anything is pushed, and nothing is pushed until both pass.
     (i) STAMPS CHECK (issue 553): ${regenCheckNote}. Exit 0 is the pass - go on to (ii). A non-zero exit names the skills whose recorded stamp no longer matches their content, which means A4's regenerate did not take. Do NOT hand-edit a stamp to make this pass - the recorded hash is what makes the dates believable - and do NOT read a green PR check as evidence here: in run 6aac4a53 the payload rebuilt, the tests passed and skill-stamps.yml's \`pull_request\` run (which tests the merge ref) was green while the push-event run of the same \`check\` job was red on arrival. Instead re-run A4's commands byte-identical, \`git add -A\`, and run the check again. If the second run still fails, \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason naming every skill the check listed.
     (ii) TESTS: re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
-A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, and nothing is pushed until it passes (issue 514): \`git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD\`. Exit 1 with no output is the pass - go to STEP B. Exit 0 lists paths whose COMMITTED content still carries conflict markers, which is what a resolution that staged the markers instead of removing them leaves behind; run 6aab1eac committed and pushed exactly that and then asked for a force push. Do NOT push and do NOT open a PR. For each listed path that is class (a) or (b): resolve it again (\`git checkout --theirs -- <path>\`, or \`node tools/resolve-stamp-conflict.js <path>\`), redo A4's regeneration and BOTH halves of A5's gate, \`git add -- <path>\`, amend the merge commit with \`git commit --amend --no-edit\` (which keeps both merge parents), and run the scan again. For any listed path that is class (c), and for any path a second scan still lists: \`git reset --hard HEAD~1\` if the merge is already committed (\`git merge --abort\` if it is not), push nothing, open no PR, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every path the scan listed], blockedReason:"conflict markers left in <paths> after the merge"}.
-A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(d), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
+A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, and nothing is pushed until it passes (issue 514): \`git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD\`. Exit 1 with no output is the pass - go to STEP B. Exit 0 lists paths whose COMMITTED content still carries conflict markers, which is what a resolution that staged the markers instead of removing them leaves behind; run 6aab1eac committed and pushed exactly that and then asked for a force push. Do NOT push and do NOT open a PR. For each listed path that is class (a), (b) or (d): resolve it again (\`git checkout --theirs -- <path>\`, \`node tools/resolve-stamp-conflict.js <path>\`, or ${gitSpelling(instrument, 'checkout --conflict=diff3 -- <path>')} then \`node tools/resolve-append-conflict.js <path>\`), redo A4's regeneration and BOTH halves of A5's gate, \`git add -- <path>\`, amend the merge commit with \`git commit --amend --no-edit\` (which keeps both merge parents), and run the scan again. For any listed path that is class (c), and for any path a second scan still lists: \`git reset --hard HEAD~1\` if the merge is already committed (\`git merge --abort\` if it is not), push nothing, open no PR, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every path the scan listed], blockedReason:"conflict markers left in <paths> after the merge"}.
+A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(e), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
 
 STEP B - push and open the PR (only when STEP A ended clean, resolved, or unmerged-by-classifier):
 B1. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run AL's lookups and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed" when no lookup printed the ref ("blocked" when one did - the push itself failed), conflictPaths:[], branchLookup:[every run], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the classifier REFUSES is not a failed push: re-issue it byte-identical once (A0), and if that retry is refused too, read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. Only when the remote tip is missing or behind does a twice-refused push come back as {pushed:false, ...}.
@@ -2286,7 +2557,7 @@ C4. ${gitSpelling(instrument, `push origin ${branch}`)} - a fast-forward, no for
 STEP D - merge the PR you opened (issue 770). Run 6ab4840f opened ten PRs that each waited for an orchestrator to find them, and six went dirty on the generated payload in the meantime; the session that opened a PR is the one that knows it is finished, so it merges it. Runs only when STEP B returned a prUrl; otherwise return merged false, mergeSha "", prState "not-attempted".
 D1. WAIT FOR CI. ${rules.prState('<PR number>')} Then ${rules.prChecks('<PR number>')} Poll with \`sleep 60\` between reads, for at most 20 minutes (the Windows restore test on claude-dotfiles takes about 8). CI is finished when no check run is "queued" or "in_progress". A head that shows ZERO check runs on two reads one minute apart has no CI - treat that as finished and green. If the bound passes first: return merged false, mergeSha "", prState "ci-pending", blockedReason naming the checks still running.
 D2. THE BAR (orchestrator/RUNBOOK.md "Merge"): every check run's conclusion is "success", "skipped" or "neutral"; mergeable_state is "clean"; ${rules.prReviews('<PR number>')} has no review in state "CHANGES_REQUESTED". Any conclusion "failure", "cancelled", "timed_out" or "action_required": return merged false, prState "ci-red", blockedReason naming each failing check by name. A CHANGES_REQUESTED review: prState "changes-requested", blockedReason naming the reviewer. Never re-run a job, never edit, skip or quarantine a test, never push an empty commit, never merge a head with a red check.
-D3. DIRTY: mergeable_state "dirty" means ${defaultBranch} moved under the PR after STEP A. Run STEP A once more on ${branch} exactly as above (A1-A7, the same three resolvable classes, the same regeneration and gate, the same marker scan), push with a plain ${gitSpelling(instrument, `push origin ${branch}`)} (no force flag), then go back to D1 with the NEW head sha. At most two such rounds; after that return merged false, prState "dirty-unresolved", conflictPaths from the last STEP A. mergeable_state "unknown" is GitHub still computing: wait 30 seconds and read D1 again.
+D3. DIRTY: mergeable_state "dirty" means ${defaultBranch} moved under the PR after STEP A. Run STEP A once more on ${branch} exactly as above (A1-A7, the same four resolvable classes, the same regeneration and gate, the same marker scan), push with a plain ${gitSpelling(instrument, `push origin ${branch}`)} (no force flag), then go back to D1 with the NEW head sha. At most two such rounds; after that return merged false, prState "dirty-unresolved", conflictPaths from the last STEP A. A merge the classifier refuses in a D3 round does NOT go to A8 - the PR is already open, and pushing it again unmerged changes nothing (issue 907): when the byte-identical retry is refused too, list the paths the PR conflicts on with ${gitSpelling(instrument, `merge-tree --write-tree --name-only --no-messages origin/${branch} origin/${defaultBranch}`)} (it moves no ref and touches no checkout; every line after the first is a conflicted path) and return merged false, prState "dirty-unresolved", conflictPaths those paths, blockedReason "merge of origin/${defaultBranch} refused by the classifier: <the refusal text VERBATIM, both if they differed>" - that is the orchestrator's cue to merge ${defaultBranch} into the PR itself. mergeable_state "unknown" is GitHub still computing: wait 30 seconds and read D1 again.
 D4. MERGE: when the bar holds, ${rules.prMerge('<PR number>', `fix: ${t.title} (#${t.number})`)} Pass the head sha you read in D1 and that the checks ran on: a merge call for a head that moved fails, and that failure means go back to D1, never retry blind. Never a branch delete: delete_branch_on_merge is on for every fleeted repo. On merged:true, return merged true, mergeSha, prState "merged".
 D5. THE TICKET, only after merged:true: ${rules.issueState(t.number)} ${keepOpen || unmet.length ? `This ticket stays OPEN (${keepOpen ? 'its own instruction' : 'unmet acceptance criteria are listed in the PR'}): if it reads "closed", it was closed by mistake - say so in blockedReason and leave it; if "open", ${rules.labelSwap(t.number)}` : `The PR body's "Closes #${t.number}" closes it at merge; if it still reads "open" one read later (wait 30 seconds), ${rules.issueClose(t.number, '<prUrl>')}`} Report the final state as ticketState.
 
@@ -2381,7 +2652,11 @@ const runCodeLane = async (t, workerIndex) => {
   // attempt so the run record names the level and the model each implementer ran on.
   const difficulty = t.difficulty || null
   const implModels = []
+  // Issue 812: the attempt a quota/rate-limit halt stopped this ticket at (0 = never stopped).
+  let haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
+    // Issue 812: no attempt starts once the run is halted on a quota or rate limit.
+    if (runHalt.halted()) { haltedAt = attempt; break }
     const implModel = pickImplModel(difficulty, attempt, cfg)
     // Per-worker suffix - the concrete slot the branch name lives in. Keep this
     // shape in sync with tools/ticket-fleet-branch.js (its test guards the drift).
@@ -2424,8 +2699,11 @@ Hard rules, in priority order (issue 628): each restates a rail this prompt spel
 6. Stay in scope: a pre-existing bug or behavior the ticket does not ask for becomes a discovery string, not a fix.
 Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - shell, git, script file, editor, test runner - must target THIS sub-session's own worktree and nothing else; never \`cd\`, \`git -C\`, \`--git-dir\`/\`--work-tree\`, \`GIT_DIR=\`, absolute path, symlink, \`npm run\`, Makefile or generated script your way into the shared checkout at the repository root, and never write a byte outside your worktree - the harness refuses some of those spellings and silently permits the rest, so this rule is yours to keep, not its.
 ${PYTHON_RAIL}
-${SCRATCH_RAIL}
+${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}
+${HARNESS_RELAY_RAIL}
+${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}`))}
 Repo map from scout:\n${scout.repoMap}
+Issue body (verbatim):\n${t.body || '(none)'}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
 Rules: one branch named ${branch}; commit your work, then push that branch and nothing else: run ${gitSpelling(instrument, `push -u origin ${branch}`)} as soon as the commit lands, and return pushed: true only when it exits 0 (a pushed branch survives a dead container, a killed Deliver step and an interrupt - issue 405). If the push fails, return pushed: false and quote the git output verbatim at the end of testTail, after the test tail; the run then pushes the branch for you. NEVER open a PR, NEVER merge, NEVER push any branch but ${branch}, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
@@ -2437,6 +2715,7 @@ Return structured output only.`,
       { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: implModel, isolation: 'worktree' }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `impl:#${t.number}.${attempt}`)
       implError = unusableReason(`impl:#${t.number}.${attempt}`, (err && err.message) || err)
       impl = null
     }
@@ -2458,6 +2737,9 @@ Return structured output only.`,
     // and a wrong self-report would point the verifier at a branch nobody asked for. The
     // instructed branch is what gets verified and delivered; a mismatch is logged, loudly.
     branchPushed = impl.pushed === true
+    // Issue 812: this implementer settled after the run halted - no push, verifier or retry starts
+    // for it. Its branch (pushed or not) is named in the result so the next run can pick it up.
+    if (runHalt.halted()) { haltedAt = attempt; lastVerdict = null; break }
     if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Push the branch NOW, before the verifier, not at Deliver (issue 405). Three losses on
@@ -2483,6 +2765,7 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
         { label: `push:#${t.number}.${attempt}`, phase: 'Implement', schema: PUSHED, model: cfg.deliverModel, effort: 'low' }
         )
       } catch (err) {
+        runHalt.note((err && err.message) || err, `push:#${t.number}.${attempt}`)
         log(`${unusableReason(`push:#${t.number}.${attempt}`, (err && err.message) || err)} - ${branch} may exist only in this container until Deliver pushes it.`)
         pushBack = null
       }
@@ -2520,7 +2803,8 @@ Branch under review: ${branch} (do NOT trust its author; you have not seen their
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 ${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
-Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}.${attempt}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket and the attempt, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
+${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}-verify`))}
+Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}-attempt${attempt}-w${workerIndex}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket, the attempt and the worker, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
 3. Check repo hard rails from CLAUDE.md are unbroken (forbidden paths, closing keywords in commit messages, scope creep).
@@ -2531,6 +2815,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
         { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
         )
       } catch (err) {
+        runHalt.note((err && err.message) || err, verifyLabel)
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
 
@@ -2556,12 +2841,18 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     if (lastVerdict.pass) break
   }
 
+  if (haltedAt) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([runHalt.failure()]) }
   const done = !!(impl && impl.committed && lastVerdict && lastVerdict.pass)
   let delivery = null
   let deliveryFailure = null
   // Issue 654: the classified Deliver result, and the message when it is an inconsistency.
   let outcome = null, inconsistency = null
-  if (done && cfg.deliver) {
+  // Issue 812: a branch that passed verification before the halt is not handed to a deliverer
+  // that would die on the same limit; the finish mode delivers it after the reset.
+  if (done && cfg.deliver && runHalt.halted()) {
+    deliveryFailure = `deliver:#${t.number} not started - ${runHalt.failure()}; ${branch} is verified: relaunch with finishRunId: '${runId}' after the reset to deliver it`
+    log(deliveryFailure)
+  } else if (done && cfg.deliver) {
     // Nothing gets pushed once any ticket in the wave has breached isolation (aac-routines issue
     // 192): the tree the verifier judged from is no longer trustworthy.
     assertNoBreach()
@@ -2575,6 +2866,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
       )
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
     }
@@ -2656,9 +2948,20 @@ const runWorker = async ({ ticket, workerIndex }) => {
   let result = null
   try {
     const after = Array.isArray(t.chainedAfter) ? t.chainedAfter.map(n => parseInt(n, 10)) : []
+    const blockerResults = new Map()
+    for (const n of after) blockerResults.set(n, await settled.get(n).promise)
+    // Issue 812: once the run is halted on a quota or rate limit no ticket starts; it is listed
+    // under notAttempted so the next wave (after the reset) picks it up.
+    if (runHalt.halted()) {
+      log(`#${t.number}: not attempted - ${runHalt.failure()}.`)
+      result = {
+        ticket: t.number, done: false, kind: t.kind, branch: null, notAttempted: true,
+        verdict: { pass: false, evidence: '', failures: [runHalt.failure()] },
+        prUrl: null, commentUrl: null, deliveryFailure: null, discoveries: [],
+      }
+      return result
+    }
     if (after.length) {
-      const blockerResults = new Map()
-      for (const n of after) blockerResults.set(n, await settled.get(n).promise)
       const reason = chainGate(t, blockerResults)
       if (reason) {
         log(`#${t.number}: chained ticket skipped - ${reason} (issue 854).`)
@@ -2671,7 +2974,7 @@ const runWorker = async ({ ticket, workerIndex }) => {
       }
       log(`#${t.number}: in-wave blocker(s) ${after.map(n => '#' + n).join(', ')} merged - starting from origin/${scout.defaultBranch} (issue 854).`)
     }
-    if (t.kind === 'probe') result = await runProbeLane(t)
+    if (t.kind === 'probe') result = await runProbeLane(t, workerIndex)
     else if (t.kind === 'human') result = await runHumanLane(t)
     else result = await runCodeLane(t, workerIndex)
     return result
@@ -2718,7 +3021,9 @@ assertNoBreach()
 // debug a ModuleNotFoundError that looks like broken code. The guard rewrites the pointer only;
 // it never runs pip here, because `pip install -e` writes .egg-info into the orchestrator's own
 // tree and that is exactly what checkpoint 4 above just cleared.
-if (cfg.editableGuard === false) {
+if (runHalt.halted()) {
+  log(`Editable-install guard NOT RUN - ${runHalt.failure()}. Run \`python -m pip show -f <dist>\` yourself before trusting this container's test results (claude-dotfiles issue 413).`)
+} else if (cfg.editableGuard === false) {
   log('Editable-install guard DISABLED by args (editableGuard:false) - a worktree that captured this container\'s editable install will stay captured (claude-dotfiles issue 413).')
 } else {
   // One `;`-joined probe per candidate, never a loop: the Bash tool refuses a loop whose body
@@ -2783,8 +3088,8 @@ async function runReport(discoveries, defaultBranch) {
   if (!discoveries.length) return null
   const branch = `agent/fleet-discoveries-wf_${runId}`
   const deliverStep = cfg.deliver
-    ? `6. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'))}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
-    : `6. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
+    ? `7. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'))}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
+    : `7. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
   // Wrapped (aac-routines issue 270): a writer that blows the StructuredOutput retry cap used
   // to lose the whole run report; it is now a named error on the discovery report instead.
   let written = null
@@ -2793,14 +3098,16 @@ async function runReport(discoveries, defaultBranch) {
     `Append this ticket-fleet run's discoveries to ${cfg.followupsFile} on a branch of their own, cut from the repo default branch - never the branch this session happens to be sitting on (issue 360).
 1. git -C ${orchestratorCwd} fetch origin ${defaultBranch} - ${orchestratorCwd} is the orchestrator's own checkout, measured absolute at Setup (issue 562), never wherever your shell happens to start.
 2. git -C ${orchestratorCwd} worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
-3. Append to ${cfg.followupsFile} at that worktree's repo root (create it if missing; append-only, never rewrite or reword an existing entry). Add a "## Run <DATE> (ticket-fleet ${runId})" heading, where <DATE> is today's UTC date in ISO form as \`date -u +%F\` prints it - a run's section has to be tellable from every other run's at a glance (issue 322), then one bullet per finding, each self-contained and verbatim:\n- ${discoveries.join('\n- ')}
-4. Stage and commit ${cfg.followupsFile} and nothing else, message "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)".
-5. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
+3. Write this run's discovery bullets, exactly as given here and in this order, as a JSON array of strings to ${scratchFile('discoveries-bullets.json')}: ${JSON.stringify(discoveries)}
+4. From that worktree's repo root, run \`node tools/followups-append.js ${cfg.followupsFile} ${runId} ${scratchFile('discoveries-bullets.json')}\` (create ${cfg.followupsFile} if it does not exist; the script does that). Do NOT append, edit or reword ${cfg.followupsFile} by hand - a hand edit is what deleted seven earlier runs' worth of bullets before this script existed (issue 882); the script is append-only by construction and refuses to run if that were ever not true. It prints one line of JSON on success; if it exits non-zero, stop and return that stderr as the error.
+5. Commit ${cfg.followupsFile} by explicit path and nothing else (issue 807 - a broad add once swept a CRLF-rewritten test file into this commit): ${gitSpelling(instrument, `add -- ${cfg.followupsFile}`)}, then ${gitSpelling(instrument, `commit -m "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)" -- ${cfg.followupsFile}`)}. Never add with -A, . or -u, and never commit with -a; the trailing \`-- ${cfg.followupsFile}\` commits that one path even if something else got staged. Then run ${gitSpelling(instrument, 'show --name-only --format= HEAD')}: it must print exactly \`${cfg.followupsFile}\`. If it prints any other path, stop - push nothing, open no PR - and return sha and prUrl as empty strings.
+6. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
 ${deliverStep}
 Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, do NOT touch any ticket. Return structured output only.`,
       { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: 'low' }
     )
   } catch (err) {
+    runHalt.note((err && err.message) || err, 'followups-writer')
     return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', (err && err.message) || err) }
   }
   return {
@@ -2811,7 +3118,12 @@ Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, d
   }
 }
 // [FLEET-REPORT-END]
-const discoveryReport = await runReport(allDiscoveries, scout.defaultBranch)
+// Issue 812: a halted run does not start the writer - it would die on the same limit. The bullets
+// travel in the run result's discoveryList instead, so the journal (and the run record distilled
+// from it) still carries every one of them.
+const discoveryReport = runHalt.halted() && allDiscoveries.length
+  ? { branch: null, sha: null, prUrl: null, bullets: allDiscoveries.length, error: `followups-writer not started - ${runHalt.failure()}` }
+  : await runReport(allDiscoveries, scout.defaultBranch)
 const followupsError = (discoveryReport && discoveryReport.error) || null
 if (followupsError) log(`${followupsError} - ${allDiscoveries.length} discovery string(s) were NOT committed to ${cfg.followupsFile}; they are in this report's discoveryList.`)
 else if (discoveryReport) log(`discoveries: ${discoveryReport.bullets} bullet(s) committed as ${discoveryReport.sha || 'unknown sha'} on ${discoveryReport.branch}${discoveryReport.prUrl ? ' (' + discoveryReport.prUrl + ')' : ''}`)
@@ -2843,7 +3155,7 @@ return {
   })),
   // conflictPaths is populated only by a code-lane ticket whose pre-push merge hit a conflict
   // outside the generated files and the SKILL.md stamp blocks (issue 318); no PR was opened.
-  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency && !r.chainSkipped).map(r => ({
+  failed: clean.filter(r => (!r.done || r.deliveryFailure) && !r.inconsistency && !r.chainSkipped && !r.notAttempted).map(r => ({
     ticket: r.ticket,
     kind: r.kind,
     failures: (r.done ? [] : failuresOf(r.verdict)).concat(r.deliveryFailure ? [r.deliveryFailure] : []),
@@ -2855,6 +3167,10 @@ return {
   // prepends a run-level entry (ticket: null) when the tree-guard baseline itself was unusable, so
   // "this run had no isolation guard" is as visible as any per-ticket inconsistency.
   inconsistent: (treeGuardUnusable ? [{ ticket: null, kind: 'tree-guard', branch: null, detail: treeGuardUnusable }] : [])
+    // Issue 807: a HEAD the wave moved and a checkpoint put back is flagged here, not only logged.
+    .concat(headWatchUnusable ? [{ ticket: null, kind: 'orchestrator-head', branch: null, detail: headWatchUnusable }] : [])
+    .concat(headRestores.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
+      detail: `orchestrator HEAD moved to ${h.from} during the wave; restored onto ${h.to} at ${h.label} (issue 807). Check the orchestrator checkout's stash list for work the move stashed.` })))
     .concat(clean.filter(r => r.inconsistency).map(r => ({
       ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
     }))),
@@ -2882,5 +3198,8 @@ return {
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
   implModels: clean.filter(r => r.kind === 'code').map(r => ({ ticket: r.ticket, difficulty: r.difficulty || null, models: r.implModels || [] })),
+  // Issue 812: halt names the quota/rate-limit reason and reset time once (null on a normal run);
+  // notAttempted lists the tickets the halt kept from starting at all.
+  ...haltReport(runHalt.get(), clean),
   recordCommand: RECORD_COMMAND,
 }

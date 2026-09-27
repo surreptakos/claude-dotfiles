@@ -364,6 +364,19 @@ function normalizeTitle(title) {
     .join(' ');
 }
 
+/** The milestone that parks a ticket (issue 889). The ticket reaper parks belt-and-suspenders work
+ *  there and the fleet drops it (issue 786); the owner's ruling on a parked ticket is often to strip
+ *  its state label so it stops resurfacing in a triage or owner queue. So a parked ticket with no
+ *  state label is the intended state, not intake drift. */
+const PARKED_MILESTONE = 'Maybe Someday';
+
+/** True when an open issue should be reported `untriaged`: it carries none of `triagedLabels` and is
+ *  not parked in the Maybe Someday milestone. Pure. */
+function isUntriaged(issue, triagedLabels) {
+  if (issue.milestone && issue.milestone.title === PARKED_MILESTONE) return false;
+  return !(issue.labels || []).some((l) => triagedLabels.includes(l.name));
+}
+
 /** Group open issues by normalized title and return one entry per later member of each group:
  *  `{ issue, duplicateOf, normalized }`, the lowest-numbered issue of the group being the one
  *  the others duplicate. Pure — the caller decides how loudly to report it. */
@@ -403,6 +416,8 @@ if (require.main !== module) {
     proseBlockers,
     normalizeTitle,
     duplicateTitleFindings,
+    isUntriaged,
+    PARKED_MILESTONE,
     landedCommits,
     landedFindings,
     stalePremiseFindings,
@@ -1330,8 +1345,8 @@ open.forEach((i) => {
 open.forEach((i) => {
   const names = i.labels.map((l) => l.name);
   const states = names.filter((n) => TRIAGE.includes(n));
-  const triaged = names.filter((n) => TRIAGED.includes(n));
-  if (triaged.length === 0) report('untriaged', i, 'carries no triage label, so it is invisible to every triage query.');
+  // A ticket parked in Maybe Someday may carry no state label by owner ruling (issue 889).
+  if (isUntriaged(i, TRIAGED)) report('untriaged', i, 'carries no triage label, so it is invisible to every triage query.');
   if (states.length > 1) report('conflicting-triage', i, 'carries ' + states.join(' AND ') + ' — pick one.');
 });
 
