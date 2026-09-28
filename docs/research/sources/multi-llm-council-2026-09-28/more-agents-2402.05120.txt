@@ -1,0 +1,9 @@
+Source: https://arxiv.org/abs/2402.05120
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+Title: More Agents Is All You Need
+Submitted on 3 Feb 2024 (v1), last revised 11 Oct 2024 (this version, v2)
+
+Abstract: We find that, simply via a sampling-and-voting method, the performance of large language models (LLMs) scales with the number of agents instantiated. Also, this method, termed as Agent Forest, is orthogonal to existing complicated methods to further enhance LLMs, while the degree of enhancement is correlated to the task difficulty. We conduct comprehensive experiments on a wide range of LLM benchmarks to verify the presence of our finding, and to study the properties that can facilitate its occurrence. Our code is publicly available at: this https URL
+
+--- excerpts ---
+

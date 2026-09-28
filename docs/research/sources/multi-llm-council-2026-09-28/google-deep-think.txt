@@ -1,0 +1,9 @@
+Source: https://blog.google/products/gemini/gemini-2-5-deep-think/
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+
+
+
+--- excerpts ---
+Aug 01, 2025
+Just as people tackle complex problems by taking the time to explore different angles, weigh potential solutions, and refine a final answer, Deep Think pushes the frontier of thinking capabilities by using parallel thinking techniques. This approach lets Gemini generate many ideas at once and consider them simultaneously, even revising or combining different ideas over time, before arriving at the best answer.
+Deep Think in the Gemini app uses parallel thinking techniques to deliver more detailed, creative and thoughtful responses.
