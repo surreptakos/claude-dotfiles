@@ -57,6 +57,7 @@ const cfg = Object.assign({
   verifyModel: 'claude-sonnet-5-5',         // skepticism comes from blindness + prompt, not tier
   deliverModel: 'claude-haiku-4-5-20251001',// push + PR mechanics, no judgment
   reportModel: 'claude-haiku-4-5-20251001', // formats pre-aggregated discoveries
+  effort: 'high',           // every agent() call runs at this effort (Dan, 2026-09-28)
   maxAttempts: 3,           // Ralph-style bounded retry, fresh context each attempt
   deliver: true,            // false = stop after verify, no push/PR
   followupsFile: 'FOLLOW-UPS.md',
@@ -1314,7 +1315,7 @@ the output. Return the command's REAL exit code plus its stdout and stderr VERBA
 SPELLING= marker line stdout printed (if any) in \`spelling\` - "given" or "origin" copied exactly,
 or "" when stdout has no such line (either nothing resolved, or the ls-remote fallback answered,
 which prints no marker of its own).`,
-    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: 'low' }
+    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: cfg.effort }
     )
   } catch (err) {
     runHalt.note((err && err.message) || err, label)
@@ -1489,7 +1490,7 @@ let servedRepo = null
 try {
   const served = await agent(
     `Run exactly this one command and report its result: ${gitSpelling('mcp', 'remote get-url origin')}. servedRepo is the owner/repo in it (https://github.com/<owner>/<repo>). Do not run anything else - no curl, no cp, no git add or commit.`,
-    { label: 'fleet-refresh-repo', phase: 'Setup', schema: SERVED_REPO, model: cfg.reportModel, effort: 'low' }
+    { label: 'fleet-refresh-repo', phase: 'Setup', schema: SERVED_REPO, model: cfg.reportModel, effort: cfg.effort }
   )
   // Normalized before the JS check below, so a reply spelled `Owner/Repo.git` or as the full remote
   // URL still matches FLEET_FORKS instead of falling through to the refresh agent (issue 804).
@@ -1513,7 +1514,7 @@ if (!servedRepo) {
 1. For each of ${FLEET_REFRESH_FILES.map(f => '`.claude/workflows/' + f + '`').join(' and ')} that EXISTS (\`test -f\`; a missing one is simply not listed, never created): first read the file and check whether it contains the string \`${FLEET_FORK_MARKER}\` anywhere. If it does, REFUSE to touch it - list it under errors as "<path>: refused, contains ${FLEET_FORK_MARKER} fork marker" and leave it exactly as it is (a second rail behind the servedRepo check above, issue 804). Otherwise \`curl -fsSL ${FLEET_SOURCE_RAW}/<name> -o /tmp/fleet-refresh-<name>\` and compare \`sha256sum\` of the download with the file. Different: \`cp /tmp/fleet-refresh-<name> .claude/workflows/<name>\` and list it under refreshed; same: list it under unchanged. A curl exit other than 0 goes under errors verbatim and that file is left alone. Also refresh \`tools/editable-install-guard.js\` the same way when it exists, including the ${FLEET_FORK_MARKER} check.
 2. If refreshed is non-empty: \`git add\` exactly those paths and \`git commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"\`; commit is the sha \`git rev-parse HEAD\` prints. No push, no other path staged, no rebase. If nothing was refreshed: neither add nor commit, commit "".
 Return structured output only.`,
-      { label: 'fleet-refresh', phase: 'Setup', schema: REFRESHED, model: cfg.reportModel, effort: 'low' }
+      { label: 'fleet-refresh', phase: 'Setup', schema: REFRESHED, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
     log(`fleet-refresh did not run: ${unusableReason('fleet-refresh', (err && err.message) || err)} - this run continues on the copy it was launched from.`)
@@ -1556,7 +1557,7 @@ if (orchestratorCwd === '.') {
   try {
     measured = await agent(
       'Run exactly this one bash command and report its result: `pwd`. Do not cd anywhere first. Do not run any other command.',
-      { label: 'orchestrator-cwd', phase: 'Setup', schema: CWD_MEASURE, model: cfg.reportModel, effort: 'low' }
+      { label: 'orchestrator-cwd', phase: 'Setup', schema: CWD_MEASURE, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
     measureError = unusableReason('orchestrator-cwd', (err && err.message) || err)
@@ -1580,7 +1581,7 @@ if (headWatchOn) {
   let headRes = null, headError = null
   try {
     headRes = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
-      { label: 'orchestrator-head:setup', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+      { label: 'orchestrator-head:setup', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) {
     headError = unusableReason('orchestrator-head:setup', (err && err.message) || err)
   }
@@ -1601,7 +1602,7 @@ if (treeGuardOn) {
   try {
     baseline = await agent(
       guardAgentPrompt(`[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd ${orchestratorCwd} --state-dir ${cfg.treeGuardStateDir}`),
-      { label: 'tree-guard:baseline', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
+      { label: 'tree-guard:baseline', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
     baselineError = unusableReason('tree-guard:baseline', (err && err.message) || err)
@@ -1655,7 +1656,7 @@ async function treeGuardCheck(label, ticketNumber) {
   try {
     res = await agent(
       guardAgentPrompt(`${GUARD_CMD} check --cwd ${orchestratorCwd} --state ${guardStatePath} --label ${label} --ticket ${ticketNumber} ${guardCandidates}`),
-      { label: `tree-guard:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' }
+      { label: `tree-guard:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
     agentError = unusableReason(`tree-guard:${label}#${ticketNumber}`, (err && err.message) || err)
@@ -1708,7 +1709,7 @@ async function headCheck(label, ticketNumber) {
     let res = null
     try {
       res = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
-        { label: `orchestrator-head:${tag}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+        { label: `orchestrator-head:${tag}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
     } catch (err) {
       if (runHalt.note((err && err.message) || err, `orchestrator-head:${tag}#${ticketNumber}`) === true) return 'halted'
     }
@@ -1730,7 +1731,7 @@ async function headCheck(label, ticketNumber) {
   let res = null
   try {
     res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, target)),
-      { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+      { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) { res = null }
   const after = await read(`${label}-restored`)
   if (after === 'halted') return
@@ -1899,7 +1900,7 @@ if (!cfg.finishRunId) {
   try {
     canary = await agent(
       'Run exactly this one bash command and report its result: `git rev-parse HEAD`. Do not cd anywhere first. Do not run any other command. Make no change. Return structured output only.',
-      { label: 'worktree-canary', phase: 'Setup', schema: WORKTREE_CANARY, model: cfg.reportModel, effort: 'low', isolation: 'worktree' }
+      { label: 'worktree-canary', phase: 'Setup', schema: WORKTREE_CANARY, model: cfg.reportModel, effort: cfg.effort, isolation: 'worktree' }
     )
   } catch (err) {
     const detail = String((err && err.message) || err)
@@ -1929,7 +1930,7 @@ const envFacts = await agent(
 2. \`command -v gh && gh --version\` - hasGh = true only when a path is printed AND \`gh --version\` exits 0.
 3. \`test -f "$HOME/.claude/agents/fleet-verifier.md" && echo present || echo absent\` - verifierAgentFile = true on "present".
 Print no secret value: these three are paths, a version string and set/unset, nothing else. Make no repository change, no commit, no comment. Return structured output only.`,
-  { label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: 'low' }
+  { label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: cfg.effort }
 )
 // A failed probe must not silently become `gh` - that is the issue 322 failure: in a container
 // the gh path pins a verifier agent type the registry does not hold and reaches for a
@@ -1974,7 +1975,7 @@ if (cfg.finishRunId) {
 4. Per ticket the scout returned, report: verified true ONLY when some verify:#<N>.<attempt> result has pass true; branch = the branch from THAT attempt's impl result ("" when there is none); evidence = that passing verdict's evidence verbatim; unmetCriteria = that passing verdict's unmetCriteria verbatim ([] when it has none); pushed true ONLY when THAT attempt's impl result or its push:#<N>.<attempt> result has pushed true; delivered true when a deliver:#<N> result recorded a non-empty prUrl or commentUrl, with deliveryRef that url ("" otherwise).
 5. discoveries = every string in every impl/probe result's discoveries array, in journal order.
 Never invent a ticket, a branch, a URL or a verdict, and never infer one from a prompt or a log line: a field the journal does not hold is "" or false. Make no repository change, no commit, no push, no PR, no comment - reading only. Return structured output only.`,
-    { label: `journal-read:${finishRunId}`, phase: 'Deliver', schema: JOURNAL, model: cfg.scoutModel, effort: 'low' }
+    { label: `journal-read:${finishRunId}`, phase: 'Deliver', schema: JOURNAL, model: cfg.scoutModel, effort: cfg.effort }
     )
   } catch (err) {
     journalError = unusableReason(`journal-read:${finishRunId}`, (err && err.message) || err)
@@ -2027,7 +2028,7 @@ const scout = await agent(
 6. Produce a repoMap: max 15 lines - key directories, conventions, hard rails an implementer must not break.
 7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
 Return structured output only.`,
-  { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: 'low' }
+  { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: cfg.effort }
 )
 // [FLEET-SCOUT-GATE-START]
 // A scout whose listing matched nothing is prone to route around the dead end and hand back every
@@ -2090,7 +2091,7 @@ async function resolveBlockerStates(tickets) {
 ${rules.blockerState(numbers)}
 
 These are blocker edges named by tickets this run is about to select from, so the answer decides whether a ticket runs. Read every number in the list - ${numbers.join(', ')} - and return one entry per number with the state the tracker reports, verbatim ("open" or "closed"). Where a read fails or the issue cannot be found, return "unknown" for it rather than guessing; a wrong "closed" starts work on a ticket whose blocker has not landed. Make no repository change, no commit, no comment, and change nothing on the tracker. Return structured output only.`,
-      { label: 'blocker-state', phase: 'Scout', schema: BLOCKER_STATES, model: cfg.reportModel, effort: 'low' }
+      { label: 'blocker-state', phase: 'Scout', schema: BLOCKER_STATES, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
     log(`blocker-state read failed (${(err && err.message) || err}) - every named blocker keeps blocking this wave.`)
@@ -2153,7 +2154,7 @@ Answer from the tracker as it stands right now, in this invocation (${invocation
 ${listSteps}
 A candidate number N counts as having an open PR when some open PR's head ref starts with agent/issue-N- (the branch shape this fleet pushes). Return one withOpenPr entry per such candidate - {number: N, prUrl: <that PR's html_url>, branch: <that PR's head ref>}, the first match where several exist - and no entry at all for a candidate nothing matched. When no candidate matches, return withOpenPr: [].
 Report only numbers from the candidate list above. Make no repository change, no commit, no comment, no PR. Return structured output only.`,
-      { label: `open-pr-scan@${invocationId}`, phase: 'Scout', schema: OPEN_PR_SET, model: cfg.deliverModel, effort: 'low' }
+      { label: `open-pr-scan@${invocationId}`, phase: 'Scout', schema: OPEN_PR_SET, model: cfg.deliverModel, effort: cfg.effort }
     )
   } catch (err) {
     log(`${unusableReason('open-pr-scan', (err && err.message) || err)} - proceeding as if no candidate has an open PR (worst case a duplicate PR a human closes, issue 430).`)
@@ -2215,7 +2216,7 @@ ${request}
    Where the environment holds TYPESAFE_API_KEY (\`printenv TYPESAFE_API_KEY >/dev/null\` exits 0), add the header "Authorization: Bearer <that key>"; in a cloud container the proxy injects the credential, so send none. A 429 or 529 may be retried once after 2 seconds.
 3. HTTP 200 and curl exit 0: return status "ok" and body = the response file's content verbatim. Anything else - no credential, timeout, non-200, curl error: return status "unavailable", body "", and the reason in detail.
 Return structured output only.`,
-      { label: 'difficulty', phase: 'Scout', schema: JEV_RESULT, model: cfg.deliverModel, effort: 'low' }
+      { label: 'difficulty', phase: 'Scout', schema: JEV_RESULT, model: cfg.deliverModel, effort: cfg.effort }
     )
   } catch (err) {
     log(`${unusableReason('difficulty', (err && err.message) || err)} - every implementer runs on implModel.`)
@@ -2284,7 +2285,7 @@ Rules:
 - If an item cannot be done from here, set that item's status to blocked and add a blocked entry saying what is impossible from this container and exactly what would unblock it (a second fresh container, a Routine run, a secret only the owner holds). A blocked item is a fine outcome; a fabricated one is not.
 You are operating autonomously; the user cannot answer questions mid-task. Do not end your turn on a plan, a question or a promise - run the commands first.
 Return structured output only.`,
-      { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: implementerModel(cfg.implModel), isolation: 'worktree' }
+      { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: implementerModel(cfg.implModel), isolation: 'worktree', effort: cfg.effort }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `probe:#${t.number}.${attempt}`)
@@ -2330,7 +2331,7 @@ Commands and output claimed:\n${evidenceBlocks}
 4. Fabrication check: output too clean for the command, paraphrased, or missing the tool's usual noise is a failure. So is any printed secret value.
 5. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not the tip of origin/${scout.defaultBranch} is rejected unread.
 Clean up your scratch worktree (git worktree remove) when done. Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.${rerunBlock}`,
-        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
+        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType, effort: cfg.effort }
         )
       } catch (err) {
         runHalt.note((err && err.message) || err, verifyLabel)
@@ -2382,7 +2383,7 @@ Body, in this order:
 _Generated by [Claude Code](https://claude.ai/code)_
 
 Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment. Return structured output only.`,
-      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
+      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
@@ -2418,7 +2419,7 @@ Do ONLY what an agent can do from this container:
 - Make no repository change, no commit, no push, no PR. Never perform a step that only a desktop session or a person can do, and never claim one was done.
 Return: agentSide = the commands you ran and their verbatim output; ownerSide = the remaining steps, precise enough to follow without re-reading the ticket (where to click, what to enter, what to check afterwards); ready = true only when everything an agent can do is done and only human/local-agent steps remain; remainingKind = 'local-agent' when a desktop session could take the remaining steps (running sync.ps1 -Mode pull on the desktop to apply a merged profile change, a remote branch delete the session proxy refuses, an edit the auto-mode classifier blocks in a container), 'human' when they are genuinely a person's judgment, credential or sign-off.
 Return structured output only.`,
-    { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel }
+    { label: `handoff:#${t.number}`, phase: 'Implement', schema: HANDOFF, model: cfg.verifyModel, effort: cfg.effort }
     )
   } catch (err) {
     runHalt.note((err && err.message) || err, `handoff:#${t.number}`)
@@ -2449,7 +2450,7 @@ _Generated by [Claude Code](https://claude.ai/code)_
 Then, and only after the comment is posted, relabel the ticket so the next run leaves it alone instead of repeating this handoff: ${rules.labelSwap(t.number, handBackLabel)}
 Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and "ready-for-agent" must not.
 Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that a step outside this container was performed. Return structured output only.`,
-      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel }
+      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
@@ -2630,7 +2631,7 @@ async function runFinish(journal) {
     try {
       delivery = await agent(
       deliverPrompt({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch, testCommand: finishTestCommand, resumed: true }),
-      { label: `deliver:#${number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
+      { label: `deliver:#${number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
       deliveryFailure = unusableReason(`deliver:#${number}`, (err && err.message) || err)
@@ -2736,7 +2737,7 @@ Done-condition (machine-checkable, all required): branch exists with your commit
 Scope: if, while working or testing, you find a pre-existing bug, a performance concern, or behavior the ticket doesn't mention, don't fix, optimize or extend it in this change unless the requested behavior cannot work without it; report it as a self-contained discovery string instead. Where the ticket is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in a discovery string, and don't build for the other readings as well. Verify your work however you like; scratch scripts and quick checks need not be kept. Commit tests only where the ticket asks for them or this repository already keeps tests for this kind of change, sized like the neighboring test files - roughly one focused test per stated behavior - and don't turn scratch checks into additional permanent test files. This is about extras only: implement every behavior the ticket asks for, completely.
 Edits: the number of tokens used to edit files is best minimized, all else being equal, so when it will not affect the end result, surgically edit a file rather than rewrite the entire thing.
 Return structured output only.`,
-      { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: implModel, isolation: 'worktree' }
+      { label: `impl:#${t.number}.${attempt}`, phase: 'Implement', schema: IMPL, model: implModel, isolation: 'worktree', effort: cfg.effort }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `impl:#${t.number}.${attempt}`)
@@ -2786,7 +2787,7 @@ ${gitSpelling(instrument, `push -u origin ${branch}`)}
 Then run ${gitSpelling(instrument, `ls-remote --heads origin ${branch}`)} and report pushed: true only when it prints a ref.
 If the push fails for any reason, that is the answer: return pushed: false with the git output VERBATIM. Never conclude that the branch "does not exist" and never invent a reason - when git says the ref is missing, run \`git branch -a --list '*${branch}*'\` and \`git worktree list\` and quote their output too.
 Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or delete anything. Do not push any other branch, do not push to the default branch, do not open a PR, do not comment on any ticket. Return structured output only.`,
-        { label: `push:#${t.number}.${attempt}`, phase: 'Implement', schema: PUSHED, model: cfg.deliverModel, effort: 'low' }
+        { label: `push:#${t.number}.${attempt}`, phase: 'Implement', schema: PUSHED, model: cfg.deliverModel, effort: cfg.effort }
         )
       } catch (err) {
         runHalt.note((err && err.message) || err, `push:#${t.number}.${attempt}`)
@@ -2836,7 +2837,7 @@ Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute 
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
 Clean up your scratch worktree (git worktree remove) when done. If this repo is a Python package, check afterwards that the container's editable install still names the MAIN checkout (\`python -m pip show -f <dist> | grep -i 'editable project location'\`): when it names a scratch path, quote that line in evidence and leave it alone - do NOT repair it by installing from the orchestrator's checkout, because pip writes .egg-info into the very tree the isolation checkpoint is watching. This run's editable-install guard repairs it once the wave has drained. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
-        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType }
+        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType, effort: cfg.effort }
         )
       } catch (err) {
         runHalt.note((err && err.message) || err, verifyLabel)
@@ -2887,7 +2888,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     try {
       delivery = await agent(
       deliverPrompt({ t, branch, evidence: lastVerdict.evidence, unmetCriteria: unmetCriteriaOf(lastVerdict), defaultBranch: scout.defaultBranch, testCommand }),
-      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel }
+      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
@@ -3062,7 +3063,7 @@ if (runHalt.halted()) {
   let res = null, resError = null
   try {
     res = await agent(guardAgentPrompt(editableCmd),
-      { label: 'editable-guard:post-wave', phase: 'Report', schema: TREE_GUARD, model: cfg.reportModel, effort: 'low' })
+      { label: 'editable-guard:post-wave', phase: 'Report', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) {
     resError = unusableReason('editable-guard:post-wave', (err && err.message) || err)
   }
@@ -3128,7 +3129,7 @@ async function runReport(discoveries, defaultBranch) {
 6. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
 ${deliverStep}
 Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, do NOT touch any ticket. Return structured output only.`,
-      { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: 'low' }
+      { label: 'followups-writer', phase: 'Report', schema: DISCOVERY_REPORT, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
     runHalt.note((err && err.message) || err, 'followups-writer')
