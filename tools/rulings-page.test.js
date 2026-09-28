@@ -131,3 +131,15 @@ test('bodies puts each ticket\'s GitHub text in its draft, cutting a very long o
   const data = readPageData(buildPage(dir, TEMPLATE).html);
   assert.equal(data.repos[0].tickets[0].body, 'Short **body**');
 });
+
+test('a saved pick or landing for a ticket no longer on the page does not count', () => {
+  // The page's database keeps every earlier round's rulings and landings. Counting them made a
+  // 37-ticket page read "47 answered, -10 still open, 47 landed" (2026-09-28).
+  const line = TEMPLATE.split('\n').find(l => l.startsWith('const current = '));
+  assert.ok(line, 'template defines current()');
+  const draftedAt = { 'aac-routines~3': Date.parse('2026-09-28T13:00:00Z') };
+  const current = new Function('draftedAt', `${line}; return current;`)(draftedAt);
+  assert.equal(current({ key: 'aac-routines~9', at: '2026-09-25T14:00:00Z' }), false, 'ticket not on this page');
+  assert.equal(current({ key: 'aac-routines~3', at: '2026-09-25T14:00:00Z' }), false, 'pick from an earlier round');
+  assert.equal(current({ key: 'aac-routines~3', at: '2026-09-28T14:00:00Z' }), true, 'pick from this round');
+});
