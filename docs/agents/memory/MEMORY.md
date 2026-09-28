@@ -27,6 +27,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - cowork-runs-plugin-hooks: mcp__workspace__bash
 - cowork-scheduled-tasks-live-in-session-uploads: uploads
 - cowork-transcripts-not-local: server-side
+- desktop-rpm-copy-is-account-synced: read rpm/manifest.json, not the path
 - desktop-scheduled-tasks-are-per-org: per org
 - dotfiles-public-for-cloud-clone: no env sources
 - environment-verification-log: log
