@@ -1,6 +1,6 @@
 ---
 name: cloud-home-snapshot
-description: "A cloud container's ~/.claude comes from an environment snapshot, so a failed bootstrap is served to later sessions; a session whose project dir is not a harnessed repo never reaches the repo-anchored hook, and a session-minted Routine gets no payload (curl the public hook) (issue 643)"
+description: "A cloud container's ~/.claude comes from an environment snapshot, so a failed bootstrap is served to later sessions; a session whose project dir is not a harnessed repo never reaches the repo-anchored hook, and a session-minted Routine gets no payload (curl the public hook); the image predates the seat, so the environment setup script must bootstrap (issue 643)"
 metadata:
   node_type: memory
   type: feedback
@@ -30,7 +30,25 @@ agent-minted Routine session carrying none (its `session_request.config.sources`
 by an agent (`fire_trigger` refuses: "agents can only fire routines they created"), so the shape
 is hard to reproduce from a session. Harness v31 seats a copy of the hook at
 `~/.claude/hooks/aac-bootstrap.sh` in USER settings, which every session in the container runs
-whatever its project dir is; one good bootstrap in an environment makes every later session retry.
+whatever its project dir is.
+
+**The seat never reached the image, so a multi-repo session still gets no payload** (2026-09-28).
+The snapshot is frozen, not refreshed per session: `env_01Sym7HwJnhGG1JncCEH7Jso` still restores a
+`~/.claude` written 2026-09-21 17:37 UTC (its 21 caveman skills and `.aac-bootstrap-marker` carry
+that mtime), and PR 645 merged the seat at 19:19 the same day. So the image's user settings hold no
+seat, and a session with two sources (claude-dotfiles + osh-rfp, session_016i4Wve7SMAiEYJoYhAJyWj)
+started with caveman's skills alone: `/grill-ready-for-human` was "not installed". The fix that
+does not ride the project dir or the image is the environment's **setup script**, which runs
+before every session; the repo is public, so it needs no credential:
+
+```bash
+git clone -q --depth 1 https://github.com/surreptakos/claude-dotfiles /tmp/aac-dotfiles-setup && for h in session-start upstream-skills caveman-bootstrap; do CLAUDE_PROJECT_DIR=/tmp/aac-dotfiles-setup bash /tmp/aac-dotfiles-setup/.claude/hooks/$h.sh </dev/null || true; done
+```
+
+Verified from a bare `HOME` 2026-09-28: all three exit 0, 76 skills including grill-ready-for-human,
+i-have-adhd, typesafe-ai and caveman, and the seat written to `settings.json`. `session-start.sh`
+alone is not enough: it does not run `upstream-skills.sh` or `caveman-bootstrap.sh`, and the latter
+needs `CLAUDE_PROJECT_DIR` pointing at a checkout (`lib/caveman-cli.json`).
 
 **A Routine minted from a session gets no payload at all** (merged 2026-09-23 from the retired
 `routine-without-source-has-no-payload` note). `mcp__Claude_Code_Remote__create_trigger` has no

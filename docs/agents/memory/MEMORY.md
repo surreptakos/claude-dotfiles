@@ -21,7 +21,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - caveman-base-url-stays-with-the-proxy: proxy-only
 - classifier-refusals-are-shape-not-action: retry; MCP
 - cloud-containers-can-run-powershell: 7.4.6 tarball
-- cloud-home-snapshot: image state; seat the bootstrap in $HOME; curl the public hook
+- cloud-home-snapshot: image frozen 09-21, no seat; multi-repo sessions need the setup-script bootstrap
 - cloud-only-criteria-stall-the-desktop-fleet: cloud proof
 - cowork-plugin-cache-can-go-stale: account-side, not packager
 - cowork-runs-plugin-hooks: mcp__workspace__bash
