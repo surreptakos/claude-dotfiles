@@ -2,10 +2,10 @@
 name: consistency-audit
 description: Prose-vs-reality audit of a repo's documents against code, git, the tracker and live state. Use when docs contradict each other or misstate what is built or shipped ("X is already implemented" when it isn't, or the reverse), or to wire a repo's docs/claims.json tripwire.
 metadata:
-  modified: '2026-09-25T23:18:11Z'
-  previous-modified: '2026-08-26T14:35:01Z'
-  revision: '2'
-  content-sha: a362efab595d
+  modified: '2026-09-28T21:58:49Z'
+  previous-modified: '2026-09-25T23:18:11Z'
+  revision: '3'
+  content-sha: 655726dd67b1
 ---
 
 # Consistency audit — make every document agree with reality
