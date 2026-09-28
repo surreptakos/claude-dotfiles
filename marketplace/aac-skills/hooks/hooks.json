@@ -154,6 +154,18 @@
             "statusMessage": "Checking governance gate..."
           }
         ]
+      },
+      {
+        "matcher": "Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fleet-launch-guard.js\"",
+            "commandWindows": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/fleet-launch-guard.js\"",
+            "timeout": 10,
+            "statusMessage": "Checking the fleet is launched from its own repository..."
+          }
+        ]
       }
     ],
     "PostToolUse": [
