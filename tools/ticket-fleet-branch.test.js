@@ -2282,6 +2282,51 @@ test('runCodeLane runs attempt 1 on the level pin, the retry on the heaviest, an
     'the run result names the level and models per ticket');
 });
 
+test('Jev under 0.8 confidence: the level is dropped, so every attempt runs on implModel (Dan, 2026-09-28)', () => {
+  const { parseDifficulty, pickImplModel, DIFFICULTY_CONFIDENCE_FLOOR } = require('./ticket-fleet-branch.js');
+  assert.equal(DIFFICULTY_CONFIDENCE_FLOOR, 0.8);
+  const body = JSON.stringify({ answers: {
+    'ticket-727': { type: 'score', score: 0.47, confidence: 0.3 },
+    'ticket-8': { type: 'score', score: 0.2, confidence: 0.8 },
+    'ticket-9': { type: 'score', score: 0.2 },
+  } });
+  const levels = parseDifficulty(body, [{ number: 727 }, { number: 8 }, { number: 9 }]);
+  assert.deepEqual(levels[727], { level: null, score: 0.47, confidence: 0.3 }, 'the run 6abac727 answer no longer reads as mechanical');
+  assert.equal(levels[8].level, 'mechanical', 'exactly 0.8 is sure enough');
+  assert.equal(levels[9].level, null, 'a missing confidence is not sure');
+  assert.equal(pickImplModel(levels[727].level, 1, DIFF_CFG), 'heavy');
+});
+
+test('Haiku never implements, whatever the pins or args say (Dan, 2026-09-28)', () => {
+  const { pickImplModel, implementerModel, IMPL_FALLBACK_MODEL } = require('./ticket-fleet-branch.js');
+  assert.equal(IMPL_FALLBACK_MODEL, 'claude-opus-5-5');
+  const haikuCfg = { implModel: 'claude-haiku-4-5-20251001', implPins: { mechanical: 'claude-haiku-4-5-20251001', 'multi-file': 'Claude-Haiku-9', design: null } };
+  for (const level of [null, 'mechanical', 'multi-file', 'design']) {
+    for (const attempt of [1, 2]) assert.doesNotMatch(pickImplModel(level, attempt, haikuCfg), /haiku/i, `${level} attempt ${attempt}`);
+  }
+  assert.equal(implementerModel(''), IMPL_FALLBACK_MODEL);
+  assert.equal(implementerModel('claude-sonnet-5-5'), 'claude-sonnet-5-5');
+  const script = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const pins = script.match(/^\s*implPins: (\{[^\n]*\}),/m);
+  assert.ok(pins, 'the default implPins line is found');
+  assert.doesNotMatch(pins[1], /haiku/i, 'no default implementer pin names Haiku');
+  assert.match(script, /model: implementerModel\(cfg\.implModel\), isolation: 'worktree'/, 'the prober goes through the guard too');
+  assert.doesNotMatch(script, /'claude-sonnet-5'/, 'every Sonnet pin is Sonnet 5.5');
+});
+
+test('the shipped defaults: sure easy work on Sonnet 5.5, everything else and every retry on Opus 5.5 (Dan, 2026-09-28)', () => {
+  const script = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const cfg = {
+    implModel: script.match(/^\s*implModel: '([^']+)'/m)[1],
+    // eslint-disable-next-line no-new-func
+    implPins: new Function(`return ${script.match(/^\s*implPins: (\{[^\n]*\}),/m)[1]}`)(),
+  };
+  const pickImplModel = generatedPickImplModel();
+  assert.deepEqual(['mechanical', 'multi-file', 'design', null].map(l => pickImplModel(l, 1, cfg)),
+    ['claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5']);
+  for (const l of ['mechanical', 'multi-file', 'design', null]) assert.equal(pickImplModel(l, 2, cfg), 'claude-opus-5-5', `${l} retry`);
+});
+
 test('difficultyEvalSet labels a ticket "hard" when a fleet branch shows attempt 2 or later', () => {
   const { difficultyEvalSet } = require('./ticket-fleet-branch.js');
   assert.deepEqual(difficultyEvalSet([

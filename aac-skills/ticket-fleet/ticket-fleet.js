@@ -46,14 +46,15 @@ const cfg = Object.assign({
   label: 'ready-for-agent',
   // Per-stage model pins. Frontier only where errors compound (implement); the orchestrator is the
   // main session's own model. Mid-tier for bounded, checkable work; cheap tier for pure mechanics.
-  scoutModel: 'claude-sonnet-5',            // structured extraction from gh issues
+  scoutModel: 'claude-sonnet-5-5',          // structured extraction from gh issues
   implModel: 'claude-opus-5-5',             // heaviest-context stage, version-stable across runs
   // Implementer pin per Jev difficulty level (issue 725), attempt 1 only. A level with no pin - and
   // `design` by default - uses implModel, which is also the heaviest pin every retry takes. With
-  // Jev unavailable (no credential, timeout, service down) every attempt uses implModel.
-  implPins: { mechanical: 'claude-haiku-4-5-20251001', 'multi-file': 'claude-sonnet-5', design: null },
+  // Jev unavailable (no credential, timeout, service down) or under 0.8 confidence, every attempt
+  // uses implModel. Haiku never implements, whatever a pin or arg says (Dan, 2026-09-28).
+  implPins: { mechanical: 'claude-sonnet-5-5', 'multi-file': 'claude-sonnet-5-5', design: null },
   difficulty: true,         // false skips the Jev difficulty Score; every implementer runs on implModel
-  verifyModel: 'claude-sonnet-5',           // skepticism comes from blindness + prompt, not tier
+  verifyModel: 'claude-sonnet-5-5',         // skepticism comes from blindness + prompt, not tier
   deliverModel: 'claude-haiku-4-5-20251001',// push + PR mechanics, no judgment
   reportModel: 'claude-haiku-4-5-20251001', // formats pre-aggregated discoveries
   maxAttempts: 3,           // Ralph-style bounded retry, fresh context each attempt
@@ -689,6 +690,11 @@ function unmetCriteriaOf(verdict) {
  * DIFFICULTY_LEVELS is ordered to match the Score criteria (index 0..2).
  */
 const DIFFICULTY_LEVELS = ['mechanical', 'multi-file', 'design'];
+// Jev's difficulty level is used only at or above this confidence; below it the ticket runs on
+// implModel. The same 0.8 floor the cockpit's Self-Sourcing Audit judge uses (Dan, 2026-09-28).
+const DIFFICULTY_CONFIDENCE_FLOOR = 0.8;
+// What an implementer runs on when a pin or arg names Haiku or nothing (Dan, 2026-09-28).
+const IMPL_FALLBACK_MODEL = 'claude-opus-5-5';
 const DIFFICULTY_CRITERIA = [
   'Single-file mechanical: the change lives in one file and follows a pattern already there - a rename, a config value, a message, a small guard or a copy edit; nothing new to design.',
   'Multi-file: the change spans several files (code and its tests, a generator and its output, a script and its docs) but the approach is already clear from the ticket.',
@@ -719,7 +725,9 @@ function difficultyRequest(tickets, repoMap) {
 /**
  * Pure: the Jev response (object or its JSON text) in, {<number>: {level, score, confidence}} out.
  * A ticket whose answer is missing or malformed gets no entry, so it falls back to implModel;
- * a response that is not JSON, or carries no answers, yields {}.
+ * a response that is not JSON, or carries no answers, yields {}. An answer whose confidence is
+ * missing or under DIFFICULTY_CONFIDENCE_FLOOR keeps its entry with `level: null`, so it too runs
+ * on implModel (Dan, 2026-09-28: a 0.47 score at 0.3 confidence rounded to "mechanical").
  */
 function parseDifficulty(response, tickets) {
   let body = response;
@@ -735,7 +743,9 @@ function parseDifficulty(response, tickets) {
     const score = a && typeof a.score === 'number' && isFinite(a.score) ? a.score : null;
     if (score === null) continue;
     const index = Math.min(DIFFICULTY_LEVELS.length - 1, Math.max(0, Math.round(score)));
-    out[t.number] = { level: DIFFICULTY_LEVELS[index], score, confidence: typeof a.confidence === 'number' ? a.confidence : null };
+    const confidence = typeof a.confidence === 'number' && isFinite(a.confidence) ? a.confidence : null;
+    const sure = confidence !== null && confidence >= DIFFICULTY_CONFIDENCE_FLOOR;
+    out[t.number] = { level: sure ? DIFFICULTY_LEVELS[index] : null, score, confidence };
   }
   return out;
 }
@@ -744,14 +754,26 @@ function parseDifficulty(response, tickets) {
  * Pure: the implementer model for one attempt. `cfg.implPins` maps each level to a model; a level
  * with no pin, and the `design` level by default, uses `cfg.implModel`, which is also the heaviest
  * pin. Attempt 2+ (a retry after a failed verify) always takes the heaviest pin. No level - Jev
- * unavailable, or the ticket unscored - means today's single `implModel` on every attempt.
+ * unavailable, the ticket unscored, or Jev under its confidence floor - means `implModel` on every
+ * attempt. Whatever the pins say, a Haiku model never implements (Dan, 2026-09-28): see
+ * implementerModel.
  */
 function pickImplModel(level, attempt, cfg) {
   const c = cfg || {};
   const pins = c.implPins && typeof c.implPins === 'object' ? c.implPins : {};
-  if (!level || DIFFICULTY_LEVELS.indexOf(level) < 0) return c.implModel;
-  if (Number(attempt) > 1) return pins.design || c.implModel;
-  return pins[level] || c.implModel;
+  const heaviest = implementerModel(c.implModel);
+  if (!level || DIFFICULTY_LEVELS.indexOf(level) < 0) return heaviest;
+  if (Number(attempt) > 1) return implementerModel(pins.design || heaviest);
+  return implementerModel(pins[level] || heaviest);
+}
+
+/**
+ * Pure: a model allowed to implement. Haiku is never an implementer (Dan, 2026-09-28), whatever a
+ * pin or a caller's args say; it, or an empty value, becomes IMPL_FALLBACK_MODEL.
+ */
+function implementerModel(model) {
+  const m = String(model || '').trim();
+  return !m || /haiku/i.test(m) ? IMPL_FALLBACK_MODEL : m;
 }
 
 /**
@@ -2200,12 +2222,14 @@ Return structured output only.`,
     return {}
   }
   const levels = res && res.status === 'ok' ? parseDifficulty(res.body, code) : {}
-  if (!Object.keys(levels).length) log(`Jev difficulty unavailable (${stableText(res && res.detail) || (res ? 'no parseable answers' : 'no result')}) - every implementer runs on implModel ${cfg.implModel}.`)
+  if (!Object.keys(levels).length) log(`Jev difficulty unavailable (${stableText(res && res.detail) || (res ? 'no parseable answers' : 'no result')}) - every implementer runs on implModel ${implementerModel(cfg.implModel)}.`)
   for (const t of code) {
     const d = levels[t.number]
-    log(d
+    log(d && d.level
       ? `#${t.number}: difficulty ${d.level} (score ${d.score}, confidence ${d.confidence}) - attempt 1 on ${pickImplModel(d.level, 1, cfg)}, retries on ${pickImplModel(d.level, 2, cfg)}.`
-      : `#${t.number}: no difficulty score - every attempt on implModel ${cfg.implModel}.`)
+      : d
+        ? `#${t.number}: difficulty score ${d.score} at confidence ${d.confidence}, under ${DIFFICULTY_CONFIDENCE_FLOOR} - every attempt on ${pickImplModel(null, 1, cfg)}.`
+        : `#${t.number}: no difficulty score - every attempt on ${pickImplModel(null, 1, cfg)}.`)
   }
   return levels
 }
@@ -2260,7 +2284,7 @@ Rules:
 - If an item cannot be done from here, set that item's status to blocked and add a blocked entry saying what is impossible from this container and exactly what would unblock it (a second fresh container, a Routine run, a secret only the owner holds). A blocked item is a fine outcome; a fabricated one is not.
 You are operating autonomously; the user cannot answer questions mid-task. Do not end your turn on a plan, a question or a promise - run the commands first.
 Return structured output only.`,
-      { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: cfg.implModel, isolation: 'worktree' }
+      { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: implementerModel(cfg.implModel), isolation: 'worktree' }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `probe:#${t.number}.${attempt}`)
