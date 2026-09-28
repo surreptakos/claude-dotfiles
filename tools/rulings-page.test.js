@@ -165,3 +165,15 @@ test('a ticket that moved after its card was drafted is held, not landed', () =>
   const r3 = executeLanding(planLanding(REPO, ticket(11), { choice: 'a' }, 's1', '2026-09-25'), 's1', fakeGh(earlier).run);
   assert.equal(r3.ok, true, 'comments older than the draft do not hold it');
 });
+
+test('a rerun still holds when a new comment arrived after the ruling was posted', () => {
+  const state = { comments: [], labels: ['ready-for-human'], state: 'OPEN' };
+  const { run } = fakeGh(state);
+  const p = planLanding(REPO, ticket(12), { choice: 'a' }, 's1', '2026-09-25');
+  const failing = args => { if (args[1] === 'edit') throw new Error('network'); return run(args); };
+  assert.throws(() => executeLanding(p, 's1', failing));
+  state.comments.push({ body: 'Scope changed.', createdAt: '2026-09-26T09:00:00Z' });
+  const r = executeLanding(p, 's1', run);
+  assert.equal(r.held, true);
+  assert.deepEqual(state.labels, ['ready-for-human'], 'no label written');
+});

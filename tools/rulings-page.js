@@ -118,7 +118,8 @@ function executeLanding(p, submission, run = gh) {
   const posted = view.comments.some(c => (c.body || '').includes(m));
   const since = Date.parse(p.draftedAt || 0) || 0;
   const newer = view.comments.filter(c => Date.parse(c.createdAt || 0) > since && !(c.body || '').includes('<!-- rulings-page:'));
-  if (!posted && (view.state !== 'OPEN' || newer.length)) {
+  // A closed ticket on a rerun is this landing's own close; a new comment always holds.
+  if (newer.length || (!posted && view.state !== 'OPEN')) {
     return { key: p.key, ok: false, held: true, outcome: 'held: ticket changed since the card was drafted',
       detail: view.state !== 'OPEN' ? `ticket is ${view.state.toLowerCase()}` : `${newer.length} new comment(s) since ${p.draftedAt}` };
   }
