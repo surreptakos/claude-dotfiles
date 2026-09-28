@@ -1388,8 +1388,8 @@ if (Test-Path $fleetVerifier) {
          ($toolSet -contains 'Glob') -and ($toolSet -contains 'Bash') -and
          ($toolSet -notcontains 'Edit') -and ($toolSet -notcontains 'Write')) `
         @("tools = $toolsLine")
-    Check 'fleet-verifier model pins the fleet verifyModel default (claude-sonnet-5)' `
-        ($modelLine -eq 'claude-sonnet-5') `
+    Check 'fleet-verifier model pins the fleet verifyModel default (claude-sonnet-5-5)' `
+        ($modelLine -eq 'claude-sonnet-5-5') `
         @("model = $modelLine")
 }
 if (Test-Path $fleetScriptPlugin) {

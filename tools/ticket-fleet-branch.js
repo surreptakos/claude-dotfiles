@@ -622,6 +622,11 @@ function unmetCriteriaOf(verdict) {
  * DIFFICULTY_LEVELS is ordered to match the Score criteria (index 0..2).
  */
 const DIFFICULTY_LEVELS = ['mechanical', 'multi-file', 'design'];
+// Jev's difficulty level is used only at or above this confidence; below it the ticket runs on
+// implModel. The same 0.8 floor the cockpit's Self-Sourcing Audit judge uses (Dan, 2026-09-28).
+const DIFFICULTY_CONFIDENCE_FLOOR = 0.8;
+// What an implementer runs on when a pin or arg names Haiku or nothing (Dan, 2026-09-28).
+const IMPL_FALLBACK_MODEL = 'claude-opus-5-5';
 const DIFFICULTY_CRITERIA = [
   'Single-file mechanical: the change lives in one file and follows a pattern already there - a rename, a config value, a message, a small guard or a copy edit; nothing new to design.',
   'Multi-file: the change spans several files (code and its tests, a generator and its output, a script and its docs) but the approach is already clear from the ticket.',
@@ -652,7 +657,9 @@ function difficultyRequest(tickets, repoMap) {
 /**
  * Pure: the Jev response (object or its JSON text) in, {<number>: {level, score, confidence}} out.
  * A ticket whose answer is missing or malformed gets no entry, so it falls back to implModel;
- * a response that is not JSON, or carries no answers, yields {}.
+ * a response that is not JSON, or carries no answers, yields {}. An answer whose confidence is
+ * missing or under DIFFICULTY_CONFIDENCE_FLOOR keeps its entry with `level: null`, so it too runs
+ * on implModel (Dan, 2026-09-28: a 0.47 score at 0.3 confidence rounded to "mechanical").
  */
 function parseDifficulty(response, tickets) {
   let body = response;
@@ -668,7 +675,9 @@ function parseDifficulty(response, tickets) {
     const score = a && typeof a.score === 'number' && isFinite(a.score) ? a.score : null;
     if (score === null) continue;
     const index = Math.min(DIFFICULTY_LEVELS.length - 1, Math.max(0, Math.round(score)));
-    out[t.number] = { level: DIFFICULTY_LEVELS[index], score, confidence: typeof a.confidence === 'number' ? a.confidence : null };
+    const confidence = typeof a.confidence === 'number' && isFinite(a.confidence) ? a.confidence : null;
+    const sure = confidence !== null && confidence >= DIFFICULTY_CONFIDENCE_FLOOR;
+    out[t.number] = { level: sure ? DIFFICULTY_LEVELS[index] : null, score, confidence };
   }
   return out;
 }
@@ -677,14 +686,26 @@ function parseDifficulty(response, tickets) {
  * Pure: the implementer model for one attempt. `cfg.implPins` maps each level to a model; a level
  * with no pin, and the `design` level by default, uses `cfg.implModel`, which is also the heaviest
  * pin. Attempt 2+ (a retry after a failed verify) always takes the heaviest pin. No level - Jev
- * unavailable, or the ticket unscored - means today's single `implModel` on every attempt.
+ * unavailable, the ticket unscored, or Jev under its confidence floor - means `implModel` on every
+ * attempt. Whatever the pins say, a Haiku model never implements (Dan, 2026-09-28): see
+ * implementerModel.
  */
 function pickImplModel(level, attempt, cfg) {
   const c = cfg || {};
   const pins = c.implPins && typeof c.implPins === 'object' ? c.implPins : {};
-  if (!level || DIFFICULTY_LEVELS.indexOf(level) < 0) return c.implModel;
-  if (Number(attempt) > 1) return pins.design || c.implModel;
-  return pins[level] || c.implModel;
+  const heaviest = implementerModel(c.implModel);
+  if (!level || DIFFICULTY_LEVELS.indexOf(level) < 0) return heaviest;
+  if (Number(attempt) > 1) return implementerModel(pins.design || heaviest);
+  return implementerModel(pins[level] || heaviest);
+}
+
+/**
+ * Pure: a model allowed to implement. Haiku is never an implementer (Dan, 2026-09-28), whatever a
+ * pin or a caller's args say; it, or an empty value, becomes IMPL_FALLBACK_MODEL.
+ */
+function implementerModel(model) {
+  const m = String(model || '').trim();
+  return !m || /haiku/i.test(m) ? IMPL_FALLBACK_MODEL : m;
 }
 
 /**
@@ -963,7 +984,7 @@ module.exports = {
   ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
-  DIFFICULTY_LEVELS, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, difficultyEvalSet,
+  DIFFICULTY_LEVELS, DIFFICULTY_CONFIDENCE_FLOOR, IMPL_FALLBACK_MODEL, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, implementerModel, difficultyEvalSet,
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
