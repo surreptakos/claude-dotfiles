@@ -87,7 +87,7 @@ function planLanding(repo, t, answer, submission, date) {
   const note = (answer.note || '').trim();
   const head = `${marker(submission, key)}\n**Owner ruling** (rulings page, ${date})`;
   if (!opt) {
-    return { key, repo, n: t.n, needsJudgment: true, note,
+    return { key, repo, n: t.n, needsJudgment: true, note, draftedAt: t.draftedAt,
       comment: `${head}\n\n> ${note.replace(/\n/g, '\n> ')}` };
   }
   const l = opt.landing || {};
@@ -100,18 +100,30 @@ function planLanding(repo, t, answer, submission, date) {
   // Child tickets are agent work the script cannot do (to-tickets): post the ruling, leave the rest.
   return { key, repo, n: t.n, needsJudgment: l.action === 'spawn-children', comment: lines.join('\n'),
     addLabels: add.filter(x => !remove.includes(x)), removeLabels: remove.filter(x => !add.includes(x)),
-    close, action: l.action, outcome: opt.label, blocks: t.blocks || [] };
+    close, action: l.action, outcome: opt.label, blocks: t.blocks || [], draftedAt: t.draftedAt };
 }
 
 function gh(args, input) {
   return execFileSync('gh', args, { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
-/** Execute one planned landing. Idempotent: a comment already carrying the marker is not reposted. */
+/**
+ * Execute one planned landing. Idempotent: a comment already carrying the marker is not reposted.
+ * A ticket that moved after its card was drafted (closed, or a new comment other than a ruling) is
+ * held: the owner ruled on the old text, so the run reads the new comments before applying anything.
+ */
 function executeLanding(p, submission, run = gh) {
   const view = JSON.parse(run(['issue', 'view', String(p.n), '--repo', p.repo, '--json', 'comments,labels,state']));
   const m = marker(submission, p.key);
-  if (!view.comments.some(c => (c.body || '').includes(m))) {
+  const posted = view.comments.some(c => (c.body || '').includes(m));
+  const since = Date.parse(p.draftedAt || 0) || 0;
+  const newer = view.comments.filter(c => Date.parse(c.createdAt || 0) > since && !(c.body || '').includes('<!-- rulings-page:'));
+  // A closed ticket on a rerun is this landing's own close; a new comment always holds.
+  if (newer.length || (!posted && view.state !== 'OPEN')) {
+    return { key: p.key, ok: false, held: true, outcome: 'held: ticket changed since the card was drafted',
+      detail: view.state !== 'OPEN' ? `ticket is ${view.state.toLowerCase()}` : `${newer.length} new comment(s) since ${p.draftedAt}` };
+  }
+  if (!posted) {
     const f = path.join(os.tmpdir(), `ruling-${p.key.replace('~', '-')}-${Date.now()}.md`);
     fs.writeFileSync(f, p.comment);
     run(['issue', 'comment', String(p.n), '--repo', p.repo, '--body-file', f]);

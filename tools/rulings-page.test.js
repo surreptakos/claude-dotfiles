@@ -143,3 +143,37 @@ test('a saved pick or landing for a ticket no longer on the page does not count'
   assert.equal(current({ key: 'aac-routines~3', at: '2026-09-25T14:00:00Z' }), false, 'pick from an earlier round');
   assert.equal(current({ key: 'aac-routines~3', at: '2026-09-28T14:00:00Z' }), true, 'pick from this round');
 });
+
+test('a ticket that moved after its card was drafted is held, not landed', () => {
+  // 2026-09-28: four osh-rfp tickets gained comments between drafting and the owner's submit;
+  // two of the picks no longer matched what the comments had settled.
+  const later = { body: 'Narrowed since the card was drafted.', createdAt: '2026-09-25T15:00:00Z' };
+  const state = { comments: [later], labels: ['ready-for-human'], state: 'OPEN' };
+  const { run, calls } = fakeGh(state);
+  const p = planLanding(REPO, ticket(9), { choice: 'c', note: '' }, 's1', '2026-09-25');
+  const r = executeLanding(p, 's1', run);
+  assert.equal(r.ok, false);
+  assert.equal(r.held, true);
+  assert.equal(state.comments.length, 1, 'no ruling posted');
+  assert.equal(calls.filter(c => c.startsWith('issue close') || c.startsWith('issue edit')).length, 0);
+
+  const closed = { comments: [], labels: ['ready-for-human'], state: 'CLOSED' };
+  const r2 = executeLanding(planLanding(REPO, ticket(10), { choice: 'a' }, 's1', '2026-09-25'), 's1', fakeGh(closed).run);
+  assert.equal(r2.held, true, 'closed since drafting');
+
+  const earlier = { comments: [{ body: 'old', createdAt: '2026-09-24T09:00:00Z' }], labels: ['ready-for-human'], state: 'OPEN' };
+  const r3 = executeLanding(planLanding(REPO, ticket(11), { choice: 'a' }, 's1', '2026-09-25'), 's1', fakeGh(earlier).run);
+  assert.equal(r3.ok, true, 'comments older than the draft do not hold it');
+});
+
+test('a rerun still holds when a new comment arrived after the ruling was posted', () => {
+  const state = { comments: [], labels: ['ready-for-human'], state: 'OPEN' };
+  const { run } = fakeGh(state);
+  const p = planLanding(REPO, ticket(12), { choice: 'a' }, 's1', '2026-09-25');
+  const failing = args => { if (args[1] === 'edit') throw new Error('network'); return run(args); };
+  assert.throws(() => executeLanding(p, 's1', failing));
+  state.comments.push({ body: 'Scope changed.', createdAt: '2026-09-26T09:00:00Z' });
+  const r = executeLanding(p, 's1', run);
+  assert.equal(r.held, true);
+  assert.deepEqual(state.labels, ['ready-for-human'], 'no label written');
+});

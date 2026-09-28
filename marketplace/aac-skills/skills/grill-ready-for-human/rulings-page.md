@@ -24,7 +24,9 @@ run by hand from any session.
 3. Per submission: `node tools/rulings-page.js land --page <html> --rulings <dir> --submission <id>
    --keys <comma-joined keys> --execute > <result.json>`. It comments (marker makes a rerun a no-op),
    relabels, closes, and verifies each ticket's labels and state. Exit 1 means at least one ticket
-   failed; the result names it.
+   failed; the result names it. A result with `held` is a ticket that closed or gained a comment
+   after its card was drafted, so nothing was written: read the new comments, land the pick by hand
+   only if it still fits them, otherwise tell the owner what changed and leave the ticket as it is.
 4. Every result with `needsJudgment` (an "Other" pick, or a pick that spawns child tickets): the
    note or ruling is already posted. A spawn-children pick: run `/to-tickets` for the children.
    An "Other" pick: Read
