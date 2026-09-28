@@ -1,0 +1,9 @@
+Source: https://arxiv.org/abs/2604.02668
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+Title: Too Polite to Disagree: Understanding Sycophancy Propagation in Multi-Agent Systems
+Submitted on 3 Apr 2026 (v1), last revised 14 Jul 2026 (this version, v2)
+
+Abstract: Large language models (LLMs) often exhibit sycophancy: agreement with user stance even when it conflicts with the model's opinion. While prior work has mostly studied this in single-agent settings, it remains underexplored in collaborative multi-agent systems. We ask whether awareness of other agents' sycophancy levels influences discussion outcomes. To investigate this, we run controlled experiments with six open-source LLMs, providing agents with peer sycophancy rankings that estimate each peer's tendency toward sycophancy. These rankings are based on scores calculated using various static (pre-discussion) and dynamic (online) strategies. We find that providing sycophancy priors reduces the influence of sycophancy-prone peers, mitigates error-cascades, and improves final discussion accuracy by an absolute 10.5%. Thus, this is a lightweight and efficient way to reduce model sycophancy during discussions and subsequently improve downstream accuracy.
+
+--- excerpts ---
+

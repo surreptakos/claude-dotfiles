@@ -1,0 +1,9 @@
+Source: https://arxiv.org/abs/2502.08788
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+Title: Stop Overvaluing Multi-Agent Debate -- We Must Rethink Evaluation and Embrace Model Heterogeneity
+Submitted on 12 Feb 2025 (v1), last revised 21 Jun 2025 (this version, v3)
+
+Abstract: Multi-agent debate (MAD) has gained significant attention as a promising line of research to improve the factual accuracy and reasoning capabilities of large language models (LLMs). Despite its conceptual appeal, current MAD research suffers from critical limitations in evaluation practices, including limited benchmark coverage, weak baseline comparisons, and inconsistent setups. This paper presents a systematic evaluation of 5 representative MAD methods across 9 benchmarks using 4 foundational models. Surprisingly, our findings reveal that MAD often fail to outperform simple single-agent baselines such as Chain-of-Thought and Self-Consistency, even when consuming significantly more inference-time computation. To advance MAD research, we further explore the role of model heterogeneity and find it as a universal antidote to consistently improve current MAD frameworks. Based on our findings, we argue that the field must stop overvaluing MAD in its current form; for true advancement, we must critically rethink evaluation paradigms and actively embrace model heterogeneity as a core design principle.
+
+--- excerpts ---
+

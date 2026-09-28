@@ -1,0 +1,13 @@
+Source: https://x.ai/news/grok-4
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+
+
+
+--- excerpts ---
+The request is for a popular post from early July 2025 about a crazy word puzzle involving legs.
+Let's try searching for relevant X posts from July 1 to July 9, 2025.
+Posts around July 7-8, 2025, suggest the viral post is about the NYT Connections puzzle's absurd category.
+For July 6, 2025, puzzle #756's purple category was words ending with homophones of leg parts.
+Now, let's search X for posts with 'homophones' and 'parts of the leg' from July 6 to 9, 2025, requiring at least 100 favorites.
+Based on your description, it sounds like you're referring to a viral X post from July7, 2025, complaining about a particularly frustrating category in the New York Times' daily Connections word puzzle (game #756). The puzzle involves grouping 16 words intofour themed categories, and one of them—the purple (hardest) group—was "ending withhomophones for parts of the leg." The words were crypto (sounds like it ends with"toe"), decaf (ends with "calf"), Disney (ends with "knee"), and Prussian (ends with"shin"). This stretched connection sparked a lot of outrage and memes online for being overly obscure and accent-dependent.
+We have made further progress on parallel test-time compute, which allows Grok to consider multiple hypotheses at once. We call this model Grok 4 Heavy, and it sets a new standard for performance and reliability. Grok 4 Heavy saturates most academic benchmarks and is the first model to score 50% on Humanity's Last Exam, a benchmark "designed to be the final closed-ended academic benchmark of its kind."

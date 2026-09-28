@@ -1,0 +1,9 @@
+Source: https://arxiv.org/abs/2410.21819
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+Title: Self-Preference Bias in LLM-as-a-Judge
+Submitted on 29 Oct 2024 (v1), last revised 21 Jun 2025 (this version, v2)
+
+Abstract: Automated evaluation leveraging large language models (LLMs), commonly referred to as LLM evaluators or LLM-as-a-judge, has been widely used in measuring the performance of dialogue systems. However, the self-preference bias in LLMs has posed significant risks, including promoting specific styles or policies intrinsic to the LLMs. Despite the importance of this issue, there is a lack of established methods to measure the self-preference bias quantitatively, and its underlying causes are poorly understood. In this paper, we introduce a novel quantitative metric to measure the self-preference bias. Our experimental results demonstrate that GPT-4 exhibits a significant degree of self-preference bias. To explore the causes, we hypothesize that LLMs may favor outputs that are more familiar to them, as indicated by lower perplexity. We analyze the relationship between LLM evaluations and the perplexities of outputs. Our findings reveal that LLMs assign significantly higher evaluations to outputs with lower perplexity than human evaluators, regardless of whether the outputs were self-generated. This suggests that the essence of the bias lies in perplexity and that the self-preference bias exists because LLMs prefer texts more familiar to them.
+
+--- excerpts ---
+

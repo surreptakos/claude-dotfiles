@@ -1,0 +1,9 @@
+Source: https://arxiv.org/abs/2510.07517
+Fetched: 2026-09-28 with curl, HTML converted to text. Verbatim excerpts only; the full text is at the URL.
+Title: When Identity Skews Debate: Anonymization for Bias-Reduced Multi-Agent Reasoning
+Submitted on 8 Oct 2025 (v1), last revised 9 Apr 2026 (this version, v5)
+
+Abstract: Multi-agent debate (MAD) aims to improve large language model (LLM) reasoning by letting multiple agents exchange answers and then aggregate their opinions. Yet recent studies reveal that agents are not neutral: they are prone to identity-driven sycophancy and self-bias, uncritically adopting a peer's view or stubbornly adhering to their own prior output, undermining the reliability of debate. In this work, we present the first principled framework that joins sycophancy and self-bias to mitigate and quantify identity bias in MAD. First, we formalize the debate dynamics as an identity-weighted Bayesian update process. Second, we propose response anonymization: by removing identity markers from prompts, agents cannot distinguish "self" from "peer", which forces equal weights on agent identity, thereby reducing bias and improving trustworthiness. Third, we define the Identity Bias Coefficient (IBC), a principled bias metric that measures an agent's tendency to follow its peer versus itself. Empirical studies across multiple models and benchmarks confirm that identity bias is widespread, with sycophancy far more common than self-bias. Our findings highlight the need to ensure that MAD systems reason based on content rather than identity. Code is released in this https URL.
+
+--- excerpts ---
+
