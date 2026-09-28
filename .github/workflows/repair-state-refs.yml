@@ -18,7 +18,12 @@ name: Repair state refs
 #   * `workflow_dispatch` for a manual run.
 #
 # The workflow's own token has `issues: write` scope on the repository, which is all
-# `gh issue edit --body-file -` needs.
+# `gh issue edit --body-file -` needs. It cannot read the four sibling repos, though (issue 930:
+# GraphQL "Could not resolve to a Repository"), and without a sibling's number set nothing can
+# be rewritten, so the script logs that row as skipped and exits 0. Here the job is a no-op that
+# stays green while the cloud venue is paused (ADR 0001); the live repair is the desktop
+# watchdog's, whose gh login reads all four repos. Give this job a token that reads them only if
+# cloud masters come back.
 
 on:
   issues:

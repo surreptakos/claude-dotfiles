@@ -15,7 +15,7 @@
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
 
-const { rewrite, repair, knownNumbers, contextFor, REPOS, DOTFILES, CONTEXT_WINDOW } =
+const { rewrite, repair, knownNumbers, contextFor, main, REPOS, DOTFILES, CONTEXT_WINDOW } =
   require('./repair-state-refs.js');
 
 const REPO = 'surreptakos/aac-contract-builder';
@@ -274,4 +274,49 @@ test('repair: opts.knownDotfiles / opts.knownRepo bypass the list calls', () => 
   assert.equal(writes[0], 'surreptakos/aac-contract-builder#237 ref surreptakos/aac-contract-builder#157 and #999');
   const kinds = gh.calls.map((c) => c.args.slice(0, 2).join(' '));
   assert.deepEqual(kinds.filter((k) => k.endsWith('list')), []);
+});
+
+// ---- main: the CLI path the workflow runs (issue 930) --------------------------------------
+
+function runMain(argv, gh) {
+  const out = [];
+  const err = [];
+  const code = main(argv, { runGh: gh, log: (l) => out.push(l), error: (l) => err.push(l) });
+  return { code, out, err };
+}
+
+test('main: a sibling repo the token cannot resolve is skipped and the run exits 0', () => {
+  // Verbatim shape of the Actions failure: the GITHUB_TOKEN cannot see the sibling repo.
+  const { row, gh, writes } = buildFakeForRepair({ body: 'surreptakos/aac-contract-builder#237 and #157' });
+  const fake = (args, input) => {
+    if (args[1] === 'list' && args[3] === row.repo) {
+      throw new Error('Command failed: gh issue list -R ' + row.repo + ' --state all --limit 1000 --json number\n' +
+        "GraphQL: Could not resolve to a Repository with the name '" + row.repo + "'. (repository)");
+    }
+    return gh(args, input);
+  };
+  const r = runMain(['--only', 'contract-builder'], fake);
+  assert.equal(r.code, 0);
+  assert.deepEqual(r.err, []);
+  assert.match(r.out[0], /skipped, surreptakos\/aac-contract-builder is not readable/);
+  assert.equal(writes.length, 0);
+});
+
+test('main: a readable sibling repo still has its bare #N rewritten', () => {
+  const { gh, writes } = buildFakeForRepair({ body: 'surreptakos/aac-contract-builder#237 and #157' });
+  const r = runMain(['--only', 'contract-builder'], gh);
+  assert.equal(r.code, 0);
+  assert.match(r.out[0], /rewrote 1 bare cross-repo #N/);
+  assert.equal(writes[0], 'surreptakos/aac-contract-builder#237 and surreptakos/aac-contract-builder#157');
+});
+
+test('main: any other gh failure on a sibling repo still fails the run (exit 2)', () => {
+  const { row, gh } = buildFakeForRepair({ body: 'clean' });
+  const fake = (args, input) => {
+    if (args[1] === 'list' && args[3] === row.repo) throw new Error('HTTP 502: Bad Gateway');
+    return gh(args, input);
+  };
+  const r = runMain(['--only', 'contract-builder'], fake);
+  assert.equal(r.code, 2);
+  assert.match(r.err[0], /FAILED \(HTTP 502/);
 });
