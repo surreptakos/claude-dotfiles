@@ -1676,6 +1676,42 @@ for (const mode of ['gh', 'mcp']) {
   });
 }
 
+// Issue 934: a triage pass sent four ruled tickets back to ready-for-human on the body's "Dan
+// rules ..." line while Dan's rulings-page ruling sat in the newest comment. A ticket the scout
+// reports an owner ruling on is handed back without that relabel, and the ruling is cited.
+const RULED_TICKET = {
+  number: 714, title: 't', criteria: '- [ ] Dan rules which path', kindReason: 'body: Dan rules which path',
+  ownerRuling: 'https://github.com/x/y/issues/714#issuecomment-1\n<!-- rulings-page:s1:714 -->\n**Owner ruling** (rulings page, 2026-09-25): take path A.',
+};
+for (const mode of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} human lane never relabels a ticket carrying an owner ruling ready-for-human under ${mode}`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push([opts.label, prompt]);
+      if (opts.label.startsWith('handoff:')) return { agentSide: '$ true', ownerSide: ['decide the path'], ready: true, remainingKind: 'human' };
+      if (opts.label.startsWith('deliver:')) return { commented: true, commentUrl: 'https://github.com/x/y/issues/714#c2', labels: ['ready-for-agent'] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    await driveHumanLane(FLEET_SCRIPT, agentMock, RULED_TICKET, mode);
+    const text = prompts.find(([label]) => label === 'deliver:#714')[1];
+    const swap = loadTrackerRules(FLEET_SCRIPT, mode).labelSwap(714, 'ready-for-human');
+    assert.ok(!text.includes(swap), `${mode}: a ruled ticket must not be given the ready-for-human relabel`);
+    assert.doesNotMatch(text, mode === 'mcp' ? /mcp__github__issue_write/ : /labels\[\]=ready-for-human/, `${mode}: no label write at all`);
+    assert.match(text, /must NOT be relabelled ready-for-human/);
+    assert.ok(text.includes('take path A.'), 'the ruling is quoted in the handoff comment');
+  });
+}
+
+test('triage skill and fleet scout name the owner-ruling markers before any ready-for-human move (issue 934)', () => {
+  const skill = fs.readFileSync(path.join(__dirname, '..', 'aac-skills', 'triage', 'SKILL.md'), 'utf8');
+  const fleet = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(skill, /## Ruling check before ready-for-human[\s\S]*newest-first/);
+  for (const marker of ['**Owner ruling**', 'rulings-page:', 'Ruling (Dan']) {
+    assert.ok(skill.includes('`' + marker + '`'), `triage skill names ${marker}`);
+    assert.ok(fleet.includes(marker), `fleet scout names ${marker}`);
+  }
+});
+
 test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is an unanswered fleet handoff`, () => {
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
   const fresh = { number: 267, kind: 'human', blockedBy: [], handoffPending: false };
