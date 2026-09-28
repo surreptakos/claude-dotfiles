@@ -53,3 +53,4 @@ and give the note a name that says what it is — adding one costs its own line 
 - workflow-runtime-quirks: scriptPath; no Date.now; LF; absolute scriptPath, cwd stale
 - workflow-prompt-needs-allow-rule: bare Workflow in allow
 - vendored-copy-provenance-needs-upstream-history: diff every upstream revision
+- cloud-skips-third-party-marketplaces: hooks clone and copy the skills

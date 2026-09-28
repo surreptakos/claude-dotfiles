@@ -20,9 +20,11 @@
     "",
     "The same two keys declare the third-party plugins a desktop runs (profile/claude/settings.json):",
     "caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, and pyright-lsp and",
-    "typescript-lsp from claude-plugins-official. Each installs from its upstream marketplace, so a",
-    "session gets the current release; none is vendored into the aac-skills payload. The caveman",
-    "proxy is not part of the plugin: caveman-bootstrap.sh below installs the CLI and starts it.",
+    "typescript-lsp from claude-plugins-official, none vendored into the aac-skills payload. A",
+    "desktop installs each from its upstream marketplace. A cloud container sets",
+    "SKIP_PLUGIN_MARKETPLACE=true and fetched only claude-plugins-official (2026-09-28), so hooks",
+    "deliver the rest at the current upstream HEAD: caveman-bootstrap.sh (skills, CLI, proxy) and",
+    "upstream-skills.sh (i-have-adhd, typesafe skills).",
     "The LSP plugins carry config only; .claude/hooks/lsp-servers.sh installs the binaries they launch.",
     "",
     ".claude/hooks/session-start.sh runs first on SessionStart and only in a cloud",
@@ -160,6 +162,16 @@
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/lsp-servers.sh\"",
             "timeout": 180,
             "statusMessage": "Cloud container: installing language servers..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/upstream-skills.sh\"",
+            "timeout": 120,
+            "statusMessage": "Cloud container: installing upstream plugin skills..."
           }
         ]
       }
