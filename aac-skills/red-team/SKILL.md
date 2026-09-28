@@ -2,10 +2,10 @@
 name: red-team
 description: Red-team a drafted answer against other vendors' models (GPT, Gemini, Grok, DeepSeek) through OpenRouter before sending it. Use when the user asks to red-team, cross-check or get a second opinion on an answer from other models, or says a reply is important enough to check.
 metadata:
-  modified: "2026-09-28T04:52:52Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "0dd34aa0d3f4"
+  modified: "2026-09-28T17:37:41Z"
+  previous-modified: "2026-09-28T04:52:52Z"
+  revision: "2"
+  content-sha: "fd40f04dd21e"
 ---
 
 # red-team
@@ -42,10 +42,13 @@ has a better check.
 
    Defaults: panel `google/gemini-3.1-pro-preview`, `x-ai/grok-4.7`, `deepseek/deepseek-v4-pro`;
    critic `openai/gpt-5.5`, kept outside the panel so it never judges its own answer.
-   `--panel a,b,c` and `--critic m` take any OpenRouter model id; `--dry-run` prints the requests
-   without sending. Exit 2 `cannot read input`: fix the file path. Exit 2 `OPENROUTER_API_KEY is
-   not set`, or exit 1 twice (read `error` and `errors` after the first): skip to step 6 and send
-   the draft marked as unchecked, naming what failed. Done when the script exits 0 with a `critique` whose
+   `--panel a,b,c` and `--critic m` take any OpenRouter model id; `--max-tokens n` caps each call's
+   output (default 16000); `--dry-run` prints the requests without sending. In a cloud container
+   the egress proxy injects the key, so no `OPENROUTER_API_KEY` is needed there. Exit 2 `cannot
+   read input`: fix the file path. HTTP 402 `requires more credits`: the OpenRouter account is out
+   of credits; tell the user to top it up. Exit 2 `OPENROUTER_API_KEY is not set`, a 402, or exit 1
+   twice (read `error` and `errors` after the first): skip to step 6 and send the draft marked as
+   unchecked, naming what failed. Done when the script exits 0 with a `critique` whose
    `findings` you can read; a `verdict` of `unparsed` means reading the critic's points out of
    `raw` instead.
 

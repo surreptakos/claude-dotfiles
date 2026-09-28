@@ -191,3 +191,32 @@ test('UTF-16LE input with a BOM (PowerShell 5.1 redirect) reads as text', () => 
 test('the default critic sits outside the default panel', () => {
   assert.ok(!DEFAULT_PANEL.includes(DEFAULT_CRITIC))
 })
+
+test('every call caps max_tokens; --max-tokens overrides and rejects a non-integer', async () => {
+  const { server, seen, base } = await mockServer(body => isCritic(body)
+    ? reply(JSON.stringify({ verdict: 'sound', findings: [], panelOnly: [] }))
+    : reply('ok'))
+  try {
+    const { q, d } = tmpFiles()
+    const r = await runScript(['--question', q, '--draft', d, '--panel', 'p/one', '--critic', 'c/critic', '--max-tokens', '900'],
+      { OPENROUTER_API_KEY: 'test-key', OPENROUTER_BASE_URL: base })
+    assert.strictEqual(r.code, 0, r.err)
+    assert.deepStrictEqual(seen.map(s => s.body.max_tokens), [900, 900])
+  } finally { server.close() }
+  assert.strictEqual(parseArgs(['--question', 'q', '--draft', 'd']).maxTokens, 16000)
+  assert.throws(() => parseArgs(['--question', 'q', '--draft', 'd', '--max-tokens', '1.5']), /positive integer/)
+})
+
+test('behind HTTPS_PROXY no key is needed and no Authorization header is sent (the proxy injects it)', async () => {
+  const { server, seen, base } = await mockServer(body => isCritic(body)
+    ? reply(JSON.stringify({ verdict: 'sound', findings: [], panelOnly: [] }))
+    : reply('ok'))
+  try {
+    const { q, d } = tmpFiles()
+    const r = await runScript(['--question', q, '--draft', d, '--panel', 'p/one', '--critic', 'c/critic'],
+      { OPENROUTER_BASE_URL: base, HTTPS_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1' })
+    assert.strictEqual(r.code, 0, r.err)
+    assert.strictEqual(seen.length, 2)
+    assert.ok(seen.every(s => s.auth === undefined))
+  } finally { server.close() }
+})
