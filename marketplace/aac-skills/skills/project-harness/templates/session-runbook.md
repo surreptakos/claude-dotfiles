@@ -96,3 +96,5 @@ clasp push                  # main checkout only, never a worktree
 bare one authorizes clasp's own OAuth client with narrower default scopes, and `~/.clasprc.json` is
 shared by every clasp project on the machine — so the result pushes fine here while silently dropping
 scopes another repo depends on. The tool prints the exact command to paste; do not shorten it.
+
+<!-- probe (issue 933): a deliberate template change with no version bump, reverted next commit -->
