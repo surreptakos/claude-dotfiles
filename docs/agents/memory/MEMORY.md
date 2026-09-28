@@ -55,3 +55,4 @@ and give the note a name that says what it is — adding one costs its own line 
 - workflow-prompt-needs-allow-rule: bare Workflow in allow
 - vendored-copy-provenance-needs-upstream-history: diff every upstream revision
 - cloud-skips-third-party-marketplaces: hooks clone and copy the skills
+- status-report-is-not-a-request: past tense is a report; check Teams first
