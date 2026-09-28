@@ -112,10 +112,11 @@ from the dotfiles checkout by absolute path; nothing else about a master lives t
      worktree this master did not create. A fleet removes its worktrees when it finishes, so
      an unexpected one is a fleet mid-run from another terminal, or a crashed one that
      needs `git worktree prune` first.
-  Cloud runners leave no process here, so the 2-hour signal from RUNBOOK.md (fleet PRs or
-  `agent/issue-*` / `agent/fleet-discoveries-*` branches on origin updated within 2 hours that
-  this master did not create) stays as the third check. Same response as RUNBOOK.md on any hit:
-  defer indefinitely, escalate to Dan for an explicit handoff, never proceed on your own.
+  3. Cloud runners leave no process here, so the third check reads origin: fleet PRs or
+  `agent/issue-*` / `agent/fleet-discoveries-*` branches updated within 2 hours that this
+  master did not create. RUNBOOK.md no longer carries this rule, so it lives here.
+  On any hit of the three: defer indefinitely, escalate to Dan for an explicit handoff, never
+  proceed on your own.
 - **Kill switch.** Esc / Ctrl+C in a master's terminal stops the current pass. With no `Pass
   complete` line the watchdog treats that process as still working while it is alive, and once
   the window is closed it launches the next repo on its next slot. Disabling the task
