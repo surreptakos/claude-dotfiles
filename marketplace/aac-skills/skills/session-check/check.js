@@ -1189,7 +1189,7 @@ function bootstrapChecks() {
   }
   ok(`aac-bootstrap payload v${marker.payload_version} — ${marker.skills.length} skills, gh ${marker.gh_path && marker.gh_path !== 'missing' ? 'installed' : 'MISSING'}`);
   if (seat.state === 'ok') note(`governance hooks seated at ${seat.root} (CLAUDE_PLUGIN_ROOT in settings.json resolved, issue 614)`);
-  if (self.state === 'ok') note(`bootstrap re-run seated at ${self.hook}, so a session on any project dir bootstraps (issue 643)`);
+  if (self.state === 'ok') note(`bootstrap re-run seated at ${self.hook}, for later sessions in this container only; a fresh container gets the payload from the environment setup script (issue 643, memory cloud-home-snapshot)`);
   else note('marker records no plugin_root: a pre-v30 bootstrap, whose merged governance hooks could not run (issue 614) — the next container picks up the current hook');
   const cmp = bootstrap.compareToMaster(marker, process.env);
   if (cmp.state === 'drift') {
