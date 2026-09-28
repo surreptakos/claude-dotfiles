@@ -29,9 +29,10 @@
 #     each refresh with the work copy), so no user-visible content changes hands.
 #   - skills: junctions recreated against the same machine-wide targets; real skill dirs
 #     overlaid file-by-file; personal-only skills left alone
-#   - settings.json: HOOKS KEY ONLY, with the mechanical path rewrite \.claude\ ->
-#     \.claude-personal\ (.codex paths untouched). Every other key - model, plugins,
-#     statusLine, prefs - is the personal profile's own and is preserved.
+#   - settings.json: HOOKS KEY, with the mechanical path rewrite \.claude\ ->
+#     \.claude-personal\ (.codex paths untouched), plus the claude-dotfiles entry of
+#     extraKnownMarketplaces (issue 943, its autoUpdate flag). Every other key - model,
+#     plugins, statusLine, prefs - is the personal profile's own and is preserved.
 #   - project memories: union merge. Work files copy in (newer mtime wins), MEMORY.md is
 #     unioned by pointer-line target, and personal-only files are NEVER deleted.
 #
@@ -191,7 +192,7 @@ function Update-PersonalProfile {
 
     # ------------------------------------------------------------------- settings.json
 
-    # HOOKS KEY ONLY. The work profile's hooks block is serialized, its \.claude\ paths are
+    # HOOKS KEY (plus the claude-dotfiles marketplace entry below). The work profile's hooks block is serialized, its \.claude\ paths are
     # mechanically rewritten to \.claude-personal\ (in serialized JSON a path backslash is
     # doubled, hence the \\ spellings), and the result replaces the personal hooks key.
     # Everything else in the personal settings.json is preserved as-is.
@@ -214,6 +215,21 @@ function Update-PersonalProfile {
                 $personalSettings.hooks = $rewritten
             } else {
                 $personalSettings | Add-Member -MemberType NoteProperty -Name hooks -Value $rewritten
+            }
+
+            # Issue 943: the claude-dotfiles marketplace entry follows the work profile too, so
+            # its autoUpdate flag reaches the personal profile. Other marketplaces stay personal.
+            # StrictMode is on: probe each property before reading it.
+            $workDotfiles = $null
+            if ($workSettings.PSObject.Properties.Name -contains 'extraKnownMarketplaces' -and
+                $workSettings.extraKnownMarketplaces.PSObject.Properties.Name -contains 'claude-dotfiles') {
+                $workDotfiles = $workSettings.extraKnownMarketplaces.'claude-dotfiles'
+            }
+            if ($null -ne $workDotfiles) {
+                if ($personalSettings.PSObject.Properties.Name -notcontains 'extraKnownMarketplaces') {
+                    $personalSettings | Add-Member -MemberType NoteProperty -Name extraKnownMarketplaces -Value ([pscustomobject]@{}) -Force
+                }
+                $personalSettings.extraKnownMarketplaces | Add-Member -MemberType NoteProperty -Name 'claude-dotfiles' -Value $workDotfiles -Force
             }
 
             $newText = ConvertTo-Json -InputObject $personalSettings -Depth 32
