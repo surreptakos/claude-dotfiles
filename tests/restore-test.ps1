@@ -1037,8 +1037,21 @@ foreach ($s in @(@{ Name = 'work'; Path = (Join-Path $FakeHome '.claude\settings
         if ($entry.PSObject.Properties.Name -contains 'autoUpdate') { $flag = $entry.autoUpdate }
     }
     if ($flag -ne $true) { $autoUpdateOn += ("{0} profile: claude-dotfiles autoUpdate is {1}" -f $s.Name, $flag) }
+    # Dan, 2026-09-28: every declared marketplace auto-updates, third-party ones included.
+    if (($null -ne $json) -and ($json.PSObject.Properties.Name -contains 'extraKnownMarketplaces')) {
+        foreach ($m in $json.extraKnownMarketplaces.PSObject.Properties) {
+            $mFlag = $null
+            if ($m.Value.PSObject.Properties.Name -contains 'autoUpdate') { $mFlag = $m.Value.autoUpdate }
+            if ($mFlag -ne $true) { $autoUpdateOn += ("{0} profile: {1} autoUpdate is {2}" -f $s.Name, $m.Name, $mFlag) }
+        }
+    }
+    # The desktop app sets DISABLE_AUTOUPDATER=1, which blocks the refresh unless settings say 0.
+    $override = $null
+    if (($null -ne $json) -and ($json.PSObject.Properties.Name -contains 'env') -and
+        ($json.env.PSObject.Properties.Name -contains 'DISABLE_AUTOUPDATER')) { $override = $json.env.DISABLE_AUTOUPDATER }
+    if ($override -ne '0') { $autoUpdateOn += ("{0} profile: env DISABLE_AUTOUPDATER is {1}" -f $s.Name, $override) }
 }
-Check 'both profiles declare autoUpdate for the claude-dotfiles marketplace' ($autoUpdateOn.Count -eq 0) $autoUpdateOn
+Check 'both profiles declare autoUpdate for every marketplace and override DISABLE_AUTOUPDATER' ($autoUpdateOn.Count -eq 0) $autoUpdateOn
 
 $pCommands = @()
 if (($null -ne $pSettings) -and ($pSettings.PSObject.Properties.Name -contains 'hooks')) {
