@@ -198,25 +198,67 @@ test('prompt hook forwards /caveman lite to the mode tracker, which records the 
   assert.equal(fs.readFileSync(path.join(f.home, '.claude', '.caveman-active'), 'utf8'), 'lite');
 });
 
-test('CLI_VERSION comes from the shared pin (lib/caveman-cli.json), not a hardcoded default (issue 825)', () => {
+// The CLI half against a stub npm: `npm view` answers with `latest` (or fails, for an unreachable
+// registry), and `npm install` records its argv and lays down a fake `caveman` whose --version
+// names the version it was installed at. `installed` seeds an older CLI already in the container.
+function cliRun({ latest, installed, extraEnv = {} }) {
   const f = makeHome();
   const npmLog = path.join(f.home, 'npm-invocations.log');
   const stubDir = path.join(f.home, 'stub-bin');
+  const binDir = path.join(f.home, '.local', 'bin');
   fs.mkdirSync(stubDir, { recursive: true });
-  // A stub npm that just records its argv and exits 0 - real network install is out of scope for
-  // this test; only "which version did the hook ask for" is.
-  fs.writeFileSync(path.join(stubDir, 'npm'), `#!/bin/bash\necho "$@" >> "${npmLog}"\nexit 0\n`);
-  fs.chmodSync(path.join(stubDir, 'npm'), 0o755);
-  const pinnedVersion = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'lib', 'caveman-cli.json'), 'utf8')).cliVersion;
+  fs.mkdirSync(binDir, { recursive: true });
+  const fakeCaveman = (v) => `#!/bin/bash\n[ "$1" = --version ] && { echo '{"version": "${v}"}'; exit 0; }\nexit 1\n`;
+  if (installed) fs.writeFileSync(path.join(binDir, 'caveman'), fakeCaveman(installed), { mode: 0o755 });
+  const template = path.join(stubDir, 'caveman.template');
+  fs.writeFileSync(template, fakeCaveman('__V__'));
+  const posix = (p) => p.replace(/\\/g, '/');
+  fs.writeFileSync(path.join(stubDir, 'npm'), [
+    '#!/bin/bash',
+    `echo "$@" >> "${posix(npmLog)}"`,
+    `if [ "$1" = view ]; then ${latest ? `echo ${latest}; exit 0` : 'echo "npm error network" >&2; exit 1'}; fi`,
+    'v="${@: -1}"; v="${v##*@}"',
+    `sed "s/__V__/$v/" "${posix(template)}" > "${posix(binDir)}/caveman"`,
+    `chmod +x "${posix(binDir)}/caveman"`,
+    'exit 0',
+  ].join('\n') + '\n', { mode: 0o755 });
   const r = run(BOOTSTRAP, {
     ...f,
     stdin: '{}',
-    extraEnv: { PATH: `${stubDir}:${process.env.PATH}`, CAVEMAN_BOOTSTRAP_SKIP_CLI: '' },
+    extraEnv: { PATH: `${stubDir}${path.delimiter}${process.env.PATH}`, CAVEMAN_BOOTSTRAP_SKIP_CLI: '', ...extraEnv },
   });
-  assert.equal(r.status, 0, r.stderr);
-  const log = fs.readFileSync(npmLog, 'utf8');
-  assert.match(log, new RegExp(`@caveman-ai/cli@${pinnedVersion.replace(/\./g, '\\.')}`),
-    `expected npm to be asked for the pinned version ${pinnedVersion}, got: ${log}`);
+  const log = fs.existsSync(npmLog) ? fs.readFileSync(npmLog, 'utf8') : '';
+  return { f, r, log, ctx: contextOf(r), binDir };
+}
+
+test('an older CLI upgrades to the current npm release, and the marker line names it (issue 931)', () => {
+  const { log, ctx, f } = cliRun({ latest: '9.9.9', installed: '1.0.0' });
+  assert.match(log, /^view @caveman-ai\/cli version/m, log);
+  assert.match(log, /install .*@caveman-ai\/cli@9\.9\.9/, log);
+  assert.match(ctx, /cli: installed 9\.9\.9 \(was 1\.0\.0\)/);
+  const marker = JSON.parse(fs.readFileSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap', 'state.json'), 'utf8'));
+  assert.equal(marker.cli_version, '9.9.9');
+});
+
+test('the current release already installed runs no npm install (issue 931)', () => {
+  const { log, ctx } = cliRun({ latest: '9.9.9', installed: '9.9.9' });
+  assert.doesNotMatch(log, /install/, log);
+  assert.match(ctx, /cli: present 9\.9\.9/);
+});
+
+test('CAVEMAN_BOOTSTRAP_CLI_VERSION pins a one-off version without asking the registry (issue 931)', () => {
+  const { log, ctx } = cliRun({ latest: '9.9.9', installed: '1.0.0', extraEnv: { CAVEMAN_BOOTSTRAP_CLI_VERSION: '1.2.3' } });
+  assert.doesNotMatch(log, /view/, log);
+  assert.match(log, /install .*@caveman-ai\/cli@1\.2\.3/, log);
+  assert.match(ctx, /cli: installed 1\.2\.3/);
+});
+
+test('an unreachable registry keeps the installed CLI untouched and the session starts (issue 931)', () => {
+  const { r, log, ctx, binDir } = cliRun({ latest: null, installed: '1.0.0' });
+  assert.equal(r.status, 0);
+  assert.doesNotMatch(log, /install/, log);
+  assert.match(ctx, /cli: registry unreachable, kept 1\.0\.0/);
+  assert.match(fs.readFileSync(path.join(binDir, 'caveman'), 'utf8'), /"version": "1\.0\.0"/);
 });
 
 test('prompt hook stays silent when the checkout is absent', () => {
