@@ -231,6 +231,17 @@ function Update-PersonalProfile {
                 }
                 $personalSettings.extraKnownMarketplaces | Add-Member -MemberType NoteProperty -Name 'claude-dotfiles' -Value $workDotfiles -Force
             }
+            # The desktop app launches Claude Code with DISABLE_AUTOUPDATER=1, which also stops
+            # marketplace refreshes; the work profile's env overrides it. Mirror those two keys.
+            if ($workSettings.PSObject.Properties.Name -contains 'env') {
+                foreach ($key in @('DISABLE_AUTOUPDATER', 'FORCE_AUTOUPDATE_PLUGINS')) {
+                    if ($workSettings.env.PSObject.Properties.Name -notcontains $key) { continue }
+                    if ($personalSettings.PSObject.Properties.Name -notcontains 'env') {
+                        $personalSettings | Add-Member -MemberType NoteProperty -Name env -Value ([pscustomobject]@{}) -Force
+                    }
+                    $personalSettings.env | Add-Member -MemberType NoteProperty -Name $key -Value $workSettings.env.$key -Force
+                }
+            }
 
             $newText = ConvertTo-Json -InputObject $personalSettings -Depth 32
             $oldText = if (Test-Path $personalSettingsPath) { [System.IO.File]::ReadAllText($personalSettingsPath) } else { '' }
