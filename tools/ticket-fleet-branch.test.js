@@ -2314,6 +2314,19 @@ test('Haiku never implements, whatever the pins or args say (Dan, 2026-09-28)', 
   assert.doesNotMatch(script, /'claude-sonnet-5'/, 'every Sonnet pin is Sonnet 5.5');
 });
 
+test('the shipped defaults: sure easy work on Sonnet 5.5, everything else and every retry on Opus 5.5 (Dan, 2026-09-28)', () => {
+  const script = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const cfg = {
+    implModel: script.match(/^\s*implModel: '([^']+)'/m)[1],
+    // eslint-disable-next-line no-new-func
+    implPins: new Function(`return ${script.match(/^\s*implPins: (\{[^\n]*\}),/m)[1]}`)(),
+  };
+  const pickImplModel = generatedPickImplModel();
+  assert.deepEqual(['mechanical', 'multi-file', 'design', null].map(l => pickImplModel(l, 1, cfg)),
+    ['claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-5-5']);
+  for (const l of ['mechanical', 'multi-file', 'design', null]) assert.equal(pickImplModel(l, 2, cfg), 'claude-opus-5-5', `${l} retry`);
+});
+
 test('difficultyEvalSet labels a ticket "hard" when a fleet branch shows attempt 2 or later', () => {
   const { difficultyEvalSet } = require('./ticket-fleet-branch.js');
   assert.deepEqual(difficultyEvalSet([
