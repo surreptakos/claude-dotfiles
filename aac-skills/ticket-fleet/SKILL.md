@@ -6,10 +6,10 @@ description: >
   asks to run the ticket fleet or clear a wave of ready-for-agent tickets, or an orchestrator
   worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-28T20:16:54Z"
-  previous-modified: "2026-09-26T07:09:52Z"
-  revision: "54"
-  content-sha: "c7097f361cba"
+  modified: "2026-09-28T20:36:51Z"
+  previous-modified: "2026-09-28T20:16:54Z"
+  revision: "55"
+  content-sha: "0bbee018a4a1"
 ---
 
 # ticket-fleet
@@ -124,6 +124,8 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
   A score under 0.8 confidence is ignored and the ticket runs on `implModel` (Opus 5.5); the two
   lighter pins default to Sonnet 5.5. Haiku never implements: any pin or arg naming it becomes
   Opus 5.5 (Dan, 2026-09-28).
+- `effort` (default `'high'`): the effort every agent() call runs at, all stages alike (Dan,
+  2026-09-28). `tools/fleet-effort.test.js` fails on a call that omits it.
 - `verifierAgent`: leave unset. The run pins `fleet-verifier` only on a desktop that has the file;
   a cloud session cannot load custom agent types (issue 339). `''` forces unpinned.
 - `followupsFile` (default `FOLLOW-UPS.md`): where discoveries are appended.
