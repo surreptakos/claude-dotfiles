@@ -1023,6 +1023,23 @@ $prefsIntact = ($null -ne $pSettings) -and
                ($pSettings.fastMode -eq $true)
 Check 'personal settings.json parses and keeps its personal prefs' $prefsIntact
 
+# Issue 943: without autoUpdate the claude-dotfiles marketplace never refreshes, so aac-skills
+# stays at the version installed. Both profiles must declare it.
+$autoUpdateOn = @()
+foreach ($s in @(@{ Name = 'work'; Path = (Join-Path $FakeHome '.claude\settings.json') },
+                 @{ Name = 'personal'; Path = $pSettingsPath })) {
+    $json = $null
+    try { $json = Get-Content $s.Path -Raw | ConvertFrom-Json } catch { }
+    $flag = $null
+    if (($null -ne $json) -and ($json.PSObject.Properties.Name -contains 'extraKnownMarketplaces') -and
+        ($json.extraKnownMarketplaces.PSObject.Properties.Name -contains 'claude-dotfiles')) {
+        $entry = $json.extraKnownMarketplaces.'claude-dotfiles'
+        if ($entry.PSObject.Properties.Name -contains 'autoUpdate') { $flag = $entry.autoUpdate }
+    }
+    if ($flag -ne $true) { $autoUpdateOn += ("{0} profile: claude-dotfiles autoUpdate is {1}" -f $s.Name, $flag) }
+}
+Check 'both profiles declare autoUpdate for the claude-dotfiles marketplace' ($autoUpdateOn.Count -eq 0) $autoUpdateOn
+
 $pCommands = @()
 if (($null -ne $pSettings) -and ($pSettings.PSObject.Properties.Name -contains 'hooks')) {
     foreach ($event in $pSettings.hooks.PSObject.Properties) {

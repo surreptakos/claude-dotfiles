@@ -62,7 +62,8 @@
       "source": {
         "source": "github",
         "repo": "surreptakos/claude-dotfiles"
-      }
+      },
+      "autoUpdate": true
     },
     "borski": {
       "source": {
