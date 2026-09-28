@@ -26,3 +26,6 @@ winget cannot deliver this: `Microsoft.PowerShell` ships an msixbundle only, whi
 `WindowsApps` and is invisible to that fixed list. The MSI from the GitHub release is the only route,
 and it needs elevation.
 
+Source: https://github.com/surreptakos/claude-dotfiles/issues/214
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/979

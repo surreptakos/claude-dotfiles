@@ -38,3 +38,7 @@ line below.
 - **Standards no-counts ruling** (Dan, 2026-08-26): during a `/maintain-repo` sweep of
   aac-contract-builder, stripped "22 patterns", "~20 of 35 checklist items" and a Status column from
   four surfaces in one commit. See [[state-a-standing-rule-once]].
+
+Source: profile/claude/CLAUDE.md
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/970

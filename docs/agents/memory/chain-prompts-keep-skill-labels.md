@@ -19,3 +19,5 @@ choose. Adapt the consumer instead. The fleet's `label` arg takes one label, so 
 build the set yourself (open issues with any agent-ready label, minus Maybe Someday and open
 `agent/issue-<N>-` PRs) and pass it as `tickets`. An explicit `tickets` list skips the fleet's own
 Maybe Someday filter, which is why the caller filters. See [[routine-sessions-run-acceptedits]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/955

@@ -20,3 +20,5 @@ desktop this way; the agent also treats the live home as scratch, which worktree
 **How to apply:** cloud-only probes go to a claude.ai/code session started by Dan (or a Routine
 with the repo as source). Never hand a remote-isolation agent a task that writes under `~/.claude`.
 Re-test before relying on this note; a later CLI may change what "remote" does.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/166, https://github.com/surreptakos/claude-dotfiles/issues/175

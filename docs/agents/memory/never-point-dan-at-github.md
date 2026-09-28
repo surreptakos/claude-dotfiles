@@ -21,3 +21,7 @@ reply, or in an artifact when it outgrows one. The global rules carry this as a 
 **How to apply:** `gh issue view N --json url,comments -q '.comments[i].url'` gives a comment
 permalink; put it in the reply. If the content is under ~20 lines, quote it instead. Related:
 [[answer-yes-no-in-one-line]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/579, https://github.com/surreptakos/claude-dotfiles/issues/683, https://github.com/surreptakos/claude-dotfiles/issues/655
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/977

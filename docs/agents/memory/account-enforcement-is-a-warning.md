@@ -31,3 +31,5 @@ host-session file under `%APPDATA%\Claude\claude-code-sessions\<account>\<org>\`
 in the profile's `.claude.json`. Cloud, mobile and Cowork have no local identity: say so, do not
 guess. When a repo or routine changes hands, edit the registry in the same turn. Related:
 [[desktop-scheduled-tasks-are-per-org]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/103, https://github.com/surreptakos/claude-dotfiles/issues/714, https://github.com/surreptakos/claude-dotfiles/issues/707, https://github.com/surreptakos/claude-dotfiles/issues/526
