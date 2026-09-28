@@ -28,37 +28,43 @@
       "source": {
         "source": "git",
         "url": "https://github.com/sstklen/yes.md.git"
-      }
+      },
+      "autoUpdate": true
     },
     "mattpocock": {
       "source": {
         "source": "github",
         "repo": "mattpocock/skills"
-      }
+      },
+      "autoUpdate": true
     },
     "claude-plugins-official": {
       "source": {
         "source": "git",
         "url": "https://github.com/anthropics/claude-plugins-official.git"
-      }
+      },
+      "autoUpdate": true
     },
     "caveman": {
       "source": {
         "source": "github",
         "repo": "JuliusBrussee/caveman"
-      }
+      },
+      "autoUpdate": true
     },
     "i-have-adhd": {
       "source": {
         "source": "github",
         "repo": "ayghri/i-have-adhd"
-      }
+      },
+      "autoUpdate": true
     },
     "typesafe-ai": {
       "source": {
         "source": "github",
         "repo": "typesafe-ai/skills"
-      }
+      },
+      "autoUpdate": true
     },
     "claude-dotfiles": {
       "source": {
@@ -71,7 +77,8 @@
       "source": {
         "source": "git",
         "url": "https://github.com/borski/travel-hacking-toolkit.git"
-      }
+      },
+      "autoUpdate": true
     }
   },
   "outputStyle": "Concise",

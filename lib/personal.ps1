@@ -231,6 +231,16 @@ function Update-PersonalProfile {
                 }
                 $personalSettings.extraKnownMarketplaces | Add-Member -MemberType NoteProperty -Name 'claude-dotfiles' -Value $workDotfiles -Force
             }
+            # Every marketplace both profiles declare takes the work profile's autoUpdate flag
+            # (Dan, 2026-09-28: third-party marketplaces auto-update too).
+            if ($workSettings.PSObject.Properties.Name -contains 'extraKnownMarketplaces' -and
+                $personalSettings.PSObject.Properties.Name -contains 'extraKnownMarketplaces') {
+                foreach ($m in $workSettings.extraKnownMarketplaces.PSObject.Properties) {
+                    if ($m.Value.PSObject.Properties.Name -notcontains 'autoUpdate') { continue }
+                    if ($personalSettings.extraKnownMarketplaces.PSObject.Properties.Name -notcontains $m.Name) { continue }
+                    $personalSettings.extraKnownMarketplaces.($m.Name) | Add-Member -MemberType NoteProperty -Name autoUpdate -Value $m.Value.autoUpdate -Force
+                }
+            }
             # The desktop app launches Claude Code with DISABLE_AUTOUPDATER=1, which also stops
             # marketplace refreshes; the work profile's env overrides it. Mirror those two keys.
             if ($workSettings.PSObject.Properties.Name -contains 'env') {
