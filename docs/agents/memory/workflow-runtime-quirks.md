@@ -1,6 +1,6 @@
 ---
 name: workflow-runtime-quirks
-description: Workflow tool traps - named workflows are session-start snapshots (launch by scriptPath), scripts cannot call Date.now()/Math.random() (fleet needs args.runId), scriptPath refuses a CRLF file (2026-09-15), and the tool call uses the session's cwd AT CALL TIME, not the served repo (2026-09-23)
+description: Workflow tool traps - named workflows are session-start snapshots (launch by scriptPath), scripts cannot call Date.now()/Math.random() (fleet needs args.runId), scriptPath refuses a CRLF file (2026-09-15), the tool call uses the session's cwd AT CALL TIME, not the served repo (2026-09-23), and each agent's worktree follows the cwd at spawn, so never cd mid-run (2026-09-28)
 metadata:
   type: project
 ---
@@ -36,6 +36,14 @@ Two Workflow-tool behaviours that cost a fleet launch each on 2026-09-01:
    with a direct `Bash` check immediately before the `Workflow` call — do not trust the
    "Primary working directory" environment line alone, since it can be stale relative to the actual
    call.
+
+5. **Each agent's worktree comes from the session's cwd at the moment that agent spawns, not at
+   launch.** Cockpit run 6abac727 (2026-09-28) launched cleanly from the cockpit, then the
+   orchestrator ran `cd /home/user/claude-dotfiles && ...` for unrelated work mid-run. The retry
+   implementer spawned after that got a claude-dotfiles worktree; it noticed and cloned the cockpit
+   itself, so nothing broke, but the launch guard (issue 950) only checks at launch. While a fleet
+   runs, never move the session: use `git -C <path>` or a `( cd <path> && ... )` subshell for any
+   other repo. Dan declined a per-worker repo check on 2026-09-28, so this discipline is the guard.
 
 **Why:** the `workflow-authoring` skill documents rule 2 and it was dismissed as stale on the strength
 of one successful run. A live launch settled it. Rule 1 is documented nowhere. Rule 4 is undocumented
