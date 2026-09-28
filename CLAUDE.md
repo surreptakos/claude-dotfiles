@@ -1,9 +1,5 @@
 # claude-dotfiles
 
-<!-- owner-account:begin — managed by claude-dotfiles/tools/owner-account-line.js; do not edit -->
-Owner account: Dan-AAC (desktop app)
-<!-- owner-account:end -->
-
 The Claude Code setup itself, under version control: global rules, skills, hooks, plugin manifests.
 `README.md` explains the design; this file is what an agent working *on* the repo needs to know.
 

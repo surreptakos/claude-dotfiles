@@ -299,9 +299,10 @@ Write-Info "dotfiles=$DotfilesRoot  staleAfter=${MaxHeartbeatAgeMinutes}m  idle=
 
 # --- Account guard (issue 103): a WARNING, never a gate ----------------------------------------
 # The masters run under whatever account ~/.claude.json is signed into (the bare `claude` launch
-# below reads the default profile). ~/.claude/accounts.json says which account owns each repo. A
-# mismatch spends the wrong account's quota, so it is logged every tick - and only logged: the
-# owner ruled enforcement stays a warning (Dan, 2026-09-09).
+# below reads the default profile). ~/.claude/accounts.json lists the owner's accounts and the repos
+# the watchdog serves. Neither account owns a repo - either may work any (owner ruling 2026-09-25,
+# issue 714) - so the guard warns only for an account or repo the registry does not list. It is
+# only logged: the owner ruled enforcement stays a warning (Dan, 2026-09-09).
 function Write-AccountGuard {
     param([array]$Rows)
     $registryPath = Join-Path $env:USERPROFILE '.claude\accounts.json'
@@ -321,10 +322,12 @@ function Write-AccountGuard {
     $warned = 0
     foreach ($r in $Rows) {
         $entry = $registry.repos.PSObject.Properties | Where-Object { $_.Name -ieq $r.Repo } | Select-Object -First 1
-        if (-not $entry -or -not $entry.Value) { Write-Info "[$($r.Slug)] WARN account: $($r.Repo) is not in the accounts registry (masters run as $me)"; $warned++; continue }
-        if ($entry.Value.owner -ne $me) { Write-Info "[$($r.Slug)] WARN account: $($r.Repo) belongs to $($entry.Value.owner); masters here run as $me"; $warned++ }
+        # No repo has an owner account (owner ruling 2026-09-25, issue 714): only a repo the
+        # registry does not list warns. An entry is `{}` (or `{ "status": "dead" }`), so test
+        # the property, not its value.
+        if (-not $entry) { Write-Info "[$($r.Slug)] WARN account: $($r.Repo) is not in the accounts registry (masters run as $me)"; $warned++ }
     }
-    if ($warned -eq 0) { Write-Info "account guard: masters run as $me, registry owner of all $($Rows.Count) repos" }
+    if ($warned -eq 0) { Write-Info "account guard: masters run as $me, one of the owner's accounts; either may work all $($Rows.Count) repos" }
 }
 # Whatever the registry holds, the guard is a log line. A throw here would stop the tick and
 # leave every master unserved, which is the opposite of a warning.

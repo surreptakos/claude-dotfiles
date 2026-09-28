@@ -10,11 +10,11 @@ metadata:
 
 Account-to-repo and account-to-routine enforcement is a **warning, never a hard gate** (Dan,
 2026-09-09, issue 103). The registry is `~/.claude/accounts.json` (whitelisted, travels with the
-dotfiles): Dan-AAC (desktop app) owns claude-dotfiles, aac-routines, aac-message-board,
-aac-sales-commissions and the desktop routines the registry's `routines` map lists; Dan (CLI,
-mobile, web, Task Scheduler) owns aac-bill-intake, zoho-source-of-truth, aac-sales-cockpit and
-aac-contract-builder. Which account the desktop watchdog masters run as is open (issue 714: the CLI
-on the PC is signed in as Dan-AAC, and every watchdog tick warns).
+dotfiles). Dan-AAC (desktop app) owns the desktop routines the registry's `routines` map lists.
+**No repo has an owner account** (Dan, 2026-09-25, issue 714: "either account, any project"; Dan
+and Dan-AAC are the same owner). The registry's `repos` map only lists slugs and marks dead ones,
+so session-check and the watchdog warn about a repo that is dead or unlisted and about an account
+that is not in the registry, never about which registered account works which repo.
 
 **Todoist Triage moved twice.** Ruled Active Alarm's Cowork task `todoist-triage-friday` on
 2026-09-10; a claude.ai/code routine from 2026-09-11; since 2026-09-23 the desktop task
