@@ -83,3 +83,11 @@ the rules file's first line, the hook exits silently, so a PC session sees the
 rules once. `GLOBAL_RULES_HOOK_FORCE=1` runs it anyway;
 `GLOBAL_RULES_FILE` points it at another file. Pinned by
 `tools/global-rules-hook.test.js`.
+
+## fleet-launch-guard.js
+
+A third, payload-only script, wired as a `PreToolUse` hook with matcher `Workflow`. It refuses a
+ticket-fleet launch when the session is not at the top level of a git repository, or when the fleet
+script belongs to a different repository than the session's. The deny message names the exact `cd`
+that fixes it. Incidents and rules are in the script's header; `tools/fleet-launch-guard.test.js`
+rebuilds each incident with throwaway repos.

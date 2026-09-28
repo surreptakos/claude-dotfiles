@@ -42,6 +42,7 @@ REQUIRED_HOOKS = [
     ('UserPromptSubmit', r'session-gate\.js"?\s+prompt', 'session gate (prompt)'),
     ('UserPromptSubmit', r'global-rules\.js"?\s+digest', 'global rules digest (per prompt)'),
     ('PreToolUse', r'ask_matt_gate\.py"?\s+claude-pre-tool', 'ask-matt gate (pre-tool)'),
+    ('PreToolUse', r'fleet-launch-guard\.js', 'fleet launch guard (refuses a ticket-fleet launch from the wrong folder)'),
     ('PostToolUse', r'ask_matt_gate\.py"?\s+claude-post-tool', 'ask-matt gate (post-tool)'),
     ('Stop', r'ask_matt_gate\.py"?\s+claude-stop', 'ask-matt gate (stop)'),
     ('PreCompact', r'state-stash\.js', 'state stash (pre-compact)'),

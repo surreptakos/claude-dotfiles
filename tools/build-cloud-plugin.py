@@ -967,6 +967,18 @@ def main():
                   "Recalling the global rules digest..."),
         ]})
 
+    # Fleet launch guard (Dan, 2026-09-28): refuses a ticket-fleet Workflow launch from a folder that
+    # is not the top of the fleet script's own repository, before any agent is spent. Payload-only,
+    # like global-rules.js: no live-tree twin, so it ships whenever governance hooks do.
+    fleet_guard_src = guard_src_dir / "fleet-launch-guard.js"
+    if gov_sources_present and fleet_guard_src.is_file():
+        (scripts_dir / "fleet-launch-guard.js").write_bytes(
+            fleet_guard_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
+        governance_hooks["PreToolUse"].append({"matcher": "Workflow", "hooks": [
+            _hook("node", "node", "fleet-launch-guard.js", [], 10,
+                  "Checking the fleet is launched from its own repository..."),
+        ]})
+
     (hooks_dir / "hooks.json").write_bytes((
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )
