@@ -1939,7 +1939,22 @@ YES_JEV_QUESTIONS = {
     " board, not merged, no reviews) as a fact?" + YES_JEV_OWN_VOICE,
     "review-read": "Does `reply` claim there are no PR review threads, reviews or review comments,"
     " as a fact about the PR's current state?" + YES_JEV_OWN_VOICE,
+    "count": "Does `reply` state how many rows, companies, vendors, sites, lines, records or people a"
+    " table or list the assistant produced contains, as a fact about that list?" + YES_JEV_OWN_VOICE,
 }
+# Dan, 2026-09-28 (osh-rfp, five corrections in one afternoon): "76 person or note rows" was written
+# as if checked and 53 of them were companies. A count is a stand-in for the rows; a reply that
+# quotes one says which rows were read, or does not quote it.
+COUNT_CLAIM_PATTERN = re.compile(
+    r"\b\d{1,3}(?:,\d{3})*\s+(?:rows?|companies|vendors|sites|lines|records|entries|people|persons"
+    r"|contact names|names)\b",
+    re.IGNORECASE,
+)
+ROWS_READ_PATTERN = re.compile(
+    r"\b(?:read|printed(?: and read)?|re-read|checked)\s+(?:every|all|each|the)\s+(?:\d+\s+)?(?:row|line|entry|match|name)s?\b"
+    r"|\brow by row\b|\bevery row\b|\ball \d+ rows\b",
+    re.IGNORECASE,
+)
 YES_JEV_FLOOR = 0.5  # below this Jev says the reply does not itself do it, and the hit is dropped
 YES_JEV_TIMEOUT = 3.0  # seconds; the Stop hook's whole budget is 5
 
@@ -2008,6 +2023,13 @@ def _yes_lint(
                 "YES absence stated after a refused call: \"" + absent.group(0)
                 + "\" — a refused write is not a read of state; read the state, or say you could not check"
             ))
+    counted = COUNT_CLAIM_PATTERN.search(prose)
+    if counted and not ROWS_READ_PATTERN.search(prose):
+        found.append((
+            "count",
+            "YES count without a read: \"" + counted.group(0)
+            + "\" — a count stands in for the rows; say which rows you read (every row, row by row), or drop it"
+        ))
     if turn_tools is not None and not (turn_tools & PR_REVIEW_READ_METHODS):
         review_absent = REVIEW_ABSENCE_PATTERN.search(prose)
         if review_absent:
