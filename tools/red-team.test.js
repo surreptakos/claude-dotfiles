@@ -10,7 +10,7 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 
 const SCRIPT = path.join(__dirname, '..', 'aac-skills', 'red-team', 'red-team.js')
-const { parseArgs, parseCritique, readText, DEFAULT_PANEL, DEFAULT_CRITIC } = require(SCRIPT)
+const { parseArgs, parseCritique, readText, callCost, DEFAULT_PANEL, DEFAULT_CRITIC } = require(SCRIPT)
 
 function tmpFiles() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'red-team-'))
@@ -190,4 +190,40 @@ test('UTF-16LE input with a BOM (PowerShell 5.1 redirect) reads as text', () => 
 
 test('the default critic sits outside the default panel', () => {
   assert.ok(!DEFAULT_PANEL.includes(DEFAULT_CRITIC))
+})
+
+test('every call caps max_tokens; --max-tokens overrides and rejects a non-integer', async () => {
+  const { server, seen, base } = await mockServer(body => isCritic(body)
+    ? reply(JSON.stringify({ verdict: 'sound', findings: [], panelOnly: [] }))
+    : reply('ok'))
+  try {
+    const { q, d } = tmpFiles()
+    const r = await runScript(['--question', q, '--draft', d, '--panel', 'p/one', '--critic', 'c/critic', '--max-tokens', '900'],
+      { OPENROUTER_API_KEY: 'test-key', OPENROUTER_BASE_URL: base })
+    assert.strictEqual(r.code, 0, r.err)
+    assert.deepStrictEqual(seen.map(s => s.body.max_tokens), [900, 900])
+  } finally { server.close() }
+  assert.strictEqual(parseArgs(['--question', 'q', '--draft', 'd']).maxTokens, 16000)
+  assert.throws(() => parseArgs(['--question', 'q', '--draft', 'd', '--max-tokens', '1.5']), /positive integer/)
+})
+
+test('behind HTTPS_PROXY no key is needed and no Authorization header is sent (the proxy injects it)', async () => {
+  const { server, seen, base } = await mockServer(body => isCritic(body)
+    ? reply(JSON.stringify({ verdict: 'sound', findings: [], panelOnly: [] }))
+    : reply('ok'))
+  try {
+    const { q, d } = tmpFiles()
+    const r = await runScript(['--question', q, '--draft', d, '--panel', 'p/one', '--critic', 'c/critic'],
+      { OPENROUTER_BASE_URL: base, HTTPS_PROXY: 'http://127.0.0.1:9', NO_PROXY: '127.0.0.1' })
+    assert.strictEqual(r.code, 0, r.err)
+    assert.strictEqual(seen.length, 2)
+    assert.ok(seen.every(s => s.auth === undefined))
+  } finally { server.close() }
+})
+
+test('a BYOK call counts the upstream provider cost, not only the OpenRouter fee', () => {
+  // Shape of a live openai/gpt-5.5 usage block routed through the account's own OpenAI key.
+  assert.strictEqual(callCost({ cost: 0, is_byok: true, cost_details: { upstream_inference_cost: 0.000785 } }), 0.000785)
+  assert.strictEqual(callCost({ cost: 0.02, cost_details: { upstream_inference_cost: 0.02 } }), 0.02)
+  assert.strictEqual(callCost({}), 0)
 })
