@@ -10,7 +10,7 @@ const path = require('node:path')
 const { spawn } = require('node:child_process')
 
 const SCRIPT = path.join(__dirname, '..', 'aac-skills', 'red-team', 'red-team.js')
-const { parseArgs, parseCritique, readText, DEFAULT_PANEL, DEFAULT_CRITIC } = require(SCRIPT)
+const { parseArgs, parseCritique, readText, callCost, DEFAULT_PANEL, DEFAULT_CRITIC } = require(SCRIPT)
 
 function tmpFiles() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'red-team-'))
@@ -219,4 +219,11 @@ test('behind HTTPS_PROXY no key is needed and no Authorization header is sent (t
     assert.strictEqual(seen.length, 2)
     assert.ok(seen.every(s => s.auth === undefined))
   } finally { server.close() }
+})
+
+test('a BYOK call counts the upstream provider cost, not only the OpenRouter fee', () => {
+  // Shape of a live openai/gpt-5.5 usage block routed through the account's own OpenAI key.
+  assert.strictEqual(callCost({ cost: 0, is_byok: true, cost_details: { upstream_inference_cost: 0.000785 } }), 0.000785)
+  assert.strictEqual(callCost({ cost: 0.02, cost_details: { upstream_inference_cost: 0.02 } }), 0.02)
+  assert.strictEqual(callCost({}), 0)
 })

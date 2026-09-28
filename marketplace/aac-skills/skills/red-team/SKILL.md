@@ -2,10 +2,10 @@
 name: red-team
 description: Red-team a drafted answer against other vendors' models (GPT, Gemini, Grok, DeepSeek) through OpenRouter before sending it. Use when the user asks to red-team, cross-check or get a second opinion on an answer from other models, or says a reply is important enough to check.
 metadata:
-  modified: '2026-09-28T17:37:41Z'
-  previous-modified: '2026-09-28T04:52:52Z'
-  revision: '2'
-  content-sha: fd40f04dd21e
+  modified: '2026-09-28T17:42:02Z'
+  previous-modified: '2026-09-28T17:37:41Z'
+  revision: '3'
+  content-sha: 8bf335bf48f5
 ---
 
 # red-team

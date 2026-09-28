@@ -75,6 +75,10 @@ function parseArgs(argv) {
 
 const label = i => String.fromCharCode(65 + i)
 
+// A BYOK call (the account's own provider key) bills the provider directly: usage.cost holds only
+// OpenRouter's fee, often 0, and the model's price sits in cost_details.upstream_inference_cost.
+const callCost = u => Number(u.cost || 0) + (u.is_byok ? Number((u.cost_details && u.cost_details.upstream_inference_cost) || 0) : 0)
+
 function panelRequest(model, question, maxTokens = DEFAULT_MAX_TOKENS) {
   return { model, max_tokens: maxTokens, messages: [{ role: 'system', content: PANEL_SYSTEM }, { role: 'user', content: question }] }
 }
@@ -150,8 +154,8 @@ async function run(args, apiKey, question, draft) {
     const l = label(panel.length)
     panel.push({ label: l, answer: s.value.content })
     key[l] = model
-    usage.cost += Number(s.value.usage.cost || 0)
-    usage.calls.push({ model, cost: s.value.usage.cost ?? null })
+    usage.cost += callCost(s.value.usage)
+    usage.calls.push({ model, cost: callCost(s.value.usage), byok: Boolean(s.value.usage.is_byok) })
   })
   if (!panel.length) return { code: 1, out: { error: 'no panel answer came back', errors } }
 
@@ -159,8 +163,8 @@ async function run(args, apiKey, question, draft) {
   try {
     const c = await complete(criticRequest(args.critic, question, draft, panel, args.maxTokens), apiKey)
     critique = parseCritique(c.content)
-    usage.cost += Number(c.usage.cost || 0)
-    usage.calls.push({ model: args.critic, role: 'critic', cost: c.usage.cost ?? null })
+    usage.cost += callCost(c.usage)
+    usage.calls.push({ model: args.critic, role: 'critic', cost: callCost(c.usage), byok: Boolean(c.usage.is_byok) })
   } catch (e) {
     return { code: 1, out: { error: `critic failed: ${e.message}`, panel, errors, usage, key } }
   }
@@ -197,4 +201,4 @@ if (require.main === module) {
   } else main().then(code => { process.exitCode = code })
 }
 
-module.exports = { parseArgs, parseCritique, readText, panelRequest, criticRequest, run, DEFAULT_PANEL, DEFAULT_CRITIC }
+module.exports = { parseArgs, parseCritique, callCost, readText, panelRequest, criticRequest, run, DEFAULT_PANEL, DEFAULT_CRITIC }
