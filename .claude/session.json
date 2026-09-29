@@ -18,6 +18,8 @@
     "`node --test gas/` does not work there), and detection cannot reproduce that."
   ],
   "test": "powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree && node --test tests/*.test.js tools/*.test.js aac-skills/session-check/*.test.js",
+  "testTimeoutMs": 600000,
+  "_testTimeoutMs": "Measured 2026-09-29 on Dan-Inspiron15: restore-test.ps1 alone 178 s, node suite 138 s, 316 s together, over the 300 s default; 504 s for the restore half under fleet load.",
   "ticketLabel": "ready-for-agent",
   "releaseGates": [],
   "note": "Release here is the push to origin/master - that is what a container installs; a desktop takes skills and rules through the aac-skills plugin (claude plugin marketplace update, then claude plugin update) and the rest of the profile through sync.ps1 -Mode pull. Nothing here is generated from a live tree any more (issue 214): edit aac-skills/ for skills and profile/ for the consumer profile, on a branch, and let CI stamp and rebuild the plugin payload."
