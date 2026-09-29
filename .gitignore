@@ -21,6 +21,9 @@ cache/
 tmp/
 downloads/
 hook-state/
+# Issue 1010: tools/fleet-run-record.js writes a fleet run's record here; the orchestrator posts
+# its digest on the state issue, so the file itself stays machine-local.
+state/fleet-runs/
 node_modules/
 __pycache__/
 *.pyc
