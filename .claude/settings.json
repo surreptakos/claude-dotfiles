@@ -19,12 +19,15 @@
     "installed_plugins.json was empty (evidence on issue 106).",
     "",
     "The same two keys declare the third-party plugins a desktop runs (profile/claude/settings.json):",
-    "caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, and pyright-lsp and",
-    "typescript-lsp from claude-plugins-official, none vendored into the aac-skills payload. A",
-    "desktop installs each from its upstream marketplace. A cloud container sets",
+    "caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, travel-hacker@borski, and",
+    "pyright-lsp and typescript-lsp from claude-plugins-official, none vendored into the aac-skills",
+    "payload. A desktop installs each from its upstream marketplace. A cloud container sets",
     "SKIP_PLUGIN_MARKETPLACE=true and fetched only claude-plugins-official (2026-09-28), so hooks",
     "deliver the rest at the current upstream HEAD: caveman-bootstrap.sh (skills, CLI, proxy) and",
-    "upstream-skills.sh (i-have-adhd, typesafe skills).",
+    "upstream-skills.sh (i-have-adhd and typesafe skills; the travel-hacker skills, agent and MCP",
+    "servers). The travel-hacker API keys (SEATS_AERO_API_KEY, DUFFEL_API_KEY_LIVE, IGNAV_API_KEY,",
+    "AWARDWALLET_API_KEY, AWARDWALLET_USER_ID) are session environment variables: the claude.ai",
+    "environment for a container, the Windows user environment on a desktop. Never this repo.",
     "The LSP plugins carry config only; .claude/hooks/lsp-servers.sh installs the binaries they launch.",
     "",
     ".claude/hooks/session-start.sh runs first on SessionStart and only in a cloud",
@@ -123,6 +126,12 @@
         "source": "git",
         "url": "https://github.com/anthropics/claude-plugins-official.git"
       }
+    },
+    "borski": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/borski/travel-hacking-toolkit.git"
+      }
     }
   },
   "enabledPlugins": {
@@ -130,6 +139,7 @@
     "typesafe@typesafe-ai": true,
     "caveman@caveman": true,
     "i-have-adhd@i-have-adhd": true,
+    "travel-hacker@borski": true,
     "pyright-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true
   },
