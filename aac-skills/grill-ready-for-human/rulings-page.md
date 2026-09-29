@@ -3,8 +3,9 @@
 The same two phases as `SKILL.md`, across every repo at once, with a page in place of the question
 batch. **Ask** is a published artifact holding every open `ready-for-human` ticket with drafted
 options; the owner clicks through it and presses Submit. **Land** is a run that reads what Submit
-recorded and writes each ruling to GitHub. Two desktop scheduled tasks drive it; either may also be
-run by hand from any session.
+recorded and writes each ruling to GitHub. The weekday-morning digest task drives both: it lands
+first, then redrafts. The 30-minute lander task is off (Dan, 2026-09-29); Land may still be run by
+hand from any session.
 
 - Page: https://claude.ai/artifact/9wnfsMJFtUNGGoSh46bmDE (one URL for good; republish in place,
   never publish a second page, or the owner's saved picks stay behind on the old one).
@@ -16,7 +17,7 @@ run by hand from any session.
 - Drafts are never committed: the repo is public. They live in the published page (each ticket
   carries `draftedAt`) and in temp files.
 
-## Land (the lander task, and step 1 of the digest)
+## Land (step 1 of the digest; also runnable by hand)
 
 1. `ArtifactData` `query` on `submissions` where `status == "submitted"`. None: stop, no output.
 2. `Artifact` `read` the page URL; it saves the full HTML to a file. `ArtifactData` `list` on

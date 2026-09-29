@@ -113,7 +113,7 @@ textarea{width:100%;border:1px solid var(--input);border-radius:8px;background:v
 <main class="wrap">
   <div class="eyebrow" id="eyebrow"></div>
   <h1>Ready-for-human rulings</h1>
-  <p class="lede">Each card is one ticket waiting on your call. Pick an option (the <b>recommended</b> one is my drafted answer), add a note if you want to steer it, and press <b>Submit</b> when done. Picks save as you click; close the tab any time. Submit hands every answered ticket to Claude, which writes the ruling onto the ticket, relabels or closes it and unblocks what it was holding up: at once if a Claude session is watching this page, otherwise within 30 minutes on weekdays.</p>
+  <p class="lede">Each card is one ticket waiting on your call. Pick an option (the <b>recommended</b> one is my drafted answer), add a note if you want to steer it, and press <b>Submit</b> when done. Picks save as you click; close the tab any time. Submit hands every answered ticket to Claude, which writes the ruling onto the ticket, relabels or closes it and unblocks what it was holding up: at once if a Claude session is watching this page, otherwise at the next weekday morning run (5 AM Central).</p>
   <section class="tiles" aria-label="Progress">
     <div class="tile"><div class="num pri" id="tAns">0</div><div class="t"><b>Answered</b><span id="tAnsSub">of 0 tickets</span></div></div>
     <div class="tile"><div class="num warn" id="tLeft">0</div><div class="t"><b>Still open</b><span>unanswered tickets</span></div></div>
@@ -285,7 +285,7 @@ async function submit(keys){
       await comments.sendToClaude({anchor, text}); sent = true;
     }
   } catch (e) { sent = false; }
-  st.textContent = sent ? "Sent. Claude is landing them; each card shows “Landed” as it goes." : "Saved as batch " + id + ". The next landing run (every 30 minutes, weekdays 8 AM to 6 PM Central) writes them to GitHub; each card then shows “Landed”.";
+  st.textContent = sent ? "Sent. Claude is landing them; each card shows “Landed” as it goes." : "Saved as batch " + id + ". The next weekday morning run (5 AM Central) writes them to GitHub; each card then shows “Landed”.";
 }
 
 (async () => {
