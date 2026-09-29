@@ -1400,7 +1400,18 @@ const headRestoreSeen = new Set()
 // Joined like buildTipLookupCommand: the orchestrator checkout is not worktree-isolated, so no
 // caveman guard sits in front of these, and `instrument` (gitSpelling) is not known yet at Setup.
 const headCommand = (cwd) => ['git -C', cwd, 'symbolic-ref --quiet --short HEAD || echo DETACHED;', 'git -C', cwd, 'rev-parse HEAD'].join(' ')
-const restoreCommand = (cwd, target) => ['git -C', cwd, 'checkout', target].join(' ')
+// Issue 1006: a deliverer that ran `git merge origin/master` and `git reset --hard <ticket sha>` in
+// this checkout left HEAD on the SAME branch name at a different sha, and could leave a merge in
+// progress. The restore therefore aborts any merge in progress, checks the start branch back out
+// and moves it back to its Setup sha with `reset --keep` - which keeps every uncommitted change
+// the operator had (it refuses rather than overwrite one), unlike `reset --hard`. A detached start
+// is a plain `checkout --detach <sha>`. The sha the wave moved the branch to stays in the reflog.
+const restoreCommand = (cwd, start) => [
+  'git -C', cwd, 'rev-parse -q --verify MERGE_HEAD >/dev/null && git -C', cwd, 'merge --abort;',
+  ...(start.branch
+    ? ['git -C', cwd, 'checkout', start.branch, '&& git -C', cwd, 'reset --keep', start.sha]
+    : ['git -C', cwd, 'checkout --detach', start.sha]),
+].join(' ')
 
 function parseHeadState(stdout) {
   const lines = String(stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
@@ -1416,7 +1427,7 @@ function headAgentPrompt(command) {
 ${command}
 
 Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
-file, and never run \`git stash\`, \`git reset\` or any other git command than the one above. Return
+file, and never run \`git stash\` or any git command other than the one above. Return
 its REAL exit code plus its stdout and stderr VERBATIM, character for character.`
 }
 
@@ -1699,10 +1710,17 @@ async function treeGuardCheck(label, ticketNumber) {
 /**
  * Issue 807: re-read the orchestrator checkout's HEAD and put it back on the Setup ref if the wave
  * moved it. Returns quietly when HEAD is where it started; a moved HEAD is restored and recorded
- * in `headRestores` (the run report flags it); a HEAD that cannot be read or restored is a breach.
- * A branch start is restored with `git checkout <branch>`, a detached start with `checkout
- * --detach <sha>` - never `reset` (it would move the operator's branch) and never `stash pop`
- * (the stash stack is shared with every worktree of the wave).
+ * in `headRestores` (the run report flags it) and the wave carries on; only a HEAD the restore
+ * cannot put back is a breach. A branch start is restored with `git checkout <branch>` plus
+ * `reset --keep <setup sha>`, a detached start with `checkout --detach <sha>` (restoreCommand) -
+ * never `reset --hard` and never `stash pop` (the stash stack is shared with every worktree of
+ * the wave).
+ *
+ * Issue 1006: "moved" includes the start branch's own sha moving (a deliverer's `git merge` or
+ * `git reset --hard` run here), and a HEAD read that comes back unreadable is restored and re-read
+ * rather than ended on: run wf_3ccddd78 ended the whole wave on "HEAD unreadable at deliver", with
+ * three verified branches undelivered and no report writer. The breach still reaches the run
+ * result, as an `orchestrator-head` entry in `inconsistent`.
  */
 async function headCheck(label, ticketNumber) {
   const start = orchestratorHead
@@ -1716,7 +1734,7 @@ async function headCheck(label, ticketNumber) {
     }
     return res && res.exitCode === 0 ? parseHeadState(res.stdout) : null
   }
-  const moved = (h) => start.branch ? h.branch !== start.branch : (h.branch !== null || h.sha !== start.sha)
+  const moved = (h) => (start.branch ? h.branch !== start.branch : h.branch !== null) || h.sha !== start.sha
   const flag = (entry) => {
     breaches.push({ label, observedBy: ticketNumber, blamed: [], who: `ticket #${ticketNumber} (observed at its checkpoint; the HEAD move names no author)`, entries: [entry] })
     log(`ISOLATION BREACH (issue 807) at ${label} - ${entry}`)
@@ -1725,25 +1743,25 @@ async function headCheck(label, ticketNumber) {
 
   const now = await read(label)
   if (now === 'halted') return
-  if (!now) flag(`orchestrator HEAD unreadable at ${label}; expected ${describeHead(start)}`)
-  if (!moved(now)) return
+  if (now && !moved(now)) return
 
-  const target = start.branch ? start.branch : `--detach ${start.sha}`
+  const target = describeHead(start)
   let res = null
   try {
-    res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, target)),
+    res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, start)),
       { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) { res = null }
   const after = await read(`${label}-restored`)
   if (after === 'halted') return
   if (!after || moved(after)) {
-    flag(`orchestrator HEAD moved to ${describeHead(now)} and a checkout of ${target} did not put it back (exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''}); restore it by hand`)
+    flag(`orchestrator HEAD ${now ? `moved to ${describeHead(now)}` : `unreadable at ${label}`} and a restore onto ${target} did not put it back (exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''}); restore it by hand`)
   }
-  const key = `${now.branch}|${now.sha}`
+  const from = now ? describeHead(now) : `unreadable at ${label}`
+  const key = now ? `${now.branch}|${now.sha}` : `unreadable|${label}#${ticketNumber}`
   if (headRestoreSeen.has(key)) return
   headRestoreSeen.add(key)
-  headRestores.push({ label, observedBy: ticketNumber, from: describeHead(now), to: describeHead(after) })
-  log(`Orchestrator HEAD RESTORED at ${label} (ticket #${ticketNumber}, issue 807): the wave moved it to ${describeHead(now)}; checked back onto ${describeHead(after)}. If the checkout held uncommitted work before the run, look in the stash list of ${orchestratorCwd} - the fleet never pops a stash.`)
+  headRestores.push({ label, observedBy: ticketNumber, from, to: describeHead(after) })
+  log(`Orchestrator HEAD RESTORED at ${label} (ticket #${ticketNumber}, issues 807 and 1006): the wave left it ${now ? `on ${from}` : from}; put back onto ${describeHead(after)} and the wave continues. A sha the wave moved the branch to stays in the reflog of ${orchestratorCwd}; if the checkout held uncommitted work before the run, look in its stash list too - the fleet never pops a stash.`)
 }
 // [FLEET-TREE-GUARD-CHECK-END]
 
@@ -2560,7 +2578,7 @@ This is a FINISH pass over a run whose Deliver step died (issue 405): an earlier
 STEP A - merge the default branch BEFORE pushing, so the PR opens mergeable:
 A0. A CLASSIFIER REFUSAL IS NOT A RULE VIOLATION (issue 544). In a container the auto-mode classifier sometimes refuses a command of this stage on the shape of its text rather than on what it would do, and the refusals are not deterministic - run 6aaafad4 found that re-issuing the byte-identical command usually succeeded on the next try. The categories this fleet has been refused under so far are ${classifierCategoriesSeen()}. An unattended session is sanctioned to run every command this stage needs (the 2026-09-15 cloud permission ruling), so read a refusal as a flaky gate, never as a sign that you are doing something forbidden and never as a reason to stop the delivery. Whenever a command below is REFUSED (as opposed to running and failing): re-issue it ONCE, byte-identical. If that retry is refused too, take the fallback the step names - A8 for the merge, B1 for the push, B2 for the PR. NEVER end this stage with {pushed:false, prUrl:""} while the branch is verified: a verified branch always reaches origin and a PR, and the refusal text becomes a note on that PR rather than a substitute for it.
 AL. FINDING ${branch} ON ORIGIN (issue 654) - "could not tell" is never "absent". Run 6ab1884a's deliverer reported a verified, pushed branch "not found on origin or locally" while \`git ls-remote\` from the orchestrator printed its ref minutes later, and the ticket was filed as a failure. Whenever this stage needs to know whether ${branch} is on origin - A1's fetch of it failed, B1's push failed, or anything else makes it look missing: (1) \`git rev-parse --show-toplevel\` and ${gitSpelling(instrument, 'remote get-url origin')} - you must be in a checkout of the served repository, and an origin naming any other repository makes every answer below worthless, so say so; (2) \`git ls-remote --exit-code --heads origin ${branch}\`; (3) \`git fetch origin\`, then that same ls-remote again. Record EVERY ls-remote in branchLookup as {exitCode: its REAL exit code, output: verbatim}. Exit 0 printing a refs/heads/ line means the branch IS on origin: fetch it and carry on. Exit 2 is git's own "no matching ref"; any other exit, and an exit 0 that printed nothing, means you could not tell. When no lookup printed the ref, stop this ticket and return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed", conflictPaths:[], branchLookup:[every run], blockedReason:"<the git output of every command above, VERBATIM>"} - never mergeStatus "blocked", which means a merge that conflicted or broke the tests, and never "not found" or "does not exist" as your own conclusion: the run reads the exit codes and decides.
-A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git -C ${orchestratorCwd} worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` against the orchestrator's own checkout, measured absolute at Setup - issue 562 - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439), and from INSIDE that checkout - \`cd\` into it, never \`git -C\` into it: ${gitSpelling(instrument, `merge --no-edit origin/${defaultBranch}`)}. That is the spelling a live probe ran in a fleet worktree without a refusal, as a fast-forward and as a true merge commit (issue 907, recorded on that ticket); run 6ab733a4's deliverer lost the merge on #897 to "Interfere With Workloads" and then "Auto-Mode Bypass", so do not re-spell it into anything else. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
+A1. \`git fetch origin ${defaultBranch} ${branch}\` - the Implement step already pushed ${branch}, so origin has it and a fetch is enough to reach it. If that fetch fails, run AL before anything else - one failed command is not an answer. Then, from a checkout of ${branch} (its own worktree, or \`git -C ${orchestratorCwd} worktree add ${scratchFile(`deliver-${t.number}`)} ${branch}\` against the orchestrator's own checkout, measured absolute at Setup - issue 562 - that exact path, which carries this run's id and the ticket number because every worker of this run shares one scratchpad directory, issue 439), and from INSIDE that checkout - \`cd\` into it, never \`git -C\` into it: ${gitSpelling(instrument, `merge --no-edit origin/${defaultBranch}`)}. Before that merge, and before any reset or checkout in this stage, \`git rev-parse --show-toplevel\` must print that checkout and never ${orchestratorCwd}: run wf_3ccddd78's deliverer merged and hard-reset the orchestrator's own branch from there (issue 1006). That merge spelling is the one a live probe ran in a fleet worktree without a refusal, as a fast-forward and as a true merge commit (issue 907, recorded on that ticket); run 6ab733a4's deliverer lost the merge on #897 to "Interfere With Workloads" and then "Auto-Mode Bypass", so do not re-spell it into anything else. If the classifier REFUSES that merge command, re-issue it byte-identical once (A0); if the retry is refused as well, go to A8 - a refused merge never stops the delivery.
 A2. Clean merge (exit 0, nothing conflicted): if this branch touched \`aac-skills/project-harness/UPGRADES.md\`, run \`node tools/renumber-harness-upgrade.js\` before going on - two harness bumps in one wave can write the same \`| N |\` row far enough apart that git merges both silently, and a duplicate row is that same collision without a conflict (issue 515). If it prints "renumbered", go to A4 and mergeStatus is "resolved"; otherwise mergeStatus is "clean" - run A5(i)'s stamps check on the merge result before going on, because a clean merge that folded this branch's skill edit into the default branch's leaves the stamp stale with no conflict to resolve (issue 553), and if it fails do A4's regenerate, \`git add -A\`, commit it and run the check again. Then go to STEP A7, which runs on this path too.
 A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly four classes may be resolved here; a path in none of them is a real merge you must NOT guess at.
     (a) GENERATED FILE - the path matches one of ${generatedList}. Take the default branch's side: \`git checkout --theirs -- <path>\` then \`git add -- <path>\`.
@@ -3204,7 +3222,7 @@ return {
     // Issue 807: a HEAD the wave moved and a checkpoint put back is flagged here, not only logged.
     .concat(headWatchUnusable ? [{ ticket: null, kind: 'orchestrator-head', branch: null, detail: headWatchUnusable }] : [])
     .concat(headRestores.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
-      detail: `orchestrator HEAD moved to ${h.from} during the wave; restored onto ${h.to} at ${h.label} (issue 807). Check the orchestrator checkout's stash list for work the move stashed.` })))
+      detail: `orchestrator isolation breach: HEAD ${/^unreadable/.test(h.from) ? h.from : `moved to ${h.from}`} during the wave; restored onto ${h.to} at ${h.label} and the wave continued (issues 807, 1006). Check the orchestrator checkout's reflog and stash list for what the move left behind.` })))
     .concat(clean.filter(r => r.inconsistency).map(r => ({
       ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
     }))),

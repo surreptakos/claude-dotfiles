@@ -2793,13 +2793,105 @@ test('treeGuardCheck: a clean-tree HEAD move to detached origin/main is checked 
   await treeGuardCheck('verify-attempt1', 5);
   assert.equal(restores.length, 1);
   assert.match(restores[0], /git -C \/m checkout main(?!\S)/);
-  assert.ok(!/stash|reset/.test(restores[0].split('\n')[2]), 'the restore command must be a plain checkout');
+  assert.ok(!/stash|reset --hard/.test(restores[0].split('\n')[2]), 'the restore must never stash or hard-reset (issue 1006 adds a reset --keep)');
   assert.ok(logs.some((l) => /Orchestrator HEAD RESTORED at verify-attempt1/.test(l) && /stash list/.test(l)));
 });
 
 test('treeGuardCheck: a HEAD move the restore cannot undo is an isolation breach (issue 807)', async () => {
   const { treeGuardCheck } = await driveTreeGuard(headMock(['main', 'detached'], []), { orchestratorCwd: '/m' });
   await assert.rejects(() => treeGuardCheck('deliver', 5), /isolation breached.*did not put it back/);
+});
+
+// Issue 1006: run wf_3ccddd78's deliverer for #934 ran `git merge origin/master` and `git reset
+// --hard <ticket sha>` in the orchestrator checkout. HEAD stayed on the same branch name at another
+// sha, the next checkpoint read it as unreadable, and the breach ended the wave: #827 and #930
+// were left undelivered and the report writer never ran.
+test('treeGuardCheck: the start branch moved to another sha at deliver is reset back with reset --keep, not flagged fatal (issue 1006)', async () => {
+  const start = 'a'.repeat(40);
+  let head = 'c'.repeat(40), reads = 0;
+  const restores = [];
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'tree-guard:baseline') return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/s.json', baselineCount: 0 }), stderr: '' };
+    if (opts.label.startsWith('orchestrator-head:restore:')) { restores.push(prompt.split('\n')[2]); head = start; return { exitCode: 0, stdout: '', stderr: '' }; }
+    if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `main\n${reads++ === 0 ? start : head}\n`, stderr: '' };
+    if (opts.label.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  const { treeGuardCheck, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' });
+  await treeGuardCheck('deliver', 934);
+  await treeGuardCheck('deliver', 827);
+  assert.deepEqual(restores, [`git -C /m rev-parse -q --verify MERGE_HEAD >/dev/null && git -C /m merge --abort; git -C /m checkout main && git -C /m reset --keep ${start}`]);
+  assert.ok(logs.some((l) => /Orchestrator HEAD RESTORED at deliver \(ticket #934/.test(l) && /main \(cccccccccccc\)/.test(l) && /reflog/.test(l)));
+});
+
+test('a wave whose deliverer merges and resets the orchestrator checkout still delivers every other ticket and runs the report writer, and the run result names the breach (issue 1006)', async () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const helpers = loadStableHelpers(FLEET_SCRIPT);
+  const start = 'a'.repeat(40);
+  let head = start, unreadableOnce = false;
+  const calls = [], restores = [];
+  const agentMock = async (prompt, opts) => {
+    const l = opts.label;
+    calls.push(l);
+    if (l === 'tree-guard:baseline') return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/s.json', baselineCount: 0 }), stderr: '' };
+    if (l.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    if (l.startsWith('orchestrator-head:restore:')) { restores.push(prompt.split('\n')[2]); head = start; return { exitCode: 0, stdout: '', stderr: '' }; }
+    if (l.startsWith('orchestrator-head:')) {
+      // The observed failure: the first read after the move came back unreadable.
+      if (unreadableOnce) { unreadableOnce = false; return { exitCode: 128, stdout: '', stderr: 'fatal' }; }
+      return { exitCode: 0, stdout: `main\n${head}\n`, stderr: '' };
+    }
+    const n = parseInt(l.replace(/^[^#]*#/, ''), 10);
+    if (l.startsWith('impl:')) {
+      return { branch: prompt.match(/agent\/issue-\d+-attempt\d+-wf_testrun-w\d+/)[0], committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [`${n} found a thing`] };
+    }
+    if (l.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (l.startsWith('deliver:')) {
+      // #934's deliverer: `git merge origin/master` then `git reset --hard 74abb51f` in /m.
+      if (n === 934) { head = 'c'.repeat(40); unreadableOnce = true; }
+      return { pushed: true, prUrl: `https://github.com/x/y/pull/${n}`, mergeStatus: 'clean', conflictPaths: [] };
+    }
+    if (l === 'followups-writer') return { branch: 'b', sha: 's', prUrl: '', appended: 3 };
+    throw new Error(`unexpected agent label: ${l}`);
+  };
+  const body = [treeGuardSetupBody(src), extractMarked(src, 'FLEET-DELIVER-PROMPT'), extractCodeLane(src),
+    extractMarked(src, 'FLEET-LANES'), extractMarked(src, 'FLEET-REPORT')].join('\n');
+  // What the script runs after the wave: the pre-report checkpoint, then the report writer.
+  const tail = "await treeGuardCheck('pre-report', 0)\nassertNoBreach()\n"
+    + "const discoveryReport = await runReport(results.flatMap(r => (r && r.discoveries) || []), 'main')\n"
+    + 'return { results, breaches, headRestores, discoveryReport }';
+  const logs = [];
+  const run = new AsyncFunction('scope', `with (scope) {\n${body}\n${tail}\n}`);
+  const out = await run(laneScope({
+    agent: agentMock, log: (m) => logs.push(m),
+    cfg: {
+      treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js', treeGuardStateDir: '.git/orchestrator-tree-guard',
+      orchestratorCwd: '/m', reportModel: 'r', maxAttempts: 1, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z',
+      followupsFile: 'FOLLOW-UPS.md',
+    },
+    runId: 'testrun', invocationId: 'inv1', scout: { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' },
+    instrument: 'gh', rules: new Proxy({}, { get: () => () => '' }), verifierAgentType: 'fleet-verifier',
+    dedupeBrief: () => '', testCommand: 'echo ok', revParse: async () => null, classifyDelivery, worktreeMismatch,
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+    runHalt: createRunHalt(() => {}),
+    stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
+    priorFindingsBlock: helpers.priorFindingsBlock, unmetCriteriaOf: helpers.unmetCriteriaOf, gitSpelling: helpers.gitSpelling,
+    wave: [934, 827, 930].map((number) => ({ number, kind: 'code', title: 't', criteria: '', blockedBy: [] })),
+    buildLanes, chainGate, DISCOVERY_REPORT: {},
+    pipeline: async (items, fn) => { const res = []; for (const i of items) res.push(await fn(i)); return res; },
+  }));
+
+  assert.deepEqual(calls.filter((l) => l.startsWith('deliver:')), ['deliver:#934', 'deliver:#827', 'deliver:#930'],
+    'every pending deliverer must run after the breach');
+  assert.deepEqual(out.results.map((r) => r && r.prUrl), [934, 827, 930].map((n) => `https://github.com/x/y/pull/${n}`));
+  assert.deepEqual(out.breaches, [], 'a restored HEAD is not a fatal breach');
+  assert.equal(restores.length, 1);
+  assert.match(restores[0], new RegExp(`merge --abort; git -C /m checkout main && git -C /m reset --keep ${start}$`));
+  assert.deepEqual(out.headRestores, [{ label: 'deliver', observedBy: 934, from: 'unreadable at deliver', to: `main (${start.slice(0, 12)})` }]);
+  assert.ok(calls.includes('followups-writer'), 'the report writer must run');
+  assert.ok(out.discoveryReport && !out.discoveryReport.error, `the writer's report must come back clean: ${JSON.stringify(out.discoveryReport)}`);
+  assert.match(src, /\.concat\(headRestores\.map\(h => \(\{ ticket: h\.observedBy, kind: 'orchestrator-head'[^\n]*\n\s*detail: `orchestrator isolation breach: /,
+    'the run result must list each restore under `inconsistent`, named as an isolation breach');
 });
 
 test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
