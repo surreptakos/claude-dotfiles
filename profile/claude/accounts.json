@@ -47,6 +47,8 @@
     "surreptakos/aac-contract-builder":   {}
   },
   "routines": {
+    "self-sourcing-audit-local":{ "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "claude-dotfiles-local": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "daily-forgotten-tasks": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-steffi":        { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-rob":           { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
