@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-28T21:53:59Z"
-  previous-modified: "2026-09-18T04:15:27Z"
-  revision: "7"
-  content-sha: "027eb23976f9"
+  modified: "2026-09-29T01:39:47Z"
+  previous-modified: "2026-09-28T21:55:14Z"
+  revision: "8"
+  content-sha: "64422e26d44d"
 ---
 
 # Triage
@@ -84,13 +84,25 @@ Show counts and a one-line summary per item. Let the maintainer pick.
 5. **Apply the outcome:**
    - `ready-for-agent`: post an agent brief comment ([AGENT-BRIEF.md](AGENT-BRIEF.md)).
    - `ready-for-local-agent` — same structure as an agent brief, but name the desktop-only or proxy-blocked capability that keeps a cloud container from taking it (a `sync.ps1 -Mode pull` on the desktop, a remote branch delete the session proxy refuses, or an edit the auto-mode classifier blocks; a project-board sweep is no longer one, the Board sweep job runs it). A desktop session can pick it up.
-   - `ready-for-human` — same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). A step a local session can perform never carries `ready-for-human`.
+   - `ready-for-human` — first run the [ruling check](#ruling-check-before-ready-for-human). Then the same structure as an agent brief, but note why it can't be delegated (judgment calls, external access, design decisions, manual testing). A step a local session can perform never carries `ready-for-human`.
    - `needs-info`: post triage notes (template below).
    - For `wontfix`, close the issue, with the comment depending on *why*:
      - **Already implemented**: the change already exists in the codebase. Point to where it lives; do **not** write to `.out-of-scope/` (that KB is for *rejected* requests, not built ones).
      - **Rejected (bug)**: give a polite explanation, then close.
      - **Rejected (enhancement)**: write to `.out-of-scope/`, link to it from a comment, then close ([OUT-OF-SCOPE.md](OUT-OF-SCOPE.md)).
    - `needs-triage`: apply the role. Optional comment if there's partial progress.
+
+## Ruling check before ready-for-human
+
+Before moving any ticket to `ready-for-human` — step 5, a bulk pass, a relabel from `ready-for-agent`, a quick state override — read its comments **newest-first** for an owner ruling. A ruling comment carries one of these markers: `**Owner ruling**`, `rulings-page:`, `Ruling (Dan`. The ticket body's acceptance line ("Dan rules ...") is not the source: it says a ruling was needed, not that none was given.
+
+If a ruling is found, the owner has already answered, so do not re-queue the ticket for him. Route by the ruling instead:
+
+- it rules the work in or settles the question — `ready-for-agent`, with the ruling quoted and linked in the agent brief;
+- it rules the work out or moot — close it (`wontfix` or completed, as the ruling says), citing the ruling;
+- it leaves a later, different step to a person — keep the current label and comment citing the ruling and naming what is still open. Move to `ready-for-human` only when that open step is genuinely new, not the question the ruling answered.
+
+On a quick state override, tell the maintainer the ruling you found before applying the move. Four claude-dotfiles tickets (714, 718, 720, 721) went back to `ready-for-human` on 2026-09-25 hours after Dan had ruled on each, and sat in his queue asking what he had answered (issue 934).
 
 ## Triaging a discovery list into tickets
 
