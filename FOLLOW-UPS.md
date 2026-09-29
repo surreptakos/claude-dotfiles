@@ -452,3 +452,89 @@
 - Not handled (out of scope for issue 807): the orchestrator staying on its start branch but with that branch's sha moved (e.g. a reset or commit onto it mid-wave) is not flagged by the new HEAD watch - it compares only the branch name when the run started on a branch.
 - The finish mode (finishRunId) return value at aac-skills/ticket-fleet/ticket-fleet.js (`inconsistent: finished.inconsistent`) does not carry the tree-guard/orchestrator-head run-level entries the normal report now includes; a finish-mode run's checkpoints still restore and log, but the flag appears only in the log there.
 - The discoveries writer's DISCOVERY_REPORT schema has no error field, so step 4's existing 'return that stderr as the error' (followups-append.js failure) and the new step-5 refusal (commit held a foreign path) can only surface as an empty sha, which runReport logs as 'unknown sha' rather than an error.
+
+## Run 2026-09-29 (ticket-fleet 6abad6ee)
+
+- Issue #637 cannot close after the owner's four-ref delete alone. Sweep run 36444912222 (2026-09-28T15:36Z, schedule, on master) found indings: 26 stranded, 0 probably-landed, 0 undecided PR(s).
+- Issue #637 is labelled eady-for-local-agent, not eady-for-human as the 2026-09-21 ruling text says it should stay.
+- Issue 847 owner ruling says 'Already pressed it', but huddle_drafts on the Day Board is empty as of 2026-09-28 (desktop login, which can read the DB).
+- Issue 847's owner comment says the cloud session could not read the DB because the artifact belongs to another organization. In this desktop session the Artifact list shows the board as '(mine)', and reads succeed.
+- Box 3's literal trigger ('the next harness re-copy into aac-bill-intake') has NOT happened: aac-bill-intake docs/agents/harness-version.md on main reads harness-version: 33.
+- aac-bill-intake tracker-audit.yml run 36444709549 (head 6d6cfec1, 2026-09-28T15:35) failed with unrelated issue.
+- Git Bash (MSYS) rewrites a bare /compact argument to C:/Program Files/Git/compact.
+- On --resume, Claude Code re-runs every SessionStart hook but writes a new hook_additional_context entry only for output that changed.
+- The third-party sstklen/yes plugin's hook writes a stderr error on every Bash call in desktop session 8da30043.
+- Stale live-tree copies of governance scripts are still in C:\Users\Dan\.claude\hooks.
+- The probe left side effects outside the repo: the transcript and scratch files.
+- tests/bootstrap-test.sh cannot pass on the Windows desktop (Git Bash).
+- Assumption on issue 721: the owner ruling says to add 'one line'.
+- Issue 827 acceptance criteria 1 to 4 need Dan on AAC-AI.
+- Assumption: 'CLAUDE.md' in criterion 5 means the repo's own CLAUDE.md.
+- About 19 node tests fail on the Windows desktop at baseline commit 27698bc3.
+- tests/bootstrap-test.sh is effectively unrunnable on the Windows desktop under Git Bash.
+- tests/bootstrap-test.sh hangs on this Windows desktop.
+- Other repos' CLAUDE.md or AGENTS.md files may still carry a stale 'Owner account:' block.
+- I extended tools/owner-account-line.js to treat an ownerless registry entry like a dead one.
+- tests/restore-test.ps1: the owner-account sweep is now vacuous.
+- aac-skills/session-check/identity.test.js fixtures still use per-repo owners.
+- The watchdog and session-check still warn for an unregistered account.
+- Worktree isolation guard quirks: it refuses git status and git diff.
+- Assumption for issue 930: the fix is the ticket's 'faster option'.
+- The bootstrap gate ash tests/bootstrap-test.sh cannot pass on the Windows desktop.
+- Step-7 sweep of other repos NOT done.
+- Assumption: the issue says the check fails when 'harness-version.md does not' change.
+- Side effect of the gate: every change needs a harness version bump.
+- Stamp side effect: the deliberate-failure probe commit was stamped separately.
+- tests/bootstrap-test.sh hangs on this Windows desktop: stalled after printing its scratch line.
+- tests/bootstrap-test.sh fails when run on the Windows desktop under Git Bash.
+- Assumption for issue 931: 'current release' means npm's latest dist-tag.
+- tools/caveman-desktop-install.ps1 still requires -RepoRoot.
+- Not addressed: when the cloud hook upgrades the CLI while an older proxy is already listening.
+- Issue 718 counted 36 notes, but docs/agents/memory holds 43 notes.
+- 31 ready-for-human tickets were filed (issues 961 to 991).
+- Checker loophole: exit 3 with only 'unchecked' lines counts as a pass.
+- Checker semantics: a fact passes if it appears in ANY cited source.
+- Fetched HTML escapes < and >.
+- Bulk PR 719 and the root CLAUDE.md were excluded as sources.
+- tests/bootstrap-test.sh cannot pass on the Windows desktop: its ln -s PATH shim.
+- The Bash tool refuses commands containing git inside worktree-isolated agents.
+- Ticket bodies redact identifier and personal lines because the repo is public.
+- Recorded version for #943: on Dan-Inspiron15.
+- The ~/.claude-personal profile has not caught up.
+- Many project-scope aac-skills installs are pinned to old versions.
+- Assumption (issue 934): the ticket names 'any fleet or triage step that sets ready-for-human'.
+- Assumption (issue 934): for a ruled ticket the human lane keeps its current labels.
+- tests/bootstrap-test.sh cannot finish on the Windows desktop.
+- In this desktop worktree session the Bash worktree guard refuses plain git status.
+- Pre-existing flake: aac-skills/session-check/check.test.js.
+- tests/bootstrap-test.sh hung on the Windows desktop.
+- Assumption: the recipe cannot share a helper with the engine.
+- tests/docs-claims.test.js keeps its behavior.
+- Guard quirk in this worktree harness.
+- Consuming repos' existing copies of the wrapper still hold the old recipe.
+- aac-skills/session-check test fails on this Windows desktop.
+- tests/bootstrap-test.sh hung: no output past the scratch-dir banner.
+- The 'not checked' NOTE text was reworded.
+- PARKED_MILESTONE comparison is case-sensitive exact.
+- Rebase result for issue 932.
+- tests/bootstrap-test.sh does not work on a Windows Git Bash desktop.
+- The session-check unit test failed once under load.
+- triage/SKILL.md now mixes local-only lines.
+- The packager reports moving disable-model-invocation under metadata.
+- The worktree guard refuses git through the Bash tool.
+- Origin has four more stranded refs under agent/issue-5*.
+- Issue 637 now carries the label ready-for-local-agent.
+- The owner comment on issue 847 blames the failed check.
+- The live Day Board version stamp 1790344689 decodes.
+- The previous attempt's premise does not hold.
+- The owner ruling conflicts with the empty huddle_drafts collection.
+- Issue 827 AC1 to AC4 cannot be done by a fleet agent.
+- tests/restore-test.ps1 writes into the REAL home.
+- tests/bootstrap-test.sh does not work on a Windows Git Bash desktop: pathshim.
+- 
+ode --test launched from PowerShell fails 19 repo tests.
+- Live-tree audit for this attempt.
+- The worktree guard refused bare git from the Bash tool.
+- agent/issue-543-attempt3-wf_6aac5d73-w0 was on origin.
+- Issue 637 now has only the label eady-for-local-agent.
+- Four more agent/issue-5* refs are on origin.
