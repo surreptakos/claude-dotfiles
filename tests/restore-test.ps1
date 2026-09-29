@@ -1469,7 +1469,7 @@ if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry) -and (Test-Path $ow
         $out = & node $ownerModule check --repo $RepoRoot --registry $ownerRegistry --slug 'surreptakos/claude-dotfiles' 2>&1
         $checkExit = $LASTEXITCODE
     } finally { $ErrorActionPreference = $prev }
-    Check 'this repo''s CLAUDE.md carries the owner-account line that profile/claude/accounts.json says it should (AC2)' `
+    Check 'this repo''s CLAUDE.md matches profile/claude/accounts.json: no owner named, so no owner-account block (AC2, issue 714)' `
         ($checkExit -eq 0) @($out)
 }
 # Synthetic sweep across every live registered repo: seed a fake clones root, run apply-all
@@ -1483,7 +1483,13 @@ if ((Test-Path $ownerModule) -and (Test-Path $ownerRegistry)) {
     $liveSlugs = @()
     foreach ($pp in $registry.repos.PSObject.Properties) {
         $entry = $pp.Value
-        if ($entry.PSObject.Properties.Name -contains 'status' -and $entry.status -eq 'dead') { continue }
+        # Indexing Properties by name, not `.Properties.Name`: an empty `{}` entry has no members
+        # and member enumeration over nothing throws under strict mode.
+        $statusProp = $entry.PSObject.Properties['status']
+        if ($statusProp -and $statusProp.Value -eq 'dead') { continue }
+        # Issue 714: no repo has an owner account, so an entry with no owner carries no block and
+        # apply-all/check-all skip it; only a repo that names an owner is swept here.
+        if (-not $entry.PSObject.Properties['owner']) { continue }
         $liveSlugs += $pp.Name
         $repoName = ($pp.Name -split '/')[1]
         $repoDir  = Join-Path $sweepRoot $repoName

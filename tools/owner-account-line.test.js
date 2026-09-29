@@ -56,6 +56,7 @@ function fixtureRegistry() {
       'surreptakos/claude-dotfiles': { owner: 'Dan-AAC' },
       'surreptakos/aac-contract-builder': { owner: 'Dan' },
       'surreptakos/aac-task-management': { owner: 'Dan-AAC', status: 'dead' },
+      'surreptakos/aac-bill-intake': {},
     },
   };
 }
@@ -189,6 +190,21 @@ test('dead repos: no block written, and a stale block is removed on apply', () =
   assert.equal(cli(['check', '--repo', repoPath, '--registry', regPath, '--slug', 'surreptakos/aac-task-management']).status, 1);
 });
 
+test('ownerless repos (issue 714): no block written, a stale block is removed on apply, render exits 3', () => {
+  const slug = 'surreptakos/aac-bill-intake';
+  const { regPath, repoPath } = makeRepo('# repo\n\nintro.\n', slug);
+  const args = (mode) => [mode, '--repo', repoPath, '--registry', regPath, '--slug', slug];
+  assert.equal(cli(args('apply')).status, 0);
+  assert.equal(fs.readFileSync(path.join(repoPath, 'CLAUDE.md'), 'utf8').includes(BEGIN_MARK), false);
+  assert.equal(cli(args('check')).status, 0);
+  assert.equal(cli(args('render')).status, 3);
+  const withStale = '# repo\n\n' + renderBlock('Dan', ['cli']) + '\n\nintro.\n';
+  fs.writeFileSync(path.join(repoPath, 'CLAUDE.md'), withStale);
+  assert.equal(cli(args('check')).status, 1);
+  assert.equal(cli(args('apply')).status, 0);
+  assert.equal(fs.readFileSync(path.join(repoPath, 'CLAUDE.md'), 'utf8').includes(BEGIN_MARK), false);
+});
+
 test('unregistered slug or missing registry: exit 2 (could not audit, not a pass)', () => {
   const { regPath, repoPath } = makeRepo('# repo\n', 'nope/nope');
   assert.equal(cli(['check', '--repo', repoPath, '--registry', regPath, '--slug', 'nope/nope']).status, 2);
@@ -310,21 +326,16 @@ test('checkAll: missing clone → skipped, not counted against exit code', () =>
   assert.equal(results.some((r) => r.status === 'skipped'), true);
 });
 
-test('checkAll: exercises every live repo in the real profile/claude/accounts.json (registry drift guard)', () => {
+test('real profile/claude/accounts.json: no repo carries an owner, so no owner block is expected (issue 714)', () => {
   const regPath = path.join(__dirname, '..', 'profile', 'claude', 'accounts.json');
   if (!fs.existsSync(regPath)) return;
   const reg = JSON.parse(fs.readFileSync(regPath, 'utf8'));
-  const live = liveRepos(reg);
-  assert.ok(live.length >= 1, 'registry should list at least one live repo');
-  for (const r of live) {
-    assert.ok(reg.accounts[r.owner], `${r.slug} names an unknown owner ${r.owner}`);
+  assert.ok(Object.keys(reg.repos).length >= 1, 'registry should still list the repos');
+  for (const [slug, entry] of Object.entries(reg.repos)) {
+    assert.equal(entry.owner, undefined, `${slug} names an owner; neither account owns a repo`);
   }
-  const resolver = (slug) => {
-    const e = findRepoEntry(reg, slug);
-    return { content: `# r\n\n${renderBlock(e.owner, surfacesFor(reg, e.owner))}\n`, mdPath: slug };
-  };
-  const results = checkAll(reg, resolver);
-  assert.equal(rollup(results), 0, JSON.stringify(results));
+  assert.deepEqual(liveRepos(reg), []);
+  assert.equal(rollup(checkAll(reg, () => { throw new Error('nothing to resolve'); })), 0);
 });
 
 test('indexClonesUnder: finds a checkout by remote origin URL, ignores unrelated dirs', () => {
@@ -560,20 +571,17 @@ test('drift-guard: THIS repo\'s CLAUDE.md carries the block profile/claude/accou
   const slug = 'surreptakos/claude-dotfiles';
   const entry = findRepoEntry(reg, slug);
   assert.ok(entry, `${slug} must be in ${regPath}`);
-  const surfaces = surfacesFor(reg, entry.owner);
-  const expectedLine = renderLine(entry.owner, surfaces);
-
-  // Read the actual bytes of CLAUDE.md and pull the line the block carries. No renderBlock
-  // on this side of the assertion — an editor who mis-typed the block by one character
-  // fails here.
+  // No owner in the registry (issue 714): the file must carry no block. Read the actual bytes so
+  // a stale hand-typed block fails here.
+  assert.equal(entry.owner, undefined, `${slug} names an owner; neither account owns a repo`);
   const md = fs.readFileSync(mdPath, 'utf8');
   const actualLine = extractLine(md);
   assert.equal(
     actualLine,
-    expectedLine,
+    null,
     `CLAUDE.md is out of sync with ${regPath} for ${slug}\n` +
-    `  expected: ${expectedLine}\n` +
-    `  actual:   ${actualLine || '(no owner-account block)'}\n` +
+    `  expected: (no owner-account block)\n` +
+    `  actual:   ${actualLine}\n` +
     `  fix:      node tools/owner-account-line.js apply`
   );
 
