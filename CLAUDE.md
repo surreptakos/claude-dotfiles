@@ -63,6 +63,11 @@ never from an intermediate one, so `previous-modified` names the published versi
   `hooks/` and `tools/` (the packager's source only: pull does not restore them, and
   `settings.json` names no script the plugin ships, issue 733), `agents/`, the plugin manifests,
   and `profile/codex/`.
+- Caveman wiring (the proxy and `shrink-hook` hook entries, the `127.0.0.1:8787` model route) is
+  written by `caveman enable claude` on the machine, never carried in the profile: install and
+  pull run it through `tools/caveman-desktop-install.ps1`, and pull merges `settings.json` around
+  it (`tools/settings-caveman-merge.js`). Never add it to `profile/claude/settings.json`, and
+  never strip it by hand (issues 825, 826).
 - `lib/manifest.ps1` — the whitelist of what pull writes, the exclusions, the path templating, the
   secret guard. Adding something to the setup means adding it to `Get-DotfileItems` here.
 - `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before
