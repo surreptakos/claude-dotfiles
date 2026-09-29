@@ -11,7 +11,10 @@ retired the `claude/`, `codex/` and `memory/` mirrors and `sync.ps1 -Mode push` 
 Edit `aac-skills/<name>/` for a skill and `profile/` for the consumer profile — the global rules
 text, `settings.json`, the hook scripts, the Codex half. Do it on a branch, run the two commands
 below, commit, and merge: **the merge to master is the release**, and it is what a cloud container
-installs; a desktop takes the skills and rules with `claude plugin update` (pull restores the rest).
+installs; a desktop takes them on its own: `profile/claude/settings.json` registers the marketplace with
+`autoUpdate: true`, so Claude Code's background refresh installs the new payload version after the next
+session start with no command (Dan, 2026-09-29: never tell him to run `claude plugin update`; pull
+restores the rest).
 
 Generated, and never hand-edited: `marketplace/`, `.claude-plugin/marketplace.json` and the
 `aac-skills/project-harness/templates/` files the two generators own. `DASHBOARD.md` too — see
