@@ -2,14 +2,22 @@
 /**
  * wr001-lint - deterministic checks for AAC-WR-001.
  *
- * Covers the rules a regex can decide with high precision. Five judgment
+ * Covers every rule a pattern can decide (see wr001-coverage.md beside this
+ * file for all 167 rules: pattern, Jev, reader, or layout). Five judgment
  * rules that are yes/no on a single unit get a TypeSafe Jev Noul each (issue
  * 731): Rule 5 on the opening paragraph, Rules 6 and 10 per sentence, Rule 162
  * on the last paragraph, Rule 164 per paragraph. Those findings are WARN only
  * and never change the exit code. With Jev unavailable (no credential, a
  * timeout, the service down) the output is exactly the regex-only output.
- * Rules 8, 9, 154, 161, 166 and the rest of Part XXV need the evidence or the
- * whole document and stay with a reader.
+ * A rule that needs the evidence, the audience or the whole document (8, 154,
+ * 161, 166 among them) stays with a reader; the coverage table says which.
+ *
+ * Maintenance rule (Dan, 2026-09-29): a revision of the standard that adds or
+ * changes a rule lands in the same PR as its check here, or as its row in
+ * wr001-coverage.md saying why no pattern can decide it. Rule 37 sat in
+ * Appendix F as an owner ruling for six days with no check and let two run-in
+ * headings through; tools/wr001-lint-coverage.test.js fails when the table and
+ * this file disagree.
  *
  * Usage:
  *   node wr001-lint.js <file...> [--formal] [--prose] [--json] [--quiet]
@@ -23,8 +31,8 @@
  *
  * Exit: 0 clean, 1 findings at error severity, 2 could not read a file.
  *
- * Pinned to AAC-WR-001 v0.6. Ship this file under the same tag as the
- * standard; a lint rule and the text it enforces must not drift apart.
+ * Pinned to the STANDARD_VERSION below. Ship this file under the same tag
+ * as the standard; a lint rule and the text it enforces must not drift apart.
  */
 
 const fs = require("fs");
@@ -62,12 +70,116 @@ const APOS_PLURAL =
 const MONTHS =
   "January|February|March|April|May|June|July|August|September|October|November|December";
 
+
+const NUM_WORDS = "one|two|three|four|five|six|seven|eight|nine|ten";
+const TEENS_UP = "eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety";
+const COUNT_NOUNS = "doors?|cameras?|technicians?|sites?|customers?|panels?|readers?|days?|weeks?|months?|years?|questions?|lists?|items?|people|employees?|clinics?|states?|systems?|tabs?|rows?|columns?|emails?|bills?|vendors?|companies|work orders?|locations?|devices?|contracts?|proposals?|invoices?|inspections?|visits?|calls?|tickets?|subcontractors?|groups?|parts?|steps?|pages?";
+const US_STATES = "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY";
+// Rule 22: words ending in -ly that are not adverbs and may take a hyphen.
+const LY_NOT_ADVERB = "family|supply|early|only|daily|weekly|monthly|yearly|quarterly|hourly|assembly|ally|rally|fly|apply|reply|july|italy|jelly|belly|bully|holy|ugly|likely|friendly|lovely|timely|costly|deadly|elderly|lonely|orderly|silly|chilly|hilly|oily|wily|jolly|folly|tally|bodily|kindly|worldly";
+
+// Phrase and word checks added 2026-09-29 (Dan: "shouldn't all rules be in the
+// linter?"). Each row: the rule it decides, the severity, the pattern, the
+// message. formalSev, when present, replaces sev in a formal document.
+const PHRASE_CHECKS = [
+  // --- Part II, house style -----------------------------------------------
+  { rule: 9, sev: "warn", re: /\b(utili[sz]e[sd]?|utili[sz]ing|utili[sz]ation|prior to|subsequent to|commence[sd]?|commencing|due to the fact that|in the event that|at the present time|in close proximity to)\b/gi,
+    msg: "plain language: prefer use, before, after, start, because, if, now, near" },
+  { rule: 10, sev: "error", re: /\b(I am writing to (inform|let|tell|advise)|Please be advised that|It should be noted that|As you (are|may be) aware|At this time,?|In order to|With regard to|Please note that|Kindly note that)\b/gi,
+    msg: "filler that adds no information; delete it" },
+  { rule: 14, sev: "warn", re: /\bshall\b/gi,
+    msg: "'shall' outside a contract; use will, must, or may (Rule 139 keeps it in legal text)" },
+  // --- Part III, punctuation ------------------------------------------------
+  { rule: 16, sev: "warn", re: /\b[\w'-]+, [\w'-]+(?: [\w'-]+)?, (?!(?:and|or|is|are|was|were|has|have|will|which|who|but|so|then)\b)(?:[\w'-]+ )?[\w'-]+ (?:and|or) [\w'-]+/g,
+    msg: "series of three or more with no serial comma before the last item" },
+  { rule: 21, sev: "error", re: /\b(are|is|were|was|include|includes|included|of|to|for|with|by|such as|at)\s*:(?!\d)/g,
+    msg: "colon directly after a verb or preposition; finish the sentence first" },
+  { rule: 22, sev: "warn", re: new RegExp(`\\b(?!(?:${LY_NOT_ADVERB})-)[a-z]+ly-[a-z]+\\b`, "gi"),
+    msg: "hyphen after an -ly adverb; write 'highly confidential', not 'highly-confidential'" },
+  // --- Part IV, capitalization ---------------------------------------------
+  { rule: 35, sev: "warn", re: /(?<![.!?]\s|^)\b(Fire Alarm|Access Control|Intrusion Alarm|Video Surveillance|Burglar Alarm) (System|Systems|Monitoring)\b(?![\w ]*(?:Admin Fee|tab|column|Fee))/g,
+    msg: "generic system type capitalized mid-sentence; lowercase unless it is an official product or a quotation" },
+  // --- Part V, numbers, dates, time, money ---------------------------------
+  { rule: 38, sev: "warn", re: new RegExp(`(?<![$\\d.,:/-])\\b([1-9]|10)\\s+(${COUNT_NOUNS})\\b(?!\\s*(?:%|percent|a\\.m\\.|p\\.m\\.))`, "g"),
+    msg: "figure for a number one through ten in prose; spell it out (Rule 39 excepts a related series)" },
+  { rule: 38, sev: "warn", re: new RegExp(`\\b(${TEENS_UP})(?:-(?:${NUM_WORDS}))?\\s+(${COUNT_NOUNS})\\b`, "gi"),
+    msg: "spelled-out number over ten; use figures (11 cameras, 24 customers)" },
+  { rule: 40, sev: "warn", re: /[.!?]\s+\d[\d,.]*\s+[a-z]/g,
+    msg: "sentence begins with a figure; spell it out or recast" },
+  { rule: 42, sev: "error", re: new RegExp(`\\b(${MONTHS}),\\s+\\d{4}\\b`, "g"),
+    msg: "comma between month and year; write 'September 2026'" },
+  { rule: 43, sev: "warn", re: /(?<![\w/])\d{1,2}\/\d{1,2}\/\d{2,4}(?![\w/])/g,
+    msg: "numeric date in narrative text; write the month out, or YYYY-MM-DD where a sortable date helps" },
+  { rule: 44, sev: "warn", re: /\b12(:00)?\s*(a\.m\.|p\.m\.)/gi,
+    msg: "12 a.m. or 12 p.m.; use midnight or noon" },
+  { rule: 46, sev: "error", re: /\$\s*\d[\d,]*(\.\d+)?\s+dollars\b/gi,
+    msg: "dollar sign and the word dollars together; use one" },
+  { rule: 47, sev: "warn", re: /\b\d+(\.\d+)?%(?!\s*(?:markup|Mark-Up|cap))/g, prose: true, noTables: true,
+    msg: "percent symbol in narrative prose; write '39 percent' (tables and dashboards keep the symbol)" },
+  { rule: 48, sev: "warn", re: new RegExp(`\\b(${NUM_WORDS})\\s+(feet|foot|inches|inch|hours?|minutes?|pounds?|volts?|amps?|miles?|gallons?|seconds?)\\b(?!\\s+(?:notice|ago|later|drive|walk))`, "gi"),
+    msg: "spelled-out technical measurement; use figures (5 feet, 2 hours)" },
+  { rule: 50, sev: "error", re: /(?<![\w.$])\.\d+\b(?![\w.-])/g,
+    msg: "decimal under one with no leading zero; write 0.5" },
+  { rule: 52, sev: "warn", re: /\b(1st|2nd|3rd|[4-9]th|10th)\b/g,
+    msg: "ordinal first through tenth; spell it out (figures only for identifiers and 11th on)" },
+  { rule: 54, sev: "warn", re: /\b(approx\.|w\/|b\/c|thru\b|pls\b|dept\.|mgmt\.)/gi,
+    msg: "ordinary word abbreviated in prose; spell it out" },
+  { rule: 60, sev: "warn", re: new RegExp(`\\b[A-Z][a-z]+(?: [A-Z][a-z]+)?, (${US_STATES})\\b(?!-\\d)(?![\\s,]*\\d{5})`, "g"),
+    msg: "state abbreviation in prose; spell the state out (USPS form only in a postal address)" },
+  { rule: 63, sev: "error", re: /\b(to|please|will|can|should|must|and|then|not)\s+(setup|login|backup|signoff|handoff|breakdown)\b/gi,
+    msg: "one-word noun form used as a verb; the verb is two words (set up, log in, back up)" },
+  { rule: 63, sev: "error", re: /\b(a|an|the|this|that|our|your|initial|quick|full)\s+(set up|log in|back up|follow up|sign off|hand off|break down)\b(?!\s+(?:the|a|an|our|your|with|on|to|by|for|from|it|them|him|her)\b)/gi,
+    msg: "two-word verb form used as a noun; the noun is one word or hyphenated (setup, login, follow-up)" },
+  { rule: 84, sev: "warn", re: /\b[A-Z]{4,}(?:\s+[A-Z]{2,}){3,}\b/g,
+    msg: "running text in all capitals; use sentence case (quoted headings aside)" },
+  { rule: 88, sev: "error", re: /\bclick here\b/gi,
+    msg: "'Click here'; use descriptive link text" },
+  // --- Part XII, email ------------------------------------------------------
+  { rule: 100, sev: "warn", re: /^Subject:\s*(Question|Update|FYI|Important|Hello|Hi|Follow[- ]?up|Quick question|Checking in)\s*$/im,
+    msg: "subject line with no topic, project, or required action" },
+  { rule: 101, sev: "error", re: /\b(I )?hope (this|you)('re| are| find| finds)?[\w ]{0,20}(well|doing well|great)\b/gi,
+    msg: "'I hope this email finds you well'; start with the purpose" },
+  { rule: 104, sev: "warn", re: /\bASAP\b/g,
+    msg: "'ASAP'; give the date and time, or the sequence that sets the deadline" },
+  // --- Part XXV, draft quality and AI tells ------------------------------
+  { rule: 155, sev: "warn", re: /\b(really|just|literally|genuinely|honestly|simply|actually|deeply|truly|fundamentally|inherently|inevitably|interestingly|importantly|crucially)\b/gi,
+    msg: "empty adverb; cut it unless it carries emphasis or uncertainty" },
+  { rule: 155, sev: "error", re: /\b(At its core|In today's [\w-]+|It's worth noting|It is worth noting|At the end of the day|When it comes to|In a world where|The reality is)\b/gi,
+    msg: "filler phrase (Appendix G8); delete it" },
+  { rule: 156, sev: "error", re: /\b(What nobody tells you|What they don't tell you|The part everyone misses|Here's what most people miss|The missing piece is|Nobody talks about)\b/gi,
+    msg: "faux-insight setup; state the point" },
+  { rule: 157, sev: "error", re: /\b(The best part|The kicker|The result|The truth|The catch|The upshot|The bottom line|The key|The takeaway|Bottom line):/g,
+    msg: "colon-reveal drama; write one sentence" },
+  { rule: 158, sev: "error", re: /\b(marks a pivotal moment|stands as a testament|underscores the importance|a shining example of|speaks volumes|a powerful reminder|represents a significant (milestone|step)|The reasons are structural|The implications are significant|This is the deepest problem|The stakes are high|The consequences are real)\b/gi,
+    msg: "importance puffery or vague declarative; give the fact and let the reader judge" },
+  { rule: 159, sev: "error", re: /,\s+(highlighting|underscoring|demonstrating|reflecting|showcasing|emphasizing|signaling|reinforcing|illustrating|paving the way)\b/gi,
+    msg: "trailing participial clause that restates the sentence as commentary; end on the act" },
+  { rule: 160, sev: "error", re: /\b(experts agree|studies show|research suggests|scientists say|observers note|industry leaders believe|it is widely understood|data indicates)\b/gi,
+    msg: "weasel attribution; name the source or cut the claim" },
+  { rule: 162, sev: "error", re: /\b(And that changes everything|That's the whole game|Nothing else matters|Let that sink in)\b/gi,
+    msg: "fake-profound kicker; end on the last real point" },
+  { rule: 163, sev: "error", re: /\b(the key point is|this distinction matters|what this means is|it is worth noting|the takeaway is|it's important to understand|this is a crucial distinction|Here's the thing|Here's what|Here's this|Here's that|Here's why|The uncomfortable truth is|It turns out|The real [\w-]+ is|Let me be clear|The truth is,|I'll say it again|I'm going to be honest|Can we talk about|Here's the problem though|This matters because|Make no mistake|Here's why that matters|Full stop\.|Hint:|Plot twist:|Spoiler:|You already know this, but|But that's another post|is a feature, not a bug|Dressed up as|Let me walk you through|In this section, we'll|As we'll see|I want to explore|They exist, I promise|I promise)\b/gi,
+    msg: "interpretive metadiscourse or throat-clearing (Appendix G1, G2, G7, G9, G10); delete the wrapper, keep the sentence" },
+  { rule: 164, sev: "error", re: /\b(Not because [^.]{1,60}\. Because|isn't the problem\. [\w ]+ is\.|The answer isn't [^.]{1,40}\. It's|The question isn't [^.]{1,40}\. It's|It's not (about )?[^.]{1,40}\. It's|not just [^.]{1,40} but also|It feels like [^.]{1,40}\. It's actually|stops being [^.]{1,30} and starts being|That's it\. That's the|Here's what I mean:|Think about it:|And that's okay\.|Nobody designed this\.|People tend to)\b/gi,
+    msg: "formulaic structure (Appendix H1 to H6); state the point directly" },
+  { rule: 164, sev: "warn", re: /(?:^|[.!?]\s+)(So|Look),\s/g,
+    msg: "sentence opens with 'So,' or 'Look,'; start with content" },
+  { rule: 165, sev: "warn", re: /\w\s\*\*[^*\n]{1,40}\*\*\s\w/g,
+    msg: "decorative bold inside a sentence; put the emphasis in the words" },
+  { rule: 167, sev: "error", re: /\b(delve[sd]?|delving|foster(s|ed|ing)?|leverag(e|es|ed|ing)|facilitat(e|es|ed|ing)|empower(s|ed|ing|ment)?|streamlin(e|es|ed|ing)|elevat(e|es|ed|ing)|embark(s|ed|ing)?|supercharg(e|es|ed|ing)|garner(s|ed|ing)?|enhanc(e|es|ed|ing|ement|ements)|bolster(s|ed|ing)?|underscor(e|es|ed|ing)|showcas(e|es|ed|ing)|emphasi[sz](e|es|ed|ing)|highlight(s|ed|ing)|tapestry|realm|interplay|testament|multifaceted|meticulous(ly)?|intricate|paramount|transformative|pivotal|crucial(ly)?|enduring|vibrant|valuable|ever-evolving|cutting-edge|deep dive|align(s|ed|ing)? with|paradigm shift|game[- ]changer|navigat(e|es|ed|ing) (the )?(challenges|complexit|landscape)|unpack(s|ed|ing)?|lean(s|ed|ing)? into|double down|take a step back|moving forward|circle back|on the same page)\b/gi,
+    msg: "machine vocabulary (Rule 167, Appendix G3); cut or replace with the plain word" },
+  { rule: 167, sev: "error", re: /\blandscape\b(?!\s*(?:orientation|mode|page|section|layout|view|printing|tab))/gi,
+    msg: "'landscape' as an abstract noun; say situation or field (page orientation is exempt)" },
+];
+
 const CHECKS = [
   // --- Punctuation -------------------------------------------------------
   // Sentence spacing only. A markdown list marker ("1.  Item") and table cell
   // padding are layout, not sentence spacing; both are filtered in lintFile.
   { rule: 15, sev: "error", re: /[.!?:;]  +(?=[A-Z"'(])/g,
     msg: "two or more spaces between sentences; use one" },
+  { rule: 26, sev: "warn", re: /[\w)\]][”"][.,](?!\d)/g,
+    msg: "period or comma outside the closing quotation mark; U.S. style puts it inside (a technical identifier may keep it outside)" },
   { rule: 25, sev: "error", re: /\band\/or\b/gi,
     msg: "and/or; name the actual relationship" },
   { rule: 27, sev: "error", re: APOS_PLURAL,
@@ -137,6 +249,7 @@ function lintFile(file, opts) {
   const formal =
     opts.prose ? false : opts.formal || detectFormal(file, lines);
   const findings = [];
+  const hasTables = lines.some((l) => /^\s*\|/.test(l));
 
   const push = (i, col, rule, sev, msg, text) =>
     findings.push({ line: i + 1, col, rule, sev, msg, text: text.trim() });
@@ -147,6 +260,19 @@ function lintFile(file, opts) {
       let m;
       while ((m = c.re.exec(line)) !== null) {
         push(i, m.index + 1, c.rule, c.sev, c.msg, m[0]);
+        if (m[0].length === 0) c.re.lastIndex++;
+      }
+    }
+
+    // Rule 2 protects quotations: an inline quoted span is not AAC prose.
+    const unquoted = line.replace(/["“][^"”\n]{3,}["”]/g, (q) => " ".repeat(q.length));
+    for (const c of PHRASE_CHECKS) {
+      if (c.prose && (formal || !opts.prose)) continue;
+      if (c.noTables && hasTables) continue;
+      c.re.lastIndex = 0;
+      let m;
+      while ((m = c.re.exec(unquoted)) !== null) {
+        push(i, m.index + 1, c.rule, c.formalSev && formal ? c.formalSev : c.sev, c.msg, m[0]);
         if (m[0].length === 0) c.re.lastIndex++;
       }
     }
@@ -204,6 +330,29 @@ function lintFile(file, opts) {
       msg: `document mixes 'percent' (${wordPct}) and '%' (${signPct}); pick one`,
       text: "",
     });
+  }
+
+  // Rule 93. No more than three list levels.
+  lines.forEach((l, i) => {
+    const m = /^(\s*)(\d+\.|[-*+])\s+/.exec(l);
+    if (m && m[1].length >= 9) {
+      findings.push({ line: i + 1, col: 1, rule: 93, sev: "warn", msg: "list nested deeper than three levels", text: l.trim().slice(0, 40) });
+    }
+  });
+
+  // Rule 95. A table carries a short descriptive title above it.
+  lines.forEach((l, i) => {
+    if (!/^\s*\|/.test(l) || (i > 0 && /^\s*\|/.test(lines[i - 1]))) return;
+    let j = i - 1;
+    while (j >= 0 && !lines[j].trim()) j--;
+    if (j < 0 || !/^\s*(?:\*\*)?Table\b/i.test(lines[j])) {
+      findings.push({ line: i + 1, col: 1, rule: 95, sev: "warn", msg: "table without a title line above it ('Table 1. ...')", text: l.trim().slice(0, 40) });
+    }
+  });
+
+  // Rule 124. A document with a table states its data-as-of date or period.
+  if (hasTables && !/\b(as of|data as of|reporting period|through (?:\w+ \d{1,2}, )?\d{4}|trailing (?:twelve|\d+) months|period covered)\b/i.test(raw)) {
+    findings.push({ line: 0, col: 0, rule: 124, sev: "warn", msg: "tables present but no data-as-of date or reporting period found", text: "" });
   }
 
   // Rules 146 and 147. The filename is part of the deliverable.
