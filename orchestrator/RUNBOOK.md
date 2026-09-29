@@ -72,7 +72,9 @@ body points to a claude-dotfiles issue and reads to `tools/tracker-audit.js` as 
 `dangling-reference` when the intent was another repo. Every reference to work in the served repo
 — issues, PRs, heartbeat citations — is written `owner/repo#N`, never bare `#N`. Writing refs
 right the first time is the master's job; `.github/workflows/repair-state-refs.yml` sweeps behind
-as a backstop on issue-edit events, not a substitute.
+as a backstop on issue-edit events, not a substitute. Its `GITHUB_TOKEN` cannot read the served
+repos, so it skips each row until the job gets a token that can (issue 930); until then the
+desktop watchdog's sweep is the only repair.
 
 ## Guard
 
