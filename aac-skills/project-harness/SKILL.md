@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-29T18:26:10Z"
-  previous-modified: "2026-09-28T23:57:44Z"
-  revision: "46"
-  content-sha: "b4d76aa4e00a"
+  modified: "2026-09-29T19:38:01Z"
+  previous-modified: "2026-09-29T18:44:14Z"
+  revision: "47"
+  content-sha: "140a4cd706b1"
 ---
 
 # Project Harness
@@ -94,6 +94,11 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      (an import error) while the suite is green locally.
 5. **Pre-commit test gate** — copy `templates/pre-commit` to `.githooks/pre-commit`, substitute the
    test command, add a one-line `.githooks/README.md`, then `git config core.hooksPath .githooks`.
+   Stage the hook executable: `git add .githooks/pre-commit && git update-index --chmod=+x
+   .githooks/pre-commit`; `git ls-files -s .githooks/pre-commit` must then read `100755`. A Windows
+   checkout runs `core.fileMode=false`, so `git add` alone records 100644 whatever the disk bit says,
+   and git on Linux skips the gate with only `hint: The '.githooks/pre-commit' hook was ignored
+   because it's not set as executable.` (issue 1021; v30 fixed the same trap for the bootstrap hook).
    Time the suite first; over ~60s, make it a pre-push hook instead and say so.
 6. **ADR status lines** — give every ADR a `**Status:**` line after its title (default `accepted.`;
    a superseded one names its successor). The dashboard reads these.
@@ -131,7 +136,7 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      `tools/tracker-audit-template.test.js` pins both halves.
 9. **Harness version marker** — copy `templates/harness-version.md` to
    `docs/agents/harness-version.md` and set the date. It is a dedicated file so one `cat` reads it in
-   every harnessed repo. **Current version: 35.** `/session-start` reads this marker every session and
+   every harnessed repo. **Current version: 36.** `/session-start` reads this marker every session and
    STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
 10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
     `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
@@ -219,6 +224,8 @@ Done when every line below holds.
 - `node --check tools/tracker-audit.js`, then run it. Exit 1 on an existing repo is expected: hand the
   findings to the owner instead of fixing them as harness work. Exit 2 (`gh auth status`, wrong repo,
   dependencies endpoint unavailable) is reported as a failure.
+- `git ls-files -s .githooks/pre-commit` reads `100755` (step 5); `100644` means the gate runs on no
+  Linux checkout.
 - Commit everything (the new hook fires — its first test), push, `gh run watch` the dashboard
   workflow to success. Let the next real issue exercise the issue-event trigger.
 - **After the install, CI owns `DASHBOARD.md`**: run the script only to check output, then discard
