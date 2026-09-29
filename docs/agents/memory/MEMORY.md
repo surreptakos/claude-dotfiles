@@ -30,6 +30,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - desktop-rpm-copy-is-account-synced: read rpm/manifest.json, not the path
 - desktop-scheduled-tasks-are-per-org: per org
 - dotfiles-public-for-cloud-clone: no env sources
+- plugin-auto-updates-never-tell-dan: desktop marketplace autoUpdate true; never tell Dan to run claude plugin update
 - environment-verification-log: log
 - fable-usage-is-rationed: weekly cap; workers stay pinned, orchestrator runs Fable high
 - gate-declare-bare-command: nothing appended
