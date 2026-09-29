@@ -46,9 +46,9 @@ Two Workflow-tool behaviours that cost a fleet launch each on 2026-09-01:
    other repo. Dan declined a per-worker repo check on 2026-09-28, so this discipline is the guard.
 
 **Why:** the `workflow-authoring` skill documents rule 2 and it was dismissed as stale on the strength
-of one successful run. A live launch settled it. Rule 1 is documented nowhere. Rule 4 is undocumented
-in `orchestrator/RUNBOOK.md`'s dispatch section, which names only a relative
-`scriptPath = .claude/workflows/ticket-fleet.js`.
+of one successful run. A live launch settled it. Rule 1 is documented nowhere. Rule 4 was undocumented
+in `orchestrator/RUNBOOK.md` when found; its Dispatch step 4 and Roles section now require the
+absolute `scriptPath`.
 
 **How to apply:** after editing any workflow script, launch via `scriptPath`, from an LF copy when
 the source is CRLF. Every fleet launch
