@@ -27,6 +27,7 @@ const RUN_IN = [
   "1. Which hardware systems can we install, and which can we not?",
   "   1. Can install. As a starting point, the systems on the account today are VISTA-128BPT and PW7K1IC Pro-Watch.",
   "   2. Cannot install. Any platform or hardware we will not touch, with a sentence on why.",
+  "   3. Question 2, counts. The column on the tab is headed by state.",
   "",
 ].join("\n");
 
@@ -46,16 +47,16 @@ const SENTENCES = [
 test("Rule 37: a one-to-three-word label ending in a period inside a list item is an ERROR when formal", async () => {
   const { code, findings: f } = await findings(RUN_IN, ["--formal"]);
   assert.strictEqual(code, 1);
-  assert.deepStrictEqual(f.map((x) => [x.line, x.sev, x.text]), [[4, "error", "Can install."], [5, "error", "Cannot install."]]);
+  assert.deepStrictEqual(f.map((x) => [x.line, x.sev, x.text]), [[4, "error", "Can install."], [5, "error", "Cannot install."], [6, "error", "Question 2, counts."]]);
 });
 
 test("Rule 37: the same label is a WARN in ordinary prose and does not move the exit code", async () => {
   const { code, findings: f } = await findings(RUN_IN, ["--prose"]);
   assert.strictEqual(code, 0);
-  assert.deepStrictEqual(f.map((x) => x.sev), ["warn", "warn"]);
+  assert.deepStrictEqual(f.map((x) => x.sev), ["warn", "warn", "warn"]);
 });
 
-test("Rule 37: full sentences, a Yes., a label with a digit, and a paragraph opener are not flagged", async () => {
+test("Rule 37: full sentences, a Yes., and a paragraph opener are not flagged", async () => {
   const { code, findings: f } = await findings(SENTENCES, ["--formal"]);
   assert.strictEqual(code, 0);
   assert.deepStrictEqual(f, []);
