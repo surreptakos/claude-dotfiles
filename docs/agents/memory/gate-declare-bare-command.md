@@ -19,3 +19,7 @@ python "__USERHOME__\.codex\hooks\ask_matt_gate.py" declare-claude "<session>" "
 Since 2026-09-21 (issue 608) a trailing `; echo "exit=$?"` or `2>&1; echo 'EXIT=$?'` is tolerated; anything else appended is still a rejection — `; echo "EXIT=$?"; ls` is two commands, and the second one denies the call. The prompt gate and the deny both say so in words now, so the rejection no longer reads as "the declaration itself was wrong".
 
 **How to apply:** First tool call of every turn is the bare declaration. Put the real work in the next call. Same rule for the pre-send lint: separate call, output read from the result, no chaining needed but harmless there. Related: [[workflow-runtime-quirks]].
+
+Source: profile/codex/hooks/ask_matt_gate.py, https://github.com/surreptakos/claude-dotfiles/issues/608, https://github.com/surreptakos/claude-dotfiles/issues/662
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/972

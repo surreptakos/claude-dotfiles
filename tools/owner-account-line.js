@@ -36,7 +36,7 @@
  *   --via          clones | github (default: clones)
  *
  * Exit codes: 0 clean / applied / rendered, 1 check drift, 2 usage or read error, 3 registered
- * repo is marked dead (nothing to write; check treats missing line as ok). check-all rolls the
+ * repo is marked dead or has no `owner` (nothing to write; check treats missing line as ok). check-all rolls the
  * per-repo codes up: exit 1 if any repo drifted, 2 if any lookup failed, 0 only when every live
  * repo agrees with the registry.
  *
@@ -222,11 +222,19 @@ function defaultClonesRoot(env = process.env) {
   return path.join(home, 'Claude', 'Projects');
 }
 
+/** Why a registry entry carries no owner line, or null when it should. Neither account owns a
+ *  repo (owner ruling 2026-09-25, issue 714): an entry with no `owner` has nothing to render. */
+function noLineReason(entry) {
+  if (entry.status === 'dead') return 'is marked dead';
+  if (!entry.owner) return 'has no owner';
+  return null;
+}
+
 /** Return every live (non-dead) repo in the registry as { slug, owner, entry }. */
 function liveRepos(reg) {
   const out = [];
   for (const [slug, entry] of Object.entries(reg.repos || {})) {
-    if (entry.status === 'dead') continue;
+    if (noLineReason(entry)) continue;
     out.push({ slug, owner: entry.owner, entry });
   }
   return out;
@@ -387,14 +395,19 @@ function run(argv, env = process.env, io = {}) {
     return 2;
   }
 
+  const noLine = noLineReason(entry);
   if (opts.mode === 'render') {
+    if (noLine) {
+      process.stderr.write(`${slug} ${noLine} in ${regPath}; no line to render\n`);
+      return 3;
+    }
     const surfaces = surfacesFor(reg, entry.owner);
     process.stdout.write(renderLine(entry.owner, surfaces) + '\n');
     return 0;
   }
 
-  // Dead repos: no line to write. check() treats missing/dead as ok; apply() removes any stale block.
-  if (entry.status === 'dead') {
+  // Dead or ownerless repos: no line to write. check() treats a missing line as ok; apply() removes any stale block.
+  if (noLine) {
     if (opts.mode === 'apply') {
       // Strip a stale block from every instructions file the repo carries (some repos
       // duplicate the two files; leaving one clean while the other keeps a stale block would
@@ -407,11 +420,11 @@ function run(argv, env = process.env, io = {}) {
         if (BLOCK_RE.test(content)) {
           const cleaned = content.replace(new RegExp('\\n?' + BLOCK_RE.source + '\\n?', ''), '\n');
           fs.writeFileSync(mdPath, cleaned);
-          process.stdout.write(`removed stale block: ${slug} is marked dead in ${regPath} (${mdPath})\n`);
+          process.stdout.write(`removed stale block: ${slug} ${noLine} in ${regPath} (${mdPath})\n`);
           removed = true;
         }
       }
-      if (!removed) process.stdout.write(`${slug} is marked dead in ${regPath}; no line to write\n`);
+      if (!removed) process.stdout.write(`${slug} ${noLine} in ${regPath}; no line to write\n`);
       return 0;
     }
     // check
@@ -420,7 +433,7 @@ function run(argv, env = process.env, io = {}) {
       if (!fs.existsSync(mdPath)) continue;
       const content = fs.readFileSync(mdPath, 'utf8');
       if (BLOCK_RE.test(content)) {
-        process.stderr.write(`drift: ${slug} is marked dead but ${mdPath} carries an owner-account block\n`);
+        process.stderr.write(`drift: ${slug} ${noLine} but ${mdPath} carries an owner-account block\n`);
         return 1;
       }
     }

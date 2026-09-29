@@ -20,3 +20,5 @@ is wasted work.
 **How to apply:** after `claude plugin update aac-skills@claude-dotfiles` at user scope, the new
 payload (hooks included) is what every session on the PC loads. Prove it with the debug-file probe
 rather than updating project scopes one by one.
+
+Source: profile/claude/plugins/installed_plugins.json, https://github.com/surreptakos/claude-dotfiles/issues/208

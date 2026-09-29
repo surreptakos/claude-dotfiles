@@ -7,7 +7,8 @@
     "accounts: label -> { uuid, email, orgs: { uuid: label }, surfaces }. uuid is the claude.ai",
     "account id: desktop sessions carry it in the path of their host-session file under",
     "%APPDATA%\\Claude\\claude-code-sessions; CLI sessions carry it in oauthAccount of .claude.json.",
-    "repos: GitHub slug -> owner label, optional status 'dead'.",
+    "repos: GitHub slug -> {}, optional status 'dead'. No repo has an owner account: Dan and Dan-AAC",
+    "are the same owner and either may work any repo (owner ruling 2026-09-25, issue 714).",
     "routines: desktop scheduled-task id -> owner label and the org it must be enabled under.",
     "auditRepo: the one repo whose session check walks every desktop registry for stray routines."
   ],
@@ -35,17 +36,19 @@
     }
   },
   "repos": {
-    "surreptakos/claude-dotfiles":        { "owner": "Dan-AAC" },
-    "surreptakos/aac-routines":           { "owner": "Dan-AAC" },
-    "surreptakos/aac-message-board":      { "owner": "Dan-AAC" },
-    "surreptakos/aac-sales-commissions":  { "owner": "Dan-AAC" },
-    "surreptakos/aac-task-management":    { "owner": "Dan-AAC", "status": "dead" },
-    "surreptakos/aac-bill-intake":        { "owner": "Dan" },
-    "surreptakos/zoho-source-of-truth":   { "owner": "Dan" },
-    "surreptakos/aac-sales-cockpit":      { "owner": "Dan" },
-    "surreptakos/aac-contract-builder":   { "owner": "Dan-AAC" }
+    "surreptakos/claude-dotfiles":        {},
+    "surreptakos/aac-routines":           {},
+    "surreptakos/aac-message-board":      {},
+    "surreptakos/aac-sales-commissions":  {},
+    "surreptakos/aac-task-management":    { "status": "dead" },
+    "surreptakos/aac-bill-intake":        {},
+    "surreptakos/zoho-source-of-truth":   {},
+    "surreptakos/aac-sales-cockpit":      {},
+    "surreptakos/aac-contract-builder":   {}
   },
   "routines": {
+    "self-sourcing-audit-local":{ "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "claude-dotfiles-local": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "daily-forgotten-tasks": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-steffi":        { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "o3-prep-rob":           { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
