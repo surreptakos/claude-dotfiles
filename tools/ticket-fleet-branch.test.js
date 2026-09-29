@@ -2678,11 +2678,12 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
   // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
   // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
   const cwdFlags = guardBody.match(/--cwd \$\{orchestratorCwd\}/g) || [];
-  assert.equal(cwdFlags.length, 2, `expected the baseline and the check command to both pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
+  assert.equal(cwdFlags.length, 3, `expected the baseline, the check and the restore (issue 1020) command to all pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
   assert.ok(!guardBody.includes('--cwd .'), 'no guard command may hardcode the relative default');
   assert.ok(!guardBody.includes('--cwd ${cfg.orchestratorCwd}'), 'no guard command may read cfg.orchestratorCwd directly - only the measured orchestratorCwd');
   assert.match(guardBody, /\$\{GUARD_CMD\} baseline --cwd \$\{orchestratorCwd\}/, 'tree-guard:baseline must run node tools/orchestrator-tree-guard.js with the absolute path');
   assert.match(guardBody, /\$\{GUARD_CMD\} check --cwd \$\{orchestratorCwd\}/, 'every tree-guard:<label> check must run node tools/orchestrator-tree-guard.js with the absolute path');
+  assert.match(guardBody, /\$\{GUARD_CMD\} restore --cwd \$\{orchestratorCwd\}/, 'every tree-guard:restore must run node tools/orchestrator-tree-guard.js with the absolute path');
 
   // The tip agent (revParse, `tip:#<ticket>`) reads a ref from the orchestrator's own checkout too,
   // and is exactly as exposed to a mid-run `cd` as the guard - it must carry the same absolute path.
@@ -2713,8 +2714,8 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
   const logs = [];
-  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn treeGuardCheck;\n}`);
-  const treeGuardCheck = await wrapper(laneScope({
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable };\n}`);
+  const inner = await wrapper(laneScope({
     agent: agentMock,
     log: (m) => logs.push(m),
     cfg: Object.assign({
@@ -2723,7 +2724,7 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
     }, cfgOverrides),
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
   }));
-  return { treeGuardCheck, logs };
+  return Object.assign(inner, { logs });
 }
 
 const MEASURED_ORCHESTRATOR_CWD = '/home/runner/work/measured-checkout';
@@ -2851,8 +2852,9 @@ test('tree-guard baseline exit 3 aborts the run when treeGuard:true (issue 811)'
 
 // Mutation test (issue 811): with a working baseline, a stage that writes into the orchestrator's
 // own tree must be caught, not just measured. `check`'s stdout reporting a fresh entry is exactly
-// what a scripted root-tree write during a run would produce; treeGuardCheck must throw naming the
-// checkpoint label and the ticket, not swallow it.
+// what a scripted root-tree write during a run would produce. Since issue 1020 the checkpoint
+// restores it and continues; a restore that does not take (here: its agent throws) must still
+// throw naming the checkpoint label and the ticket, not swallow it.
 test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint and the ticket (issue 811 mutation test)', async () => {
   const agentMock = async (prompt, opts) => {
     if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
@@ -2877,6 +2879,72 @@ test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint a
       return true;
     },
   );
+});
+
+// Issue 1020: this repo ships tools/orchestrator-tree-guard.js, so a wave launched here with default
+// args runs the guard for real. The agent stand-in EXECUTES each command it is handed with bash from
+// this repo's root - where the fleet's guard agents run - against a scratch orchestrator checkout:
+// the Setup baseline must report the guard active, and a file a subagent writes into that
+// checkout's root must be caught at the next checkpoint, moved aside and recorded for the run
+// result while the wave continues (issue 1006's restore-and-continue), not thrown.
+test('tree guard present in this repo: default args baseline it active, and a root-tree write is caught, restored and recorded (issue 1020)', async (t) => {
+  const os = require('node:os');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const defaultScript = (src.match(/treeGuardScript: '([^']+)'/) || [])[1];
+  assert.equal(defaultScript, 'tools/orchestrator-tree-guard.js');
+  assert.ok(fs.existsSync(path.join(REPO_ROOT, defaultScript)), `${defaultScript} must ship in this repo, or treeGuard:'auto' turns the guard off (issue 1020)`);
+
+  // The guard agents run bash; a Windows shell with no bash on PATH (PowerShell) cannot stand in.
+  if (spawnSync('bash', ['-c', 'true']).error) { t.skip('no bash on PATH to run the guard commands; covered by the Linux gate and Git Bash'); return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tree-guard-1020-'));
+  const orch = path.join(tmp, 'orch');
+  const git = (...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: orch, encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+  };
+  fs.mkdirSync(orch);
+  try {
+    git('init', '-q');
+    fs.writeFileSync(path.join(orch, 'README.md'), 'hi\n');
+    git('add', 'README.md');
+    git('commit', '-q', '-m', 'init');
+    fs.writeFileSync(path.join(orch, 'operator-notes.txt'), 'dirt from before the run\n');
+    const orchPosix = spawnSync('bash', ['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
+    const bashAgent = async (prompt, opts) => {
+      if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `main\n${'a'.repeat(40)}\n`, stderr: '' };
+      const r = spawnSync('bash', ['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
+      return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
+    };
+    const { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, {
+      orchestratorCwd: orchPosix, treeGuardStateDir: `${orchPosix}/.git/orchestrator-tree-guard`,
+    });
+    assert.equal(treeGuardUnusable, null, 'the baseline must not report the guard unusable');
+    assert.ok(logs.some((l) => /^tree-guard: active - orchestrator-tree baseline taken .*1 pre-existing entry/.test(l)), JSON.stringify(logs));
+
+    await treeGuardCheck('implement-attempt1', 7); // clean: the operator's dirt is in the baseline
+    // The run 6abbcc6e shape: the report writer's scratch file landed in the orchestrator root.
+    fs.writeFileSync(path.join(orch, 'discoveries-bullets.json'), '[]\n');
+    await treeGuardCheck('verify-attempt1', 7);
+
+    assert.equal(breaches.length, 0, 'a restored write must not end the wave');
+    assert.equal(treeRestores.length, 1);
+    assert.equal(treeRestores[0].label, 'verify-attempt1');
+    assert.deepEqual(treeRestores[0].entries, ['?? discoveries-bullets.json']);
+    assert.ok(!fs.existsSync(path.join(orch, 'discoveries-bullets.json')), 'the leaked file must be gone from the root');
+    assert.ok(fs.existsSync(path.join(orch, 'operator-notes.txt')), 'pre-run dirt is the operator\'s and is never touched');
+    const stateDir = path.join(orch, '.git', 'orchestrator-tree-guard');
+    const quarantine = fs.readdirSync(stateDir).filter((n) => n.endsWith('.quarantine'));
+    assert.equal(quarantine.length, 1);
+    assert.ok(fs.existsSync(path.join(stateDir, quarantine[0], 'discoveries-bullets.json')), 'nothing is deleted: the write is moved aside inside .git');
+    await treeGuardCheck('pre-report', 0); // the next checkpoint sees a clean tree again
+    assert.equal(treeRestores.length, 1);
+
+    // The run result lists it under `inconsistent`, next to the HEAD restores.
+    assert.match(src, /\.concat\(treeRestores\.map\(t => \(\{ ticket: t\.observedBy, kind: 'tree-guard'/,
+      'a restored root-tree write must reach the run result, not only a log line');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 // Issue 807: a wave ran `git stash` + `git checkout origin/main` in the orchestrator checkout. The

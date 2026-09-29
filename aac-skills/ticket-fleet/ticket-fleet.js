@@ -1361,9 +1361,13 @@ which prints no marker of its own).`,
 // exactly this index. The Deliver phase runs unisolated for the same reason (aac-routines 270).
 //
 // So the guard is wired at four checkpoints - after Implement, after Verify, after Deliver, and
-// before Report - and each one THROWS. A throw inside a pipeline stage drops that ticket to null,
-// so its own Verify and Deliver never run; the `breaches` array then trips every other in-flight
-// ticket's next checkpoint and the Deliver gate, and the run itself fails before Report. The probe
+// before Report. A new entry a checkpoint finds is RESTORED and the wave continues (claude-dotfiles
+// issue 1020, the dirt half of issue 1006's restore-and-continue): the guard tool moves the tree's
+// copy into a quarantine inside .git, puts the path back as HEAD had it, and the run result lists
+// it under `inconsistent`. Only an entry the restore cannot put back THROWS. A throw inside a
+// pipeline stage drops that ticket to null, so its own Verify and Deliver never run; the `breaches`
+// array then trips every other in-flight ticket's next checkpoint and the Deliver gate, and the run
+// itself fails before Report. The probe
 // and human lanes have no per-lane checkpoint of their own: they open no PR and push nothing, so
 // the pre-report checkpoint is the one that covers them.
 //
@@ -1377,13 +1381,19 @@ which prints no marker of its own).`,
 // synchronous read-modify-write between awaits cannot interleave.
 //
 // Portability: this one script serves every fleeted repo, and `tools/orchestrator-tree-guard.js`
-// ships in aac-routines only. The baseline command therefore probes for the tool first and exits 3
-// when it is absent; under the default `treeGuard: 'auto'` that turns the guard off for repos that
-// do not serve it, and `treeGuard: true` makes the same absence a hard abort.
+// ships in aac-routines and, since issue 1020, in claude-dotfiles (whose copy adds the `restore`
+// subcommand; against a copy without it the restore exits 2 and the leak stays a breach, as
+// before). The baseline command probes for the tool first and exits 3 when it is absent; under the
+// default `treeGuard: 'auto'` that turns the guard off for repos that do not serve it, and
+// `treeGuard: true` makes the same absence a hard abort.
 // [FLEET-TREE-GUARD-DEFS-START]
 const GUARD_CMD = `node ${cfg.treeGuardScript}`
 const breaches = []
 const attributed = new Set()
+// Issue 1020: one entry per restored root-tree write - { label, observedBy, who, entries, quarantine }.
+const treeRestores = []
+// A leaked path goes into a bash command as ONE word, whatever it contains.
+const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 let guardStatePath = null
 let guardCandidates = ''   // filled in once the wave is known, below
 let treeGuardOn = cfg.treeGuard === true || cfg.treeGuard === 'auto'
@@ -1664,7 +1674,7 @@ if (treeGuardOn) {
     )
   } else {
     guardStatePath = parsed.statePath
-    log(`Orchestrator-tree baseline taken (aac-routines issue 192): ${parsed.baselineCount} pre-existing entr${parsed.baselineCount === 1 ? 'y' : 'ies'}, state ${guardStatePath}. Dirt that pre-dates this run is the operator's and is never blamed on a ticket.`)
+    log(`tree-guard: active - orchestrator-tree baseline taken (aac-routines issue 192): ${parsed.baselineCount} pre-existing entr${parsed.baselineCount === 1 ? 'y' : 'ies'}, state ${guardStatePath}. Dirt that pre-dates this run is the operator's and is never blamed on a ticket.`)
   }
 } else {
   log('Orchestrator-tree guard DISABLED by args (treeGuard:false) - isolation breaches will not fail this run (aac-routines issue 192).')
@@ -1728,9 +1738,31 @@ async function treeGuardCheck(label, ticketNumber) {
     ? `ticket ${blamed.map(n => '#' + n).join(', #')} (content-matched to ${[...new Set(fresh.flatMap(e => e.matchedBranches || []))].join(', ')})`
     : `ticket #${ticketNumber} (observed at its checkpoint; content matched no wave branch, so this names the observer, not a proven author)`
   const entries = fresh.map(e => `${e.status} ${e.path}`)
-  breaches.push({ label, observedBy: ticketNumber, blamed, who, entries })
-  log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}`)
-  throw new Error(breachMessage())
+
+  // Issue 1020: restore and continue, as issue 1006 does for a moved HEAD. The guard tool moves
+  // the tree's copy of each entry into a quarantine inside .git (nothing is deleted), puts the path
+  // back as HEAD had it, and re-reads the tree; only an entry it cannot put back ends the chain.
+  let restore = null, restoreError = null
+  try {
+    restore = await agent(
+      guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${guardStatePath} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
+      { label: `tree-guard:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
+    )
+  } catch (err) {
+    restoreError = unusableReason(`tree-guard:restore:${label}#${ticketNumber}`, (err && err.message) || err)
+  }
+  let restored = null
+  try { restored = JSON.parse(String((restore && restore.stdout) || '')) } catch (e) { restored = null }
+  if (!restore || restore.exitCode !== 0 || !restored || restored.ok !== true) {
+    const why = `restore did not take (exit=${restore ? restore.exitCode : 'null'} stderr=${restore ? restore.stderr : ''} error=${restoreError || 'none'})`
+    breaches.push({ label, observedBy: ticketNumber, blamed, who, entries: entries.concat(why) })
+    log(`ISOLATION BREACH (aac-routines issue 192) at ${label} - ${who}: ${entries.join('; ')}; ${why}`)
+    throw new Error(breachMessage())
+  }
+  // Put back, so a later write to the same path is a new leak, not an already-reported one.
+  for (const e of fresh) attributed.delete(e.path)
+  treeRestores.push({ label, observedBy: ticketNumber, who, entries, quarantine: restored.quarantineDir || null })
+  log(`Orchestrator tree RESTORED at ${label} (ticket #${ticketNumber}, issues 1006 and 1020) - ${who} wrote ${entries.join('; ')} into ${orchestratorCwd}; moved to ${restored.quarantineDir || 'the guard quarantine'} and the wave continues.`)
 }
 
 /**
@@ -3259,6 +3291,9 @@ return {
     .concat(headWatchUnusable ? [{ ticket: null, kind: 'orchestrator-head', branch: null, detail: headWatchUnusable }] : [])
     .concat(headRestores.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
       detail: `orchestrator isolation breach: HEAD ${/^unreadable/.test(h.from) ? h.from : `moved to ${h.from}`} during the wave; restored onto ${h.to} at ${h.label} and the wave continued (issues 807, 1006). Check the orchestrator checkout's reflog and stash list for what the move left behind.` })))
+    // Issue 1020: a root-tree write a checkpoint caught and put back.
+    .concat(treeRestores.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
+      detail: `orchestrator isolation breach: ${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout; caught at ${t.label}, moved to ${t.quarantine || 'the guard quarantine'} and restored, and the wave continued (issues 1006, 1020).` })))
     .concat(clean.filter(r => r.inconsistency).map(r => ({
       ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
     }))),
