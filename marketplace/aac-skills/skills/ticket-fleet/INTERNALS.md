@@ -170,7 +170,9 @@ after the fleet-refresh step and before anything needs it, and bakes that litera
 later guard, tip and scratch-worktree command; a `cd` by the parent afterwards cannot touch a string
 already written into a prompt. A caller that already knows the absolute path - or wants the guard to
 audit a different tree on purpose - can still pass `orchestratorCwd` itself; only the `.` default
-triggers the measurement.
+triggers the measurement. The `pwd` spelling depends on the shell the measuring agent picks, so a
+drive-letter answer (`C:\...` or `C:/...`) is normalised to `/c/...`; any other answer not starting
+with `/` still aborts the run before Scout (issue 1007).
 
 ## The scratchpad is one per run, not one per worker
 
