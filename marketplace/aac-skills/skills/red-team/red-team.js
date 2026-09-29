@@ -25,7 +25,7 @@
 const fs = require('fs')
 const { spawnSync } = require('child_process')
 
-const DEFAULT_PANEL = ['google/gemini-3.1-pro-preview', 'x-ai/grok-4.7', 'deepseek/deepseek-v4-pro']
+const DEFAULT_PANEL = ['google/gemini-3.1-pro-preview', 'x-ai/grok-4.7', 'openai/gpt-6.1-sol-pro']
 const DEFAULT_CRITIC = 'openai/gpt-5.5'
 const TIMEOUT_MS = 180000
 // Sent on every call: without it OpenRouter reserves the model's whole output window (64k-128k tokens)

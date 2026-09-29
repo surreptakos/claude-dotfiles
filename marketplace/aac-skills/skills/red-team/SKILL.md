@@ -1,11 +1,11 @@
 ---
 name: red-team
-description: Red-team a drafted answer against other vendors' models (GPT, Gemini, Grok, DeepSeek) through OpenRouter before sending it. Use when the user asks to red-team, cross-check or get a second opinion on an answer from other models, or says a reply is important enough to check.
+description: Red-team a drafted answer against other vendors' models (GPT, Gemini, Grok) through OpenRouter before sending it. Use when the user asks to red-team, cross-check or get a second opinion on an answer from other models, or says a reply is important enough to check.
 metadata:
-  modified: '2026-09-28T17:42:02Z'
-  previous-modified: '2026-09-28T17:37:41Z'
-  revision: '3'
-  content-sha: 8bf335bf48f5
+  modified: '2026-09-29T22:30:10Z'
+  previous-modified: '2026-09-28T17:42:02Z'
+  revision: '4'
+  content-sha: d1aa9d332b20
 ---
 
 # red-team
@@ -40,7 +40,7 @@ has a better check.
    node "<skill base directory>/red-team.js" --question <question.md> --draft <draft.md>
    ```
 
-   Defaults: panel `google/gemini-3.1-pro-preview`, `x-ai/grok-4.7`, `deepseek/deepseek-v4-pro`;
+   Defaults: panel `google/gemini-3.1-pro-preview`, `x-ai/grok-4.7`, `openai/gpt-6.1-sol-pro`;
    critic `openai/gpt-5.5`, kept outside the panel so it never judges its own answer.
    `--panel a,b,c` and `--critic m` take any OpenRouter model id; `--max-tokens n` caps each call's
    output (default 16000); `--dry-run` prints the requests without sending. In a cloud container
