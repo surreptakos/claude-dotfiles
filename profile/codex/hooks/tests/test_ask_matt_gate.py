@@ -1566,6 +1566,22 @@ class AskMattGateTests(unittest.TestCase):
             path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
             self.assertEqual(len(gate._turn_refusals(str(path))), 1)
 
+    def test_yes_lint_flags_a_row_count_with_no_read_statement(self) -> None:
+        """Dan, 2026-09-28: a count is a stand-in for the rows; quoting one needs the read beside it."""
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_count", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        counted = "Tab 3c is 76 person or note rows; the workbook is filed and merged."
+        self.assertTrue(any("count without a read" in v for v in gate._yes_lint(counted, {"Bash"}, [])))
+        read = "Tab 3c is 29 rows; I read every row: 20 people and 9 notes."
+        self.assertFalse(any("count without a read" in v for v in gate._yes_lint(read, {"Bash"}, [])))
+        row_by_row = "154 companies on tab 3, read row by row before the rebuild."
+        self.assertFalse(any("count without a read" in v for v in gate._yes_lint(row_by_row, {"Bash"}, [])))
+        in_code = "Verifiers: ```\n74 passed, 0 failed\n12 tickets\n``` nothing else."
+        self.assertFalse(any("count without a read" in v for v in gate._yes_lint(in_code, {"Bash"}, [])))
+
     def test_yes_lint_flags_review_absence_claimed_before_the_matching_read(self) -> None:
         # A "no review threads" claim is premature until the reply actually read the reviews — no
         # refusal need be involved, unlike the board-add case above.

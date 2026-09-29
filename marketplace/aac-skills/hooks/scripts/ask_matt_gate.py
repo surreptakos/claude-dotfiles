@@ -1955,8 +1955,8 @@ YES_JEV_QUESTIONS = {
 # as if checked and 53 of them were companies. A count is a stand-in for the rows; a reply that
 # quotes one says which rows were read, or does not quote it.
 COUNT_CLAIM_PATTERN = re.compile(
-    r"\b\d{1,3}(?:,\d{3})*\s+(?:rows?|companies|vendors|sites|lines|records|entries|people|persons"
-    r"|contact names|names)\b",
+    r"\b\d{1,3}(?:,\d{3})*\s+(?:[a-z-]+\s+){0,3}?(?:rows?|companies|vendors|sites|lines|records|entries|people"
+    r"|persons?|contact names|names)\b",
     re.IGNORECASE,
 )
 ROWS_READ_PATTERN = re.compile(
