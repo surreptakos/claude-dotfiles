@@ -22,3 +22,7 @@ Cleanup took closing #5, stripping its acceptance boxes so `tools/tracker-audit.
 **How to apply:** after spawning a task chip, treat that topic as claimed. At publish time re-list
 issues, and check `git ls-remote --heads origin` for the other session's branch — its work may be
 committed but unpushed, which the issue body will not tell you. See [[state-a-standing-rule-once]].
+
+Source: tools/tracker-audit.js
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/989

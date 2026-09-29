@@ -18,3 +18,7 @@ first verifier fail, take the branch by hand, make the proof doc state exactly w
 where, list the cloud steps under "What remains", open the PR with `Refs #N` (issue stays
 open), merge, and let the next cloud session post the real quote. Merged this way: #235.
 Related: [[workflow-runtime-quirks]] (scriptPath refuses the CRLF plugin script, #233).
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/163, https://github.com/surreptakos/claude-dotfiles/issues/235, https://github.com/surreptakos/claude-dotfiles/issues/233
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/965
