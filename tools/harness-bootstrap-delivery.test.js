@@ -89,6 +89,49 @@ test('a fresh repo gets the bootstrap hook, its SessionStart entry and the postu
   assert.strictEqual(s.enabledPlugins['aac-skills@claude-dotfiles'], true);
 });
 
+const GOVERNANCE_PLUGINS = ['yes@sstklen', 'caveman@caveman', 'i-have-adhd@i-have-adhd',
+                            'typesafe@typesafe-ai'];
+const GOVERNANCE_MARKETPLACES = ['sstklen', 'caveman', 'i-have-adhd', 'typesafe-ai'];
+
+test('a fresh repo enables the five governance plugins from their four marketplaces (issue 1018)', () => {
+  const root = scratchRepo();
+  deliver(root);
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  for (const name of ['aac-skills@claude-dotfiles'].concat(GOVERNANCE_PLUGINS)) {
+    assert.strictEqual(s.enabledPlugins[name], true, name);
+  }
+  for (const name of ['claude-dotfiles'].concat(GOVERNANCE_MARKETPLACES)) {
+    assert.ok(s.extraKnownMarketplaces[name].source, name);
+  }
+  assert.deepStrictEqual(s.extraKnownMarketplaces.sstklen.source,
+    { source: 'git', url: 'https://github.com/sstklen/yes.md.git' });
+});
+
+test('a repo carrying only aac-skills gains the four and keeps everything else (issue 1018)', () => {
+  const root = scratchRepo();
+  fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+  const file = path.join(root, '.claude', 'settings.json');
+  fs.writeFileSync(file, JSON.stringify({
+    env: { KEEP: '1' },
+    extraKnownMarketplaces: {
+      'claude-dotfiles': { source: { source: 'github', repo: 'surreptakos/claude-dotfiles' }, autoUpdate: true },
+      'their-own': { source: { source: 'github', repo: 'x/y' } },
+    },
+    enabledPlugins: { 'aac-skills@claude-dotfiles': true, 'own@their-own': true, 'caveman@caveman': false },
+  }, null, 2) + '\n');
+  deliver(root);
+  const s = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.deepStrictEqual(s.env, { KEEP: '1' });
+  assert.strictEqual(s.extraKnownMarketplaces['claude-dotfiles'].autoUpdate, true);
+  assert.ok(s.extraKnownMarketplaces['their-own']);
+  assert.strictEqual(s.enabledPlugins['own@their-own'], true);
+  assert.strictEqual(s.enabledPlugins['caveman@caveman'], false, 'a deliberate false survives');
+  for (const name of GOVERNANCE_PLUGINS.filter((n) => n !== 'caveman@caveman')) {
+    assert.strictEqual(s.enabledPlugins[name], true, name);
+  }
+  assert.match(deliver(root), /already delivered/);
+});
+
 test('a second run changes nothing and says so', () => {
   const root = scratchRepo();
   deliver(root);

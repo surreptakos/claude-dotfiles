@@ -19,7 +19,7 @@
     "installed_plugins.json was empty (evidence on issue 106).",
     "",
     "The same two keys declare the third-party plugins a desktop runs (profile/claude/settings.json):",
-    "caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, travel-hacker@borski, and",
+    "yes@sstklen (issue 1018), caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, travel-hacker@borski, and",
     "pyright-lsp and typescript-lsp from claude-plugins-official, none vendored into the aac-skills",
     "payload. A desktop installs each from its upstream marketplace. A cloud container sets",
     "SKIP_PLUGIN_MARKETPLACE=true and fetched only claude-plugins-official (2026-09-28), so hooks",
@@ -132,6 +132,12 @@
         "source": "git",
         "url": "https://github.com/borski/travel-hacking-toolkit.git"
       }
+    },
+    "sstklen": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/sstklen/yes.md.git"
+      }
     }
   },
   "enabledPlugins": {
@@ -141,7 +147,8 @@
     "i-have-adhd@i-have-adhd": true,
     "travel-hacker@borski": true,
     "pyright-lsp@claude-plugins-official": true,
-    "typescript-lsp@claude-plugins-official": true
+    "typescript-lsp@claude-plugins-official": true,
+    "yes@sstklen": true
   },
   "hooks": {
     "SessionStart": [
