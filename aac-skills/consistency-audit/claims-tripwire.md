@@ -52,21 +52,45 @@ was designed against.
 
 ## 2. Add a wrapper test
 
-A thin test in the repo's suite — the engine already exits 1 with one line per finding.
+A thin test in the repo's suite — the engine already exits 1 with one line per finding. It has to
+find the engine itself, because a skill lives in a different place on each kind of machine: a cloud
+container has the bootstrap's copy under `~/.claude/skills`, a desktop has only the aac-skills
+plugin cache (pull stopped writing `~/.claude/skills`, issue 734). The wrapper tries the first,
+then the newest plugin version directory, and when neither exists it fails naming every path tried.
 
 ```js
 // tests/claims-audit.test.js in the consuming repo
+const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 
-const ENGINE = path.join(
-  require('node:os').homedir(),
-  '.claude', 'skills', 'consistency-audit', 'claims-audit.js'
-);
+const REL = path.join('consistency-audit', 'claims-audit.js');
+
+// Every place the engine can live, in the order to try: the container's skills copy, then each
+// plugin-cache version directory, newest first. With no version directory the pattern is listed.
+function engineCandidates(home) {
+  const claude = path.join(home, '.claude');
+  const cache = path.join(claude, 'plugins', 'cache', 'claude-dotfiles', 'aac-skills');
+  let versions = [];
+  try { versions = fs.readdirSync(cache); } catch { /* no plugin cache */ }
+  versions.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  return [
+    path.join(claude, 'skills', REL),
+    ...(versions.length ? versions : ['*']).map((v) => path.join(cache, v, 'skills', REL)),
+  ];
+}
 
 test('docs/claims.json verifies clean', () => {
-  execFileSync(process.execPath, [ENGINE], {
+  const tried = engineCandidates(os.homedir());
+  const engine = tried.find((p) => fs.existsSync(p));
+  assert.ok(engine,
+    'claims-audit.js not found; tried:\n  ' + tried.join('\n  ') +
+    '\nInstall or update the aac-skills plugin (claude plugin update aac-skills), or in a ' +
+    'container run the dotfiles bootstrap.');
+  execFileSync(process.execPath, [engine], {
     cwd: path.join(__dirname, '..'),
     stdio: 'inherit',
   });
