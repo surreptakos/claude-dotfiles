@@ -718,10 +718,10 @@ foreach ($dir in 'hooks', 'tools') {
 # ------------------------------------------------------------------ 6e. caveman desktop installer (issue 825)
 
 # The main install above ran the caveman step offline (CAVEMAN_DESKTOP_SKIP_CLI=1, same reasoning
-# as the automated hook test), so its own behaviour - -DryRun, the fail-closed offline path, and
-# the no-op second install - gets exercised directly here, against tools/caveman-desktop-install.ps1
-# in the clone, hermetically: a stub npm on PATH proves the no-op case never shells out, and
-# nothing here touches a real registry.
+# as the automated hook test), so its own behaviour - -DryRun, the fail-closed offline path, the
+# upgrade to the current npm release, the no-op second install and the unreachable registry - gets
+# exercised directly here, against tools/caveman-desktop-install.ps1 in the clone, hermetically:
+# a stub npm on PATH stands in for the registry, and nothing here touches a real one.
 Write-Host ''
 Write-Host 'Caveman desktop installer (issue 825)'
 $cavemanInstaller = Join-Path $Clone 'tools\caveman-desktop-install.ps1'
@@ -764,34 +764,69 @@ Check 'offline skip variable: fail-closed holds (no route, no proxy hooks, one s
     (($skipExit -eq 0) -and (-not $skipRoute) -and ($skipCavemanHooks -eq 0) -and ($skipLines.Count -eq 1)) `
     (@(("route present: {0}, caveman hook entries: {1}, status lines: {2}" -f $skipRoute, $skipCavemanHooks, $skipLines.Count)) + $skipLines)
 
-# 6e3. second install is a no-op for the CLI step: no npm run when the pinned version is already
-# installed. Seed a fake node_modules/@caveman-ai/cli at the pinned version, then put a stub npm
-# on PATH that fails this check if it is ever invoked - the direct proof nothing shelled out to it.
-$pin = Get-Content -Raw (Join-Path $Clone 'lib\caveman-cli.json') | ConvertFrom-Json
+# 6e3. the CLI tracks the current npm release (issue 931). A stub npm on PATH stands in for the
+# registry: it logs every argv, answers `npm view` with $env:CAVEMAN_TEST_LATEST (or fails, the
+# unreachable registry, when that is unset) and "installs" by exiting 0. A fake
+# node_modules/@caveman-ai/cli/package.json seeds the version already installed.
 $fakeCliDir = Join-Path $FakeHome '.local\node_modules\@caveman-ai\cli'
+$fakeCliPkg = Join-Path $fakeCliDir 'package.json'
 New-Item -ItemType Directory -Path $fakeCliDir -Force | Out-Null
-(@{ version = $pin.cliVersion } | ConvertTo-Json) |
-    Set-Content -LiteralPath (Join-Path $fakeCliDir 'package.json') -Encoding UTF8
+$npmStubDir = Join-Path $FakeRoot 'caveman-npm-stub'
+$npmStubLog = Join-Path $FakeRoot 'caveman-npm-argv.log'
+New-Item -ItemType Directory -Path $npmStubDir -Force | Out-Null
+Set-Content -LiteralPath (Join-Path $npmStubDir 'npm.cmd') -Encoding ascii -Value @(
+    '@echo off',
+    ('>>"{0}" echo %*' -f $npmStubLog),
+    'if not "%1"=="view" exit /b 0',
+    'if not defined CAVEMAN_TEST_LATEST (echo npm error network 1>&2& exit /b 1)',
+    'echo %CAVEMAN_TEST_LATEST%',
+    'exit /b 0'
+)
 
-$noopStubDir = Join-Path $FakeRoot 'caveman-npm-stub'
-New-Item -ItemType Directory -Path $noopStubDir -Force | Out-Null
-Set-Content -LiteralPath (Join-Path $noopStubDir 'npm.cmd') `
-    -Value '@echo FAULT: npm ran when the pinned version was already installed 1>&2' -Encoding ascii
-
-$previousPath = $env:Path
-$env:Path = "$noopStubDir;$previousPath"
-$noopLog = Join-Path $FakeRoot 'caveman-noop.log'
-try {
-    & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
-        -UserHome $FakeHome -RepoRoot $Clone *> $noopLog
-    $noopExit = $LASTEXITCODE
-} finally {
-    $env:Path = $previousPath
+function Invoke-CavemanWithStubNpm {
+    param([string]$Installed, [string]$Latest, [string]$Pin, [string]$Name)
+    (@{ version = $Installed } | ConvertTo-Json) | Set-Content -LiteralPath $fakeCliPkg -Encoding UTF8
+    if (Test-Path $npmStubLog) { Remove-Item -LiteralPath $npmStubLog -Force }
+    $saved = @{ Path = $env:Path; Latest = $env:CAVEMAN_TEST_LATEST; Pin = $env:CAVEMAN_DESKTOP_CLI_VERSION }
+    $env:Path = "$npmStubDir;$($saved.Path)"
+    $env:CAVEMAN_TEST_LATEST = $Latest
+    $env:CAVEMAN_DESKTOP_CLI_VERSION = $Pin
+    $log = Join-Path $FakeRoot ("caveman-{0}.log" -f $Name)
+    try {
+        & $Engine -NoProfile -ExecutionPolicy Bypass -File $cavemanInstaller `
+            -UserHome $FakeHome -RepoRoot $Clone *> $log
+        $exit = $LASTEXITCODE
+    } finally {
+        $env:Path = $saved.Path
+        $env:CAVEMAN_TEST_LATEST = $saved.Latest
+        $env:CAVEMAN_DESKTOP_CLI_VERSION = $saved.Pin
+    }
+    $argv = if (Test-Path $npmStubLog) { Get-Content -Raw $npmStubLog } else { '' }
+    return [pscustomobject]@{ Exit = $exit; Text = (Get-Content -Raw $log); Argv = "$argv" }
 }
-$noopText = Get-Content -Raw $noopLog
-Check 'second install is a no-op for the caveman step (no npm run when the pinned version is present)' `
-    (($noopExit -eq 0) -and ($noopText -notmatch 'FAULT: npm ran') -and ($noopText -match 'no npm run')) `
-    @($noopText)
+
+$up = Invoke-CavemanWithStubNpm -Installed '1.0.0' -Latest '9.9.9' -Name 'upgrade'
+Check 'an older installed CLI upgrades to the current npm release (npm view, then install @latest)' `
+    (($up.Exit -eq 0) -and ($up.Argv -match 'view @caveman-ai/cli version') -and
+     ($up.Argv -match 'install .*@caveman-ai/cli@9\.9\.9') -and ($up.Text -match 'cli installed 9\.9\.9 \(was 1\.0\.0\)')) `
+    @($up.Text, $up.Argv)
+
+$noop = Invoke-CavemanWithStubNpm -Installed '9.9.9' -Latest '9.9.9' -Name 'noop'
+Check 'second install is a no-op for the caveman step (no npm install when the current release is present)' `
+    (($noop.Exit -eq 0) -and ($noop.Argv -notmatch 'install') -and ($noop.Text -match 'present 9\.9\.9 \(no npm install\)')) `
+    @($noop.Text, $noop.Argv)
+
+$offline = Invoke-CavemanWithStubNpm -Installed '1.0.0' -Latest '' -Name 'offline'
+$keptPkg = (Get-Content -Raw $fakeCliPkg | ConvertFrom-Json).version
+Check 'an unreachable npm registry keeps the installed CLI untouched (no npm install, exit 0)' `
+    (($offline.Exit -eq 0) -and ($offline.Argv -notmatch 'install') -and ($keptPkg -eq '1.0.0') -and
+     ($offline.Text -match 'registry unreachable, kept 1\.0\.0')) `
+    @($offline.Text, $offline.Argv)
+
+$pinned = Invoke-CavemanWithStubNpm -Installed '1.0.0' -Latest '9.9.9' -Pin '1.2.3' -Name 'pin'
+Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the registry' `
+    (($pinned.Exit -eq 0) -and ($pinned.Argv -notmatch 'view') -and ($pinned.Argv -match 'install .*@caveman-ai/cli@1\.2\.3')) `
+    @($pinned.Text, $pinned.Argv)
 
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
 

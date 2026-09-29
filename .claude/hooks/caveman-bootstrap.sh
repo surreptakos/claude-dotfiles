@@ -16,7 +16,8 @@
 #      manage/optimize/explore/evidence-review and the six work patterns) copied into
 #      ~/.claude/skills/<name>/, AFTER the aac-skills bootstrap has finished copying its payload
 #      (the payload no longer vendors a `caveman` copy; the wait still orders the settings writes);
-#   3. the "big rock": @caveman-ai/cli installed under ~/.local (on PATH through $CLAUDE_ENV_FILE),
+#   3. the "big rock": @caveman-ai/cli at its current npm release (asked every run, issue 931)
+#      installed under ~/.local (on PATH through $CLAUDE_ENV_FILE),
 #      its signed Go binaries fetched by `caveman setup --install` into ~/.caveman/bin, the local
 #      proxy started in compress mode, and `caveman enable claude` run - which wires the shrink
 #      hook (PreToolUse rewrites noisy Bash commands through `caveman shrink`, byte-recoverable with
@@ -51,7 +52,7 @@
 #   CAVEMAN_BOOTSTRAP_SKIP_CLI  1 = skip npm, binaries, proxy and enable (offline CI)
 #   CAVEMAN_BOOTSTRAP_AAC_WAIT  seconds to wait for the aac-skills marker (default 120; 0 = none)
 #   CAVEMAN_BOOTSTRAP_REF / CAVEMAN_BOOTSTRAP_REPO / CAVEMAN_BOOTSTRAP_CLI_VERSION   pins
-#     (CLI_VERSION otherwise comes from the shared pin, lib/caveman-cli.json - issue 825)
+#     (the CLI otherwise tracks the current npm release of @caveman-ai/cli - issue 931)
 #   CAVEMAN_CLOUD_PROXY         0 = install skills and CLI only; no proxy, no `enable claude`
 set -uo pipefail
 
@@ -83,16 +84,11 @@ if [ -z "$REF" ] && [ -z "${CAVEMAN_BOOTSTRAP_SOURCE:-}" ]; then
 fi
 REF="${REF:-local}"
 
-# The CLI version is the one pin shared with the desktop installer (issue 825): both read
-# lib/caveman-cli.json so a version bump lands on cloud and desktop from a single edit. An env
-# var still wins, for a one-off pin during testing.
-REPO_ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-PIN_FILE="${CAVEMAN_BOOTSTRAP_PIN_FILE:-$REPO_ROOT/lib/caveman-cli.json}"
-PIN_CLI_VERSION=""
-if [ -f "$PIN_FILE" ]; then
-  PIN_CLI_VERSION="$(grep -o '"cliVersion" *: *"[^"]*"' "$PIN_FILE" | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
-fi
-CLI_VERSION="${CAVEMAN_BOOTSTRAP_CLI_VERSION:-${PIN_CLI_VERSION:-1.3.4}}"
+# The CLI tracks the current @caveman-ai/cli release on npm, asked every run the way REF tracks
+# the newest caveman tag (issue 931; the desktop installer does the same). An env var still wins,
+# for a one-off pin. CLI_VERSION ends up naming the version this session runs.
+CLI_PIN="${CAVEMAN_BOOTSTRAP_CLI_VERSION:-}"
+CLI_VERSION="${CLI_PIN:-latest}"
 LOCAL_PREFIX="$HOME_DIR/.local"
 BIN_DIR="$LOCAL_PREFIX/bin"
 AAC_WAIT="${CAVEMAN_BOOTSTRAP_AAC_WAIT:-120}"
@@ -201,20 +197,43 @@ if [ -z "${CAVEMAN_BOOTSTRAP_SKIP_CLI:-}" ]; then
     export PATH="$(dirname "$CLAUDE_CODE_EXECPATH"):$PATH"
   fi
 
-  installed=""
-  if [ -x "$BIN_DIR/caveman" ]; then
-    installed="$("$BIN_DIR/caveman" --version 2>/dev/null | grep -o '"version": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true)"
-  fi
-  if [ "$installed" != "$CLI_VERSION" ]; then
-    if npm install -g --prefix "$LOCAL_PREFIX" --no-fund --no-audit "@caveman-ai/cli@$CLI_VERSION" >/dev/null 2>&1; then
-      cli_state="installed $CLI_VERSION"
+  installed_version() {
+    [ -x "$BIN_DIR/caveman" ] || return 0
+    "$BIN_DIR/caveman" --version 2>/dev/null | grep -o '"version": *"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"$/\1/' || true
+  }
+  # The registry's current release, or nothing when it cannot be reached. Bounded: an offline
+  # container must not stall the session on npm's default five-minute fetch timeout.
+  latest_version() {
+    local t=()
+    command -v timeout >/dev/null 2>&1 && t=(timeout 60)
+    ${t[@]+"${t[@]}"} npm view @caveman-ai/cli version --fetch-retries=0 --fetch-timeout=20000 2>/dev/null \
+      | tr -d '\r' | grep -E '^ *[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)? *$' | tail -1 | tr -d ' ' || true
+  }
+
+  installed="$(installed_version)"
+  wanted="${CLI_PIN:-$(latest_version)}"
+  if [ -z "$wanted" ]; then
+    # Registry unreachable: keep whatever is installed, and leave a running proxy alone.
+    if [ -n "$installed" ]; then
+      note "npm registry unreachable; keeping @caveman-ai/cli $installed"
+      cli_state="registry unreachable, kept $installed"
     else
-      problem "npm install of @caveman-ai/cli@$CLI_VERSION failed"
-      cli_state="npm failed"
+      problem "npm registry unreachable and no @caveman-ai/cli installed"
+      cli_state="registry unreachable, not installed"
+    fi
+  elif [ "$installed" != "$wanted" ]; then
+    if npm install -g --prefix "$LOCAL_PREFIX" --no-fund --no-audit "@caveman-ai/cli@$wanted" >/dev/null 2>&1; then
+      now="$(installed_version)"
+      cli_state="installed ${now:-$wanted}${installed:+ (was $installed)}"
+      installed="${now:-$wanted}"
+    else
+      problem "npm install of @caveman-ai/cli@$wanted failed"
+      cli_state="npm failed${installed:+, kept $installed}"
     fi
   else
-    cli_state="present $CLI_VERSION"
+    cli_state="present $installed"
   fi
+  CLI_VERSION="${installed:-none}"
 
   if [ -x "$BIN_DIR/caveman" ]; then
     export CAVEMAN_HOME="${CAVEMAN_HOME:-$HOME_DIR/.caveman}"
