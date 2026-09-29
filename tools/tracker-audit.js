@@ -377,6 +377,13 @@ function isUntriaged(issue, triagedLabels) {
   return !(issue.labels || []).some((l) => triagedLabels.includes(l.name));
 }
 
+/** True when the repo sequences work with milestones (check 8): some issue carries a milestone other
+ *  than the Maybe Someday parking milestone. Parking one ticket there is not a sequencing choice
+ *  (issue 946). Pure. */
+function usesMilestones(issues) {
+  return issues.some((i) => i.milestone && i.milestone.title && i.milestone.title !== PARKED_MILESTONE);
+}
+
 /** Group open issues by normalized title and return one entry per later member of each group:
  *  `{ issue, duplicateOf, normalized }`, the lowest-numbered issue of the group being the one
  *  the others duplicate. Pure — the caller decides how loudly to report it. */
@@ -417,6 +424,7 @@ if (require.main !== module) {
     normalizeTitle,
     duplicateTitleFindings,
     isUntriaged,
+    usesMilestones,
     PARKED_MILESTONE,
     landedCommits,
     landedFindings,
@@ -1460,9 +1468,11 @@ open.forEach((i) => {
 // chosen milestones as its sequencing record, and an open issue outside every milestone is work no
 // milestone view will ever show. Observed on aac-contract-builder 2026-08-21: 26 of 29 open issues
 // unmilestoned because milestones were created mid-push — no tool noticed.
-const milestonesInUse = issues.some((i) => i.milestone && i.milestone.title);
+// The Maybe Someday parking milestone does not count as sequencing (issue 946): a repo whose only
+// milestone is that one is not using milestones.
+const milestonesInUse = usesMilestones(issues);
 if (!milestonesInUse) {
-  console.log('NOTE: no issue carries a milestone, so milestone coverage was not checked.\n');
+  console.log('NOTE: no issue carries a milestone other than ' + PARKED_MILESTONE + ', so milestone coverage was not checked.\n');
 } else {
   open.forEach((i) => {
     if (!(i.milestone && i.milestone.title)) {

@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: session_01EtYk6hgE1HXtbnWrtb4pzk
-  modified: 2026-09-17T19:10:00.000Z
+  modified: 2026-09-28T23:20:00.000Z
 ---
 
 Found 2026-09-17 (issues 483, 519). The cloud environment `Default` carried
@@ -21,11 +21,15 @@ URL pointing at a local proxy makes the container's outbound traffic look third-
 injection stops. The same value in a synced `~/.claude/settings.json` is issue 479's desktop twin:
 a restored machine without a running caveman proxy sends every model call to a dead port.
 
-**How to apply:** caveman's `enable` writes the base URL into the settings of the session that
-started the proxy, and that is the only place it may live. Never set it in a cloud environment's
-variables, never let `profile/claude/settings.json` carry it (it has not since issue 826: pull
-merges settings.json and keeps a machine's own caveman route and hooks), never put it in a
-project `.claude/settings.json`.
+**How to apply:** caveman wiring - the base URL and the proxy / `shrink-hook` hook entries - is
+written by `caveman enable claude` on the machine that runs the proxy, never carried in the
+profile, and that is the only place it may live. Install and pull run it through
+`tools/caveman-desktop-install.ps1` (issue 825), and pull merges settings.json around a machine's
+own caveman route and hooks (issue 826), so there is nothing to strip by hand. Never add it to
+`profile/claude/settings.json`, never set it in a cloud environment's variables, never put it in
+a project `.claude/settings.json`.
 When a container shows `git` refusing github.com with `could not read Username` and an empty
 `~/.claude/hook-state/aac-bootstrap/`, check `env | grep ANTHROPIC_BASE_URL` before blaming the
 platform. Related: [[three-skill-channels]].
+
+Source: .claude/hooks/session-start.sh, profile/claude/settings.json, .claude/settings.json, https://github.com/surreptakos/claude-dotfiles/issues/483, https://github.com/surreptakos/claude-dotfiles/issues/479, https://github.com/surreptakos/claude-dotfiles/issues/826

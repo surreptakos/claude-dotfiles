@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-26T05:15:47Z"
-  previous-modified: "2026-09-26T00:23:30Z"
-  revision: "43"
-  content-sha: "d956d0483db6"
+  modified: "2026-09-28T23:57:44Z"
+  previous-modified: "2026-09-28T22:16:13Z"
+  revision: "45"
+  content-sha: "f25f16d744b8"
 ---
 
 # Project Harness
@@ -131,7 +131,7 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      `tools/tracker-audit-template.test.js` pins both halves.
 9. **Harness version marker** — copy `templates/harness-version.md` to
    `docs/agents/harness-version.md` and set the date. It is a dedicated file so one `cat` reads it in
-   every harnessed repo. **Current version: 33.** `/session-start` reads this marker every session and
+   every harnessed repo. **Current version: 34.** `/session-start` reads this marker every session and
    STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
 10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
     `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
@@ -294,7 +294,8 @@ The marker answers what a repo lacks, and a changed template is lacking just as 
 file. So **bump the version whenever a template changes materially**, then immediately run the step-7
 sweep: find every install, read every marker, upgrade whatever is behind. A bump alone records
 staleness without fixing it, and a stale repo cannot detect its own staleness — its audit and marker
-are both old — so only this skill, looking across installs, can close the gap.
+are both old — so only this skill, looking across installs, can close the gap. In claude-dotfiles,
+`generated-code.yml` fails any `templates/` change that leaves the number alone (issue 933).
 
 ## Scope limits
 

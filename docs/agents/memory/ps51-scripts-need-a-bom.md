@@ -13,3 +13,5 @@ metadata:
 **Why:** 5.1 defaults to the ANSI code page for BOM-less files; 7 defaults to UTF-8.
 
 **How to apply:** after writing or rewriting a `.ps1` in this repo, re-save it with `New-Object System.Text.UTF8Encoding $true` (or check bytes 0-2 are EF BB BF), or keep strings ASCII-only. Prefer registering scheduled tasks against `pwsh.exe` when it exists — `install-watchdog-task.ps1` does since 2026-09-02. Also: `-WhatIf` via `SupportsShouldProcess` leaks into the CimCmdlets module import and prints a dozen `What if: Set Alias` lines; a plain `[switch]$WhatIf` avoids it. Related: [[powershell-7-is-the-tool-engine]].
+
+Source: orchestrator/master-watchdog.ps1, orchestrator/install-watchdog-task.ps1

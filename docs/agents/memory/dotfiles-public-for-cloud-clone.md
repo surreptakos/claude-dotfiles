@@ -26,3 +26,7 @@ Consequence: a clone failure with "could not read Username" now means the repo r
 again. Check its visibility first; add_repo is the per-session workaround, not the fix.
 Pre-flip scan (tree + 898 commits): no tokens or keys; the exposure is identifiers and the AAC
 standards text, which the payload already carried.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/614, https://github.com/surreptakos/claude-dotfiles/issues/291, https://github.com/surreptakos/claude-dotfiles/issues/617
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/969

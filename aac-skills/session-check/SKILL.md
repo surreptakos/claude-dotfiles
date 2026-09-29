@@ -3,10 +3,10 @@ name: session-check
 description: Engine behind the session gate — check.js runs the git/clasp/test/ticket checks for any repo. The hooks call it; /session-start and /session-end re-print its report.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-28T15:19:56Z"
-  previous-modified: "2026-09-26T05:16:12Z"
-  revision: "42"
-  content-sha: "d044fbabe627"
+  modified: "2026-09-28T21:18:52Z"
+  previous-modified: "2026-09-28T15:19:56Z"
+  revision: "43"
+  content-sha: "2cea7a73df16"
 ---
 
 # Session check (engine)
@@ -54,9 +54,11 @@ is reported as `skipped (<host>-only)` and not run — a desktop-only sweep that
 container is noise, and noise is what gets the whole report skimmed past.
 
 The **Account** section (`identity.js`) reads `~/.claude/accounts.json` — which Claude account
-owns which repo and desktop routine — and compares it with the account the session runs under
-(desktop: the host-session file's path; CLI: `oauthAccount` in the profile's `.claude.json`;
-cloud: unknown, so unchecked). Findings there carry warning severity by ruling.
+owns which desktop routine — and checks that the account the session runs under is one of the
+owner's (desktop: the host-session file's path; CLI: `oauthAccount` in the profile's
+`.claude.json`; cloud: unknown, so unchecked). No repo has an owner account: either account may
+work any repo (owner ruling 2026-09-25, issue 714), so only an unregistered account warns.
+Findings there carry warning severity by ruling.
 
 In a claude-dotfiles checkout, on a desktop, a silent **pull nudge** (`pull-nudge.js`, issue 735)
 compares `sync.ps1 -Mode pull`'s last recorded commit against the default branch, restricted to the

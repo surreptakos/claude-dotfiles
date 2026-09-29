@@ -19,3 +19,7 @@ pre-existing audit drift optional; that paragraph was rewritten the same day.
 **How to apply:** run the audit, fix each finding in place (qualify bare `#N` as `owner/repo#N`,
 tick or justify boxes, add the triage label), re-run until only findings needing an owner ruling
 remain, and turn those into `ready-for-human` tickets. See [[verify-before-filing-a-sweep-ticket]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/92
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/983

@@ -15,6 +15,12 @@ name: Generated code
 # The fix for either failure is the command the generator itself prints: run it without --check,
 # which rewrites the artifact, then commit the result.
 # The dashboard branch is a force-pushed snapshot artifact and is never checked.
+#
+# Issue 933 adds a third check: a change under aac-skills/project-harness/templates/ must bump
+# `harness-version: N` in templates/harness-version.md. PR 914 changed templates/tracker-audit.js
+# at v33, so no install read as behind and no sweep ran. The fix is the version bump plus the
+# project-harness skill's step-7 sweep. It diffs against the merge-base with origin/master (or,
+# on a push to master, the previous tip), hence the full-history checkout.
 
 on:
   pull_request:
@@ -30,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -40,3 +48,13 @@ jobs:
         # both, rather than send you back for a second round.
         if: ${{ !cancelled() }}
         run: node tools/build-harness-tracker-audit.js --check
+      - name: A harness template change bumps the harness version
+        if: ${{ !cancelled() }}
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF" = refs/heads/master ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            node tools/check-harness-version-bump.js --base "$BEFORE"
+          else
+            node tools/check-harness-version-bump.js
+          fi
