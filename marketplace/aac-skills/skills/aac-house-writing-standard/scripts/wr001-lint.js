@@ -303,9 +303,10 @@ function lintFile(file, opts) {
     // stripUncheckable blanks the list marker, a list item is the only line
     // that starts with spaces, so the check reaches list items alone: a label
     // of one to three words, capitalized, ending in a period, then a capital.
-    // (Dan, 2026-09-29, on the OSH delegation emails.)
+    // A digit in the label does not exempt it: "Question 2, counts." slipped
+    // through on 2026-09-29. (Dan, 2026-09-29, on the OSH delegation emails.)
     const runIn = /^\s+([A-Z][\w'-]*(?:\s+[\w'-]+){0,2}\.)\s+(?=[A-Z])/.exec(line);
-    if (runIn && !/^(?:Yes|No)\.$/.test(runIn[1]) && !/\d/.test(runIn[1])) {
+    if (runIn && !/^(?:Yes|No)\.$/.test(runIn[1])) {
       push(i, runIn.index + 1, 37, formal ? "error" : "warn",
         "run-in heading ending in a period; recast the label as a sentence (Rule 37 allows run-in headings only in legal documents, ending with a colon)",
         runIn[1]);
