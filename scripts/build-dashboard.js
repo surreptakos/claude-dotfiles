@@ -157,9 +157,9 @@ async function fetchRestoreTestVerdict(opts) {
   opts = opts || {};
   const workflow = opts.workflow || CONFIG.restoreTestWorkflow;
   const branch = opts.branch || CONFIG.restoreTestBranch;
-  const repoSlug = opts.repoSlug || repoSlugFromGit();
+  const repoSlug = opts.repoSlug === undefined ? repoSlugFromGit() : opts.repoSlug;
   const token = opts.token || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  const fetchImpl = opts.fetchImpl || (typeof fetch === 'function' ? fetch : null);
+  const fetchImpl = opts.fetchImpl === undefined ? (typeof fetch === 'function' ? fetch : null) : opts.fetchImpl;
 
   if (!repoSlug || !fetchImpl) return UNKNOWN_VERDICT;
 
