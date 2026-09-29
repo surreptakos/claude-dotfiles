@@ -3,15 +3,15 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-24T05:27:51Z'
-  previous-modified: '2026-09-18T18:36:19Z'
-  revision: '6'
-  content-sha: 535b9cf10d61
+  modified: '2026-09-29T16:47:57Z'
+  previous-modified: '2026-09-24T05:27:51Z'
+  revision: '7'
+  content-sha: 67a750d4574b
 ---
 
 # Maintain repo
 
-One weekly pass. Two skills back-to-back, in order.
+One weekly pass. Three skills back-to-back, in order: ticket-reaper, consistency-audit, consolidate-memory.
 
 ## Always a full sweep — never a delta
 

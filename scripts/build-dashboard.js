@@ -13,9 +13,9 @@ const path = require('path');
 // ---- CONFIG: the harness skill fills this per repo -------------------------
 const CONFIG = {
   title: 'claude-dotfiles',
-  // -From worktree, not origin: this repo is private, so a clone from inside a CI runner has no
-  // credential, and a gate that cloned HEAD would report on the previous commit rather than the
-  // one being made. worktree copies what git currently sees. ~13s.
+  // -From worktree, not origin: a gate that cloned the remote would report on the previous
+  // commit rather than the one being made (the repo is public since 2026-09-21, so credentials
+  // are no longer the reason). worktree copies what git currently sees. ~13s.
   //
   // Not run by `dashboard.yml` any more (issue 452): the CI job reads the restore-test verdict
   // from the Actions API instead (see `restoreTestWorkflow` below and `fetchRestoreTestVerdict()`)
@@ -24,7 +24,7 @@ const CONFIG = {
   // set `RUN_LOCAL_TEST_COMMAND=1` to spawn it (e.g. from the desktop, where the PowerShell
   // profile it restores actually exists) instead of reading the Actions verdict.
   testCommand: 'powershell -ExecutionPolicy Bypass -File tests/restore-test.ps1 -From worktree',
-  adrDir: null,                     // no ADRs here
+  adrDir: 'docs/adr',               // front-matter `status:` lines, read below
   deployWorkflow: null,             // nothing deploys; sync.ps1 is the release path and it is local
   // The health line's real source of truth (issue 452): the latest completed run of this workflow
   // on `master`, read through the Actions API rather than re-run here. That workflow is the gate
@@ -211,7 +211,10 @@ async function build() {
     adrs = fs.readdirSync(dir).filter(f => /^\d{4}-.*\.md$/.test(f)).sort().map(f => {
       const text = fs.readFileSync(path.join(dir, f), 'utf8');
       const title = (text.match(/^#\s+(.+)$/m) || [])[1] || f;
-      let status = (text.match(/^\*\*Status:\*\*\s*(.+)$/m) || [])[1] || 'no status line';
+      // A `**Status:**` body line (the harness template's shape) or, as this repo's ADRs carry
+      // it, a `status:` key in the leading front matter.
+      const front = (text.match(/^---\r?\n([\s\S]*?)\r?\n---/) || [])[1] || '';
+      let status = (text.match(/^\*\*Status:\*\*\s*(.+)$/m) || front.match(/^status:\s*(.+)$/m) || [])[1] || 'no status line';
       status = status.split(/(?<=\w[.)])\s/)[0];
       if (status.length > 160) status = status.slice(0, 157) + '...';
       return { id: f.slice(0, 4), title, status, file: CONFIG.adrDir + '/' + f };

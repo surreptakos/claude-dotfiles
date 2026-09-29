@@ -18,7 +18,7 @@ repositories attached to the session" for API and release-asset requests; a plai
 public repo works unattached (measured: octocat/Hello-World exit 0, an unattached private repo
 "could not read Username"). The environment dialog has name, network access, environment
 variables, API credentials and a setup script; there is no repository or "source" list, so
-"add claude-dotfiles as a second environment source" was never a real fix. The setup script
+"attach it as an environment source" was never a real fix. The setup script
 cannot help either: it runs before the agent proxy, so it gets no GitHub or Google credential,
 and it reaches only public GitHub content.
 
@@ -27,6 +27,6 @@ again. Check its visibility first; add_repo is the per-session workaround, not t
 Pre-flip scan (tree + 898 commits): no tokens or keys; the exposure is identifiers and the AAC
 standards text, which the payload already carried.
 
-Source: https://github.com/surreptakos/claude-dotfiles/issues/614, https://github.com/surreptakos/claude-dotfiles/issues/291, https://github.com/surreptakos/claude-dotfiles/issues/617
+Source: https://github.com/surreptakos/claude-dotfiles/issues/614, https://github.com/surreptakos/claude-dotfiles/issues/291, https://github.com/surreptakos/claude-dotfiles/issues/617, docs/research/cloud-container-capabilities.md, .claude/hooks/session-start.sh
 
 Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/969

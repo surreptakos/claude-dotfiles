@@ -11,7 +11,7 @@ metadata:
 Account-to-repo and account-to-routine enforcement is a **warning, never a hard gate** (Dan,
 2026-09-09, issue 103). The registry is `~/.claude/accounts.json` (whitelisted, travels with the
 dotfiles). Dan-AAC (desktop app) owns the desktop routines the registry's `routines` map lists.
-**No repo has an owner account** (Dan, 2026-09-25, issue 714: "either account, any project"; Dan
+**No repo has an owner account** (Dan, 2026-09-25, issue 714: "Either account, any project"; Dan
 and Dan-AAC are the same owner). The registry's `repos` map only lists slugs and marks dead ones,
 so session-check and the watchdog warn about a repo that is dead or unlisted and about an account
 that is not in the registry, never about which registered account works which repo.

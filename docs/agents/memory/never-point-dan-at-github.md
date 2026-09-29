@@ -6,7 +6,7 @@ metadata:
 ---
 
 When a reply rests on a ticket, comment, PR or file on GitHub, paste the direct URL (issue or
-comment permalink) or quote the content inline. Never "the spec is on issue 579" as a bare
+comment permalink) or quote the content inline. Never *the spec is on issue 579* as a bare
 pointer.
 
 **Why:** Dan, 2026-09-21: "Stop telling me to check github and either give me a link or give me
@@ -23,5 +23,3 @@ permalink; put it in the reply. If the content is under ~20 lines, quote it inst
 [[answer-yes-no-in-one-line]].
 
 Source: https://github.com/surreptakos/claude-dotfiles/issues/579, https://github.com/surreptakos/claude-dotfiles/issues/683, https://github.com/surreptakos/claude-dotfiles/issues/655
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/977

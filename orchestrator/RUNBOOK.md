@@ -30,8 +30,9 @@ each Routine serves its own repo independently.
   issue, dispatches everything in-session, ends the turn on `Pass complete`. No session outlives
   one wake; continuity lives in the state issue.
 - **Fleet** — the plugin-served `aac-skills/ticket-fleet/ticket-fleet.js`, copied into the repo as
-  `.claude/workflows/ticket-fleet.js` and invoked in-session via the Workflow tool with
-  `scriptPath = .claude/workflows/ticket-fleet.js`. A `${CLAUDE_PLUGIN_ROOT}` path is refused in a
+  `.claude/workflows/ticket-fleet.js` and invoked in-session via the Workflow tool with an
+  absolute `scriptPath = /home/user/<repo>/.claude/workflows/ticket-fleet.js` (Dispatch step 4:
+  a relative path resolves against a cwd that can be stale). A `${CLAUDE_PLUGIN_ROOT}` path is refused in a
   cloud container — the Workflow tool reads only a path under the working directory (issue 233).
   One script for local and cloud; it picks between the `gh` CLI and the connector tools at run
   time. Same scout / pinned implementer / blind refuting verifier / deliver shape.

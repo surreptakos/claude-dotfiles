@@ -58,6 +58,4 @@ and give the note a name that says what it is — adding one costs its own line 
 - status-report-is-not-a-request: past tense is a report; check Teams first
 - chain-prompts-keep-skill-labels: never force a label upstream; widen the fleet's tickets list
 
-Source: tools/repo-memory-load.js, tools/repo-memory-load.test.js, https://github.com/surreptakos/claude-dotfiles/issues/210, https://github.com/surreptakos/claude-dotfiles/issues/589, profile/claude/CLAUDE.md, docs/agents/memory/hook-exit-126-is-the-mode-bit.md, docs/agents/memory/cloud-containers-can-run-powershell.md
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/975
+Source: tools/repo-memory-load.js, tools/repo-memory-load.test.js, https://github.com/surreptakos/claude-dotfiles/issues/210, https://github.com/surreptakos/claude-dotfiles/issues/589, profile/claude/CLAUDE.md, docs/agents/memory/hook-exit-126-is-the-mode-bit.md, docs/agents/memory/cloud-containers-can-run-powershell.md, https://github.com/surreptakos/claude-dotfiles/pull/652

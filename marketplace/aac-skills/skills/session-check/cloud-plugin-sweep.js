@@ -7,8 +7,8 @@
  *   node cloud-plugin-sweep.js --stamp    # record the current tree as the last-pushed one
  *
  * WHY IT EXISTS
- * Cloud claude.ai/code containers load the aac-skills plugin from the private marketplace at
- * surreptakos/claude-dotfiles. `tools/build-cloud-plugin.py` refreshes marketplace/aac-skills/
+ * Cloud claude.ai/code containers load the aac-skills plugin from the marketplace at
+ * surreptakos/claude-dotfiles (public since 2026-09-21). `tools/build-cloud-plugin.py` refreshes marketplace/aac-skills/
  * from the repo's aac-skills/ tree, and merging that to master publishes it. From then on the
  * merge IS the upload for every skill the plugin serves — no zip re-upload at claude.ai. This
  * sweep watches for a local edit made AFTER that last publish, so a cloud session is never
