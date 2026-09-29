@@ -83,15 +83,17 @@ for (const c of CASES) {
   test(`Rule ${c.rule}: WARN on the Avoid fixture, nothing on the Preferred one`, async () => {
     const avoid = { [c.rule]: [c.avoid] };
     const bad = await findings(c.fail, avoid);
-    const hits = bad.findings.filter((f) => f.rule === c.rule);
+    // The regex pass may flag the same fixture on its own (Rules 10, 162 and
+    // 164 carry phrase checks since 2026-09-29); this test is about the Jev finding.
+    const jev = (fs3) => fs3.filter((f) => f.rule === c.rule && /Jev/.test(f.msg));
+    const hits = jev(bad.findings);
     assert.strictEqual(hits.length, 1, JSON.stringify(bad.findings));
     assert.strictEqual(hits[0].sev, "warn");
     assert.strictEqual(hits[0].text, c.avoid);
-    assert.match(hits[0].msg, /Jev/);
-    assert.strictEqual(bad.code, 0);
+    assert.strictEqual(bad.code, bad.findings.some((f) => f.sev === "error") ? 1 : 0);
 
     const good = await findings(c.pass, avoid);
-    assert.deepStrictEqual(good.findings.filter((f) => f.rule === c.rule), []);
+    assert.deepStrictEqual(jev(good.findings), []);
   });
 }
 
@@ -106,9 +108,12 @@ test("no Jev answer produces an ERROR or moves the exit code", async () => {
   const f = write(CASES.map((c) => c.fail).join("\n"));
   const { code, out } = await runLint(f, yesToAll, ["--json"]);
   const all = JSON.parse(out).results[0].findings;
-  assert.ok(all.length >= 5);
-  assert.ok(all.every((x) => x.sev === "warn"), JSON.stringify(all));
-  assert.strictEqual(code, 0);
+  const jevOnes = all.filter((x) => /Jev/.test(x.msg));
+  assert.ok(jevOnes.length >= 5);
+  assert.ok(jevOnes.every((x) => x.sev === "warn"), JSON.stringify(jevOnes));
+  // The exit code is the regex pass's alone: a Jev answer never moves it.
+  const regexOnly = await runLint(f, null, ["--json"]);
+  assert.strictEqual(code, regexOnly.code);
 
   // The stopslop Stop hook, which exits 2 on ERROR, neither runs the linter nor calls Jev.
   const hookDir = path.join(__dirname, "..", "profile", "claude");

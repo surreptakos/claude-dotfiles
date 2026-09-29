@@ -3,10 +3,10 @@ name: aac-house-writing-standard
 description: "AAC-WR-001, the controlled copy of AAC's house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit."
 metadata:
   standard-version: '0.10'
-  modified: "2026-09-29T17:21:39Z"
-  previous-modified: "2026-09-26T01:37:12Z"
-  revision: "12"
-  content-sha: "c3c5ea454567"
+  modified: "2026-09-29T18:01:48Z"
+  previous-modified: "2026-09-29T17:21:39Z"
+  revision: "13"
+  content-sha: "4d9c7e09002c"
 ---
 
 # AAC house writing standard
@@ -63,7 +63,12 @@ python3 scripts/build_references.py ../../docs/standards/AAC-WR-001.md reference
 ```
 
 The script exits non-zero if any section of the source lands in no file, so a
-new Part cannot go missing. Then set `standard-version` in this file's
+new Part cannot go missing.
+When a revision adds or changes a rule, the same PR adds its check to `scripts/wr001-lint.js`
+or its row to `scripts/wr001-coverage.md` saying why no pattern can decide it;
+`tools/wr001-lint-coverage.test.js` fails when the two disagree (Dan, September 29, 2026,
+after Rule 37 sat as an owner ruling for six days with no check).
+ Then set `standard-version` in this file's
 `metadata` and `STANDARD_VERSION` in `scripts/wr001-lint.js` to the new
 version. The other four metadata keys belong to `tools/skill-stamps.py`; the
 repo's stamp-and-build commands rotate them.
