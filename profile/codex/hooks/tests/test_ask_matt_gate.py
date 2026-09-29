@@ -936,6 +936,37 @@ class AskMattGateTests(unittest.TestCase):
             )
             self.assertEqual(stopped, {})
 
+    def test_claude_stop_blocks_once_when_the_presend_lint_was_skipped(self) -> None:
+        # 2026-09-29: reporting a skipped lint to the next turn did not stop a session skipping it
+        # every turn. Stop now blocks; stop_hook_active releases the continuation; a clean lint
+        # against this turn's nonce passes.
+        sid = "claude-lint-block"
+        stop = {"session_id": sid, "hook_event_name": "Stop"}
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.run_gate("claude-prompt", {"session_id": sid, "hook_event_name": "UserPromptSubmit"}, state_dir)
+            nonce = json.loads((state_dir / f"claude--{sid}.json").read_text(encoding="utf-8"))["nonce"]
+            self.assertEqual(self.run_claude_declare(sid, nonce, "implement", state_dir).returncode, 0)
+
+            skipped = json.loads(self.run_gate("claude-stop", stop, state_dir).stdout)
+            self.assertEqual(skipped["decision"], "block")
+            self.assertIn("Pre-send lint not run", skipped["reason"])
+            self.assertIn(f'lint <file> "{sid}"', skipped["reason"])
+
+            released = json.loads(
+                self.run_gate("claude-stop", {**stop, "stop_hook_active": True}, state_dir).stdout
+            )
+            self.assertNotIn("decision", released)
+            # A host that never sends stop_hook_active is bounded too: the nonce-keyed stamp releases.
+            again = json.loads(self.run_gate("claude-stop", stop, state_dir).stdout or "{}")
+            self.assertNotIn("decision", again)
+
+            draft = "route unchecked: Jev unavailable\nQueue empty.\nNext: send it."
+            lint = self.run_presend_lint(sid, draft, state_dir)
+            self.assertEqual(lint.returncode, 0, lint.stdout)
+            linted = json.loads(self.run_gate("claude-stop", stop, state_dir).stdout or "{}")
+            self.assertNotIn("decision", linted)
+
     def test_claude_gate_blocks_tools_and_stop_until_exact_declaration(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
@@ -997,12 +1028,13 @@ class AskMattGateTests(unittest.TestCase):
             self.assertEqual(json.loads(blocked_stop.stdout)["decision"], "block")
             self.assertEqual(declared.returncode, 0, declared.stderr)
             self.assertEqual(json.loads(allowed_tool.stdout), {})
-            # This turn never ran the pre-send lint, so Stop reports that rather than answering {} —
-            # the audit is unconditional by design. What matters here is that it does not BLOCK once a
-            # route is declared, which is what this test is about.
+            # This turn never ran the pre-send lint, so Stop still blocks — but on the lint, not the
+            # route (2026-09-29: a skipped lint blocks). What matters here is that the declaration
+            # cleared the route block.
             allowed_stop_out = json.loads(allowed_stop.stdout)
-            self.assertNotIn("decision", allowed_stop_out)
-            self.assertIn("WITHOUT the required pre-send lint", allowed_stop_out["systemMessage"])
+            self.assertEqual(allowed_stop_out["decision"], "block")
+            self.assertIn("Pre-send lint not run", allowed_stop_out["reason"])
+            self.assertNotIn("route", allowed_stop_out["reason"].lower())
             final_state = json.loads(state_path.read_text(encoding="utf-8"))
             self.assertEqual(final_state["flow"], "implement")
             self.assertTrue(final_state["yes"])
@@ -1227,6 +1259,9 @@ class AskMattGateTests(unittest.TestCase):
             # A second user prompt clears the flow and carries the route forward as last_flow.
             self.run_gate("claude-prompt", {"session_id": "s-recon"}, state_dir)
             self.assertIsNone(self._state(state_dir, "s-recon")["flow"])
+            # Linted, so the lint block (2026-09-29) is not what this test sees; the stamp must
+            # survive the reconcile rewrite.
+            self.assertEqual(self.run_presend_lint("s-recon", "route unchecked: Jev unavailable\nQueue empty.\nNext: send it.", state_dir).returncode, 0)
 
             stopped = json.loads(
                 self.run_gate("claude-stop", {"session_id": "s-recon"}, state_dir).stdout
@@ -1286,6 +1321,8 @@ class AskMattGateTests(unittest.TestCase):
                 state_dir,
                 "I think this is really just basically the answer, and it might be simply fine.",
             )
+            # The draft was linted; the sent text drifted from it. That drift is reported, not blocked.
+            self.assertEqual(self.run_presend_lint("s-lint", "route unchecked: Jev unavailable\nQueue empty.\nNext: send it.", state_dir).returncode, 0)
             stopped = json.loads(
                 self.run_gate(
                     "claude-stop",
@@ -1431,7 +1468,7 @@ class AskMattGateTests(unittest.TestCase):
             self.assertEqual(stopped, {})
             self.assertNotIn("pending_lint", self._state(state_dir, "s-clean"))
 
-    def test_a_clean_reply_sent_without_the_presend_lint_is_still_reported(self) -> None:
+    def test_a_clean_reply_sent_without_the_presend_lint_is_blocked(self) -> None:
         # The audit's whole point: a turn can end with a perfectly clean message and still have
         # skipped the step that makes cleanliness deliberate rather than luck.
         with tempfile.TemporaryDirectory() as folder:
@@ -1447,14 +1484,9 @@ class AskMattGateTests(unittest.TestCase):
                     state_dir,
                 ).stdout
             )
-            self.assertIn("WITHOUT the required pre-send lint", stopped["systemMessage"])
-            self.assertIn("pending_lint", self._state(state_dir, "s-skip"))
-            # ...and it reaches the model where it can act on it: the next turn's context.
-            injected = json.loads(
-                self.run_gate("claude-prompt", {"session_id": "s-skip"}, state_dir).stdout
-            )["hookSpecificOutput"]["additionalContext"]
-            self.assertIn("CAVEMAN VIOLATION IN YOUR LAST MESSAGE", injected)
-            self.assertIn("WITHOUT the required pre-send lint", injected)
+            # 2026-09-29: reported-next-turn was read past every turn; it now blocks.
+            self.assertEqual(stopped["decision"], "block")
+            self.assertIn("Pre-send lint not run", stopped["reason"])
 
     def test_a_stale_lint_stamp_cannot_pass_a_later_turn(self) -> None:
         # A bare boolean would: stamp it once and every turn afterwards reads as compliant. The stamp
@@ -1481,7 +1513,8 @@ class AskMattGateTests(unittest.TestCase):
                     state_dir,
                 ).stdout
             )
-            self.assertIn("WITHOUT the required pre-send lint", stopped["systemMessage"])
+            self.assertEqual(stopped["decision"], "block")
+            self.assertIn("Pre-send lint not run", stopped["reason"])
 
 
     def test_lint_subcommand_fails_a_dirty_draft_before_it_is_sent(self) -> None:
@@ -1721,7 +1754,7 @@ class AskMattGateTests(unittest.TestCase):
 
             def stop_with(tools: list[str], text: str) -> dict:
                 transcript = self._transcript_with_tools(state_dir, tools, text)
-                self.run_presend_lint("s-yes", "Queue empty.", state_dir)  # clean stamp
+                self.assertEqual(self.run_presend_lint("s-yes", "route unchecked: Jev unavailable\nQueue empty.\nNext: send it.", state_dir).returncode, 0)
                 return json.loads(
                     self.run_gate(
                         "claude-stop", {"session_id": "s-yes", "transcript_path": transcript},

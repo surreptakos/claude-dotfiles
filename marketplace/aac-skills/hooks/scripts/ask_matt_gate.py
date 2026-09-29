@@ -2258,9 +2258,9 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         # rendered by the time a Stop hook runs, so a block cannot take it back — it only makes the
         # model write a second one. Enforcement therefore lives at UserPromptSubmit (the route is in
         # context before the model writes) and at PreToolUse (which really can refuse). Stop only
-        # reconciles what those two left, and blocks in exactly one case: a session where no route
-        # was ever declared, where there is no earlier state to reconcile against and a second
-        # message is the lesser cost.
+        # reconciles what those two left, and blocks in two cases, where a second message is the
+        # lesser cost: a session where no route was ever declared (no earlier state to reconcile
+        # against), and a turn that skipped the pre-send lint (below, 2026-09-29).
         carried = (state or {}).get("last_flow")
         if not carried:
             # That block is only worth anything if the model can satisfy it, and the sole way to
@@ -2310,6 +2310,9 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
                 # Issue 840: a reconciled route was never picked; the next message does not
                 # continue it.
                 "flow_reconciled": True,
+                # A lint run this turn survives the rewrite, or the lint block below would refuse a
+                # turn that did lint.
+                "lint_clean_nonce": (state or {}).get("lint_clean_nonce"),
             },
         )
         _log_governance(session_id, f"undeclared turn reconciled to last route: {carried}")
@@ -2332,6 +2335,26 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
         _write_state("claude", session_id, current)
         _log_governance(session_id, "correction turn ended with no system change")
         notes.append(miss)
+    # A skipped lint BLOCKS (Dan, 2026-09-29, brazil-flights session). Reporting it to the next turn
+    # did not work: a whole session skipped it every turn and read past each carried complaint. The
+    # block costs a second reply after the unlinted one; Dan accepted that cost. `stop_hook_active`
+    # above releases the continuation; the nonce-keyed `lint_refused` stamp releases it too (the same
+    # two-sided bound as `stop_refused`), so the block fires at most once per turn either way. A
+    # second unlinted Stop falls through and is carried to the next prompt as before.
+    current = _read_state("claude", session_id) or {}
+    if violations and current.get("lint_refused") != current.get("nonce"):
+        current["lint_refused"] = current.get("nonce")
+        _write_state("claude", session_id, current)
+        _log_governance(session_id, "stop blocked: pre-send lint not run")
+        return {
+            "decision": "block",
+            "reason": (
+                "Pre-send lint not run this turn. Write your reply to a file, run "
+                f'{_runner_spelling()} "{SCRIPT}" lint <file> "{session_id}", rewrite until it '
+                "exits 0, then send the linted text as a correction of the reply above."
+                + (" " + " ".join(notes) if notes else "")
+            ),
+        }
     try:
         final_text = _last_assistant_text(transcript_path) if transcript_path else ""
         if final_text.strip():
@@ -2476,9 +2499,9 @@ def _lint_draft(path: str, session_id: str = "") -> int:
 
     When `session_id` is given, a CLEAN result stamps `lint_clean_nonce` into that session's state.
     That stamp is what makes the discipline auditable rather than honour-based: `_claude_stop` reads
-    it and, when the turn ended with no clean lint against the CURRENT nonce, says so and carries the
-    complaint into the next turn's injected context. It cannot retract the unlinted message — nothing
-    can — but a skipped step stops being invisible.
+    it and, when the turn ended with no clean lint against the CURRENT nonce, blocks once so the model
+    lints and resends (2026-09-29), then carries the complaint into the next turn's context. It cannot
+    retract the unlinted message — nothing can — but a skipped step stops being invisible.
     """
     try:
         # utf-8-sig: Windows PowerShell 5.1 `Set-Content -Encoding utf8` writes a BOM, and a BOM that
