@@ -156,12 +156,15 @@ test('release gate: a gate that prints nothing and never exits still STOPs with 
 });
 
 test('release gate: a gate that prints a PASS verdict then hangs warns, quoting the PASS line, not a STOP', () => {
+  // 1000 ms, not 50: the gate is a fresh node.exe, and on Windows under the suite's parallel
+  // file runs its startup alone can pass 50 ms, so the PASS line was not yet captured when the
+  // timeout fired and the check read STOP (observed 2026-09-29 on the full gate; alone it passed).
   const output = runChecker({
-    gateTimeoutMs: 50,
+    gateTimeoutMs: 1000,
     releaseGates: [`${JSON.stringify(process.execPath)}`
       + ` -e "console.log('PASS release gate ok'); setTimeout(() => {}, 5000)"`],
   }, { args: ['--end'] });
-  assert.match(output, /!!\s*release gate TIMEOUT after 50 ms/);
+  assert.match(output, /!!\s*release gate TIMEOUT after 1000 ms/);
   assert.match(output, /"PASS release gate ok"/);
   assert.doesNotMatch(output, /STOP release gate/);
 });
