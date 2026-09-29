@@ -2,10 +2,10 @@
 name: aac-performance-review-audit
 description: Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email.
 metadata:
-  modified: '2026-09-25T23:17:31Z'
-  previous-modified: '2026-09-24T21:31:18Z'
-  revision: '3'
-  content-sha: ce8418388ae2
+  modified: '2026-09-29T20:32:48Z'
+  previous-modified: '2026-09-29T20:31:20Z'
+  revision: '5'
+  content-sha: 819eb51deab9
 ---
 
 # AAC performance review audit

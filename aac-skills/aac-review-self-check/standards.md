@@ -70,7 +70,7 @@ Guidance: every Weakness has a point. A point that names new work or development
 What no format or meaning check can settle. The reviewer settles each of these before sending; the skip-level checks each of them.
 
 - **Figures.** Every figure on the page matches the workbook or system it came from, computed to the period end in the header.
-- **Rating.** It matches what the direct actually did, with the case against it named. For sales roles the evidence is the signed comp plan: its quotas, the New Logo and Self-Sourced definitions, and the mix gates.
+- **Rating.** It matches what the direct actually did, with the case against it named. For sales roles the evidence is every expectation in the comp plans in force during the period: the Project GP and RMR quotas, the New Logo mix, and (from the plan effective April 1, 2026) the Self-Sourced mix. This holds even though the plan scopes the mix requirements to kicker eligibility (Dan, September 23, 2026). Measure each mix per Period, which the plan defines as the month or quarter (5(i)); never pool several months, because pooling hides the months with none. A change order on a self-sourced deal is not self-sourced (Dan, September 23, 2026).
 - **Result and Ramification.** Consistent with the Rating and with each other, and the Ramification genuinely hands the direct something.
 - **Preponderance.** Most of the page supports the Core Message; not every item has to.
 - **No surprises.** Every Weakness is something the direct has already heard from the reviewer this year, in a One on One or at the time (Manager Tools, No Surprises In Reviews). A repeat from the prior review passes. A Weakness he has not heard comes off the page, may be raised out loud in the meeting, and does not weigh on the Rating.
