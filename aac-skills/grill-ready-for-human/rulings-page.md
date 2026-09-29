@@ -48,7 +48,10 @@ run by hand from any session.
 3. `keep` holds drafts still valid (ticket not updated since `draftedAt`). `toDraft` lists tickets
    per repo that are new or changed. For each repo in `toDraft`, one `Agent` (read-only) with the
    drafting brief below, writing `<drafts dir>/<repo-short>.json` for exactly those numbers. Merge
-   each repo's `keep` tickets into the same file.
+   each repo's `keep` tickets into the same file. `keep` only proves the GitHub thread is quiet,
+   not that the world is: a kept draft whose `draftedAt` is before today goes to its repo's agent
+   too, so every card is re-checked against the live evidence below (Dan, 2026-09-29: a page of
+   71 cards drafted from ticket text alone was "lots of text out of date").
 4. `node tools/rulings-page.js bodies --drafts <dir>` (each card shows the ticket's own GitHub text
    beside the explainer), then `node tools/rulings-page.js build --drafts <dir> --out <page.html>`;
    publish it with `url` set to the page URL. The page's database, and the owner's saved picks, carry over.
@@ -62,7 +65,20 @@ run by hand from any session.
 Read-only: comment, label or edit nothing. For each listed ticket, `gh issue view N --repo <repo>
 --comments` (every comment: earlier ones carry partial rulings), blocking links (`Blocked by #X`
 text and `gh api repos/<repo>/issues/N/dependencies/blocked_by` and `.../blocking`), the repo's
-labels (`gh label list`) and whatever quick lookup makes the options concrete. Frame each ticket's
+labels (`gh label list`) and whatever quick lookup makes the options concrete.
+
+A ticket is a stand-in for the work, not its current state. Before drafting, read what has
+happened since the ticket's newest comment in the systems where it happens: the hourly Teams,
+Outlook and calendar exports in Google Drive (folder `1ZSqv0g3JcomibZ3aFHT84eq0FVlGAXTP`, files
+`teams__<person-or-chat>__<stamp>.json`, `outlook_inbox__…`, `outlook_sent__…`, `calendar__…`;
+Drive connector `search_files` with `title contains '…'`), the Microsoft 365 connector for mail and
+chats the exports miss, Gmail, and the repo's own system of record (Zoho, BILL, the sheet). Search
+by the people, customers, job numbers and amounts the ticket names. When the evidence moves the
+ticket (a reply arrived, the action was done, the fact changed), the card says so: `plain`,
+`background` and the options describe today's state, the recommended option lands it, and
+`evidence` on the ticket, `[{"source","date","gist"}]`, lists each source (file or message, date,
+one-line gist); the card shows it under the explainer. Quote dates and
+senders; never infer an event the evidence does not show. Frame each ticket's
 one decision in plain real-world English: the owner holds no coding context and never opens the
 ticket. 2-4 options, the ticket's own when it lists them, exactly one `recommended`; the id `other`
 is reserved. Write `{"repo","labels","tickets":[{"n","title","url","plain","question","blockedBy",

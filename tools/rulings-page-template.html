@@ -144,7 +144,8 @@ function md(s){ s = String(s || "").trim(); if (!s) return "<p><i>No description
 function explainHtml(t){
   const e = t.explainer;
   if (!e) return "<p>" + esc(t.plain) + "</p>";
-  return "<p><b>What this is.</b> " + esc(e.what) + "</p><p><b>How we got here.</b> " + esc(e.background) + "</p><p><b>Why it matters.</b> " + esc(e.stakes) + "</p>";
+  const ev = (t.evidence || []).map(x => "<li>" + esc(x.date || "") + " · " + esc(x.source || "") + ": " + esc(x.gist || "") + "</li>").join("");
+  return "<p><b>What this is.</b> " + esc(e.what) + "</p><p><b>How we got here.</b> " + esc(e.background) + "</p><p><b>Why it matters.</b> " + esc(e.stakes) + "</p>" + (ev ? "<p><b>Latest evidence.</b></p><ul>" + ev + "</ul>" : "");
 }
 const wide = () => { try { return matchMedia("(min-width: 761px)").matches; } catch (e) { return true; } };
 
