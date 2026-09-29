@@ -561,5 +561,9 @@ async function run(argv, io = {}) {
 module.exports = { lintFile, proseUnits, jevFindings, run, JEV_FLOOR };
 
 if (require.main === module) {
-  run(process.argv.slice(2)).then((code) => process.exit(code));
+  // exitCode, not process.exit(): on Windows Node 24 a forced exit while a
+  // Jev socket is still closing trips libuv's `!(handle->flags &
+  // UV_HANDLE_CLOSING)` assertion in src/win/async.c and the process
+  // returns 127 after printing a clean report (seen 2026-09-29).
+  run(process.argv.slice(2)).then((code) => { process.exitCode = code; });
 }
