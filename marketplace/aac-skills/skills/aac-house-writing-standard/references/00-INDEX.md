@@ -41,8 +41,8 @@ one of them, name that document and hand the work to it.
 
 ## Mechanical check
 
-`scripts/wr001-lint.js` decides 21 of the 167 rules by pattern: 15, 23, 25, 27,
-28, 29, 42, 44, 45, 46, 47, 53, 56, 57, 61, 62, 64, 65, 66, 146, 165. Run it
+`scripts/wr001-lint.js` decides 22 of the 167 rules by pattern: 15, 23, 25, 27,
+28, 29, 37, 42, 44, 45, 46, 47, 53, 56, 57, 61, 62, 64, 65, 66, 146, 165. Run it
 before reading, and read for the rest.
 
 ```

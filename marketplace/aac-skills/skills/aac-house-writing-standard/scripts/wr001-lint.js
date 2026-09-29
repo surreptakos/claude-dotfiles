@@ -172,6 +172,19 @@ function lintFile(file, opts) {
         "\u2014");
     }
 
+    // Rule 37. A run-in heading ("Can install. As a starting point...") is
+    // permitted only in a legal document, and then ends with a colon. After
+    // stripUncheckable blanks the list marker, a list item is the only line
+    // that starts with spaces, so the check reaches list items alone: a label
+    // of one to three words, capitalized, ending in a period, then a capital.
+    // (Dan, 2026-09-29, on the OSH delegation emails.)
+    const runIn = /^\s+([A-Z][\w'-]*(?:\s+[\w'-]+){0,2}\.)\s+(?=[A-Z])/.exec(line);
+    if (runIn && !/^(?:Yes|No)\.$/.test(runIn[1]) && !/\d/.test(runIn[1])) {
+      push(i, runIn.index + 1, 37, formal ? "error" : "warn",
+        "run-in heading ending in a period; recast the label as a sentence (Rule 37 allows run-in headings only in legal documents, ending with a colon)",
+        runIn[1]);
+    }
+
     // Rule 28. Exclamation points have no place in formal writing.
     let ex;
     const exRe = /!/g;
