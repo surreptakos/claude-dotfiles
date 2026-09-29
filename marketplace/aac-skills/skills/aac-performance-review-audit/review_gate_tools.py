@@ -11,7 +11,7 @@
       Write the embedded template to disk.
 
 Requires python-docx. Page count needs LibreOffice (soffice) and pdfinfo; otherwise pass --no-render.
-Template (zlib then base64) md5 e323c80215f14bc222717f2457b10b1a (Dan's canonical formatting, saved 9/9/26).
+Template md5 0bac36e6466ed3a61da6a774a561132b (Dan's canonical formatting, saved 9/9/26; placeholder "[Direct]" in place of a sample name, 9/29/26).
 """
 import re, sys, argparse, subprocess, tempfile, os, datetime, shutil
 from docx import Document
@@ -290,7 +290,7 @@ def gate1_main(argv):
 
 
 TEMPLATE_NAME = "Format Rejection Template.docx"
-TEMPLATE_MD5 = "e323c80215f14bc222717f2457b10b1a"
+TEMPLATE_MD5 = "0bac36e6466ed3a61da6a774a561132b"
 
 
 def template_bytes():
