@@ -1200,6 +1200,15 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus',
   conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp or append resolver refused, and any path the pre-push marker scan found conflict markers in; when prState is dirty-unresolved, the paths the PR still conflicts on (issue 907); empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
   branchLookup: { type: 'array', items: { type: 'object', required: ['exitCode', 'output'], properties: { exitCode: { type: 'integer', description: 'REAL exit code of `git ls-remote --exit-code --heads origin <branch>`, not a pipeline\'s' }, output: { type: 'string', description: 'its stdout and stderr, verbatim' } } }, description: 'issue 654: every `git ls-remote --exit-code --heads origin <branch>` this stage ran, in order; [] when it never had to look. Exit 2 is git\'s own "no matching ref"; any other non-zero, or an exit 0 that printed nothing, means "could not tell", not "absent"' },
   blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed; when prState is ci-red or changes-requested, the failing check names or the reviewer; when prState is dirty-unresolved because the re-merge was refused, the refusal text VERBATIM (issue 907)' },
+  // Issue 1008: a gate whose only failures were child processes reporting a null exit code (a spawn
+  // failure under parallel load, not a test failure) is re-run once, alone; this records that it was.
+  gateRetry: { type: 'object', required: ['firstExitCode', 'retryExitCode', 'outcome'], description: 'issue 1008: present only when a run of the test command in this stage exited non-zero with every failing test reporting a null exit code from a child process, and the gate was therefore re-run once, alone; omit it when no such retry ran', properties: {
+    firstExitCode: { type: 'integer', description: 'REAL exit code of the first run' },
+    nullExitLines: { type: 'string', description: 'the first run\'s failing lines that read a null exit code, verbatim' },
+    retryExitCode: { type: 'integer', description: 'REAL exit code of the one re-run - this is the gate\'s verdict' },
+    retryTail: { type: 'string', description: 'the decisive final lines of the re-run' },
+    outcome: { type: 'string', enum: ['passed', 'failed'], description: 'passed = the re-run exited 0 and delivery went on; failed = it exited non-zero and mergeStatus is blocked' },
+  } },
   // Issue 770: STEP D merges the PR the deliverer opened. These say whether it did and why not.
   merged: { type: 'boolean', description: 'true only when the merge call in STEP D returned merged:true for THIS PR' },
   mergeSha: { type: 'string', description: 'the sha the merge call returned; "" when not merged' },
@@ -2531,6 +2540,14 @@ function mergeNote(delivery) {
   return ` - open, not merged: ${delivery.prState || 'prState not reported'}${paths}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
 }
 
+// Issue 1008: one clause for the run log saying the gate was re-run after a null-exit spawn failure.
+function gateRetryNote(delivery) {
+  const g = delivery && delivery.gateRetry
+  if (!g || typeof g !== 'object') return ''
+  const verdict = g.outcome === 'passed' || g.retryExitCode === 0 ? 'passed' : 'failed'
+  return ` - test gate re-run once after a null-exit spawn failure (first run exit ${g.firstExitCode}): re-run ${verdict} (exit ${g.retryExitCode})`
+}
+
 function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
   // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
   // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
@@ -2588,7 +2605,7 @@ A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly 
 A4. Once every conflicted path was class (a), (b), (c) or (d): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Run each of them EXACTLY as written, every flag included: \`--home\` names the OWNER's home, and a stamp hashed against the container's home instead is what sent #550 and #552 out red (issue 553). Then \`git add -A\`.
 A5. THE GATE - both halves run AFTER A4's regenerate and BEFORE anything is pushed, and nothing is pushed until both pass.
     (i) STAMPS CHECK (issue 553): ${regenCheckNote}. Exit 0 is the pass - go on to (ii). A non-zero exit names the skills whose recorded stamp no longer matches their content, which means A4's regenerate did not take. Do NOT hand-edit a stamp to make this pass - the recorded hash is what makes the dates believable - and do NOT read a green PR check as evidence here: in run 6aac4a53 the payload rebuilt, the tests passed and skill-stamps.yml's \`pull_request\` run (which tests the merge ref) was green while the push-event run of the same \`check\` job was red on arrival. Instead re-run A4's commands byte-identical, \`git add -A\`, and run the check again. If the second run still fails, \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason naming every skill the check listed.
-    (ii) TESTS: re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
+    (ii) TESTS: re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. NULL EXIT UNDER LOAD (issue 1008) - this holds for every run of that command in this stage: when it exits non-zero and EVERY failing test reports a null exit code from a child process (the failure reads "exited null", "status null" or "exit code null" - the harness could not spawn or lost the subprocess), that is a spawn failure from the wave's parallel load, not a test failure. Re-run the same command ONCE, alone - nothing else running beside it - and return gateRetry {firstExitCode, nullExitLines: those failing lines VERBATIM, retryExitCode, retryTail, outcome: "passed" or "failed"}. The re-run's exit code is the gate's verdict: 0 goes on as green; non-zero is the failure below, with the re-run's failing lines. A run with any failure that is not a null exit is never re-run, and there is never a second re-run. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
 A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, and nothing is pushed until it passes (issue 514): \`git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD\`. Exit 1 with no output is the pass - go to STEP B. Exit 0 lists paths whose COMMITTED content still carries conflict markers, which is what a resolution that staged the markers instead of removing them leaves behind; run 6aab1eac committed and pushed exactly that and then asked for a force push. Do NOT push and do NOT open a PR. For each listed path that is class (a), (b) or (d): resolve it again (\`git checkout --theirs -- <path>\`, \`node tools/resolve-stamp-conflict.js <path>\`, or ${gitSpelling(instrument, 'checkout --conflict=diff3 -- <path>')} then \`node tools/resolve-append-conflict.js <path>\`), redo A4's regeneration and BOTH halves of A5's gate, \`git add -- <path>\`, amend the merge commit with \`git commit --amend --no-edit\` (which keeps both merge parents), and run the scan again. For any listed path that is class (c), and for any path a second scan still lists: \`git reset --hard HEAD~1\` if the merge is already committed (\`git merge --abort\` if it is not), push nothing, open no PR, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every path the scan listed], blockedReason:"conflict markers left in <paths> after the merge"}.
 A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(e), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
@@ -2671,7 +2688,7 @@ async function runFinish(journal) {
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
     }
-    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
+    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${gateRetryNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
     else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
@@ -2939,7 +2956,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // than re-implementing - the refusal text travels in the PR body and in the journal's
     // blockedReason, not in this line.
     const unmergedByClassifier = !!(delivery && delivery.mergeStatus === 'unmerged-by-classifier')
-    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${mergeNote(delivery)}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
+    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${mergeNote(delivery)}${gateRetryNote(delivery)}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
 
     // Checkpoint 3 of 4 (aac-routines issue 270): the Deliver step pushes and opens the PR from
     // the parent's context - unisolated, like the verifier - so it can dirty the orchestrator's
@@ -2966,6 +2983,8 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // Carried so the run report can say which PRs still owe the default-branch merge (issue 544).
     mergeStatus: (delivery && delivery.mergeStatus) || null,
     // Issue 770: STEP D merged the PR itself, or says why it is still open.
+    // Issue 1008: the one re-run of a gate that failed only on null exit codes, and how it ended.
+    gateRetry: (delivery && delivery.gateRetry) || null,
     merged: !!(delivery && delivery.merged === true), mergeSha: (delivery && delivery.mergeSha) || null,
     prState: (delivery && delivery.prState) || null, ticketState: (delivery && delivery.ticketState) || null,
     mergeNote: delivery && delivery.mergeStatus === 'unmerged-by-classifier'

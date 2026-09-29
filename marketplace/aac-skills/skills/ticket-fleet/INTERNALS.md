@@ -125,6 +125,13 @@ with `conflictPaths` naming every path still in conflict. A test command that fa
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
 
+**A null exit code is a spawn failure, not a failing gate (issue 1008).** Wave `wf_3ccddd78-a8a`
+blocked three verified deliveries whose every failure read `hook exited null` while fourteen
+tickets delivered in parallel; the same suite run alone passed. When every failing test reports
+a null exit code from a child process, the deliverer re-runs the test command once, alone, and
+that re-run decides. The result carries `gateRetry {firstExitCode, nullExitLines, retryExitCode,
+retryTail, outcome}` and the deliver log line says how the re-run ended.
+
 **A merge the classifier refuses is not a blocked merge.** In a container the auto-mode
 classifier sometimes refuses `git merge` on the shape of the command rather than on what it
 would do, and the refusals are not deterministic — a byte-identical retry usually goes through.
