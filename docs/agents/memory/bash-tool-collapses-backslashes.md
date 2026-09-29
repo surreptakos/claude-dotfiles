@@ -14,6 +14,4 @@ The Bash tool collapses `\\` to `\` before the command reaches bash, and a quote
 
 **How to apply:** any script, patch or file content that contains a backslash goes through the Write tool to a scratchpad file, then Bash runs the file. Building the backslash in code (`chr(92)`, `bytes([92])`) also works. Verify with a byte-level check (`b'\x08' in data`) when the payload is a regex. Related: [[sed-strips-crlf-in-this-repo]].
 
-Source: aac-skills/ticket-fleet/ticket-fleet.js
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/962
+Source: aac-skills/ticket-fleet/ticket-fleet.js, https://github.com/surreptakos/claude-dotfiles/issues/72

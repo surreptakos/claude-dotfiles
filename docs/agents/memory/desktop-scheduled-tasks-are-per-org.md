@@ -36,4 +36,6 @@ reads each registry at org init, so file edits take effect on the next switch or
 `%LOCALAPPDATA%\Claude\Logs\main.log` and the org-specific registry, not the SKILL.md dirs. See
 [[fable-usage-is-rationed]] for why routines and fleet workers stay off Fable.
 
+Source: https://github.com/surreptakos/claude-dotfiles/issues/103
+
 Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/968

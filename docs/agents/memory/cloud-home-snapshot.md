@@ -27,7 +27,7 @@ session installed*: compare its `installed_at` to the container's boot time befo
 dir IS that harnessed repo. A Routine-fired session carrying two repository sources, and an
 agent-minted Routine session carrying none (its `session_request.config.sources` is `[]`, issue
 226), never reach it — and a Routine created via the claude.ai UI or the HTTP API cannot be fired
-by an agent (`fire_trigger` refuses: "agents can only fire routines they created"), so the shape
+by an agent (`fire_trigger` refuses: "Agents can only fire routines they created"), so the shape
 is hard to reproduce from a session. Harness v31 seats a copy of the hook at
 `~/.claude/hooks/aac-bootstrap.sh` in USER settings, which every session in the container runs
 whatever its project dir is.
@@ -72,6 +72,6 @@ source repo; one minted from a session puts that line first in its prompt. (The 
 Routines had sources; they are disabled since 2026-09-23, ADR 0001.) Related:
 [[dotfiles-public-for-cloud-clone]], [[routine-sessions-run-acceptedits]].
 
-Source: .claude/hooks/upstream-skills.sh, .claude/hooks/caveman-bootstrap.sh, lib/caveman-cli.json (removed by issue 931; the CLI now tracks the latest npm release), aac-skills/session-check/check.js, https://github.com/surreptakos/claude-dotfiles/issues/643, https://github.com/surreptakos/claude-dotfiles/issues/226, https://github.com/surreptakos/claude-dotfiles/issues/645, https://github.com/surreptakos/claude-dotfiles/issues/942
+Source: .claude/hooks/upstream-skills.sh, .claude/hooks/caveman-bootstrap.sh, aac-skills/session-check/check.js, https://github.com/surreptakos/claude-dotfiles/issues/643, https://github.com/surreptakos/claude-dotfiles/issues/226, https://github.com/surreptakos/claude-dotfiles/issues/645, https://github.com/surreptakos/claude-dotfiles/issues/942, https://github.com/surreptakos/claude-dotfiles/pull/539
 
 Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/964

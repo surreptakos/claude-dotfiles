@@ -20,6 +20,6 @@ the pushed commit (`git status --short` empty, nothing unpushed) read the local 
 command substitution that silently yields an empty string then feeds an empty `--version` into a
 stamp; check the captured value before using it. See [[bash-tool-collapses-backslashes]].
 
-Source: .claude-plugin/marketplace.json
+Source: .claude-plugin/marketplace.json, https://github.com/surreptakos/claude-dotfiles/pull/58
 
 Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/976

@@ -38,8 +38,4 @@ tool in `pending_action`. See #651.
 (`docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`) cites for moving the masters back to
 the desktop; the four `master-*` Routines are disabled, not deleted.
 
-**2026-09-23:** this is the first of the three blockers ADR 0001
-(`docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`) cites for moving the masters back to
-the desktop; the four `master-*` Routines are disabled, not deleted.
-
 Source: .claude/settings.json, aac-skills/ticket-fleet/ticket-fleet.js, aac-skills/project-harness/templates/add-cloud-plugin.js, docs/adr/0001-orchestrator-masters-run-on-the-desktop.md, https://github.com/surreptakos/claude-dotfiles/issues/75, https://github.com/surreptakos/claude-dotfiles/issues/651

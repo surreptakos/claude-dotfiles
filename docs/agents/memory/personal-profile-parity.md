@@ -55,6 +55,4 @@ earlier hold-off): the union merge above copies them in on every pull. Decision 
 direction out until 2026-09-23; since the two-way link above, both profiles read and write one
 `projects` tree, so personal-session memories reach the work account too.
 
-Source: sync.ps1, lib/personal.ps1, profile/claude/tools/link-personal-profile.ps1, profile/claude/hooks/state-stash.js, profile/claude/hooks/state-rehydrate.js, profile/claude/hooks/session-gate.js, https://github.com/surreptakos/claude-dotfiles/issues/214, https://github.com/surreptakos/claude-dotfiles/issues/729
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/978
+Source: sync.ps1, lib/personal.ps1, profile/claude/tools/link-personal-profile.ps1, profile/claude/hooks/state-stash.js, profile/claude/hooks/state-rehydrate.js, profile/claude/hooks/session-gate.js, https://github.com/surreptakos/claude-dotfiles/issues/214, https://github.com/surreptakos/claude-dotfiles/issues/729, https://github.com/surreptakos/claude-dotfiles/issues/9

@@ -56,6 +56,4 @@ the source is CRLF. Every fleet launch
 [[fable-usage-is-rationed]] for the model pins the fleet keeps. For a cloud-Routine master, use an
 absolute `scriptPath` and confirm the repo cwd right before the call (rule 4).
 
-Source: aac-skills/ticket-fleet/ticket-fleet.js, orchestrator/RUNBOOK.md, orchestrator/LOCAL-RUNBOOK.md, https://github.com/surreptakos/claude-dotfiles/issues/55, https://github.com/surreptakos/claude-dotfiles/issues/950
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/991
+Source: aac-skills/ticket-fleet/ticket-fleet.js, orchestrator/RUNBOOK.md, orchestrator/LOCAL-RUNBOOK.md, https://github.com/surreptakos/claude-dotfiles/issues/55, https://github.com/surreptakos/claude-dotfiles/issues/950, https://github.com/surreptakos/claude-dotfiles/issues/233
