@@ -31,3 +31,5 @@ a project `.claude/settings.json`.
 When a container shows `git` refusing github.com with `could not read Username` and an empty
 `~/.claude/hook-state/aac-bootstrap/`, check `env | grep ANTHROPIC_BASE_URL` before blaming the
 platform. Related: [[three-skill-channels]].
+
+Source: .claude/hooks/session-start.sh, profile/claude/settings.json, .claude/settings.json, https://github.com/surreptakos/claude-dotfiles/issues/483, https://github.com/surreptakos/claude-dotfiles/issues/479, https://github.com/surreptakos/claude-dotfiles/issues/826

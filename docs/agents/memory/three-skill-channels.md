@@ -57,3 +57,7 @@ the six task-contract policies `investigate-first`, `lean-build`, `migration`, `
 `surgical-patch`, `verify-and-stop`, all of which its per-prompt hook names), `session-start-hook`
 comes with Claude Code, and `synced/` is channel 3's account cache. Before calling any of that
 drift, check those four sources: `comm` over two listings proves a difference, not a fault.
+
+Source: sync.ps1, aac-skills/session-check/cloud-plugin-sweep.js, profile/claude/plugins/installed_plugins.json, tools/build-cloud-plugin.py, https://github.com/surreptakos/claude-dotfiles/issues/214, https://github.com/surreptakos/claude-dotfiles/issues/631, https://github.com/surreptakos/claude-dotfiles/issues/530, https://github.com/surreptakos/claude-dotfiles/issues/742
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/987

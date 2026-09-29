@@ -48,7 +48,7 @@ git clone -q --depth 1 https://github.com/surreptakos/claude-dotfiles /tmp/aac-d
 Verified from a bare `HOME` 2026-09-28: all three exit 0, 76 skills including grill-ready-for-human,
 i-have-adhd, typesafe-ai and caveman, and the seat written to `settings.json`. `session-start.sh`
 alone is not enough: it does not run `upstream-skills.sh` or `caveman-bootstrap.sh`, and the latter
-needs `CLAUDE_PROJECT_DIR` pointing at a checkout (`lib/caveman-cli.json`).
+needs `CLAUDE_PROJECT_DIR` pointing at a checkout (its `.caveman.json` sets the level).
 
 **A Routine minted from a session gets no payload at all** (merged 2026-09-23 from the retired
 `routine-without-source-has-no-payload` note). `mcp__Claude_Code_Remote__create_trigger` has no
@@ -71,3 +71,7 @@ A Routine that must run under AAC governance is created in the Routines UI or th
 source repo; one minted from a session puts that line first in its prompt. (The four `master-*`
 Routines had sources; they are disabled since 2026-09-23, ADR 0001.) Related:
 [[dotfiles-public-for-cloud-clone]], [[routine-sessions-run-acceptedits]].
+
+Source: .claude/hooks/upstream-skills.sh, .claude/hooks/caveman-bootstrap.sh, lib/caveman-cli.json, aac-skills/session-check/check.js, https://github.com/surreptakos/claude-dotfiles/issues/643, https://github.com/surreptakos/claude-dotfiles/issues/226, https://github.com/surreptakos/claude-dotfiles/issues/645, https://github.com/surreptakos/claude-dotfiles/issues/942
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/964

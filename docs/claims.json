@@ -1,7 +1,7 @@
 {
   "_comment": [
-    "Docs claims-audit tripwire. Verified by the shared engine (whose home-installed copy lives",
-    "at ~/.claude/skills/consistency-audit/claims-audit.js and whose mirror is",
+    "Docs claims-audit tripwire. Verified by the shared engine (a container's copy lives at",
+    "~/.claude/skills/consistency-audit/claims-audit.js, the repo's own at",
     "aac-skills/consistency-audit/claims-audit.js) via tests/docs-claims.test.js, chained",
     "into the session.json test command. tests/claims-audit.test.js is the ENGINE's unit suite;",
     "this file plus docs-claims.test.js is the repo's own docs tripwire. Adding a claim is a",

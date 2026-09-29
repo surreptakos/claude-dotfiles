@@ -29,3 +29,5 @@ must recognise `mcp__workspace__bash` and print a command the sandbox can run (`
 plugin-root path, never `py -3` on a Windows path). Keep the text-only rules in the global CLAUDE.md
 too; they are the floor, not the whole. Related: [[marketplace-is-the-distribution-spine]],
 [[cowork-transcripts-not-local]], [[gate-declare-bare-command]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/228, https://github.com/surreptakos/claude-dotfiles/issues/608

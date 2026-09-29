@@ -48,6 +48,7 @@ const {
   deletedSubjectFindings,
   duplicateTitleFindings,
   isUntriaged,
+  usesMilestones,
   commentDatesByNumber,
   fetchCommentDates,
 } = require('./tracker-audit.js');
@@ -733,4 +734,18 @@ test('isUntriaged: a label-less ticket parked in Maybe Someday is not untriaged;
   assert.equal(isUntriaged(noMilestone, TRIAGED), true);
   const labelled = normalizeIssue({ number: 7, state: 'open', labels: ['ready-for-agent'] });
   assert.equal(isUntriaged(labelled, TRIAGED), false);
+});
+
+// ---- usesMilestones: check 8, with Maybe Someday not counting (issue 946) ---
+
+test('usesMilestones: Maybe Someday alone is not sequencing, so unmilestoned is not checked', () => {
+  const mk = (n, m) => normalizeIssue({ number: n, state: 'open', labels: [], milestone: m ? { title: m } : null });
+  assert.equal(usesMilestones([mk(1, 'Maybe Someday'), mk(2, null), mk(3, null)]), false);
+  assert.equal(usesMilestones([mk(1, null), mk(2, null)]), false);
+});
+
+test('usesMilestones: a real milestone in use still turns unmilestoned on, parked or not', () => {
+  const mk = (n, m) => normalizeIssue({ number: n, state: 'open', labels: [], milestone: m ? { title: m } : null });
+  assert.equal(usesMilestones([mk(1, 'v2'), mk(2, null)]), true);
+  assert.equal(usesMilestones([mk(1, 'Maybe Someday'), mk(2, 'v2'), mk(3, null)]), true);
 });

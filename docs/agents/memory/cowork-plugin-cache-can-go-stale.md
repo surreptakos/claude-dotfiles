@@ -32,3 +32,5 @@ claude.ai account side, outside this repo's control.
 bug instead. The fix is account-side (claude.ai UI, ready-for-human territory — issue 857), not a
 rebuild. `docs/agents/memory/MEMORY.md` and this note's own file are the source; there is no
 `~/.claude` mirror to keep in step, per issue 210.
+
+Source: profile/codex/hooks.json, profile/codex/hooks/ask_matt_gate.py, tools/build-cloud-plugin.py, https://github.com/surreptakos/claude-dotfiles/issues/829, https://github.com/surreptakos/claude-dotfiles/issues/857, https://github.com/surreptakos/claude-dotfiles/issues/210

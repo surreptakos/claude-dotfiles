@@ -30,8 +30,8 @@
  *                           missing (a cloud container gets gh from the bootstrap SessionStart
  *                           hook, and its egress proxy authenticates api.github.com — private
  *                           repos included — for the REST fallback when it does not)
- *   ~/.claude/accounts.json which Claude account owns this repo, versus the one the session runs
- *                           under (identity.js); in the registry's auditRepo, also which desktop
+ *   ~/.claude/accounts.json whether the session's Claude account is one of the owner's (either may
+ *                           work any repo, issue 714; identity.js); in the registry's auditRepo, also which desktop
  *                           routines are enabled outside their owner. Warnings only, never STOP.
  *
  * OPTIONAL `.claude/session.json`, all keys optional:
@@ -1234,16 +1234,17 @@ function accountChecks() {
     warn(`${slug.owner}/${slug.repo} is not in the accounts registry — session runs as ${meText}`);
     note(`add it under "repos" in ${reg._path}`);
   } else {
-    const ownerUuid = (reg.accounts[entry.owner] || {}).uuid;
+    // No repo has an owner account (owner ruling 2026-09-25, issue 714): either of the owner's
+    // accounts may work any repo, so the only account finding left is a session running under an
+    // account the registry does not know.
     if (entry.status === 'dead') {
-      warn(`${entry.key} is marked ${entry.status} in the accounts registry (owner ${entry.owner})`);
+      warn(`${entry.key} is marked ${entry.status} in the accounts registry`);
     }
-    if (!me) note(`${entry.key} belongs to ${entry.owner}; this surface leaves no account identity on disk (cloud?), so that is unchecked`);
-    else if (!ownerUuid) note(`${entry.key} belongs to ${entry.owner}, which has no uuid in the registry; session runs as ${meText}`);
-    else if (ownerUuid.toLowerCase() === me.accountUuid.toLowerCase()) ok(`${entry.owner} owns ${entry.key}; session runs as ${meText}`);
+    if (!me) note(`this surface leaves no account identity on disk (cloud?), so the account is unchecked`);
+    else if (identity.labelFor(reg, me.accountUuid)) ok(`session runs as ${meText}, one of the owner's accounts; either may work ${entry.key}`);
     else {
-      warn(`${entry.key} belongs to ${entry.owner}; this session runs as ${meText}`);
-      note(`switch account for this repo, or move it under "repos" in ${reg._path}`);
+      warn(`session runs as ${meText}, which is not one of the owner's accounts in the registry`);
+      note(`add the account under "accounts" in ${reg._path}, or switch to a registered one`);
     }
   }
 
