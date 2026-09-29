@@ -1719,10 +1719,44 @@ for (const mode of ['gh', 'mcp']) {
     const text = deliver[1];
     assert.match(text, /ready-for-agent/, `${mode} deliver prompt must name the label being removed`);
     assert.match(text, /ready-for-human/, `${mode} deliver prompt must name the label being added`);
-    const toolCall = mode === 'mcp' ? /mcp__github__issue_write/ : /gh api --method DELETE repos\/\{owner\}\/\{repo\}\/issues\/266\/labels\/ready-for-agent/;
+    const toolCall = mode === 'mcp' ? /mcp__github__issue_write/ : /gh api --method PUT repos\/\{owner\}\/\{repo\}\/issues\/266\/labels/;
     assert.match(text, toolCall, `${mode} deliver prompt must relabel through the ${mode} instrument`);
     assert.deepEqual(result.labels, ['ready-for-human'], 'the lane must report the labels the ticket carries afterwards');
     assert.equal(result.commentUrl, 'https://github.com/x/y/issues/266#c1');
+  });
+}
+
+// Issue 1009: a finish pass added ready-for-human to issue 827 while ready-for-local-agent stayed
+// on it. A ticket arriving with a state label other than ready-for-agent loses it in the same edit
+// that puts the hand-back label on - under both instruments, in the human lane and in D5.
+const STATE_LABELS = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'ready-for-local-agent', 'wontfix'];
+for (const mode of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} relabel removes every other state label in one edit under ${mode} (issue 1009)`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push([opts.label, prompt]);
+      if (opts.label.startsWith('handoff:')) return { agentSide: '$ true', ownerSide: ['sign off'], ready: true, remainingKind: 'human' };
+      if (opts.label.startsWith('deliver:')) return { commented: true, commentUrl: 'https://github.com/x/y/issues/827#c1', labels: ['ready-for-human'] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    // The ticket arrives carrying ready-for-local-agent, not ready-for-agent.
+    await driveHumanLane(FLEET_SCRIPT, agentMock, { number: 827, title: 't', criteria: 'c', kindReason: 'labelled ready-for-local-agent' }, mode);
+    const lane = prompts.find(([label]) => label === 'deliver:#827')[1];
+    assert.match(lane, /no other state label may be/, `${mode}: the deliverer must not report a second state label`);
+    const rules = loadTrackerRules(FLEET_SCRIPT, mode);
+    const removalList = mode === 'mcp' ? /every other state label removed \(([^)]*)\)/ : /EXCEPT the other state labels \(([^)]*)\)/;
+    const oneEdit = mode === 'mcp' ? /issue_write \(method "update", issue_number 827\) ONCE/ : /--method PUT repos\/\{owner\}\/\{repo\}\/issues\/827\/labels/;
+    for (const [where, text, target] of [
+      ['human lane', lane, 'ready-for-human'],
+      ['D5 keep-open', rules.labelSwap(827), 'ready-for-human'],
+      ['local hand-back', rules.labelSwap(827, 'ready-for-local-agent'), 'ready-for-local-agent'],
+    ]) {
+      const m = text.match(removalList);
+      assert.ok(m, `${mode} ${where}: the relabel must list the state labels it removes`);
+      assert.deepEqual(m[1].match(/[a-z-]+/g).sort(), STATE_LABELS.filter((l) => l !== target).sort(), `${mode} ${where}: every state label but ${target} is removed`);
+      assert.match(text, oneEdit, `${mode} ${where}: the swap is one whole-set edit`);
+      assert.doesNotMatch(text, /--method DELETE|--method POST repos\/\{owner\}\/\{repo\}\/issues\/827\/labels/, `${mode} ${where}: no per-label edit that could leave two state labels`);
+    }
   });
 }
 
