@@ -10,9 +10,15 @@ metadata:
 
 A skill offered in a session came from one of three places, and they are not interchangeable:
 
-1. **Local** — `~/.claude/skills`, restored by `sync.ps1 -Mode pull` from the repo's one
-   `aac-skills/` tree (since issue 214; the `~/.agents/skills` junctions and the push that
-   mirrored them retired), fingerprinted by `cloud-plugin-sweep.js`.
+1. **Local** — `~/.claude/skills`. Pull wrote it from the repo's one `aac-skills/` tree between
+   issue 214 (the `~/.agents/skills` junctions and the push that mirrored them retired) and
+   issue 734 (pull stopped writing it; the plugin serves every skill as `aac-skills:<name>`).
+   Pull never deletes, so the last pull-written copy stays until moved aside by hand (README,
+   "One skill tree"; ticket 1022). A bare `/session-end` still resolves to that stale copy while
+   it exists (measured 2026-09-29: its step 4 named paths issue 733 retired).
+   `cloud-plugin-sweep.js` fingerprints this copy and the repo's `aac-skills/` tree together
+   (the `aac/` prefix in its drift lines is the repo tree), reading the main checkout's path,
+   so a branch checked out there reads as drift until it merges.
 2. **Account Plugins** — an uploaded plugin zip (`dan-skills` on 2026-08-31, `aac-skills` since).
    Not under `~/.claude/plugins`; `installed_plugins.json` never lists it. The marketplace install
    of the same plugin is a separate route: [[marketplace-is-the-distribution-spine]].
