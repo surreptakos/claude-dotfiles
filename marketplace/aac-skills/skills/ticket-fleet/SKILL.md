@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave: drive open ready-for-agent tickets throug
 
   '
 metadata:
-  modified: '2026-09-29T18:28:14Z'
-  previous-modified: '2026-09-29T15:46:05Z'
-  revision: '59'
-  content-sha: b9990797e51b
+  modified: '2026-09-29T22:36:17Z'
+  previous-modified: '2026-09-29T18:28:14Z'
+  revision: '60'
+  content-sha: bf51101cf54a
 ---
 
 # ticket-fleet
@@ -29,8 +29,8 @@ behind them. Never launch a second wave while one is running in the same repo; w
      copy it to `.claude/workflows/` here - a test forbids that file (issue 299).
    - On the desktop, from any cwd: the plugin cache copy,
      `~/.claude/plugins/cache/claude-dotfiles/aac-skills/<version>/skills/ticket-fleet/ticket-fleet.js`
-     (`${CLAUDE_PLUGIN_ROOT}` is that `<version>` directory). Run
-     `claude plugin marketplace update claude-dotfiles && claude plugin update aac-skills` first.
+     (`${CLAUDE_PLUGIN_ROOT}` is that `<version>` directory); the marketplace auto-updates at
+     session start, so the newest `<version>` is the one to launch.
    - In any other repo: copy the script and its guard into the cwd once, then launch
      `.claude/workflows/ticket-fleet.js` (or `name: 'ticket-fleet'`):
 

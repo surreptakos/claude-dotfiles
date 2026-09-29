@@ -2,10 +2,10 @@
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin. Use when the session-end cloud-plugin sweep reports drift or no recorded upload, when cloud or Cowork sessions are missing a skill, after editing a skill that must reach claude.ai/code, or to upload a skill zip to a claude.ai Skills page.
 metadata:
-  modified: "2026-09-29T16:41:08Z"
-  previous-modified: "2026-09-25T23:18:11Z"
-  revision: "10"
-  content-sha: "ae8e6bc8c65f"
+  modified: "2026-09-29T22:36:17Z"
+  previous-modified: "2026-09-29T16:41:08Z"
+  revision: "11"
+  content-sha: "3392e38162da"
 ---
 
 # Update the cloud plugin
@@ -37,7 +37,10 @@ load no account-enabled plugins (the account-level sync returns zero,
 before git credentials exist, so `claude plugin marketplace add` fails there on a private clone.
 Uploading a plugin to an account reaches none of them.
 
-A local machine refreshes with:
+A local machine refreshes itself: the marketplace is registered with `autoUpdate: true` in the
+profile's `settings.json`, so the background refresh after the next session start installs the new
+payload version. Never tell the owner to run `claude plugin update` (Dan, 2026-09-29). The manual
+form exists only for a session that cannot wait for the next start:
 
 ```bash
 claude plugin marketplace update claude-dotfiles && claude plugin update aac-skills
