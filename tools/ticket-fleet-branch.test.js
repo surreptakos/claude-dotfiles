@@ -1231,6 +1231,56 @@ for (const file of RESUME_GUARD_PAIR) {
       'the log must say the PR still owes the default-branch merge');
   });
 
+  // ---- A null exit code under parallel load is a spawn failure, not a failing gate (issue 1008) ----
+  // Wave wf_3ccddd78-a8a: three deliverers ran the gate beside eleven others, every failure read
+  // `hook exited null`, and each stopped a verified delivery as blocked; the same suite run alone
+  // passed. The gate is re-run once, alone, and only a second failure blocks.
+
+  test(`${rel} deliver prompt re-runs a gate that failed only on null exit codes, once (issue 1008)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    const prompt = extractMarked(src, 'FLEET-DELIVER-PROMPT');
+    const a5 = prompt.slice(prompt.indexOf('(ii) TESTS:'), prompt.indexOf('A6. Tests green'));
+    assert.match(a5, /EVERY failing test reports a null exit code from a child process/,
+      'the retry must be keyed on every failure being a null exit, not on any failure');
+    assert.match(a5, /Re-run the same command ONCE, alone/, 'the gate is re-run once, by itself');
+    assert.match(a5, /A run with any failure that is not a null exit is never re-run, and there is never a second re-run/,
+      'a real failure is never retried, and the retry is not a loop');
+    assert.match(a5, /The re-run's exit code is the gate's verdict/, 'only the second failure blocks delivery');
+    assert.match(a5, /return gateRetry \{firstExitCode, nullExitLines: [^}]*retryExitCode, retryTail, outcome/,
+      'the retry and its outcome must be returned in the deliver result');
+    const delivered = src.slice(src.indexOf('const DELIVERED = '), src.indexOf('const COMMENTED = '));
+    assert.match(delivered, /gateRetry: \{ type: 'object', required: \['firstExitCode', 'retryExitCode', 'outcome'\]/,
+      'the DELIVERED schema must accept the gateRetry record the prompt asks for');
+    assert.match(delivered, /outcome: \{ type: 'string', enum: \['passed', 'failed'\]/);
+  });
+
+  test(`${rel} runCodeLane records the null-exit gate retry and its outcome (issue 1008)`, async () => {
+    const nullLines = 'not ok 3 - tools/session-start-hook.test.js\n  hook exited null';
+    const gateRetryNote = new Function(`${extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT')}\nreturn gateRetryNote;`)();
+    assert.equal(gateRetryNote({ prUrl: 'x' }), '', 'no retry, no note');
+    const cases = [
+      { number: 1008, gateRetry: { firstExitCode: 1, nullExitLines: nullLines, retryExitCode: 0, retryTail: '# pass 778', outcome: 'passed' },
+        delivery: { pushed: true, prUrl: 'https://github.com/x/y/pull/1008', mergeStatus: 'resolved', conflictPaths: [] }, done: true, verdict: /re-run passed \(exit 0\)/ },
+      { number: 1009, gateRetry: { firstExitCode: 1, nullExitLines: nullLines, retryExitCode: 1, retryTail: 'hook exited null', outcome: 'failed' },
+        delivery: { pushed: false, prUrl: '', mergeStatus: 'blocked', conflictPaths: [], blockedReason: 'hook exited null' }, done: false, verdict: /re-run failed \(exit 1\)/ },
+    ];
+    for (const c of cases) {
+      const agentMock = async (_prompt, opts) => {
+        if (opts.label.startsWith('impl:')) {
+          return { branch: `agent/issue-${c.number}-attempt1-wf_testrun-w0`, committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+        }
+        if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+        if (opts.label.startsWith('deliver:')) return Object.assign({ gateRetry: c.gateRetry }, c.delivery);
+        throw new Error('unexpected label: ' + opts.label);
+      };
+      const { result, logs } = await driveCodeLane(file, agentMock, { number: c.number, title: 't', criteria: '' }, 0);
+      assert.equal(result.done, c.done, `#${c.number}: the re-run's exit code decides the delivery`);
+      assert.deepEqual(result.gateRetry, c.gateRetry, `#${c.number}: the run result must carry the retry record verbatim`);
+      assert.ok(logs.some((m) => /test gate re-run once after a null-exit spawn failure \(first run exit 1\)/.test(m) && c.verdict.test(m)),
+        `#${c.number}: the deliver log line must say the gate was re-run and how it ended`);
+    }
+  });
+
   // ---- The merge spelling a live probe accepted (issue 907) ----
   // Run 6ab733a4's deliverer had `git merge origin/master` refused twice and left PR #897 dirty.
   // The probe on issue 907 ran the gitSpelling form from inside a fleet worktree without a refusal.
