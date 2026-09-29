@@ -54,7 +54,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - workflow-runtime-quirks: scriptPath; no Date.now; LF; absolute scriptPath, cwd stale; no cd mid-run
 - workflow-prompt-needs-allow-rule: bare Workflow in allow
 - vendored-copy-provenance-needs-upstream-history: diff every upstream revision
-- cloud-skips-third-party-marketplaces: hooks clone and copy the skills
+- cloud-skips-third-party-marketplaces: hooks clone and copy skills, agents, MCP; keys stay in the environment
 - status-report-is-not-a-request: past tense is a report; check Teams first
 - chain-prompts-keep-skill-labels: never force a label upstream; widen the fleet's tickets list
 
