@@ -1037,8 +1037,13 @@ function haltReport(halt, results) {
 // `labelSwap` is the human lane's hand-back: once the handoff comment is posted the ticket
 // belongs to whoever takes the remaining steps, so the run takes `ready-for-agent` off it and
 // puts `ready-for-local-agent` (a desktop session) or `ready-for-human` (a person) on. Without that the next label listing hands the same ticket back to the fleet and the
-// handoff comment is written again (issue 266).
+// handoff comment is written again (issue 266). The swap takes off EVERY other state label, not
+// only `ready-for-agent`: a ticket holds one state role (docs/agents/triage-labels.md), and a
+// swap that knew only `ready-for-agent` left `ready-for-local-agent` beside `ready-for-human` on
+// issue 827 (issue 1009).
 // [FLEET-TRACKER-RULES-START]
+const STATE_LABELS = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'ready-for-local-agent', 'wontfix']
+const otherStateLabels = (target) => STATE_LABELS.filter(l => l !== target)
 function trackerRules(mode) {
   // Every MCP tool here takes owner and repo as arguments; a prompt that never names them leaves
   // the agent to guess, and a guessed owner stalled run 6ab4840f for 106 minutes (issue 757).
@@ -1050,7 +1055,7 @@ function trackerRules(mode) {
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
     commentPost: (_bodyFile) => `${REPO} Use mcp__github__add_issue_comment - the body is an argument here, so no scratch file is written.`,
-    labelSwap: (n, target = 'ready-for-human') => `${REPO} Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
+    labelSwap: (n, target = 'ready-for-human') => `${REPO} Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) ONCE with labels = that list with every other state label removed (${otherStateLabels(target).map(l => `"${l}"`).join(', ')}) and "${target}" added - a ticket holds exactly one state label (issue 1009). labels replaces the whole set, so send every non-state label the ticket keeps. Whichever of those state labels were or were not there, "${target}" must end up the ticket's only state label.`,
     blockerState: (nums) => `${REPO} Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
     prCreate: (_bodyFile) => `mcp__github__create_pull_request (${REPO}) - the body is an argument here, so no scratch file is written.`,
     prComment: (_bodyFile) => `mcp__github__add_issue_comment (${REPO}) on issue`,
@@ -1070,7 +1075,7 @@ function trackerRules(mode) {
     scoutNotes: `{owner}/{repo} come from ${gitSpelling(mode, 'remote get-url origin')} - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
     commentPost: (bodyFile) => `Write the comment body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first: the scratchpad the harness names for you is shared with every other worker of this run, so a bare name there is overwritten mid-task and you post another worker's text (issue 439). Then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\` with {owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
+    labelSwap: (n, target = 'ready-for-human') => `Make \`${target}\` the ticket's only state label in ONE edit with REST ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}) - a ticket holds exactly one state label (issue 1009): read the current labels with \`gh api repos/{owner}/{repo}/issues/${n}/labels --jq '.[].name'\`, then replace the whole set with \`gh api --method PUT repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\` plus one \`-f "labels[]=<name>"\` for every label read EXCEPT the other state labels (${otherStateLabels(target).map(l => `\`${l}\``).join(', ')}) - PUT replaces the set, so a label left out is removed. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: (bodyFile) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
     prComment: (bodyFile) => `write the comment to \`${bodyFile}\` (that exact path - issue 439), then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\``,
@@ -2457,8 +2462,8 @@ ${ruled
   ? `Then leave every label exactly as it is: the ticket carries an owner ruling, so it must NOT be relabelled ready-for-human (issue 934). Read the labels once with the tracker and return them in \`labels\`; "ready-for-human" must not be added.
 Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label, and never state that a step outside this container was performed. Return structured output only.`
   : `Then, and only after the comment is posted, relabel the ticket so the next run leaves it alone instead of repeating this handoff: ${rules.labelSwap(t.number, handBackLabel)}
-Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and "ready-for-agent" must not.
-Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that a step outside this container was performed. Return structured output only.`}`,
+Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and no other state label may be - "ready-for-agent" included (issue 1009).
+Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than the state labels, and never state that a step outside this container was performed. Return structured output only.`}`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
