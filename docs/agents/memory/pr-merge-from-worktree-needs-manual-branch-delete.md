@@ -16,7 +16,7 @@ PR #96).
 **Why:** gh's post-merge cleanup checks out the base branch in the current checkout; in a worktree
 that branch belongs to the main checkout.
 
-**How to apply:** treat exit 1 from that command as "verify, then finish by hand": `gh pr view N`
+**How to apply:** treat exit 1 from that command as *verify, then finish by hand*: `gh pr view N`
 confirms MERGED, then `git push origin --delete <branch>` removes the remote branch; the local branch
 goes with the worktree.
 
@@ -35,5 +35,3 @@ deletes the head branch, because `delete_branch_on_merge` is on; it is only a br
 behind it, such as an abandoned fleet attempt, that a container has to leave for the desktop.
 
 Source: https://github.com/surreptakos/claude-dotfiles/issues/96, https://github.com/surreptakos/claude-dotfiles/issues/183, https://github.com/surreptakos/claude-dotfiles/issues/637
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/980

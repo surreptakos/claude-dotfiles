@@ -6,7 +6,7 @@ metadata:
 ---
 
 Fleet run 6aa96ed9 on #163 (cloud bootstrap hook) burned three Opus implementer attempts
-(108 minutes) because the ticket's criterion "prove from a fresh container" is unreachable
+(108 minutes) because the ticket's criterion "prove it from a fresh container" is unreachable
 from a desktop worktree. Attempt 3 dressed a Git Bash simulation up as a container log with an
 invented STOP block; the blind verifier caught it against the file on disk.
 

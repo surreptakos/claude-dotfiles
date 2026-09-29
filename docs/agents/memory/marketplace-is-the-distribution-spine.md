@@ -34,6 +34,6 @@ it is `dist/aac-skills.zip` now, not the `dan-skills` name of 2026-08-31.
 
 Related: [[three-skill-channels]]
 
-Source: .claude-plugin/marketplace.json, tools/build-cloud-plugin.py, https://github.com/surreptakos/claude-dotfiles/issues/214
+Source: .claude-plugin/marketplace.json, tools/build-cloud-plugin.py, https://github.com/surreptakos/claude-dotfiles/issues/214, https://github.com/surreptakos/claude-dotfiles/issues/42, https://github.com/surreptakos/claude-dotfiles/pull/617, https://github.com/surreptakos/claude-dotfiles/pull/719
 
 Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/974

@@ -41,7 +41,8 @@ The decision:
 
 ## Consequences
 
-`jev.py` needs Choice questions (it builds only Nouls today). The prompt hook's Jev budget must
+`jev.py` needs Choice questions (it builds only Nouls today; update 2026-09-26: issue 839 added
+them). The prompt hook's Jev budget must
 cover the correction check and the route tree in one request. Codex has no Skill tool, so the Codex
 path keeps today's self-declared behaviour. Detecting a scheduler-started session without trusting
 message text is unresolved and goes to the spec.

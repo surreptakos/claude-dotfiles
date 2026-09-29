@@ -23,10 +23,11 @@ script or the global rules text is edited here, on a branch, and merging to mast
 | `profile/claude/CLAUDE.md` | — (not restored) | global governance — caveman, YES, ask-matt, the AAC Google access notes. The one source the payload's rules text is copied from; a desktop gets it from the aac-skills plugin's global-rules hook, like a container (issue 732) |
 | `profile/claude/global-pointer.md` | `~/.claude/CLAUDE.md` | a short pointer: rules arrive via the plugin, their source is the file above, then a heading for machine-local notes. It must never carry the rules file's first line, because the hook stays silent when the global CLAUDE.md does |
 | `profile/claude/settings.json` | `~/.claude/settings.json` | plugin marketplaces, status line. No caveman proxy hook or model route: `caveman enable claude` writes those on the machine and pull merges around them (issues 825, 826). No governance hook entry: the plugin dispatches those, and an entry here would silence or double its copy (issue 733) |
-| `profile/claude/hooks/`, `profile/claude/tools/` | — (not restored) | `session-gate.js`, `governance-reminder.js`, the stop-slop pair and `stopslop.py`: the source the packager copies into the plugin. A desktop runs the plugin's copies, as a container does (issue 733) |
+| `profile/claude/hooks/`, `profile/claude/tools/` | — (not restored) | `session-gate.js`, `governance-reminder.js`, `state-stash.js`, `state-rehydrate.js`, the stop-slop pair and `stopslop.py`: the source the packager copies into the plugin. A desktop runs the plugin's copies, as a container does (issue 733) |
 | `profile/claude/agents/` | `~/.claude/agents/` | user-level subagent definitions, including the fleet's tool-restricted verifier |
 | `profile/claude/plugins/*.json` | `~/.claude/plugins/` | which plugins and marketplaces to reinstall — not the 10 MB cache. Merged, not copied: a newer live entry wins (issue 717) |
 | `profile/claude/accounts.json` | `~/.claude/accounts.json` | which Claude account owns which repo and routine (issue 103) |
+| `profile/claude/i-have-adhd-always` | `~/.claude/.i-have-adhd-always` | the i-have-adhd plugin's always-on opt-in: its SessionStart hook injects the ruleset only when this file exists |
 | `profile/codex/hooks/` | `~/.codex/hooks/` | `ask_matt_gate.py`, which the pre-send lint and the governance gate both call |
 | `profile/codex/hooks.json` | `~/.codex/hooks.json` | the wiring that calls it — without this the script above is inert |
 | `profile/codex/config.toml` | `~/.codex/config.toml` | Codex's settings — model, sandbox, marketplaces, plugin enables, project trust. Scanned for credential values (2026-08-12 and 2026-08-19): none — the `sha256:` values in it are trust pins for `hooks.json` entries, not secrets |
@@ -114,7 +115,7 @@ writes nothing.
 git clone <this repo> ; cd claude-dotfiles ; .\install.ps1
 ```
 
-It checks for git, node, `py`, `claude` and `gh`, restores the configuration, and prints what
+It checks for git, node, `py`, `claude`, `gh` and PyYAML, restores the configuration, and prints what
 remains: the two secret files, `/login`, `gh auth login`, and `gas login` (once per Google account;
 `clasp` is no longer a prerequisite — every AAC Apps Script repo deploys itself, see `gas/README.md`).
 
@@ -205,7 +206,7 @@ that does update itself: a container installs it from master at session start.
 
 The caveman suite (the `caveman@caveman` plugin and the `@caveman-ai/cli` proxy the desktop runs)
 takes the same road into a cloud session of *this* repo: `.claude/hooks/caveman-bootstrap.sh`
-installs the pinned plugin checkout, its twenty skills, the CLI with its signed binaries, the
+installs the plugin checkout at its newest release tag, its twenty skills, the CLI with its signed binaries, the
 local proxy and `caveman enable claude` at SessionStart, and `.claude/hooks/caveman-prompt.sh`
 runs the plugin's mode tracker on every prompt. What it can and cannot do in a container, with
 the probes behind each claim, is in `docs/caveman-cloud-2026-09-16.md`.
@@ -263,7 +264,7 @@ the clone open. `RESTORE_TEST_ACTIVE` stops the descent: a nested run reports `p
 and exits 0, so the check still gets a real `session-check` run and a run now creates exactly one
 scratch directory.
 
-`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade|rules-copy|governance-entry|hooks-dir|tools-dir|skill-tree`
+`-Fault missing|crlf|home-leak|secret|drift|broken-hook|collision|locked-scratch|lint-root|lint-mirror|sandbox-identity|plugin-downgrade|rules-copy|governance-entry|hooks-dir|tools-dir|skill-tree|dead-caveman-hook|caveman-overwrite`
 breaks one thing on purpose so the matching check can be watched going red. A check that has only
 ever passed is not yet a check — the retired `dead-link` fault passed on its first attempt because
 it deleted a directory nothing linked to.

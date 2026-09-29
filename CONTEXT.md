@@ -29,7 +29,8 @@ fallback is never silent, never the heaviest route, and never a blocked turn.
 Adversarial pass (2026-09-25) found: the prompt hook has 5 s and already spends up to 3 s on one Jev
 call, so the whole tree must be one POST (every level's question at once, the correction check
 folded in) walked in code afterwards; `jev.py` builds only Noul questions today, so a Choice needs
-adding to the client. Decision record: `docs/adr/0002-jev-picks-the-route.md`.
+adding to the client (added 2026-09-26 by issue 839: `jev.py` now asks Choice questions too).
+Decision record: `docs/adr/0002-jev-picks-the-route.md`.
 
 Scope (Dan, 2026-09-25): **the gate routes engineering work only.** The tree's first question is
 whether the message is software work in a repository or other work. Other work (contract packages,

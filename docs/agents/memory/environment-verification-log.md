@@ -39,6 +39,6 @@ line below.
   aac-contract-builder, stripped "22 patterns", "~20 of 35 checklist items" and a Status column from
   four surfaces in one commit. See [[state-a-standing-rule-once]].
 
-Source: profile/claude/CLAUDE.md
+Source: profile/claude/CLAUDE.md, https://github.com/surreptakos/claude-dotfiles/pull/235, https://github.com/surreptakos/claude-dotfiles/issues/175
 
 Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/970

@@ -46,9 +46,9 @@ Two Workflow-tool behaviours that cost a fleet launch each on 2026-09-01:
    other repo. Dan declined a per-worker repo check on 2026-09-28, so this discipline is the guard.
 
 **Why:** the `workflow-authoring` skill documents rule 2 and it was dismissed as stale on the strength
-of one successful run. A live launch settled it. Rule 1 is documented nowhere. Rule 4 is undocumented
-in `orchestrator/RUNBOOK.md`'s dispatch section, which names only a relative
-`scriptPath = .claude/workflows/ticket-fleet.js`.
+of one successful run. A live launch settled it. Rule 1 is documented nowhere. Rule 4 was undocumented
+in `orchestrator/RUNBOOK.md` when found; its Dispatch step 4 and Roles section now require the
+absolute `scriptPath`.
 
 **How to apply:** after editing any workflow script, launch via `scriptPath`, from an LF copy when
 the source is CRLF. Every fleet launch
@@ -56,6 +56,4 @@ the source is CRLF. Every fleet launch
 [[fable-usage-is-rationed]] for the model pins the fleet keeps. For a cloud-Routine master, use an
 absolute `scriptPath` and confirm the repo cwd right before the call (rule 4).
 
-Source: aac-skills/ticket-fleet/ticket-fleet.js, orchestrator/RUNBOOK.md, orchestrator/LOCAL-RUNBOOK.md, https://github.com/surreptakos/claude-dotfiles/issues/55, https://github.com/surreptakos/claude-dotfiles/issues/950
-
-Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/991
+Source: aac-skills/ticket-fleet/ticket-fleet.js, orchestrator/RUNBOOK.md, orchestrator/LOCAL-RUNBOOK.md, https://github.com/surreptakos/claude-dotfiles/issues/55, https://github.com/surreptakos/claude-dotfiles/issues/950, https://github.com/surreptakos/claude-dotfiles/issues/233

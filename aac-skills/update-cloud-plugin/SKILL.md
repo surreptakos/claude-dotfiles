@@ -2,17 +2,17 @@
 name: update-cloud-plugin
 description: Rebuild and republish the aac-skills plugin. Use when the session-end cloud-plugin sweep reports drift or no recorded upload, when cloud or Cowork sessions are missing a skill, after editing a skill that must reach claude.ai/code, or to upload a skill zip to a claude.ai Skills page.
 metadata:
-  modified: "2026-09-25T23:18:11Z"
-  previous-modified: "2026-09-24T05:28:01Z"
-  revision: "9"
-  content-sha: "2c6f93038916"
+  modified: "2026-09-29T16:41:08Z"
+  previous-modified: "2026-09-25T23:18:11Z"
+  revision: "10"
+  content-sha: "ae8e6bc8c65f"
 ---
 
 # Update the cloud plugin
 
 **One plugin.** `aac-skills` — every skill in the repo's hand-edited `aac-skills/` tree, packaged
-by `tools/build-cloud-plugin.py` and served from the private marketplace at
-`surreptakos/claude-dotfiles`. (`dan-skills` is retired: no account or zip carries that name.)
+by `tools/build-cloud-plugin.py` and served from the marketplace at
+`surreptakos/claude-dotfiles` (a public repo since 2026-09-21). (`dan-skills` is retired: no account or zip carries that name.)
 
 ## Three skill channels, and the surface each serves
 
