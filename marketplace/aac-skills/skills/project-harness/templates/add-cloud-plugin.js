@@ -8,7 +8,8 @@
 //      from it by `tools/build-harness-bootstrap-hook.js` there; no repo carries skill content,
 //      because the hook installs the payload from dotfiles master at session start.
 //   2. the PLUGIN DECLARATION (extraKnownMarketplaces + enabledPlugins), so a cloud session
-//      (claude.ai/code) installs aac-skills at startup.
+//      (claude.ai/code) installs aac-skills and the yes, caveman, i-have-adhd and typesafe
+//      governance plugins at startup (issue 1018).
 //   3. the PERMISSION POSTURE: permissions.defaultMode auto + a blanket allow list, and the
 //      widened autoMode.allow ruling (Dan, 2026-09-17, issue 543, superseding issue 245), so every
 //      cloud or Routine session — attended or unattended — is sanctioned to run every action its
@@ -30,9 +31,12 @@ const root = process.argv[2];
 if (!root) { console.error('usage: node add-cloud-plugin.js <repo-root>'); process.exit(2); }
 const file = path.join(root, '.claude', 'settings.json');
 
-const MARKETPLACE = 'claude-dotfiles';
-const SOURCE = { source: 'github', repo: 'surreptakos/claude-dotfiles' };
 const PLUGIN = 'aac-skills@claude-dotfiles';
+// The marketplaces and plugins to declare are READ from templates/claude-settings.json beside this
+// script, for the same reason as the ruling below: the template documents the set (aac-skills plus
+// the yes, caveman, i-have-adhd and typesafe governance plugins, issue 1018), and a second copy
+// here would be one nobody diffs.
+const TEMPLATE = JSON.parse(fs.readFileSync(path.join(__dirname, 'claude-settings.json'), 'utf8'));
 
 // Widened autoMode.allow ruling — issue 543 (Dan, 2026-09-17), superseding the issue 245 text this
 // line used to repeat. READ from templates/claude-settings.json beside this script rather than
@@ -67,9 +71,17 @@ const EOL = rawBefore && rawBefore.includes('\r\n') ? '\r\n' : '\n';
 const before = JSON.stringify(settings);
 
 settings.extraKnownMarketplaces = Object.assign({}, settings.extraKnownMarketplaces);
-settings.extraKnownMarketplaces[MARKETPLACE] = Object.assign(
-  {}, settings.extraKnownMarketplaces[MARKETPLACE], { source: SOURCE });
-settings.enabledPlugins = Object.assign({}, settings.enabledPlugins, { [PLUGIN]: true });
+// A marketplace the repo already names keeps its other keys (autoUpdate) and takes the template's
+// source; a plugin the repo already lists is left as the repo has it - a deliberate `false` on one
+// of the governance plugins survives - except aac-skills, which is always forced on.
+for (const [name, entry] of Object.entries(TEMPLATE.extraKnownMarketplaces)) {
+  settings.extraKnownMarketplaces[name] = Object.assign(
+    {}, settings.extraKnownMarketplaces[name], { source: entry.source });
+}
+settings.enabledPlugins = Object.assign({}, settings.enabledPlugins);
+for (const name of Object.keys(TEMPLATE.enabledPlugins)) {
+  if (name === PLUGIN || !(name in settings.enabledPlugins)) settings.enabledPlugins[name] = true;
+}
 
 // permissions: install defaultMode:auto + a blanket allow list when neither is set. Never
 // downgrade an existing defaultMode (a repo may explicitly want bypassPermissions or acceptEdits
@@ -200,5 +212,5 @@ if (!settingsChanged && hookAction === 'unchanged' && !indexModeAction) {
 console.log('bootstrap hook', hookAction + ':', hookDest);
 if (indexModeAction) console.log(indexModeAction);
 console.log(settingsChanged
-  ? 'declared ' + PLUGIN + ' + posture (issue 543) + the SessionStart bootstrap hook in ' + file
+  ? 'declared the plugin set + posture (issue 543) + the SessionStart bootstrap hook in ' + file
   : 'settings already carried the plugin, the posture and the SessionStart hook: ' + file);

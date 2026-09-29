@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-28T23:57:44Z"
-  previous-modified: "2026-09-28T22:16:13Z"
-  revision: "45"
-  content-sha: "f25f16d744b8"
+  modified: "2026-09-29T18:26:10Z"
+  previous-modified: "2026-09-28T23:57:44Z"
+  revision: "46"
+  content-sha: "b4d76aa4e00a"
 ---
 
 # Project Harness
@@ -131,7 +131,7 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      `tools/tracker-audit-template.test.js` pins both halves.
 9. **Harness version marker** — copy `templates/harness-version.md` to
    `docs/agents/harness-version.md` and set the date. It is a dedicated file so one `cat` reads it in
-   every harnessed repo. **Current version: 34.** `/session-start` reads this marker every session and
+   every harnessed repo. **Current version: 35.** `/session-start` reads this marker every session and
    STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
 10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
     `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
@@ -188,6 +188,11 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
       content: the hook installs the payload from dotfiles master in a container and exits 0 locally.
       In claude-dotfiles the template is generated from the repo's own `.claude/hooks/session-start.sh`
       by `tools/build-harness-bootstrap-hook.js`: edit the hook and re-run the generator.
+    - **The plugin set** — `extraKnownMarketplaces` + `enabledPlugins` are read out of
+      `templates/claude-settings.json`: `aac-skills@claude-dotfiles` plus the four governance plugins
+      `yes@sstklen`, `caveman@caveman`, `i-have-adhd@i-have-adhd` and `typesafe@typesafe-ai` with their
+      marketplaces, the set `profile/claude/settings.json` runs on the desktop minus its LSP and travel
+      plugins (Dan, 2026-09-29, issue 1018). A plugin the repo already lists keeps its value.
     - **Existing `.claude/settings.json` is preserved**: the script only adds keys and unions arrays
       (`extraKnownMarketplaces`, `enabledPlugins`, `permissions`, `autoMode.allow`,
       `hooks.SessionStart`). An existing `permissions.defaultMode` stays as it is; only absence gets
@@ -222,7 +227,8 @@ Done when every line below holds.
 - `node ~/.claude/skills/session-check/check.js` from the repo finds the test command and reports the
   tracker audit; `no test command detected` means the substitution did not land.
 - **Cloud** — `.claude/settings.json` carries `enabledPlugins["aac-skills@claude-dotfiles"]` and the
-  `claude-dotfiles` marketplace; the bootstrap hook file reads `100755` in `git ls-files -s`, and one
+  `claude-dotfiles` marketplace, and enables `yes@sstklen`, `caveman@caveman`, `i-have-adhd@i-have-adhd`
+  and `typesafe@typesafe-ai` from their four marketplaces; the bootstrap hook file reads `100755` in `git ls-files -s`, and one
   `hooks.SessionStart` entry names it. Locally the hook proves only that it exits 0; the real test is
   a fresh cloud session on the repo showing `aac-skills:` skills, the `AAC-BOOTSTRAP MARKER` line,
   `gh --version`, one `gh api repos/<owner>/<repo>` call, and session-check's `Cloud bootstrap` block

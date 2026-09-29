@@ -10,6 +10,13 @@
     "marketplace clone fails there. Declared here, Claude Code clones the marketplace itself after",
     "credentials are wired up. Verified 2026-09-09 (claude-dotfiles#100).",
     "",
+    "The same two keys also deliver the governance set beside aac-skills (Dan, 2026-09-29, issue 1018,",
+    "osh-rfp PR 79): yes@sstklen, caveman@caveman, i-have-adhd@i-have-adhd and typesafe@typesafe-ai,",
+    "with the four marketplaces they come from. Reference set: profile/claude/settings.json, the five",
+    "governance plugins the desktop runs (its LSP and travel plugins are left out). Without them a cloud",
+    "session in a harnessed repo runs with no yes or caveman plugin. add-cloud-plugin.js reads both keys",
+    "out of THIS file, so the delivered set and the documented set cannot drift.",
+    "",
     "permissions + autoMode carry the widened autoMode.allow ruling (Dan, 2026-09-17, issue 543,",
     "superseding issue 245): EVERY cloud session or Routine master - attended or unattended - is",
     "sanctioned to run every action its work requires, destructive and irreversible included,",
@@ -48,9 +55,37 @@
         "source": "github",
         "repo": "surreptakos/claude-dotfiles"
       }
+    },
+    "sstklen": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/sstklen/yes.md.git"
+      }
+    },
+    "caveman": {
+      "source": {
+        "source": "github",
+        "repo": "JuliusBrussee/caveman"
+      }
+    },
+    "i-have-adhd": {
+      "source": {
+        "source": "github",
+        "repo": "ayghri/i-have-adhd"
+      }
+    },
+    "typesafe-ai": {
+      "source": {
+        "source": "github",
+        "repo": "typesafe-ai/skills"
+      }
     }
   },
   "enabledPlugins": {
-    "aac-skills@claude-dotfiles": true
+    "aac-skills@claude-dotfiles": true,
+    "yes@sstklen": true,
+    "caveman@caveman": true,
+    "i-have-adhd@i-have-adhd": true,
+    "typesafe@typesafe-ai": true
   }
 }
