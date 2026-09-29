@@ -1566,6 +1566,16 @@ Return structured output only.`,
 const CWD_MEASURE = { type: 'object', required: ['cwd'], properties: {
   cwd: { type: 'string', description: 'the absolute path `pwd` printed, verbatim - not abbreviated, not reconstructed from memory' },
 } }
+// Issue 1007: which spelling `pwd` comes back in depends on the shell the measuring agent picks,
+// not on the repo - a POSIX shell on Windows prints `/c/Users/...`, PowerShell `C:\Users\...`. A
+// drive-letter path (`X:\...` or `X:/...`) is folded to the `/x/...` spelling the guard and tip
+// commands below already take; anything else not starting with `/` stays unmeasured (null).
+function normaliseMeasuredCwd(cwd) {
+  if (typeof cwd !== 'string') return null
+  if (cwd[0] === '/') return cwd
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(cwd)
+  return m ? `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}` : null
+}
 let orchestratorCwd = cfg.orchestratorCwd
 if (orchestratorCwd === '.') {
   let measured = null, measureError = null
@@ -1577,7 +1587,8 @@ if (orchestratorCwd === '.') {
   } catch (err) {
     measureError = unusableReason('orchestrator-cwd', (err && err.message) || err)
   }
-  if (!measured || typeof measured.cwd !== 'string' || measured.cwd[0] !== '/') {
+  const normalisedCwd = measured ? normaliseMeasuredCwd(measured.cwd) : null
+  if (!normalisedCwd) {
     throw new Error(
       'ticket-fleet run ABORTED before Scout - could not measure the orchestrator checkout\'s absolute path (issue 562). '
       + `cwd=${measured ? JSON.stringify(measured.cwd) : 'null'} error=${measureError || 'none'}. `
@@ -1585,7 +1596,8 @@ if (orchestratorCwd === '.') {
       + "the orchestrating session's if it `cd`s mid-run, so an unmeasured relative path is never used."
     )
   }
-  orchestratorCwd = measured.cwd
+  orchestratorCwd = normalisedCwd
+  if (normalisedCwd !== measured.cwd) log(`Orchestrator cwd: pwd printed ${JSON.stringify(measured.cwd)}, drive-letter spelling normalised to ${normalisedCwd} (issue 1007).`)
   log(`Orchestrator checkout measured at ${orchestratorCwd} (issue 562) - every guard and tip-check agent below is handed this absolute path, not cfg.orchestratorCwd's relative default, so a later \`cd\` in the parent session cannot misdirect one.`)
 } else {
   log(`Orchestrator checkout path from args.orchestratorCwd: ${orchestratorCwd} (already absolute or caller-set - measurement skipped).`)

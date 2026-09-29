@@ -2673,7 +2673,7 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
   assert.match(guardBody, /label: 'orchestrator-cwd'/, 'the cwd measurement must be its own labelled Setup agent');
   assert.match(guardBody, /phase: 'Setup'/, 'the measurement must run in the Setup phase, before any checkpoint needs it');
   assert.match(guardBody, /'pwd'|`pwd`/, 'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
-  assert.match(guardBody, /measured\.cwd\[0\] !== '\/'/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
+  assert.match(guardBody, /if \(!normalisedCwd\) \{/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
 
   // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
   // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
@@ -2784,6 +2784,36 @@ test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and
   await treeGuardCheck('implement-attempt1', 7);
   assert.equal(commands.length, 2, 'expected the baseline plus one check');
   for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// Issue 1007: the measuring agent's `pwd` spelling depends on the shell it picks. A drive-letter
+// path in either slash style is accepted and folded to `/x/...`; anything else still aborts.
+async function measureCwd(measuredCwd) {
+  const baselines = [];
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: measuredCwd };
+    if (opts.label === 'tree-guard:baseline') {
+      baselines.push(prompt);
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: 's', baselineCount: 0 }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  await driveTreeGuard(agentMock);
+  return baselines[0];
+}
+
+test('orchestrator-cwd: a Windows drive-letter pwd in either slash style is normalised to /x/... (issue 1007)', async () => {
+  for (const measured of ['C:\\Users\\Dan\\repo\\.claude\\worktrees\\wt', 'C:/Users/Dan/repo/.claude/worktrees/wt']) {
+    const prompt = await measureCwd(measured);
+    assert.match(prompt, /--cwd \/c\/Users\/Dan\/repo\/\.claude\/worktrees\/wt(?!\S)/, `${measured} must reach the guard as /c/...`);
+  }
+});
+
+test('orchestrator-cwd: a pwd that is neither /-absolute nor a drive-letter path still aborts before Scout (issue 1007)', async () => {
+  for (const measured of ['relative\\path', 'C:relative', '\\\\server\\share']) {
+    await assert.rejects(() => measureCwd(measured),
+      /ticket-fleet run ABORTED before Scout - could not measure the orchestrator checkout's absolute path \(issue 562\)/);
+  }
 });
 
 // Issue 811: in a served repo with no copy of tools/orchestrator-tree-guard.js (a cloud container
