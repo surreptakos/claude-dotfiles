@@ -267,6 +267,12 @@ owner columns. Progress and ownership live in the tracker; duplicating them in p
 state change (Dan, 2026-08-26, after stripping four such surfaces from aac-contract-builder in one
 commit).
 
+## AAC deliverables
+
+Load `aac-house-writing-standard` before drafting any deliverable another person will read: page,
+email, memo, report, runbook, Teams message. The claude.ai account setting does not reach cloud
+sessions; this line does (issue 721).
+
 ## AAC Google Cloud & Apps Script access
 
 You already have durable, owner-grade access to the AAC Google stack (shared GCP project, a no-expiry

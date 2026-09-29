@@ -23,3 +23,7 @@ Do not echo it into skills, hooks or per-project CLAUDE.md files — global memo
 session of every project already, and it loads once per session rather than per turn, so one mention
 is the whole cost. If drift feels likely, say so and let him decide rather than pre-installing a
 guard. See [[verify-before-filing-a-sweep-ticket]].
+
+Source: profile/claude/CLAUDE.md, https://github.com/surreptakos/claude-dotfiles/issues/214
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/985

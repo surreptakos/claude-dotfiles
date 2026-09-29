@@ -54,3 +54,7 @@ Work project memories now DO flow into the personal profile (issue #9 decision a
 earlier hold-off): the union merge above copies them in on every pull. What stays out, per
 decision b, is the reverse direction — personal-session content never enters the work account's
 context.
+
+Source: sync.ps1, lib/personal.ps1, profile/claude/tools/link-personal-profile.ps1, profile/claude/hooks/state-stash.js, profile/claude/hooks/state-rehydrate.js, profile/claude/hooks/session-gate.js, https://github.com/surreptakos/claude-dotfiles/issues/214, https://github.com/surreptakos/claude-dotfiles/issues/729
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/978

@@ -18,3 +18,5 @@ exceeds the Windows path limit; core.longpaths does not cover the pack keep file
 **How to apply:** for throwaway clones use a short root (`mkdir /c/hv17`), delete it when done.
 Keep scripts and outputs in the scratchpad; only the git checkout needs the short path.
 Related: [[sed-strips-crlf-in-this-repo]].
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/981

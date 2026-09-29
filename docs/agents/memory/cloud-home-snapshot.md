@@ -71,3 +71,7 @@ A Routine that must run under AAC governance is created in the Routines UI or th
 source repo; one minted from a session puts that line first in its prompt. (The four `master-*`
 Routines had sources; they are disabled since 2026-09-23, ADR 0001.) Related:
 [[dotfiles-public-for-cloud-clone]], [[routine-sessions-run-acceptedits]].
+
+Source: .claude/hooks/upstream-skills.sh, .claude/hooks/caveman-bootstrap.sh, lib/caveman-cli.json, aac-skills/session-check/check.js, https://github.com/surreptakos/claude-dotfiles/issues/643, https://github.com/surreptakos/claude-dotfiles/issues/226, https://github.com/surreptakos/claude-dotfiles/issues/645, https://github.com/surreptakos/claude-dotfiles/issues/942
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/964
