@@ -125,6 +125,13 @@ with `conflictPaths` naming every path still in conflict. A test command that fa
 otherwise-resolved merge blocks the same way. Re-run the fleet on that ticket, or merge the
 branch by hand.
 
+**A null exit code is a spawn failure, not a failing gate (issue 1008).** Wave `wf_3ccddd78-a8a`
+blocked three verified deliveries whose every failure read `hook exited null` while fourteen
+tickets delivered in parallel; the same suite run alone passed. When every failing test reports
+a null exit code from a child process, the deliverer re-runs the test command once, alone, and
+that re-run decides. The result carries `gateRetry {firstExitCode, nullExitLines, retryExitCode,
+retryTail, outcome}` and the deliver log line says how the re-run ended.
+
 **A merge the classifier refuses is not a blocked merge.** In a container the auto-mode
 classifier sometimes refuses `git merge` on the shape of the command rather than on what it
 would do, and the refusals are not deterministic — a byte-identical retry usually goes through.
@@ -170,7 +177,9 @@ after the fleet-refresh step and before anything needs it, and bakes that litera
 later guard, tip and scratch-worktree command; a `cd` by the parent afterwards cannot touch a string
 already written into a prompt. A caller that already knows the absolute path - or wants the guard to
 audit a different tree on purpose - can still pass `orchestratorCwd` itself; only the `.` default
-triggers the measurement.
+triggers the measurement. The `pwd` spelling depends on the shell the measuring agent picks, so a
+drive-letter answer (`C:\...` or `C:/...`) is normalised to `/c/...`; any other answer not starting
+with `/` still aborts the run before Scout (issue 1007).
 
 ## The scratchpad is one per run, not one per worker
 

@@ -1037,8 +1037,13 @@ function haltReport(halt, results) {
 // `labelSwap` is the human lane's hand-back: once the handoff comment is posted the ticket
 // belongs to whoever takes the remaining steps, so the run takes `ready-for-agent` off it and
 // puts `ready-for-local-agent` (a desktop session) or `ready-for-human` (a person) on. Without that the next label listing hands the same ticket back to the fleet and the
-// handoff comment is written again (issue 266).
+// handoff comment is written again (issue 266). The swap takes off EVERY other state label, not
+// only `ready-for-agent`: a ticket holds one state role (docs/agents/triage-labels.md), and a
+// swap that knew only `ready-for-agent` left `ready-for-local-agent` beside `ready-for-human` on
+// issue 827 (issue 1009).
 // [FLEET-TRACKER-RULES-START]
+const STATE_LABELS = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'ready-for-local-agent', 'wontfix']
+const otherStateLabels = (target) => STATE_LABELS.filter(l => l !== target)
 function trackerRules(mode) {
   // Every MCP tool here takes owner and repo as arguments; a prompt that never names them leaves
   // the agent to guess, and a guessed owner stalled run 6ab4840f for 106 minutes (issue 757).
@@ -1050,7 +1055,7 @@ function trackerRules(mode) {
     scoutNotes: `There is no \`gh\` CLI here - GitHub goes through the MCP tools.`,
     handoffRead: (n) => `${REPO} Read the ticket and its comments with mcp__github__issue_read (method get, then method get_comments).`,
     commentPost: (_bodyFile) => `${REPO} Use mcp__github__add_issue_comment - the body is an argument here, so no scratch file is written.`,
-    labelSwap: (n, target = 'ready-for-human') => `${REPO} Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) with labels = that list with "ready-for-agent" removed and "${target}" added. labels replaces the whole set, so send every label the ticket keeps. If "ready-for-agent" was not there, still make sure "${target}" ends up on the ticket.`,
+    labelSwap: (n, target = 'ready-for-human') => `${REPO} Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) ONCE with labels = that list with every other state label removed (${otherStateLabels(target).map(l => `"${l}"`).join(', ')}) and "${target}" added - a ticket holds exactly one state label (issue 1009). labels replaces the whole set, so send every non-state label the ticket keeps. Whichever of those state labels were or were not there, "${target}" must end up the ticket's only state label.`,
     blockerState: (nums) => `${REPO} Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
     prCreate: (_bodyFile) => `mcp__github__create_pull_request (${REPO}) - the body is an argument here, so no scratch file is written.`,
     prComment: (_bodyFile) => `mcp__github__add_issue_comment (${REPO}) on issue`,
@@ -1070,7 +1075,7 @@ function trackerRules(mode) {
     scoutNotes: `{owner}/{repo} come from ${gitSpelling(mode, 'remote get-url origin')} - \`gh repo view\` is GraphQL too. NEVER run \`gh issue list\` or \`gh issue view\`: they are GraphQL-backed and return HTTP 403 "GitHub GraphQL is not available from Claude Code sessions" (issue 130). Only \`gh api repos/{owner}/{repo}/...\` REST paths work.`,
     handoffRead: (n) => `Read the ticket and its comments with \`gh api repos/{owner}/{repo}/issues/${n}\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}); never \`gh issue view\`/\`gh issue list\` (GraphQL, HTTP 403 here - issue 130).`,
     commentPost: (bodyFile) => `Write the comment body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first: the scratchpad the harness names for you is shared with every other worker of this run, so a bare name there is overwritten mid-task and you post another worker's text (issue 439). Then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\` with {owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    labelSwap: (n, target = 'ready-for-human') => `Remove \`ready-for-agent\` and add \`${target}\` with REST ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}): \`gh api --method DELETE repos/{owner}/{repo}/issues/${n}/labels/ready-for-agent\` (HTTP 404 just means the label was not on the ticket - carry on), then \`gh api --method POST repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\`. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
+    labelSwap: (n, target = 'ready-for-human') => `Make \`${target}\` the ticket's only state label in ONE edit with REST ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}) - a ticket holds exactly one state label (issue 1009): read the current labels with \`gh api repos/{owner}/{repo}/issues/${n}/labels --jq '.[].name'\`, then replace the whole set with \`gh api --method PUT repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\` plus one \`-f "labels[]=<name>"\` for every label read EXCEPT the other state labels (${otherStateLabels(target).map(l => `\`${l}\``).join(', ')}) - PUT replaces the set, so a label left out is removed. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     prCreate: (bodyFile) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
     prComment: (bodyFile) => `write the comment to \`${bodyFile}\` (that exact path - issue 439), then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\``,
@@ -1195,6 +1200,15 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus',
   conflictPaths: { type: 'array', items: { type: 'string' }, description: 'when mergeStatus is blocked, every path still in conflict (git diff --name-only --diff-filter=U), any path the stamp or append resolver refused, and any path the pre-push marker scan found conflict markers in; when prState is dirty-unresolved, the paths the PR still conflicts on (issue 907); empty otherwise, unmerged-by-classifier included (a refused merge conflicted with nothing - it never ran)' },
   branchLookup: { type: 'array', items: { type: 'object', required: ['exitCode', 'output'], properties: { exitCode: { type: 'integer', description: 'REAL exit code of `git ls-remote --exit-code --heads origin <branch>`, not a pipeline\'s' }, output: { type: 'string', description: 'its stdout and stderr, verbatim' } } }, description: 'issue 654: every `git ls-remote --exit-code --heads origin <branch>` this stage ran, in order; [] when it never had to look. Exit 2 is git\'s own "no matching ref"; any other non-zero, or an exit 0 that printed nothing, means "could not tell", not "absent"' },
   blockedReason: { type: 'string', description: 'when mergeStatus is blocked, one line saying why - the conflicting hunk, or the failing test tail; when mergeStatus is unmerged-by-classifier, the classifier refusal text VERBATIM, both refusals if they differed; when prState is ci-red or changes-requested, the failing check names or the reviewer; when prState is dirty-unresolved because the re-merge was refused, the refusal text VERBATIM (issue 907)' },
+  // Issue 1008: a gate whose only failures were child processes reporting a null exit code (a spawn
+  // failure under parallel load, not a test failure) is re-run once, alone; this records that it was.
+  gateRetry: { type: 'object', required: ['firstExitCode', 'retryExitCode', 'outcome'], description: 'issue 1008: present only when a run of the test command in this stage exited non-zero with every failing test reporting a null exit code from a child process, and the gate was therefore re-run once, alone; omit it when no such retry ran', properties: {
+    firstExitCode: { type: 'integer', description: 'REAL exit code of the first run' },
+    nullExitLines: { type: 'string', description: 'the first run\'s failing lines that read a null exit code, verbatim' },
+    retryExitCode: { type: 'integer', description: 'REAL exit code of the one re-run - this is the gate\'s verdict' },
+    retryTail: { type: 'string', description: 'the decisive final lines of the re-run' },
+    outcome: { type: 'string', enum: ['passed', 'failed'], description: 'passed = the re-run exited 0 and delivery went on; failed = it exited non-zero and mergeStatus is blocked' },
+  } },
   // Issue 770: STEP D merges the PR the deliverer opened. These say whether it did and why not.
   merged: { type: 'boolean', description: 'true only when the merge call in STEP D returned merged:true for THIS PR' },
   mergeSha: { type: 'string', description: 'the sha the merge call returned; "" when not merged' },
@@ -1563,6 +1577,16 @@ Return structured output only.`,
 const CWD_MEASURE = { type: 'object', required: ['cwd'], properties: {
   cwd: { type: 'string', description: 'the absolute path `pwd` printed, verbatim - not abbreviated, not reconstructed from memory' },
 } }
+// Issue 1007: which spelling `pwd` comes back in depends on the shell the measuring agent picks,
+// not on the repo - a POSIX shell on Windows prints `/c/Users/...`, PowerShell `C:\Users\...`. A
+// drive-letter path (`X:\...` or `X:/...`) is folded to the `/x/...` spelling the guard and tip
+// commands below already take; anything else not starting with `/` stays unmeasured (null).
+function normaliseMeasuredCwd(cwd) {
+  if (typeof cwd !== 'string') return null
+  if (cwd[0] === '/') return cwd
+  const m = /^([A-Za-z]):[\\/](.*)$/.exec(cwd)
+  return m ? `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}` : null
+}
 let orchestratorCwd = cfg.orchestratorCwd
 if (orchestratorCwd === '.') {
   let measured = null, measureError = null
@@ -1574,7 +1598,8 @@ if (orchestratorCwd === '.') {
   } catch (err) {
     measureError = unusableReason('orchestrator-cwd', (err && err.message) || err)
   }
-  if (!measured || typeof measured.cwd !== 'string' || measured.cwd[0] !== '/') {
+  const normalisedCwd = measured ? normaliseMeasuredCwd(measured.cwd) : null
+  if (!normalisedCwd) {
     throw new Error(
       'ticket-fleet run ABORTED before Scout - could not measure the orchestrator checkout\'s absolute path (issue 562). '
       + `cwd=${measured ? JSON.stringify(measured.cwd) : 'null'} error=${measureError || 'none'}. `
@@ -1582,7 +1607,8 @@ if (orchestratorCwd === '.') {
       + "the orchestrating session's if it `cd`s mid-run, so an unmeasured relative path is never used."
     )
   }
-  orchestratorCwd = measured.cwd
+  orchestratorCwd = normalisedCwd
+  if (normalisedCwd !== measured.cwd) log(`Orchestrator cwd: pwd printed ${JSON.stringify(measured.cwd)}, drive-letter spelling normalised to ${normalisedCwd} (issue 1007).`)
   log(`Orchestrator checkout measured at ${orchestratorCwd} (issue 562) - every guard and tip-check agent below is handed this absolute path, not cfg.orchestratorCwd's relative default, so a later \`cd\` in the parent session cannot misdirect one.`)
 } else {
   log(`Orchestrator checkout path from args.orchestratorCwd: ${orchestratorCwd} (already absolute or caller-set - measurement skipped).`)
@@ -2475,8 +2501,8 @@ ${ruled
   ? `Then leave every label exactly as it is: the ticket carries an owner ruling, so it must NOT be relabelled ready-for-human (issue 934). Read the labels once with the tracker and return them in \`labels\`; "ready-for-human" must not be added.
 Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label, and never state that a step outside this container was performed. Return structured output only.`
   : `Then, and only after the comment is posted, relabel the ticket so the next run leaves it alone instead of repeating this handoff: ${rules.labelSwap(t.number, handBackLabel)}
-Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and "ready-for-agent" must not.
-Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than those two, and never state that a step outside this container was performed. Return structured output only.`}`,
+Return the ticket's labels after the update in \`labels\`; "${handBackLabel}" must be among them and no other state label may be - "ready-for-agent" included (issue 1009).
+Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT post more than one comment, do NOT change any label other than the state labels, and never state that a step outside this container was performed. Return structured output only.`}`,
       { label: `deliver:#${t.number}`, phase: 'Deliver', schema: COMMENTED, model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
@@ -2530,6 +2556,14 @@ function mergeNote(delivery) {
   const paths = delivery.prState === 'dirty-unresolved' && Array.isArray(delivery.conflictPaths) && delivery.conflictPaths.length
     ? ` (conflicts: ${delivery.conflictPaths.join(', ')})` : ''
   return ` - open, not merged: ${delivery.prState || 'prState not reported'}${paths}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
+}
+
+// Issue 1008: one clause for the run log saying the gate was re-run after a null-exit spawn failure.
+function gateRetryNote(delivery) {
+  const g = delivery && delivery.gateRetry
+  if (!g || typeof g !== 'object') return ''
+  const verdict = g.outcome === 'passed' || g.retryExitCode === 0 ? 'passed' : 'failed'
+  return ` - test gate re-run once after a null-exit spawn failure (first run exit ${g.firstExitCode}): re-run ${verdict} (exit ${g.retryExitCode})`
 }
 
 function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
@@ -2589,7 +2623,7 @@ A3. Conflicts: list them with \`git diff --name-only --diff-filter=U\`. Exactly 
 A4. Once every conflicted path was class (a), (b), (c) or (d): regenerate, because the resolved stamps and payload are now stale - ${regenNote}. Run each of them EXACTLY as written, every flag included: \`--home\` names the OWNER's home, and a stamp hashed against the container's home instead is what sent #550 and #552 out red (issue 553). Then \`git add -A\`.
 A5. THE GATE - both halves run AFTER A4's regenerate and BEFORE anything is pushed, and nothing is pushed until both pass.
     (i) STAMPS CHECK (issue 553): ${regenCheckNote}. Exit 0 is the pass - go on to (ii). A non-zero exit names the skills whose recorded stamp no longer matches their content, which means A4's regenerate did not take. Do NOT hand-edit a stamp to make this pass - the recorded hash is what makes the dates believable - and do NOT read a green PR check as evidence here: in run 6aac4a53 the payload rebuilt, the tests passed and skill-stamps.yml's \`pull_request\` run (which tests the merge ref) was green while the push-event run of the same \`check\` job was red on arrival. Instead re-run A4's commands byte-identical, \`git add -A\`, and run the check again. If the second run still fails, \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason naming every skill the check listed.
-    (ii) TESTS: re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
+    (ii) TESTS: re-run \`${testCommand}\` and record the REAL exit code, not a pipeline's. NULL EXIT UNDER LOAD (issue 1008) - this holds for every run of that command in this stage: when it exits non-zero and EVERY failing test reports a null exit code from a child process (the failure reads "exited null", "status null" or "exit code null" - the harness could not spawn or lost the subprocess), that is a spawn failure from the wave's parallel load, not a test failure. Re-run the same command ONCE, alone - nothing else running beside it - and return gateRetry {firstExitCode, nullExitLines: those failing lines VERBATIM, retryExitCode, retryTail, outcome: "passed" or "failed"}. The re-run's exit code is the gate's verdict: 0 goes on as green; non-zero is the failure below, with the re-run's failing lines. A run with any failure that is not a null exit is never re-run, and there is never a second re-run. Non-zero: \`git merge --abort\`, push nothing, open no PR, and return mergeStatus "blocked" with conflictPaths listing the paths that were in conflict and blockedReason holding the decisive failing lines.
 A6. Tests green: commit the merge (\`git commit --no-edit\` while the merge is in progress, or \`git commit -am "merge origin/${defaultBranch} into ${branch} (issue ${t.number}): generated files re-stamped and rebuilt"\`). mergeStatus is "resolved".
 A7. MARKER SCAN - it runs on EVERY path through STEP A, a clean merge included, and nothing is pushed until it passes (issue 514): \`git grep -l -e '^<<<<<<< ' -e '^>>>>>>> ' HEAD\`. Exit 1 with no output is the pass - go to STEP B. Exit 0 lists paths whose COMMITTED content still carries conflict markers, which is what a resolution that staged the markers instead of removing them leaves behind; run 6aab1eac committed and pushed exactly that and then asked for a force push. Do NOT push and do NOT open a PR. For each listed path that is class (a), (b) or (d): resolve it again (\`git checkout --theirs -- <path>\`, \`node tools/resolve-stamp-conflict.js <path>\`, or ${gitSpelling(instrument, 'checkout --conflict=diff3 -- <path>')} then \`node tools/resolve-append-conflict.js <path>\`), redo A4's regeneration and BOTH halves of A5's gate, \`git add -- <path>\`, amend the merge commit with \`git commit --amend --no-edit\` (which keeps both merge parents), and run the scan again. For any listed path that is class (c), and for any path a second scan still lists: \`git reset --hard HEAD~1\` if the merge is already committed (\`git merge --abort\` if it is not), push nothing, open no PR, and return {pushed:false, prUrl:"", mergeStatus:"blocked", conflictPaths:[every path the scan listed], blockedReason:"conflict markers left in <paths> after the merge"}.
 A8. DELIVER WITHOUT THE MERGE (issue 544) - this path is for ONE case only: the merge command in A1 was refused by the classifier twice. A merge that RAN and conflicted outside the resolvable classes is A3(e), and a merge that broke the tests is A5; neither comes here. Leave ${branch} exactly as the verifier saw it - no merge, no rebase, no new commit, nothing regenerated. Run A7's marker scan on that untouched tip, then go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths [] and blockedReason holding the refusal text VERBATIM (both texts if the two refusals differed). Run 6aac3d3b lost the deliveries of #489 and #493 at exactly this point, each returning {pushed:false, prUrl:""} over one refused merge while the branch beside it was verified and complete; the session then merged, pushed and opened PRs #540 and #541 by hand. The PR body carrying the refusal text is what lets whoever merges it merge ${defaultBranch} in themselves instead of re-implementing a ticket that is already done.
@@ -2672,7 +2706,7 @@ async function runFinish(journal) {
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
     }
-    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
+    log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${gateRetryNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
     else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
@@ -2940,7 +2974,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // than re-implementing - the refusal text travels in the PR body and in the journal's
     // blockedReason, not in this line.
     const unmergedByClassifier = !!(delivery && delivery.mergeStatus === 'unmerged-by-classifier')
-    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${mergeNote(delivery)}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
+    log(deliveryFailure || `deliver:#${t.number}: ${(delivery && delivery.prUrl) || 'no PR (pre-push merge blocked)'}${mergeNote(delivery)}${gateRetryNote(delivery)}${unmergedByClassifier ? ` - opened WITHOUT the pre-push merge: the classifier refused \`git merge\` twice, so origin/${scout.defaultBranch} still has to be merged into ${branch} before this PR goes in` : ''}`)
 
     // Checkpoint 3 of 4 (aac-routines issue 270): the Deliver step pushes and opens the PR from
     // the parent's context - unisolated, like the verifier - so it can dirty the orchestrator's
@@ -2967,6 +3001,8 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // Carried so the run report can say which PRs still owe the default-branch merge (issue 544).
     mergeStatus: (delivery && delivery.mergeStatus) || null,
     // Issue 770: STEP D merged the PR itself, or says why it is still open.
+    // Issue 1008: the one re-run of a gate that failed only on null exit codes, and how it ended.
+    gateRetry: (delivery && delivery.gateRetry) || null,
     merged: !!(delivery && delivery.merged === true), mergeSha: (delivery && delivery.mergeSha) || null,
     prState: (delivery && delivery.prState) || null, ticketState: (delivery && delivery.ticketState) || null,
     mergeNote: delivery && delivery.mergeStatus === 'unmerged-by-classifier'

@@ -1231,6 +1231,56 @@ for (const file of RESUME_GUARD_PAIR) {
       'the log must say the PR still owes the default-branch merge');
   });
 
+  // ---- A null exit code under parallel load is a spawn failure, not a failing gate (issue 1008) ----
+  // Wave wf_3ccddd78-a8a: three deliverers ran the gate beside eleven others, every failure read
+  // `hook exited null`, and each stopped a verified delivery as blocked; the same suite run alone
+  // passed. The gate is re-run once, alone, and only a second failure blocks.
+
+  test(`${rel} deliver prompt re-runs a gate that failed only on null exit codes, once (issue 1008)`, () => {
+    const src = fs.readFileSync(file, 'utf8');
+    const prompt = extractMarked(src, 'FLEET-DELIVER-PROMPT');
+    const a5 = prompt.slice(prompt.indexOf('(ii) TESTS:'), prompt.indexOf('A6. Tests green'));
+    assert.match(a5, /EVERY failing test reports a null exit code from a child process/,
+      'the retry must be keyed on every failure being a null exit, not on any failure');
+    assert.match(a5, /Re-run the same command ONCE, alone/, 'the gate is re-run once, by itself');
+    assert.match(a5, /A run with any failure that is not a null exit is never re-run, and there is never a second re-run/,
+      'a real failure is never retried, and the retry is not a loop');
+    assert.match(a5, /The re-run's exit code is the gate's verdict/, 'only the second failure blocks delivery');
+    assert.match(a5, /return gateRetry \{firstExitCode, nullExitLines: [^}]*retryExitCode, retryTail, outcome/,
+      'the retry and its outcome must be returned in the deliver result');
+    const delivered = src.slice(src.indexOf('const DELIVERED = '), src.indexOf('const COMMENTED = '));
+    assert.match(delivered, /gateRetry: \{ type: 'object', required: \['firstExitCode', 'retryExitCode', 'outcome'\]/,
+      'the DELIVERED schema must accept the gateRetry record the prompt asks for');
+    assert.match(delivered, /outcome: \{ type: 'string', enum: \['passed', 'failed'\]/);
+  });
+
+  test(`${rel} runCodeLane records the null-exit gate retry and its outcome (issue 1008)`, async () => {
+    const nullLines = 'not ok 3 - tools/session-start-hook.test.js\n  hook exited null';
+    const gateRetryNote = new Function(`${extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT')}\nreturn gateRetryNote;`)();
+    assert.equal(gateRetryNote({ prUrl: 'x' }), '', 'no retry, no note');
+    const cases = [
+      { number: 1008, gateRetry: { firstExitCode: 1, nullExitLines: nullLines, retryExitCode: 0, retryTail: '# pass 778', outcome: 'passed' },
+        delivery: { pushed: true, prUrl: 'https://github.com/x/y/pull/1008', mergeStatus: 'resolved', conflictPaths: [] }, done: true, verdict: /re-run passed \(exit 0\)/ },
+      { number: 1009, gateRetry: { firstExitCode: 1, nullExitLines: nullLines, retryExitCode: 1, retryTail: 'hook exited null', outcome: 'failed' },
+        delivery: { pushed: false, prUrl: '', mergeStatus: 'blocked', conflictPaths: [], blockedReason: 'hook exited null' }, done: false, verdict: /re-run failed \(exit 1\)/ },
+    ];
+    for (const c of cases) {
+      const agentMock = async (_prompt, opts) => {
+        if (opts.label.startsWith('impl:')) {
+          return { branch: `agent/issue-${c.number}-attempt1-wf_testrun-w0`, committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+        }
+        if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+        if (opts.label.startsWith('deliver:')) return Object.assign({ gateRetry: c.gateRetry }, c.delivery);
+        throw new Error('unexpected label: ' + opts.label);
+      };
+      const { result, logs } = await driveCodeLane(file, agentMock, { number: c.number, title: 't', criteria: '' }, 0);
+      assert.equal(result.done, c.done, `#${c.number}: the re-run's exit code decides the delivery`);
+      assert.deepEqual(result.gateRetry, c.gateRetry, `#${c.number}: the run result must carry the retry record verbatim`);
+      assert.ok(logs.some((m) => /test gate re-run once after a null-exit spawn failure \(first run exit 1\)/.test(m) && c.verdict.test(m)),
+        `#${c.number}: the deliver log line must say the gate was re-run and how it ended`);
+    }
+  });
+
   // ---- The merge spelling a live probe accepted (issue 907) ----
   // Run 6ab733a4's deliverer had `git merge origin/master` refused twice and left PR #897 dirty.
   // The probe on issue 907 ran the gitSpelling form from inside a fleet worktree without a refusal.
@@ -1669,10 +1719,44 @@ for (const mode of ['gh', 'mcp']) {
     const text = deliver[1];
     assert.match(text, /ready-for-agent/, `${mode} deliver prompt must name the label being removed`);
     assert.match(text, /ready-for-human/, `${mode} deliver prompt must name the label being added`);
-    const toolCall = mode === 'mcp' ? /mcp__github__issue_write/ : /gh api --method DELETE repos\/\{owner\}\/\{repo\}\/issues\/266\/labels\/ready-for-agent/;
+    const toolCall = mode === 'mcp' ? /mcp__github__issue_write/ : /gh api --method PUT repos\/\{owner\}\/\{repo\}\/issues\/266\/labels/;
     assert.match(text, toolCall, `${mode} deliver prompt must relabel through the ${mode} instrument`);
     assert.deepEqual(result.labels, ['ready-for-human'], 'the lane must report the labels the ticket carries afterwards');
     assert.equal(result.commentUrl, 'https://github.com/x/y/issues/266#c1');
+  });
+}
+
+// Issue 1009: a finish pass added ready-for-human to issue 827 while ready-for-local-agent stayed
+// on it. A ticket arriving with a state label other than ready-for-agent loses it in the same edit
+// that puts the hand-back label on - under both instruments, in the human lane and in D5.
+const STATE_LABELS = ['needs-triage', 'needs-info', 'ready-for-agent', 'ready-for-human', 'ready-for-local-agent', 'wontfix'];
+for (const mode of ['gh', 'mcp']) {
+  test(`${FLEET_SCRIPT_REL} relabel removes every other state label in one edit under ${mode} (issue 1009)`, async () => {
+    const prompts = [];
+    const agentMock = async (prompt, opts) => {
+      prompts.push([opts.label, prompt]);
+      if (opts.label.startsWith('handoff:')) return { agentSide: '$ true', ownerSide: ['sign off'], ready: true, remainingKind: 'human' };
+      if (opts.label.startsWith('deliver:')) return { commented: true, commentUrl: 'https://github.com/x/y/issues/827#c1', labels: ['ready-for-human'] };
+      throw new Error('unexpected label: ' + opts.label);
+    };
+    // The ticket arrives carrying ready-for-local-agent, not ready-for-agent.
+    await driveHumanLane(FLEET_SCRIPT, agentMock, { number: 827, title: 't', criteria: 'c', kindReason: 'labelled ready-for-local-agent' }, mode);
+    const lane = prompts.find(([label]) => label === 'deliver:#827')[1];
+    assert.match(lane, /no other state label may be/, `${mode}: the deliverer must not report a second state label`);
+    const rules = loadTrackerRules(FLEET_SCRIPT, mode);
+    const removalList = mode === 'mcp' ? /every other state label removed \(([^)]*)\)/ : /EXCEPT the other state labels \(([^)]*)\)/;
+    const oneEdit = mode === 'mcp' ? /issue_write \(method "update", issue_number 827\) ONCE/ : /--method PUT repos\/\{owner\}\/\{repo\}\/issues\/827\/labels/;
+    for (const [where, text, target] of [
+      ['human lane', lane, 'ready-for-human'],
+      ['D5 keep-open', rules.labelSwap(827), 'ready-for-human'],
+      ['local hand-back', rules.labelSwap(827, 'ready-for-local-agent'), 'ready-for-local-agent'],
+    ]) {
+      const m = text.match(removalList);
+      assert.ok(m, `${mode} ${where}: the relabel must list the state labels it removes`);
+      assert.deepEqual(m[1].match(/[a-z-]+/g).sort(), STATE_LABELS.filter((l) => l !== target).sort(), `${mode} ${where}: every state label but ${target} is removed`);
+      assert.match(text, oneEdit, `${mode} ${where}: the swap is one whole-set edit`);
+      assert.doesNotMatch(text, /--method DELETE|--method POST repos\/\{owner\}\/\{repo\}\/issues\/827\/labels/, `${mode} ${where}: no per-label edit that could leave two state labels`);
+    }
   });
 }
 
@@ -2589,7 +2673,7 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
   assert.match(guardBody, /label: 'orchestrator-cwd'/, 'the cwd measurement must be its own labelled Setup agent');
   assert.match(guardBody, /phase: 'Setup'/, 'the measurement must run in the Setup phase, before any checkpoint needs it');
   assert.match(guardBody, /'pwd'|`pwd`/, 'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
-  assert.match(guardBody, /measured\.cwd\[0\] !== '\/'/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
+  assert.match(guardBody, /if \(!normalisedCwd\) \{/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
 
   // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
   // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
@@ -2700,6 +2784,36 @@ test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and
   await treeGuardCheck('implement-attempt1', 7);
   assert.equal(commands.length, 2, 'expected the baseline plus one check');
   for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+});
+
+// Issue 1007: the measuring agent's `pwd` spelling depends on the shell it picks. A drive-letter
+// path in either slash style is accepted and folded to `/x/...`; anything else still aborts.
+async function measureCwd(measuredCwd) {
+  const baselines = [];
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'orchestrator-cwd') return { cwd: measuredCwd };
+    if (opts.label === 'tree-guard:baseline') {
+      baselines.push(prompt);
+      return { exitCode: 0, stdout: JSON.stringify({ statePath: 's', baselineCount: 0 }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  await driveTreeGuard(agentMock);
+  return baselines[0];
+}
+
+test('orchestrator-cwd: a Windows drive-letter pwd in either slash style is normalised to /x/... (issue 1007)', async () => {
+  for (const measured of ['C:\\Users\\Dan\\repo\\.claude\\worktrees\\wt', 'C:/Users/Dan/repo/.claude/worktrees/wt']) {
+    const prompt = await measureCwd(measured);
+    assert.match(prompt, /--cwd \/c\/Users\/Dan\/repo\/\.claude\/worktrees\/wt(?!\S)/, `${measured} must reach the guard as /c/...`);
+  }
+});
+
+test('orchestrator-cwd: a pwd that is neither /-absolute nor a drive-letter path still aborts before Scout (issue 1007)', async () => {
+  for (const measured of ['relative\\path', 'C:relative', '\\\\server\\share']) {
+    await assert.rejects(() => measureCwd(measured),
+      /ticket-fleet run ABORTED before Scout - could not measure the orchestrator checkout's absolute path \(issue 562\)/);
+  }
 });
 
 // Issue 811: in a served repo with no copy of tools/orchestrator-tree-guard.js (a cloud container
