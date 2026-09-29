@@ -305,7 +305,7 @@ function lintFile(file, opts) {
     // of one to three words, capitalized, ending in a period, then a capital.
     // A digit in the label does not exempt it: "Question 2, counts." slipped
     // through on 2026-09-29. (Dan, 2026-09-29, on the OSH delegation emails.)
-    const runIn = /^\s+([A-Z][\w'-]*(?:\s+[\w'-]+){0,2}\.)\s+(?=[A-Z])/.exec(line);
+    const runIn = /^\s+([A-Z][\w'-]*(?:,?\s+[\w'-]+){0,2}\.)\s+(?=[A-Z])/.exec(line);
     if (runIn && !/^(?:Yes|No)\.$/.test(runIn[1])) {
       push(i, runIn.index + 1, 37, formal ? "error" : "warn",
         "run-in heading ending in a period; recast the label as a sentence (Rule 37 allows run-in headings only in legal documents, ending with a colon)",
