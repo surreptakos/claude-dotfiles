@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-28T21:53:59Z"
-  previous-modified: "2026-09-23T15:56:34Z"
-  revision: "6"
-  content-sha: "6c42b9132a23"
+  modified: "2026-09-29T22:49:58Z"
+  previous-modified: "2026-09-28T21:53:59Z"
+  revision: "7"
+  content-sha: "92b6018c317f"
 ---
 
 # To Tickets
@@ -42,7 +42,7 @@ Break the work into **tracer bullet** tickets.
 
 Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
-**Human-only halves get their own ticket.** When a slice contains a step only a human can perform (a UI operation the API cannot do, a credential mint, an owner decision or sign-off, manual testing), split that step into its own ticket labeled `ready-for-human` (or the tracker's equivalent), with the dependent agent ticket declaring it as a blocker — never a bullet inside an agent ticket's body, a PR-comment note, or a handoff-doc line. The owner works from a label query; a human step not carrying the label is invisible to the person who has to perform it (measured 2026-08-24: a PR-gating UI rename sat unseen in PR comments until the owner asked).
+**Human-only halves get their own ticket, and "human" means a person is the only instrument.** Before labelling a step `ready-for-human`, ask whether a desktop session can do it: `gh` on the owner's PC reaches API paths the cloud proxy refuses (repo visibility, Actions access, cross-repo code search), and `agent-browser` on the owner's logged-in browser can work a settings dialog (a cloud environment's variables and setup script, a token page). Those steps are `ready-for-local-agent`, with the one tap only a person can give (a 2FA code, a sudo-mode password, a judgment call) named in the body. Dan, 2026-09-29, on four owner tickets a desktop agent could have done: "I don't understand why I have to do anything if you have the ability to use my computer and run commands and click around." When a slice contains a step only a person can perform (a decision or sign-off, a 2FA or password prompt, a judgment call), split that step into its own ticket labeled `ready-for-human` (or the tracker's equivalent), with the dependent agent ticket declaring it as a blocker — never a bullet inside an agent ticket's body, a PR-comment note, or a handoff-doc line. The owner works from a label query; a human step not carrying the label is invisible to the person who has to perform it (measured 2026-08-24: a PR-gating UI rename sat unseen in PR comments until the owner asked).
 
 **Wide refactors are the exception to vertical slicing.** A **wide refactor** is one mechanical change (rename a column, retype a shared symbol) whose **blast radius** fans across the whole codebase, so a single edit breaks thousands of call sites at once and no vertical slice can land green. Don't force it into a tracer bullet; sequence it as **expand–contract**. First expand: add the new form beside the old so nothing breaks. Then migrate the call sites over in batches sized by blast radius (per package, per directory), each batch its own ticket blocked by the expand, keeping CI green batch to batch because the old form still exists. Finally contract: delete the old form once no caller remains, in a ticket blocked by every migrate batch. When even the batches can't stay green alone, keep the sequence but let them share an integration branch that all block a final integrate-and-verify ticket; green is promised only there.
 
