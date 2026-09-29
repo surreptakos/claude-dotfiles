@@ -2,10 +2,10 @@
 name: consolidate-memory
 description: Full holistic pass over every memory file — merge duplicates, fix stale facts, prune the index. Never a delta sweep.
 metadata:
-  modified: '2026-09-21T03:33:08Z'
-  previous-modified: '2026-09-18T18:36:19Z'
-  revision: '4'
-  content-sha: 97cd5671198f
+  modified: '2026-09-28T21:43:43Z'
+  previous-modified: '2026-09-21T03:33:08Z'
+  revision: '5'
+  content-sha: 7bf926833495
 ---
 
 # Memory Consolidation
@@ -37,7 +37,7 @@ Every invocation walks the complete memory set. Never restrict to files created 
 
 **Fix time references.** Convert "next week", "this quarter", "by Friday" to absolute dates so they stay readable later. Every file, every run.
 
-**Ground-check what you rewrite.** Where the repo carries the checker (claude-dotfiles does), run `node tools/check-evidence.js <note.md>` on every note this pass edits before declaring it finished: each number, date and quote must appear verbatim in a source the note cites as a Markdown link or on a `Source:` line. Exit 1 names the line whose fact is missing; exit 3 means a source could not be read, and that is not a pass. A merge is exactly where a number drifts off its evidence.
+**Ground-check what you rewrite.** Where the repo carries the checker (claude-dotfiles does), run `node tools/check-evidence.js <note.md>` on every note this pass edits before declaring it finished: each number, date and quote must appear verbatim in a source the note cites as a Markdown link or on a `Source:` line. Give every note a `Source:` line: a repo file path, or an issue or comment URL. A note that cites URLs only runs with `--fetch`. Read the exit code this way. Exit 0 is a pass. Exit 3 is a pass only when every finding is an `unchecked <url>` line (a source that could not be fetched or was not fetched) and no fact is reported missing. Exit 1 (a fact not found in its sources) and exit 2 (a read error) are never a pass: fix the source, fix the fact, or file the fact its own `ready-for-human` ticket. When no source can be found for a note or a fact, never cut it silently. Leave the fact in place, file one `ready-for-human` ticket per unsourced note that names the note, quotes the unsourced facts and asks the owner for the source or for permission to drop them, and link the ticket from the note as a bare URL on its own line (a Markdown link would count as a source). A merge is exactly where a number drifts off its evidence.
 
 **Drop what's easy to re-find.** If a memory just restates something you could pull from the user's calendar, docs, or connected tools on demand, cut it. Keep what's hard to re-derive: stated preferences, context behind a decision, who to go to for what.
 

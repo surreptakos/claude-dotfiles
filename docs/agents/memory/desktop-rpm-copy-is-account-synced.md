@@ -23,3 +23,5 @@ names the marketplace and who installed it.
 read `rpm/manifest.json` for the plugin id in the session's plugin path. Do not infer
 "organization" from the folder layout. See [[cowork-plugin-cache-can-go-stale]] for the same
 folder going stale on the Cowork side.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/943, https://github.com/surreptakos/claude-dotfiles/issues/857, https://github.com/surreptakos/claude-dotfiles/issues/948

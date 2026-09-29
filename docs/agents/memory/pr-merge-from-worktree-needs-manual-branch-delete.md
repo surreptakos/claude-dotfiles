@@ -33,3 +33,7 @@ proxy refuses both instruments: `git push origin --delete <branch>` fails with
 answers `Write access to this GitHub API path is not permitted through this proxy.` Merging still
 deletes the head branch, because `delete_branch_on_merge` is on; it is only a branch with no merge
 behind it, such as an abandoned fleet attempt, that a container has to leave for the desktop.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/96, https://github.com/surreptakos/claude-dotfiles/issues/183, https://github.com/surreptakos/claude-dotfiles/issues/637
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/980

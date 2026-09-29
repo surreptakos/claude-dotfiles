@@ -33,3 +33,7 @@ for claude.ai Skills pages (Customize > Skills, admin-settings > Skills), which 
 it is `dist/aac-skills.zip` now, not the `dan-skills` name of 2026-08-31.
 
 Related: [[three-skill-channels]]
+
+Source: .claude-plugin/marketplace.json, tools/build-cloud-plugin.py, https://github.com/surreptakos/claude-dotfiles/issues/214
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/974

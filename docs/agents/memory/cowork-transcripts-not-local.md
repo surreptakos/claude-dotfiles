@@ -16,3 +16,5 @@ Verified 2026-09-03 by walking `%APPDATA%\Claude` and both profile dirs.
 - A one-off crawler plus classifier and merge scripts, and the resulting to-do lists, were saved to `__USERHOME__\transcript-exports\forgotten-todos-2026-09-02\` (rerunnable; see the scripts there).
 
 Related: [[desktop-scheduled-tasks-are-per-org]].
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/967

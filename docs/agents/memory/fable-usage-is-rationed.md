@@ -18,3 +18,7 @@ route bulk agent work through `claude-fable-5-1` need Dan's explicit ask.
 
 The orchestrator session itself runs Fable 5.1 at high effort (Dan, 2026-09-24: "which is where
 you should be as orchestrator"). The rationing covers bulk worker load, not the session that drives it. See [[marketplace-is-the-distribution-spine]] for where the fleet scripts live.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/259, https://github.com/surreptakos/claude-dotfiles/issues/956, https://github.com/surreptakos/claude-dotfiles/issues/759, https://github.com/surreptakos/claude-dotfiles/issues/691
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/971

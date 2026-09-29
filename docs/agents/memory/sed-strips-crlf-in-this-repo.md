@@ -10,3 +10,7 @@ Git Bash `sed -i` on a CRLF file in this repo rewrites every line ending to LF: 
 **Why:** `.gitattributes` pins `* -text`, so git converts nothing: the CRLF bytes on disk are exactly what gets committed, and sed emits LF.
 
 **How to apply:** edit CRLF files (`.ps1`, generated JSON) with PowerShell `.Replace()` + `[System.IO.File]::WriteAllText`, or the Edit tool - never `sed -i`. After any scripted edit, check `git diff --stat`: a full-file line count means endings churned. Related: [[powershell-7-is-the-tool-engine]].
+
+Source: sync.ps1
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/982

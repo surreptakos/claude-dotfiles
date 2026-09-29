@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Install the pinned @caveman-ai/cli on this machine and wire it into settings.json, or fail
+    Install the current @caveman-ai/cli npm release on this machine and wire it into settings.json, or fail
     closed - never leave a hook or a model route pointing at a binary that was never installed.
 
 .DESCRIPTION
@@ -10,15 +10,16 @@
     /settings.json has already landed at $UserHome\.claude\settings.json by then, hooks and env
     route baked in from whichever machine last ran `caveman enable claude`).
 
-    Both installers share ONE version pin - lib\caveman-cli.json - so bumping the CLI means
-    editing one file, not two languages.
+    Both installers track the current npm release of @caveman-ai/cli, asked with `npm view`
+    every run (issue 931); $env:CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version instead.
 
     What a real run does, mirroring the cloud bootstrap's steps 3 (CLI, binaries, proxy, enable):
       1. skip entirely, fail closed, if $env:CAVEMAN_DESKTOP_SKIP_CLI is set (offline machine, a
          test run, or a caller that wants no network touched);
-      2. skip the npm install (not the rest) when the pinned version is already present - a
-         second run is a no-op on that count;
-      3. `npm install -g --prefix $UserHome\.local ...` the pinned version;
+      2. skip the npm install (not the rest) when the current release is already present - a
+         second run is a no-op on that count - or when the registry cannot be reached and a CLI
+         is already installed (it is kept, and a running proxy is left alone);
+      3. `npm install -g --prefix $UserHome\.local ...` the current release;
       4. `caveman setup --install` (fetch the signed proxy binary) and `caveman enable claude`
          (the CLI's own writer for the hook + route wiring in ~/.claude/settings.json - it knows
          its own install paths, so this script never hand-authors those commands).
@@ -51,18 +52,24 @@ $ErrorActionPreference = 'Stop'
 
 $ProxyPort = 8787
 
-function Get-CavemanPinnedVersion {
-    <# The one pin shared with .claude/hooks/caveman-bootstrap.sh (issue 825). #>
-    param([Parameter(Mandatory = $true)][string]$RepoRoot)
-    if ($env:CAVEMAN_DESKTOP_CLI_VERSION) { return $env:CAVEMAN_DESKTOP_CLI_VERSION }
-    $pinFile = Join-Path $RepoRoot 'lib\caveman-cli.json'
-    if (Test-Path $pinFile) {
-        try {
-            $pin = Get-Content -Raw -LiteralPath $pinFile | ConvertFrom-Json
-            if ($pin.PSObject.Properties['cliVersion'] -and $pin.cliVersion) { return [string]$pin.cliVersion }
-        } catch { }
+function Get-CavemanLatestVersion {
+    <#
+        The registry's current @caveman-ai/cli release, or $null when npm or the registry cannot
+        be reached (issue 931; .claude/hooks/caveman-bootstrap.sh asks the same question).
+        Bounded, so an offline pull does not wait out npm's five-minute default fetch timeout.
+    #>
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & npm view '@caveman-ai/cli' version --fetch-retries=0 --fetch-timeout=20000 2>$null
+        if ($LASTEXITCODE -ne 0) { return $null }
+        return (@($out | ForEach-Object { "$_".Trim() } |
+                 Where-Object { $_ -match '^\d+\.\d+\.\d+([-+][0-9A-Za-z.-]+)?$' }) | Select-Object -Last 1)
+    } catch {
+        return $null
+    } finally {
+        $ErrorActionPreference = $previous
     }
-    return '1.3.4'
 }
 
 function Get-InstalledCavemanVersion {
@@ -153,10 +160,11 @@ $LocalPrefix  = Join-Path $UserHome '.local'
 $CavemanHome  = Join-Path $UserHome '.caveman'
 $ProxyExe     = Join-Path $CavemanHome 'bin\caveman-proxy.exe'
 $CavemanCmd   = Join-Path $LocalPrefix 'caveman.cmd'
-$Version      = Get-CavemanPinnedVersion -RepoRoot $RepoRoot
+$Pin          = $env:CAVEMAN_DESKTOP_CLI_VERSION
 
 if ($DryRun) {
-    Write-Host ("  caveman: would install {0} to {1} (dry run - no npm, no settings.json edit)" -f $Version, $LocalPrefix)
+    $what = if ($Pin) { "@caveman-ai/cli@$Pin" } else { 'the current npm release of @caveman-ai/cli' }
+    Write-Host ("  caveman: would install {0} to {1} (dry run - no npm, no settings.json edit)" -f $what, $LocalPrefix)
     exit 0
 }
 
@@ -167,8 +175,17 @@ if ($env:CAVEMAN_DESKTOP_SKIP_CLI) {
 }
 
 $installed = Get-InstalledCavemanVersion -LocalPrefix $LocalPrefix
+$Version = if ($Pin) { $Pin } else { Get-CavemanLatestVersion }
 $npmState = 'skipped'
-if ($installed -ne $Version) {
+if (-not $Version) {
+    if (-not $installed) {
+        Remove-CavemanWiring -Path $LiveSettings -ProxyPort $ProxyPort -ProxyExe $ProxyExe | Out-Null
+        Write-Host '  caveman: npm registry unreachable and no @caveman-ai/cli installed - failing closed (dead caveman hooks and route stripped)' -ForegroundColor Yellow
+        exit 0
+    }
+    # Registry unreachable: keep the installed CLI; a running proxy is never touched here.
+    $npmState = "registry unreachable, kept $installed (no npm install)"
+} elseif ($installed -ne $Version) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -184,9 +201,9 @@ if ($installed -ne $Version) {
         Write-Host ("  caveman: npm install of @caveman-ai/cli@{0} FAILED - failing closed (dead caveman hooks and route stripped)" -f $Version) -ForegroundColor Yellow
         exit 0
     }
-    $npmState = "installed $Version"
+    $npmState = if ($installed) { "installed $Version (was $installed)" } else { "installed $Version" }
 } else {
-    $npmState = "present $Version (no npm run)"
+    $npmState = "present $Version (no npm install)"
 }
 
 $setupState = 'skipped'

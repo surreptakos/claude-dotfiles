@@ -21,3 +21,7 @@ Two stand-ins that gave the wrong answer on PR 928:
 
 Also normalise before comparing: this repo stores the copies CRLF, and em-dash vs. other
 punctuation churn upstream makes whole files look rewritten when the words are unchanged.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/928
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/988
