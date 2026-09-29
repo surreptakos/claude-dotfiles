@@ -13,3 +13,5 @@ tables, commit hashes, fleet status. He wanted one sentence.
 
 **How to apply:** Detail stays in tool results. Offer it only if asked. Related:
 [[reporting-style-plain-english]] (aac-routines memory, same instinct for reports).
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/961

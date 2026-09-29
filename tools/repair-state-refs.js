@@ -160,35 +160,62 @@ function repair(row, opts) {
   return { row, changed, wrote: true, newBody };
 }
 
-module.exports = { REPOS, DOTFILES, CONTEXT_WINDOW, rewrite, repair, knownNumbers, contextFor, defaultRunGh };
+/**
+ * Issue 930: the Actions GITHUB_TOKEN is scoped to claude-dotfiles, so `gh issue list` against
+ * a sibling repo fails with GraphQL "Could not resolve to a Repository". Without the sibling's
+ * number set nothing can be rewritten, so that one error means "nothing to repair" and the row
+ * is skipped. Every other error still fails the run. The local watchdog runs under the owner's
+ * gh login, which reads all four repos, so there the repair still happens.
+ */
+function isUnreadableRepo(err) {
+  return /Could not resolve to a Repository/.test(String(err && err.message));
+}
 
-if (require.main === module) {
-  const argv = process.argv.slice(2);
+/**
+ * The CLI. Returns the exit code: 0 when every row was rewritten, clean, or skipped as
+ * unreadable; 2 on a usage error or any other failure. `io.runGh`, `io.log` and `io.error`
+ * are injectable for tests.
+ */
+function main(argv, io) {
+  io = io || {};
+  const gh = io.runGh || defaultRunGh;
+  const log = io.log || console.log;
+  const error = io.error || console.error;
   const dryRun = argv.includes('--dry-run');
   const onlyIdx = argv.indexOf('--only');
   const only = onlyIdx >= 0 ? argv[onlyIdx + 1] : null;
   const rows = only ? REPOS.filter((r) => r.slug === only) : REPOS;
   if (rows.length === 0) {
-    console.error('no matching repo for --only ' + only + ' (known: ' + REPOS.map((r) => r.slug).join(', ') + ')');
-    process.exit(2);
+    error('no matching repo for --only ' + only + ' (known: ' + REPOS.map((r) => r.slug).join(', ') + ')');
+    return 2;
   }
   let knownDotfiles;
-  try { knownDotfiles = knownNumbers(DOTFILES); }
-  catch (e) { console.error('cannot list ' + DOTFILES + ' numbers: ' + e.message); process.exit(2); }
+  try { knownDotfiles = knownNumbers(DOTFILES, gh); }
+  catch (e) { error('cannot list ' + DOTFILES + ' numbers: ' + e.message); return 2; }
   let total = 0;
   let failures = 0;
   for (const row of rows) {
     try {
-      const knownRepo = knownNumbers(row.repo);
-      const res = repair(row, { dryRun, knownDotfiles, knownRepo });
+      let knownRepo;
+      try { knownRepo = knownNumbers(row.repo, gh); }
+      catch (e) {
+        if (!isUnreadableRepo(e)) throw e;
+        log('[' + row.slug + '] #' + row.stateIssue + ': skipped, ' + row.repo + ' is not readable with this token (nothing to repair)');
+        continue;
+      }
+      const res = repair(row, { dryRun, knownDotfiles, knownRepo, runGh: gh });
       total += res.changed;
       const verb = res.wrote ? 'rewrote' : (res.dryRun ? 'would rewrite' : 'clean');
-      console.log('[' + row.slug + '] #' + row.stateIssue + ': ' + verb + ' ' + res.changed + ' bare cross-repo #N');
+      log('[' + row.slug + '] #' + row.stateIssue + ': ' + verb + ' ' + res.changed + ' bare cross-repo #N');
     } catch (e) {
-      console.error('[' + row.slug + '] #' + row.stateIssue + ': FAILED (' + e.message + ')');
+      error('[' + row.slug + '] #' + row.stateIssue + ': FAILED (' + e.message + ')');
       failures++;
     }
   }
-  console.log((dryRun ? 'DRY RUN — ' : '') + 'total bare cross-repo refs ' + (dryRun ? 'that would be ' : '') + 'rewritten: ' + total);
-  if (failures > 0) process.exit(2);
+  log((dryRun ? 'DRY RUN — ' : '') + 'total bare cross-repo refs ' + (dryRun ? 'that would be ' : '') + 'rewritten: ' + total);
+  return failures > 0 ? 2 : 0;
 }
+
+module.exports = { REPOS, DOTFILES, CONTEXT_WINDOW, rewrite, repair, knownNumbers, contextFor, defaultRunGh, isUnreadableRepo, main };
+
+if (require.main === module) process.exit(main(process.argv.slice(2)));

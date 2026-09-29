@@ -19,3 +19,5 @@ So a third-party plugin reaches a container only through a SessionStart hook tha
 and copies `skills/<name>/` into `~/.claude/skills/`: `caveman-bootstrap.sh` for caveman,
 `upstream-skills.sh` for i-have-adhd and typesafe. Keep the settings declaration anyway: it is what
 a desktop installs from.
+
+Source: .claude/settings.json, profile/claude/plugins/known_marketplaces.json, profile/claude/plugins/installed_plugins.json, .claude/hooks/caveman-bootstrap.sh, .claude/hooks/upstream-skills.sh, https://github.com/surreptakos/claude-dotfiles/issues/928

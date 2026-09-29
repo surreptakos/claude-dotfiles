@@ -51,3 +51,7 @@ before the run record surfaced the answer.
 and grep its Cowork session jsonl files for `<scheduled-task name=`; recreate from the newest
 enqueue line. Related: [[desktop-scheduled-tasks-are-per-org]], [[cowork-transcripts-not-local]],
 [[account-enforcement-is-a-warning]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/707, https://github.com/anthropics/claude-code/issues/38055
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/966

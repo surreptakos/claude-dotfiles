@@ -45,3 +45,7 @@ $ python -m aac_routines.leave_dates out          # 2026-09-14..20: 16 approved 
 The 2026-09-13 mail "Mark Kurland has requested Work from Home, Sept 15" that the 2026-09-15 triage
 run turned into an approve-it action reads `Approved, status_updated_by Dan Gatsakos` in the
 report: the mail was stale the moment Dan clicked. Related: [[session-env-carries-zoho-and-gas-tokens]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/204, https://github.com/surreptakos/claude-dotfiles/issues/607
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/973

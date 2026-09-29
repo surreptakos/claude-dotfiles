@@ -34,3 +34,7 @@ So `aac-bill-intake` and `aac-sales-cockpit`, which list `Workflow`, cannot have
 prompt. When the prompt appears, check the rooting repo's `.claude/settings.json`, then re-run
 `node aac-skills/project-harness/templates/add-cloud-plugin.js <repo>`.
 `tools/harness-bootstrap-delivery.test.js` fails if this repo drifts from that delivery.
+
+Source: aac-skills/project-harness/templates/add-cloud-plugin.js, .claude/settings.json, tools/harness-bootstrap-delivery.test.js, https://github.com/surreptakos/claude-dotfiles/issues/705, https://github.com/surreptakos/claude-dotfiles/issues/651
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/990

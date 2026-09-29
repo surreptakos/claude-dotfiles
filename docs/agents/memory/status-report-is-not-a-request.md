@@ -16,3 +16,7 @@ was Dan's Teams sent messages, which the Microsoft 365 connector reads (`chat_me
 **How to apply:** when a message could be a report or a request, search Teams and Outlook for what
 Dan sent in the last hour before acting. Record what is found on the tickets. Ask only if the search
 shows nothing. See [[answer-yes-no-in-one-line]].
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/954
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/986

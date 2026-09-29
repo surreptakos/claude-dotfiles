@@ -32,3 +32,5 @@ one command per Bash call. Never read a refusal as a rule, defer a ticket, or re
 one — workers that did cost two deliveries and an implementation attempt (issue 545). The full
 table of refused shapes, categories and working spellings is in the `ticket-fleet` skill,
 "Shapes the auto-mode classifier refuses". Related: [[cloud-only-criteria-stall-the-desktop-fleet]].
+
+Source: .claude/settings.json, https://github.com/surreptakos/claude-dotfiles/issues/245, https://github.com/surreptakos/claude-dotfiles/issues/545

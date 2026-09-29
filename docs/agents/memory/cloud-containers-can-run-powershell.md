@@ -31,3 +31,7 @@ desktop is only needed when the restore has to land over a live `~/.claude`.
 
 Related: [[ps51-scripts-need-a-bom]], [[sed-strips-crlf-in-this-repo]],
 [[cloud-only-criteria-stall-the-desktop-fleet]]
+
+Source: tests/restore-test.ps1, docs/agents/issue-tracker.md, sync.ps1, lib/manifest.ps1, install.ps1, tests/settings-invariants.tests.ps1, tests/git-env-leak.tests.ps1, tests/settings-defaultmode.tests.ps1, .github/workflows/windows-restore-test.yml, https://github.com/surreptakos/claude-dotfiles/issues/454, https://github.com/surreptakos/claude-dotfiles/issues/213, https://github.com/surreptakos/claude-dotfiles/issues/302
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/963

@@ -63,3 +63,7 @@ wire (`Credential Exploration`), the helper included — verify from a session w
 The helper's own tests (`python3 tools/zoho-rest.test.py`) cover the picker, the token request
 and the header without a network. Related: [[caveman-base-url-stays-with-the-proxy]] for a
 variable that must *not* live in the environment.
+
+Source: gas/cli/gas.js, tools/zoho-rest.py, tools/zoho-rest.test.py, https://github.com/surreptakos/claude-dotfiles/issues/602
+
+Unsourced facts, ticket: https://github.com/surreptakos/claude-dotfiles/issues/984

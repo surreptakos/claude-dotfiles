@@ -2,10 +2,10 @@
 name: "yes"
 description: "Evidence-first discipline. Use when modifying files, configs, databases or deployments; when debugging fails twice or spins on one approach; when about to hedge, guess or claim a root cause without data; when handing work or questions to the user that tools could answer; when closing a fix without a ripple check. Skip first-attempt failures and fixes already in progress."
 metadata:
-  modified: "2026-09-28T14:10:04Z"
-  previous-modified: "2026-09-25T23:14:17Z"
-  revision: "3"
-  content-sha: "a9ae06a7ab01"
+  modified: "2026-09-28T23:18:15Z"
+  previous-modified: "2026-09-28T14:10:04Z"
+  revision: "4"
+  content-sha: "9c2ebcac6ff0"
 ---
 
 # YES — evidence-first discipline
@@ -43,7 +43,11 @@ you already found. If you truly cannot do a step, name the blocker.
 **4. Unread is unread.** Characterise only a source you opened this session. Truncated or empty
 tool output is not a read: say it was cut off and re-run it. A stand-in is unread too: a task
 description, a summary, a run record or your memory of a name describes the source, it is not the
-source. Before stating an item's current state, read its newest entry.
+source. Before stating an item's current state, read its newest entry. A count is a stand-in
+for the rows it counts: a generated table or list (a workbook tab, a CSV, names for a person) is
+filed only after every row is printed and read, and the reply says so; the pre-send lint refuses
+a row count with no read statement beside it (Dan, 2026-09-28: "76 person or note rows", 53 of
+them companies).
 
 **5. Quote, then infer.** Separate what a source says from what you conclude: quote or cite the
 source for the first, and label the second as inference.

@@ -31,3 +31,5 @@ because the payload's dedup guard exits silently when settings.json names the sc
 
 **A gate that reads entries is not a gate.** `tests/bootstrap-test.sh` check 7 now executes the
 merged hooks; that is the assertion the previous 14 lacked.
+
+Source: tests/bootstrap-test.sh, .claude/hooks/session-start.sh, https://github.com/surreptakos/claude-dotfiles/issues/614, https://github.com/surreptakos/claude-dotfiles/issues/600
