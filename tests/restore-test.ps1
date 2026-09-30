@@ -25,7 +25,8 @@
       9  the restored hooks actually RUN from their new home, and the payload's skills from the clone
       6e the caveman desktop installer (issue 825): -DryRun, the offline fail-closed path, the
          no-op second install, and settings.json carries a caveman hook or route only when the
-         binary it names is on disk
+         binary it names is on disk; with the binary present it starts the proxy and registers
+         its HKCU Run logon start, into a scratch key (issue 1110)
       9f the profile carries no caveman wiring, and a pull over a live settings.json keeps
          caveman's own hooks and route while every other key is the profile's (issue 826)
      10  two overlapping runs do not delete each other's scratch directory
@@ -859,6 +860,36 @@ $pinned = Invoke-CavemanWithStubNpm -Installed '1.0.0' -Latest '9.9.9' -Pin '1.2
 Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the registry' `
     (($pinned.Exit -eq 0) -and ($pinned.Argv -notmatch 'view') -and ($pinned.Argv -match 'install .*@caveman-ai/cli@1\.2\.3')) `
     @($pinned.Text, $pinned.Argv)
+
+# 6e4. issue 1110: with the proxy binary on disk the installer starts it when 8787 does not answer
+# and registers its logon start under HKCU Run. The binary here is a stand-in that cannot run, so
+# the start fails (reported, still exit 0), and the Run key is a per-run scratch key, never the
+# real one; both are removed afterwards so the checks below see the home they expect.
+$fakeProxy = Join-Path $FakeHome '.caveman\bin\caveman-proxy.exe'
+$fakeProxyPlanted = -not (Test-Path -LiteralPath $fakeProxy)
+if ($fakeProxyPlanted) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $fakeProxy) -Force | Out-Null
+    Set-Content -LiteralPath $fakeProxy -Value 'restore-test stand-in' -Encoding ascii
+}
+$testRunKey = 'HKCU:\Software\claude-dotfiles-restore-test\' + [guid]::NewGuid().ToString('N')
+$previousRunKey = $env:CAVEMAN_DESKTOP_RUN_KEY
+$env:CAVEMAN_DESKTOP_RUN_KEY = $testRunKey
+try {
+    $logon1 = Invoke-CavemanWithStubNpm -Installed '9.9.9' -Latest '9.9.9' -Name 'logon1'
+    $runValue = [string](Get-ItemProperty -LiteralPath $testRunKey -Name 'CavemanProxy' -ErrorAction SilentlyContinue).CavemanProxy
+    $logon2 = Invoke-CavemanWithStubNpm -Installed '9.9.9' -Latest '9.9.9' -Name 'logon2'
+} finally {
+    $env:CAVEMAN_DESKTOP_RUN_KEY = $previousRunKey
+    Remove-Item -LiteralPath (Split-Path -Parent $testRunKey) -Recurse -Force -ErrorAction SilentlyContinue
+    if ($fakeProxyPlanted) { Remove-Item -LiteralPath $fakeProxy -Force -ErrorAction SilentlyContinue }
+}
+Check 'with the proxy binary present the installer tries to start it and registers a logon start naming it (issue 1110)' `
+    (($logon1.Exit -eq 0) -and ($logon1.Text -match 'proxy (started|failed to start|already answering)') -and
+     ($logon1.Text -match 'logon start registered now \(CavemanProxy\)') -and
+     ($runValue.IndexOf($fakeProxy, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) `
+    @($logon1.Text, ("Run value: {0}" -f $runValue))
+Check 'a second install leaves the logon start as it is (issue 1110)' `
+    (($logon2.Exit -eq 0) -and ($logon2.Text -match 'logon start registered \(CavemanProxy\)')) @($logon2.Text)
 
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
 
