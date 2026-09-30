@@ -29,6 +29,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { shell } = require('./posix-shell.js');
+const BASH = shell('bash');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const HOOK = path.join(REPO_ROOT, '.claude', 'hooks', 'session-start.sh');
@@ -89,7 +91,7 @@ function seedRemote(root, branch = 'master') {
 function runHook({ home, remote, ref = 'master', extraEnv = {} } = {}) {
   const envFile = path.join(home, 'env-file');
   fs.writeFileSync(envFile, '');
-  return spawnSync('bash', [HOOK], {
+  return BASH.run([HOOK], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
@@ -112,7 +114,7 @@ function runHook({ home, remote, ref = 'master', extraEnv = {} } = {}) {
 // Acceptance criterion 1: fake clone with unrelated local default branch — bootstrap
 // names the condition and rebuilds against origin.
 // -------------------------------------------------------------------------------
-test('bootstrap self-repair: cached clone with a local master that has no merge-base with origin is named and re-cloned (issue 241)', () => {
+test('bootstrap self-repair: cached clone with a local master that has no merge-base with origin is named and re-cloned (issue 241)', { skip: BASH.skip }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aac-bootstrap-unrelated-'));
   try {
     const { remote, seed } = seedRemote(home);
@@ -183,7 +185,7 @@ test('bootstrap self-repair: cached clone with a local master that has no merge-
 // Acceptance criterion 2: clone where local/origin agree — bootstrap is silent about
 // the cache and does not rebuild it.
 // -------------------------------------------------------------------------------
-test('bootstrap self-repair: cached clone where local == origin is silent about the cache and does not re-clone (issue 241)', () => {
+test('bootstrap self-repair: cached clone where local == origin is silent about the cache and does not re-clone (issue 241)', { skip: BASH.skip }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aac-bootstrap-same-'));
   try {
     const { remote } = seedRemote(home);
@@ -219,7 +221,7 @@ test('bootstrap self-repair: cached clone where local == origin is silent about 
 // session; the deepen shim in the hook prevents that. Freeze the invariant so a
 // future edit dropping the deepen fires here first.
 // -------------------------------------------------------------------------------
-test('bootstrap self-repair: shallow clone, origin advanced (linear fast-forward) resets silently — no false rebuild (issue 241)', () => {
+test('bootstrap self-repair: shallow clone, origin advanced (linear fast-forward) resets silently — no false rebuild (issue 241)', { skip: BASH.skip }, () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'aac-bootstrap-ff-'));
   try {
     const { remote, seed } = seedRemote(home);
