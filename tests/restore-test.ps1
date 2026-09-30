@@ -14,7 +14,7 @@
 
     Checks, in order:
       0  the clone materialized the exact bytes that were pushed (clone modes only)
-      1  install.ps1 exits 0
+      1  install.ps1 exits 0, having run the setup check with its machine probes skipped
       2  every whitelisted item landed, with the same file count as the repo
       4  no __USERHOME* token survives in any restored file
       5  no real-home path survives in any restored file
@@ -453,6 +453,19 @@ New-Item -ItemType Directory -Path (Split-Path $StaleSkill -Parent) -Force | Out
 $StaleSkillText = "---`nname: pre-734-stale`ndescription: written by a pull from before issue 734`n---`n"
 [System.IO.File]::WriteAllText($StaleSkill, $StaleSkillText, (New-Object System.Text.UTF8Encoding($false)))
 
+# Issue 1068: install.ps1 ends in the setup check, which STOPs (exit 1) on a missing secret file,
+# so the fake home gets stand-ins for the two files the owner copies by hand. They only have to
+# parse; they hold nothing credential-shaped, so the secret guard in section 8 stays meaningful.
+$SeededSecrets = @(
+    @{ Name = 'gpt-sheets-access-475817-853f8648243b.json'; Text = '{"type":"service_account","project_id":"restore-test"}' },
+    @{ Name = 'client_secret_594980791877-restore-test.apps.googleusercontent.com.json'; Text = '{"installed":{"client_id":"restore-test"}}' }
+) | ForEach-Object {
+    $path = Join-Path $FakeHome ('.config\' + $_.Name)
+    New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+    [System.IO.File]::WriteAllText($path, $_.Text, (New-Object System.Text.UTF8Encoding($false)))
+    $path
+}
+
 # ------------------------------------------------------------------ 1. run the installer
 
 $log = Join-Path $FakeRoot 'install.log'
@@ -474,6 +487,12 @@ try {
 
 Write-Host 'Install'
 Check 'install.ps1 exits 0' ($installExit -eq 0) @(Get-Content $log -Tail 15)
+# Issue 1068: install.ps1 is a wrapper around the setup check, and in a fake home the check must
+# skip the machine probes rather than run them against this machine.
+$installLog = Get-Content -Raw $log
+Check 'install.ps1 ran the setup check, machine probes skipped in the fake home' `
+    (($installLog -match '(?m)^Credentials\s*$') -and ($installLog -match 'machine probe skipped') -and
+     ($installLog -match '(?m)^Owner to-do\s*$')) @(Get-Content $log -Tail 15)
 
 # Post-install faults: breakage the restore itself would have to catch, which cannot be staged
 # in the repo because the repo is the thing being restored FROM.
@@ -566,6 +585,8 @@ $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction Silently
                              $_.FullName -ne (Join-Path $FakeHome '.claude.json') -and
                              # Issue 734: seeded before the install, not restored; section 6b.
                              $_.FullName -ne $StaleSkill -and
+                             # Issue 1068: the secret stand-ins, seeded before the install.
+                             $SeededSecrets -notcontains $_.FullName -and
                              $_.FullName -notlike '*\.claude.json.bak-*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
@@ -1561,6 +1582,22 @@ if (Test-Path $invariantTests) {
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
 } else {
     Check 'settings-invariants.tests.ps1 shipped' $false @('tests/settings-invariants.tests.ps1 missing from clone')
+}
+
+# The setup check engine against seeded fake homes (issue 1068): every check has a case that
+# fails it, and no run prints a secret value. Runs against the CLONE, like the two suites above.
+$setupCheckTests = Join-Path $Clone 'tests\setup-check.tests.ps1'
+if (Test-Path $setupCheckTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $setupCheckTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'setup-check.tests.ps1 passes (each check fails on its fixture; no secret printed)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'setup-check.tests.ps1 shipped' $false @('tests/setup-check.tests.ps1 missing from clone')
 }
 
 # ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)

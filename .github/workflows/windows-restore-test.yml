@@ -44,6 +44,7 @@ on:
       - 'lib/**.ps1'
       - 'sync.ps1'
       - 'install.ps1'
+      - 'setup-check.ps1'
       - '.github/workflows/windows-restore-test.yml'
   push:
     branches-ignore: [dashboard]
@@ -53,6 +54,7 @@ on:
       - 'lib/**.ps1'
       - 'sync.ps1'
       - 'install.ps1'
+      - 'setup-check.ps1'
       - '.github/workflows/windows-restore-test.yml'
 
 permissions:

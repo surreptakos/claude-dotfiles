@@ -115,9 +115,12 @@ writes nothing.
 git clone <this repo> ; cd claude-dotfiles ; .\install.ps1
 ```
 
-It checks for git, node, `py`, `claude`, `gh` and PyYAML, restores the configuration, and prints what
-remains: the two secret files, `/login`, `gh auth login`, and `gas login` (once per Google account;
-`clasp` is no longer a prerequisite — every AAC Apps Script repo deploys itself, see `gas/README.md`).
+It restores the configuration, then runs the setup check (`setup-check.ps1 -Fix`): git, node, `py`,
+`claude`, `gh` and PyYAML (installed when missing), the two secret files under `~/.config`, and live
+probes of the `gh`, Claude and `gas` logins (`clasp` is no longer a prerequisite — every AAC Apps
+Script repo deploys itself, see `gas/README.md`). What only you can do comes last, as numbered steps
+with the exact command; the exit code is 1 while any STOP remains. Re-run
+`powershell -ExecutionPolicy Bypass -File setup-check.ps1` any time; it only reports without `-Fix`.
 
 ## Absolute paths are stored as tokens
 
@@ -270,7 +273,8 @@ ever passed is not yet a check — the retired `dead-link` fault passed on its f
 it deleted a directory nothing linked to.
 
 What it does **not** prove: that Claude Code itself authenticates and boots from the restored
-config. That needs `/login`, which is item 1 of the by-hand list `install.ps1` prints.
+config. That needs `/login`, which the setup check lists as an owner to-do on the real profile
+(in the fake home it skips its machine probes, the Claude login among them).
 
 ## The secret guard
 
