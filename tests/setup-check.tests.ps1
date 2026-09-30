@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Drive setup-check.ps1 against seeded fake homes (issue 1068).
+    Drive setup-check.ps1 against seeded fake homes (issues 1068, 1070).
 
 .DESCRIPTION
     Each case seeds a fake home and a stub directory (SETUP_CHECK_STUBS), runs the engine the way
@@ -31,6 +31,7 @@ try { $Engine = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.Fil
 $TempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() }
 
 $Sandbox  = Join-Path $TempRoot ('setup-check-tests-' + [guid]::NewGuid().ToString('N'))
+$FixtureRoot = Join-Path $Sandbox 'fixture'
 $Sentinel = 'FIXTURE-SECRET-' + [guid]::NewGuid().ToString('N')
 $Tools    = @('git', 'node', 'py', 'claude', 'gh')
 
@@ -55,14 +56,45 @@ function Write-Utf8NoBom {
     [System.IO.File]::WriteAllText($Path, $Text, (New-Object System.Text.UTF8Encoding($false)))
 }
 
-# A clean fixture: both secret files present and parseable, every stub passing. Returns the
-# home and the stub directory; a case then breaks exactly one thing.
+# One restored profile, built once by a real pull (caveman kept offline) and copied into every
+# fixture, so the profile layer starts clean: no drift, the plugin recorded, a caveman proxy binary.
+# Restored files carry the home path, so every fixture lives at the one path the pull wrote to.
+function New-Template {
+    $thome = Join-Path $FixtureRoot 'home'
+    New-Item -ItemType Directory -Path $thome -Force | Out-Null
+    $prevSkip = $env:CAVEMAN_DESKTOP_SKIP_CLI
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $env:CAVEMAN_DESKTOP_SKIP_CLI = '1'
+        & $Engine -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot 'sync.ps1') -Mode pull -UserHome $thome *> $null
+        if ($LASTEXITCODE -ne 0) { throw "template pull exited $LASTEXITCODE" }
+    } finally {
+        $env:CAVEMAN_DESKTOP_SKIP_CLI = $prevSkip
+        $ErrorActionPreference = $prevEap
+    }
+    Get-ChildItem -LiteralPath $thome -Directory -Filter '.claude-dotfiles-backup-*' | Remove-Item -Recurse -Force
+    $proxy = Join-Path $thome '.caveman\bin\caveman-proxy.exe'
+    New-Item -ItemType Directory -Path (Split-Path $proxy -Parent) -Force | Out-Null
+    Write-Utf8NoBom $proxy 'fixture proxy'
+    $plugins = [System.IO.File]::ReadAllText((Join-Path $thome '.claude\plugins\installed_plugins.json')) | ConvertFrom-Json
+    $script:InstalledVersion = [string]@($plugins.plugins.'aac-skills@claude-dotfiles')[0].version
+    $saved = Join-Path $Sandbox 'template'
+    Move-Item -LiteralPath $thome -Destination $saved
+    return $saved
+}
+
+# A clean fixture: the template profile, both secret files present and parseable, every stub
+# passing. Returns the home and the stub directory; a case then breaks exactly one thing.
 function New-Fixture {
     $script:Case++
-    $root  = Join-Path $Sandbox ('case{0}' -f $script:Case)
+    $root  = $FixtureRoot
     $fhome = Join-Path $root 'home'
     $stubs = Join-Path $root 'stubs'
     $config = Join-Path $fhome '.config'
+    if (Test-Path -LiteralPath $root) { Remove-Item -LiteralPath $root -Recurse -Force }
+    New-Item -ItemType Directory -Path $root -Force | Out-Null
+    Copy-Item -LiteralPath $Template -Destination $fhome -Recurse
     New-Item -ItemType Directory -Path $config, $stubs -Force | Out-Null
     $key = [ordered]@{ type = 'service_account'; private_key = $Sentinel }
     Write-Utf8NoBom (Join-Path $config 'gpt-sheets-access-475817-853f8648243b.json') ($key | ConvertTo-Json)
@@ -91,6 +123,21 @@ exit 0
 "@
     }
     Write-Utf8NoBom (Join-Path $stubs 'pyyaml-present') 'present'
+    # Profile probes: master's plugin version comes from a file; caveman-live exits with the code
+    # in caveman-live.code (0 when absent); caveman-enable leaves a marker that it ran.
+    Write-Utf8NoBom (Join-Path $stubs 'offered-version') $script:InstalledVersion
+    Write-Utf8NoBom (Join-Path $stubs 'master-plugin-version.ps1') @'
+[System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'offered-version'))
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'caveman-live.ps1') @'
+$f = Join-Path $PSScriptRoot 'caveman-live.code'
+if (Test-Path $f) { exit ([int](Get-Content $f)) }
+exit 0
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'caveman-enable.ps1') @'
+Set-Content -Path (Join-Path $PSScriptRoot 'caveman-enabled') -Value 'ran'
+exit 0
+'@
     return [pscustomobject]@{ Home = $fhome; Stubs = $stubs; Config = $config }
 }
 
@@ -100,14 +147,18 @@ function Invoke-Check {
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Tool, '-UserHome', $h)
     if ($Fix) { $argList += '-Fix' }
     $prevStubs = $env:SETUP_CHECK_STUBS
+    $prevSkip = $env:CAVEMAN_DESKTOP_SKIP_CLI
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
         if ($NoStubs) { $env:SETUP_CHECK_STUBS = $null } else { $env:SETUP_CHECK_STUBS = $Fixture.Stubs }
+        # A -Fix pull runs the desktop caveman step; keep it offline, as the restore test does.
+        $env:CAVEMAN_DESKTOP_SKIP_CLI = '1'
         $out = & $Engine @argList 2>&1 | Out-String
         $exit = $LASTEXITCODE
     } finally {
         $env:SETUP_CHECK_STUBS = $prevStubs
+        $env:CAVEMAN_DESKTOP_SKIP_CLI = $prevSkip
         $ErrorActionPreference = $prevEap
     }
     Assert ("no secret value in the output (case {0})" -f $script:Case) (-not $out.Contains($Sentinel)) $out
@@ -128,13 +179,14 @@ function Test-Todo {
 
 try {
     New-Item -ItemType Directory -Path $Sandbox -Force | Out-Null
+    $Template = New-Template
 
     Write-Host 'Clean fixture'
     $f = New-Fixture
     $r = Invoke-Check $f
     Assert 'clean fixture exits 0' ($r.Exit -eq 0) $r.Out
     Assert 'report has one heading per layer, then the to-do' `
-        ($r.Out -match '(?ms)^Prerequisites\s*$.*^Credentials\s*$.*^Owner to-do\s*$') $r.Out
+        ($r.Out -match '(?ms)^Prerequisites\s*$.*^Profile\s*$.*^Credentials\s*$.*^Owner to-do\s*$') $r.Out
     Assert 'every line is ok, no STOP' (($r.Out -match '(?m)^  ok    gh\r?$') -and ($r.Out -notmatch 'STOP  ')) $r.Out
 
     Write-Host '-Fix is idempotent'
@@ -208,12 +260,95 @@ try {
             (($r.Out -match ("STOP  {0}" -f $l.Label)) -and (Test-Todo $r.Out $l.Todo)) $r.Out
     }
 
+    Write-Host 'Profile: pull drift'
+    $f = New-Fixture
+    $accounts = Join-Path $f.Home '.claude\accounts.json'
+    $want = [System.IO.File]::ReadAllText($accounts)
+    Write-Utf8NoBom $accounts '{ "drifted": true }'
+    $r = Invoke-Check $f
+    Assert 'a drifted profile file exits 1' ($r.Exit -eq 1) $r.Out
+    Assert 'it is a STOP naming the file, and the to-do is pull' `
+        (($r.Out -match 'STOP  profile differs from the repo .*accounts\.json') -and (Test-Todo $r.Out 'sync\.ps1" -Mode pull')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix runs pull and exits 0' (($r.Exit -eq 0) -and ($r.Out -match 'ok    profile matches the repo  \(pull ran under -Fix\)')) $r.Out
+    Assert '-Fix restored the file' ([System.IO.File]::ReadAllText($accounts) -eq $want)
+
+    Write-Host 'Profile: aac-skills plugin'
+    $f = New-Fixture
+    $r = Invoke-Check $f
+    Assert 'a current plugin is ok, naming both versions' `
+        ($r.Out -match ('ok    aac-skills plugin {0}  \(master offers {0}\)' -f [regex]::Escape($script:InstalledVersion))) $r.Out
+    Write-Utf8NoBom (Join-Path $f.Stubs 'offered-version') '2999.1.1'
+    $r = Invoke-Check $f
+    Assert 'a stale plugin is !! naming both versions' `
+        ($r.Out -match ('!!    aac-skills plugin is stale: installed {0}, master offers 2999\.1\.1' -f [regex]::Escape($script:InstalledVersion))) $r.Out
+    Assert 'its to-do is a restart, never claude plugin update' `
+        ((Test-Todo $r.Out 'Restart the Claude app') -and ($r.Out -notmatch 'plugin update')) $r.Out
+    Assert 'a stale plugin alone blocks nothing (exit 0)' ($r.Exit -eq 0) $r.Out
+
+    $f = New-Fixture
+    $ip = Join-Path $f.Home '.claude\plugins\installed_plugins.json'
+    Write-Utf8NoBom $ip '{ "version": 2, "plugins": {} }'
+    $r = Invoke-Check $f
+    Assert 'a missing plugin is a STOP with an install to-do' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  aac-skills plugin not installed') -and (Test-Todo $r.Out 'claude plugin install aac-skills@claude-dotfiles')) $r.Out
+
+    Write-Host 'Profile: hooks and caveman'
+    $f = New-Fixture
+    $settingsPath = Join-Path $f.Home '.claude\settings.json'
+    $settings = [System.IO.File]::ReadAllText($settingsPath) | ConvertFrom-Json
+    $dead = Join-Path $f.Home '.caveman\bin\gone\caveman-proxy.exe'
+    $settings.hooks = [pscustomobject]@{ SessionStart = @([pscustomobject]@{ hooks = @([pscustomobject]@{ type = 'command'; command = ("& '{0}' native-hook claude" -f $dead) }) }) }
+    Write-Utf8NoBom $settingsPath ($settings | ConvertTo-Json -Depth 20)
+    $r = Invoke-Check $f
+    Assert 'a hook naming a missing file exits 1' ($r.Exit -eq 1) $r.Out
+    Assert 'it is a STOP naming the event and the file' `
+        ($r.Out -match ('STOP  SessionStart hook names a missing file: {0}' -f [regex]::Escape($dead))) $r.Out
+
+    $f = New-Fixture
+    Remove-Item (Join-Path $f.Home '.caveman\bin\caveman-proxy.exe')
+    $r = Invoke-Check $f
+    Assert 'a missing proxy binary is !! with an install to-do' `
+        (($r.Out -match '!!    caveman proxy binary missing') -and (Test-Todo $r.Out 'caveman-desktop-install\.ps1')) $r.Out
+    Assert 'report-only never runs the caveman install' (-not (Test-Path (Join-Path $f.Stubs 'caveman-enabled')))
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix runs the caveman install' (Test-Path (Join-Path $f.Stubs 'caveman-enabled')) $r.Out
+
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-live.code') '1'
+    $r = Invoke-Check $f
+    Assert 'a dead proxy port exits 1 as a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy port 8787 does not answer')) $r.Out
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-live.code') '2'
+    $r = Invoke-Check $f
+    Assert 'a claude -p that does not answer exits 1 as a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  proxy port 8787 answers, but a terminal claude -p did not')) $r.Out
+
+    Write-Host 'Profile: personal profile'
+    $f = New-Fixture
+    $personal = Join-Path $f.Home '.claude-personal'
+    $r = Invoke-Check $f -Fix
+    Assert 'an absent personal profile is reported skipped' ($r.Out -match '--    ~/.claude-personal  \(absent: skipped, never created\)') $r.Out
+    Assert 'and -Fix does not create it' (-not (Test-Path $personal))
+
+    $f = New-Fixture
+    $personal = Join-Path $f.Home '.claude-personal'
+    New-Item -ItemType Directory -Path (Join-Path $personal 'plugins') -Force | Out-Null
+    Copy-Item (Join-Path $f.Home '.claude\plugins\installed_plugins.json') (Join-Path $personal 'plugins\installed_plugins.json')
+    $pdead = Join-Path $personal 'hooks\gone.js'
+    Write-Utf8NoBom (Join-Path $personal 'settings.json') ((@{ hooks = @{ Stop = @(@{ hooks = @(@{ type = 'command'; command = ('node "{0}"' -f $pdead) }) }) } }) | ConvertTo-Json -Depth 20)
+    $r = Invoke-Check $f
+    Assert 'a present personal profile gets the plugin check' `
+        ($r.Out -match '(?ms)~/.claude-personal\s*$.*ok    aac-skills plugin') $r.Out
+    Assert 'and the hook check: a dead personal hook is a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match ('STOP  Stop hook names a missing file: {0}' -f [regex]::Escape($pdead)))) $r.Out
+
     Write-Host 'Machine probes in a fake home'
     $f = New-Fixture
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, PyYAML, 3 logins)' ($skipped -eq 9) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, 3 logins)' ($skipped -eq 11) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'
