@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate."
 metadata:
-  modified: "2026-09-30T14:52:48Z"
-  previous-modified: "2026-09-30T14:50:34Z"
-  revision: "26"
-  content-sha: "db744f141a9a"
+  modified: "2026-09-30T15:16:49Z"
+  previous-modified: "2026-09-30T14:52:48Z"
+  revision: "27"
+  content-sha: "2e6d8a23aa23"
 ---
 
 # todoist-triage
@@ -110,7 +110,7 @@ Ask in plain numbered prose — it works in every session type, where a picker t
 
 **Tier 3 — tell.** Deadlines, past-due counts, the cap, coverage. They go in the status (step 6) and nowhere in the questions.
 
-**Publish to the Day Board** after tier 1 is applied and before the status: the run meta, one card per tier-2 question, and the "Waiting on you" list, in one batch per [`day-board.md`](day-board.md). The board is a second place to answer; the numbered questions are still asked.
+**Publish to the Day Board** after tier 1 is applied and before the status: the run meta, one card per tier-2 question, and the "Waiting on you" list, in one batch per [`day-board.md`](day-board.md), with no pay, review, health or leave detail in anything the board shows. The board is a second place to answer; the numbered questions are still asked.
 
 Done when every ruling carries a tier, tier 1 is applied, the board batch is written (or its failure logged), and Dan has answered the tier-2 questions.
 

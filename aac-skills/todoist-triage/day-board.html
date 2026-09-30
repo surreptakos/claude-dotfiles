@@ -968,18 +968,22 @@ footer{font-size:12px;color:var(--muted)}
     const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:40});
     const mine = objectsOf(res).filter(o => o.from && o.from.userId === HUDDLE.danId && o.createdDateTime && o.messageType !== "systemEventMessage");
     mine.sort((a,b) => String(b.createdDateTime).localeCompare(String(a.createdDateTime)));
-    const last = mine[0];
-    if (!last) return null;
-    // The listing's bodyPreview stops at 1000 characters (bodyTruncated), which cut the last risk line of
-    // Dan's 2026-09-23 post mid-word. Lines are copied word for word, so read the full body when it was cut.
-    let html = last.bodyPreview;
-    if (last.bodyTruncated){
-      if (!last.uri) throw {code:"tool_error", message:"last post was cut off and carries no uri to read in full"};
-      const full = objectsOf(await call("ms365", "read_resource", {uri:last.uri})).find(o => o.body && typeof o.body.content === "string");
-      if (!full) throw {code:"tool_error", message:"last post was cut off and the full read returned no body"};
-      html = full.body.content;
+    // His last huddle post is his newest message that has the huddle sections, not his newest message:
+    // on 2026-09-30 the newest was a one-word reply ("cancelling") and the draft started from that.
+    for (const m of mine){
+      // The listing's bodyPreview stops at 1000 characters (bodyTruncated), which cut the last risk line of
+      // Dan's 2026-09-23 post mid-word. Lines are copied word for word, so read the full body when it was cut.
+      let html = m.bodyPreview;
+      if (m.bodyTruncated){
+        if (!m.uri) throw {code:"tool_error", message:"last post was cut off and carries no uri to read in full"};
+        const full = objectsOf(await call("ms365", "read_resource", {uri:m.uri})).find(o => o.body && typeof o.body.content === "string");
+        if (!full) throw {code:"tool_error", message:"last post was cut off and the full read returned no body"};
+        html = full.body.content;
+      }
+      const text = stripHtml(html), p = parseLastPost(text);
+      if (p.focus.length || p.risks.length) return {at: new Date(m.createdDateTime), text};
     }
-    return {at: new Date(last.createdDateTime), text: stripHtml(html)};
+    return null;
   }
 
   // A tick is evidence only when it is not part of a bulk clear-out and not a subtask under an open parent.
@@ -1030,6 +1034,211 @@ footer{font-size:12px;color:var(--muted)}
     return clip(blocks.join("\n") || (typeof (res && res.payload) === "string" ? res.payload : ""), 6000);
   }
 
+  // ---------- HUDDLE GATE (Dan, 2026-09-30: "extremely brutal", 100% compliance, zero paraphrasing) ----------
+  // Works like a stop hook: every draft passes through huddleGate and the independent judge before anything
+  // is shown, copied or saved. Any violation rejects the draft; the drafter gets the violations and tries
+  // again; after HUD_MAX_ATTEMPTS the post is blocked and nothing can be copied. A judge that errors, skips a
+  // line or answers in the wrong shape counts as a failure (fail closed).
+  // Dan's rules, word for word from his "Huddle Review" channel post (2026-05-20, message 1779312768721)
+  // and his amendment (2026-08-18, message 1787060298693). Never reword these.
+  const DAN_RULES = [
+    "1. Keep Today’s Focus to the top 1–3 items only. Do not list everything you plan to touch. List the few things that matter most.",
+    "2. Report outcomes, not activity. “Had a meeting” or “reviewed emails” is usually not enough. Tell us what changed, what moved forward, what was decided, what was sent, what was completed, or what is now waiting on someone. Examples:",
+    "- Decided X", "- Sent X for project/opportunity Y", "- Completed X and sent to Y", "- Found X issue", "- Fixed X issue in Y", "- Moved X to next step", "- Customer approved X, ordering Y", "- Followed up on X so we can do Y",
+    "3. Risks/Blockers should explain the consequence. Instead of “O3 cancelled,” say what slips if the O3 is cancelled. Instead of “waiting on Dan,” say what decision/input is needed and what cannot move until it is provided.",
+    "- Matt review may slip if O3 is cancelled again", "- If Apollo meeting is moved, WI outbound setup likely moves back another week", "- Waiting on Dan approval of service labor rates; cannot finalize CDW pricing until approved",
+    "4. If there is no real risk, just write “None today.” That's better than listing generic things like interruptions, traffic, meetings getting cancelled, or emergencies.",
+    "Amendment (2026-08-18): You don't need to include \"not doing today\". I included that just to remind myself not to get distracted."
+  ];
+  const HUD_MAX_ATTEMPTS = 3;
+  const HEAD_DAILY = "Yesterday's report", HEAD_GAP = "Yesterday's (& earlier) report";
+  // Report lines open with one of Dan's outcome verbs (his rule 2 examples, plus the verbs his own posts use).
+  const OUTCOME_VERBS = ["decided","sent","completed","found","fixed","moved","customer","followed","delegated","booked","signed","approved","paid","submitted","answered","scheduled","assigned","closed","released","uploaded","hired","ordered","finalized","filed","granted","gave","set"];
+  const ACTIVITY_RX = /\b(had a meeting|met with|meeting with|reviewed|worked on|working on|looked (at|into)|discussed|attended|checked|touched base|caught up|went through|started on)\b/i;
+  const CONSEQUENCE_RX = /\b(so|until|unless|can'?t|cannot|won'?t|delay(s|ed)?|slip(s|ping)?|block(s|ed|ing)?|stuck|means|at risk|if|without|moves? back|need(s|ed)?)\b/i;
+  const GENERIC_RX = /\b(interruption|traffic|emergenc|meetings? (getting |got |being )?cancel)/i;
+  // Confidential for a team post: money amounts, pay, reviews and discipline, health and leave, identity numbers.
+  const CONFIDENTIAL_RX = [
+    /\$\s?\d|\b\d[\d,]*(\.\d+)?\s?(dollars|usd)\b/i,
+    /\b(bonus(es)?|salar(y|ies)|raises?|wages?|pay (rate|band|increase|raise|cut|grade)s?|compensation|comp plan|stipends?|severance|commission rates?)\b/i,
+    /\b(performance|annual|self|mid-?year|90-?day)[- ]reviews?\b|\breview audit\b|\bPIP\b|\bwrite-?ups?\b|disciplin|terminat|\bfired\b|\blet go\b/i,
+    /\b(sick|medical|FMLA|leave of absence|doctor|surgery|pregnan|diagnos|injur|illness|hospital)/i,
+    /\b(SSN|social security|date of birth)\b/i
+  ];
+  const hudNorm = s => String(s == null ? "" : s).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
+  const hudWords = s => hudNorm(s).split(" ").filter(Boolean);
+  const hudBag = s => new Set(hudNorm(s).toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(w => w.length >= 3));
+  function hudJaccard(a, b){
+    const x = hudBag(a), y = hudBag(b);
+    if (!x.size || !y.size) return 0;
+    let n = 0; x.forEach(w => { if (y.has(w)) n++; });
+    return n / (x.size + y.size - n);
+  }
+  // Splits Dan's last post into its sections, bullet by bullet, exactly as he wrote them.
+  function parseLastPost(text){
+    const out = {report:[], focus:[], risks:[], other:[]};
+    let cur = null;
+    String(text || "").split(/\r?\n/).forEach(raw => {
+      const t = hudNorm(raw);
+      if (!t) return;
+      if (/^dan gatsakos\s*\|/i.test(t)) return;
+      if (/^yesterday/i.test(t) && t.length < 45){ cur = "report"; return; }
+      if (/^today'?s focus/i.test(t) && t.length < 30){ cur = "focus"; return; }
+      if (/^risks?\s*\/?\s*blockers?/i.test(t) && t.length < 30){ cur = "risks"; return; }
+      if (/^not doing today/i.test(t) && t.length < 30){ cur = "other"; return; }
+      const line = t.replace(/^[•*·\-–]\s*/, "");
+      if (cur && line) out[cur].push(line);
+    });
+    return out;
+  }
+  // "Yesterday's report" only when his last post was on the previous business day.
+  function expectedHeading(lastAt, now){
+    if (!lastAt) return HEAD_GAP;
+    const prev = new Date(now); prev.setHours(0,0,0,0);
+    do { prev.setDate(prev.getDate() - 1); } while (prev.getDay() === 0 || prev.getDay() === 6);
+    const lastKey = ymd(new Date(lastAt));
+    if (lastKey === ymd(now)) return null;          // he already posted today: either heading is his call
+    return lastKey === ymd(prev) ? HEAD_DAILY : HEAD_GAP;
+  }
+  // A moved line keeps every word except one contiguous span of at most four words, and keeps at least half of itself.
+  function isNarrowEdit(orig, next){
+    const a = hudWords(orig), b = hudWords(next);
+    let p = 0; while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    let s = 0; while (s < a.length - p && s < b.length - p && a[a.length-1-s] === b[b.length-1-s]) s++;
+    const ca = a.length - p - s, cb = b.length - p - s;
+    return (ca > 0 || cb > 0) && ca <= 4 && cb <= 4 && (p + s) * 2 >= a.length;
+  }
+  const tagOfEvidence = ev => { const e = hudNorm(ev).toLowerCase(); return e.startsWith("kept verbatim") ? "kept" : e.startsWith("edited:") ? "edited" : e.startsWith("new") ? "new" : ""; };
+  const CONF_DETAIL = "pay, money, review, discipline, health, leave or identity detail in a team post";
+
+  // Deterministic half of the gate. Returns every violation; an empty list passes this half.
+  function huddleGate(d, lastPost, now){
+    const v = [];
+    const add = (rule, section, index, text, detail) => v.push({rule, section, index, text: text == null ? "" : String(text), detail});
+    if (!d || typeof d !== "object" || Array.isArray(d)){ add("shape", "", -1, "", "the draft is not a JSON object"); return v; }
+    const sections = ["report","focus","risks","dropped"];
+    sections.forEach(k => { if (!Array.isArray(d[k])) add("shape", k, -1, "", "missing the " + k + " list"); });
+    if (v.length) return v;
+    Object.keys(d).filter(k => !sections.includes(k) && k !== "reportHeading").forEach(k => add("shape", k, -1, "", "unexpected section " + k));
+    const last = parseLastPost(lastPost ? lastPost.text : "");
+    const lastLines = last.report.concat(last.focus, last.risks);
+    const maxLen = lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120;
+    const want = expectedHeading(lastPost && lastPost.at, now);
+    const head = hudNorm(d.reportHeading);
+    if (want ? head !== want : ![HEAD_DAILY, HEAD_GAP].includes(head)) add("heading", "report", -1, head, "heading must be exactly \"" + (want || HEAD_DAILY) + "\"");
+    const valid = (item, section, i) => {
+      if (!item || typeof item !== "object" || typeof item.text !== "string" || !hudNorm(item.text)){ add("shape", section, i, "", "a line with no text"); return false; }
+      if (typeof item.evidence !== "string" || !hudNorm(item.evidence)) add("evidence", section, i, item.text, "no evidence named");
+      return true;
+    };
+    const confidential = (t, section, i) => CONFIDENTIAL_RX.forEach(rx => { if (rx.test(t)) add("confidential", section, i, t, CONF_DETAIL); });
+    const tooLong = (t, section, i) => { if (t.length > maxLen) add("length", section, i, t, "longer than your longest line last time (" + maxLen + " characters)"); };
+    // Report: outcomes in his verbs, never re-reported, never activity, backed by more than a ticked task.
+    d.report.forEach((it, i) => {
+      if (!valid(it, "report", i)) return;
+      const t = hudNorm(it.text);
+      const first = (t.split(" ")[0] || "").toLowerCase().replace(/[^a-z]/g, "");
+      if (!OUTCOME_VERBS.includes(first)) add("rule2-outcome", "report", i, t, "must open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked...)");
+      if (ACTIVITY_RX.test(t)) add("rule2-activity", "report", i, t, "reports activity, not an outcome");
+      if (last.report.some(l => hudNorm(l) === t || hudJaccard(l, t) >= 0.6)) add("rereport", "report", i, t, "your last post already claimed this");
+      if (!/\b(mail|meeting|granola|board|replied|ruling|post|teams|note)\b/i.test(String(it.evidence || ""))) add("evidence", "report", i, t, "a ticked task alone is not evidence; name the mail, meeting note or board ruling");
+      tooLong(t, "report", i); confidential(t, "report", i);
+    });
+    // Focus and risks: carried word for word, edited in one narrow span, or new; nothing paraphrased.
+    const derived = {focus: new Set(), risks: new Set()};
+    ["focus","risks"].forEach(section => {
+      const mine = last[section];
+      d[section].forEach((it, i) => {
+        if (!valid(it, section, i)) return;
+        const t = hudNorm(it.text), tag = tagOfEvidence(it.evidence);
+        if (!tag) add("evidence", section, i, t, "evidence must start with \"kept verbatim\", \"edited:\" or \"new\"");
+        if (tag === "kept"){
+          const j = mine.findIndex(l => hudNorm(l) === t);
+          if (j < 0) add("paraphrase", section, i, t, "marked kept verbatim but is not character for character a line of your last " + section);
+          else derived[section].add(j);
+          return;                                       // his own words, already posted: exempt from the rest
+        }
+        if (tag === "edited"){
+          const j = mine.findIndex(l => isNarrowEdit(l, t));
+          if (j < 0) add("paraphrase", section, i, t, "an edit may change one span of up to four words; everything else stays word for word");
+          else derived[section].add(j);
+        }
+        if (tag === "new"){
+          if (mine.some(l => hudNorm(l) === t)) add("evidence", section, i, t, "this is your line word for word; tag it kept verbatim");
+          else { const near = mine.find(l => hudJaccard(l, t) >= 0.5); if (near) add("paraphrase", section, i, t, "rewords your line \"" + near + "\"; keep it verbatim or edit one span"); }
+        }
+        tooLong(t, section, i); confidential(t, section, i);
+        if (section === "risks"){
+          if (t === "None today."){ if (d.risks.length > 1) add("rule4-none", "risks", i, t, "\"None today.\" must be the only risk line"); }
+          else {
+            if (!CONSEQUENCE_RX.test(t)) add("rule3-consequence", "risks", i, t, "does not say what slips or what cannot move");
+            if (GENERIC_RX.test(t)) add("rule4-generic", "risks", i, t, "generic risk (interruptions, traffic, cancelled meetings, emergencies)");
+          }
+        }
+      });
+    });
+    if (d.focus.length < 1 || d.focus.length > 3) add("rule1-focus", "focus", -1, "", "Today's focus has " + d.focus.length + " items; rule 1 allows 1-3");
+    if (!d.risks.length) add("rule4-none", "risks", -1, "", "no risk lines; write \"None today.\"");
+    // Continuity: every line of his last focus and risks is carried, edited, or dropped with a stated reason.
+    const droppedOk = new Set(d.dropped.filter(x => x && /^(done|cleared|trimmed):/i.test(hudNorm(x.why))).map(x => hudNorm(x.text)));
+    ["focus","risks"].forEach(section => last[section].forEach((l, j) => {
+      if (!derived[section].has(j) && !droppedOk.has(hudNorm(l))) add("carry", section, -1, l, "your line disappeared; carry it verbatim, edit one span, or list it under dropped with why \"done:\", \"cleared:\" or \"trimmed:\"");
+    }));
+    const all = d.report.concat(d.focus, d.risks).map(x => hudNorm(x && x.text)).join("\n");
+    if (/not doing today/i.test(all)) add("amendment", "", -1, "", "no \"not doing today\" section (your 2026-08-18 amendment)");
+    return v;
+  }
+
+  // Independent half: a second Claude call that never saw the drafting prompt judges each new or edited line
+  // against Dan's rules as typed yes/no answers. Anything missing, malformed or failed counts against the draft.
+  function judgeLines(d){
+    const lines = [];
+    ["report","focus","risks"].forEach(section => (d[section] || []).forEach((it, index) => {
+      if (section !== "report" && tagOfEvidence(it && it.evidence) === "kept") return;   // his own posted words
+      lines.push({section, index, text: it && it.text, evidence: it && it.evidence});
+    }));
+    return lines;
+  }
+  function judgePrompt(lines){
+    return [
+      "You are a strict compliance judge for a manager's daily huddle post to his team. You did not write it. Judge each line on its own; when in doubt, fail it.",
+      "",
+      "THE MANAGER'S RULES, WORD FOR WORD:",
+      DAN_RULES.join("\n"),
+      "",
+      "The post goes to the whole team, so it must not reveal anyone's pay, bonus, raise, performance review, discipline, health, leave, or any money amount.",
+      "",
+      "LINES:",
+      JSON.stringify(lines),
+      "",
+      "Answer every question for every line, true or false. For focus lines answer outcome and consequence as true.",
+      "- outcome: (report lines) does it state an outcome (changed, moved forward, decided, sent, completed, now waiting on someone) rather than activity?",
+      "- consequence: (risks lines) does it say what slips or what cannot move, or is it exactly \"None today.\"?",
+      "- generic: is it a generic item such as interruptions, traffic, meetings getting cancelled or emergencies?",
+      "- confidential: does it reveal pay, bonus, raise, review, discipline, health, leave or a money amount?",
+      "- supported: does its evidence field actually support what the line claims?",
+      'Reply with only JSON: {"verdicts": [{"section": string, "index": number, "outcome": boolean, "consequence": boolean, "generic": boolean, "confidential": boolean, "supported": boolean, "reason": string}]}'
+    ].join("\n");
+  }
+  function judgeViolations(lines, res){
+    const v = [];
+    const got = res && Array.isArray(res.verdicts) ? res.verdicts : null;
+    if (!got){ v.push({rule:"judge", section:"", index:-1, text:"", detail:"the judge answered in the wrong shape"}); return v; }
+    lines.forEach(l => {
+      const x = got.find(g => g && g.section === l.section && g.index === l.index);
+      const add = (rule, detail) => v.push({rule, section:l.section, index:l.index, text:hudNorm(l.text), detail: detail + (x && x.reason ? " (" + hudNorm(x.reason).slice(0, 160) + ")" : "")});
+      if (!x){ add("judge", "the judge skipped this line"); return; }
+      if (["outcome","consequence","generic","confidential","supported"].some(k => typeof x[k] !== "boolean")){ add("judge", "the judge did not answer every question"); return; }
+      if (l.section === "report" && !x.outcome) add("rule2-outcome", "judge: activity, not an outcome");
+      if (l.section === "risks" && !x.consequence) add("rule3-consequence", "judge: no consequence named");
+      if (x.generic) add("rule4-generic", "judge: generic item");
+      if (x.confidential) add("confidential", "judge: " + CONF_DETAIL);
+      if (!x.supported) add("evidence", "judge: the evidence does not support the line");
+    });
+    return v;
+  }
+  const violationText = x => "[" + x.rule + "] " + (x.section ? x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ": " : "") + (x.text ? "\"" + x.text + "\" - " : "") + x.detail;
+
   function hudPrompt(ctx){
     const todayKey = ymd(new Date());
     const cw = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK)
@@ -1041,24 +1250,26 @@ footer{font-size:12px;color:var(--muted)}
     return [
       "Draft Dan Gatsakos's daily huddle post for his team channel. Dan posts it himself. Today is " + todayKey + ".",
       "",
-      "RULES (Dan's own; follow exactly):",
+      "DAN'S RULES, WORD FOR WORD FROM HIS \"Huddle Review\" POST TO THE TEAM. They are the definition of a huddle post:",
+      DAN_RULES.join("\n"),
+      "",
+      "HOW TO BUILD THE DRAFT:",
       "- Three sections only, no name/date header: report, focus, risks.",
-      "- Report heading: \"Yesterday's report\" if his last post was the previous business day, else \"Yesterday's (& earlier) report\". Gap in calendar days since last post: " + gapDays + ".",
-      "- Report = outcomes, not activity, in his verbs: Sent X to Y. Decided X. Completed X and sent to Y. Delegated X to Y. Booked X. A meeting with no decision or assignment is not a line.",
+      "- START FROM HIS LAST POST, not a fresh write (Dan, 2026-09-23). Copy its focus and risk lines, then change only what the evidence changed. Still true: copy the line character for character. Moved: change one span of at most four words (\"due tomorrow\" becomes \"due today\"). Done: drop it and report the outcome. Cleared risk: drop it.",
+      "- NEVER PARAPHRASE HIS LINES. A line of his is either carried character for character, edited in one span of at most four words, or listed under dropped. A reworded version of his line is rejected.",
+      "- Report: outcomes in his verbs (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked). Never re-report what his last post claimed. Outcomes from meeting notes his last post never claimed DO count, even from before it.",
       "- A completed task alone is NOT evidence. Use it only when a sent mail, a meeting note or a board ruling corroborates it; merge them into one line. Otherwise drop it.",
-      "- BOARD RULINGS are Dan's own decisions, made on his day board: each is evidence on its own. A hand-off to a direct (to-NAME) is \"Delegated X to NAME\"; a delete or Rule out with a reason that says it is done or settled is \"Completed X\" or \"Decided X\"; his note, when present, says what he meant. A ruling that only moves a date or parks a task is not a report line, but it can change a focus line. A \"replied\" row is \"Answered NAME on SUBJECT\".",
-      "- Outcomes from meeting notes that his last post never claimed DO count, even if they happened before the last post. Never re-report what the last post already claimed.",
-      "- Four to seven report bullets when the evidence supports it; fewer is fine; never invent.",
-      "- Focus = one to three items: his still-true focus lines kept verbatim, plus NEW lines ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\"). Order: deadline first, then what blocks someone else, then priority.",
-      "- Risks = margin or capacity pressure, and anything that blocks another person, each naming what slips. A date alone is not a risk. If nothing real, the single line \"None today.\"",
-      "- START FROM HIS LAST POST, not a fresh write (Dan, 2026-09-23; aac-huddle-notes skill). Copy its focus and risk lines, then change only what the evidence changed:",
-      "  - Still true: copy the line WORD FOR WORD, character for character, even where you would phrase it better. Rewording the same fact reads to his team as something new.",
-      "  - Moved: edit only the part that moved (\"due tomorrow\" becomes \"due today\"); the rest of the line stays exactly as he wrote it.",
-      "  - Done: drop it from focus and report it. Cleared risk: delete it.",
-      "  - New: add a line in his register.",
-      "- Continuity: each item in his last post's focus and risks is done (report), kept (verbatim), edited (only the moved part), or cleared. None disappears silently.",
-      "- For every focus or risk line, the evidence field starts with \"kept verbatim\", \"edited: <what moved>\" or \"new\".",
-      "- Plain, blunt, short lines. No filler.",
+      "- BOARD RULINGS are Dan's own decisions, made on his day board: each is evidence on its own. A hand-off to a direct (to-NAME) is \"Delegated X to NAME\"; a delete or Rule out with a reason that says it is done or settled is \"Completed X\" or \"Decided X\"; his note, when present, says what he meant. A ruling that only moves a date or parks a task is not a report line. A \"replied\" row is \"Answered NAME on SUBJECT\".",
+      "- New focus lines come ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\").",
+      "",
+      "THE GATE (code checks every draft; one failure rejects the whole draft and it is never shown):",
+      "- Report heading is exactly \"" + (expectedHeading(ctx.last && ctx.last.at, new Date()) || HEAD_DAILY) + "\".",
+      "- Today's focus has 1 to 3 lines. Extra lines of his go under dropped with why \"trimmed: <reason>\".",
+      "- Every focus and risk line's evidence starts with \"kept verbatim\", \"edited: <what moved>\" or \"new\". Every report line's evidence names the mail, meeting note or board ruling.",
+      "- Every line of his last focus and risks is carried verbatim, edited in one span, or listed under dropped with why starting \"done:\", \"cleared:\" or \"trimmed:\" and its text copied exactly.",
+      "- No line longer than the longest line in his last post.",
+      "- Every new risk says what slips or what cannot move. No generic risks. No real risk: the single line \"None today.\"",
+      "- CONFIDENTIAL, NEVER IN THE POST: pay, bonus, raise, salary, stipend, any money amount, performance or annual reviews, discipline, health, sickness, leave, identity numbers. The whole team reads it.",
       "",
       "HIS LAST POST (" + (ctx.last ? ctx.last.at.toISOString() : "none found") + "):",
       ctx.last ? clip(ctx.last.text, 2500) : "(none)",
@@ -1082,6 +1293,7 @@ footer{font-size:12px;color:var(--muted)}
       JSON.stringify(meetings),
       "",
       "SURFACES THAT FAILED THIS RUN: " + (ctx.gaps.length ? ctx.gaps.join("; ") : "none"),
+      ctx.violations && ctx.violations.length ? "\nYOUR PREVIOUS DRAFT WAS REJECTED BY THE GATE. Fix every item below and change nothing that passed:\n" + ctx.violations.map(violationText).join("\n") : "",
       "",
       'Reply with only JSON: {"reportHeading": string, "report": [{"text": string, "evidence": string}], "focus": [{"text": string, "evidence": string}], "risks": [{"text": string, "evidence": string}], "dropped": [{"text": string, "why": string}]}',
       'Each "evidence" names the source: mail subject and date, meeting note, task name, or post line.'
@@ -1132,27 +1344,51 @@ footer{font-size:12px;color:var(--muted)}
         sentSince(since).catch(e => { gaps.push("sent mail: " + (e.code || "failed")); return []; }),
         notesSince(since).catch(e => { gaps.push("meeting notes: " + (e.code || "failed")); return ""; })
       ]);
-      hudStatus("Drafting… (usually 20–60 seconds)");
       if (!db) gaps.push("board rulings: storage unavailable");
       const board = boardRulingsSince(logDocs, waitDocs, since);
-      const d = await sample.json(hudPrompt({last, done, sent, notes, board, gaps}), {signal: hudCtl.signal, cache: false});
-      renderHuddle(d || {});
-      // Every draft is kept in board storage so a Claude session can read exactly what was generated
+      // The gate: a draft is shown only when the code checks and the independent judge both pass it.
+      let d = null, violations = [], passed = false, attempt = 0;
+      while (attempt < HUD_MAX_ATTEMPTS && !passed){
+        attempt++;
+        hudStatus("Drafting, attempt " + attempt + " of " + HUD_MAX_ATTEMPTS + "… (20–60 seconds each)");
+        d = await sample.json(hudPrompt({last, done, sent, notes, board, gaps, violations}), {signal: hudCtl.signal, cache: false});
+        violations = huddleGate(d, last, new Date());
+        if (!violations.length){
+          hudStatus("Checking attempt " + attempt + " against your rules…");
+          const lines = judgeLines(d);
+          let verdict = null;
+          try { verdict = await sample.json(judgePrompt(lines), {signal: hudCtl.signal, cache: false}); }
+          catch(e){ if (e && e.code === "cancelled") throw e; verdict = null; }
+          violations = judgeViolations(lines, verdict);
+        }
+        passed = !violations.length;
+      }
+      const now = new Date();
+      const id = ymd(now) + "T" + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+      if (!passed){
+        // Blocked: nothing to copy, and no line text is stored, so a rejected line never reaches shared storage.
+        $("hud-post").hidden = true; $("hud-copy").hidden = true; hudText = "";
+        $("hud-ev-body").innerHTML = '<div class="evsec">Why it was blocked</div>' + violations.map(x => '<div class="evrow"><b>' + esc(x.rule) + '</b><span>' + esc(violationText(x)) + '</span></div>').join("");
+        $("hud-ev").hidden = false; $("hud-ev").open = true;
+        try { if (db) await db.doc("huddle_drafts/" + id).set({draftedAt: now.toISOString(), day: ymd(now), blocked: true, attempts: attempt, violations: violations.map(x => ({rule: x.rule, section: x.section, index: x.index})), gaps}); } catch(e){}
+        hudStatus("Blocked: " + violations.length + " rule failure" + (violations.length === 1 ? "" : "s") + " after " + attempt + " drafts. Nothing to copy. Draft again, or write it yourself.", true);
+        return;
+      }
+      renderHuddle(d);
+      // Every passing draft is kept in board storage so a Claude session can read exactly what was generated
       // (Dan, 2026-09-25: a draft that lives only in the browser cannot be checked).
       let saved = "", saveFailed = false;
       try {
         if (!db) throw {code:"db_unavailable"};
-        const now = new Date();
-        const id = ymd(now) + "T" + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
         await db.doc("huddle_drafts/" + id).set({
-          draftedAt: now.toISOString(), day: ymd(now), text: hudText,
-          reportHeading: String((d && d.reportHeading) || ""),
-          report: (d && d.report) || [], focus: (d && d.focus) || [], risks: (d && d.risks) || [], dropped: (d && d.dropped) || [],
-          lastPost: last ? {at: last.at.toISOString(), text: last.text} : null, gaps
+          draftedAt: now.toISOString(), day: ymd(now), text: hudText, attempts: attempt,
+          reportHeading: String(d.reportHeading || ""),
+          report: d.report, focus: d.focus, risks: d.risks, dropped: d.dropped,
+          lastPostAt: last ? last.at.toISOString() : null, gaps
         });
         saved = " Saved for review.";
       } catch(e){ saved = " Not saved for review (" + ((e && e.code) || "failed") + ")."; saveFailed = true; }
-      hudStatus("Draft ready. Edit before you post" + (gaps.length ? ". Could not read: " + gaps.join("; ") + "." : " — every source answered.") + saved, gaps.length > 0 || saveFailed);
+      hudStatus("Passed every rule on attempt " + attempt + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + saved, gaps.length > 0 || saveFailed);
     } catch(e){
       if (e && e.code === "cancelled"){ hudStatus("Stopped."); }
       else hudStatus(SAMPLE_COPY[e && e.code] || ("Draft failed: " + ((e && (e.code || e.message)) || "unknown") + ". Try again."), true);
