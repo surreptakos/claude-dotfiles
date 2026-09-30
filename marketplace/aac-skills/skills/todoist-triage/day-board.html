@@ -1131,7 +1131,7 @@ footer{font-size:12px;color:var(--muted)}
     const e = hudNorm(ev).toLowerCase();
     return /^kept verbatim($|[\s:;,.-])/.test(e) ? "kept" : /^edited:/.test(e) ? "edited" : /^new($|[\s:;,.-])/.test(e) ? "new" : "";
   };
-  const CONF_DETAIL = "pay, money, review, discipline, health, leave or identity detail in a team post";
+  const CONF_DETAIL = "pay, money, discipline, health, leave or identity detail in a team post";
   const LINE_KEYS = ["text","evidence"], DROP_KEYS = ["text","why"];
   const DROP_WHY_RX = /^(done|cleared|trimmed|withheld):\s*\S/i;
 
@@ -1268,7 +1268,7 @@ footer{font-size:12px;color:var(--muted)}
       "THE MANAGER'S RULES, WORD FOR WORD:",
       DAN_RULES.join("\n"),
       "",
-      "The post goes to the whole team, so neither a line nor its evidence may reveal anyone's pay, bonus, raise, promotion, performance review, discipline, health, sickness, leave, identity number, or any money amount.",
+      "The post goes to the whole team, so neither a line nor its evidence may reveal anyone's pay, bonus, raise, promotion, discipline, health, sickness, leave, identity number, or any money amount. Naming a review or an audit that is on someone's plate, or a quote, invoice or ticket number, is fine.",
       "",
       "HIS LAST POST'S LINES (his own words):",
       JSON.stringify({report: last.report, focus: last.focus, risks: last.risks}),
@@ -1280,7 +1280,7 @@ footer{font-size:12px;color:var(--muted)}
       "- outcome: (report lines) does it state an outcome (changed, moved forward, decided, sent, completed, now waiting on someone) rather than activity? Answer true for other sections.",
       "- consequence: (risks lines that are not kept) does it say what slips or what cannot move, or is it exactly \"None today.\"? Answer true for other lines.",
       "- generic: is it a generic item such as interruptions, traffic, meetings getting cancelled or emergencies?",
-      "- confidential: does the line or its evidence reveal pay, bonus, raise, promotion, review, discipline, health, sickness, leave, an identity number or a money amount?",
+      "- confidential: does the line or its evidence reveal pay, bonus, raise, promotion, discipline, health, sickness, leave, an identity number or a money amount? That a review or audit is due is not confidential.",
       "- supported: does its evidence field actually support what the line claims? Answer true for kept lines.",
       "- paraphrase: (lines that are not kept) does it restate one of his last post's lines, in any section, in different words? A report line that re-reports his last report is a paraphrase. Answer false for kept lines.",
       'Reply with only JSON: {"verdicts": [{"section": string, "index": number, "outcome": boolean, "consequence": boolean, "generic": boolean, "confidential": boolean, "supported": boolean, "paraphrase": boolean, "reason": string}]}'
@@ -1421,7 +1421,7 @@ footer{font-size:12px;color:var(--muted)}
       "DAN'S RULES, WORD FOR WORD:",
       DAN_RULES.join("\n"),
       "",
-      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note or board ruling; a new risk says what slips or what cannot move; no pay, money, review, discipline, health, leave or identity detail anywhere. Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
+      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note or board ruling; a new risk says what slips or what cannot move; no pay, money, discipline, health, leave or identity detail anywhere (naming a review, an audit or a document number is fine). Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
       "Change as little as the problem needs. If a line cannot be fixed from the evidence, drop it.",
       "",
       "LINES TO FIX:",
@@ -1482,6 +1482,27 @@ footer{font-size:12px;color:var(--muted)}
       "",
       'Reply with only JSON: {"add": [{"section": "focus" or "risks", "text": string, "evidence": string}]}'
     ].join("\n");
+  }
+  // Which overdue items hold another person up (Dan, 2026-09-30, option 1: top 3 in focus, the rest only when
+  // they block someone). A typed yes/no per task; a missing or malformed answer counts as "blocks", so the
+  // check fails toward naming the item, never toward hiding it.
+  function blockersPrompt(tasks){
+    return [
+      "For each of Dan Gatsakos's overdue work tasks, answer one question: is another person (a direct report, a coworker, a customer or a vendor) waiting on Dan to act before they can move?",
+      "Answer from the task text alone. When in doubt, answer true.",
+      "",
+      "TASKS:",
+      JSON.stringify(tasks.map((task, index) => ({index, task}))),
+      "",
+      'Reply with only JSON: {"items": [{"index": number, "blocks": boolean, "who": string}]}'
+    ].join("\n");
+  }
+  function blockingTasks(tasks, res){
+    const items = res && Array.isArray(res.items) ? res.items : null;
+    return tasks.filter((t, index) => {
+      const hits = items ? items.filter(x => x && x.index === index) : [];
+      return hits.length !== 1 || typeof hits[0].blocks !== "boolean" || hits[0].blocks;
+    });
   }
   function applyAdds(d0, res){
     const d = clone(d0);
@@ -1591,7 +1612,7 @@ footer{font-size:12px;color:var(--muted)}
       "- Every line of his last focus and risks is carried verbatim, edited in one span, or listed under dropped with its text copied exactly and why starting \"done:\", \"cleared:\", \"trimmed:\" or \"withheld:\" (withheld = his line names a confidential detail, so it cannot be carried; write exactly \"withheld: confidential detail\"). Dropped lists only his lines.",
       "- No line longer than the longest line in his last post.",
       "- Every new risk says what slips or what cannot move. No generic risks. No real risk: the single line \"None today.\"",
-      "- CONFIDENTIAL, NEVER IN THE POST OR ITS EVIDENCE, NOT EVEN IN HIS CARRIED LINES: pay, bonus, raise, salary, stipend, promotion, any money amount, performance or annual reviews, discipline, health, sickness, leave, identity numbers. The whole team reads it.",
+      "- CONFIDENTIAL, NEVER IN THE POST OR ITS EVIDENCE, NOT EVEN IN HIS CARRIED LINES: pay, bonus, raise, salary, stipend, promotion, any money amount, discipline, health, sickness, leave, identity numbers. The whole team reads it.",
       "- Each line is exactly {\"text\", \"evidence\"}; each dropped entry exactly {\"text\", \"why\"}. No other fields.",
       "",
       "HIS LAST POST (" + (ctx.last ? ctx.last.at.toISOString() : "none found") + "):",
@@ -1609,7 +1630,7 @@ footer{font-size:12px;color:var(--muted)}
       "BOARD RULINGS SINCE (triage answers with his reason, and asks he marked replied):",
       JSON.stringify(ctx.board || {rulings:[], replied:[]}).slice(0, 8000),
       "",
-      "MUST APPEAR (overdue, due today or deadline within 7 days; each one named by a focus line, a risk line, or a report line if done):",
+      "MUST APPEAR (deadline within 7 days, or overdue and holding someone up; each one named by a focus line, a risk line that says who is waiting, or a report line if done). Other overdue tasks appear only if they are among the top 3 focus items:",
       JSON.stringify(ctx.mustCover || []),
       "",
       "CURRENT WORK TASKS (the only task source for focus):",
@@ -1678,7 +1699,16 @@ footer{font-size:12px;color:var(--muted)}
       const todayKey = ymd(new Date()), weekOut = ymd(new Date(Date.now() + 7 * 86400000));
       const dueNow = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK && (t.labels || []).includes("do")
         && ((t.dueDate && String(t.dueDate).slice(0, 10) <= todayKey) || (t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut))).map(t => t.content);
-      const mustCover = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - mustCover.length;
+      const hasDeadline = new Set(lastTasks.filter(t => t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut).map(t => t.content));
+      const candidates = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - candidates.length;
+      // Rule 1 keeps focus to three and the post is not a task dump (Dan, 2026-09-30, option 1): beyond the
+      // deadlines, only overdue items that hold someone up must appear.
+      hudStatus("Sorting which overdue items hold someone up…");
+      const overdueOnly = candidates.filter(t => !hasDeadline.has(t));
+      let blockRes = null;
+      if (overdueOnly.length){ try { blockRes = await ask(blockersPrompt(overdueOnly)); } catch(e){ if (e && e.code === "cancelled") throw e; } }
+      const mustCover = candidates.filter(t => hasDeadline.has(t)).concat(blockingTasks(overdueOnly, blockRes));
+      hudStatus("Drafting… (20–60 seconds)");
       const first = await ask(hudPrompt({last, done, sent, notes, board, gaps, mustCover}));
       const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
       const repairCtx = {mustCover, maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
