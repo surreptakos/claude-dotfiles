@@ -227,6 +227,38 @@ test('an older copy of the template under session-start.sh is overwritten in pla
   assert.strictEqual(s.hooks.SessionStart[0].hooks[0].command, 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"');
 });
 
+test('a sidecar carrying a pre-v37 copy takes the token-aware template and drops the public-repo STOP (issue 1048)', () => {
+  // The aac-sales-cockpit shape: its own session-start.sh, the bootstrap in the sidecar, and a
+  // STOP line from before issue 1047 that tells a session the dotfiles repo is public.
+  const root = scratchRepo();
+  const hooks = path.join(root, '.claude', 'hooks');
+  fs.mkdirSync(hooks, { recursive: true });
+  const foreign = '#!/bin/sh\n# the repo\'s own start hook\n';
+  fs.writeFileSync(path.join(hooks, 'session-start.sh'), foreign);
+  const current = fs.readFileSync(TARGET, 'utf8');
+  const older = current.split('\n').filter((l) => !l.includes('BOOTSTRAP_DOTFILES_TOKEN'))
+    .concat(['# the cloud GitHub proxy clones any public repo without attaching it,',
+             '# and the repo was made public on 2026-09-21', '']).join('\n');
+  const sidecar = path.join(hooks, 'session-start-bootstrap.sh');
+  fs.writeFileSync(sidecar, older);
+  fs.writeFileSync(path.join(root, '.claude', 'settings.json'), JSON.stringify({
+    hooks: { SessionStart: [
+      { hooks: [{ type: 'command', command: 'bash "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start-bootstrap.sh"' }] },
+      { hooks: [{ type: 'command', command: 'sh "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh"' }] },
+    ] },
+  }, null, 2) + '\n');
+
+  assert.match(deliver(root), /bootstrap hook updated: .*session-start-bootstrap\.sh/);
+  const text = fs.readFileSync(sidecar, 'utf8');
+  assert.strictEqual(text, current, 'the sidecar is the template, byte for byte');
+  assert.match(text, /BOOTSTRAP_DOTFILES_TOKEN/);
+  assert.doesNotMatch(text, /made public|clones any public repo/);
+  assert.strictEqual(fs.readFileSync(path.join(hooks, 'session-start.sh'), 'utf8'), foreign);
+  const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
+  assert.strictEqual(s.hooks.SessionStart.flatMap((g) => g.hooks).length, 2, 'no entry added or lost');
+  assert.match(deliver(root), /already delivered/);
+});
+
 // ---------------------------------------------------------------------------------- v30 ---------
 function gitRepo(root, fileMode) {
   const r = spawnSync('git', ['-C', root, 'init', '-q'], { encoding: 'utf8' });
