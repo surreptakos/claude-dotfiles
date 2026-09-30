@@ -458,6 +458,10 @@ try {
     Assert 'a commit gate off is a STOP' (($r.Exit -eq 1) -and ($r.Out -match 'STOP  surreptakos/osh-rfp .* commit gate off')) $r.Out
     $r = Invoke-Check $f -Fix
     Assert '-Fix turns it on' (($r.Exit -eq 0) -and ((& git -C $row.Path config --get core.hooksPath) -eq '.githooks')) $r.Out
+    & git -C $row.Path config core.hooksPath (Join-Path $row.Path '.githooks')
+    $r = Invoke-Check $f
+    Assert 'an absolute core.hooksPath to the clone''s .githooks counts as on' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    surreptakos/osh-rfp ')) $r.Out
 
     $f = New-Fixture
     $row = Get-Row $f 'surreptakos/brazil-flights'

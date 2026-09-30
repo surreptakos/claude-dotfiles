@@ -636,7 +636,13 @@ function Test-Clones {
     foreach ($row in $List.Repos) {
         if (-not (Test-Path -LiteralPath (Join-Path $row.Path '.git'))) { continue }
         if (-not (Test-Path -LiteralPath (Join-Path $row.Path '.githooks') -PathType Container)) { continue }
-        $on = (Invoke-Git @('-C', $row.Path, 'config', '--get', 'core.hooksPath')).Out -eq '.githooks'
+        # Relative or absolute, the gate is on when the value resolves to the clone's .githooks.
+        $value = (Invoke-Git @('-C', $row.Path, 'config', '--get', 'core.hooksPath')).Out
+        $on = $false
+        if ($value) {
+            $full = if ([System.IO.Path]::IsPathRooted($value)) { $value } else { Join-Path $row.Path $value }
+            $on = Test-SamePath $full (Join-Path $row.Path '.githooks')
+        }
         if (-not $on -and $Fix) {
             $on = ((Invoke-Git @('-C', $row.Path, 'config', 'core.hooksPath', '.githooks')).Code -eq 0)
             if ($on) { $gates[$row.Repo] = 'set by -Fix' }
