@@ -112,8 +112,11 @@ writes nothing.
 ## New machine
 
 ```powershell
-git clone <this repo> ; cd claude-dotfiles ; .\install.ps1
+git clone <this repo> ; cd claude-dotfiles ; powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
+
+Type it in a terminal. Double-clicking a `.ps1` file opens it in Notepad, and a bare `.\install.ps1`
+fails on a fresh Windows install, whose execution policy blocks scripts (AAC-AI, 2026-09-30).
 
 It restores the configuration, then runs the setup check (`setup-check.ps1 -Fix`): git, node, `py`,
 `claude`, `gh` and PyYAML (installed when missing), the two secret files under `~/.config`, and live
