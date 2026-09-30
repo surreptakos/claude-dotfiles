@@ -215,6 +215,8 @@ function ConvertTo-UtcOrNull {
     # The masters write timestamps two ways: ISO ("2026-09-29T21:36:11Z") and the marker shape
     # ("2026-09-24 21:07"). Either parses as UTC; anything else is $null.
     if (-not $Text) { return $null }
+    # PowerShell 7's ConvertFrom-Json turns an ISO string into a DateTime already (5.1 keeps the string).
+    if ($Text -is [datetime]) { return $Text.ToUniversalTime() }
     try {
         return [datetime]::Parse([string]$Text, [Globalization.CultureInfo]::InvariantCulture,
             [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
@@ -381,6 +383,30 @@ function Get-BootPrompt {
             "memory or an estimate (issue 711). My messages in this terminal override everything.")
 }
 
+function Set-StateOutcome {
+    param([int]$Issue, [string]$Outcome, [string]$Tag)
+    # Rewrite lastPassOutcome and lastPassAt in the state issue's JSON block (RUNBOOK.md "Pass
+    # complete" writes the same two fields). Text substitution on the two lines, nothing else
+    # in the body moves; a body without both fields is left alone and logged.
+    $body = Get-StateBody -Issue $Issue
+    if (-not $body) { Write-Info "$Tag could not read #$Issue to record '$Outcome'"; return }
+    $now = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $rxOutcome = '(?m)^(\s*"lastPassOutcome"\s*:\s*)(null|"[^"\r\n]*")'
+    $rxAt = '(?m)^(\s*"lastPassAt"\s*:\s*)(null|"[^"\r\n]*")'
+    if (-not ([regex]::IsMatch($body, $rxOutcome) -and [regex]::IsMatch($body, $rxAt))) {
+        Write-Info "$Tag #${Issue}: no lastPassOutcome/lastPassAt fields - '$Outcome' not recorded"
+        return
+    }
+    $new = [regex]::Replace($body, $rxOutcome, ('${1}"' + $Outcome + '"'), 1)
+    $new = [regex]::Replace($new, $rxAt, ('${1}"' + $now + '"'), 1)
+    $tmp = Join-Path $env:TEMP ("watchdog-state-$Issue.md")
+    [System.IO.File]::WriteAllText($tmp, $new, (New-Object System.Text.UTF8Encoding($false)))
+    & gh issue edit $Issue --repo surreptakos/claude-dotfiles --body-file $tmp 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $script:StateBodies[$Issue] = $new; Write-Info "$Tag #${Issue}: lastPassOutcome '$Outcome', lastPassAt $now" }
+    else { Write-Info "$Tag #${Issue}: gh issue edit failed - '$Outcome' not recorded" }
+    Remove-Item $tmp -ErrorAction SilentlyContinue
+}
+
 function Stop-MasterWindow {
     param($Proc, [string]$Tag)
     # Stop the claude process and, when its parent is the cmd.exe /k wrapper the watchdog
@@ -395,7 +421,7 @@ function Stop-MasterWindow {
 }
 
 function Invoke-StateRefRepair {
-    # Issue 92: sweep the master orchestrator state issues (#74-#77) so a bare `#N` reference
+    # Issue 92: sweep the master orchestrator state issues (every lib/repos.json row that names one) so a bare `#N` reference
     # to work in the owning repo is qualified to `owner/repo#N`. Deterministic backstop for
     # the prose rule in Get-BootPrompt; idempotent (no `gh issue edit` call when nothing needs
     # changing). Node is already required elsewhere in this repo (tracker-audit, the code
@@ -403,7 +429,7 @@ function Invoke-StateRefRepair {
     #
     # Called two ways:
     #   * -Slug '<slug>' for a targeted sweep right after that master closes.
-    #   * with no -Slug for a sweep of ALL four state issues on every watchdog tick.
+    #   * with no -Slug for a sweep of EVERY state issue on every watchdog tick.
     # The tick-wide sweep is what keeps "the next heartbeat carries no bare cross-repo #N"
     # true within one watchdog interval regardless of which master (local or cloud) wrote.
     param([string]$Slug, [string]$Tag = '[repair]')
@@ -463,7 +489,7 @@ $selected = @($Repos | Where-Object { $Only.Count -eq 0 -or $Only -contains $_.S
 
 $rcProcs = Get-RemoteControlProcesses
 
-# --- State-ref repair (issue 92): every tick, all four state issues -------------------
+# --- State-ref repair (issue 92): every tick, every state issue ----------------------
 # A bare cross-repo `#N` written into a master's state issue trips the tracker audit's
 # `dangling-reference` check. The prose rule in Get-BootPrompt / LOCAL-RUNBOOK / RUNBOOK is
 # the weaker half - the same prose rule already lived in RUNBOOK.md on 2026-09-03 and was
@@ -516,8 +542,9 @@ foreach ($p in $rcProcs) {
         else {
             Stop-MasterWindow -Proc $p -Tag $tag
             # Issue 92: sweep this master's state issue for bare cross-repo #N refs now
-            # that the window has closed and no one else is writing to it.
-            Invoke-StateRefRepair -Slug $slug -Tag $tag
+            # that the window has closed and no one else is writing to it. The dotfiles
+            # master's state issue lives in the repo it serves: nothing to qualify there.
+            if ($row.Repo -ne 'surreptakos/claude-dotfiles') { Invoke-StateRefRepair -Slug $slug -Tag $tag }
         }
         continue
     }
@@ -536,7 +563,14 @@ foreach ($p in $rcProcs) {
                 if ($idleMin -ge $StallIdleMinutes -and -not $Force) {
                     Write-Info "$tag STALLED at $($latest.ToString('u')) (${ageMin}m old, transcript idle ${idleMin}m >= ${StallIdleMinutes}m) - recycling pid=$($p.ProcessId)"
                     if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
-                    else { Stop-MasterWindow -Proc $p -Tag $tag }
+                    else {
+                        Stop-MasterWindow -Proc $p -Tag $tag
+                        # A recycled master never writes its outcome. Without one the drain rule reads
+                        # the previous outcome (`success`) and relaunches the same stall every slot,
+                        # starving the lower priorities; record it here so the repo waits for new
+                        # tracker activity like any other stalled pass.
+                        Set-StateOutcome -Issue $row.StateIssue -Outcome 'stalled-recycled' -Tag $tag
+                    }
                     continue
                 }
                 Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old, transcript idle ${idleMin}m (< ${StallIdleMinutes}m) - possibly stalled; not killed"

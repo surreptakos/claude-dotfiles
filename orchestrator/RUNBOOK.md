@@ -297,7 +297,7 @@ run or skip via the empty-pass guard. Do not schedule anything — the Routine i
 
 ## Grill phase
 
-When every open ticket across the four repos is either closed or `ready-for-human`, the master
+When every open ticket across the served repos is either closed or `ready-for-human`, the master
 enters the grill phase. Follow `grill-ready-for-human` from the plugin one ticket at a time — no
 batch rulings — with the master grilling itself first. Per ticket:
 

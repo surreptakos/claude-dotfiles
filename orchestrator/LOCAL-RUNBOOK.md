@@ -197,7 +197,7 @@ but cannot merge.
 > never write to it or to another repo's state issue. **Cross-repo reference rule (issue 92):** your
 > state issue lives in claude-dotfiles, so a bare `#N` in its body points to a claude-dotfiles
 > issue. Every reference to work in `<owner/repo>` — issues, PRs, heartbeat citations — is written
-> `owner/repo#N`, never bare `#N`. The watchdog sweeps all four state issues on every tick and
+> `owner/repo#N`, never bare `#N`. The watchdog sweeps every state issue on every tick and
 > again after a pass with `node tools/repair-state-refs.js`, so a bare cross-repo `#N` whose
 > paragraph names `<owner/repo>` is auto-qualified within about ten minutes; writing them right the
 > first time keeps every heartbeat honest and stops needless issue edits. Check your state issue
@@ -304,7 +304,7 @@ cannot happen:
 
 The task registers under the current user via `schtasks.exe /IT /RL LIMITED`. `Register-ScheduledTask`
 with the INTERACTIVE principal needed elevation on this machine (2026-09-02); `schtasks /IT` did not.
-One task serves all four repos; the serial hand-off is inside the script. The interval dropped
+One task serves every served repo; the serial hand-off is inside the script. The interval dropped
 from 30 to 10 minutes with issue 79 so a finished pass does not hold the slot for half an hour;
 a watchdog run is four `gh issue view` calls and a process listing.
 
