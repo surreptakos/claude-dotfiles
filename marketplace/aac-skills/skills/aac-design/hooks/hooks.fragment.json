@@ -1,0 +1,30 @@
+{
+  "_comment": "Merge into the aac-skills plugin hooks/hooks.json: append each group to its event array. The scripts stay in this skill; nothing is copied.",
+  "PostToolUse": [
+    {
+      "matcher": "Write|Edit|MultiEdit",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" write",
+          "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" write",
+          "timeout": 20,
+          "statusMessage": "Design-linting the file..."
+        }
+      ]
+    }
+  ],
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" stop",
+          "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" stop",
+          "timeout": 30,
+          "statusMessage": "Checking deliverables against the design gate..."
+        }
+      ]
+    }
+  ]
+}
