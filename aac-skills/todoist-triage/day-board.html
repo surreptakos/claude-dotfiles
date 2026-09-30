@@ -10,6 +10,8 @@ Source of record for the artifact. Edit here, then republish to that URL with th
   {"server": "Google Drive", "tools": ["search_files", "read_file_content"]}]}}
 Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
 Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
+Every triage answer is also logged to db ruling_log/<taskId>-<stamp> (undoneAt set on Undo); the huddle draft reads it, since the morning run deletes answered cards.
+"Apply my note" asks Claude (sample) to read the note as one update-tasks ruling, parks it on the card as `proposal`, and writes nothing until Dan clicks Apply.
 -->
 <html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Dan&#39;s Day Board</title>
@@ -580,7 +582,7 @@ footer{font-size:12px;color:var(--muted)}
       return;
     }
     try { db = window.claude.use ? await window.claude.use("db") : null; } catch(e){ db = null; }
-    watchTriage(); watchWaiting();
+    watchTriage(); watchWaiting(); watchRulingLog();
     await refreshAll();
     setInterval(refreshAll, REFRESH_MS);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAll(); });
@@ -696,8 +698,11 @@ footer{font-size:12px;color:var(--muted)}
         (p.source && p.source.lastAt ? '<div class="src">Last message: ' + esc(p.source.lastFrom || "") + ', ' + esc(String(p.source.lastAt).slice(0, 10)) + (p.source.quote ? ' — “' + esc(p.source.quote) + '”' : '') + '</div>'
           : '<div class="err">Source not read — built from the task text alone. Check the thread before ruling.</div>') +
         '<div class="acts">' + opts + '<button type="button" data-opt="wontfix" class="no">Rule out</button></div>' +
-        '<textarea rows="1" placeholder="Why, or a different ruling (optional — the next run reads it)"></textarea>' +
-        '<div class="acts"><button type="button" data-opt="note">Send note only</button></div>' +
+        '<textarea rows="1" placeholder="Why, or a different ruling in your own words">' + esc((p.proposal && p.proposal.note) || "") + '</textarea>' +
+        '<div class="acts"><button type="button" data-opt="read">Apply my note</button><button type="button" data-opt="note">Keep as note for the next run</button></div>' +
+        (p.proposal ? (p.proposal.ruling
+          ? '<div class="why">Your note reads as: <b>' + esc(p.proposal.summary) + '</b></div><div class="acts"><button type="button" data-opt="proposal">Apply: ' + esc(p.proposal.summary) + '</button></div>'
+          : '<div class="why">No Todoist change found in your note' + (p.proposal.why ? ' (' + esc(p.proposal.why) + ')' : '') + '. Keep it as a note, or reword it.</div>') : '') +
         (p.error ? '<div class="err">Last attempt failed: ' + esc(p.error) + '</div>' : '') + '</div>';
     }).join("");
     const done = mine.filter(p => p.status === "answered").sort((a,b) => String(b.answeredAt || "").localeCompare(String(a.answeredAt || "")));
@@ -720,7 +725,9 @@ footer{font-size:12px;color:var(--muted)}
     row.querySelectorAll("button").forEach(b => b.disabled = true);
     try {
       const taskId = await undoRuling(p);
-      await db.doc("triage/" + p._id).update({status:"open", taskId, choice:null, note:"", answeredAt:null, undo:null, error:null, undoneAt:new Date().toISOString()});
+      const undoneAt = new Date().toISOString();
+      if (p.logId){ try { await db.doc("ruling_log/" + p.logId).update({undoneAt}); } catch(e){} }
+      await db.doc("triage/" + p._id).update({status:"open", taskId, choice:null, note:"", answeredAt:null, logId:null, undo:null, error:null, undoneAt});
       refreshTasks();
     } catch(err){
       const msg = (err && (err.message || err.code)) || "failed";
@@ -810,11 +817,67 @@ footer{font-size:12px;color:var(--muted)}
     }
     return taskId;
   }
+  // A note read by Claude may only carry these update-tasks fields, and only a project this board writes to.
+  // Merges are left to the triage run: they need the duplicate's markers and a survivor id.
+  function normalizeNoteRuling(raw){
+    const r = raw && typeof raw === "object" ? raw : {};
+    const summary = String(r.summary || "").replace(/\s+/g, " ").trim().slice(0, 120);
+    const why = String(r.why || "").replace(/\s+/g, " ").trim().slice(0, 200);
+    const x = r.ruling && typeof r.ruling === "object" ? r.ruling : null;
+    if (!x || !summary) return {summary, why, ruling:null};
+    if (x.delete === true) return {summary, why, ruling:{delete:true}};
+    const o = {};
+    if (Array.isArray(x.labels) && x.labels.every(l => typeof l === "string" && /^[\w-]{1,40}$/.test(l))) o.labels = x.labels;
+    if (typeof x.projectId === "string" && (x.projectId === WONTFIX || PROJECTS.some(q => q.id === x.projectId))) o.projectId = x.projectId;
+    if (typeof x.dueString === "string" && x.dueString.trim()) o.dueString = x.dueString.trim().slice(0, 60);
+    if (typeof x.deadlineDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.deadlineDate)) o.deadlineDate = x.deadlineDate;
+    if (["p1","p2","p3","p4"].includes(x.priority)) o.priority = x.priority;
+    if (typeof x.content === "string" && x.content.trim()) o.content = x.content.trim().slice(0, 300);
+    return {summary, why, ruling: Object.keys(o).length ? o : null};
+  }
+  function notePrompt(p, task, note){
+    return [
+      "Dan Gatsakos wrote a note on a Todoist triage card. Turn it into ONE concrete change to this task, or say there is none.",
+      "Labels mean whose ball it is: do (Dan), to-lynne, to-steffi, to-nick, to-rob, to-mark (a direct), chase (an outside party). A task carries exactly one ball label; keep every other label it has (claude, no-sweep) when you set labels.",
+      "Projects: " + JSON.stringify(PROJECTS.map(q => ({id:q.id, name:q.tag}))) + "; Wontfix " + WONTFIX + " is for a ruled-out task (done, dead, not his).",
+      "dueString is Dan's do date in Todoist words (\"today\", \"Oct 5\"). deadlineDate (YYYY-MM-DD) only when his note names a hard deadline. priority p1..p4 only when he asks. content only when he retitles it.",
+      "delete:true only when he says the task is done, settled or not needed.",
+      "Use only what his note says; never add a change he did not ask for.",
+      "",
+      "CARD: " + JSON.stringify({title:p.title, question:p.question, source:p.source || null, offered:(p.options || []).map(o => o.label)}),
+      "TASK NOW: " + JSON.stringify({labels:task.labels, projectId:task.projectId, due:task.dueDate, deadline:task.deadlineDate, priority:task.priority}),
+      "NOTE: " + JSON.stringify(note),
+      "",
+      'Reply with only JSON: {"summary": "<the change in under 12 words, e.g. Hand to Lynne, look again Oct 5>", "why": "<one clause>", "ruling": {"labels"?: [..], "projectId"?: "..", "dueString"?: "..", "deadlineDate"?: "..", "priority"?: "..", "content"?: "..", "delete"?: true} or null}'
+    ].join("\n");
+  }
+  // Reads the note with Claude and parks the proposal on the card; nothing touches Todoist until Dan clicks Apply.
+  async function readNote(row, p, note){
+    const status = row.querySelector(".why") || row;
+    row.querySelectorAll("button,textarea").forEach(b => b.disabled = true);
+    try {
+      const sample = window.claude && window.claude.use ? await window.claude.use("sample").catch(() => null) : null;
+      if (!sample) throw {code:"sample_unavailable", message:"Claude is not available in this view; open the page on claude.ai"};
+      const task = await snapshotTask(p.taskId);
+      const d = normalizeNoteRuling(await sample.json(notePrompt(p, task, note), {cache:false}));
+      await db.doc("triage/" + p._id).update({proposal:{note, summary:d.summary, why:d.why, ruling:d.ruling, readAt:new Date().toISOString()}, error:null});
+    } catch(err){
+      const msg = (err && (SAMPLE_COPY[err.code] || err.message || err.code)) || "failed";
+      try { await db.doc("triage/" + p._id).update({error: msg}); } catch(e){}
+      row.querySelectorAll("button,textarea").forEach(b => b.disabled = false);
+    }
+  }
   async function answer(row, key){
     const p = triDocs.find(x => x._id === row.dataset.id);
     if (!p || !db) return;
     const note = row.querySelector("textarea").value.trim();
-    const o = key === "wontfix" ? {label:"Rule out", projectId:WONTFIX} : key === "note" ? {label:"Note only"} : (p.options || [])[+key];
+    if (key === "read"){
+      if (!note){ row.querySelector("textarea").focus(); return; }
+      if (p.taskId) return readNote(row, p, note);
+      key = "note";
+    }
+    const prop = key === "proposal" && p.proposal && p.proposal.ruling ? Object.assign({label:"Your note: " + p.proposal.summary}, p.proposal.ruling) : null;
+    const o = key === "wontfix" ? {label:"Rule out", projectId:WONTFIX} : key === "note" ? {label:"Note only"} : key === "proposal" ? prop : (p.options || [])[+key];
     if (!o) return;
     if (key === "note" && !note){ row.querySelector("textarea").focus(); return; }
     row.querySelectorAll("button,textarea").forEach(b => b.disabled = true);
@@ -828,7 +891,11 @@ footer{font-size:12px;color:var(--muted)}
           if (r) undo.commentIds = (undo.commentIds || []).concat(addedIds(r));
         }
       }
-      await db.doc("triage/" + p._id).update({status:"answered", choice:o.label, note, answeredAt:new Date().toISOString(), error:null, undo});
+      const answeredAt = new Date().toISOString();
+      // The triage run deletes answered cards each morning; the log keeps the ruling for the next huddle draft.
+      const logId = p._id + "-" + answeredAt.replace(/[^0-9]/g, "").slice(0, 14);
+      try { await db.doc("ruling_log/" + logId).set({taskId:p.taskId || "", title:p.title || "", ruling:o.label, note, at:answeredAt}); } catch(e){}
+      await db.doc("triage/" + p._id).update({status:"answered", choice:o.label, note, answeredAt, logId, error:null, undo});
       if (key !== "note") refreshTasks();
     } catch(err){
       const msg = (err && (err.message || err.code)) || "failed";
@@ -932,6 +999,23 @@ footer{font-size:12px;color:var(--muted)}
     }).map(e => ({task: (e.extraData || {}).content, done: e.eventDate}));
   }
 
+  let logDocs = [];
+  function watchRulingLog(){
+    if (!db) return;
+    db.collection("ruling_log").onSnapshot(q => { logDocs = q.docs.map(d => Object.assign({_id: d.id}, d.data())); }, () => {});
+  }
+  // Dan's own clicks on this board since his last post: triage rulings (with his reason) and asks he marked replied.
+  // Rulings come from the log, which outlives the cards the morning triage run deletes.
+  function boardRulingsSince(log, wait, since){
+    const after = x => x && new Date(x).getTime() > since.getTime();
+    const rulings = log.filter(r => !r.undoneAt && after(r.at))
+      .sort((a,b) => String(a.at).localeCompare(String(b.at)))
+      .map(r => ({task:r.title, ruling:r.ruling || "", note:r.note || "", at:r.at}));
+    const replied = wait.filter(w => w.status === "done" && after(w.doneAt))
+      .map(w => ({to:w.from || "", subject:w.subject || "", ask:w.ask || "", at:w.doneAt}));
+    return {rulings, replied};
+  }
+
   async function sentSince(since){
     const res = await call("ms365", "outlook_email_search", {folderName:"Sent Items", afterDateTime:since.toISOString(), limit:25});
     return objectsOf(res).filter(o => o.subject !== undefined).map(o => ({subject:o.subject, sent:o.sentDateTime || o.receivedDateTime, gist: clip(o.summary, 200)}));
@@ -958,7 +1042,8 @@ footer{font-size:12px;color:var(--muted)}
       "- Three sections only, no name/date header: report, focus, risks.",
       "- Report heading: \"Yesterday's report\" if his last post was the previous business day, else \"Yesterday's (& earlier) report\". Gap in calendar days since last post: " + gapDays + ".",
       "- Report = outcomes, not activity, in his verbs: Sent X to Y. Decided X. Completed X and sent to Y. Delegated X to Y. Booked X. A meeting with no decision or assignment is not a line.",
-      "- A completed task alone is NOT evidence. Use it only when a sent mail or a meeting note corroborates it; merge the task and its mail into one line. Otherwise drop it.",
+      "- A completed task alone is NOT evidence. Use it only when a sent mail, a meeting note or a board ruling corroborates it; merge them into one line. Otherwise drop it.",
+      "- BOARD RULINGS are Dan's own decisions, made on his day board: each is evidence on its own. A hand-off to a direct (to-NAME) is \"Delegated X to NAME\"; a delete or Rule out with a reason that says it is done or settled is \"Completed X\" or \"Decided X\"; his note, when present, says what he meant. A ruling that only moves a date or parks a task is not a report line, but it can change a focus line. A \"replied\" row is \"Answered NAME on SUBJECT\".",
       "- Outcomes from meeting notes that his last post never claimed DO count, even if they happened before the last post. Never re-report what the last post already claimed.",
       "- Four to seven report bullets when the evidence supports it; fewer is fine; never invent.",
       "- Focus = one to three items: his still-true focus lines kept verbatim, plus NEW lines ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\"). Order: deadline first, then what blocks someone else, then priority.",
@@ -983,6 +1068,9 @@ footer{font-size:12px;color:var(--muted)}
       "",
       "MEETING NOTES (Granola) SINCE:",
       ctx.notes || "(none)",
+      "",
+      "BOARD RULINGS SINCE (triage answers with his reason, and asks he marked replied):",
+      JSON.stringify(ctx.board || {rulings:[], replied:[]}).slice(0, 8000),
       "",
       "CURRENT WORK TASKS (the only task source for focus):",
       JSON.stringify(cw).slice(0, 8000),
@@ -1042,7 +1130,9 @@ footer{font-size:12px;color:var(--muted)}
         notesSince(since).catch(e => { gaps.push("meeting notes: " + (e.code || "failed")); return ""; })
       ]);
       hudStatus("Drafting… (usually 20–60 seconds)");
-      const d = await sample.json(hudPrompt({last, done, sent, notes, gaps}), {signal: hudCtl.signal, cache: false});
+      if (!db) gaps.push("board rulings: storage unavailable");
+      const board = boardRulingsSince(logDocs, waitDocs, since);
+      const d = await sample.json(hudPrompt({last, done, sent, notes, board, gaps}), {signal: hudCtl.signal, cache: false});
       renderHuddle(d || {});
       // Every draft is kept in board storage so a Claude session can read exactly what was generated
       // (Dan, 2026-09-25: a draft that lives only in the browser cannot be checked).

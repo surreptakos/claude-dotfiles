@@ -4,7 +4,7 @@ Disclosed reference for [`SKILL.md`](SKILL.md) steps 1 and 4, and for any change
 
 ## Read the answers (step 1)
 
-`query` collection `triage` where `status == "answered"`. Each is a tier-2 answer Dan gave since the last run, with its Todoist write already done: `Rule out` moved the task into Wontfix, so it needs nothing more. Every board item is a task, so none goes in the run record. A `Note only` answer carries no write: act on the note as if he typed it in the session. Name the count on status line 2, then `delete` each consumed document. A card Dan undid is back at `status: "open"`: treat it as unanswered.
+`query` collection `triage` where `status == "answered"`. Each is a tier-2 answer Dan gave since the last run, with its Todoist write already done: `Rule out` moved the task into Wontfix, so it needs nothing more. Every board item is a task, so none goes in the run record. A `Note only` answer carries no write: act on the note as if he typed it in the session. An answer whose choice starts `Your note:` is a note Dan had the board read and apply on the spot, so its write is done like any other option's. Leave `ruling_log` alone: the board's huddle draft reads it, and it is not consumed. Name the count on status line 2, then `delete` each consumed document. A card Dan undid is back at `status: "open"`: treat it as unanswered.
 
 ## Publish the run (step 4)
 
