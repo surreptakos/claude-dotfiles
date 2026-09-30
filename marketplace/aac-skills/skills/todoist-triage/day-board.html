@@ -1059,18 +1059,21 @@ footer{font-size:12px;color:var(--muted)}
   const GENERIC_RX = /\b(interruption|traffic|emergenc|meetings? (getting |got |being )?cancel)/i;
   // Confidential for a team post. Deliberately wide: a false alarm costs a redraft, a miss leaks a person's detail.
   const CONFIDENTIAL_RX = [
-    // money: any currency sign or code, "1.5k", "15,000", "500 bucks", spelled-out amounts
-    /[$€£]\s?\d|\b(usd|eur|gbp)\s?\d|\b\d[\d,]*(\.\d+)?\s?(k|m|dollars?|usd|eur|gbp|bucks|grand)\b|\b\d{1,3}(,\d{3})+(\.\d+)?\b|\b(hundred|thousand|million)\s+(dollars|bucks)\b/i,
+    // money: any currency sign or code, "1.5k", "15,000", "15000", "45/hr", "5%", spelled-out amounts
+    /[$€£]\s?\d|\b(usd|eur|gbp)\s?\d|\b\d[\d,]*(\.\d+)?\s?(k|m|dollars?|usd|eur|gbp|bucks|grand)\b|\b\d{1,3}(,\d{3})+(\.\d+)?\b|\b(?!(19|20)\d\d\b)\d{4,}\b|\d\s?%|\d\s?\/\s?(hr|hour|h)\b|\bper hour\b|\b(hundred|thousand|million|grand)\b/i,
     // pay
-    /\b(bonus(es)?|salar(y|ies|ied)|raises?|wages?|pay|payroll|paycheck|hourly rate|pay (rate|band|increase|raise|cut|grade)s?|compensation|comp plan|stipends?|severance|commission rates?|promotion|demot\w*)\b/i,
-    // reviews and discipline
-    /\b(performance|annual|self|mid-?year|90-?day)[- ]reviews?\b|\b\w+'s review\b|\breview audit\b|\bPIP\b|\bwrite-?ups?\b|disciplin|terminat|\bfired\b|\blet go\b|\blaid off\b|\blayoffs?\b|\bprobation|\bwarning letter\b|harass|\bHR complaint\b/i,
-    // health and leave
-    /\b(sick|medical|medication|FMLA|leave|PTO|maternity|paternity|bereavement|doctor|surgery|pregnan|diagnos|injur|illness|hospital|cancer|chemo|therapy|mental health|disabilit)/i,
+    /\b(bonus(es)?|salar(y|ies|ied)|raises?|wages?|pay|payroll|paycheck|hourly|compensation|comp plan|stipends?|severance|commission|promotion|demot\w*|bump|increase|offer letter|equity)\b/i,
+    // reviews, discipline, departures, HR
+    /\breviews?\b|apprais|\bPIP\b|\bwrite-?ups?\b|disciplin|terminat|\bfired\b|\blet go\b|\blaid off\b|\blayoffs?\b|\bprobation|\bwarning\b|harass|\bHR\b|resign|\bquit(s|ting)?\b|\bgrievance/i,
+    // health, family and leave
+    /\b(sick|flu|covid|ill|illness|FMLA|leave|PTO|vacation|funeral|baby|doctor|surgery|hospital|cancer|chemo|therapy|a procedure|mental health|health (issue|problem|condition|reason)s?)\b|\b(medical|medicat|pregnan|diagnos|injur|disabilit|maternity|paternity|bereave)/i,
     // identity
     /\b(SSN|social security|date of birth|DOB|driver'?s licen[cs]e|bank account|routing number)\b/i
   ];
-  const hudNorm = s => String(s == null ? "" : s).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
+  const hudNorm = s => String(s == null ? "" : s).normalize("NFKC").replace(/[​-‏⁠﻿­]/g, "").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
+  // Plain text only: lookalike letters, zero-width characters and markup cannot slip a word past the patterns.
+  const PLAIN_RX = /^[ -~–—…]*$/;
+  const plainOk = s => PLAIN_RX.test(hudNorm(s)) && !/[<>]/.test(hudNorm(s)) && String(s).normalize("NFKC").replace(/[‘’“”]/g, "").length === String(s).normalize("NFKC").replace(/[‘’“”​-‏⁠﻿­]/g, "").length;
   const hudWords = s => hudNorm(s).split(" ").filter(Boolean);
   const hudBag = s => new Set(hudNorm(s).toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(w => w.length >= 3));
   const isConfidential = s => CONFIDENTIAL_RX.some(rx => rx.test(hudNorm(s)));
@@ -1088,10 +1091,11 @@ footer{font-size:12px;color:var(--muted)}
       const t = hudNorm(raw);
       if (!t) return;
       if (/^dan gatsakos\s*\|/i.test(t)) return;
-      if (/^yesterday/i.test(t) && t.length < 45){ cur = "report"; return; }
-      if (/^today'?s focus/i.test(t) && t.length < 30){ cur = "focus"; return; }
-      if (/^risks?\s*\/?\s*blockers?/i.test(t) && t.length < 30){ cur = "risks"; return; }
-      if (/^not doing today/i.test(t) && t.length < 30){ cur = "other"; return; }
+      const h = t.toLowerCase().replace(/:$/, "").trim();
+      if (h === "yesterday's report" || h === "yesterday's (& earlier) report"){ cur = "report"; return; }
+      if (h === "today's focus"){ cur = "focus"; return; }
+      if (h === "risks/blockers" || h === "risks / blockers"){ cur = "risks"; return; }
+      if (h === "not doing today"){ cur = "other"; return; }
       const line = t.replace(/^[•*·\-–]\s*/, "");
       if (cur && line) out[cur].push(line);
     });
@@ -1148,6 +1152,7 @@ footer{font-size:12px;color:var(--muted)}
       if (extra.length) add("shape", section, i, "", "unexpected fields: " + extra.join(", "));
       if (typeof item.text !== "string" || !hudNorm(item.text)){ add("shape", section, i, "", "a line with no text"); return false; }
       if (typeof item.evidence !== "string" || !hudNorm(item.evidence)) add("evidence", section, i, item.text, "no evidence named");
+      if (!plainOk(item.text) || !plainOk(item.evidence || "")) add("charset", section, i, "", "only plain letters, digits and punctuation; no lookalike, hidden or markup characters");
       if (isConfidential(item.text)) add("confidential", section, i, item.text, CONF_DETAIL);
       if (isConfidential(item.evidence)) add("confidential", section, i, item.text, "its evidence carries " + CONF_DETAIL);
       return true;
@@ -1199,6 +1204,7 @@ footer{font-size:12px;color:var(--muted)}
       });
     });
     if (d.risks.some(x => x && hudNorm(x.text) === "None today.") && d.risks.length > 1) add("rule4-none", "risks", -1, "", "\"None today.\" must be the only risk line");
+    if (!d.report.length) add("report-empty", "report", -1, "", "no report lines; a post reports at least one outcome");
     if (d.focus.length < 1 || d.focus.length > 3) add("rule1-focus", "focus", -1, "", "Today's focus has " + d.focus.length + " items; rule 1 allows 1-3");
     if (!d.risks.length) add("rule4-none", "risks", -1, "", "no risk lines; write \"None today.\"");
     // Dropped: only his own last focus and risk lines, each with a stated reason, nothing else.
@@ -1209,6 +1215,7 @@ footer{font-size:12px;color:var(--muted)}
       const extra = Object.keys(x).filter(k => !DROP_KEYS.includes(k));
       if (extra.length) add("shape", "dropped", i, "", "unexpected fields: " + extra.join(", "));
       const t = hudNorm(x.text);
+      if (!plainOk(x.text) || !plainOk(x.why || "")) add("charset", "dropped", i, "", "only plain letters, digits and punctuation");
       if (!lastFR.includes(t)) add("dropped", "dropped", i, t, "dropped must quote a line of your last focus or risks exactly");
       if (isConfidential(t) && !/^withheld:/i.test(hudNorm(x.why))) add("confidential", "dropped", i, t, "a confidential line of yours must be dropped as \"withheld:\"");
       if (!DROP_WHY_RX.test(hudNorm(x.why))) add("dropped", "dropped", i, t, "why must start with \"done:\", \"cleared:\", \"trimmed:\" or \"withheld:\" and give the reason");
@@ -1246,7 +1253,7 @@ footer{font-size:12px;color:var(--muted)}
       "The post goes to the whole team, so neither a line nor its evidence may reveal anyone's pay, bonus, raise, promotion, performance review, discipline, health, sickness, leave, identity number, or any money amount.",
       "",
       "HIS LAST POST'S LINES (his own words):",
-      JSON.stringify({focus: last.focus, risks: last.risks}),
+      JSON.stringify({report: last.report, focus: last.focus, risks: last.risks}),
       "",
       "LINES TO JUDGE (kept:true means a line of his own, carried word for word or dropped):",
       JSON.stringify(lines),
@@ -1257,7 +1264,7 @@ footer{font-size:12px;color:var(--muted)}
       "- generic: is it a generic item such as interruptions, traffic, meetings getting cancelled or emergencies?",
       "- confidential: does the line or its evidence reveal pay, bonus, raise, promotion, review, discipline, health, sickness, leave, an identity number or a money amount?",
       "- supported: does its evidence field actually support what the line claims? Answer true for kept lines.",
-      "- paraphrase: (lines that are not kept) does it restate one of his last post's lines in different words instead of copying it? Answer false for kept lines.",
+      "- paraphrase: (lines that are not kept) does it restate one of his last post's lines, in any section, in different words? A report line that re-reports his last report is a paraphrase. Answer false for kept lines.",
       'Reply with only JSON: {"verdicts": [{"section": string, "index": number, "outcome": boolean, "consequence": boolean, "generic": boolean, "confidential": boolean, "supported": boolean, "paraphrase": boolean, "reason": string}]}'
     ].join("\n");
   }
@@ -1284,6 +1291,7 @@ footer{font-size:12px;color:var(--muted)}
     return v;
   }
   // A confidential line is never echoed back, not even in the blocked view.
+  const violationView = x => "[" + x.rule + "] " + (x.section ? x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ": " : "") + String(x.detail).replace(/ \(.*\)$/, "").replace(/"[^"]*"/g, "\"…\"");
   const violationText = x => "[" + x.rule + "] " + (x.section ? x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ": " : "") + (x.text && x.rule !== "confidential" ? "\"" + x.text + "\" - " : "") + x.detail;
 
   function hudPrompt(ctx){
@@ -1416,12 +1424,13 @@ footer{font-size:12px;color:var(--muted)}
       if (!passed){
         // Blocked: nothing to copy, and no line text is stored, so a rejected line never reaches shared storage.
         $("hud-post").hidden = true; $("hud-copy").hidden = true; hudText = "";
-        $("hud-ev-body").innerHTML = '<div class="evsec">Why it was blocked</div>' + violations.map(x => '<div class="evrow"><b>' + esc(x.rule) + '</b><span>' + esc(violationText(x)) + '</span></div>').join("");
+        $("hud-ev-body").innerHTML = '<div class="evsec">Why it was blocked</div>' + violations.map(x => '<div class="evrow"><b>' + esc(x.rule) + '</b><span>' + esc(violationView(x)) + '</span></div>').join("");
         $("hud-ev").hidden = false; $("hud-ev").open = true;
         try { if (db) await db.doc("huddle_drafts/" + id).set({draftedAt: now.toISOString(), day: ymd(now), blocked: true, attempts: attempt, violations: violations.map(x => ({rule: x.rule, section: x.section, index: x.index})), gaps}); } catch(e){}
         hudStatus("Blocked: " + violations.length + " rule failure" + (violations.length === 1 ? "" : "s") + " after " + attempt + " drafts. Nothing to copy. Draft again, or write it yourself.", true);
         return;
       }
+      d.reportHeading = [HEAD_DAILY, HEAD_GAP].find(h => h === hudNorm(d.reportHeading));
       // A withheld line of his never reaches the page or storage, not even under "Left out".
       d.dropped = d.dropped.map(x => /^withheld:/i.test(hudNorm(x.why)) ? {text: "(withheld)", why: "withheld: confidential detail"} : x);
       renderHuddle(d);
