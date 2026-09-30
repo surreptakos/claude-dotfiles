@@ -41,7 +41,8 @@ function shell(name) {
     skip: exe ? false : `no ${name}: not on PATH and no Git for Windows bin/${name}.exe`,
     run(args, opts) {
       const r = spawnSync(exe, args, opts);
-      if (r.error) throw new Error(`${exe} ${args.join(' ')} did not start: ${r.error.message}`);
+      // EPIPE with an exit status: the child ran and exited without reading `input`.
+      if (r.error && !(r.error.code === 'EPIPE' && r.status !== null)) throw new Error(`${exe} ${args.join(' ')} did not start: ${r.error.message}`);
       return r;
     },
   };
