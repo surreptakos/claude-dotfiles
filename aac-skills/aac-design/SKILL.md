@@ -2,15 +2,17 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-09-30T17:29:41Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "a6c7f15e3ff5"
+  modified: "2026-09-30T18:17:47Z"
+  previous-modified: "2026-09-30T17:29:41Z"
+  revision: "2"
+  content-sha: "f624e77f206e"
 ---
 
 # AAC design
 
-Every deliverable is judged by what it looks like rendered, and it ships only with a passing **critique stamp**. The design gate hook enforces this:
+Every deliverable is judged by what it looks like rendered, and it ships only with a passing **critique stamp**.
+
+**The gate hook is NOT wired yet (2026-09-30).** `hooks/hooks.fragment.json` is not merged into the plugin's hooks, because run plugin-wide it blocks ordinary code work: the linter reports 1 and 23 errors on two `.html` source files in a code repository. It gets wired once it fires only inside an opted-in folder (surreptakos/claude-dotfiles#1082). Until then nothing enforces the steps below: run the linter, the critique and the scorer yourself, and say in the reply which files shipped without a stamp. When wired, the hook works as follows:
 
 - **After every write** it lints the `.docx`, `.pptx` or `.html` file just written.
 - **At every Stop** it refuses to end the turn while any deliverable changed this turn still has a design error, or has no stamp matching its current bytes.
