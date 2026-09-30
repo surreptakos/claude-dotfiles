@@ -22,12 +22,16 @@ function element(id){
 const text = v => ({content: [{type: "text", text: JSON.stringify(v)}]});
 const ymd = d => d.toISOString().slice(0, 10);
 
-function buildPage({tasks, lastPostHtml, onPrompt}){
+function buildPage({tasks, lastPostHtml, onPrompt, triage = [], todoist = () => undefined}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const prompts = [];
   const now = new Date();
+  const calls = [];
   const mcp = {async callTool(server, tool, input){
+    calls.push({server, tool, input});
+    const own = server === "Todoist" && todoist(tool, input);
+    if (own) return text(own);
     if (tool === "teams_list_channel_messages") return text([{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: lastPostHtml, messageType: "message"}]);
     if (tool === "find-tasks") return text({tasks: input.projectId === CURRENT_WORK ? tasks : [], hasMore: false});
     if (tool === "find-activity") return text({events: []});
@@ -38,7 +42,7 @@ function buildPage({tasks, lastPostHtml, onPrompt}){
   const store = {};
   const db = {
     doc(p){ return {set: async v => { store[p] = v; }, update: async v => { store[p] = Object.assign(store[p] || {}, v); }, onSnapshot(fn){ fn({exists: false, data: () => null}); }}; },
-    collection(){ return {onSnapshot(fn){ fn({docs: []}); }}; }
+    collection(name){ return {onSnapshot(fn){ fn({docs: name === "triage" ? triage.map(t => ({id: t._id, data: () => t})) : []}); }}; }
   };
   const sample = {async json(prompt){ prompts.push(prompt); return onPrompt(prompt); }};
   const ctx = {
@@ -49,7 +53,7 @@ function buildPage({tasks, lastPostHtml, onPrompt}){
   };
   vm.createContext(ctx);
   vm.runInContext(script, ctx);
-  return {$, prompts, store};
+  return {$, prompts, store, calls};
 }
 
 const lastPostHtml = "<p>Dan | 9/29/2026</p><p>Yesterday's report</p><ul><li>Sent the vendor the supplier documents for setup</li></ul>" +
@@ -115,4 +119,39 @@ test("a blockers answer in the wrong shape requires every overdue item (fails to
 test("no prompt the page sends calls a review confidential (Dan, 2026-09-30: the Mireya review audit belongs in the post)", () => {
   const offending = script.split(/\r?\n/).filter(l => /(confidential|reveal|CONF_DETAIL|NEVER IN THE POST|no pay)/i.test(l) && /\breviews?\b/i.test(l) && !/is fine|is not confidential|not confidential/i.test(l));
   assert.deepStrictEqual(offending, []);
+});
+
+// Issue 1074: update-tasks replaces the whole due string, so a do date sent that way wipes a recurring
+// task's repeat. The card reads the task first and moves a recurring one with reschedule-tasks, date only.
+async function rule(recurring, option){
+  const card = {_id: "q1", taskId: "t1", title: "Weekly vendor check", status: "open", options: [option]};
+  const page = buildPage({tasks: [], lastPostHtml, onPrompt: () => ({}), triage: [card], todoist(tool){
+    if (tool === "fetch-object") return {id: "t1", content: "Weekly vendor check", labels: ["do"], projectId: CURRENT_WORK, dueDate: "2026-10-05", recurring, priority: "p4"};
+    if (tool === "update-tasks" || tool === "reschedule-tasks") return {tasks: [{id: "t1"}], failures: []};
+  }});
+  await new Promise(r => setImmediate(r));
+  const row = {dataset: {id: "q1"}, querySelector: () => ({value: ""}), querySelectorAll: () => []};
+  await page.$("tri-body").fire("click", {target: {closest: sel => sel === "button[data-opt]" ? {dataset: {opt: "0"}, closest: () => row} : null}});
+  for (let i = 0; i < 20 && !page.store["triage/q1"]; i++) await new Promise(r => setImmediate(r));
+  return {writes: page.calls.filter(c => ["update-tasks", "reschedule-tasks"].includes(c.tool)), card: page.store["triage/q1"] || {}};
+}
+
+test("a do-date ruling on a recurring task goes through reschedule-tasks with a date, never a due string", async () => {
+  const {writes, card} = await rule("every monday", {label: "Look again Oct 7, hand to Lynne", dueString: "Oct 7", labels: ["to-lynne"]});
+  assert.strictEqual(card.status, "answered", card.error);
+  assert.deepStrictEqual(writes.map(c => c.tool), ["update-tasks", "reschedule-tasks"]);
+  assert.strictEqual(writes[0].input.tasks[0].dueString, undefined, "update-tasks would wipe the repeat");
+  assert.match(writes[1].input.tasks[0].date, /^\d{4}-10-07$/);
+});
+
+test("a do date the board cannot read as a date changes nothing on a recurring task", async () => {
+  const {writes, card} = await rule("every monday", {label: "No date", dueString: "no date"});
+  assert.deepStrictEqual(writes, []);
+  assert.match(card.error, /repeats/);
+});
+
+test("a do-date ruling on a non-recurring task still sends the due string through update-tasks", async () => {
+  const {writes, card} = await rule(false, {label: "Look again Oct 7", dueString: "Oct 7"});
+  assert.strictEqual(card.status, "answered", card.error);
+  assert.deepStrictEqual(writes.map(c => [c.tool, c.input.tasks[0].dueString]), [["update-tasks", "Oct 7"]]);
 });

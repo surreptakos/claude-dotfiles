@@ -790,11 +790,11 @@ class AskMattGateTests(unittest.TestCase):
             text=True, capture_output=True, env=env, check=False,
         )
 
-    def _appealed_turn(self, state_dir: Path, sid: str) -> str:
+    def _appealed_turn(self, state_dir: Path, sid: str, reason: str = "it asks for a design") -> str:
         turn = self._routed_turn(state_dir, sid, "what does the gate do?", self._canned(kind="question"))
         self.assertIn("appeal-claude", turn["context"])
         nonce = turn["state"]["nonce"]
-        done = self.run_appeal(sid, nonce, "grill-with-docs", "it asks for a design", state_dir)
+        done = self.run_appeal(sid, nonce, "grill-with-docs", reason, state_dir)
         self.assertEqual(done.returncode, 0, done.stderr)
         return nonce
 
@@ -832,6 +832,25 @@ class AskMattGateTests(unittest.TestCase):
             line = "Route appeal: grill-with-docs instead of direct-answer, because it asks for a design"
             accepted = self.run_presend_lint("s-line", f"{line}\n{body}", state_dir)
             self.assertEqual(accepted.returncode, 0, accepted.stdout)
+
+    def test_the_mandated_appeal_line_is_exempt_from_the_sentence_cap(self) -> None:
+        # Issue 1059: a long reason made the line the gate demands fail the 28-word sentence cap.
+        reason = ("the interview is finished and Dan confirmed it; the next step is publishing "
+                  "the spec, then tickets for every slice the spec names, in order")
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._appealed_turn(state_dir, "s-long", reason)
+            line = f"Route appeal: grill-with-docs instead of direct-answer, because {reason}"
+            self.assertGreater(len(line.split()), 28)
+            accepted = self.run_presend_lint(
+                "s-long", f"{line}\nGrill started.\nNext: answer question one.", state_dir
+            )
+            self.assertEqual(accepted.returncode, 0, accepted.stdout)
+            # The exemption covers that one line only: a long sentence after it is still refused.
+            long_tail = " ".join(["word"] * 30) + "."
+            refused = self.run_presend_lint("s-long", f"{line}\n{long_tail}", state_dir)
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn("over 28 words", refused.stdout)
 
     def test_appeals_off_in_the_settings_file_refuses_the_appeal(self) -> None:
         committed = json.loads((SCRIPT.parent / "route-gate.json").read_text(encoding="utf-8"))

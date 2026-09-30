@@ -1,5 +1,5 @@
 {
-  "_comment": "Merge into the aac-skills plugin hooks/hooks.json: append each group to its event array. The scripts stay in this skill; nothing is copied.",
+  "_comment": "tools/build-cloud-plugin.py appends each group to its event array in the aac-skills plugin hooks/hooks.json. The scripts stay in this skill; nothing is copied. designgate.py acts only inside a folder carrying the .aac-design marker file.",
   "PostToolUse": [
     {
       "matcher": "Write|Edit|MultiEdit",
