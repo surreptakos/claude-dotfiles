@@ -44,7 +44,10 @@
     "surreptakos/aac-bill-intake":        {},
     "surreptakos/zoho-source-of-truth":   {},
     "surreptakos/aac-sales-cockpit":      {},
-    "surreptakos/aac-contract-builder":   {}
+    "surreptakos/aac-contract-builder":   {},
+    "surreptakos/aac-performance-reviews": {},
+    "surreptakos/brazil-flights":         {},
+    "surreptakos/osh-rfp":                {}
   },
   "routines": {
     "self-sourcing-audit-local":{ "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },

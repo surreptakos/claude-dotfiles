@@ -251,9 +251,10 @@ launches anything; `-Force` skips the guards and launches the next repo regardle
 process is fully independent of the watchdog run. A pass that ends between slots leaves the window
 open for at most 10 minutes before the watchdog closes it.
 
-The repo table (slug, `owner/repo`, state issue, clone path) lives at the top of the script.
-Adding a repo means adding a row there, creating its state issue, and adding it to the registry in
-issue #44 — nothing else.
+The repos served are the rows flagged `served` in the shared repo list, `lib/repos.json` (issue
+1067), in their `priority` order; each carries its `master` name, `owner/repo`, state issue and clone
+path. Serving a repo means flagging its row there (with `master`, `stateIssue`, `priority`), creating
+its state issue, and adding it to the registry in issue #44 — nothing else.
 
 ### Install — two steps, on purpose
 

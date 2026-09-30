@@ -43,8 +43,9 @@
 
 const { execFileSync } = require('child_process');
 
-// Same order, slugs and issue numbers as $Repos in orchestrator/master-watchdog.ps1 and the
-// registry in claude-dotfiles issue #44. Keep the three in step.
+// Same order, slugs and issue numbers as the served rows of lib/repos.json (priority, master,
+// stateIssue; the watchdog reads them there) and the registry in claude-dotfiles issue #44.
+// Keep the three in step.
 const REPOS = [
   { slug: 'bill-intake',      repo: 'surreptakos/aac-bill-intake',      stateIssue: 74 },
   { slug: 'contract-builder', repo: 'surreptakos/aac-contract-builder', stateIssue: 75 },

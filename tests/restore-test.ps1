@@ -86,10 +86,11 @@ param(
     #   dead-caveman-hook  plants a hook entry naming a caveman binary at a path that does not
     #                exist -> check 6e1 (issue 825)
     #   caveman-overwrite  pull copies settings.json over a live one instead of merging -> check 9f (issue 826)
+    #   repo-list    the trust writer covers only four rows of the shared repo list -> check 6a2 (issue 1067)
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
                  'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree',
-                 'dead-caveman-hook', 'caveman-overwrite')]
+                 'dead-caveman-hook', 'caveman-overwrite', 'repo-list')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -369,6 +370,16 @@ foreach ($dirFault in @(@{ Name = 'hooks-dir'; Dir = 'hooks' }, @{ Name = 'tools
     [System.IO.File]::WriteAllText($cloneManifest, $text.Replace($anchor, $entry + $anchor))
     Note ('fault: the clone''s whitelist writes ~/.claude/{0} again' -f $dirFault.Dir)
 }
+if ($Fault -eq 'repo-list') {
+    # What the trust writer did before issue 1067: records for its own four-row copy of the
+    # repos, not for every row of the shared list.
+    $cloneTrust = Join-Path $Clone 'tools\settings-invariants.ps1'
+    $text = [System.IO.File]::ReadAllText($cloneTrust)
+    $anchor = '.Repos | ForEach-Object { $_.Path }'
+    if (-not $text.Contains($anchor)) { throw 'repo-list fault: the trust writer''s list read moved; update the anchor here' }
+    [System.IO.File]::WriteAllText($cloneTrust, $text.Replace($anchor, '.Repos | Select-Object -First 4 | ForEach-Object { $_.Path }'))
+    Note 'fault: the clone''s trust writer covers only four of the listed repos'
+}
 if ($Fault -eq 'skill-tree') {
     # What pull did before issue 734: the whole aac-skills/ tree written to ~/.claude/skills.
     $cloneManifest = Join-Path $Clone 'lib\manifest.ps1'
@@ -579,7 +590,7 @@ $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction Silently
                              $_.FullName -notlike '*\.claude\hook-state\*' -and
                              # Issue 199: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1
                              # -Trust, which lands (and if absent, seeds) ~/.claude.json with the
-                             # four master-watchdog trust records. Machine-local state Claude Code
+                             # shared repo list's trust records. Machine-local state Claude Code
                              # owns, deliberately outside the sync manifest, so it also stays out
                              # of the whitelist count. Its content is asserted separately below.
                              $_.FullName -ne (Join-Path $FakeHome '.claude.json') -and
@@ -852,8 +863,8 @@ Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the reg
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
 
 # The other half of AC1: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1 with -Trust,
-# which lands hasTrustDialogAccepted=true into ~/.claude.json for the four master-watchdog clone
-# paths under the pulled home. Combined with permissions.defaultMode=bypassPermissions above, a
+# which lands hasTrustDialogAccepted=true into ~/.claude.json for every clone path in the shared
+# repo list (lib/repos.json, issue 1067) under the pulled home. Combined with permissions.defaultMode=bypassPermissions above, a
 # fresh claude launch in one of those clones reaches first prompt with no permission dialog and
 # no folder-trust dialog. ~/.claude.json is not in the sync manifest (holds oauthAccount and
 # other machine-only state), so this is the only automated surface that lands trust records; a
@@ -861,16 +872,26 @@ Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the reg
 # paths without updating this check, fails here.
 Write-Host ''
 Write-Host '.claude.json trust records (issue 199)'
+# Issue 1067: the clone paths are the rows of the shared repo list, which the manifest has read
+# from the checkout (lib/repos.json) rather than restore into the home. Read it the way the trust
+# writer and the watchdog do, through the clone's own Read-RepoList.
+$repoList = $null
+$repoListError = ''
+try { $repoList = Read-RepoList -UserHome $FakeHome } catch { $repoListError = $_.Exception.Message }
+$listRows = @()
+if ($null -ne $repoList) { $listRows = @($repoList.Repos) }
+$outsideHome = @($listRows | Where-Object { -not $_.Path.StartsWith($FakeHome + '\') -or
+                                            ($_.Path -ne (Join-Path $FakeHome $_.RelativePath.Replace('/', '\'))) })
+Check ("the clone's shared repo list reads: anchor '{0}', {1} rows, each an absolute path under the fake home" -f
+       $(if ($repoList) { $repoList.Anchor } else { '' }), $listRows.Count) `
+    (($null -ne $repoList) -and $repoList.Anchor -and ($listRows.Count -gt 0) -and ($outsideHome.Count -eq 0) -and
+     (@($listRows | Where-Object { $_.Served }).Count -gt 0)) `
+    (@($repoListError) + @($outsideHome | ForEach-Object { $_.Path }))
 $stateFile = Join-Path $FakeHome '.claude.json'
 Check '.claude.json exists after pull (invariant tool seeds it)' (Test-Path $stateFile)
 if (Test-Path $stateFile) {
     $state = Get-Content $stateFile -Raw | ConvertFrom-Json
-    $expectedClones = @(
-        (Join-Path $FakeHome 'Claude\Projects\Financial\aac-bill-intake'),
-        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\contract-builder'),
-        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\aac-cockpit'),
-        (Join-Path $FakeHome 'Claude\Projects\Operations\zoho-source-of-truth')
-    )
+    $expectedClones = @($listRows | ForEach-Object { $_.Path })
     # $clone would clobber the script-scope $Clone (PowerShell variables are case-insensitive),
     # so use a distinctive loop name instead.
     $untrusted = @()
@@ -883,7 +904,8 @@ if (Test-Path $stateFile) {
             $untrusted += $clonePath
         }
     }
-    Check 'each of the four master-watchdog clone paths carries hasTrustDialogAccepted=true' ($untrusted.Count -eq 0) $untrusted
+    Check ("each of the {0} listed repos' clone paths carries hasTrustDialogAccepted=true" -f $expectedClones.Count) `
+        (($expectedClones.Count -gt 0) -and ($untrusted.Count -eq 0)) $untrusted
 }
 
 # ------------------------------------------------------------------ 6a. codex config.toml is usable
@@ -1299,18 +1321,20 @@ Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
 Check 'plugin-served session-check reports on a repo' $ran @($out | Select-Object -Last 10)
 
-# Issue 103: the account registry travels, parses, and names every repo the watchdog serves - the
-# repo list is read from the watchdog script itself so the two cannot drift apart unnoticed.
+# Issue 103: the account registry travels, parses, and names every repo in the shared repo list
+# (issue 1067: the watchdog's served rows come from that list, so they are covered too). The rows
+# are read through the clone's Read-RepoList, so the list and the registry cannot drift unnoticed.
 $accounts = Join-Path $FakeHome '.claude\accounts.json'
 $registry = $null
 try { $registry = Get-Content $accounts -Raw | ConvertFrom-Json } catch { }
-$watchdogRepos = @([regex]::Matches((Get-Content (Join-Path $Clone 'orchestrator\master-watchdog.ps1') -Raw), "Repo\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
-$unregistered = @($watchdogRepos | Where-Object { -not ($registry -and $registry.repos -and ($registry.repos.PSObject.Properties.Name -contains $_)) })
+$listedRepos = @()
+try { $listedRepos = @((Read-RepoList -UserHome $FakeHome).Repos | ForEach-Object { $_.Repo }) } catch { }
+$unregistered = @($listedRepos | Where-Object { -not ($registry -and $registry.repos -and ($registry.repos.PSObject.Properties.Name -contains $_)) })
 $accountsDetail = @($unregistered)
-if ($watchdogRepos.Count -eq 0) { $accountsDetail = @("no Repo = '<owner/repo>' rows found in orchestrator\master-watchdog.ps1 - the table format changed; update this regex") }
+if ($listedRepos.Count -eq 0) { $accountsDetail = @("the clone's shared repo list (lib\repos.json) did not read") }
 elseif ($null -eq $registry) { $accountsDetail = @("$accounts missing or not JSON") }
-Check ("restored accounts.json parses and names all {0} watchdog repos" -f $watchdogRepos.Count) `
-    ($null -ne $registry -and $watchdogRepos.Count -gt 0 -and $unregistered.Count -eq 0) $accountsDetail
+Check ("restored accounts.json parses and names all {0} listed repos" -f $listedRepos.Count) `
+    ($null -ne $registry -and $listedRepos.Count -gt 0 -and $unregistered.Count -eq 0) $accountsDetail
 
 $identityTest = Join-Path $Clone 'marketplace\aac-skills\skills\session-check\identity.test.js'
 if (Test-Path $identityTest) {

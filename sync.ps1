@@ -240,12 +240,12 @@ Invoke-RepoMemoryPointer -BackupRoot $backup
 # already carries them is enough on its own; running the enforcer against live here
 # belt-and-braces catches an older checkout or a partial pull.
 #
-# Also runs -Trust: writes hasTrustDialogAccepted=true into ~/.claude.json for the four
-# clone paths (bill-intake, contract-builder, sales-cockpit, zoho-source-of-truth).
+# Also runs -Trust: writes hasTrustDialogAccepted=true into ~/.claude.json for every clone path
+# in the shared repo list (lib/repos.json, issue 1067).
 # ~/.claude.json is deliberately outside the manifest (it holds oauthAccount and other
 # machine-only state), so trust records land per-machine here rather than travelling through
 # the repo. Combined with the bypassPermissions default in the restored settings, a fresh
-# claude launch in one of those four clones reaches first prompt with no permission dialog and
+# claude launch in one of those clones reaches first prompt with no permission dialog and
 # no folder-trust dialog (issue 199 AC1). The tool prints MISSING and returns cleanly if
 # ~/.claude.json has not been created yet (claude has never launched on this machine), which is
 # the correct behaviour for a first-ever install - launching claude once creates the file, and
