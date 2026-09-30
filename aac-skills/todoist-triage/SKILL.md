@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate."
 metadata:
-  modified: "2026-09-30T15:52:27Z"
-  previous-modified: "2026-09-25T23:15:16Z"
-  revision: "25"
-  content-sha: "9ae0e5aeb48a"
+  modified: "2026-09-30T16:13:51Z"
+  previous-modified: "2026-09-30T15:52:27Z"
+  revision: "26"
+  content-sha: "5ab3e8cbf1f7"
 ---
 
 # todoist-triage
@@ -87,7 +87,7 @@ One line per item: title, ball label, project (Current Work if this week, else b
 
 Propose a priority change only for a deadline inside 7 days at p2 or lower. Duplicates are merge proposals: survivor named, the duplicate's unique text quoted.
 
-**Agent sweep.** Then sweep every open `do` task with no other question this run for work an agent could do, per [`agent-sweep.md`](agent-sweep.md). Each candidate is a question for Dan, never a write.
+**Agent sweep.** Then sweep every open task in Current Work, the backlog and the Inbox, whatever its ball, for work an agent could do, per [`agent-sweep.md`](agent-sweep.md). Each candidate is a question for Dan, never a write.
 
 Then give every line a tier (step 4). A tier-1 line names its kind and its proof in one clause — the message read to its last message, the prior ruling, or the system row that contradicts the premise. A line whose proof takes more than one clause is tier 2.
 
