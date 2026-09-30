@@ -1057,22 +1057,21 @@ footer{font-size:12px;color:var(--muted)}
   const ACTIVITY_RX = /\b(had a meeting|met with|meeting with|reviewed|worked on|working on|looked (at|into)|discussed|attended|checked|touched base|caught up|went through|started on)\b/i;
   const CONSEQUENCE_RX = /\b(so|until|unless|can'?t|cannot|won'?t|delay(s|ed)?|slip(s|ping)?|block(s|ed|ing)?|stuck|means|at risk|if|without|moves? back|need(s|ed)?)\b/i;
   const GENERIC_RX = /\b(interruption|traffic|emergenc|meetings? (getting |got |being )?cancel)/i;
-  // Confidential for a team post. Deliberately wide: a false alarm costs a redraft, a miss leaks a person's detail.
+  // Confidential for a team post: money amounts, pay, health and leave detail, discipline, identity numbers.
+  // Not confidential (Dan, 2026-09-30, "where's the review audit for Mireya? ExcalTech?"): that a review or an
+  // audit is on someone's plate, and ticket, quote, invoice or order numbers. Those are the work itself.
   const CONFIDENTIAL_RX = [
-    // money: any currency sign or code, "1.5k", "15,000", "15000", "45/hr", "5%", spelled-out amounts
-    /[$€£]\s?\d|\b(usd|eur|gbp)\s?\d|\b\d[\d,]*(\.\d+)?\s?(k|m|dollars?|usd|eur|gbp|bucks|grand)\b|\b\d{1,3}(,\d{3})+(\.\d+)?\b|\b(?!(19|20)\d\d\b)\d{4,}\b|\d\s?%|\d\s?\/\s?(hr|hour|h)\b|\bper hour\b|\b(hundred|thousand|million|grand)\b/i,
+    // money: currency signs and codes, "1.5k", "15,000", "45/hr", "5%", bare 4+ digit amounts that are not a
+    // year and not a numbered document (quote #013157, invoice RE355989, PO 4411, ticket 12345)
+    /[$€£]\s?\d|\b(usd|eur|gbp)\s?\d|\b\d[\d,]*(\.\d+)?\s?(k|m|dollars?|usd|eur|gbp|bucks|grand)\b|\b\d{1,3}(,\d{3})+(\.\d+)?\b|(?<!(#|\b(quote|invoice|inv|po|ticket|order|job|wo|case|number|no\.?|ref|rev|id)\s?#?\s?)\s*)\b(?!(19|20)\d\d\b)\d{4,}\b(?![-\/]\d)|\b\d+\.\d\d\b|\d\s?%|\d\s?\/\s?(hr|hour|h)\b|\bper hour\b|\b(hundred|thousand|million|grand)\b/i,
     // pay
-    /\b(bonus(es)?|salar(y|ies|ied)|raises?|wages?|pay|payroll|paycheck|hourly|compensation|comp plan|stipends?|severance|commission|promotion|demot\w*|bump|increase|offer letter|equity)\b/i,
-    // reviews, discipline, departures, HR
-    /\breviews?\b|apprais|\bPIP\b|\bwrite-?ups?\b|disciplin|terminat|\bfired\b|\blet go\b|\blaid off\b|\blayoffs?\b|\bprobation|\bwarning\b|harass|\bHR\b|resign|\bquit(s|ting)?\b|\bgrievance/i,
+    /\b(bonus(es)?|salar(y|ies|ied)|raises?|raised (his|her|their)|wages?|payroll|paychecks?|paycheques?|hourly rate|compensation|comp plan|stipends?|severance|commission rate|promotion|demot\w*|pay (rate|band|increase|raise|cut|grade)s?|payout|cost of living|COLA|percent)\b/i,
+    // discipline and departures
+    /\bPIP\b|\bperformance (plan|issues?)\b|\bwrite-?ups?\b|\bwritten up\b|disciplin|terminat|\bfired\b|\bfiring\b|\blet(ting)? \w+ go\b|\blaid off\b|\blayoffs?\b|\bprobation|\bwarning letter\b|reprimand|misconduct|harass|resign|\bgrievance|suspen(ded|sion)|dismiss(ed|al)|\btwo weeks'? notice\b|\blast day\b/i,
     // health, family and leave
-    /\b(sick|flu|covid|ill|illness|FMLA|leave|PTO|vacation|funeral|baby|doctor|surgery|hospital|cancer|chemo|therapy|a procedure|mental health|health (issue|problem|condition|reason)s?)\b|\b(medical|medicat|pregnan|diagnos|injur|disabilit|maternity|paternity|bereave)/i,
-    // rates, adjustments and departures said in words
-    /\b(percent|an hour|a year|per (year|month|week)|payout|cost of living|COLA|evaluation|performance plan|suspen\w*|dismiss\w*|written up|last day|two weeks|notice period|time off|day off|days off|out of office for|migraine|passed away|died|death|diabetes|rehab|anxiety|depress\w*|dentist|appointment|passport|employee id|badge number)\b|\blet(ting)? \w+ go\b|\b(ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\s?k\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|fifty)\s+(dollars|bucks|percent)\b/i,
-    // more health, pay, HR, leave and tax words; every long number and every decimal amount
-    /\b(sickness|unwell|asthma|therap\w*|surgeon|raised|paid|paycheque|firing|reprimand\w*|misconduct|performance issues?|coaching|sabbatical|OOO|jury duty|EIN|W-?2|W-?4|1099|I-?9|dollars?|bucks|cents)\b|\d{4,}|\d+\.\d+/i,
-    // identity
-    /\b(SSN|social security|date of birth|DOB|driver'?s licen[cs]e|bank account|routing number)\b/i
+    /\b(sick|sickness|flu|covid|ill|illness|unwell|FMLA|leave|PTO|vacation|time off|days? off|sabbatical|OOO|jury duty|funeral|baby|doctor|dentist|surgeon|surgery|hospital|cancer|chemo|therap\w*|asthma|diabetes|migraine|anxiety|depress\w*|rehab|passed away|died|death|a procedure|mental health|health (issue|problem|condition|reason)s?)\b|\b(medical|medicat|pregnan|diagnos|injur|disabilit|maternity|paternity|bereave)/i,
+    // identity and tax
+    /\b(SSN|social security|date of birth|DOB|driver'?s licen[cs]e|bank account|routing number|passport|employee id|EIN|W-?2|W-?4|1099|I-?9)\b/i
   ];
   const hudNorm = s => String(s == null ? "" : s).normalize("NFKC").replace(/[\u200B\u200C\u200D\u200E\u200F\u2060\uFEFF\u00AD\u034F]/g, "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
   // Plain text only: lookalike letters, zero-width characters and markup cannot slip a word past the patterns.
@@ -1396,7 +1395,7 @@ footer{font-size:12px;color:var(--muted)}
     }));
     // Rule 1: more than three focus lines keeps his carried lines first, then the draft's new ones.
     if (d.focus.length > 3){
-      const keep = d.focus.filter(it => tagOfEvidence(it.evidence) === "kept").concat(d.focus.filter(it => tagOfEvidence(it.evidence) !== "kept")).slice(0, 3);
+      const keep = d.focus.slice(0, 3);
       d.focus.filter(it => !keep.includes(it)).forEach(it => { if (tagOfEvidence(it.evidence) === "kept") d.dropped.push({text: it.text, why: "trimmed: top 1-3 only"}); });
       d.focus = keep;
     }
@@ -1445,6 +1444,53 @@ footer{font-size:12px;color:var(--muted)}
     drops.sort((a, b) => b.index - a.index).forEach(t => d[t.section].splice(t.index, 1));
     return d;
   }
+  // ---------- COVERAGE (Dan, 2026-09-30: "where's the review audit for Mireya? Excaltech, call dominic, docusign?") ----------
+  // The rules gate checks the shape of each line; this checks the post says what is on his plate. Every Current
+  // Work task of his that is overdue, due today, or has a deadline inside 7 days must be named by some line.
+  const COVER_STOP = new Set("the and for with from that this your have will into about decide review send sign call back make sure need needs task tasks today week".split(" "));
+  const coverWords = s => [...new Set(hudNorm(s).toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 4 && !COVER_STOP.has(w)))];
+  // A task is covered when a line shares two of its distinctive words, or all of them when it has fewer.
+  function isCovered(task, d){
+    const want = coverWords(task);
+    if (!want.length) return true;
+    return LINE_SECTIONS.some(k => d[k].some(it => {
+      const have = new Set(coverWords(it.text));
+      const n = want.filter(w => have.has(w)).length;
+      return n >= Math.min(2, want.length);
+    }));
+  }
+  const uncovered = (d, mustCover) => (mustCover || []).filter(t => !isCovered(t, d));
+  function coverPrompt(d, missing, ctx){
+    return [
+      "Dan Gatsakos's huddle post leaves out work that is overdue or due now. Write one line for each item below, and nothing else.",
+      "",
+      "DAN'S RULES, WORD FOR WORD:",
+      DAN_RULES.join("\n"),
+      "",
+      "HOW: an item Dan does today goes to focus while focus has fewer than 3 lines (focus now has " + d.focus.length + "); every other item is a risk that names who is waiting or what slips (rule 3).",
+      "Plain text, no longer than " + ctx.maxLen + " characters, and no pay, money amount, health, leave, discipline or identity detail. Naming a review or an audit, a quote, invoice or ticket number is fine.",
+      "Evidence starts \"new: \" and names the task.",
+      "",
+      "CURRENT POST:",
+      JSON.stringify({focus: d.focus.map(x => x.text), risks: d.risks.map(x => x.text)}),
+      "",
+      "ITEMS TO ADD:",
+      JSON.stringify(missing),
+      "",
+      'Reply with only JSON: {"add": [{"section": "focus" or "risks", "text": string, "evidence": string}]}'
+    ].join("\n");
+  }
+  function applyAdds(d0, res){
+    const d = clone(d0);
+    (res && Array.isArray(res.add) ? res.add : []).forEach(a => {
+      if (!a || !["focus", "risks"].includes(a.section) || typeof a.text !== "string" || typeof a.evidence !== "string") return;
+      const section = a.section === "focus" && d.focus.length >= 3 ? "risks" : a.section;
+      if (section === "risks") d.risks = d.risks.filter(x => hudNorm(x.text) !== "None today.");
+      d[section].push({text: a.text, evidence: /^new/i.test(hudNorm(a.evidence)) ? a.evidence : "new: " + a.evidence});
+    });
+    return d;
+  }
+
   // Violations point at lines by content, not position, so removing one line never re-aims a fix at another.
   const lineKey = (section, it) => section + "|" + hudNorm(it && it.text) + "|" + hudNorm(it && it.evidence);
   const keyed = (d, v) => v.map(x => LINE_SECTIONS.includes(x.section) && x.index >= 0 && d[x.section][x.index] ? Object.assign({}, x, {key: lineKey(x.section, d[x.section][x.index])}) : x);
@@ -1484,8 +1530,16 @@ footer{font-size:12px;color:var(--muted)}
     };
     const drop = v => { const n = lineCount(d); d = autoFix(removeFailing(d, v), last, now); removed += Math.max(0, n - lineCount(d)); };
     let v = await check();
-    while (v.length && !v.some(FATAL) && rounds < HUD_REPAIR_ROUNDS){
+    while ((v.length || uncovered(d, ctx.mustCover).length) && !v.some(FATAL) && rounds < HUD_REPAIR_ROUNDS){
       rounds++;
+      const missing = uncovered(d, ctx.mustCover);
+      if (missing.length){
+        onStatus && onStatus("Adding " + missing.length + " missing item" + (missing.length === 1 ? "" : "s") + " (round " + rounds + " of " + HUD_REPAIR_ROUNDS + ")…");
+        let res = null;
+        try { res = await ask(coverPrompt(d, missing, ctx)); } catch(e){ if (e && e.code === "cancelled") throw e; }
+        d = autoFix(applyAdds(d, res), last, now);
+        v = await check();
+      }
       // Code-decidable failures (confidential, generic, re-reported, paraphrased) are removed, never reworded.
       drop(v.filter(x => !REWRITE_RULES.has(x.rule)));
       const rewrite = locate(d, v.filter(x => REWRITE_RULES.has(x.rule)));
@@ -1501,7 +1555,7 @@ footer{font-size:12px;color:var(--muted)}
       v = await check();
     }
     if (v.length && !v.some(FATAL)){ drop(v); v = await check(); }
-    return {d, passed: !v.length, violations: v, rounds, removed};
+    return {d, passed: !v.length, violations: v, rounds, removed, missing: uncovered(d, ctx.mustCover)};
   }
 
   function hudPrompt(ctx){
@@ -1551,6 +1605,9 @@ footer{font-size:12px;color:var(--muted)}
       "",
       "BOARD RULINGS SINCE (triage answers with his reason, and asks he marked replied):",
       JSON.stringify(ctx.board || {rulings:[], replied:[]}).slice(0, 8000),
+      "",
+      "MUST APPEAR (overdue, due today or deadline within 7 days; each one named by a focus line, a risk line, or a report line if done):",
+      JSON.stringify(ctx.mustCover || []),
       "",
       "CURRENT WORK TASKS (the only task source for focus):",
       JSON.stringify(cw).slice(0, 8000),
@@ -1615,9 +1672,13 @@ footer{font-size:12px;color:var(--muted)}
       // code checks and the independent judge both pass every line that is left.
       hudStatus("Drafting… (20–60 seconds)");
       const ask = p => sample.json(p, {signal: hudCtl.signal, cache: false});
-      const first = await ask(hudPrompt({last, done, sent, notes, board, gaps}));
+      const first = await ask(hudPrompt({last, done, sent, notes, board, gaps, mustCover}));
       const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
-      const repairCtx = {maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
+      const todayKey = ymd(new Date()), weekOut = ymd(new Date(Date.now() + 7 * 86400000));
+      const dueNow = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK && (t.labels || []).includes("do")
+        && ((t.dueDate && String(t.dueDate).slice(0, 10) <= todayKey) || (t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut))).map(t => t.content);
+      const mustCover = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - mustCover.length;
+      const repairCtx = {mustCover, maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
         evidence: JSON.stringify({completed: done, sent, meetingNotes: notes, boardRulings: board})};
       const result = await gateLoop(first, last, new Date(), ask, repairCtx, hudStatus);
       let d = result.d, violations = result.violations;
@@ -1655,7 +1716,8 @@ footer{font-size:12px;color:var(--muted)}
         });
         saved = " Saved for review.";
       } catch(e){ saved = " Not saved for review (" + ((e && e.code) || "failed") + ")."; saveFailed = true; }
-      hudStatus("Passed every rule" + (result.rounds ? " after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") : "") + (result.removed ? "; " + result.removed + " line" + (result.removed === 1 ? "" : "s") + " removed that could not pass" : "") + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + saved, gaps.length > 0 || saveFailed);
+      const notes2 = (result.missing.length ? " Still missing: " + result.missing.join("; ") + "." : "") + (leftOutConfidential ? " " + leftOutConfidential + " confidential task" + (leftOutConfidential === 1 ? "" : "s") + " left out." : "");
+      hudStatus("Passed every rule" + (result.rounds ? " after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") : "") + (result.removed ? "; " + result.removed + " line" + (result.removed === 1 ? "" : "s") + " removed that could not pass" : "") + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + notes2 + saved, gaps.length > 0 || saveFailed || result.missing.length > 0);
     } catch(e){
       if (e && e.code === "cancelled"){ hudStatus("Stopped."); }
       else hudStatus(SAMPLE_COPY[e && e.code] || ("Draft failed: " + ((e && (e.code || e.message)) || "unknown") + ". Try again."), true);

@@ -13,7 +13,7 @@ const pad = n => String(n).padStart(2, "0");
 const ymd = d => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
 const clip = (s, n) => { s = String(s || ""); return s.length > n ? s.slice(0, n) + "..." : s; };
 const G = new Function("ymd", "clip", src.slice(from, to) +
-  "; return {huddleGate, judgeLines, judgeViolations, autoFix, gateLoop, repairPrompt, parseLastPost, expectedHeading, isConfidential, violationView};")(ymd, clip);
+  "; return {huddleGate, judgeLines, judgeViolations, autoFix, gateLoop, repairPrompt, parseLastPost, expectedHeading, isConfidential, violationView, uncovered, isCovered};")(ymd, clip);
 
 const now = new Date(2026, 8, 30, 10, 0, 0);                       // a Wednesday
 const lastPost = {at: new Date(2026, 8, 29, 9, 0, 0), text: [
@@ -129,4 +129,44 @@ test("a repair that sneaks in a confidential detail is caught and removed", asyn
 test("the blocked view never shows a line", () => {
   const out = G.violationView({rule: "paraphrase", section: "focus", index: 0, text: "Sent the manager the bonus form", detail: "rewords \"Sent the manager the bonus form\""});
   assert(!/bonus|manager/.test(out), out);
+});
+
+test("confidential means amounts, pay, health, leave, discipline, identity - not reviews or document numbers", () => {
+  ["Sent the manager the $1,500 bonus form", "Crew lead is out sick", "Approved 15000 for the tech", "Decided the tech's raise", "Sent the SSN list", "Tech on leave until Monday"]
+    .forEach(t => assert(G.isConfidential(t), "should block: " + t));
+  ["Audit the revised annual review for the tech", "Approve or decline vendor Quote #013157 (battery backup)", "Recover the overpayment on invoice RE355989",
+   "Sign the fuel-cell unit swap DocuSign", "Review audit for the tech is overdue, so the manager's review cannot go out", "Sent the 2026 bid"]
+    .forEach(t => assert(!G.isConfidential(t), "should allow: " + t));
+});
+
+test("every overdue item must be named; missing ones are added by a targeted call, not a redraft", async () => {
+  const mustCover = ["Approve or decline vendor Quote #013157 (battery backup, second unit)", "Decide on the customer's reduction request and call him back"];
+  const d0 = draft();
+  let coverCalls = 0;
+  const ask = async prompt => {
+    if (prompt.startsWith("You are a strict compliance judge")){
+      const lines = JSON.parse(prompt.split("LINES TO JUDGE (kept:true means a line of his own, carried word for word or dropped):\n")[1].split("\n")[0]);
+      return judgeAll()(lines);
+    }
+    if (prompt.includes("ITEMS TO ADD:")){
+      coverCalls++;
+      return {add: [{section: "risks", text: "Vendor quote #013157 undecided, so the second unit waits", evidence: "new: task quote"},
+                    {section: "risks", text: "Customer reduction request unanswered, so the account call slips", evidence: "new: task call back"}]};
+    }
+    throw new Error("no repair expected");
+  };
+  assert.strictEqual(G.uncovered(d0, mustCover).length, 2);
+  const r = await G.gateLoop(d0, lastPost, now, ask, Object.assign({}, ctx, {mustCover, maxLen: 104}));
+  assert.strictEqual(r.passed, true, JSON.stringify(r.violations));
+  assert.strictEqual(coverCalls, 1);
+  assert.deepStrictEqual(r.missing, []);
+  assert.deepStrictEqual(r.d.report, d0.report, "report untouched");
+  assert.deepStrictEqual(r.d.focus, d0.focus, "focus untouched");
+});
+
+test("an item still missing after the last round is reported, not silently dropped", async () => {
+  const mustCover = ["Decide on the customer's reduction request and call him back"];
+  const {ask} = mockClaude(judgeAll(), () => ({fixes: []}));
+  const r = await G.gateLoop(draft(), lastPost, now, async p => p.includes("ITEMS TO ADD:") ? {add: []} : ask(p), Object.assign({}, ctx, {mustCover}));
+  assert.deepStrictEqual(r.missing, mustCover);
 });
