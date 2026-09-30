@@ -1483,6 +1483,27 @@ footer{font-size:12px;color:var(--muted)}
       'Reply with only JSON: {"add": [{"section": "focus" or "risks", "text": string, "evidence": string}]}'
     ].join("\n");
   }
+  // Which overdue items hold another person up (Dan, 2026-09-30, option 1: top 3 in focus, the rest only when
+  // they block someone). A typed yes/no per task; a missing or malformed answer counts as "blocks", so the
+  // check fails toward naming the item, never toward hiding it.
+  function blockersPrompt(tasks){
+    return [
+      "For each of Dan Gatsakos's overdue work tasks, answer one question: is another person (a direct report, a coworker, a customer or a vendor) waiting on Dan to act before they can move?",
+      "Answer from the task text alone. When in doubt, answer true.",
+      "",
+      "TASKS:",
+      JSON.stringify(tasks.map((task, index) => ({index, task}))),
+      "",
+      'Reply with only JSON: {"items": [{"index": number, "blocks": boolean, "who": string}]}'
+    ].join("\n");
+  }
+  function blockingTasks(tasks, res){
+    const items = res && Array.isArray(res.items) ? res.items : null;
+    return tasks.filter((t, index) => {
+      const hits = items ? items.filter(x => x && x.index === index) : [];
+      return hits.length !== 1 || typeof hits[0].blocks !== "boolean" || hits[0].blocks;
+    });
+  }
   function applyAdds(d0, res){
     const d = clone(d0);
     (res && Array.isArray(res.add) ? res.add : []).forEach(a => {
@@ -1609,7 +1630,7 @@ footer{font-size:12px;color:var(--muted)}
       "BOARD RULINGS SINCE (triage answers with his reason, and asks he marked replied):",
       JSON.stringify(ctx.board || {rulings:[], replied:[]}).slice(0, 8000),
       "",
-      "MUST APPEAR (overdue, due today or deadline within 7 days; each one named by a focus line, a risk line, or a report line if done):",
+      "MUST APPEAR (deadline within 7 days, or overdue and holding someone up; each one named by a focus line, a risk line that says who is waiting, or a report line if done). Other overdue tasks appear only if they are among the top 3 focus items:",
       JSON.stringify(ctx.mustCover || []),
       "",
       "CURRENT WORK TASKS (the only task source for focus):",
@@ -1678,7 +1699,16 @@ footer{font-size:12px;color:var(--muted)}
       const todayKey = ymd(new Date()), weekOut = ymd(new Date(Date.now() + 7 * 86400000));
       const dueNow = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK && (t.labels || []).includes("do")
         && ((t.dueDate && String(t.dueDate).slice(0, 10) <= todayKey) || (t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut))).map(t => t.content);
-      const mustCover = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - mustCover.length;
+      const hasDeadline = new Set(lastTasks.filter(t => t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut).map(t => t.content));
+      const candidates = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - candidates.length;
+      // Rule 1 keeps focus to three and the post is not a task dump (Dan, 2026-09-30, option 1): beyond the
+      // deadlines, only overdue items that hold someone up must appear.
+      hudStatus("Sorting which overdue items hold someone up…");
+      const overdueOnly = candidates.filter(t => !hasDeadline.has(t));
+      let blockRes = null;
+      if (overdueOnly.length){ try { blockRes = await ask(blockersPrompt(overdueOnly)); } catch(e){ if (e && e.code === "cancelled") throw e; } }
+      const mustCover = candidates.filter(t => hasDeadline.has(t)).concat(blockingTasks(overdueOnly, blockRes));
+      hudStatus("Drafting… (20–60 seconds)");
       const first = await ask(hudPrompt({last, done, sent, notes, board, gaps, mustCover}));
       const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
       const repairCtx = {mustCover, maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
