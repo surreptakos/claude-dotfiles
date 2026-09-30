@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: '2026-09-30T22:13:31Z'
-  previous-modified: '2026-09-30T20:10:38Z'
+  modified: '2026-09-30T22:23:11Z'
+  previous-modified: '2026-09-30T21:51:31Z'
   revision: '4'
-  content-sha: dc3c9c3ffd68
+  content-sha: 6669b16fa3e4
 ---
 
 # AAC design
@@ -38,7 +38,7 @@ Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only t
 
 ## Steps
 
-1. **Load the standards.** Load `aac-house-writing-standard` and read CORE, LAYOUT, CONTROL and DRAFT-QUALITY. It governs every word on the deliverable. Until `assets/AAC-WR-001-amendment-forms.md` is adopted, its form clauses are the approved exceptions to Rules 43, 77, 85, 98 and 99. Done when those four files are read this session.
+1. **Load the standards.** Load `aac-house-writing-standard` and read CORE, LAYOUT, CONTROL and DRAFT-QUALITY. It governs every word on the deliverable. AAC-WR-001 v0.11 carries the fill-in form clauses in Rules 43, 77, 85, 98 and 99; `assets/AAC-WR-001-amendment-forms.md` is the record of that amendment. Done when those four files are read this session.
 
 2. **Inventory the content.** List every section, field and sentence with its source. Tag each one:
    - *keep*;

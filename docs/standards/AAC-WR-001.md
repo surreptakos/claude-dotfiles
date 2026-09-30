@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.10 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.11 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.10 |
+| **Version** | 0.11 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -41,6 +41,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
 | 0.9 | 2026-09-22 | Rule 161 scoped to responses and messages to people, not prose deliverables: Rule 161; Appendix F. | Pending |
 | 0.10 | 2026-09-26 | Machine-vocabulary word list: Rule 167. Straight-quote mandate rejected: Appendix F. | Pending |
+| 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 
 # How to use this standard
 
@@ -398,6 +399,8 @@ The agreement signed April 15, 2026, remains in effect.
 
 Avoid numeric dates in narrative documents because formats can be misread. Use numeric dates in forms, space-constrained tables, software fields, file names, and system exports. Use **YYYY-MM-DD** where a machine-sortable date is useful.
 
+On a form that a person fills in by hand, write dates as MM/DD/YYYY. State the format once in the form's instructions, or in the field label when the form has one date field.
+
 ## 44. Time
 
 Use figures: **8 a.m., 8:30 a.m., 3 p.m., 3:15 p.m.** Use lowercase **a.m.** and **p.m.** with periods in formal prose. Do not use unnecessary zeros. Use **noon** and **midnight** when clearer than 12 a.m. or 12 p.m.
@@ -572,6 +575,8 @@ Use one font family throughout a routine business document unless another font h
 
 Use an alternate font only when an approved template specifies it. A software default does not override this standard.
 
+On a fill-in form, field labels and statements printed inside a write cell are 9 pt, the source-note size. Written values, instructions and terms are at least 10 pt. Name the font on the text and in the document defaults; a font left only to the document theme falls back to Times New Roman in previews that do not read themes.
+
 ## 78. Text color
 
 Use black or near-black for body text. Approved company brand colors may be used for titles, headings, rules, table headers, and limited visual emphasis. Do not use color as the only way to communicate meaning. Documents must remain understandable when printed in grayscale.
@@ -609,6 +614,8 @@ Use bold for headings, important labels, and limited emphasis. Use italics for p
 Insert an actual page break when a new page is required; do not use repeated hard returns. Enable widow/orphan control so a paragraph split across pages leaves at least two lines on each page. Keep a heading with the following paragraph and a table caption with the first table row. A short paragraph or list may be kept together when doing so does not create a large gap.
 
 Do not leave a closing or signature block alone on a continuation page. Move at least two lines of the final body paragraph with it, or adjust the preceding layout without reducing legibility. Inspect every page after pagination changes; a clean first page does not establish that later pages are correct.
+
+A form longer than one page repeats its name and its identity fields (such as the employee or account) at the top of every continuation page, and keeps each signature block together with the statement it signs.
 
 ## 86. Headers and footers
 
@@ -680,9 +687,13 @@ Use adequate cell padding, intentional alignment, and limited borders. A distinc
 
 Fit the table to the usable page width. Wrap text or adjust column widths first. For a table that remains too wide, use a landscape section, split it at a logical boundary with repeated identifiers, or move it to an appendix. Do not shrink table text below 9 pt to force a fit. Preserve the relationships among data when splitting a table.
 
+Fill-in forms are the exception to limited borders. When a label sits inside the cell it names, the cell carries all four borders, and neighboring cells share them in one joined grid per section. A label without its box floats and reads as stray text. Do not use a typed line of _ characters or open space as write space. Data tables keep the limited-border treatment above.
+
 ## 99. Empty and zero values
 
 Distinguish among 0 for a measured or confirmed zero, N/A for not applicable, Unknown when information should exist but is not known, and Unlogged when activity or a value was not recorded. Use a dash for not applicable only when the table defines that convention. Do not leave an unexplained blank in a completed data table. Empty response or signature fields are permitted in an uncompleted form.
+
+On a form, a person marks a field that does not apply by writing N/A and initialing it. A blank field on a completed form means the entry is missing, not that it does not apply.
 
 # Part XII - Email
 
@@ -1270,6 +1281,7 @@ Table F1. House decision register
 | 161 | Consistent naming binding in responses and messages to people (email, Teams, review feedback); free in prose deliverables (reports, proposals, scopes, procedures). | Owner ruling, September 22, 2026, issue 627, superseding a September 21, 2026 draft ruling that split the rule by document type instead. `blader/humanizer` 3.0.0 dropped its equivalent pattern as an AI tell; Rule 161 answers a different question (precision, not machine detection), so the rule stands but is scoped to correspondence. | 0.9 |
 | 167 | Machine-vocabulary word list adopted across the board, not scoped to one document class. Beacon, harness, gate, and robust stay exempt when literal. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Lists compared: `petergyang/no-ai-slop` and `blader/humanizer`. Checked by the stop-slop detector, issue 620. | 0.10 |
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
+| 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
 
 # Appendix G - Phrase register
 

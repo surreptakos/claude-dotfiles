@@ -2,11 +2,11 @@
 name: aac-house-writing-standard
 description: 'AAC-WR-001, the controlled copy of AAC''s house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit.'
 metadata:
-  standard-version: '0.10'
-  modified: '2026-09-30T20:20:49Z'
-  previous-modified: '2026-09-29T21:09:31Z'
-  revision: '17'
-  content-sha: 07bbbc5e9afe
+  standard-version: '0.11'
+  modified: '2026-09-30T22:23:25Z'
+  previous-modified: '2026-09-30T21:51:31Z'
+  revision: '18'
+  content-sha: 089bde04833c
 ---
 
 # AAC house writing standard

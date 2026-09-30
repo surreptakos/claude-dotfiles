@@ -41,7 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.10";
+const STANDARD_VERSION = "0.11";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
@@ -111,7 +111,7 @@ const PHRASE_CHECKS = [
   { rule: 42, sev: "error", re: new RegExp(`\\b(${MONTHS}),\\s+\\d{4}\\b`, "g"),
     msg: "comma between month and year; write 'September 2026'" },
   { rule: 43, sev: "warn", re: /(?<![\w/])\d{1,2}\/\d{1,2}\/\d{2,4}(?![\w/])/g,
-    msg: "numeric date in narrative text; write the month out, or YYYY-MM-DD where a sortable date helps" },
+    msg: "numeric date in narrative text; write the month out, or YYYY-MM-DD where a sortable date helps (a hand-filled form writes MM/DD/YYYY)" },
   { rule: 44, sev: "warn", re: /\b12(:00)?\s*(a\.m\.|p\.m\.)/gi,
     msg: "12 a.m. or 12 p.m.; use midnight or noon" },
   { rule: 46, sev: "error", re: /\$\s*\d[\d,]*(\.\d+)?\s+dollars\b/gi,
