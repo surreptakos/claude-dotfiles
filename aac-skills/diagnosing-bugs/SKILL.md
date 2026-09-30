@@ -2,10 +2,10 @@
 name: diagnosing-bugs
 description: Diagnosis loop for hard bugs and performance regressions. Use when the user says "diagnose"/"debug this", or reports something broken/throwing/failing/slow.
 metadata:
-  modified: "2026-09-27T19:31:03Z"
-  previous-modified: "2026-08-20T00:41:59Z"
-  revision: "2"
-  content-sha: "abae1641e105"
+  modified: "2026-09-30T23:03:38Z"
+  previous-modified: "2026-09-27T19:31:03Z"
+  revision: "3"
+  content-sha: "7e19ceae6c2c"
 ---
 
 # Diagnosing Bugs
@@ -95,6 +95,12 @@ Do not proceed until you have reproduced **and** minimised.
 Generate **3–5 ranked hypotheses** before testing any of them. Single-hypothesis generation anchors on the first plausible idea.
 
 Each hypothesis must be **falsifiable**: state the prediction it makes.
+
+**Read the revision that failed, not the branch tip.** When the failure belongs to a commit (a CI run,
+a deploy), search and read that commit (`git grep <pattern> <sha>`, `git show <sha>:<path>`). The tip
+may already carry someone's fix, and an absence found there says nothing about the build that broke.
+(2026-09-30: a leaked address was read as coming from live data because `git grep` on a freshly fetched
+`origin/main` found only the placeholder a later fix had just put in.)
 
 > Format: "If <X> is the cause, then <changing Y> will make the bug disappear / <changing Z> will make it worse."
 
