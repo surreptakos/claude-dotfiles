@@ -78,3 +78,5 @@ jobs:
           echo "the gate fails when the start report does not wait for the bootstrap, as it must"
       - name: Clone failure —an unreachable dotfiles repo must leave a named STOP, not a missing marker (issue 483)
         run: tests/bootstrap-test.sh --scenario clone-failure
+      - name: Token clone — BOOTSTRAP_DOTFILES_TOKEN reaches git through askpass and lands in no URL, config or log (issue 1047)
+        run: tests/bootstrap-test.sh --scenario token-clone

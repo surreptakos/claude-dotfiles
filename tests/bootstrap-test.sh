@@ -53,6 +53,11 @@
 #                                                        # a STOP additionalContext line, and gh;
 #                                                        # session-check STOPs on the cause. Exits 0
 #                                                        # when that honesty holds, 1 when it does not.
+#   tests/bootstrap-test.sh --scenario token-clone      # issue 1047: BOOTSTRAP_DOTFILES_TOKEN set and
+#                                                        # the clone taken from a local bare repo: the
+#                                                        # marker reports success and the clone's
+#                                                        # remote URL, .git/config and the hook's
+#                                                        # output carry no userinfo and no token.
 #
 # ENV
 #   BOOTSTRAP_TEST_SCRATCH   scratch root to use instead of a fresh mktemp -d
@@ -82,8 +87,8 @@ case "$FAULT" in
   *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root, stale-payload, gate-before-bootstrap)" >&2; exit 64 ;;
 esac
 case "$SCENARIO" in
-  ""|clone-failure) ;;
-  *) echo "bootstrap-test: unknown scenario '$SCENARIO' (known: clone-failure)" >&2; exit 64 ;;
+  ""|clone-failure|token-clone) ;;
+  *) echo "bootstrap-test: unknown scenario '$SCENARIO' (known: clone-failure, token-clone)" >&2; exit 64 ;;
 esac
 
 fails=0
@@ -214,6 +219,81 @@ if [ "$SCENARIO" = "clone-failure" ]; then
     echo "bootstrap gate (clone-failure scenario): PASS"
   else
     echo "bootstrap gate (clone-failure scenario): FAIL ($fails check(s))"
+  fi
+  [ -n "${BOOTSTRAP_TEST_KEEP:-}" ] || rm -rf "$SCRATCH" 2>/dev/null || true
+  [ "$fails" -eq 0 ] || exit 1
+  exit 0
+fi
+
+# ------------------------------------------------ scenario: token-clone (issue 1047) ----------
+# BOOTSTRAP_DOTFILES_TOKEN is set and there is no BOOTSTRAP_SOURCE, so the hook takes its own
+# clone, here from a local bare repository (no network, no credential prompt). The token travels to
+# git through askpass and must land nowhere: the marker reports success, the clone's remote URL has
+# no `@`, and a sentinel token value appears in neither .git/config, the marker, the merged user
+# settings, the $CLAUDE_ENV_FILE nor the hook's stdout and stderr. A second run against the cached
+# clone takes the fetch path with the variable still set and must succeed too.
+if [ "$SCENARIO" = "token-clone" ]; then
+  TOKEN="ghp_sentinel1047TokenMustNotLeak"
+  WORK="$SCRATCH/dotfiles-work"
+  BARE="$SCRATCH/dotfiles-bare.git"
+  mkdir -p "$WORK/marketplace"
+  cp -r "$PAYLOAD" "$WORK/marketplace/aac-skills"
+  git -C "$WORK" init -q -b master
+  git -C "$WORK" add -A
+  git -C "$WORK" -c user.name=gate -c user.email=gate@example.invalid commit -q -m fixture
+  git clone -q --bare "$WORK" "$BARE"
+  : > "$ENV_FILE"
+  hook_out="$SCRATCH/hook-stdout.json"
+  hook_err="$SCRATCH/hook-stderr.txt"
+  MARKER="$CLEAN_HOME/.claude/hook-state/aac-bootstrap/state.json"
+  CLONE="$CLEAN_HOME/.aac-dotfiles"
+  for round in first cached; do
+    env -i \
+      PATH="$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE=true \
+      BOOTSTRAP_HOME="$CLEAN_HOME" \
+      BOOTSTRAP_DOTFILES_REPO="file://$BARE" \
+      BOOTSTRAP_DOTFILES_TOKEN="$TOKEN" \
+      BOOTSTRAP_SKIP_GH=1 \
+      CLAUDE_ENV_FILE="$ENV_FILE" \
+      ${passthrough[@]+"${passthrough[@]}"} \
+      bash "$HOOK" >"$hook_out" 2>"$hook_err"
+    hook_status=$?
+    if [ "$hook_status" -eq 0 ]; then
+      pass "hook exited 0 with the token set ($round run)"
+    else
+      fail "hook exited $hook_status with the token set ($round run); stderr: $(tail -3 "$hook_err" | tr '\n' ' ')"
+    fi
+    if python3 - "$MARKER" <<'PYMARK'
+import json, sys
+m = json.load(open(sys.argv[1]))
+sys.exit(0 if m.get('failed') is not True and m.get('payload_version') and m.get('skills') else 1)
+PYMARK
+    then
+      pass "marker reports success ($round run)"
+    else
+      fail "marker does not report success ($round run): $(head -c 300 "$MARKER" 2>/dev/null)"
+    fi
+    url="$(git -C "$CLONE" config --get remote.origin.url 2>/dev/null || true)"
+    case "$url" in
+      ""|*@*) fail "remote.origin.url is empty or carries userinfo ($round run): '$url'" ;;
+      *) pass "remote.origin.url has no '@' ($round run): $url" ;;
+    esac
+    # The second run must not be short-circuited by the fresh-marker rule.
+    touch -d '10 minutes ago' "$MARKER"
+  done
+  leaks=$(grep -rl --binary-files=text -F "$TOKEN" "$CLEAN_HOME" "$ENV_FILE" "$hook_out" "$hook_err" 2>/dev/null | head -3 | tr '\n' ' ')
+  if [ -z "$leaks" ]; then
+    pass "the token value appears nowhere under the home (.git/config included), the env file or the hook output"
+  else
+    fail "the token value leaked into: $leaks"
+  fi
+  echo ""
+  if [ "$fails" -eq 0 ]; then
+    echo "bootstrap gate (token-clone scenario): PASS"
+  else
+    echo "bootstrap gate (token-clone scenario): FAIL ($fails check(s))"
   fi
   [ -n "${BOOTSTRAP_TEST_KEEP:-}" ] || rm -rf "$SCRATCH" 2>/dev/null || true
   [ "$fails" -eq 0 ] || exit 1
