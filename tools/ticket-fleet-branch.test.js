@@ -18,6 +18,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const { spawnSync } = require('node:child_process');
+const { shell } = require('./posix-shell.js');
+const BASH = shell('bash');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
@@ -526,7 +528,7 @@ test('live-tree find skips the CLI skills-sync manifest but still catches an imp
       fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
       fs.writeFileSync(path.join(home, rel), 'x');
     }
-    const r = spawnSync('bash', ['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
+    const r = BASH.run(['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
       { env: { ...process.env, HOME: home }, encoding: 'utf8' });
     assert.strictEqual(r.status, 0, r.stderr);
     const hits = r.stdout.split('\n').filter(Boolean).map((f) => path.relative(home, f)).sort();
@@ -2917,7 +2919,7 @@ test('tree guard present in this repo: default args baseline it active, and a ro
   assert.ok(fs.existsSync(path.join(REPO_ROOT, defaultScript)), `${defaultScript} must ship in this repo, or treeGuard:'auto' turns the guard off (issue 1020)`);
 
   // The guard agents run bash; a Windows shell with no bash on PATH (PowerShell) cannot stand in.
-  if (spawnSync('bash', ['-c', 'true']).error) { t.skip('no bash on PATH to run the guard commands; covered by the Linux gate and Git Bash'); return; }
+  if (BASH.skip) { t.skip(BASH.skip); return; }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tree-guard-1020-'));
   const orch = path.join(tmp, 'orch');
   const git = (...args) => {
@@ -2931,10 +2933,10 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     git('add', 'README.md');
     git('commit', '-q', '-m', 'init');
     fs.writeFileSync(path.join(orch, 'operator-notes.txt'), 'dirt from before the run\n');
-    const orchPosix = spawnSync('bash', ['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
+    const orchPosix = BASH.run(['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
     const bashAgent = async (prompt, opts) => {
       if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `main\n${'a'.repeat(40)}\n`, stderr: '' };
-      const r = spawnSync('bash', ['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
       return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
     };
     const { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, {
