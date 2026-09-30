@@ -2,17 +2,17 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-09-25T23:15:16Z'
-  previous-modified: '2026-09-25T13:58:01Z'
-  revision: '24'
-  content-sha: aac2296232c3
+  modified: '2026-09-30T15:52:27Z'
+  previous-modified: '2026-09-25T23:15:16Z'
+  revision: '25'
+  content-sha: 9ae0e5aeb48a
 ---
 
 # todoist-triage
 
 Dan rules the judgment calls; the skill clears the rest itself. It applies a settled delete or an exact-duplicate merge without asking, asks Dan about the items that need a person, and tells him the rest. aac-routines (live) is intake only and leaves a task alone once created; this skill picks up from there. Labels are rulings: applied once, changed only when Dan says.
 
-Disclosed reference, each read where its step points: [`sources.md`](sources.md) (exports, live tail, systems of record), [`run-ledger.md`](run-ledger.md) (prior records, queue, this run's record), [`rulings.md`](rulings.md) (standing rulings, delegation), [`day-board.md`](day-board.md) (the board's data and page).
+Disclosed reference, each read where its step points: [`sources.md`](sources.md) (exports, live tail, systems of record), [`run-ledger.md`](run-ledger.md) (prior records, queue, this run's record), [`rulings.md`](rulings.md) (standing rulings, delegation), [`day-board.md`](day-board.md) (the board's data and page), [`agent-sweep.md`](agent-sweep.md) (tasks an agent could do).
 
 ## Scope
 
@@ -37,7 +37,7 @@ Every open task carries exactly one ball label, or it is in the triage queue.
 
 **Dates carry the calendar.** The **do date** (Todoist's "due date") is Dan's plan — the day he intends to work it or look again — and moves freely. A backlog `do` with a do date resurfaces that day; without one it sits in the pool the Friday pass draws from. The **deadline** (Todoist's "deadline") is the world's constraint — the day after which something bad happens (IDFPR, tax extension, lien). Set one only when the source names it; it moves Dan, Dan leaves it where it is.
 
-**Other labels.** `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a task still carrying it is a nested duplicate from an older pass — propose it as a merge like any other.
+**Other labels.** `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a task still carrying it is a nested duplicate from an older pass — propose it as a merge like any other. `agent` and `no-agent` are Dan's answer to the agent sweep (step 3) and never change the ball.
 
 **Wontfix is where a task-shaped ruling sticks.** It is the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`). This skill's queue and the `aac-forgotten-tasks` guard read it through the same matcher with the same evidence bound, so a ruled-out item stays suppressed on both sides until evidence newer than the ruling arrives, then resurfaces (ADR 0009 in the routine repository).
 
@@ -87,9 +87,11 @@ One line per item: title, ball label, project (Current Work if this week, else b
 
 Propose a priority change only for a deadline inside 7 days at p2 or lower. Duplicates are merge proposals: survivor named, the duplicate's unique text quoted.
 
+**Agent sweep.** Then sweep every open `do` task with no other question this run for work an agent could do, per [`agent-sweep.md`](agent-sweep.md). Each candidate is a question for Dan, never a write.
+
 Then give every line a tier (step 4). A tier-1 line names its kind and its proof in one clause — the message read to its last message, the prior ruling, or the system row that contradicts the premise. A line whose proof takes more than one clause is tier 2.
 
-Done when every queue item and alarm has a line and a tier, every tier-1 line names its proof, and every `unknown` names its surface.
+Done when every queue item and alarm has a line and a tier, every tier-1 line names its proof, every `unknown` names its surface, and every swept task is either an agent question or left out.
 
 ### 4. Tier, apply, ask (Dan, 2026-09-21)
 
@@ -102,11 +104,11 @@ Every ruling lands in exactly one tier.
 
 Everything else is tier 2, including a ruling that *nearly* qualifies: a label naming a person, a task with a deadline, a delete resting on a title, an absence of evidence, or age alone.
 
-**Tier 2 — ask every one, in the same turn as the status.** Whose ball it is when a name is involved, anything with a deadline, evidence contradicting an existing label, and every `unknown`. Rank by consequence, dated items first. Every question is asked this run; in a scheduled run the questions wait in the session and the notification brings Dan to them.
+**Tier 2 — ask every one, in the same turn as the status.** Whose ball it is when a name is involved, anything with a deadline, evidence contradicting an existing label, every `unknown`, and every agent-sweep candidate. Rank by consequence, dated items first. Every question is asked this run; in a scheduled run the questions wait in the session and the notification brings Dan to them.
 
 Ask in plain numbered prose — it works in every session type, where a picker tool silently vanishes from some. Each question names the item, the one-clause reason, and **substantive rulings** to choose between — the ball on a named person, the date, delete, defer — and leaves Dan room for his reason, the half of the answer that stops the item returning.
 
-**Every "no" lands durably before the run ends:** the task into Wontfix when task-shaped, `ruled-out` in the run record when the topic never became a task. A ruling that exists only in the transcript is lost.
+**Every "no" lands durably before the run ends:** the task into Wontfix when task-shaped, `ruled-out` in the run record when the topic never became a task, and `no-agent` on the task when the no answers the agent sweep — the task stays live. A ruling that exists only in the transcript is lost.
 
 **Tier 3 — tell.** Deadlines, past-due counts, the cap, coverage. They go in the status (step 6) and nowhere in the questions.
 
