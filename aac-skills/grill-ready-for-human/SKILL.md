@@ -3,10 +3,10 @@ name: grill-ready-for-human
 description: Walk every ready-for-human ticket — read them all, ask every ruling in one batch, then land each as a comment and relabel or close.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-30T20:38:21Z"
-  previous-modified: "2026-09-30T20:13:31Z"
-  revision: "11"
-  content-sha: "c1cc77885b59"
+  modified: "2026-09-30T22:43:59Z"
+  previous-modified: "2026-09-30T20:38:21Z"
+  revision: "12"
+  content-sha: "03086f2563c0"
 ---
 
 # Grill ready-for-human
@@ -64,7 +64,7 @@ Every ticket open at start carries a landed ruling comment **and** a label/state
 
 ## In a cloud container
 
-A cloud session (claude.ai/code, Cowork) has no `gh`; `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Same steps, GitHub MCP instruments: read [`cloud.md`](cloud.md) for the substitution table before the first tracker call.
+A cloud session's `gh` cannot reach GitHub GraphQL (HTTP 403 on `gh issue`, `gh pr`, `gh search`; `gh api` REST works, and Cowork has no `gh` at all); `CLAUDE_CODE_REMOTE_SESSION_ID` set in the environment is the tell. Same steps, GitHub MCP instruments or `gh api` REST: read [`cloud.md`](cloud.md) for the substitution table before the first tracker call. `tools/rulings-page.js` already speaks REST (PR 1128).
 
 ## Across every repo: the rulings page
 
