@@ -585,9 +585,13 @@ function Test-Caveman {
     } else {
         Write-Line stop ('caveman proxy port {0} does not answer, so claude -p cannot{1}' -f $ProxyPort, $note)
         if (Test-Path -LiteralPath $proxyExe) {
-            # Issue 1110: the install starts the proxy; when it still does not listen, the proxy
-            # itself exits, and only running it in a terminal shows why.
-            Add-Todo ('Start the caveman proxy: the caveman install starts it and registers it at logon; if port {0} still does not answer, run the proxy in a terminal and read why it exits:' -f $ProxyPort) @($InstallCommand, ('& "{0}"' -f $proxyExe))
+            # Issue 1110: the install starts the proxy and registers it at logon; Start-Process starts
+            # it now (PR 1127); when it still does not listen, the proxy itself exits, and only
+            # running it in a terminal shows why.
+            Add-Todo ('Start the caveman proxy: the caveman install starts it and registers it at logon, or start it directly; if port {0} still does not answer, run the proxy in a terminal and read why it exits:' -f $ProxyPort) @(
+                $InstallCommand,
+                ('powershell -Command "Start-Process ''{0}'' -WindowStyle Hidden"' -f $proxyExe),
+                ('& "{0}"' -f $proxyExe))
         } else {
             Add-Todo 'Install caveman - the install also starts its proxy - then check that a terminal claude -p "reply ok" answers:' @($InstallCommand)
         }
