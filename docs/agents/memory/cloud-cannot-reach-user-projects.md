@@ -18,11 +18,16 @@ surreptakos/aac-sales-cockpit issue 752 to the AAC Sales Report board (user proj
   bound to their configured repositories. Use repository-scoped endpoints".
 - The GitHub MCP tools carry no Projects tool.
 
-A user-owned board has no repository-scoped path, so no cloud session can write it. The routes
-that work: the board's built-in "Auto-add to project" workflow (owner toggle, Settings then
-Workflows, filtered to the repo), or a desktop session's `gh`. A repo doc that tells an agent to run
-`gh project item-add` at issue creation is a desktop-only step; a container reports it as owed, it
-does not retry it.
+A user-owned board has no repository-scoped path, so no cloud session can write it. The board's
+"Auto-add to project" workflow does the job with no session step, and AAC Sales Report has had it on
+since 2026-07-29 (aac-sales-cockpit `docs/agents/issue-tracker.md`, "New issues reach the AAC Sales
+Report board automatically"; Dan confirmed 2026-09-30). So a new issue there owes nothing. Manual
+`gh project item-add` is desktop-only backfill.
+
+That doc's opening line still said to item-add every new issue, contradicting its own auto-add
+section further down. This session read the opening line, missed the section, and sent Dan to
+enable a toggle that was already on. Read a tracker doc to the end before reporting a board step as
+owed.
 
 The general lesson: a `gh` error string is gh's own summary. Before naming a cause, re-run with
 `GH_DEBUG=api` and quote the HTTP status and message of the failing request.
