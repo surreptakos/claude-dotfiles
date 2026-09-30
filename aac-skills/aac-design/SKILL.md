@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-09-30T18:17:47Z"
-  previous-modified: "2026-09-30T17:29:41Z"
-  revision: "2"
-  content-sha: "f624e77f206e"
+  modified: "2026-09-30T19:07:54Z"
+  previous-modified: "2026-09-30T18:17:47Z"
+  revision: "3"
+  content-sha: "4dbece850a13"
 ---
 
 # AAC design
