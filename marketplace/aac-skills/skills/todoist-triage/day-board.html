@@ -967,7 +967,7 @@ footer{font-size:12px;color:var(--muted)}
   async function lastOwnPost(){
     const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:40});
     const mine = objectsOf(res).filter(o => o.from && o.from.userId === HUDDLE.danId && o.createdDateTime && o.messageType !== "systemEventMessage");
-    mine.sort((a,b) => String(b.createdDateTime).localeCompare(String(a.createdDateTime)));
+    mine.sort((a,b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
     // His last huddle post is his newest message that has the huddle sections, not his newest message:
     // on 2026-09-30 the newest was a one-word reply ("cancelling") and the draft started from that.
     for (const m of mine){
@@ -1053,7 +1053,7 @@ footer{font-size:12px;color:var(--muted)}
   const HUD_MAX_ATTEMPTS = 3;
   const HEAD_DAILY = "Yesterday's report", HEAD_GAP = "Yesterday's (& earlier) report";
   // Report lines open with one of Dan's outcome verbs (his rule 2 examples, plus the verbs his own posts use).
-  const OUTCOME_VERBS = ["decided","sent","completed","found","fixed","moved","customer","followed","delegated","booked","signed","approved","paid","submitted","answered","scheduled","assigned","closed","released","uploaded","hired","ordered","finalized","filed","granted","gave","set"];
+  const OUTCOME_VERBS = ["decided","sent","completed","found","fixed","moved","customer","followed","delegated","booked","signed","approved","submitted","answered","scheduled","assigned","closed","released","uploaded","hired","ordered","finalized","filed","granted","gave","set"];
   const ACTIVITY_RX = /\b(had a meeting|met with|meeting with|reviewed|worked on|working on|looked (at|into)|discussed|attended|checked|touched base|caught up|went through|started on)\b/i;
   const CONSEQUENCE_RX = /\b(so|until|unless|can'?t|cannot|won'?t|delay(s|ed)?|slip(s|ping)?|block(s|ed|ing)?|stuck|means|at risk|if|without|moves? back|need(s|ed)?)\b/i;
   const GENERIC_RX = /\b(interruption|traffic|emergenc|meetings? (getting |got |being )?cancel)/i;
@@ -1069,16 +1069,20 @@ footer{font-size:12px;color:var(--muted)}
     /\b(sick|flu|covid|ill|illness|FMLA|leave|PTO|vacation|funeral|baby|doctor|surgery|hospital|cancer|chemo|therapy|a procedure|mental health|health (issue|problem|condition|reason)s?)\b|\b(medical|medicat|pregnan|diagnos|injur|disabilit|maternity|paternity|bereave)/i,
     // rates, adjustments and departures said in words
     /\b(percent|an hour|a year|per (year|month|week)|payout|cost of living|COLA|evaluation|performance plan|suspen\w*|dismiss\w*|written up|last day|two weeks|notice period|time off|day off|days off|out of office for|migraine|passed away|died|death|diabetes|rehab|anxiety|depress\w*|dentist|appointment|passport|employee id|badge number)\b|\blet(ting)? \w+ go\b|\b(ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\s?k\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|fifty)\s+(dollars|bucks|percent)\b/i,
+    // more health, pay, HR, leave and tax words; every long number and every decimal amount
+    /\b(sickness|unwell|asthma|therap\w*|surgeon|raised|paid|paycheque|firing|reprimand\w*|misconduct|performance issues?|coaching|sabbatical|OOO|jury duty|EIN|W-?2|W-?4|1099|I-?9|dollars?|bucks|cents)\b|\d{4,}|\d+\.\d+/i,
     // identity
     /\b(SSN|social security|date of birth|DOB|driver'?s licen[cs]e|bank account|routing number)\b/i
   ];
-  const hudNorm = s => String(s == null ? "" : s).normalize("NFKC").replace(/[​-‏⁠﻿­]/g, "").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
+  const hudNorm = s => String(s == null ? "" : s).normalize("NFKC").replace(/[\u200B\u200C\u200D\u200E\u200F\u2060\uFEFF\u00AD\u034F]/g, "").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
   // Plain text only: lookalike letters, zero-width characters and markup cannot slip a word past the patterns.
   const PLAIN_RX = /^[ -~–—…]*$/;
-  const plainOk = s => !/[\t\n\v\f\r\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]| {2}|^ | $/.test(String(s)) && PLAIN_RX.test(hudNorm(s)) && !/[<>]/.test(hudNorm(s)) && String(s).normalize("NFKC").replace(/[\u2018\u2019\u201C\u201D]/g, "").length === String(s).normalize("NFKC").replace(/[\u2018\u2019\u201C\u201D\u200B-\u200F\u2060\uFEFF\u00AD]/g, "").length;
+  const plainOk = s => !/[\t\n\v\f\r\u0085\u00A0\u1680\u2000-\u200F\u2028-\u202F\u205F-\u206F\u3000\uFEFF\u00AD\u034F]| {2}|^ | $/.test(String(s)) && PLAIN_RX.test(hudNorm(s)) && !/[<>]/.test(hudNorm(s));
   const hudWords = s => hudNorm(s).split(" ").filter(Boolean);
   const hudBag = s => new Set(hudNorm(s).toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(w => w.length >= 3));
-  const isConfidential = s => CONFIDENTIAL_RX.some(rx => rx.test(hudNorm(s)));
+  // Dates and clock times are not amounts: take them out before the money patterns run.
+  const DATE_RX = /\b(19|20)\d\d-\d\d-\d\d(T\d\d:\d\d(:\d\d(\.\d+)?)?Z?)?\b|\b\d{1,2}:\d\d\b|\b\d{1,2}\/\d{1,2}(\/\d{2,4})?\b/g;
+  const isConfidential = s => { const t = hudNorm(s).replace(DATE_RX, " "); return CONFIDENTIAL_RX.some(rx => rx.test(t)); };
   function hudJaccard(a, b){
     const x = hudBag(a), y = hudBag(b);
     if (!x.size || !y.size) return 0;
@@ -1154,7 +1158,9 @@ footer{font-size:12px;color:var(--muted)}
       if (extra.length) add("shape", section, i, "", "unexpected fields: " + extra.join(", "));
       if (typeof item.text !== "string" || !hudNorm(item.text)){ add("shape", section, i, "", "a line with no text"); return false; }
       if (typeof item.evidence !== "string" || !hudNorm(item.evidence)) add("evidence", section, i, item.text, "no evidence named");
-      if (!plainOk(item.text) || !plainOk(item.evidence || "")) add("charset", section, i, "", "only plain letters, digits and punctuation; no lookalike, hidden or markup characters");
+      else if (hudNorm(item.evidence).length > 200) add("evidence", section, i, item.text, "evidence longer than 200 characters");
+      const own = section !== "report" && tagOfEvidence(item.evidence) === "kept";
+      if ((!own && !plainOk(item.text)) || !plainOk(item.evidence || "")) add("charset", section, i, "", "only plain letters, digits and punctuation; no lookalike, hidden or markup characters");
       if (isConfidential(item.text)) add("confidential", section, i, item.text, CONF_DETAIL);
       if (isConfidential(item.evidence)) add("confidential", section, i, item.text, "its evidence carries " + CONF_DETAIL);
       return true;
@@ -1168,6 +1174,8 @@ footer{font-size:12px;color:var(--muted)}
       if (!OUTCOME_VERBS.includes(first)) add("rule2-outcome", "report", i, t, "must open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked...)");
       if (ACTIVITY_RX.test(t)) add("rule2-activity", "report", i, t, "reports activity, not an outcome");
       if (last.report.some(l => hudNorm(l) === t || hudJaccard(l, t) >= 0.5)) add("rereport", "report", i, t, "your last post already claimed this");
+      const doneFR = new Set(d.dropped.filter(x => x && /^done:/i.test(hudNorm(x.why))).map(x => hudNorm(x.text)));
+      last.focus.concat(last.risks).forEach(l => { if (hudJaccard(l, t) >= 0.4 && !doneFR.has(hudNorm(l))) add("paraphrase", "report", i, t, "restates one of your lines; report it only when that line is dropped as done"); });
       if (!/\b(mail|meeting|granola|board|replied|ruling|post|teams|note)\b/i.test(String(it.evidence || ""))) add("evidence", "report", i, t, "a ticked task alone is not evidence; name the mail, meeting note or board ruling");
       tooLong(t, "report", i);
     });
@@ -1206,6 +1214,7 @@ footer{font-size:12px;color:var(--muted)}
       });
     });
     if (d.risks.some(x => x && hudNorm(x.text) === "None today.") && d.risks.length > 1) add("rule4-none", "risks", -1, "", "\"None today.\" must be the only risk line");
+    if (d.report.length > 7) add("report-long", "report", -1, "", "more than 7 report lines");
     if (!d.report.length) add("report-empty", "report", -1, "", "no report lines; a post reports at least one outcome");
     if (d.focus.length < 1 || d.focus.length > 3) add("rule1-focus", "focus", -1, "", "Today's focus has " + d.focus.length + " items; rule 1 allows 1-3");
     if (!d.risks.length) add("rule4-none", "risks", -1, "", "no risk lines; write \"None today.\"");
@@ -1217,7 +1226,8 @@ footer{font-size:12px;color:var(--muted)}
       const extra = Object.keys(x).filter(k => !DROP_KEYS.includes(k));
       if (extra.length) add("shape", "dropped", i, "", "unexpected fields: " + extra.join(", "));
       const t = hudNorm(x.text);
-      if (!plainOk(x.text) || !plainOk(x.why || "")) add("charset", "dropped", i, "", "only plain letters, digits and punctuation");
+      if (!plainOk(x.why || "")) add("charset", "dropped", i, "", "only plain letters, digits and punctuation");
+      else if (hudNorm(x.why).length > 120) add("dropped", "dropped", i, t, "reason longer than 120 characters");
       if (!lastFR.includes(t)) add("dropped", "dropped", i, t, "dropped must quote a line of your last focus or risks exactly");
       if (isConfidential(t) && !/^withheld:/i.test(hudNorm(x.why))) add("confidential", "dropped", i, t, "a confidential line of yours must be dropped as \"withheld:\"");
       if (!DROP_WHY_RX.test(hudNorm(x.why))) add("dropped", "dropped", i, t, "why must start with \"done:\", \"cleared:\", \"trimmed:\" or \"withheld:\" and give the reason");
@@ -1225,6 +1235,7 @@ footer{font-size:12px;color:var(--muted)}
       if (droppedOk.has(t)) add("duplicate", "dropped", i, t, "dropped twice");
       droppedOk.add(t);
     });
+    ["focus","risks"].forEach(section => last[section].forEach((l, j) => { if (derived[section].has(j) && droppedOk.has(hudNorm(l))) add("duplicate", section, -1, "", "one of your lines is both carried and dropped"); }));
     // Continuity: every line of his last focus and risks is carried, edited, or dropped with a stated reason.
     ["focus","risks"].forEach(section => last[section].forEach((l, j) => {
       if (!derived[section].has(j) && !droppedOk.has(hudNorm(l))) add("carry", section, -1, l, "your line disappeared; carry it verbatim, edit one span, or list it under dropped with a reason");
@@ -1241,7 +1252,10 @@ footer{font-size:12px;color:var(--muted)}
     ["report","focus","risks"].forEach(section => (d[section] || []).forEach((it, index) => {
       lines.push({section, index, kept: section !== "report" && tagOfEvidence(it && it.evidence) === "kept", text: it && it.text, evidence: it && it.evidence});
     }));
-    (d.dropped || []).forEach((it, index) => lines.push({section: "dropped", index, kept: true, text: it && it.text, evidence: it && it.why}));
+    (d.dropped || []).forEach((it, index) => {
+      const withheld = /^withheld:/i.test(hudNorm(it && it.why));
+      lines.push({section: "dropped", index, kept: true, text: withheld ? "(withheld)" : it && it.text, evidence: withheld ? "withheld: confidential detail" : it && it.why});
+    });
     return lines;
   }
   function judgePrompt(lines, lastPost){
