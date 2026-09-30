@@ -1,0 +1,138 @@
+{
+  "title": "EMPLOYEE RAISE FORM",
+  "footer": "Active Alarm Company, Inc. | Employee Raise Form | Rev. 2026-09-30",
+  "max_pages": 1,
+  "blocks": [
+    {
+      "type": "intro",
+      "text": "If printed, use black ink. Write dates as MM/DD/YYYY, strike through and initial corrections, and write N/A where a field does not apply. The manager routes the form to the General Manager, then the employee, then HR. The employee signs before the effective date, because that signature date is the pay-change notice."
+    },
+    {
+      "type": "section",
+      "heading": "Employee",
+      "rows": [
+        [
+          {
+            "label": "Employee name"
+          },
+          {
+            "label": "Current title"
+          }
+        ],
+        [
+          {
+            "label": "Current pay basis",
+            "choices": [
+              "Hourly",
+              "Salaried"
+            ],
+            "span": 4
+          },
+          {
+            "label": "Sales plan participant",
+            "choices": [
+              "No",
+              "Yes (see Terms)"
+            ],
+            "span": 8
+          }
+        ]
+      ]
+    },
+    {
+      "type": "section",
+      "heading": "Pay change",
+      "rows": [
+        [
+          {
+            "label": "Current base rate ($ per hour or per year)",
+            "format": "money"
+          },
+          {
+            "label": "New base rate ($ per hour or per year)",
+            "format": "money"
+          }
+        ],
+        [
+          {
+            "label": "Effective date (for work on and after)",
+            "span": 4,
+            "height": 760
+          },
+          {
+            "label": "Reason (describe a promotion or other reason below)",
+            "choices": [
+              "Annual review",
+              "Promotion",
+              "Market"
+            ],
+            "other": true,
+            "write": true,
+            "span": 8,
+            "height": 760
+          }
+        ]
+      ]
+    },
+    {
+      "type": "bullets",
+      "heading": "Terms",
+      "items": [
+        "The new base rate (gross) replaces the rate in Employment Agreement Section 1(b), Wages, for work on and after the effective date, and changes no other term. A promotion also needs a personnel-change document.",
+        "If Sales plan participant is Yes, the manager attaches a new Compensation Schedule or an amendment signed by the employee and the General Manager, with the new on-target earnings (OTE) estimate and base rate."
+      ]
+    },
+    {
+      "type": "signatures",
+      "heading": "Signatures",
+      "columns": [
+        {
+          "step": 1,
+          "role": "Manager",
+          "statement": "I recommend this raise."
+        },
+        {
+          "step": 2,
+          "role": "General Manager",
+          "choices": [
+            "Approved",
+            "Returned"
+          ],
+          "prefill": {
+            "Printed name": "Dan Gatsakos, General Manager"
+          }
+        },
+        {
+          "step": 3,
+          "role": "Employee",
+          "statement": "I acknowledge receipt of this notice of my new base rate on the date signed below.",
+          "labels": {
+            "Date": "Date (before the effective date)"
+          }
+        }
+      ],
+      "full_rows": [
+        [
+          "If returned: reason (General Manager). The manager resubmits this form; to approve it, strike Returned and initial.",
+          "If signed on or after the effective date: date notice was given (manager initials)"
+        ]
+      ]
+    },
+    {
+      "type": "hr_use",
+      "step": 4,
+      "label": "HR use only",
+      "fields": [
+        {
+          "label": "Records and payroll updated (date)",
+          "span": 6
+        },
+        {
+          "label": "Initials",
+          "span": 2
+        }
+      ],
+      "statement": "Updates the HR database and payroll."
+    }
+  ]
+}

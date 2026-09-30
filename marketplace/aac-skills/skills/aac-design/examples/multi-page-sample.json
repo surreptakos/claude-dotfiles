@@ -1,0 +1,428 @@
+{
+  "title": "REQUEST FOR ALARM CODE ADJUSTMENT",
+  "footer": "Active Alarm Company, Inc. | Alarm Code Adjustment | Rev. 2026-09-30",
+  "max_pages": 2,
+  "continuation": {
+    "identify": [
+      "Subscriber name",
+      "Account number"
+    ]
+  },
+  "blocks": [
+    {
+      "type": "intro",
+      "text": "Use this form to add or remove keypad codes and passcodes. If printed, use black ink. Write N/A in a field that does not apply."
+    },
+    {
+      "type": "section",
+      "heading": "Subscriber",
+      "rows": [
+        [
+          {
+            "label": "Subscriber name",
+            "span": 8
+          },
+          {
+            "label": "Account number",
+            "span": 4
+          }
+        ],
+        [
+          {
+            "label": "Address",
+            "span": 8
+          },
+          {
+            "label": "Account type",
+            "choices": [
+              "Residential",
+              "Commercial"
+            ],
+            "span": 4
+          }
+        ]
+      ]
+    },
+    {
+      "type": "section",
+      "heading": "Alarm codes",
+      "rows": [
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ],
+        [
+          {
+            "label": "Change",
+            "choices": [
+              "Add",
+              "Remove"
+            ],
+            "span": 3
+          },
+          {
+            "label": "User name",
+            "span": 5
+          },
+          {
+            "label": "Keypad code",
+            "span": 2
+          },
+          {
+            "label": "Passcode",
+            "span": 2
+          }
+        ]
+      ]
+    },
+    {
+      "type": "bullets",
+      "heading": "Certification",
+      "items": [
+        "I certify that the details on this form are correct, that I told each person listed that their information is being provided to Active Alarm Company, Inc. and its monitoring company, and that I am authorized to change codes on this account."
+      ]
+    },
+    {
+      "type": "signatures",
+      "heading": "Signatures",
+      "columns": [
+        {
+          "step": 1,
+          "role": "Subscriber",
+          "statement": "I certify the statement above."
+        },
+        {
+          "step": 2,
+          "role": "Active Alarm",
+          "statement": "Codes entered and confirmed with the subscriber."
+        }
+      ]
+    }
+  ]
+}
