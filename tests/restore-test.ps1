@@ -86,7 +86,7 @@ param(
     #   dead-caveman-hook  plants a hook entry naming a caveman binary at a path that does not
     #                exist -> check 6e1 (issue 825)
     #   caveman-overwrite  pull copies settings.json over a live one instead of merging -> check 9f (issue 826)
-    #   repo-list    the clone's shared repo list (lib/repos.json) is missing -> check 6a2 (issue 1067)
+    #   repo-list    the trust writer covers only four rows of the shared repo list -> check 6a2 (issue 1067)
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
                  'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree',
@@ -371,9 +371,14 @@ foreach ($dirFault in @(@{ Name = 'hooks-dir'; Dir = 'hooks' }, @{ Name = 'tools
     Note ('fault: the clone''s whitelist writes ~/.claude/{0} again' -f $dirFault.Dir)
 }
 if ($Fault -eq 'repo-list') {
-    # The shared repo list gone from the checkout its readers run from (issue 1067).
-    Remove-Item -LiteralPath (Join-Path $Clone 'lib\repos.json') -Force
-    Note 'fault: deleted the clone''s shared repo list'
+    # What the trust writer did before issue 1067: records for its own four-row copy of the
+    # repos, not for every row of the shared list.
+    $cloneTrust = Join-Path $Clone 'tools\settings-invariants.ps1'
+    $text = [System.IO.File]::ReadAllText($cloneTrust)
+    $anchor = '.Repos | ForEach-Object { $_.Path }'
+    if (-not $text.Contains($anchor)) { throw 'repo-list fault: the trust writer''s list read moved; update the anchor here' }
+    [System.IO.File]::WriteAllText($cloneTrust, $text.Replace($anchor, '.Repos | Select-Object -First 4 | ForEach-Object { $_.Path }'))
+    Note 'fault: the clone''s trust writer covers only four of the listed repos'
 }
 if ($Fault -eq 'skill-tree') {
     # What pull did before issue 734: the whole aac-skills/ tree written to ~/.claude/skills.
