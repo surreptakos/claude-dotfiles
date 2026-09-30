@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Drive setup-check.ps1 against seeded fake homes (issues 1068, 1070).
+    Drive setup-check.ps1 against seeded fake homes (issues 1068, 1070, 1071).
 
 .DESCRIPTION
     Each case seeds a fake home and a stub directory (SETUP_CHECK_STUBS), runs the engine the way
@@ -32,8 +32,11 @@ $TempRoot = if ($env:TEMP) { $env:TEMP } else { [System.IO.Path]::GetTempPath() 
 
 $Sandbox  = Join-Path $TempRoot ('setup-check-tests-' + [guid]::NewGuid().ToString('N'))
 $FixtureRoot = Join-Path $Sandbox 'fixture'
+$BareRepo    = Join-Path $Sandbox 'bare.git'
 $Sentinel = 'FIXTURE-SECRET-' + [guid]::NewGuid().ToString('N')
 $Tools    = @('git', 'node', 'py', 'claude', 'gh')
+. (Join-Path (Join-Path $RepoRoot 'lib') 'manifest.ps1')
+[void](Clear-GitEnv)
 
 $script:Pass = 0
 $script:Fail = 0
@@ -77,6 +80,22 @@ function New-Template {
     $proxy = Join-Path $thome '.caveman\bin\caveman-proxy.exe'
     New-Item -ItemType Directory -Path (Split-Path $proxy -Parent) -Force | Out-Null
     Write-Utf8NoBom $proxy 'fixture proxy'
+    # Every listed repo cloned at its path, right origin, commit gate on. The pull above already
+    # wrote their trust records.
+    foreach ($row in (Read-RepoList -UserHome $thome).Repos) {
+        & git init -q $row.Path
+        & git -C $row.Path remote add origin ('https://github.com/{0}.git' -f $row.Repo)
+        New-Item -ItemType Directory -Path (Join-Path $row.Path '.githooks') -Force | Out-Null
+        & git -C $row.Path config core.hooksPath .githooks
+    }
+    # The local repo a stubbed clone copies: one commit carrying a .githooks folder.
+    $src = Join-Path $Sandbox 'bare-src'
+    & git init -q $src
+    New-Item -ItemType Directory -Path (Join-Path $src '.githooks') -Force | Out-Null
+    Write-Utf8NoBom (Join-Path $src '.githooks\pre-commit') "#!/bin/sh`nexit 0`n"
+    & git -C $src -c core.autocrlf=false add -A
+    & git -C $src -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m fixture
+    & git clone -q --bare $src $BareRepo 2>$null
     $plugins = [System.IO.File]::ReadAllText((Join-Path $thome '.claude\plugins\installed_plugins.json')) | ConvertFrom-Json
     $script:InstalledVersion = [string]@($plugins.plugins.'aac-skills@claude-dotfiles')[0].version
     $saved = Join-Path $Sandbox 'template'
@@ -138,7 +157,74 @@ exit 0
 Set-Content -Path (Join-Path $PSScriptRoot 'caveman-enabled') -Value 'ran'
 exit 0
 '@
+    # Projects probes. The PC is not the anchor unless computer-name says so; watchdog-state holds
+    # the task's state; install/disable change it and leave a marker; the routine registry is an
+    # empty directory a case can seed; clone copies the local bare repo and points origin home.
+    Write-Utf8NoBom (Join-Path $stubs 'computer-name') 'FIXTURE-PC'
+    Write-Utf8NoBom (Join-Path $stubs 'watchdog-state') 'missing'
+    New-Item -ItemType Directory -Path (Join-Path $stubs 'registry') -Force | Out-Null
+    Write-Utf8NoBom (Join-Path $stubs 'computer-name.ps1') @'
+[System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'computer-name'))
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'watchdog-task.ps1') @'
+[System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'watchdog-state'))
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'watchdog-install.ps1') @'
+Set-Content -Path (Join-Path $PSScriptRoot 'watchdog-state') -Value 'enabled' -NoNewline
+Set-Content -Path (Join-Path $PSScriptRoot 'watchdog-installed') -Value 'ran'
+exit 0
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'watchdog-disable.ps1') @'
+Set-Content -Path (Join-Path $PSScriptRoot 'watchdog-state') -Value 'disabled' -NoNewline
+Set-Content -Path (Join-Path $PSScriptRoot 'watchdog-disabled') -Value 'ran'
+exit 0
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'routine-registry.ps1') @'
+Join-Path $PSScriptRoot 'registry'
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'clone.ps1') (@'
+param($Slug, $Dest)
+& git clone -q '__BARE__' $Dest 2>$null
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+& git -C $Dest remote set-url origin ('https://github.com/{0}.git' -f $Slug)
+exit $LASTEXITCODE
+'@).Replace('__BARE__', $BareRepo)
     return [pscustomobject]@{ Home = $fhome; Stubs = $stubs; Config = $config }
+}
+
+function Get-Row {
+    param($Fixture, [string]$Slug)
+    return @((Read-RepoList -UserHome $Fixture.Home).Repos | Where-Object { $_.Repo -eq $Slug })[0]
+}
+
+function Get-TrustRecord {
+    param($Fixture, [string]$Path)
+    $state = [System.IO.File]::ReadAllText((Join-Path $Fixture.Home '.claude.json')) | ConvertFrom-Json
+    $p = @($state.projects.PSObject.Properties | Where-Object { $_.Name -eq $Path })
+    if ($p.Count -eq 0) { return $null }
+    return $p[0].Value
+}
+
+function Remove-TrustRecord {
+    param($Fixture, [string]$Path)
+    $file = Join-Path $Fixture.Home '.claude.json'
+    $state = [System.IO.File]::ReadAllText($file) | ConvertFrom-Json
+    $state.projects.PSObject.Properties.Remove($Path)
+    Write-Utf8NoBom $file ($state | ConvertTo-Json -Depth 20)
+}
+
+# One desktop registry file under <stubs>\registry\<account>\<org>, holding the named routines
+# enabled on a cron.
+function Set-Routines {
+    param($Fixture, [string[]]$Ids)
+    $reg = [System.IO.File]::ReadAllText((Join-Path $Fixture.Home '.claude\accounts.json')) | ConvertFrom-Json
+    $first = $reg.routines.($Ids[0])
+    $dir = Join-Path (Join-Path (Join-Path $Fixture.Stubs 'registry') $reg.accounts.($first.owner).uuid) $first.org
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    $tasks = @($Ids | ForEach-Object { [ordered]@{ id = $_; enabled = $true; cronExpression = '0 3 * * *' } })
+    $file = Join-Path $dir 'scheduled-tasks.json'
+    Write-Utf8NoBom $file (ConvertTo-Json -InputObject ([ordered]@{ scheduledTasks = $tasks }) -Depth 5)
+    return $file
 }
 
 function Invoke-Check {
@@ -186,7 +272,7 @@ try {
     $r = Invoke-Check $f
     Assert 'clean fixture exits 0' ($r.Exit -eq 0) $r.Out
     Assert 'report has one heading per layer, then the to-do' `
-        ($r.Out -match '(?ms)^Prerequisites\s*$.*^Profile\s*$.*^Credentials\s*$.*^Owner to-do\s*$') $r.Out
+        ($r.Out -match '(?ms)^Prerequisites\s*$.*^Profile\s*$.*^Credentials\s*$.*^Projects\s*$.*^Owner to-do\s*$') $r.Out
     Assert 'every line is ok, no STOP' (($r.Out -match '(?m)^  ok    gh\r?$') -and ($r.Out -notmatch 'STOP  ')) $r.Out
 
     Write-Host '-Fix is idempotent'
@@ -343,12 +429,100 @@ try {
     Assert 'and the hook check: a dead personal hook is a STOP' `
         (($r.Exit -eq 1) -and ($r.Out -match ('STOP  Stop hook names a missing file: {0}' -f [regex]::Escape($pdead)))) $r.Out
 
+    Write-Host 'Projects: clones, commit gate, trust'
+    $f = New-Fixture
+    $row = Get-Row $f 'surreptakos/aac-sales-commissions'
+    Remove-Item -LiteralPath $row.Path -Recurse -Force
+    Remove-TrustRecord $f $row.Path
+    $r = Invoke-Check $f
+    Assert 'a missing clone exits 1 as a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  surreptakos/aac-sales-commissions .*Sales Data KPIs\\commissions\) not cloned')) $r.Out
+    Assert 'its to-do is gh repo clone with the quoted path' (Test-Todo $r.Out 'gh repo clone surreptakos/aac-sales-commissions ".*Sales Data KPIs\\commissions"') $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix clones it from the local bare repo (path with a space) and exits 0' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    surreptakos/aac-sales-commissions .*\[cloned by -Fix, commit gate set by -Fix\]')) $r.Out
+    Assert 'the clone is there, origin pointing home' `
+        ((& git -C $row.Path remote get-url origin) -eq 'https://github.com/surreptakos/aac-sales-commissions.git')
+    Assert 'its commit gate is on' ((& git -C $row.Path config --get core.hooksPath) -eq '.githooks')
+    $rec = Get-TrustRecord $f $row.Path
+    Assert 'its trust record is written' ($null -ne $rec -and $rec.hasTrustDialogAccepted -eq $true)
+    $before = Get-Snapshot $FixtureRoot
+    $r2 = Invoke-Check $f -Fix
+    $after = Get-Snapshot $FixtureRoot
+    Assert 'a second -Fix exits 0 and changes nothing' (($r2.Exit -eq 0) -and ($before -eq $after)) $r2.Out
+
+    $f = New-Fixture
+    $row = Get-Row $f 'surreptakos/osh-rfp'
+    & git -C $row.Path config --unset core.hooksPath
+    $r = Invoke-Check $f
+    Assert 'a commit gate off is a STOP' (($r.Exit -eq 1) -and ($r.Out -match 'STOP  surreptakos/osh-rfp .* commit gate off')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix turns it on' (($r.Exit -eq 0) -and ((& git -C $row.Path config --get core.hooksPath) -eq '.githooks')) $r.Out
+
+    $f = New-Fixture
+    $row = Get-Row $f 'surreptakos/brazil-flights'
+    & git -C $row.Path remote set-url origin 'https://github.com/someone/else.git'
+    $r = Invoke-Check $f -Fix
+    Assert 'a wrong origin is a STOP, even with -Fix' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  surreptakos/brazil-flights .* origin is https://github.com/someone/else.git')) $r.Out
+
+    $f = New-Fixture
+    $row = Get-Row $f 'surreptakos/aac-routines'
+    Remove-TrustRecord $f $row.Path
+    $r = Invoke-Check $f
+    Assert 'a missing trust record is a STOP' (($r.Exit -eq 1) -and ($r.Out -match 'STOP  surreptakos/aac-routines .* has no Claude trust record')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix writes it through settings-invariants -Trust' `
+        (($r.Exit -eq 0) -and ((Get-TrustRecord $f $row.Path).hasTrustDialogAccepted -eq $true)) $r.Out
+
+    Write-Host 'Projects: anchor and watchdog'
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'computer-name') 'AAC-AI'
+    $r = Invoke-Check $f
+    Assert 'on the anchor a missing watchdog task is a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'ok    AAC-AI is the anchor PC') -and ($r.Out -match 'STOP  watchdog task missing on the anchor')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix on the anchor installs it and says so' `
+        ((Test-Path (Join-Path $f.Stubs 'watchdog-installed')) -and ($r.Out -match 'ok    watchdog task installed by -Fix \(was missing\)')) $r.Out
+
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'watchdog-state') 'enabled'
+    $r = Invoke-Check $f
+    Assert 'off the anchor an enabled watchdog task is a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'ok    FIXTURE-PC is not the anchor PC \(the anchor is AAC-AI\)') -and
+         ($r.Out -match 'STOP  watchdog task enabled on a PC that is not the anchor')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix off the anchor disables it and says so' `
+        (($r.Exit -eq 0) -and (Test-Path (Join-Path $f.Stubs 'watchdog-disabled')) -and
+         ($r.Out -match 'ok    watchdog task disabled by -Fix')) $r.Out
+
+    Write-Host 'Projects: routine audit'
+    $f = New-Fixture
+    $ids = @(([System.IO.File]::ReadAllText((Join-Path $f.Home '.claude\accounts.json')) | ConvertFrom-Json).routines.PSObject.Properties | ForEach-Object { $_.Name })
+    $regFile = Set-Routines $f @($ids | Select-Object -Skip 1)
+    $hash = (Get-FileHash $regFile).Hash
+    Write-Utf8NoBom (Join-Path $f.Stubs 'computer-name') 'AAC-AI'
+    Write-Utf8NoBom (Join-Path $f.Stubs 'watchdog-state') 'enabled'
+    $r = Invoke-Check $f -Fix
+    Assert 'on the anchor a routine missing from the registry is reported by name' `
+        ($r.Out -match ('!!    1 of {0} desktop routines not registered here: {1}' -f $ids.Count, [regex]::Escape($ids[0]))) $r.Out
+    Assert 'the registry file is not written' ((Get-FileHash $regFile).Hash -eq $hash)
+
+    $f = New-Fixture
+    $regFile = Set-Routines $f @($ids[0])
+    $hash = (Get-FileHash $regFile).Hash
+    $r = Invoke-Check $f -Fix
+    Assert 'off the anchor a live routine is reported by name' `
+        ($r.Out -match ('!!    1 desktop routines live on a PC that is not the anchor: {0}' -f [regex]::Escape($ids[0]))) $r.Out
+    Assert 'its to-do is the /setup-check skill' (Test-Todo $r.Out '/setup-check') $r.Out
+    Assert 'the registry file is not written' ((Get-FileHash $regFile).Hash -eq $hash)
+
     Write-Host 'Machine probes in a fake home'
     $f = New-Fixture
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, 3 logins)' ($skipped -eq 11) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, 3 logins, anchor)' ($skipped -eq 12) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'
