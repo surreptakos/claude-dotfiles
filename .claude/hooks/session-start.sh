@@ -72,6 +72,12 @@
 #   BOOTSTRAP_SOURCE     read the dotfiles tree from this local path instead of git-cloning
 #                        master (branch-under-test proof; the CI bootstrap test uses this)
 #   BOOTSTRAP_DOTFILES_REPO / _REF   override the clone URL and ref
+#   BOOTSTRAP_DOTFILES_TOKEN   (issue 1047; a cloud environment variable, not a test override)
+#                        a credential for a PRIVATE claude-dotfiles. Step 2 hands it to git through
+#                        an askpass helper with the credential helper disabled, on the clone and on
+#                        every fetch, deepen and reset of the cached clone; it never enters a URL,
+#                        .git/config, a log line, the marker or $CLAUDE_ENV_FILE. Unset, nothing
+#                        here changes.
 #   BOOTSTRAP_GH_VERSION override the pinned gh release tarball version
 #   BOOTSTRAP_SKIP_GH    do not install gh (offline CI)
 set -euo pipefail
@@ -152,6 +158,10 @@ fi
 # non-zero exit would drop this line and leave stderr as the only trace, the old shape.
 bootstrap_fail() {
   local stage="$1" reason="$2"
+  # Issue 1047: git never prints the credential, but a reason string is cheap to scrub.
+  if [ -n "${BOOTSTRAP_DOTFILES_TOKEN:-}" ]; then
+    reason="${reason//"$BOOTSTRAP_DOTFILES_TOKEN"/***}"
+  fi
   echo "aac-bootstrap: STOP - $stage failed: $reason" >&2
   BOOTSTRAP_FAIL_MARKER="$MARKER_FILE" BOOTSTRAP_FAIL_STAGE="$stage" BOOTSTRAP_FAIL_REASON="$reason" \
   BOOTSTRAP_FAIL_REPO="$DOTFILES_REPO" BOOTSTRAP_FAIL_REF="$DOTFILES_REF" \
@@ -173,10 +183,12 @@ with open(marker, 'w') as f:
         'failed_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }, f, indent=2)
 # The line is an instruction, not a report (issue 614): a session that reads it can repair the
-# container itself in two tool calls. Since 2026-09-21 claude-dotfiles is a PUBLIC repo, which is
-# why the clone works in a session that never attached it: the cloud GitHub proxy clones any public
-# repo, and private repos only when attached (add_repo). A cloud environment has no repository or
-# source list to configure, so "attach it as an environment source" was never a fix. The three
+# container itself in two tool calls. claude-dotfiles may be PRIVATE again (issue 1047, PRD 1045):
+# the cloud GitHub proxy clones a private repo only when it is attached to the session (add_repo)
+# or when the environment carries BOOTSTRAP_DOTFILES_TOKEN, which step 2 hands to git through
+# askpass. The line therefore names the variable, the attached-source fallback and the memory
+# note, and no longer claims the repo is public. A cloud environment has no repository or source
+# list to configure, so "attach it as an environment source" was never a fix. The three
 # assertion tokens the clone-failure gate greps for stay:
 # `AAC-BOOTSTRAP STOP: <stage> failed`, `push_files`, `ANTHROPIC_BASE_URL`.
 msg = (
@@ -184,12 +196,13 @@ msg = (
     f" no aac payload, skills or governance hooks landed in this container;"
     f" gh={e['BOOTSTRAP_FAIL_GH']}; git push falls back to GitHub MCP push_files."
     f" SELF-HEAL NOW, before any other work: if git could not read a username for github.com,"
-    f" the dotfiles repo is not a source of this session - call the Claude_Code_Remote add_repo"
-    f" tool (owner surreptakos, repo claude-dotfiles, access read), then re-run this hook with"
-    f" `bash \"{e['BOOTSTRAP_FAIL_SELF']}\"` and quote its AAC-BOOTSTRAP MARKER line. That"
-    f" failure means {e['BOOTSTRAP_FAIL_REPO']} reads as private again: the cloud GitHub proxy"
-    f" clones any public repo without attaching it, and the repo was made public on 2026-09-21"
-    f" for exactly this (claude-dotfiles issue 614); tell the owner to check its visibility."
+    f" {e['BOOTSTRAP_FAIL_REPO']} did not authenticate. Either the environment lacks the"
+    f" BOOTSTRAP_DOTFILES_TOKEN variable (the clone credential for a private claude-dotfiles;"
+    f" the owner sets it in the environment settings) or the dotfiles repo is not a source of this"
+    f" session - the attached-source fallback: call the Claude_Code_Remote add_repo tool (owner"
+    f" surreptakos, repo claude-dotfiles, access read), then re-run this hook with"
+    f" `bash \"{e['BOOTSTRAP_FAIL_SELF']}\"` and quote its AAC-BOOTSTRAP MARKER line."
+    f" Background: docs/agents/memory/dotfiles-public-for-cloud-clone.md in claude-dotfiles."
     f" If ANTHROPIC_BASE_URL is not https://api.anthropic.com, a"
     f" caveman proxy URL stripped credential injection instead (`env | grep ANTHROPIC_BASE_URL`,"
     f" issues 483, 519)"
@@ -224,6 +237,39 @@ export PATH="$BIN_DIR:$PATH"
 
 python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml 2>/dev/null || true
 
+# Issue 1047: when the environment carries BOOTSTRAP_DOTFILES_TOKEN, every call that may reach the
+# remote goes through git_dotfiles, which hands git the credential through an askpass helper and
+# turns the credential helper off. The token is never put in a URL (a URL credential persists in
+# .git/config and in the setup-script snapshot for about seven days), never written to a file (the
+# helper reads it from the environment of the git process that spawns it) and never exported past
+# that process. The helper answers only a prompt that names the host of $DOTFILES_REPO. Unset,
+# git_dotfiles is plain git and the hook behaves as it did before.
+git_dotfiles() {
+  if [ -z "${BOOTSTRAP_DOTFILES_TOKEN:-}" ]; then
+    git "$@"
+    return
+  fi
+  local askpass="$SCRATCH_DIR/askpass.sh"
+  if [ ! -f "$askpass" ]; then
+    cat > "$askpass" <<'ASKPASS'
+#!/bin/sh
+case "$1" in
+  *"$BOOTSTRAP_ASKPASS_HOST"*) ;;
+  *) exit 1 ;;
+esac
+case "$1" in
+  Username*) printf '%s\n' x-access-token ;;
+  Password*) printf '%s\n' "$BOOTSTRAP_DOTFILES_TOKEN" ;;
+esac
+ASKPASS
+    chmod 0700 "$askpass"
+  fi
+  local host
+  host="$(printf '%s' "$DOTFILES_REPO" | sed -E 's#^[A-Za-z+.-]+://([^@/]*@)?([^/:]+).*$#\2#')"
+  GIT_ASKPASS="$askpass" GIT_TERMINAL_PROMPT=0 BOOTSTRAP_ASKPASS_HOST="$host" \
+    git -c credential.helper= "$@"
+}
+
 # ---------------------------------------------------------------------------
 # 2. dotfiles source: local override (BOOTSTRAP_SOURCE) or a shallow clone of master.
 # ---------------------------------------------------------------------------
@@ -244,8 +290,12 @@ else
   if [ ! -d "$DOTFILES_CLONE/.git" ]; then
     _bootstrap_needs_reclone=1
     _bootstrap_reclone_reason="no cached clone yet"
+  elif [ -n "${BOOTSTRAP_DOTFILES_TOKEN:-}" ] \
+       && case "$(git -C "$DOTFILES_CLONE" config --get remote.origin.url 2>/dev/null || true)" in *://*@*) true ;; *) false ;; esac; then
+    _bootstrap_needs_reclone=1
+    _bootstrap_reclone_reason="cached clone's remote URL carries userinfo (issue 1047)"
   else
-    if ! git -C "$DOTFILES_CLONE" fetch --depth 1 origin "$DOTFILES_REF" >&2; then
+    if ! git_dotfiles -C "$DOTFILES_CLONE" fetch --depth 1 origin "$DOTFILES_REF" >&2; then
       _bootstrap_needs_reclone=1
       _bootstrap_reclone_reason="git fetch --depth 1 origin $DOTFILES_REF failed"
     else
@@ -262,7 +312,7 @@ else
         # history — the local tip is a shallow boundary and merge-base cannot walk past
         # it. Deepen once so a real fast-forward reads as one, and only a true
         # unrelated-history case surfaces below.
-        git -C "$DOTFILES_CLONE" fetch --deepen=100 origin "$DOTFILES_REF" >&2 || true
+        git_dotfiles -C "$DOTFILES_CLONE" fetch --deepen=100 origin "$DOTFILES_REF" >&2 || true
         if ! git -C "$DOTFILES_CLONE" merge-base "$_local_ref" "$_origin_ref" >/dev/null 2>&1; then
           _bootstrap_needs_reclone=1
           _bootstrap_reclone_reason="local $DOTFILES_REF has no merge-base with origin/$DOTFILES_REF (issue 241)"
@@ -270,7 +320,7 @@ else
       fi
     fi
     if [ -z "$_bootstrap_needs_reclone" ]; then
-      if ! git -C "$DOTFILES_CLONE" reset --hard "origin/$DOTFILES_REF" >&2; then
+      if ! git_dotfiles -C "$DOTFILES_CLONE" reset --hard "origin/$DOTFILES_REF" >&2; then
         _bootstrap_needs_reclone=1
         _bootstrap_reclone_reason="git reset --hard origin/$DOTFILES_REF failed"
       fi
@@ -282,11 +332,20 @@ else
     fi
     rm -rf "$DOTFILES_CLONE"
     _clone_err="$SCRATCH_DIR/clone.err"
-    if ! git clone --depth 1 --branch "$DOTFILES_REF" "$DOTFILES_REPO" "$DOTFILES_CLONE" 2>"$_clone_err" >&2; then
+    if ! git_dotfiles clone --depth 1 --branch "$DOTFILES_REF" "$DOTFILES_REPO" "$DOTFILES_CLONE" 2>"$_clone_err" >&2; then
       cat "$_clone_err" >&2
       bootstrap_fail clone "git clone --depth 1 --branch $DOTFILES_REF $DOTFILES_REPO: $(tail -n 1 "$_clone_err" | tr -d '\r')"
     fi
     cat "$_clone_err" >&2
+    # Issue 1047: a clone taken with the token must leave no credential behind. The askpass path
+    # never puts one in the URL, so userinfo here means something else did; fail loudly rather
+    # than seat a clone whose .git/config would be snapshotted with the container home.
+    if [ -n "${BOOTSTRAP_DOTFILES_TOKEN:-}" ]; then
+      _remote_url="$(git -C "$DOTFILES_CLONE" config --get remote.origin.url 2>/dev/null || true)"
+      case "$_remote_url" in
+        *://*@*) bootstrap_fail clone "remote.origin.url of $DOTFILES_CLONE carries userinfo after the clone; the credential must reach git through askpass only" ;;
+      esac
+    fi
   fi
   DOTFILES_SRC="$DOTFILES_CLONE"
 fi
