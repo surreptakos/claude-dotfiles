@@ -21,7 +21,8 @@
 #      payload, with no `!!` stale-marker line (issue 669: the two SessionStart groups race)
 #   6  session-check — the copy the bootstrap installed — exits 0 and prints its payload-version
 #      line, which this script quotes; and its --end mechanical gate (issue 622) STOPs on a
-#      settings file naming a hook script nothing provides
+#      settings file naming a hook script nothing provides; under the session gate's budget it
+#      cuts a suite that would outlive the gate and still prints the report (issue 1061)
 #   7  every merged SessionStart and UserPromptSubmit command RUNS from the clean home and exits 0
 #      (issue 614: checks 3 and 5 passed for three harness versions while every merged command
 #      carried a literal ${CLAUDE_PLUGIN_ROOT} that Claude Code refuses in settings.json — a gate
@@ -504,6 +505,30 @@ else
   else
     fail "session-check printed no 'aac-bootstrap payload v$version' line"
     sed -n '1,40p' "$check_out" >&2
+  fi
+
+  # Issue 1061: under the session gate's budget the installed check cuts a suite that would
+  # outlive it and still prints the whole report, naming the cut, instead of being killed silent.
+  BUDGET_FIXTURE="$SCRATCH/fixture-budget"
+  mkdir -p "$BUDGET_FIXTURE/.git" "$BUDGET_FIXTURE/.claude"
+  echo '{"harness": false, "test": "exec node -e \"setTimeout(() => {}, 30000)\"", "testTimeoutMs": 600000}' \
+    > "$BUDGET_FIXTURE/.claude/session.json"
+  budget_out="$SCRATCH/session-check-budget.txt"
+  budget_began=$(date +%s)
+  ( cd "$BUDGET_FIXTURE" && env -i \
+      PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+      BOOTSTRAP_MASTER_MANIFEST="$PAYLOAD/.claude-plugin/plugin.json" \
+      SESSION_CHECK_BUDGET_MS=8000 \
+      node "$CHECK" ) >"$budget_out" 2>&1
+  budget_took=$(( $(date +%s) - budget_began ))
+  if grep -q 'tests — no verdict, not a pass' "$budget_out" && grep -q 'Some things need a look' "$budget_out" \
+      && [ "$budget_took" -lt 20 ]; then
+    pass "session-check under an 8 s budget cut the suite and finished in ${budget_took} s: $(grep -o 'tests — no verdict[^;]*' "$budget_out" | cut -c1-110)"
+  else
+    fail "session-check under an 8 s budget did not report the cut suite (took ${budget_took} s)"
+    sed -n '1,30p' "$budget_out" >&2
   fi
 
   # Without the pinned manifest the version master offers has to come off the REMOTE. Reading it

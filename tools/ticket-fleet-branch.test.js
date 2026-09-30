@@ -2551,7 +2551,8 @@ test(`${FLEET_SCRIPT_REL} deliver prompt runs STEP D: wait for CI, the runbook b
 test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles master, forks excepted (issue 770)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const block = extractBetween(src, 'FLEET-REFRESH');
-  assert.match(block, /https:\/\/raw\.githubusercontent\.com\/surreptakos\/claude-dotfiles\/master\/aac-skills\/ticket-fleet/);
+  assert.match(block, /repos\/surreptakos\/claude-dotfiles\/contents\/aac-skills\/ticket-fleet/);
+  assert.match(block, /gh api -H "Accept: application\/vnd\.github\.raw"/, 'fetch through gh api, not raw.githubusercontent.com (issue 1049)');
   assert.match(block, /label: 'fleet-refresh', phase: 'Setup'/);
   assert.match(block, /sha256sum/, 'a copy that already matches must not be rewritten');
   assert.match(block, /git commit -m "chore\(fleet\): refresh ticket-fleet script from claude-dotfiles master \(issue 770\)"/);

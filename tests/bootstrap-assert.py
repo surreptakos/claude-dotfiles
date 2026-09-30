@@ -45,6 +45,8 @@ REQUIRED_HOOKS = [
     ('PreToolUse', r'fleet-launch-guard\.js', 'fleet launch guard (refuses a ticket-fleet launch from the wrong folder)'),
     ('PostToolUse', r'ask_matt_gate\.py"?\s+claude-post-tool', 'ask-matt gate (post-tool)'),
     ('Stop', r'ask_matt_gate\.py"?\s+claude-stop', 'ask-matt gate (stop)'),
+    ('PostToolUse', r'aac-design/scripts/designgate\.py"?\s+write', 'aac-design gate (write, issue 1082)'),
+    ('Stop', r'aac-design/scripts/designgate\.py"?\s+stop', 'aac-design gate (stop, issue 1082)'),
     ('PreCompact', r'state-stash\.js', 'state stash (pre-compact)'),
     ('SessionEnd', r'session-gate\.js"?\s+end', 'session gate (end)'),
     ('SessionEnd', r'state-stash\.js', 'state stash (session end)'),

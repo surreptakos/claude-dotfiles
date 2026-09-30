@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when t
 
   '
 metadata:
-  modified: '2026-09-30T20:48:32Z'
-  previous-modified: '2026-09-30T18:24:28Z'
-  revision: '64'
-  content-sha: fac800233ce7
+  modified: '2026-09-30T22:17:03Z'
+  previous-modified: '2026-09-30T21:02:30Z'
+  revision: '66'
+  content-sha: 29307ec84b06
 ---
 
 # ticket-fleet
@@ -58,6 +58,11 @@ waited on it.
    Done when the path resolves to a file whose bytes are LF only - the Workflow tool refuses a
    script holding a CR (issue 233) - and, in a cloud session, `git rev-parse --show-toplevel`
    run from the session root prints that root.
+
+   Then run `git fetch origin` in the launching checkout. Implementer worktrees start from its
+   local `origin/<defaultBranch>`, which a merge done through `gh` never moves: run 6abd47d1's
+   #1068 branched from master as of 11:59 on 2026-09-30, missed a 12:33 merge, and its delivery
+   stopped on a conflict that the fetch would have avoided.
 
 2. **Mint the ids.** `runId` names the run and stays the same across a resume
    (`printf %x $(date +%s)`); `invocationId` is fresh on every launch, resume included, and must
