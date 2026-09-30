@@ -23,6 +23,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
+const { shell } = require('./posix-shell.js');
+const SH = shell('sh');
 
 /** A literal path inside a RegExp: Windows separators are regex escapes otherwise. */
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -209,13 +211,13 @@ return { editableGuardPaths, editableGuardCommand, editableSeedCommand, editable
 // candidate paths existed there and the skip message said only "copy it into the served repo's
 // tools/". Run the real probe command in a repo shaped like that one - no guard anywhere - then do
 // exactly what the new message says and run it again.
-test('a served repo with no guard copy is told the exact path to create, and the probe runs once it exists (issue 435)', () => {
+test('a served repo with no guard copy is told the exact path to create, and the probe runs once it exists (issue 435)', { skip: SH.skip }, () => {
   const { editableGuardPaths, editableGuardCommand, editableGuardAbsentMessage } = fleetEditableGuardBlock();
   const paths = editableGuardPaths(null);
   const cmd = editableGuardCommand(paths, '.');
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'editable-guard-served-'));
   // HOME is redirected at the scratch repo so the ~/.claude candidate cannot match either.
-  const probe = () => spawnSync('sh', ['-c', cmd], { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: repo }) });
+  const probe = () => SH.run(['-c', cmd], { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: repo }) });
 
   const absent = probe();
   assert.equal(absent.status, 3, `a repo with no copy must report "not here" (3), got ${absent.status}: ${absent.stdout}${absent.stderr}`);
@@ -235,7 +237,7 @@ test('a served repo with no guard copy is told the exact path to create, and the
     assert.match(found.stdout, /nothing to guard/, 'and it reports it as JSON, not as a skip');
   }
   // The seed command the rail hands every worktree agent probes the same homes (issue 624).
-  const seedProbe = spawnSync('sh', ['-c', fleetEditableGuardBlock().editableSeedCommand(paths)],
+  const seedProbe = SH.run(['-c', fleetEditableGuardBlock().editableSeedCommand(paths)],
     { cwd: repo, encoding: 'utf8', env: Object.assign({}, process.env, { HOME: repo }) });
   assert.equal(seedProbe.status, 0, `the seed probe must find the same copy: ${seedProbe.stdout}${seedProbe.stderr}`);
   assert.match(seedProbe.stdout, /nothing to seed/, 'and a repo with no Python package is a quiet no-op');

@@ -18,6 +18,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const { spawnSync } = require('node:child_process');
+const { shell } = require('./posix-shell.js');
+const BASH = shell('bash');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
@@ -526,7 +528,7 @@ test('live-tree find skips the CLI skills-sync manifest but still catches an imp
       fs.mkdirSync(path.dirname(path.join(home, rel)), { recursive: true });
       fs.writeFileSync(path.join(home, rel), 'x');
     }
-    const r = spawnSync('bash', ['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
+    const r = BASH.run(['-c', liveTreeFindCommand('2000-01-01T00:00:00Z')],
       { env: { ...process.env, HOME: home }, encoding: 'utf8' });
     assert.strictEqual(r.status, 0, r.stderr);
     const hits = r.stdout.split('\n').filter(Boolean).map((f) => path.relative(home, f)).sort();
@@ -1188,32 +1190,40 @@ for (const file of RESUME_GUARD_PAIR) {
   // ---- A refused merge does not lose the delivery (issue 544) ----
   // Run 6aac3d3b ended with no PR for #489 or #493: the auto-mode classifier refused the pre-push
   // `git merge` in each lane and both deliverers returned {pushed:false, prUrl:""} over a branch
-  // that was verified and complete. The refusals are non-deterministic on byte-identical retries,
-  // so the stage retries once and then delivers without the merge.
+  // that was verified and complete. A refused merge now goes straight to A8, which delivers
+  // without the merge.
+  //
+  // Run 6abd5b87 lost all ten deliveries a different way: the prompt told the deliverer to retry a
+  // refused command byte-identical and to read a refusal as a flaky gate, and the classifier then
+  // refused to SPAWN the deliverer at all ("blocked by safety classifier: [Auto-Mode Bypass]").
+  // A spawn test of the rendered prompt bisected it to that A0 wording, so it must not come back.
 
-  test(`${rel} deliver prompt retries a classifier-refused merge once, byte-identical (issue 544)`, () => {
+  test(`${rel} deliver prompt never tells the deliverer to push a refused command through (run 6abd5b87)`, () => {
     const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
-    assert.match(prompt, /re-issue it ONCE, byte-identical/,
-      'the deliverer must be told to re-issue a refused command once with the same spelling - that is what usually goes through');
-    assert.match(prompt, /If the classifier REFUSES that merge command, re-issue it byte-identical once \(A0\); if the retry is refused as well, go to A8/,
-      'the merge step itself must name the retry and the fallback, not only the general rule');
+    for (const banned of [/re-issue it[^.]*byte-identical/i, /byte-identical retry is refused/i, /flaky gate/i,
+      /sanctioned to run every command/i, /never as a sign that you are doing something forbidden/i, /refused twice/i]) {
+      assert.doesNotMatch(prompt, banned,
+        `the deliver prompt carries ${banned}: wording that retries past a refusal gets the deliverer itself refused at spawn`);
+    }
+    assert.match(prompt, /Do not try to get the refused command through/,
+      'A0 must tell the deliverer to take the named route instead of retrying');
+    assert.match(prompt, /If the permission layer REFUSES that merge command \(A0\), go to A8/,
+      'the merge step itself must name the fallback, not only the general rule');
     assert.match(prompt, /"Modify Shared Resources".*"Interfere With Workloads"/,
-      'the prompt must name the classifier categories the waves have seen, so a refusal does not read as a rule violation');
-    assert.match(prompt, /never as a sign that you are doing something forbidden and never as a reason to stop the delivery/,
-      'the prompt must say outright that a refusal is not a rule violation');
+      'the prompt must name the classifier categories the waves have seen');
   });
 
-  test(`${rel} deliver prompt delivers without the merge when it is refused twice (issue 544)`, () => {
+  test(`${rel} deliver prompt delivers without the merge when it is refused (issue 544)`, () => {
     const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
     assert.match(prompt, /A8\. DELIVER WITHOUT THE MERGE/,
-      'a twice-refused merge must have its own step, reached from A1');
+      'a refused merge must have its own step, reached from A1');
     assert.match(prompt, /go to STEP B with mergeStatus "unmerged-by-classifier", conflictPaths \[\] and blockedReason holding the refusal text VERBATIM/,
       'the unmerged path must push, open the PR and record the refusal text verbatim');
     assert.match(prompt, /STEP B - push and open the PR \(only when STEP A ended clean, resolved, or unmerged-by-classifier\)/,
       "STEP B's gate must admit the unmerged path, or A8 would hand over to a step that refuses to run");
     assert.match(prompt, /Not merged with \$\{defaultBranch\}: classifier refusal/,
       'the PR body must carry the refusal under a heading a reviewer can act on');
-    assert.match(prompt, /NEVER end this stage with \{pushed:false, prUrl:""\} while the branch is verified/,
+    assert.match(prompt, /A refused merge alone never stops a delivery: the branch is verified, so it still reaches origin and a PR by A8/,
       'the rule that a verified branch always reaches origin and a PR must be stated, not implied');
     assert.match(prompt, /mcp__github__create_pull_request/,
       'a refused PR call has the MCP route as its fallback (issue 245 evidence), so the refusal cannot end the delivery either');
@@ -2910,7 +2920,7 @@ test('tree guard present in this repo: default args baseline it active, and a ro
   assert.ok(fs.existsSync(path.join(REPO_ROOT, defaultScript)), `${defaultScript} must ship in this repo, or treeGuard:'auto' turns the guard off (issue 1020)`);
 
   // The guard agents run bash; a Windows shell with no bash on PATH (PowerShell) cannot stand in.
-  if (spawnSync('bash', ['-c', 'true']).error) { t.skip('no bash on PATH to run the guard commands; covered by the Linux gate and Git Bash'); return; }
+  if (BASH.skip) { t.skip(BASH.skip); return; }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tree-guard-1020-'));
   const orch = path.join(tmp, 'orch');
   const git = (...args) => {
@@ -2924,10 +2934,10 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     git('add', 'README.md');
     git('commit', '-q', '-m', 'init');
     fs.writeFileSync(path.join(orch, 'operator-notes.txt'), 'dirt from before the run\n');
-    const orchPosix = spawnSync('bash', ['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
+    const orchPosix = BASH.run(['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
     const bashAgent = async (prompt, opts) => {
       if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `main\n${'a'.repeat(40)}\n`, stderr: '' };
-      const r = spawnSync('bash', ['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
       return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
     };
     const { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, {
