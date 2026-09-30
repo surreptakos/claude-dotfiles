@@ -82,3 +82,26 @@ test('check with no baseline is could-not-audit (exit 2), never a pass', (t) => 
   assert.equal(check.code, 2);
   assert.match(check.stderr, /no run baseline/);
 });
+
+// Issue 1041: the desktop scheduled task runs the fleet from `.claude/worktrees/<name>`, where `.git`
+// is a FILE; the fleet's default `--state-dir .git/orchestrator-tree-guard` hit ENOTDIR on mkdir and
+// the wave aborted before Scout. The relative `.git/...` now names the worktree's real git dir.
+test('baseline with the default .git/ state dir succeeds in a linked worktree: state under the real git dir, git status clean', (t) => {
+  const { dir, git } = scratchRepo(t);
+  const wt = path.join(dir, '.claude', 'worktrees', 'wave');
+  fs.appendFileSync(path.join(dir, '.git', 'info', 'exclude'), '.claude/worktrees/\n'); // as a real repo ignores them
+  git('worktree', 'add', '-q', '-b', 'wave', wt);
+  assert.ok(fs.statSync(path.join(wt, '.git')).isFile(), 'fixture: a linked worktree\'s .git is a file');
+  const realGitDir = spawnSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: wt, encoding: 'utf8' }).stdout.trim();
+
+  const base = guard('baseline', '--cwd', wt, '--state-dir', '.git/orchestrator-tree-guard');
+  assert.equal(base.code, 0, base.stderr);
+  assert.equal(path.resolve(path.dirname(base.json.statePath)), path.resolve(realGitDir, 'orchestrator-tree-guard'));
+  assert.ok(fs.existsSync(base.json.statePath));
+  const status = spawnSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' });
+  assert.equal(status.stdout, '', 'the baseline must never show in the worktree\'s git status');
+  assert.equal(git('status', '--porcelain'), '', 'nor in the main checkout\'s');
+
+  // The printed statePath drives the checks that follow, as the fleet hands it back.
+  assert.equal(guard('check', '--cwd', wt, '--state', base.json.statePath, '--label', 'x', '--ticket', '1').code, 0);
+});
