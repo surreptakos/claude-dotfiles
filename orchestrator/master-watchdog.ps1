@@ -9,7 +9,7 @@
     master runs at a time (Dan, 2026-09-02): the watchdog launches one repo's master, rooted in
     that repo's clone; that master runs ONE pass, writes a `**Pass complete - <UTC>**` line into
     its state issue and stops; a later watchdog slot sees the marker, closes that window, and
-    launches the next repo. Repos are served in RUNBOOK.md priority order the first time round,
+    launches the next repo. Repos are served in the shared repo list's priority order (lib/repos.json) the first time round,
     then least-recently-served first, so every repo gets a turn.
 
     A master must run inside the repo it serves: the plugin-served ticket-fleet script
@@ -69,7 +69,7 @@
     The claude-dotfiles checkout the boot prompt points masters at for the runbooks.
 
 .PARAMETER Only
-    Slugs to consider (bill-intake, contract-builder, sales-cockpit, zoho). Empty = all.
+    Master names to consider (the served rows' master field in lib/repos.json). Empty = all.
 
 .PARAMETER MaxHeartbeatAgeMinutes
     Age past which an alive master's heartbeat is reported as stale. 120 per issue 64.
@@ -113,16 +113,6 @@ param(
 # NEVER let a git-stderr warning end the script. Restore-test docs cover the trap.
 $ErrorActionPreference = 'Continue'
 
-# One row per target repo, RUNBOOK.md priority order. StateIssue is that repo's
-# "Master orchestrator state - <owner/repo>" issue in surreptakos/claude-dotfiles; #44 is the
-# registry and must never be a master's state issue again.
-$Repos = @(
-    @{ Slug = 'bill-intake';      Repo = 'surreptakos/aac-bill-intake';      StateIssue = 74; Root = (Join-Path $env:USERPROFILE 'Claude\Projects\Financial\aac-bill-intake') },
-    @{ Slug = 'contract-builder'; Repo = 'surreptakos/aac-contract-builder'; StateIssue = 75; Root = (Join-Path $env:USERPROFILE 'Claude\Projects\Sales Data KPIs\contract-builder') },
-    @{ Slug = 'sales-cockpit';    Repo = 'surreptakos/aac-sales-cockpit';    StateIssue = 76; Root = (Join-Path $env:USERPROFILE 'Claude\Projects\Sales Data KPIs\aac-cockpit') },
-    @{ Slug = 'zoho';             Repo = 'surreptakos/zoho-source-of-truth'; StateIssue = 77; Root = (Join-Path $env:USERPROFILE 'Claude\Projects\Operations\zoho-source-of-truth') }
-)
-
 $script:RunStamp = [datetime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')
 if ($LogFile) {
     $logDir = Split-Path -Parent $LogFile
@@ -137,6 +127,23 @@ function Write-Info {
         try { Add-Content -Path $LogFile -Value "$script:RunStamp $line" -Encoding UTF8 } catch { }
     }
 }
+
+# The repos served: the rows the shared repo list (lib/repos.json in this checkout, issue 1067)
+# flags served, in its priority order. StateIssue is that repo's "Master orchestrator state -
+# <owner/repo>" issue in surreptakos/claude-dotfiles; #44 is the registry and must never be a
+# master's state issue again. The child scope keeps the manifest's Set-StrictMode out of this script.
+$repoListLib = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\manifest.ps1'
+try {
+    $Repos = @(& {
+        . $repoListLib
+        (Read-RepoList -UserHome $env:USERPROFILE).Repos | Where-Object { $_.Served } | Sort-Object Priority |
+            ForEach-Object { @{ Slug = $_.Master; Repo = $_.Repo; StateIssue = $_.StateIssue; Root = $_.Path } }
+    })
+} catch {
+    Write-Info "repo list: unreadable ($($_.Exception.Message)) - nothing served"
+    exit 1
+}
+if ($Repos.Count -eq 0) { Write-Info 'repo list: no row is flagged served - nothing to do'; exit 0 }
 
 function Get-RemoteControlProcesses {
     # Every claude/node process whose command line carries --remote-control. Win32_Process

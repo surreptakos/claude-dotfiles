@@ -85,6 +85,63 @@ function Get-DotfileItems {
     )
 }
 
+# ---------------------------------------------------------------- the shared repo list
+
+# lib/repos.json names every working clone a local build carries and the anchor PC (issue 1067).
+# It is read from the checkout, not restored: nothing in Get-DotfileItems carries it, and its
+# consumers (orchestrator/master-watchdog.ps1, tools/settings-invariants.ps1 -Trust) run from a
+# claude-dotfiles checkout. This is the one reader; no consumer parses the file itself.
+#
+# Returns @{ Anchor; Repos }. Each row: Repo (GitHub slug), RelativePath (as listed), Path (the
+# absolute clone path under -UserHome, spaces kept), Served, and for a served row Master,
+# StateIssue and Priority ($null otherwise). Rows come back in file order. Throws when the file
+# is missing or a row is malformed: a partial list would silently drop a repo.
+function Read-RepoList {
+    param(
+        [Parameter(Mandatory = $true)][string]$UserHome,
+        [string]$Path = ''
+    )
+    if (-not $Path) { $Path = Join-Path $PSScriptRoot 'repos.json' }
+    if (-not (Test-Path -LiteralPath $Path)) { throw "shared repo list not found: $Path" }
+    $data = [System.IO.File]::ReadAllText($Path) | ConvertFrom-Json
+    $names = @($data.PSObject.Properties.Name)
+    if ($names -notcontains 'anchor' -or -not $data.anchor) { throw "shared repo list names no anchor PC: $Path" }
+    if ($names -notcontains 'repos') { throw "shared repo list has no repos: $Path" }
+
+    $homeRoot = $UserHome.TrimEnd('\', '/')
+    $rows = @()
+    $priorities = @()
+    foreach ($entry in @($data.repos)) {
+        $keys = @($entry.PSObject.Properties.Name)
+        if ($keys -notcontains 'repo' -or $keys -notcontains 'path' -or $keys -notcontains 'served' -or
+            -not $entry.repo -or -not $entry.path -or -not ($entry.served -is [bool])) {
+            throw "shared repo list row needs repo, path and a true/false served: $($entry | ConvertTo-Json -Compress)"
+        }
+        $master = $null; $stateIssue = $null; $priority = $null
+        if ($entry.served) {
+            if ($keys -notcontains 'master' -or $keys -notcontains 'stateIssue' -or $keys -notcontains 'priority' -or
+                -not $entry.master -or -not $entry.stateIssue -or -not $entry.priority) {
+                throw "served row $($entry.repo) needs master, stateIssue and priority"
+            }
+            if ($priorities -contains [int]$entry.priority) { throw "served row $($entry.repo) repeats priority $($entry.priority)" }
+            $priorities += [int]$entry.priority
+            $master = [string]$entry.master; $stateIssue = [int]$entry.stateIssue; $priority = [int]$entry.priority
+        }
+        $relative = [string]$entry.path
+        $rows += [pscustomobject]@{
+            Repo         = [string]$entry.repo
+            RelativePath = $relative
+            Path         = Join-Path $homeRoot ($relative.Replace('/', '\'))
+            Served       = [bool]$entry.served
+            Master       = $master
+            StateIssue   = $stateIssue
+            Priority     = $priority
+        }
+    }
+    if ($rows.Count -eq 0) { throw "shared repo list has no repos: $Path" }
+    return [pscustomobject]@{ Anchor = [string]$data.anchor; Repos = $rows }
+}
+
 # Documents is a redirectable shell folder - on this machine it points into OneDrive, not
 # $UserHome\Documents, and $UserHome\Documents still exists as the legacy stub holding
 # My Music / My Pictures. Ask the shell for the real one, but only when $UserHome IS this

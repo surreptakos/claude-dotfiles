@@ -10,8 +10,9 @@
     through PowerShell 5.1's JSON round-trip. This suite is the proof that it no longer does.
 
     Scenario 1 feeds a representative file - nested projects, an empty array, an empty object, an
-    integer past 2^53, literal UTF-8 text - with ONE of the four master-watchdog records missing,
-    and asserts the result is the input plus a single contiguous insertion. That is the strongest
+    integer past 2^53, literal UTF-8 text - holding the trust records of the first three rows of
+    the shared repo list (lib/repos.json, issue 1067) and missing the rest, and asserts the result
+    is the input plus a single contiguous insertion holding one record per missing row. That is the strongest
     statement of "every pre-existing key round-trips unchanged" available: not one byte outside
     the inserted record moved, so no round-trip could have reflowed, re-typed or truncated it.
 
@@ -90,15 +91,29 @@ function Test-SingleInsertion {
     return (($p + $s) -eq $Before.Length)
 }
 
-# The four clone paths the tool owns, under the sandbox home. Kept in the same order as the tool.
+# The clone paths the tool owns, under the sandbox home: one per row of the shared repo list, in
+# list order, through the one reader the tool itself uses (issue 1067).
+. (Join-Path (Join-Path $RepoRoot 'lib') 'manifest.ps1')
 function Get-ClonePaths {
     param([string]$FakeHome)
-    return @(
-        (Join-Path $FakeHome 'Claude\Projects\Financial\aac-bill-intake'),
-        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\contract-builder'),
-        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\aac-cockpit'),
-        (Join-Path $FakeHome 'Claude\Projects\Operations\zoho-source-of-truth')
-    )
+    return @((Read-RepoList -UserHome $FakeHome).Repos | ForEach-Object { $_.Path })
+}
+# The row count read straight off the file's text, not through the reader, so "one record per
+# row" is checked against a number the reader did not produce.
+$ListedRows = [regex]::Matches([System.IO.File]::ReadAllText((Join-Path (Join-Path $RepoRoot 'lib') 'repos.json')),
+                               '"repo"\s*:').Count
+
+function Get-TrustedCount {
+    <# How many of $Clones hold a hasTrustDialogAccepted=true record in the state file. #>
+    param([string]$StatePath, [string[]]$Clones)
+    $state = [System.IO.File]::ReadAllText($StatePath) | ConvertFrom-Json
+    $n = 0
+    foreach ($clone in $Clones) {
+        if ($state.projects.PSObject.Properties.Name -notcontains $clone) { continue }
+        $entry = $state.projects.$clone
+        if ($entry.PSObject.Properties.Name -contains 'hasTrustDialogAccepted' -and $entry.hasTrustDialogAccepted -eq $true) { $n++ }
+    }
+    return $n
 }
 
 # Built from code points, not typed into this file: PowerShell 5.1 reads a BOM-less source file
@@ -131,7 +146,7 @@ $Fixture = @'
       "allowedTools": [],
       "hasTrustDialogAccepted": true
     },
-    "__C3__": {
+    "__C2__": {
       "hasTrustDialogAccepted": true,
       "lastTotalWebSearchRequests": 0
     },
@@ -152,13 +167,10 @@ $Fixture = @'
 
 function New-Fixture {
     <#
-        The representative file, with the aac-cockpit record (clone 3 of 4) deliberately absent.
-        -WithCockpit puts that record in too, so the file is already complete: scenario 2 needs a
-        fixture whose ONLY missing invariant is the false flag it is about to assert on, otherwise
-        the tool legitimately inserts the absent record as well and "nothing else moved" is a claim
-        about a run that had two jobs to do.
+        The representative file, holding the records of the first three listed rows and missing
+        every other row's record on purpose.
     #>
-    param([string]$FakeHome, [switch]$WithCockpit)
+    param([string]$FakeHome)
     $clones = Get-ClonePaths -FakeHome $FakeHome
     $esc    = { param($p) $p.Replace('\', '\\') }
     $text   = $Fixture -replace "`r`n", "`n"
@@ -166,12 +178,8 @@ function New-Fixture {
     $text = $text.Replace('__UNICODE__', $Unicode)
     $text = $text.Replace('__C0__',      (& $esc $clones[0]))
     $text = $text.Replace('__C1__',      (& $esc $clones[1]))
-    $text = $text.Replace('__C3__',      (& $esc $clones[3]))
+    $text = $text.Replace('__C2__',      (& $esc $clones[2]))
     $text = $text.Replace('__OTHER__',   (& $esc (Join-Path $FakeHome 'Claude\Projects\Unrelated\other-clone')))
-    if ($WithCockpit) {
-        $record = "    `"" + (& $esc $clones[2]) + "`": {`n      `"hasTrustDialogAccepted`": true`n    },`n"
-        $text = $text.Replace("  `"projects`": {`n", "  `"projects`": {`n" + $record)
-    }
     return $text
 }
 
@@ -192,9 +200,9 @@ $Sandbox = Join-Path ([System.IO.Path]::GetTempPath()) $stamp
 New-Item -ItemType Directory -Path $Sandbox -Force | Out-Null
 
 try {
-    # ---- scenario 1: one of the four records missing ---------------------------------
+    # ---- scenario 1: all but three listed rows' records missing ------------------------
     Write-Host ''
-    Write-Host 'representative ~/.claude.json, one trust record missing'
+    Write-Host 'representative ~/.claude.json, most trust records missing'
 
     $home1 = Join-Path $Sandbox 'home1'
     New-Item -ItemType Directory -Path $home1 -Force | Out-Null
@@ -215,10 +223,21 @@ try {
     $single = Test-SingleInsertion -Before $before -After $after -Inserted ([ref]$inserted)
     Assert 'the rewrite is ONE contiguous insertion - every pre-existing byte survives' $single `
         ("inserted: {0}" -f $inserted)
-    Assert 'the inserted text is the missing trust record and nothing else' `
-        ($inserted.Contains('aac-cockpit') -and $inserted.Contains('"hasTrustDialogAccepted": true')) $inserted
+    # The diff window can start mid-record: the inserted records share their leading
+    # "<home>\\Claude\\Projects\\" with the record after them, so the window found is a rotation of
+    # the true insertion. Every record is whole inside the window doubled.
+    $window = $inserted + $inserted
+    $absent = @($clones1 | Select-Object -Skip 3 | Where-Object { -not $window.Contains($_.Replace('\', '\\')) })
+    $records = ([regex]::Matches($inserted, '"hasTrustDialogAccepted": true')).Count
+    Assert 'the inserted text is the missing rows'' trust records and nothing else' `
+        (($absent.Count -eq 0) -and ($records -eq ($clones1.Count - 3))) `
+        ("{0} record(s) inserted for {1} missing row(s); absent: {2}" -f $records, ($clones1.Count - 3), ($absent -join ', '))
 
-    Assert 'all four master-watchdog clone paths are trusted' (Test-AllTrusted -StatePath $state1 -Clones $clones1) $r.Out
+    Assert ("the shared repo list reads {0} rows, as many as lib/repos.json lists" -f $clones1.Count) `
+        (($clones1.Count -eq $ListedRows) -and ($ListedRows -gt 0)) ("file lists {0}" -f $ListedRows)
+    $trusted1 = Get-TrustedCount -StatePath $state1 -Clones $clones1
+    Assert ("one trust record per listed repo ({0} of {1})" -f $trusted1, $ListedRows) `
+        (($trusted1 -eq $ListedRows) -and (Test-AllTrusted -StatePath $state1 -Clones $clones1)) $r.Out
 
     # Called out one by one because these are the shapes a PowerShell 5.1 JSON round-trip
     # damages: >2^53 integers lose their last digits, non-ASCII is re-encoded, and an empty
@@ -258,8 +277,8 @@ try {
     New-Item -ItemType Directory -Path $home2 -Force | Out-Null
     $state2  = Join-Path $home2 '.claude.json'
     $clones2 = Get-ClonePaths -FakeHome $home2
-    # Start from scenario 1's post-rewrite text, which holds all four records (New-Fixture leaves
-    # aac-cockpit out on purpose, so a run from it makes an add AND a flip and "nothing else moves"
+    # Start from scenario 1's post-rewrite text, which holds every listed record (New-Fixture leaves
+    # most rows out on purpose, so a run from it makes adds AND a flip and "nothing else moves"
     # cannot hold). Only the paths differ between the two homes.
     $complete2 = $after.Replace($home1.Replace('\', '\\'), $home2.Replace('\', '\\'))
     $before2 = $complete2.Replace(
@@ -272,7 +291,7 @@ try {
     $after2 = [System.IO.File]::ReadAllText($state2)
     Assert 'a false flag flips to true and nothing else in the file moves' `
         (($r3.Exit -eq 0) -and ($after2 -ceq $complete2)) $r3.Out
-    Assert 'all four clone paths are trusted after the flip' (Test-AllTrusted -StatePath $state2 -Clones $clones2) $r3.Out
+    Assert 'every listed clone path is trusted after the flip' (Test-AllTrusted -StatePath $state2 -Clones $clones2) $r3.Out
 
     # ---- scenario 3: the fresh-machine shapes ----------------------------------------
     # A file claude has written but no project has been opened in holds an EMPTY projects
@@ -290,7 +309,7 @@ try {
         $state = Join-Path $h '.claude.json'
         Write-Utf8NoBom -Path $state -Text $shapes[$shape]
         $r = Invoke-Trust -FakeHome $h
-        Assert ("all four records land in a {0}" -f $shape) `
+        Assert ("one record per listed repo lands in a {0}" -f $shape) `
             (($r.Exit -eq 0) -and (Test-AllTrusted -StatePath $state -Clones (Get-ClonePaths -FakeHome $h))) $r.Out
     }
 

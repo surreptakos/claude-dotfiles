@@ -73,9 +73,13 @@ never from an intermediate one, so `previous-modified` names the published versi
   never strip it by hand (issues 825, 826).
 - `lib/manifest.ps1` — the whitelist of what pull writes, the exclusions, the path templating, the
   secret guard. Adding something to the setup means adding it to `Get-DotfileItems` here.
+- `lib/repos.json` — the shared repo list: every clone, which ones the watchdog serves, the anchor
+  PC. Read only through `Read-RepoList` in the manifest; never hard-code a repo row elsewhere.
 - `sync.ps1 -Mode pull [-DryRun]` — backs up to `~/.claude-dotfiles-backup-<timestamp>` before
   writing, and never deletes. `-Mode push` prints why it is retired and exits 2. On a fresh
-  machine `install.ps1 [-DryRun]` wraps it: prerequisites, pull, then the manual list.
+  machine `install.ps1 [-DryRun]` runs pull, then `setup-check.ps1 -Fix`, and exits with the
+  check's code. The setup check owns the prerequisites and the owner to-do; its machine probes
+  run only against the real profile, and a test drives them through `SETUP_CHECK_STUBS`.
 - `orchestrator/` — the master orchestrators. `LOCAL-RUNBOOK.md` is live (desktop, under
   `master-watchdog.ps1`); `RUNBOOK.md` holds the shared rules and the paused cloud venue (ADR
   0001). The fleet itself is served by the `aac-skills` plugin at

@@ -24,7 +24,8 @@ const test = require('node:test');
 
 const ROOT = path.join(__dirname, '..');
 const SUITES = ['tests/restore-test.ps1', 'tests/git-env-leak.tests.ps1',
-                'tests/settings-defaultmode.tests.ps1', 'tests/settings-invariants.tests.ps1'];
+                'tests/settings-defaultmode.tests.ps1', 'tests/settings-invariants.tests.ps1',
+                'tests/setup-check.tests.ps1'];
 
 const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
 

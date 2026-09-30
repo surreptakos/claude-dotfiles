@@ -14,7 +14,7 @@
 
     Checks, in order:
       0  the clone materialized the exact bytes that were pushed (clone modes only)
-      1  install.ps1 exits 0
+      1  install.ps1 exits 0, having run the setup check with its machine probes skipped
       2  every whitelisted item landed, with the same file count as the repo
       4  no __USERHOME* token survives in any restored file
       5  no real-home path survives in any restored file
@@ -86,10 +86,11 @@ param(
     #   dead-caveman-hook  plants a hook entry naming a caveman binary at a path that does not
     #                exist -> check 6e1 (issue 825)
     #   caveman-overwrite  pull copies settings.json over a live one instead of merging -> check 9f (issue 826)
+    #   repo-list    the trust writer covers only four rows of the shared repo list -> check 6a2 (issue 1067)
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
                  'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree',
-                 'dead-caveman-hook', 'caveman-overwrite')]
+                 'dead-caveman-hook', 'caveman-overwrite', 'repo-list')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -369,6 +370,16 @@ foreach ($dirFault in @(@{ Name = 'hooks-dir'; Dir = 'hooks' }, @{ Name = 'tools
     [System.IO.File]::WriteAllText($cloneManifest, $text.Replace($anchor, $entry + $anchor))
     Note ('fault: the clone''s whitelist writes ~/.claude/{0} again' -f $dirFault.Dir)
 }
+if ($Fault -eq 'repo-list') {
+    # What the trust writer did before issue 1067: records for its own four-row copy of the
+    # repos, not for every row of the shared list.
+    $cloneTrust = Join-Path $Clone 'tools\settings-invariants.ps1'
+    $text = [System.IO.File]::ReadAllText($cloneTrust)
+    $anchor = '.Repos | ForEach-Object { $_.Path }'
+    if (-not $text.Contains($anchor)) { throw 'repo-list fault: the trust writer''s list read moved; update the anchor here' }
+    [System.IO.File]::WriteAllText($cloneTrust, $text.Replace($anchor, '.Repos | Select-Object -First 4 | ForEach-Object { $_.Path }'))
+    Note 'fault: the clone''s trust writer covers only four of the listed repos'
+}
 if ($Fault -eq 'skill-tree') {
     # What pull did before issue 734: the whole aac-skills/ tree written to ~/.claude/skills.
     $cloneManifest = Join-Path $Clone 'lib\manifest.ps1'
@@ -453,6 +464,19 @@ New-Item -ItemType Directory -Path (Split-Path $StaleSkill -Parent) -Force | Out
 $StaleSkillText = "---`nname: pre-734-stale`ndescription: written by a pull from before issue 734`n---`n"
 [System.IO.File]::WriteAllText($StaleSkill, $StaleSkillText, (New-Object System.Text.UTF8Encoding($false)))
 
+# Issue 1068: install.ps1 ends in the setup check, which STOPs (exit 1) on a missing secret file,
+# so the fake home gets stand-ins for the two files the owner copies by hand. They only have to
+# parse; they hold nothing credential-shaped, so the secret guard in section 8 stays meaningful.
+$SeededSecrets = @(
+    @{ Name = 'gpt-sheets-access-475817-853f8648243b.json'; Text = '{"type":"service_account","project_id":"restore-test"}' },
+    @{ Name = 'client_secret_594980791877-restore-test.apps.googleusercontent.com.json'; Text = '{"installed":{"client_id":"restore-test"}}' }
+) | ForEach-Object {
+    $path = Join-Path $FakeHome ('.config\' + $_.Name)
+    New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+    [System.IO.File]::WriteAllText($path, $_.Text, (New-Object System.Text.UTF8Encoding($false)))
+    $path
+}
+
 # ------------------------------------------------------------------ 1. run the installer
 
 $log = Join-Path $FakeRoot 'install.log'
@@ -474,6 +498,12 @@ try {
 
 Write-Host 'Install'
 Check 'install.ps1 exits 0' ($installExit -eq 0) @(Get-Content $log -Tail 15)
+# Issue 1068: install.ps1 is a wrapper around the setup check, and in a fake home the check must
+# skip the machine probes rather than run them against this machine.
+$installLog = Get-Content -Raw $log
+Check 'install.ps1 ran the setup check, machine probes skipped in the fake home' `
+    (($installLog -match '(?m)^Credentials\s*$') -and ($installLog -match 'machine probe skipped') -and
+     ($installLog -match '(?m)^Owner to-do\s*$')) @(Get-Content $log -Tail 15)
 
 # Post-install faults: breakage the restore itself would have to catch, which cannot be staged
 # in the repo because the repo is the thing being restored FROM.
@@ -560,12 +590,14 @@ $restored = @(Get-ChildItem -Path $FakeHome -Recurse -File -ErrorAction Silently
                              $_.FullName -notlike '*\.claude\hook-state\*' -and
                              # Issue 199: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1
                              # -Trust, which lands (and if absent, seeds) ~/.claude.json with the
-                             # four master-watchdog trust records. Machine-local state Claude Code
+                             # shared repo list's trust records. Machine-local state Claude Code
                              # owns, deliberately outside the sync manifest, so it also stays out
                              # of the whitelist count. Its content is asserted separately below.
                              $_.FullName -ne (Join-Path $FakeHome '.claude.json') -and
                              # Issue 734: seeded before the install, not restored; section 6b.
                              $_.FullName -ne $StaleSkill -and
+                             # Issue 1068: the secret stand-ins, seeded before the install.
+                             $SeededSecrets -notcontains $_.FullName -and
                              $_.FullName -notlike '*\.claude.json.bak-*' })
 Check 'no files beyond the whitelist were written' ($restored.Count -eq $pairs.Count) `
     @(("repo pairs {0}, restored {1}" -f $pairs.Count, $restored.Count))
@@ -831,8 +863,8 @@ Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the reg
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
 
 # The other half of AC1: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1 with -Trust,
-# which lands hasTrustDialogAccepted=true into ~/.claude.json for the four master-watchdog clone
-# paths under the pulled home. Combined with permissions.defaultMode=bypassPermissions above, a
+# which lands hasTrustDialogAccepted=true into ~/.claude.json for every clone path in the shared
+# repo list (lib/repos.json, issue 1067) under the pulled home. Combined with permissions.defaultMode=bypassPermissions above, a
 # fresh claude launch in one of those clones reaches first prompt with no permission dialog and
 # no folder-trust dialog. ~/.claude.json is not in the sync manifest (holds oauthAccount and
 # other machine-only state), so this is the only automated surface that lands trust records; a
@@ -840,16 +872,26 @@ Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the reg
 # paths without updating this check, fails here.
 Write-Host ''
 Write-Host '.claude.json trust records (issue 199)'
+# Issue 1067: the clone paths are the rows of the shared repo list, which the manifest has read
+# from the checkout (lib/repos.json) rather than restore into the home. Read it the way the trust
+# writer and the watchdog do, through the clone's own Read-RepoList.
+$repoList = $null
+$repoListError = ''
+try { $repoList = Read-RepoList -UserHome $FakeHome } catch { $repoListError = $_.Exception.Message }
+$listRows = @()
+if ($null -ne $repoList) { $listRows = @($repoList.Repos) }
+$outsideHome = @($listRows | Where-Object { -not $_.Path.StartsWith($FakeHome + '\') -or
+                                            ($_.Path -ne (Join-Path $FakeHome $_.RelativePath.Replace('/', '\'))) })
+Check ("the clone's shared repo list reads: anchor '{0}', {1} rows, each an absolute path under the fake home" -f
+       $(if ($repoList) { $repoList.Anchor } else { '' }), $listRows.Count) `
+    (($null -ne $repoList) -and $repoList.Anchor -and ($listRows.Count -gt 0) -and ($outsideHome.Count -eq 0) -and
+     (@($listRows | Where-Object { $_.Served }).Count -gt 0)) `
+    (@($repoListError) + @($outsideHome | ForEach-Object { $_.Path }))
 $stateFile = Join-Path $FakeHome '.claude.json'
 Check '.claude.json exists after pull (invariant tool seeds it)' (Test-Path $stateFile)
 if (Test-Path $stateFile) {
     $state = Get-Content $stateFile -Raw | ConvertFrom-Json
-    $expectedClones = @(
-        (Join-Path $FakeHome 'Claude\Projects\Financial\aac-bill-intake'),
-        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\contract-builder'),
-        (Join-Path $FakeHome 'Claude\Projects\Sales Data KPIs\aac-cockpit'),
-        (Join-Path $FakeHome 'Claude\Projects\Operations\zoho-source-of-truth')
-    )
+    $expectedClones = @($listRows | ForEach-Object { $_.Path })
     # $clone would clobber the script-scope $Clone (PowerShell variables are case-insensitive),
     # so use a distinctive loop name instead.
     $untrusted = @()
@@ -862,7 +904,8 @@ if (Test-Path $stateFile) {
             $untrusted += $clonePath
         }
     }
-    Check 'each of the four master-watchdog clone paths carries hasTrustDialogAccepted=true' ($untrusted.Count -eq 0) $untrusted
+    Check ("each of the {0} listed repos' clone paths carries hasTrustDialogAccepted=true" -f $expectedClones.Count) `
+        (($expectedClones.Count -gt 0) -and ($untrusted.Count -eq 0)) $untrusted
 }
 
 # ------------------------------------------------------------------ 6a. codex config.toml is usable
@@ -1278,18 +1321,20 @@ Pop-Location
 $ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
 Check 'plugin-served session-check reports on a repo' $ran @($out | Select-Object -Last 10)
 
-# Issue 103: the account registry travels, parses, and names every repo the watchdog serves - the
-# repo list is read from the watchdog script itself so the two cannot drift apart unnoticed.
+# Issue 103: the account registry travels, parses, and names every repo in the shared repo list
+# (issue 1067: the watchdog's served rows come from that list, so they are covered too). The rows
+# are read through the clone's Read-RepoList, so the list and the registry cannot drift unnoticed.
 $accounts = Join-Path $FakeHome '.claude\accounts.json'
 $registry = $null
 try { $registry = Get-Content $accounts -Raw | ConvertFrom-Json } catch { }
-$watchdogRepos = @([regex]::Matches((Get-Content (Join-Path $Clone 'orchestrator\master-watchdog.ps1') -Raw), "Repo\s*=\s*'([^']+)'") | ForEach-Object { $_.Groups[1].Value })
-$unregistered = @($watchdogRepos | Where-Object { -not ($registry -and $registry.repos -and ($registry.repos.PSObject.Properties.Name -contains $_)) })
+$listedRepos = @()
+try { $listedRepos = @((Read-RepoList -UserHome $FakeHome).Repos | ForEach-Object { $_.Repo }) } catch { }
+$unregistered = @($listedRepos | Where-Object { -not ($registry -and $registry.repos -and ($registry.repos.PSObject.Properties.Name -contains $_)) })
 $accountsDetail = @($unregistered)
-if ($watchdogRepos.Count -eq 0) { $accountsDetail = @("no Repo = '<owner/repo>' rows found in orchestrator\master-watchdog.ps1 - the table format changed; update this regex") }
+if ($listedRepos.Count -eq 0) { $accountsDetail = @("the clone's shared repo list (lib\repos.json) did not read") }
 elseif ($null -eq $registry) { $accountsDetail = @("$accounts missing or not JSON") }
-Check ("restored accounts.json parses and names all {0} watchdog repos" -f $watchdogRepos.Count) `
-    ($null -ne $registry -and $watchdogRepos.Count -gt 0 -and $unregistered.Count -eq 0) $accountsDetail
+Check ("restored accounts.json parses and names all {0} listed repos" -f $listedRepos.Count) `
+    ($null -ne $registry -and $listedRepos.Count -gt 0 -and $unregistered.Count -eq 0) $accountsDetail
 
 $identityTest = Join-Path $Clone 'marketplace\aac-skills\skills\session-check\identity.test.js'
 if (Test-Path $identityTest) {
@@ -1561,6 +1606,22 @@ if (Test-Path $invariantTests) {
         ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
 } else {
     Check 'settings-invariants.tests.ps1 shipped' $false @('tests/settings-invariants.tests.ps1 missing from clone')
+}
+
+# The setup check engine against seeded fake homes (issue 1068): every check has a case that
+# fails it, and no run prints a secret value. Runs against the CLONE, like the two suites above.
+$setupCheckTests = Join-Path $Clone 'tests\setup-check.tests.ps1'
+if (Test-Path $setupCheckTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $setupCheckTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'setup-check.tests.ps1 passes (each check fails on its fixture; no secret printed)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'setup-check.tests.ps1 shipped' $false @('tests/setup-check.tests.ps1 missing from clone')
 }
 
 # ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)
