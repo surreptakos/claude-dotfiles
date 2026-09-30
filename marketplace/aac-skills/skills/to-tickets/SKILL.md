@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-29T22:49:58Z'
-  previous-modified: '2026-09-28T21:53:59Z'
-  revision: '7'
-  content-sha: 92b6018c317f
+  modified: '2026-09-30T19:28:24Z'
+  previous-modified: '2026-09-29T22:49:58Z'
+  revision: '8'
+  content-sha: 64487c9cbe8d
 ---
 
 # To Tickets
@@ -65,6 +65,8 @@ Ask the user:
 - Of the would-be-reaped group, which (if any) to publish anyway — and why. The reason is an observed failure or a live dependency, and it goes into that ticket's body so the next reaper run reads it as evidence rather than caution.
 
 A would-be-reaped ticket with a blocker or dependant in the passing group is flagged: dropping it breaks an edge, so either the user promotes it or the dependant's edge is rewritten. Iterate until the user approves the breakdown. Only the approved set is published; the rest is named in the session summary as "not filed, would be reaped" with its clause, so it is a decision on record and not a leftover.
+
+End each round of the breakdown with `Next: reply tickets ok to publish.` Ask for that phrase and no other: the publish gate on the second `gh issue create` accepts `tickets ok` as the whole message, so a different go-word invented here is refused there (issue 1060).
 
 **Called from `/session-end`: no quiz.** Typing `/session-end` is the approval (Dan, 2026-09-23). Show the breakdown in the reply, then publish every ticket, the would-be-reaped group included; the weekly reaper parks what should not have been filed.
 

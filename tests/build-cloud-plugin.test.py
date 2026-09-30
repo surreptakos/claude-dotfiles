@@ -525,6 +525,18 @@ class PluginHooksManifest(unittest.TestCase):
                          "the memory loader must not share a group with another hook")
         self.assertTrue((self.scripts_dir / "repo-memory-load.js").is_file())
 
+    def test_the_aac_design_gate_fragment_is_wired_from_the_skill(self):
+        # Issue 1082: the skill's hooks fragment rides the manifest, write on PostToolUse over
+        # Write|Edit|MultiEdit and stop on Stop, naming the gate inside the packaged skill.
+        gate = "skills/aac-design/scripts/designgate.py"
+        wired = [(event, group.get("matcher"), hook["command"].split()[-1])
+                 for event, groups in (self.manifest.get("hooks") or {}).items()
+                 for group in groups for hook in group.get("hooks", [])
+                 if gate in hook.get("command", "")]
+        self.assertEqual(sorted(wired), [("PostToolUse", "Write|Edit|MultiEdit", "write"),
+                                         ("Stop", None, "stop")])
+        self.assertTrue((MARKETPLACE_HOOKS.parent / gate).is_file())
+
     def test_no_pwsh_only_invocation_in_the_hook_commands(self):
         # Acceptance criterion 3: every script runs on python3 and node only. A pwsh-only branch
         # would need to be guarded and skipped with a printed reason; there is no such branch here,
