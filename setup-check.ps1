@@ -23,7 +23,9 @@
                      ~/.claude-personal gets the plugin and hook checks when it exists and is
                      never created (issue 1070).
       Credentials    the service account key and the OAuth client secret under ~/.config exist
-                     and parse as JSON; the GitHub, Claude and gas logins answer a live probe.
+                     and parse as JSON; the GitHub, Claude and gas logins answer a live probe;
+                     TYPESAFE_API_KEY is set (user, machine or this process's environment) and
+                     Jev answers a live call with it (issue 1133).
       Projects       every repo in the shared repo list (lib/repos.json) is cloned at its path
                      with the right origin, its commit gate on (core.hooksPath .githooks when the
                      repo has that folder) and its Claude trust record written (by
@@ -48,10 +50,11 @@
     other home they are reported as skipped, so the restore test can drive install.ps1 into a fake
     home. A test controls them through SETUP_CHECK_STUBS: a directory holding <probe>.ps1 files,
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
-    command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth,
+    command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
     Text probes print their answer instead: master-plugin-version (the aac-skills version master
-    offers), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
+    offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
+    unset - never the value), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
     Exit 0 when no STOP remains, 1 when one does, 2 when the check itself could not run.
@@ -301,6 +304,68 @@ function Test-Credentials {
         -Real { Invoke-NativeExit 'node' @($GasCli, 'whoami') } `
         -TodoText 'Log in to Google for Apps Script (once per Google account):' `
         -Commands @(('node "{0}" login' -f $GasCli))
+    Test-JevKey $Found
+}
+
+# The TypeSafe key the ask-matt route gate sends to Jev (issue 1133). Without it every turn opens
+# 'route unchecked: Jev unavailable'. The value is never read into this script's output: the key
+# probe answers with where the key is set, and the live probe hands it to node through the
+# environment only.
+$JevJs      = Join-Path (Join-Path $RepoRoot 'tools') 'jev.js'
+$JevKeyVar  = 'TYPESAFE_API_KEY'
+$JevKeyTodo = ('Set {0} as a Windows user environment variable (not settings.json, not a repo) - the command asks for the key, so it stays out of the shell history - then open a new terminal and restart the Claude app:' -f $JevKeyVar)
+$JevKeySet  = ('[Environment]::SetEnvironmentVariable(''{0}'', (Read-Host ''TypeSafe API key''), ''User'')' -f $JevKeyVar)
+
+function Test-JevKey {
+    param($Found)
+    $source = Invoke-ProbeText -Name 'jev-key' -Real {
+        foreach ($scope in @('User', 'Machine')) {
+            if ([Environment]::GetEnvironmentVariable($JevKeyVar, $scope)) { return $scope.ToLower() }
+        }
+        if ([Environment]::GetEnvironmentVariable($JevKeyVar, 'Process')) { return 'process' }
+        return ''
+    }
+    if ($null -eq $source) {
+        Write-Line skip ('TypeSafe key ({0})  ({1})' -f $JevKeyVar, $SkipReason)
+        Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
+        return
+    }
+    if (-not $source) {
+        Write-Line stop ('TypeSafe key missing: {0} is not set, so the route gate reads ''route unchecked: Jev unavailable''' -f $JevKeyVar)
+        Add-Todo $JevKeyTodo @($JevKeySet)
+        return
+    }
+    $where = switch ($source) {
+        'user'    { 'the Windows user environment' }
+        'machine' { 'the Windows machine environment' }
+        'process' { 'this process only: not a Windows user or machine variable' }
+        default   { $source }
+    }
+    Write-Line ok ('TypeSafe key ({0}, set in {1})' -f $JevKeyVar, $where)
+    if ($Found.ContainsKey('node') -and $Found['node'] -eq $false) {
+        Write-Line skip 'Jev live call  (not probed: node is missing)'
+        return
+    }
+    $code = Invoke-Probe -Name 'jev-live' -Real {
+        $prev = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Process')
+        try {
+            if (-not $prev) {
+                $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'User')
+                if (-not $key) { $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Machine') }
+                [Environment]::SetEnvironmentVariable($JevKeyVar, $key, 'Process')
+            }
+            $js = 'const j=require(process.argv[1]);j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000}).then(a=>process.exit(a&&a.ok?0:1))'
+            Invoke-NativeExit 'node' @('-e', $js, $JevJs)
+        } finally { [Environment]::SetEnvironmentVariable($JevKeyVar, $prev, 'Process') }
+    }
+    if ($null -eq $code) {
+        Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
+    } elseif ($code -eq 0) {
+        Write-Line ok 'Jev answers a live call'
+    } else {
+        Write-Line stop ('Jev did not answer a live call with {0}: the key is refused or api.typesafe.ai is unreachable' -f $JevKeyVar)
+        Add-Todo ('Replace the TypeSafe key: {0}' -f $JevKeyTodo) @($JevKeySet)
+    }
 }
 
 # ------------------------------------------------------------------ profile
