@@ -553,7 +553,10 @@ function Test-Caveman {
         Add-Todo 'Log in to Claude in a terminal, then type /login at its prompt:' @('claude')
     } else {
         Write-Line stop ('caveman proxy port {0} does not answer, so claude -p cannot{1}' -f $ProxyPort, $note)
-        Add-Todo 'Re-run the caveman install, then check that a terminal claude -p "reply ok" answers:' @($InstallCommand)
+        # Re-running the install cannot fix this: it never starts the proxy, and nothing starts it
+        # at logon yet (issue 1110, AAC-AI 2026-09-30).
+        Add-Todo 'Start the caveman proxy, then check that a terminal claude -p "reply ok" answers:' @(
+            ('powershell -Command "Start-Process ''{0}'' -WindowStyle Hidden"' -f $proxyExe))
     }
 }
 

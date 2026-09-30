@@ -39,4 +39,5 @@ The huddle draft reads the huddle channel (`huddle__global__…`) and Sent Items
 The page source of record is [`day-board.html`](day-board.html). Edit that file and republish it to the board URL with the `capabilities` its header comment lists; build every change from that file, never from memory or the live page. Every button on it:
 
 - stores what each Todoist write changed, so the card offers Undo;
-- works without `confirm()` or `alert()`, which the artifact frame blocks silently.
+- works without `confirm()` or `alert()`, which the artifact frame blocks silently;
+- moves a recurring task's do date with `reschedule-tasks`, date only, because `update-tasks` would replace its due string and wipe the repeat. A `dueString` the page cannot read as a date (it reads today, tomorrow, a weekday, Oct 5, 10/5, in 3 days, next week) changes nothing on a recurring task and shows the error on the card.
