@@ -1561,7 +1561,7 @@ def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
     ]
 
 
-def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
+def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list[str]:
     profile = LINT_PROFILES.get(mode)
     if profile is None:
         return []  # caveman off: nothing to lint
@@ -1608,7 +1608,13 @@ def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
             violations.append(
                 f"article density {density:.1f}/100 words (cap {articles_cap:g}) — drop a/an/the"
             )
-    sentences = [s.strip() for s in SENTENCE_SPLIT.split(prose) if s.strip()]
+    # Issue 1059: the route-appeal line is text the gate itself mandates, word for word, so the
+    # sentence cap never judges it: capping it left no reply that passed both rules.
+    sentence_prose = prose
+    lines = text.lstrip().splitlines()
+    if appeal_line and lines and lines[0].strip() == appeal_line:
+        sentence_prose = _strip_code("\n".join(lines[1:]))
+    sentences = [s.strip() for s in SENTENCE_SPLIT.split(sentence_prose) if s.strip()]
     long_sentences = [s for s in sentences if len(s.split()) > sentence_cap]
     if long_sentences:
         worst = max(long_sentences, key=lambda s: len(s.split()))
@@ -2519,12 +2525,13 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     adhd = _adhd_state()
     transcript = _find_transcript(session_id) if session_id else ""
     turn_refusals = _turn_refusals(transcript) if transcript else None
-    appeal_violations, shaped = _appeal_lint(text, _current_appeal(state))
+    appeal = _current_appeal(state)
+    appeal_violations, shaped = _appeal_lint(text, appeal)
     violations = (
         appeal_violations
         + _yes_lint(text, turn_tools, turn_refusals)
         + (_adhd_lint(shaped) if adhd == "on" else [])
-        + _caveman_lint(text, mode)
+        + _caveman_lint(text, mode, _appeal_line(appeal) if appeal else "")
         + _route_unchecked_lint(text, bool(state.get("route_unchecked")))
     )
     if not violations:
