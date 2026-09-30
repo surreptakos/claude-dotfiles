@@ -17,7 +17,21 @@ The first agent of every run, `env-probe`, reads the remote env vars, `gh` on PA
 verifier agent file; the instrument resolves from what it reports, because the runtime does not
 reliably expose `process.env` (issue 322). With no measurement and no `instrument` or `remote`
 arg, the run stops rather than fall back to `gh`: a cloud run on `gh` lost all twelve verifiers
-to `agent type 'fleet-verifier' not found` on 2026-09-15.
+to `agent type 'fleet-verifier' not found` on 2026-09-15. A probe that throws counts as one
+that returned nothing, so an explicit `instrument` or `remote` still carries the run.
+
+Every `agent()` call sits in a try block (issue 270): a throw out of one (the StructuredOutput
+retry cap, a quota limit) otherwise ends the whole workflow. `tools/ticket-fleet-branch.test.js`
+fails on a bare call, and `tools/fleet-effort.test.js` on one that omits `effort`.
+
+## A copied script refreshes itself
+
+A repo that launches its own `.claude/workflows/ticket-fleet.js` copy has it kept fresh by the
+wave. The first agent, `fleet-refresh-repo`, only reports `servedRepo`; the script skips the
+source repo and every fork listed in `FORKS` (`tools/ticket-fleet-contract.js`) in code (issue
+804). For any other repo a second agent, `fleet-refresh`, overwrites a stale copy from
+claude-dotfiles master and commits it (no push), so the next launch runs the fix; it refuses any
+copy carrying the `PROMPT_CONTRACT` fork marker.
 
 ## Contract and ripple list
 

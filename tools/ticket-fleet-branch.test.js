@@ -299,6 +299,20 @@ test(`fleet script ${FLEET_SCRIPT_REL} inlines the pickInstrument switch`, () =>
     'fleet must route tracker prompts through the instrument-specific rules');
 });
 
+// A throw out of agent() (the StructuredOutput retry cap, a quota limit) ends the whole workflow
+// unless the call is wrapped (aac-routines issue 270). The env-probe and the scout were the last
+// two left bare: a probe throw bypassed the explicit instrument/remote fallback, and a dead scout
+// read as an empty queue.
+test(`fleet script ${FLEET_SCRIPT_REL} wraps every agent() call in a try block (issue 270)`, () => {
+  const lines = fs.readFileSync(FLEET_SCRIPT, 'utf8').split('\n');
+  const bare = [];
+  lines.forEach((line, i) => {
+    if (!/await agent\(/.test(line)) return;
+    if (!/try \{/.test(lines.slice(Math.max(0, i - 4), i).join('\n'))) bare.push(`${i + 1}: ${line.trim()}`);
+  });
+  assert.deepEqual(bare, [], 'every agent() call must sit inside a try block');
+});
+
 test(`fleet script ${FLEET_SCRIPT_REL} measures the environment instead of reading process.env (issues 322, 339)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src, /label: 'env-probe'/,
@@ -2220,7 +2234,7 @@ test(`${FLEET_SCRIPT_REL} finish mode is reached from args.finishRunId without a
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   assert.match(src, /finishRunId: null/, 'finishRunId must be a declared arg with a default');
   const finishIdx = src.indexOf('if (cfg.finishRunId) {');
-  const scoutIdx = src.indexOf('const scout = await agent(');
+  const scoutIdx = src.indexOf("label: 'scout'");
   assert.ok(finishIdx > 0 && scoutIdx > finishIdx,
     'the finish branch must return before the scout agent is ever started');
   assert.match(src, /label: `journal-read:\$\{finishRunId\}`/, 'finish mode must read the dead run journal through its own agent');
