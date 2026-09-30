@@ -17,14 +17,14 @@
 
     Called with -Path <settings.json>, ensures the invariant on that file and reports
     whether it made a change. Called with -Trust and -UserHome, additionally writes
-    hasTrustDialogAccepted=true into the given home's ~/.claude.json for the four
-    master-watchdog clone paths (bill-intake, contract-builder, sales-cockpit,
-    zoho-source-of-truth). ~/.claude.json is NOT in the sync manifest (it holds
+    hasTrustDialogAccepted=true into the given home's ~/.claude.json for every clone path
+    in the shared repo list (lib/repos.json, read through Read-RepoList in lib/manifest.ps1,
+    issue 1067). ~/.claude.json is NOT in the sync manifest (it holds
     oauthAccount and other machine-only state), so trust records land per-machine
     when sync.ps1 -Mode pull invokes this tool with -Trust; that is what wires the
     fresh-launch, no-dialog behaviour called for by issue 199 AC1. If ~/.claude.json
     does not exist yet (claude has never launched on this machine), the tool creates
-    a minimal one containing just the four trust records; a subsequent claude launch
+    a minimal one containing just the trust records; a subsequent claude launch
     will merge its own state around them.
 
     BOTH files are edited by surgical text insertion, never by re-serialising the whole
@@ -598,12 +598,10 @@ if ($Path) {
 if ($Trust) {
     $UserHome = $UserHome.TrimEnd('\', '/')
     $statePath = Join-Path $UserHome '.claude.json'
-    $clones = @(
-        (Join-Path $UserHome 'Claude\Projects\Financial\aac-bill-intake'),
-        (Join-Path $UserHome 'Claude\Projects\Sales Data KPIs\contract-builder'),
-        (Join-Path $UserHome 'Claude\Projects\Sales Data KPIs\aac-cockpit'),
-        (Join-Path $UserHome 'Claude\Projects\Operations\zoho-source-of-truth')
-    )
+    # One trust record per row of the shared repo list (issue 1067), read through its one reader.
+    # The child scope keeps the manifest's Set-StrictMode out of this script.
+    $manifest = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'lib') 'manifest.ps1'
+    $clones = @(& { . $manifest; (Read-RepoList -UserHome $UserHome).Repos | ForEach-Object { $_.Path } })
     Write-Host ''
     Write-Host '.claude.json per-project trust'
     [void](Set-TrustInvariant -StatePath $statePath -Clones $clones)
