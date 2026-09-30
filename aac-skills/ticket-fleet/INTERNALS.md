@@ -166,7 +166,10 @@ anyway**: the verified branch is pushed as it stands, the PR is opened (through
 `mergeStatus: "unmerged-by-classifier"` with `pushed: true`, `conflictPaths: []` and the
 refusal text verbatim in `blockedReason` — and in the PR body, under "Not merged with
 `<defaultBranch>`: classifier refusal". Whoever merges that PR merges the default branch into
-the branch first; nothing needs re-implementing. A verified branch never ends a run with
+the branch first; nothing needs re-implementing. The deliverer's STEP D never merges such a PR
+itself (issue 1132): it returns `prState: "not-attempted"` and leaves the PR for the
+orchestrator's merge of the default branch, because green checks cannot vouch for a branch that
+has not seen it. A verified branch never ends a run with
 `pushed: false`, and the refusal text is a note on the PR, not a substitute for it.
 
 ## Where a verdict is allowed to come from
