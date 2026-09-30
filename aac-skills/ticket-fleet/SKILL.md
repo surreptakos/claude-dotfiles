@@ -4,10 +4,10 @@ description: >
   Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the
   ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-30T22:12:42Z"
-  previous-modified: "2026-09-30T21:34:42Z"
-  revision: "66"
-  content-sha: "4050eaf70d8a"
+  modified: "2026-09-30T22:33:22Z"
+  previous-modified: "2026-09-30T22:12:42Z"
+  revision: "67"
+  content-sha: "ac154ba56eca"
 ---
 
 # ticket-fleet
@@ -51,9 +51,9 @@ waited on it.
 
    From a cloud session, the session root must be the repo checkout. A resumed session can come
    back rooted at `/home/user`, beside the clones; every worktree agent then fails with `Cannot
-   create agent worktree: not in a git repository`, and a `cd` does not help. The
-   `worktree-canary` agent stops the run before Scout with that cause; start a new session on the
-   repo (issue 892).
+   create agent worktree: not in a git repository`, and a `cd` does not help. The `env-probe`
+   agent runs in a worktree of its own and stops the run before the scout with that cause; start
+   a new session on the repo (issues 892, 1093).
 
    Done when the path resolves to a file whose bytes are LF only - the Workflow tool refuses a
    script holding a CR (issue 233) - and, in a cloud session, `git rev-parse --show-toplevel`

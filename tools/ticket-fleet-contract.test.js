@@ -110,6 +110,20 @@ test('the plugin-served script decides the fork skip in JS before spawning the r
     'the FLEET_FORKS check must precede the refresh agent spawn in source order, so a fork never reaches it');
 });
 
+test('the refresh agent fetches the fleet files through gh api, not raw curl (issue 1049)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(src, /FLEET_SOURCE_API = 'repos\/surreptakos\/claude-dotfiles\/contents\/aac-skills\/ticket-fleet'/,
+    'the source must be the contents API path of claude-dotfiles');
+  assert.match(src, /`gh api -H "Accept: application\/vnd\.github\.raw" "\$\{FLEET_SOURCE_API\}\/<name>\?ref=master" > \/tmp\/fleet-refresh-<name>\\`/,
+    'the refresh prompt must fetch with gh api and the raw media type');
+  assert.ok(!/raw\.githubusercontent\.com\/surreptakos|FLEET_SOURCE_RAW|curl -fsSL/.test(src),
+    'no raw.githubusercontent.com fetch of claude-dotfiles may survive in the fleet script');
+  const runbook = fs.readFileSync(path.join(REPO_ROOT, 'orchestrator', 'RUNBOOK.md'), 'utf8');
+  assert.match(runbook, /gh api -H 'Accept: application\/vnd\.github\.raw' 'repos\/surreptakos\/claude-dotfiles\/contents\/\.claude\/hooks\/session-start\.sh\?ref=master'/,
+    'the orchestrator runbook bootstrap line must use the same gh api path');
+  assert.ok(!/raw\.githubusercontent\.com\/surreptakos/.test(runbook), 'the runbook must not fetch claude-dotfiles from raw.githubusercontent.com');
+});
+
 test('the script\'s own refresh block never spawns the refresh agent for a FORKS repo, however servedRepo is spelled (issue 804)', async () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const start = src.indexOf('// [FLEET-REFRESH-START]');

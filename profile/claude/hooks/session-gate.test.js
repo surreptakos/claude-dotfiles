@@ -202,3 +202,19 @@ test('SessionEnd on that parent records one line per repo (issue 663)', () => {
   const log = fs.readFileSync(path.join(box.env.SESSION_GATE_STATE_DIR, 'session-end.log'), 'utf8');
   assert.strictEqual(log.trim().split('\n').length, 2);
 });
+
+test('a check that outlives the gate gets a budget and the report names its step (issue 1061)', () => {
+  const box = sandbox();
+  // A check.js that reads the budget it was handed, marks the step it is in, then hangs past the
+  // gate's timeout — the desktop's start test run on 2026-09-29.
+  fs.writeFileSync(box.env.SESSION_GATE_CHECK, `
+    console.log('BUDGET ' + process.env.SESSION_CHECK_BUDGET_MS);
+    process.stderr.write('session-check: step git\\nsession-check: step tests and configured checks\\n');
+    setTimeout(() => {}, 60000);
+  `, 'utf8');
+  box.env.SESSION_GATE_TIMEOUT_MS = '1500';
+  const text = context(hook(box, 'start', { session_id: 's1', cwd: box.repo, source: 'startup' }));
+  assert.match(text, /BUDGET 1350\b/, 'the budget handed to check.js sits under the gate timeout');
+  assert.match(text, /did not complete — stopped in the "tests and configured checks" step — /);
+  assert.doesNotMatch(text, /session-check: step/, 'the step marks are for the gate, not the report');
+});

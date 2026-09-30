@@ -14,8 +14,11 @@ generator, commit both; `tools/fleet-inline-template.test.js` fails while the bl
 ...) are extracted verbatim by the tests and driven with a mocked `agent`.
 
 The first agent of every run, `env-probe`, reads the remote env vars, `gh` on PATH and the
-verifier agent file; the instrument resolves from what it reports, because the runtime does not
-reliably expose `process.env` (issue 322). With no measurement and no `instrument` or `remote`
+verifier agent file. It runs in a worktree of its own, so a session root that is not a git
+repository refuses it and the run stops before the scout spends anything (issue 892; since issue
+1093 there is no separate `worktree-canary` agent, and finish mode, which cuts no worktree, runs
+the probe unisolated). The instrument resolves from what it reports, because the runtime does
+not reliably expose `process.env` (issue 322). With no measurement and no `instrument` or `remote`
 arg, the run stops rather than fall back to `gh`: a cloud run on `gh` lost all twelve verifiers
 to `agent type 'fleet-verifier' not found` on 2026-09-15. A probe that throws counts as one
 that returned nothing, so an explicit `instrument` or `remote` still carries the run.
@@ -55,6 +58,12 @@ Copies this repo does not rebuild, all of which move when the contract does:
 | `claude-dotfiles` | `orchestrator/LOCAL-RUNBOOK.md` | launch args |
 | `claude-dotfiles` | `aac-skills/ticket-fleet/SKILL.md` | the args list and launch example |
 | `claude-dotfiles` | `aac-skills/project-harness/SKILL.md` | step 15, the harness's own launch instruction |
+
+The two forks carry the isolation guard too, and a fleet-refresh never touches them (issue 804), so
+a guard change reaches them the same way: re-copy. Issue 1093 changed its shape without a contract
+bump - one Setup agent, one agent per checkpoint, no Verify checkpoint for a pinned verifier, the
+canary in `env-probe` - and until a fork is re-copied it still starts the old two agents per
+checkpoint.
 
 Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
 `tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
@@ -189,14 +198,37 @@ started. Passing each of them the relative `cfg.orchestratorCwd` default (`.`) i
 the parent session's shell `cd`s to another repository mid-run, which was silently misdirecting the
 tree guard (a missing guard script there turns `treeGuard:'auto'` off with no error) and sending the
 tip agent a ref it resolved against the wrong tree (claude-dotfiles issue 562). The fix measures the
-orchestrator's absolute checkout path exactly once, with a one-command `pwd` agent at Setup, right
-after the fleet-refresh step and before anything needs it, and bakes that literal string into every
+orchestrator's absolute checkout path exactly once, with `pwd` at the head of the Setup agent's
+command (below), right after the fleet-refresh step and before anything needs it, and bakes that literal string into every
 later guard, tip and scratch-worktree command; a `cd` by the parent afterwards cannot touch a string
 already written into a prompt. A caller that already knows the absolute path - or wants the guard to
 audit a different tree on purpose - can still pass `orchestratorCwd` itself; only the `.` default
 triggers the measurement. The `pwd` spelling depends on the shell the measuring agent picks, so a
 drive-letter answer (`C:\...` or `C:/...`) is normalised to `/c/...`; any other answer not starting
 with `/` still aborts the run before Scout (issue 1007).
+
+## One agent per isolation checkpoint
+
+Every guard agent loads the whole session context before its one command, so the agent is the
+cost, not the command: run `6abd47d1` (2026-09-30) spent about 1.2M tokens on 16 checkpoint agents,
+each 74-76k tokens to run one line of shell (issue 1093). So one agent now does each job:
+
+- **Setup** is one agent, `isolation:setup`: `pwd` (when `orchestratorCwd` is the `.` default), the
+  HEAD read (issue 807) and the tree-guard baseline (issue 192) run in one shell, the baseline last
+  so the command's exit code is the guard's. The worktree canary (issue 892) rides in `env-probe`.
+- **A checkpoint** is one agent, `isolation:<label>#<ticket>`, whose command prints tagged
+  `head`/`sha` lines and the guard's `check` JSON line (`checkpointCommand` and
+  `parseCheckpointOutput` in `tools/ticket-fleet-branch.js`, inlined into the script). A moved
+  HEAD is put back first, and the re-read after the restore carries a fresh tree check, so the
+  tree verdict is never read off a checkout still on the wrong ref. Restores stay their own agents;
+  they run only when something moved.
+- **Checkpoints sit where a stage can write**: after Implement, after Deliver, and before Report.
+  After Verify only for an unpinned verifier: a pinned one runs as `fleet-verifier`, whose tool set
+  has no Edit or Write, and the next checkpoint still sees its tree.
+
+A 2-ticket wave with one attempt each starts 8 of these agents with an unpinned verifier (a cloud
+session) and 6 with a pinned one, where it started 20 (4 Setup, 16 checkpoint); the budget test in
+`tools/ticket-fleet-branch.test.js` counts them.
 
 ## The scratchpad is one per run, not one per worker
 

@@ -30,7 +30,7 @@ const {
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
-  quotaFailure, createRunHalt, haltReport,
+  quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -856,9 +856,13 @@ for (const file of RESUME_GUARD_PAIR) {
     assert.equal(result.prUrl, 'https://github.com/x/y/pull/500');
     assert.deepEqual(result.discoveries, ['finding-A']);
     // Ported from the aac-routines fork (issues 192, 270): one orchestrator-tree checkpoint after
-    // the implementer, one after the (unisolated) verifier, one after Deliver pushes.
-    assert.deepEqual(checkpoints, ['implement-attempt1#9', 'verify-attempt1#9', 'deliver#9'],
-      'the code lane must checkpoint the orchestrator tree after Implement, Verify and Deliver');
+    // the implementer and one after Deliver pushes. Issue 1093: the verifier here is pinned to
+    // the read-only `fleet-verifier`, so it gets no checkpoint of its own.
+    assert.deepEqual(checkpoints, ['implement-attempt1#9', 'deliver#9'],
+      'the code lane must checkpoint the orchestrator tree after Implement and Deliver');
+    const unpinned = await driveCodeLane(file, agentMock, { number: 9, title: 't', criteria: '' }, 0, {}, 'inv1', null, { verifierAgentType: null });
+    assert.deepEqual(unpinned.checkpoints, ['implement-attempt1#9', 'verify-attempt1#9', 'deliver#9'],
+      'an unpinned verifier can write, so it keeps its checkpoint (issue 1093)');
   });
 
   // ---- The verdict's worktree is cross-checked against the branch tip (issue 404) ----
@@ -2564,7 +2568,8 @@ test(`${FLEET_SCRIPT_REL} deliver prompt runs STEP D: wait for CI, the runbook b
 test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles master, forks excepted (issue 770)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const block = extractBetween(src, 'FLEET-REFRESH');
-  assert.match(block, /https:\/\/raw\.githubusercontent\.com\/surreptakos\/claude-dotfiles\/master\/aac-skills\/ticket-fleet/);
+  assert.match(block, /repos\/surreptakos\/claude-dotfiles\/contents\/aac-skills\/ticket-fleet/);
+  assert.match(block, /gh api -H "Accept: application\/vnd\.github\.raw"/, 'fetch through gh api, not raw.githubusercontent.com (issue 1049)');
   assert.match(block, /label: 'fleet-refresh', phase: 'Setup'/);
   assert.match(block, /sha256sum/, 'a copy that already matches must not be rewritten');
   assert.match(block, /git commit -m "chore\(fleet\): refresh ticket-fleet script from claude-dotfiles master \(issue 770\)"/);
@@ -2703,24 +2708,28 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
   // The default is still relative - only the caller's own explicit override skips measurement.
   assert.match(guardBody, /let orchestratorCwd = cfg\.orchestratorCwd/,
     'orchestratorCwd must start from the cfg default so an explicit caller override is honoured');
-  assert.match(guardBody, /if \(orchestratorCwd === '\.'\)/,
+  assert.match(guardBody, /const measureCwd = orchestratorCwd === '\.'/,
     'measurement must run precisely when the default (relative) path was not overridden');
-  // The measurement is its own one-command Setup agent, in the same "run exactly this and report
-  // it" shape the guard and tip agents already use - nothing is left to an agent's judgement.
-  assert.match(guardBody, /label: 'orchestrator-cwd'/, 'the cwd measurement must be its own labelled Setup agent');
+  // Issue 1093: the measurement rides in the one Setup agent's command - `pwd` in the same shell
+  // that reads HEAD and takes the baseline - in the same "run exactly this and report it" shape.
+  assert.match(guardBody, /label: 'isolation:setup'/, 'Setup must be one labelled agent');
   assert.match(guardBody, /phase: 'Setup'/, 'the measurement must run in the Setup phase, before any checkpoint needs it');
-  assert.match(guardBody, /'pwd'|`pwd`/, 'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
+  assert.match(guardBody, /checkpointCommand\(\{ cwd: measureCwd \? null : orchestratorCwd, head: headWatchOn, guard: baselineCmd \}\)/,
+    'Setup measures with pwd exactly when no path was given');
+  assert.match(checkpointCommand({ cwd: null, head: false, guard: null }), /^o="\$\(pwd\)"; printf 'cwd %s\\n' "\$o"$/,
+    'the measurement command must be pwd - nothing else could tell the truth about the shell cwd');
   assert.match(guardBody, /if \(!normalisedCwd\) \{/, 'an unmeasured or non-absolute result must abort the run rather than fall back to a relative path');
 
-  // Every actual guard command - baseline and check - is built from `orchestratorCwd`, never from
-  // `cfg.orchestratorCwd` directly (which would still read '.' after a parent `cd`).
-  const cwdFlags = guardBody.match(/--cwd \$\{orchestratorCwd\}/g) || [];
-  assert.equal(cwdFlags.length, 3, `expected the baseline, the check and the restore (issue 1020) command to all pass --cwd \${orchestratorCwd}, found ${cwdFlags.length}`);
-  assert.ok(!guardBody.includes('--cwd .'), 'no guard command may hardcode the relative default');
-  assert.ok(!guardBody.includes('--cwd ${cfg.orchestratorCwd}'), 'no guard command may read cfg.orchestratorCwd directly - only the measured orchestratorCwd');
-  assert.match(guardBody, /\$\{GUARD_CMD\} baseline --cwd \$\{orchestratorCwd\}/, 'tree-guard:baseline must run node tools/orchestrator-tree-guard.js with the absolute path');
-  assert.match(guardBody, /\$\{GUARD_CMD\} check --cwd \$\{orchestratorCwd\}/, 'every tree-guard:<label> check must run node tools/orchestrator-tree-guard.js with the absolute path');
+  // Every guard command - baseline, check and restore - names the checkout by the measured path,
+  // never by `cfg.orchestratorCwd` (which would still read '.' after a parent `cd`).
+  assert.match(guardBody, /\$\{GUARD_CMD\} baseline --cwd "\$o"/, 'tree-guard baseline must run against the path its own command measured');
+  assert.match(guardBody, /\$\{GUARD_CMD\} check --cwd "\$o"/, 'every tree-guard check must run against "$o"');
+  assert.match(guardBody, /checkpointCommand\(\{ cwd: orchestratorCwd, head: headWatchOn, guard: checkCmd \}\)/,
+    'every checkpoint sets "$o" from the Setup-measured orchestratorCwd');
   assert.match(guardBody, /\$\{GUARD_CMD\} restore --cwd \$\{orchestratorCwd\}/, 'every tree-guard:restore must run node tools/orchestrator-tree-guard.js with the absolute path');
+  assert.ok(!guardBody.includes('--cwd .'), 'no guard command may hardcode the relative default');
+  assert.ok(!guardBody.includes('--cwd ${cfg.orchestratorCwd}') && !guardBody.includes('cwd: cfg.orchestratorCwd'),
+    'no guard command may read cfg.orchestratorCwd directly - only the measured orchestratorCwd');
 
   // The tip agent (revParse, `tip:#<ticket>`) reads a ref from the orchestrator's own checkout too,
   // and is exactly as exposed to a mid-run `cd` as the guard - it must carry the same absolute path.
@@ -2740,13 +2749,40 @@ test(`${FLEET_SCRIPT_REL}: no guard/rev-parse/worktree-add prompt runs without t
     'no scratch-worktree `git worktree add` built from scratchFile() may omit the absolute -C path');
 });
 
+// Issue 1093: one isolation agent's command, pure - what to read in, one shell command out.
+test('checkpointCommand/parseCheckpointOutput: one command reads the path, HEAD and tree, and its stdout splits back apart (issue 1093)', () => {
+  const cmd = checkpointCommand({ cwd: "/it's/here", head: true, guard: 'node g check --cwd "$o"' });
+  assert.equal(cmd, "o='/it'\\''s/here'; printf 'head %s\\n' \"$(git -C \"$o\" symbolic-ref --quiet --short HEAD || echo DETACHED)\"; "
+    + "printf 'sha %s\\n' \"$(git -C \"$o\" rev-parse HEAD || echo UNREADABLE)\"; node g check --cwd \"$o\"");
+  assert.equal(checkpointCommand({ cwd: '/m', head: false, guard: null }), "o='/m'", 'nothing asked, nothing read');
+
+  const sha = 'a'.repeat(40);
+  assert.deepEqual(parseCheckpointOutput(`cwd /x y\nhead main\nsha ${sha}\n{"newEntries":[]}\n`),
+    { cwd: '/x y', head: { branch: 'main', sha }, guard: { newEntries: [] } });
+  assert.deepEqual(parseCheckpointOutput(`head DETACHED\r\nsha ${sha}`).head, { branch: null, sha });
+  assert.equal(parseCheckpointOutput('head DETACHED\nsha UNREADABLE\n{"newEntries":[]}').head, null, 'an unreadable HEAD is null, never a sha');
+  assert.equal(parseCheckpointOutput(`head main\nsha ${sha}\n{not json`).guard, null, 'a paraphrased guard line is could-not-audit, not a pass');
+  assert.deepEqual(parseCheckpointOutput(undefined), { cwd: null, head: null, guard: null });
+});
+
+// What one isolation agent's command prints (issue 1093): tagged lines, then the guard's JSON line.
+function isolationStdout({ cwd, head, guard } = {}) {
+  const lines = [];
+  if (cwd) lines.push(`cwd ${cwd}`);
+  if (head) lines.push(`head ${head.branch || 'DETACHED'}`, `sha ${head.sha}`);
+  if (guard) lines.push(JSON.stringify(guard));
+  return lines.join('\n');
+}
+const MAIN_HEAD = { branch: 'main', sha: 'a'.repeat(40) };
+const CLEAN = { newEntries: [] };
+
 // Behavioral half: drive the REAL treeGuardCheck (not a stub, unlike the code-lane tests above,
 // which inject a recording checkpoint precisely so the lane body under test does not depend on
-// this mechanism's internals). A mocked agent stands in for both the one-time cwd measurement and
-// every later guard command, and records the exact command string each checkpoint sent - proving
-// that a parent session's `cd` after Setup (simulated by never letting anything downstream
-// re-consult cfg.orchestratorCwd or a live cwd) cannot misdirect a later checkpoint, because the
-// absolute path was already baked into the command as a literal string at Setup.
+// this mechanism's internals). A mocked agent stands in for the one Setup agent and every later
+// checkpoint agent, and records the exact command string each sent - proving that a parent
+// session's `cd` after Setup (simulated by never letting anything downstream re-consult
+// cfg.orchestratorCwd or a live cwd) cannot misdirect a later checkpoint, because the absolute
+// path was already baked into the command as a literal string at Setup.
 async function driveTreeGuard(agentMock, cfgOverrides = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
@@ -2760,6 +2796,7 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
       treeGuardStateDir: '.git/orchestrator-tree-guard', reportModel: 'r', orchestratorCwd: '.',
     }, cfgOverrides),
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+    checkpointCommand, parseCheckpointOutput,
   }));
   return Object.assign(inner, { logs });
 }
@@ -2767,83 +2804,75 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
 const MEASURED_ORCHESTRATOR_CWD = '/home/runner/work/measured-checkout';
 
 test('treeGuardCheck: a parent cd after Setup cannot misdirect a later checkpoint (issue 562)', async () => {
-  const commands = []; // { label, cmd } for every real guard command (baseline + each check)
-  let cwdMeasurements = 0;
+  const commands = []; // { label, prompt } for every agent the guard starts
   const agentMock = async (prompt, opts) => {
-    if (opts.label === 'orchestrator-cwd') {
-      cwdMeasurements++;
+    commands.push({ label: opts.label, prompt });
+    if (opts.label === 'isolation:setup') {
       // However many times a later checkpoint runs, the measurement itself must happen once, at
       // Setup - simulating the parent `cd`ing away right after this call returns.
-      return { cwd: MEASURED_ORCHESTRATOR_CWD };
+      return { exitCode: 0, stdout: isolationStdout({ cwd: MEASURED_ORCHESTRATOR_CWD, head: MAIN_HEAD, guard: { statePath: `${MEASURED_ORCHESTRATOR_CWD}/.git/orchestrator-tree-guard/state.json`, baselineCount: 0 } }), stderr: '' };
     }
-    if (opts.label === 'tree-guard:baseline') {
-      commands.push({ label: opts.label, prompt });
-      return { exitCode: 0, stdout: JSON.stringify({ statePath: `${MEASURED_ORCHESTRATOR_CWD}/.git/orchestrator-tree-guard/state.json`, baselineCount: 0 }), stderr: '' };
-    }
-    if (opts.label.startsWith('tree-guard:')) {
-      commands.push({ label: opts.label, prompt });
-      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
-    }
+    if (opts.label.startsWith('isolation:')) return { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: CLEAN }), stderr: '' };
     throw new Error(`unexpected agent label in treeGuardCheck test: ${opts.label}`);
   };
 
   const { treeGuardCheck } = await driveTreeGuard(agentMock);
-  // Two checkpoints, standing in for the Implement and Verify checkpoints of one ticket's chain -
+  // Two checkpoints, standing in for the Implement and Deliver checkpoints of one ticket's chain -
   // the parent session is free to have `cd`d anywhere between them; nothing here re-measures.
   await treeGuardCheck('implement-attempt1', 42);
-  await treeGuardCheck('verify-attempt1', 42);
+  await treeGuardCheck('deliver', 42);
 
-  assert.equal(cwdMeasurements, 1, 'the absolute path must be measured exactly once, at Setup - never re-queried per checkpoint');
-  assert.equal(commands.length, 3, 'expected the baseline plus two checks');
-  for (const { label, prompt } of commands) {
-    assert.match(prompt, new RegExp(`--cwd ${MEASURED_ORCHESTRATOR_CWD.replace(/\//g, '\\/')}(?!\\S)`),
-      `${label} must carry the Setup-measured absolute path verbatim`);
-    assert.ok(!prompt.includes('--cwd .'), `${label} must never fall back to the relative default`);
+  assert.deepEqual(commands.map((c) => c.label), ['isolation:setup', 'isolation:implement-attempt1#42', 'isolation:deliver#42'],
+    'one agent at Setup and ONE per checkpoint - HEAD and tree read together (issue 1093)');
+  assert.match(commands[0].prompt, /o="\$\(pwd\)"; printf 'cwd %s\\n' "\$o"/, 'Setup measures the path with pwd');
+  for (const { label, prompt } of commands.slice(1)) {
+    assert.ok(prompt.includes(`o='${MEASURED_ORCHESTRATOR_CWD}'`), `${label} must carry the Setup-measured absolute path verbatim`);
+    assert.ok(!prompt.includes('$(pwd)'), `${label} must never re-measure`);
+    assert.match(prompt, /symbolic-ref --quiet --short HEAD/, `${label} must read HEAD in the same command`);
   }
-  assert.match(commands[1].prompt, /--label implement-attempt1 --ticket 42/);
-  assert.match(commands[2].prompt, /--label verify-attempt1 --ticket 42/);
+  assert.match(commands[1].prompt, /check --cwd "\$o" --state \S+ --label implement-attempt1 --ticket 42/);
+  assert.match(commands[2].prompt, /--label deliver --ticket 42/);
 });
 
 test('treeGuardCheck: an explicit orchestratorCwd override skips measurement and is used as-is (issue 562)', async () => {
   const commands = [];
   const agentMock = async (prompt, opts) => {
-    assert.notEqual(opts.label, 'orchestrator-cwd', 'an already-absolute caller override must not trigger a measurement agent');
-    if (opts.label === 'tree-guard:baseline') {
-      commands.push(prompt);
-      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/caller/given/path/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    commands.push(prompt);
+    if (opts.label === 'isolation:setup') {
+      return { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: { statePath: '/caller/given/path/.git/orchestrator-tree-guard/state.json', baselineCount: 0 } }), stderr: '' };
     }
-    if (opts.label.startsWith('tree-guard:')) {
-      commands.push(prompt);
-      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
-    }
+    if (opts.label.startsWith('isolation:')) return { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: CLEAN }), stderr: '' };
     throw new Error(`unexpected agent label: ${opts.label}`);
   };
   const { treeGuardCheck } = await driveTreeGuard(agentMock, { orchestratorCwd: '/caller/given/path' });
   await treeGuardCheck('implement-attempt1', 7);
-  assert.equal(commands.length, 2, 'expected the baseline plus one check');
-  for (const prompt of commands) assert.match(prompt, /--cwd \/caller\/given\/path(?!\S)/);
+  assert.equal(commands.length, 2, 'expected the Setup agent plus one checkpoint agent');
+  for (const prompt of commands) {
+    assert.ok(prompt.includes("o='/caller/given/path'"), prompt);
+    assert.ok(!prompt.includes('$(pwd)'), 'an already-absolute caller override must not be measured');
+  }
 });
 
-// Issue 1007: the measuring agent's `pwd` spelling depends on the shell it picks. A drive-letter
-// path in either slash style is accepted and folded to `/x/...`; anything else still aborts.
+// Issue 1007: the measuring shell's `pwd` spelling can be a drive-letter path. Either slash style is
+// accepted and folded to `/x/...` for every later command; anything else still aborts.
 async function measureCwd(measuredCwd) {
-  const baselines = [];
+  const checks = [];
   const agentMock = async (prompt, opts) => {
-    if (opts.label === 'orchestrator-cwd') return { cwd: measuredCwd };
-    if (opts.label === 'tree-guard:baseline') {
-      baselines.push(prompt);
-      return { exitCode: 0, stdout: JSON.stringify({ statePath: 's', baselineCount: 0 }), stderr: '' };
+    if (opts.label === 'isolation:setup') {
+      return { exitCode: 0, stdout: isolationStdout({ cwd: measuredCwd, head: MAIN_HEAD, guard: { statePath: 's', baselineCount: 0 } }), stderr: '' };
     }
+    if (opts.label.startsWith('isolation:')) { checks.push(prompt); return { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: CLEAN }), stderr: '' }; }
     throw new Error(`unexpected agent label: ${opts.label}`);
   };
-  await driveTreeGuard(agentMock);
-  return baselines[0];
+  const { treeGuardCheck } = await driveTreeGuard(agentMock);
+  await treeGuardCheck('implement-attempt1', 1);
+  return checks[0];
 }
 
 test('orchestrator-cwd: a Windows drive-letter pwd in either slash style is normalised to /x/... (issue 1007)', async () => {
   for (const measured of ['C:\\Users\\Dan\\repo\\.claude\\worktrees\\wt', 'C:/Users/Dan/repo/.claude/worktrees/wt']) {
     const prompt = await measureCwd(measured);
-    assert.match(prompt, /--cwd \/c\/Users\/Dan\/repo\/\.claude\/worktrees\/wt(?!\S)/, `${measured} must reach the guard as /c/...`);
+    assert.ok(prompt.includes("o='/c/Users/Dan/repo/.claude/worktrees/wt'"), `${measured} must reach the guard as /c/...`);
   }
 });
 
@@ -2857,51 +2886,46 @@ test('orchestrator-cwd: a pwd that is neither /-absolute nor a drive-letter path
 // Issue 811: in a served repo with no copy of tools/orchestrator-tree-guard.js (a cloud container
 // running claude-dotfiles against itself - the guard tool ships in aac-routines only, see the
 // portability note above FLEET-TREE-GUARD-DEFS), `[ -f <script> ] || exit 3` reproduces exactly
-// this: exit 3, no stdout. Under the default treeGuard:'auto' that used to turn the guard off with
-// only a log line; the run's returned report had no trace of it. It must now log the run as
+// this: exit 3, no guard line. Under the default treeGuard:'auto' that used to turn the guard off
+// with only a log line; the run's returned report had no trace of it. It must now log the run as
 // `tree-guard: unusable — <reason>` - not a silent exit code - so a log-blind reader still sees it.
+const guardAbsentSetup = async (prompt, opts) => {
+  if (opts.label === 'isolation:setup') return { exitCode: 3, stdout: isolationStdout({ cwd: '/measured/cwd', head: MAIN_HEAD }), stderr: '' };
+  throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
+};
+
 test('tree-guard baseline exit 3 (guard tool absent) logs "tree-guard: unusable" under treeGuard:auto (issue 811)', async () => {
-  const agentMock = async (prompt, opts) => {
-    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
-    if (opts.label === 'tree-guard:baseline') return { exitCode: 3, stdout: '', stderr: '' };
-    throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
-  };
-  const { logs } = await driveTreeGuard(agentMock);
+  const { logs } = await driveTreeGuard(guardAbsentSetup);
   const unusableLine = logs.find((l) => l.startsWith('tree-guard: unusable'));
   assert.ok(unusableLine, `expected a log line starting "tree-guard: unusable", got: ${JSON.stringify(logs)}`);
   assert.match(unusableLine, /tools\/orchestrator-tree-guard\.js is not in this repo/);
   assert.match(unusableLine, /guard OFF for this run/);
+  assert.ok(logs.some((l) => /^Orchestrator HEAD at Setup: main/.test(l)), 'the HEAD watch still starts: it needs only git');
 });
 
 // Same exit 3, but treeGuard:true - the absence must still hard-abort the run rather than being
 // swallowed, exactly as before this ticket (only the 'auto' path's silence was the bug).
 test('tree-guard baseline exit 3 aborts the run when treeGuard:true (issue 811)', async () => {
-  const agentMock = async (prompt, opts) => {
-    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
-    if (opts.label === 'tree-guard:baseline') return { exitCode: 3, stdout: '', stderr: '' };
-    throw new Error(`unexpected agent label in exit-3 test: ${opts.label}`);
-  };
   await assert.rejects(
-    () => driveTreeGuard(agentMock, { treeGuard: true }),
+    () => driveTreeGuard(guardAbsentSetup, { treeGuard: true }),
     /treeGuard:true but tools\/orchestrator-tree-guard\.js is not in this repo/,
   );
 });
 
 // Mutation test (issue 811): with a working baseline, a stage that writes into the orchestrator's
-// own tree must be caught, not just measured. `check`'s stdout reporting a fresh entry is exactly
+// own tree must be caught, not just measured. `check`'s JSON reporting a fresh entry is exactly
 // what a scripted root-tree write during a run would produce. Since issue 1020 the checkpoint
 // restores it and continues; a restore that does not take (here: its agent throws) must still
 // throw naming the checkpoint label and the ticket, not swallow it.
 test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint and the ticket (issue 811 mutation test)', async () => {
   const agentMock = async (prompt, opts) => {
-    if (opts.label === 'orchestrator-cwd') return { cwd: '/measured/cwd' };
-    if (opts.label === 'tree-guard:baseline') {
-      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/measured/cwd/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
+    if (opts.label === 'isolation:setup') {
+      return { exitCode: 0, stdout: isolationStdout({ cwd: '/measured/cwd', head: MAIN_HEAD, guard: { statePath: '/measured/cwd/.git/orchestrator-tree-guard/state.json', baselineCount: 0 } }), stderr: '' };
     }
-    if (opts.label === 'tree-guard:implement-attempt1#99') {
+    if (opts.label === 'isolation:implement-attempt1#99') {
       // Stands in for a stage scripting `git checkout <branch> -- .` (or any other write) in the
       // orchestrator's own checkout: the guard's `check` reports the new path it found.
-      return { exitCode: 0, stdout: JSON.stringify({ newEntries: [{ status: 'M', path: 'CLAUDE.md' }] }), stderr: '' };
+      return { exitCode: 1, stdout: isolationStdout({ head: MAIN_HEAD, guard: { newEntries: [{ status: 'M', path: 'CLAUDE.md' }] } }), stderr: '' };
     }
     throw new Error(`unexpected agent label in mutation test: ${opts.label}`);
   };
@@ -2923,7 +2947,9 @@ test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint a
 // this repo's root - where the fleet's guard agents run - against a scratch orchestrator checkout:
 // the Setup baseline must report the guard active, and a file a subagent writes into that
 // checkout's root must be caught at the next checkpoint, moved aside and recorded for the run
-// result while the wave continues (issue 1006's restore-and-continue), not thrown.
+// result while the wave continues (issue 1006's restore-and-continue), not thrown. Issue 1093: the
+// commands are the combined ones - HEAD and tree in one shell - and the write is still attributed
+// to the ticket whose checkpoint saw it.
 test('tree guard present in this repo: default args baseline it active, and a root-tree write is caught, restored and recorded (issue 1020)', async (t) => {
   const os = require('node:os');
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
@@ -2947,8 +2973,9 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     git('commit', '-q', '-m', 'init');
     fs.writeFileSync(path.join(orch, 'operator-notes.txt'), 'dirt from before the run\n');
     const orchPosix = BASH.run(['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
+    const labels = [];
     const bashAgent = async (prompt, opts) => {
-      if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `main\n${'a'.repeat(40)}\n`, stderr: '' };
+      labels.push(opts.label);
       const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
       return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
     };
@@ -2957,15 +2984,18 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     });
     assert.equal(treeGuardUnusable, null, 'the baseline must not report the guard unusable');
     assert.ok(logs.some((l) => /^tree-guard: active - orchestrator-tree baseline taken .*1 pre-existing entry/.test(l)), JSON.stringify(logs));
+    assert.ok(logs.some((l) => /^Orchestrator HEAD at Setup: \S+ \([0-9a-f]{12}\)/.test(l)), 'the same Setup command read HEAD for real');
 
     await treeGuardCheck('implement-attempt1', 7); // clean: the operator's dirt is in the baseline
     // The run 6abbcc6e shape: the report writer's scratch file landed in the orchestrator root.
     fs.writeFileSync(path.join(orch, 'discoveries-bullets.json'), '[]\n');
-    await treeGuardCheck('verify-attempt1', 7);
+    await treeGuardCheck('deliver', 7);
 
     assert.equal(breaches.length, 0, 'a restored write must not end the wave');
     assert.equal(treeRestores.length, 1);
-    assert.equal(treeRestores[0].label, 'verify-attempt1');
+    assert.equal(treeRestores[0].label, 'deliver');
+    assert.equal(treeRestores[0].observedBy, 7, 'the write is attributed to the ticket whose checkpoint saw it');
+    assert.match(treeRestores[0].who, /^ticket #7 \(observed at its checkpoint/);
     assert.deepEqual(treeRestores[0].entries, ['?? discoveries-bullets.json']);
     assert.ok(!fs.existsSync(path.join(orch, 'discoveries-bullets.json')), 'the leaked file must be gone from the root');
     assert.ok(fs.existsSync(path.join(orch, 'operator-notes.txt')), 'pre-run dirt is the operator\'s and is never touched');
@@ -2975,6 +3005,8 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     assert.ok(fs.existsSync(path.join(stateDir, quarantine[0], 'discoveries-bullets.json')), 'nothing is deleted: the write is moved aside inside .git');
     await treeGuardCheck('pre-report', 0); // the next checkpoint sees a clean tree again
     assert.equal(treeRestores.length, 1);
+    assert.deepEqual(labels, ['isolation:setup', 'isolation:implement-attempt1#7', 'isolation:deliver#7', 'tree-guard:restore:deliver#7', 'isolation:pre-report#0'],
+      'one agent per checkpoint; a second only to restore a write (issue 1093)');
 
     // The run result lists it under `inconsistent`, next to the HEAD restores.
     assert.match(src, /\.concat\(treeRestores\.map\(t => \(\{ ticket: t\.observedBy, kind: 'tree-guard'/,
@@ -2984,23 +3016,69 @@ test('tree guard present in this repo: default args baseline it active, and a ro
   }
 });
 
+// Issue 1041: the desktop scheduled task launches the wave from `.claude/worktrees/<name>`, whose
+// `.git` is a file. With the DEFAULT treeGuardStateDir (no launcher argument) the baseline must land
+// in that worktree's real git dir and the guard report active, not abort on ENOTDIR or go unusable.
+test('tree guard from a .claude/worktrees/* checkout with the default state dir baselines active (issue 1041)', async (t) => {
+  const os = require('node:os');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const defaultStateDir = (src.match(/treeGuardStateDir: '([^']+)'/) || [])[1];
+  assert.equal(defaultStateDir, '.git/orchestrator-tree-guard');
+  // The guard agents run bash; a Windows shell with no bash on PATH (PowerShell) cannot stand in.
+  if (BASH.skip) { t.skip(BASH.skip); return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tree-guard-1041-'));
+  const main = path.join(tmp, 'main');
+  const wt = path.join(main, '.claude', 'worktrees', 'wave');
+  const git = (cwd, ...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout;
+  };
+  fs.mkdirSync(main);
+  try {
+    git(main, 'init', '-q');
+    fs.writeFileSync(path.join(main, '.gitignore'), '.claude/worktrees/\n');
+    git(main, 'add', '.gitignore');
+    git(main, 'commit', '-q', '-m', 'init');
+    git(main, 'worktree', 'add', '-q', '-b', 'wave', wt);
+    assert.ok(fs.statSync(path.join(wt, '.git')).isFile(), 'fixture: a linked worktree\'s .git is a file');
+    const wtPosix = BASH.run(['-c', 'pwd'], { cwd: wt, encoding: 'utf8' }).stdout.trim();
+    const bashAgent = async (prompt, opts) => {
+      if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `wave\n${'a'.repeat(40)}\n`, stderr: '' };
+      const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
+      return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
+    };
+    // No treeGuardStateDir override: driveTreeGuard's cfg carries the fleet default checked above.
+    const { treeGuardCheck, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, { orchestratorCwd: wtPosix });
+    assert.equal(treeGuardUnusable, null, 'the baseline must not report the guard unusable');
+    const active = logs.find((l) => /^tree-guard: active - orchestrator-tree baseline taken/.test(l));
+    assert.ok(active, JSON.stringify(logs));
+    const realGitDir = git(wt, 'rev-parse', '--absolute-git-dir').trim();
+    const stateFiles = fs.readdirSync(path.join(realGitDir, 'orchestrator-tree-guard')).filter((n) => n.endsWith('.json'));
+    assert.equal(stateFiles.length, 1, 'the baseline lives in the worktree\'s real git dir');
+    assert.equal(git(wt, 'status', '--porcelain'), '');
+    assert.equal(git(main, 'status', '--porcelain'), '');
+    await treeGuardCheck('implement-attempt1', 7);
+    assert.equal(breaches.length, 0);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // Issue 807: a wave ran `git stash` + `git checkout origin/main` in the orchestrator checkout. The
 // tree was clean afterwards, so the dirt guard passed; the HEAD watch measured at Setup must catch
 // the move, check the start branch back out, and flag it - or throw when the restore does not take.
 function headMock(heads, restores) {
-  const main = 'a'.repeat(40), origin = 'b'.repeat(40);
+  const origin = 'b'.repeat(40);
   let reads = 0;
   return async (prompt, opts) => {
-    if (opts.label === 'tree-guard:baseline') {
-      return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/.git/orchestrator-tree-guard/state.json', baselineCount: 0 }), stderr: '' };
-    }
     if (opts.label.startsWith('orchestrator-head:restore:')) { restores.push(prompt); return { exitCode: 0, stdout: '', stderr: '' }; }
-    if (opts.label.startsWith('orchestrator-head:')) {
-      assert.match(prompt, /git -C \/m symbolic-ref --quiet --short HEAD \|\| echo DETACHED; git -C \/m rev-parse HEAD/);
+    if (opts.label.startsWith('isolation:')) {
+      assert.match(prompt, /o='\/m'; printf 'head %s\\n' "\$\(git -C "\$o" symbolic-ref --quiet --short HEAD \|\| echo DETACHED\)"; printf 'sha %s\\n' "\$\(git -C "\$o" rev-parse HEAD/);
       const h = heads[Math.min(reads++, heads.length - 1)];
-      return { exitCode: 0, stdout: h === 'main' ? `main\n${main}\n` : `DETACHED\n${origin}\n`, stderr: '' };
+      const guard = opts.label === 'isolation:setup' ? { statePath: '/m/.git/orchestrator-tree-guard/state.json', baselineCount: 0 } : CLEAN;
+      return { exitCode: 0, stdout: isolationStdout({ head: h === 'main' ? MAIN_HEAD : { branch: null, sha: origin }, guard }), stderr: '' };
     }
-    if (opts.label.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
     throw new Error(`unexpected agent label: ${opts.label}`);
   };
 }
@@ -3021,6 +3099,30 @@ test('treeGuardCheck: a HEAD move the restore cannot undo is an isolation breach
   await assert.rejects(() => treeGuardCheck('deliver', 5), /isolation breached.*did not put it back/);
 });
 
+// Issue 1093: the tree verdict is read AFTER a HEAD restore, never off the moved checkout. A wave
+// that soft-reset the orchestrator's branch shows the moved commits as staged dirt; the restore
+// puts HEAD back, and the re-read's fresh tree check - clean - is the one the checkpoint acts on.
+test('treeGuardCheck: a moved HEAD is restored before the tree is judged, off the re-read (issue 1093)', async () => {
+  const start = 'a'.repeat(40);
+  let head = 'c'.repeat(40);
+  const labels = [];
+  const agentMock = async (prompt, opts) => {
+    labels.push(opts.label);
+    if (opts.label === 'isolation:setup') return { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: { statePath: '/m/s.json', baselineCount: 0 } }), stderr: '' };
+    if (opts.label.startsWith('orchestrator-head:restore:')) { head = start; return { exitCode: 0, stdout: '', stderr: '' }; }
+    if (opts.label.startsWith('isolation:')) {
+      const dirty = head !== start;
+      return { exitCode: dirty ? 1 : 0, stdout: isolationStdout({ head: { branch: 'main', sha: head }, guard: dirty ? { newEntries: [{ status: 'M ', path: 'README.md' }] } : CLEAN }), stderr: '' };
+    }
+    throw new Error(`unexpected agent label: ${opts.label}`);
+  };
+  const { treeGuardCheck, treeRestores, breaches } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' });
+  await treeGuardCheck('deliver', 3);
+  assert.deepEqual(labels, ['isolation:setup', 'isolation:deliver#3', 'orchestrator-head:restore:deliver#3', 'isolation:deliver-restored#3']);
+  assert.deepEqual(treeRestores, [], 'dirt the HEAD restore cleared is not a tree write');
+  assert.deepEqual(breaches, []);
+});
+
 // Issue 1006: run wf_3ccddd78's deliverer for #934 ran `git merge origin/master` and `git reset
 // --hard <ticket sha>` in the orchestrator checkout. HEAD stayed on the same branch name at another
 // sha, the next checkpoint read it as unreadable, and the breach ended the wave: #827 and #930
@@ -3030,10 +3132,11 @@ test('treeGuardCheck: the start branch moved to another sha at deliver is reset 
   let head = 'c'.repeat(40), reads = 0;
   const restores = [];
   const agentMock = async (prompt, opts) => {
-    if (opts.label === 'tree-guard:baseline') return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/s.json', baselineCount: 0 }), stderr: '' };
     if (opts.label.startsWith('orchestrator-head:restore:')) { restores.push(prompt.split('\n')[2]); head = start; return { exitCode: 0, stdout: '', stderr: '' }; }
-    if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `main\n${reads++ === 0 ? start : head}\n`, stderr: '' };
-    if (opts.label.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
+    if (opts.label.startsWith('isolation:')) {
+      const guard = opts.label === 'isolation:setup' ? { statePath: '/m/s.json', baselineCount: 0 } : CLEAN;
+      return { exitCode: 0, stdout: isolationStdout({ head: { branch: 'main', sha: reads++ === 0 ? start : head }, guard }), stderr: '' };
+    }
     throw new Error(`unexpected agent label: ${opts.label}`);
   };
   const { treeGuardCheck, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' });
@@ -3043,31 +3146,29 @@ test('treeGuardCheck: the start branch moved to another sha at deliver is reset 
   assert.ok(logs.some((l) => /Orchestrator HEAD RESTORED at deliver \(ticket #934/.test(l) && /main \(cccccccccccc\)/.test(l) && /reflog/.test(l)));
 });
 
-test('a wave whose deliverer merges and resets the orchestrator checkout still delivers every other ticket and runs the report writer, and the run result names the breach (issue 1006)', async () => {
+// A whole wave - Setup, the lanes, the pre-report checkpoint and the report writer - with the
+// real guard block and a mocked agent. `wave` is ticket numbers; `hooks.deliver(n)` runs inside
+// each deliverer; `hooks.isolation(label)` may answer an isolation read before the default does.
+async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', hooks = {}, head = () => 'a'.repeat(40) } = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const helpers = loadStableHelpers(FLEET_SCRIPT);
-  const start = 'a'.repeat(40);
-  let head = start, unreadableOnce = false;
   const calls = [], restores = [];
   const agentMock = async (prompt, opts) => {
     const l = opts.label;
     calls.push(l);
-    if (l === 'tree-guard:baseline') return { exitCode: 0, stdout: JSON.stringify({ statePath: '/m/s.json', baselineCount: 0 }), stderr: '' };
-    if (l.startsWith('tree-guard:')) return { exitCode: 0, stdout: JSON.stringify({ newEntries: [] }), stderr: '' };
-    if (l.startsWith('orchestrator-head:restore:')) { restores.push(prompt.split('\n')[2]); head = start; return { exitCode: 0, stdout: '', stderr: '' }; }
-    if (l.startsWith('orchestrator-head:')) {
-      // The observed failure: the first read after the move came back unreadable.
-      if (unreadableOnce) { unreadableOnce = false; return { exitCode: 128, stdout: '', stderr: 'fatal' }; }
-      return { exitCode: 0, stdout: `main\n${head}\n`, stderr: '' };
+    if (l === 'isolation:setup') return { exitCode: 0, stdout: isolationStdout({ cwd: '/m', head: { branch: 'main', sha: head() }, guard: { statePath: '/m/s.json', baselineCount: 0 } }), stderr: '' };
+    if (l.startsWith('isolation:')) {
+      const answer = hooks.isolation && hooks.isolation(l);
+      return answer || { exitCode: 0, stdout: isolationStdout({ head: { branch: 'main', sha: head() }, guard: CLEAN }), stderr: '' };
     }
+    if (l.startsWith('orchestrator-head:restore:')) { restores.push(prompt.split('\n')[2]); if (hooks.restore) hooks.restore(); return { exitCode: 0, stdout: '', stderr: '' }; }
     const n = parseInt(l.replace(/^[^#]*#/, ''), 10);
     if (l.startsWith('impl:')) {
       return { branch: prompt.match(/agent\/issue-\d+-attempt\d+-wf_testrun-w\d+/)[0], committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [`${n} found a thing`] };
     }
     if (l.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
     if (l.startsWith('deliver:')) {
-      // #934's deliverer: `git merge origin/master` then `git reset --hard 74abb51f` in /m.
-      if (n === 934) { head = 'c'.repeat(40); unreadableOnce = true; }
+      if (hooks.deliver) hooks.deliver(n);
       return { pushed: true, prUrl: `https://github.com/x/y/pull/${n}`, mergeStatus: 'clean', conflictPaths: [] };
     }
     if (l === 'followups-writer') return { branch: 'b', sha: 's', prUrl: '', appended: 3 };
@@ -3085,20 +3186,41 @@ test('a wave whose deliverer merges and resets the orchestrator checkout still d
     agent: agentMock, log: (m) => logs.push(m),
     cfg: {
       treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js', treeGuardStateDir: '.git/orchestrator-tree-guard',
-      orchestratorCwd: '/m', reportModel: 'r', maxAttempts: 1, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z',
+      orchestratorCwd: '.', reportModel: 'r', maxAttempts: 1, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z',
       followupsFile: 'FOLLOW-UPS.md',
     },
     runId: 'testrun', invocationId: 'inv1', scout: { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' },
-    instrument: 'gh', rules: new Proxy({}, { get: () => () => '' }), verifierAgentType: 'fleet-verifier',
+    instrument: 'gh', rules: new Proxy({}, { get: () => () => '' }), verifierAgentType,
     dedupeBrief: () => '', testCommand: 'echo ok', revParse: async () => null, classifyDelivery, worktreeMismatch,
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     runHalt: createRunHalt(() => {}),
     stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
     priorFindingsBlock: helpers.priorFindingsBlock, unmetCriteriaOf: helpers.unmetCriteriaOf, gitSpelling: helpers.gitSpelling,
-    wave: [934, 827, 930].map((number) => ({ number, kind: 'code', title: 't', criteria: '', blockedBy: [] })),
+    checkpointCommand, parseCheckpointOutput,
+    wave: wave.map((number) => ({ number, kind: 'code', title: 't', criteria: '', blockedBy: [] })),
     buildLanes, chainGate, DISCOVERY_REPORT: {},
     pipeline: async (items, fn) => { const res = []; for (const i of items) res.push(await fn(i)); return res; },
   }));
+  return { out, calls, restores, logs, src };
+}
+
+test('a wave whose deliverer merges and resets the orchestrator checkout still delivers every other ticket and runs the report writer, and the run result names the breach (issue 1006)', async () => {
+  const start = 'a'.repeat(40);
+  let head = start, unreadableOnce = false;
+  const { out, calls, restores, src } = await driveGuardedWave([934, 827, 930], {
+    head: () => head,
+    hooks: {
+      // #934's deliverer: `git merge origin/master` then `git reset --hard 74abb51f` in /m.
+      deliver: (n) => { if (n === 934) { head = 'c'.repeat(40); unreadableOnce = true; } },
+      // The observed failure: the first read after the move came back unreadable.
+      isolation: () => {
+        if (!unreadableOnce) return null;
+        unreadableOnce = false;
+        return { exitCode: 0, stdout: `head DETACHED\nsha UNREADABLE\n${JSON.stringify(CLEAN)}`, stderr: 'fatal' };
+      },
+      restore: () => { head = start; },
+    },
+  });
 
   assert.deepEqual(calls.filter((l) => l.startsWith('deliver:')), ['deliver:#934', 'deliver:#827', 'deliver:#930'],
     'every pending deliverer must run after the breach');
@@ -3111,6 +3233,31 @@ test('a wave whose deliverer merges and resets the orchestrator checkout still d
   assert.ok(out.discoveryReport && !out.discoveryReport.error, `the writer's report must come back clean: ${JSON.stringify(out.discoveryReport)}`);
   assert.match(src, /\.concat\(headRestores\.map\(h => \(\{ ticket: h\.observedBy, kind: 'orchestrator-head'[^\n]*\n\s*detail: `orchestrator isolation breach: /,
     'the run result must list each restore under `inconsistent`, named as an isolation breach');
+});
+
+// Issue 1093 acceptance: run 6abd47d1 started 4 Setup agents and two agents per checkpoint - 20
+// guard or probe agents for a 2-ticket, 1-attempt wave. The budget is 8: one Setup agent and one
+// agent per checkpoint, with the Verify checkpoint only for an unpinned verifier.
+test('a 2-ticket wave with one attempt each starts at most 8 guard or probe agents (issue 1093)', async () => {
+  const guardish = (l) => /^(isolation:|tree-guard:|orchestrator-head:|orchestrator-cwd|worktree-canary|editable-guard)/.test(l);
+  const unpinned = await driveGuardedWave([11, 12], { verifierAgentType: null });
+  assert.deepEqual(unpinned.calls.filter(guardish), [
+    'isolation:setup',
+    'isolation:implement-attempt1#11', 'isolation:verify-attempt1#11', 'isolation:deliver#11',
+    'isolation:implement-attempt1#12', 'isolation:verify-attempt1#12', 'isolation:deliver#12',
+    'isolation:pre-report#0',
+  ]);
+  const pinned = await driveGuardedWave([11, 12], { verifierAgentType: 'fleet-verifier' });
+  assert.deepEqual(pinned.calls.filter(guardish), [
+    'isolation:setup', 'isolation:implement-attempt1#11', 'isolation:deliver#11',
+    'isolation:implement-attempt1#12', 'isolation:deliver#12', 'isolation:pre-report#0',
+  ], 'a pinned fleet-verifier (no Edit or Write) gets no Verify checkpoint');
+  for (const run of [unpinned, pinned]) {
+    assert.ok(run.calls.filter(guardish).length <= 8);
+    assert.deepEqual(run.out.results.map((r) => r && r.prUrl), [11, 12].map((n) => `https://github.com/x/y/pull/${n}`));
+  }
+  // The worktree canary rides in the env probe (Scout) now: no Setup agent of its own.
+  assert.ok(!unpinned.src.includes("label: 'worktree-canary'"), 'the worktree canary is not a separate agent any more');
 });
 
 test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
@@ -3554,15 +3701,21 @@ test(`${FLEET_SCRIPT_REL} tells no worker to run a bare \`git remote get-url ori
 // Issue 892: a resumed cloud session rooted outside the repo refused every worktree agent, but only
 // after the scout and all three attempts per ticket had spent their tokens. The canary block runs
 // against a mocked agent whose worktree creation fails the way the runtime's did; a stand-in for
-// the lanes follows it, so an `impl:` spawn in `labels` would mean the run went on past Setup.
+// the lanes follows it, so an `impl:` spawn in `labels` would mean the run went on past it.
+// Issue 1093: the canary is the env probe itself, run in a worktree of its own - no extra agent.
 async function driveWorktreeCanary(agentMock, cfgOverrides = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = sliceBetweenTags(src, '// [FLEET-WORKTREE-CANARY-START]', '// [FLEET-WORKTREE-CANARY-END]', 'the worktree canary block');
   const logs = [];
-  const wrapper = new AsyncFunction('agent', 'cfg', 'log', 'unusableReason',
-    `${body}\nawait agent('implement', { label: 'impl:#1.1', isolation: 'worktree' })`);
-  await wrapper(agentMock, Object.assign({ reportModel: 'r', finishRunId: null }, cfgOverrides),
-    (m) => logs.push(m), (who, detail) => `${who} output unusable: ${detail}`);
+  const wrapper = new AsyncFunction('scope',
+    `with (scope) {\n${body}\nawait agent('implement', { label: 'impl:#1.1', isolation: 'worktree' })\n}`);
+  await wrapper(laneScope({
+    agent: agentMock,
+    cfg: Object.assign({ reportModel: 'r', finishRunId: null }, cfgOverrides),
+    log: (m) => logs.push(m),
+    unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
+    runHalt: createRunHalt(() => {}),
+  }));
   return logs;
 }
 
@@ -3579,22 +3732,23 @@ test('worktree canary: a session root that is not a git repo stops the run befor
     assert.match(err.message, /launch the fleet from a session whose root IS the repository checkout/, 'the error must name the fix');
     return true;
   });
-  assert.deepEqual(labels, ['worktree-canary']);
+  assert.deepEqual(labels, ['env-probe'], 'the env probe is the canary: no separate worktree-canary agent (issue 1093)');
   assert.ok(!labels.some((l) => l.startsWith('impl:')), 'no implementer may spawn after a refused worktree');
 });
 
 test('worktree canary: a created worktree, another canary failure, or finish mode lets the run go on (issue 892)', async () => {
-  const run = async (canaryResult, cfgOverrides) => {
-    const labels = [];
+  const run = async (probeResult, cfgOverrides) => {
+    const calls = [];
     await driveWorktreeCanary(async (_prompt, opts) => {
-      labels.push(opts.label);
-      if (opts.label === 'worktree-canary') { if (canaryResult instanceof Error) throw canaryResult; return canaryResult; }
+      calls.push(`${opts.label}${opts.isolation ? ' [worktree]' : ''}`);
+      if (opts.label === 'env-probe') { if (probeResult instanceof Error) throw probeResult; return probeResult; }
       return {};
     }, cfgOverrides);
-    return labels;
+    return calls;
   };
-  assert.deepEqual(await run({ head: 'a'.repeat(40) }), ['worktree-canary', 'impl:#1.1']);
-  assert.deepEqual(await run(new Error('StructuredOutput retry cap reached')), ['worktree-canary', 'impl:#1.1']);
-  assert.deepEqual(await run(new Error('not in a git repository'), { finishRunId: 'wf_x' }), ['impl:#1.1'],
-    'finish mode spawns no worktree agent, so it runs no canary');
+  const facts = { remote: true, hasGh: false, verifierAgentFile: false };
+  assert.deepEqual(await run(facts), ['env-probe [worktree]', 'impl:#1.1 [worktree]']);
+  assert.deepEqual(await run(new Error('StructuredOutput retry cap reached')), ['env-probe [worktree]', 'impl:#1.1 [worktree]']);
+  assert.deepEqual(await run(new Error('not in a git repository'), { finishRunId: 'wf_x' }), ['env-probe', 'impl:#1.1 [worktree]'],
+    'finish mode spawns no worktree agent, so its probe runs unisolated and cannot trip the canary');
 });

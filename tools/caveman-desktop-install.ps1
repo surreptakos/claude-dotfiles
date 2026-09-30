@@ -22,7 +22,12 @@
       3. `npm install -g --prefix $UserHome\.local ...` the current release;
       4. `caveman setup --install` (fetch the signed proxy binary) and `caveman enable claude`
          (the CLI's own writer for the hook + route wiring in ~/.claude/settings.json - it knows
-         its own install paths, so this script never hand-authors those commands).
+         its own install paths, so this script never hand-authors those commands);
+      5. when the proxy binary is on disk (issue 1110): start it, hidden, if port 8787 does not
+         answer - `caveman enable claude` routes Claude there, and nothing else launches it - and
+         register it to start at logon under the HKCU Run key (value CavemanProxy; no elevation),
+         so a reboot does not leave the route pointing at a dead port. A proxy that already
+         answers is left alone. $env:CAVEMAN_DESKTOP_RUN_KEY names another key (a test's).
 
     Fail-closed path (offline skip, or any step above failing): Remove-CavemanWiring strips every
     hook entry naming a caveman binary that is not on disk, and the model route (ANTHROPIC_BASE_URL
@@ -51,6 +56,65 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $ProxyPort = 8787
+# Issue 1110: the logon start. setup-check.ps1 reads the same key and value name.
+$RunKey   = if ($env:CAVEMAN_DESKTOP_RUN_KEY) { $env:CAVEMAN_DESKTOP_RUN_KEY } else { 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' }
+$RunValue = 'CavemanProxy'
+
+function Test-ProxyPort {
+    param([Parameter(Mandatory = $true)][int]$Port)
+    $tcp = New-Object System.Net.Sockets.TcpClient
+    try {
+        $pending = $tcp.BeginConnect('127.0.0.1', $Port, $null, $null)
+        if (-not $pending.AsyncWaitHandle.WaitOne(1000)) { return $false }
+        $tcp.EndConnect($pending)
+        return $true
+    } catch { return $false } finally { $tcp.Close() }
+}
+
+function Start-CavemanProxy {
+    <#
+        Start the proxy binary, hidden and detached, when the port does not answer, then wait up
+        to 15 s for it to listen. Start-Process goes through ShellExecute, so the proxy inherits
+        no handle of a caller that captures this script's output and never holds it open.
+        Returns a one-phrase state for the status line.
+    #>
+    param([Parameter(Mandatory = $true)][string]$ProxyExe, [Parameter(Mandatory = $true)][int]$Port)
+    if (Test-ProxyPort $Port) { return "already answering on 127.0.0.1:$Port" }
+    try {
+        $startArgs = @{ FilePath = $ProxyExe; WorkingDirectory = (Split-Path -Parent $ProxyExe) }
+        # WindowStyle exists only on Windows ($IsWindows is unset on 5.1, which is Windows).
+        if (-not (Test-Path variable:IsWindows) -or $IsWindows) { $startArgs.WindowStyle = 'Hidden' }
+        Start-Process @startArgs | Out-Null
+    } catch {
+        return ("failed to start ({0})" -f $_.Exception.Message)
+    }
+    for ($i = 0; $i -lt 30; $i++) {
+        if (Test-ProxyPort $Port) { return "started on 127.0.0.1:$Port" }
+        Start-Sleep -Milliseconds 500
+    }
+    return "started, but 127.0.0.1:$Port did not answer within 15 s"
+}
+
+function Register-CavemanLogon {
+    <#
+        The HKCU Run entry that starts the proxy at logon: a hidden PowerShell that starts the
+        binary hidden, so no console window opens at every logon. Idempotent. Returns a state.
+    #>
+    param([Parameter(Mandatory = $true)][string]$ProxyExe, [Parameter(Mandatory = $true)][string]$Key,
+          [Parameter(Mandatory = $true)][string]$Name)
+    $command = ('powershell.exe -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath ''{0}'' -WindowStyle Hidden"' -f $ProxyExe.Replace("'", "''"))
+    try {
+        $current = $null
+        $item = Get-ItemProperty -LiteralPath $Key -Name $Name -ErrorAction SilentlyContinue
+        if ($item) { $current = [string]$item.$Name }
+        if ($current -ceq $command) { return "logon start registered ($Name)" }
+        if (-not (Test-Path -LiteralPath $Key)) { New-Item -Path $Key -Force | Out-Null }
+        New-ItemProperty -LiteralPath $Key -Name $Name -Value $command -PropertyType String -Force | Out-Null
+        return "logon start registered now ($Name)"
+    } catch {
+        return ("logon start NOT registered ({0})" -f $_.Exception.Message)
+    }
+}
 
 function Get-CavemanLatestVersion {
     <#
@@ -239,5 +303,14 @@ if (Test-Path $ProxyExe) {
     $enableState = 'skipped (no proxy binary) - failing closed (dead caveman hooks and route stripped)'
 }
 
-Write-Host ("  caveman: cli {0}; setup {1}; enable {2}" -f $npmState, $setupState, $enableState)
+# Issue 1110: the route above points at 127.0.0.1:8787 whenever the binary is on disk, so the proxy
+# must be listening now and again after every logon.
+$proxyState = 'skipped (no proxy binary)'
+$logonState = 'skipped (no proxy binary)'
+if (Test-Path $ProxyExe) {
+    $proxyState = Start-CavemanProxy -ProxyExe $ProxyExe -Port $ProxyPort
+    $logonState = Register-CavemanLogon -ProxyExe $ProxyExe -Key $RunKey -Name $RunValue
+}
+
+Write-Host ("  caveman: cli {0}; setup {1}; enable {2}; proxy {3}; {4}" -f $npmState, $setupState, $enableState, $proxyState, $logonState)
 exit 0

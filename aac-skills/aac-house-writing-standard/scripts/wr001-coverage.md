@@ -1,10 +1,10 @@
 # AAC-WR-001 coverage: how each of the 167 rules is checked
 
-Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit, warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
+Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit (a sentence, a paragraph, a term in context, or the whole document), warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
 
 Maintenance rule (Dan, September 29, 2026): a revision that adds or changes a rule lands with its check in `wr001-lint.js`, or with its row here saying why no pattern can decide it, in the same PR. `tools/wr001-lint-coverage.test.js` fails when this table and the linter disagree, when a rule number is missing or repeated, or when the count line below is stale.
 
-Counts: Pattern 54, Pattern and Jev 3, Jev 2, Reader 86, Layout 22.
+Counts: Pattern 54, Pattern and Jev 3, Jev 4, Reader 84, Layout 22.
 
 Table 1. Rule coverage
 
@@ -52,7 +52,7 @@ Table 1. Rule coverage
 | 40 | Numbers at the beginning of a sentence | Pattern | a figure opening a sentence |
 | 41 | Indefinite numbers | Reader | indefinite amounts need the sense |
 | 42 | Dates | Pattern | an ordinal on a month-first date; a comma between month and year |
-| 43 | Numeric dates | Pattern | a numeric date |
+| 43 | Numeric dates | Pattern | a numeric date in narrative text; the hand-filled form clause (MM/DD/YYYY, format stated once) is a rendered-form check, so the warning stays |
 | 44 | Time | Pattern | ':00' on the hour; 12 a.m. or 12 p.m. |
 | 45 | Time ranges | Pattern | an en dash after 'from' |
 | 46 | Money | Pattern | '.00' on a whole-dollar amount; '$' with the word dollars |
@@ -64,7 +64,7 @@ Table 1. Rule coverage
 | 52 | Ordinal numbers | Pattern | 1st through 10th as figures |
 | 53 | Telephone numbers | Pattern | a telephone number in parentheses |
 | 54 | General rule | Pattern | approx., w/, b/c, thru, pls, dept., mgmt. |
-| 55 | Acronyms | Reader | an acronym defined on first use needs the audience (a pattern cannot tell HDCS from a typo) |
+| 55 | Acronyms | Jev | Jev reads each all-capitals term of two to six letters that Appendix C does not list and that is not spelled out with the acronym in parentheses at first use, with the whole document as context, for a product identifier (HDCS) or a term the reader knows |
 | 56 | All-capital abbreviations | Pattern | periods in a capital abbreviation |
 | 57 | a.m. and p.m. | Pattern | AM, PM, A.M., P.M. |
 | 58 | Corporate suffixes | Reader | legal styling needs the source name |
@@ -86,7 +86,7 @@ Table 1. Rule coverage
 | 74 | Pronoun reference | Reader | vague pronoun reference needs the sense |
 | 75 | Page size | Layout | Word or PDF layout, not text; checked in the rendered document (page size) |
 | 76 | Margins | Layout | Word or PDF layout, not text; checked in the rendered document (margins) |
-| 77 | Default font | Layout | Word or PDF layout, not text; checked in the rendered document (font) |
+| 77 | Default font | Layout | Word or PDF layout, not text; checked in the rendered document (font, and the form clause: 9 pt labels, 10 pt values, font named on runs and defaults, `designlint.py` D07 and D18) |
 | 78 | Text color | Layout | Word or PDF layout, not text; checked in the rendered document (text color) |
 | 79 | Alignment | Layout | Word or PDF layout, not text; checked in the rendered document (alignment) |
 | 80 | Line and paragraph spacing | Layout | Word or PDF layout, not text; checked in the rendered document (line and paragraph spacing) |
@@ -94,7 +94,7 @@ Table 1. Rule coverage
 | 82 | Headings | Layout | Word or PDF layout, not text; checked in the rendered document (heading styles and spacing) |
 | 83 | Heading hierarchy | Layout | Word or PDF layout, not text; checked in the rendered document (heading hierarchy) |
 | 84 | Bold, italics, underlining, and capitals | Pattern | four or more words in all capitals in a row |
-| 85 | Page breaks | Layout | Word or PDF layout, not text; checked in the rendered document (page breaks and widows) |
+| 85 | Page breaks | Layout | Word or PDF layout, not text; checked in the rendered document (page breaks and widows; on a form, the continuation header and the kept-together signature block) |
 | 86 | Headers and footers | Layout | Word or PDF layout, not text; checked in the rendered document (headers and footers) |
 | 87 | First page | Layout | Word or PDF layout, not text; checked in the rendered document (first page) |
 | 88 | Hyperlinks | Pattern | 'Click here' |
@@ -107,8 +107,8 @@ Table 1. Rule coverage
 | 95 | Table titles | Pattern | a table with no title line above it |
 | 96 | Column headings | Reader | unit and scale in headings need the data |
 | 97 | Numeric alignment | Reader | alignment lives in the rendered table |
-| 98 | Table formatting | Reader | formatting lives in the rendered table |
-| 99 | Empty and zero values | Reader | N/A, Unknown, Unlogged need the data |
+| 98 | Table formatting | Reader | formatting lives in the rendered table; on a fill-in form, four borders on each labeled cell and no underscore write lines need the rendered form |
+| 99 | Empty and zero values | Reader | N/A, Unknown, Unlogged need the data; on a form, a blank in a completed form and an initialed N/A need the filled form |
 | 100 | Subject lines | Pattern | a subject line that is only Question, Update, FYI or the like |
 | 101 | Opening | Pattern | 'I hope this email finds you well' and its variants |
 | 102 | Long emails | Reader | bottom line first needs the reader; Jev Rule 5 covers the opening |
@@ -170,7 +170,7 @@ Table 1. Rule coverage
 | 158 | Importance puffery | Pattern | the Appendix G5 puffery and G11 declaratives |
 | 159 | Superficial -ing analysis | Pattern | a trailing participial clause of the Appendix H9 kind |
 | 160 | Weasel attribution | Pattern | the Appendix G6 attributions |
-| 161 | Synonym cycling | Reader | one name per actor needs the whole message and the actors (a Jev document check is the next step) |
+| 161 | Synonym cycling | Jev | one question over the whole message: is one actor, system or tool named two ways; skipped for a formal document (reports and proposals are exempt by the rule) unless `--prose` forces narrative |
 | 162 | Fake-profound kickers and summary recaps | Pattern and Jev | the Appendix H11 kickers; Jev reads the last paragraph for a recap |
 | 163 | Interpretive metadiscourse | Pattern | the Appendix G1, G2, G7, G9 and G10 phrases |
 | 164 | Formulaic structures | Pattern and Jev | the Appendix H1 to H6 formulas that have a fixed shape; Jev reads each paragraph for fragmentation |
