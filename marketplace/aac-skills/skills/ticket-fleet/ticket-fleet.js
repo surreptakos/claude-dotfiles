@@ -2001,14 +2001,23 @@ phase('Scout')
 // A subagent has a real shell, so it reads the facts instead of the script guessing them from a
 // `process` binding the runtime may not expose (issue 322) - and the caller no longer has to
 // remember `instrument: 'mcp'` in a container. Cheap tier, no judgment, three commands.
-const envFacts = await agent(
+// Wrapped (aac-routines issue 270): a probe that throws is a probe that returned nothing, so an
+// explicit `instrument` or `remote` still carries the run below instead of the throw ending it.
+let envFacts = null
+try {
+  envFacts = await agent(
   `Report three facts about the session YOU are running in. Run exactly these commands and answer only from their output - never from assumption.
 1. \`printenv CLAUDE_CODE_REMOTE_SESSION_ID; printenv CLAUDE_CODE_REMOTE_ENVIRONMENT_TYPE\` - remote = true when either prints a non-empty value, false when both are empty or unset.
 2. \`command -v gh && gh --version\` - hasGh = true only when a path is printed AND \`gh --version\` exits 0.
 3. \`test -f "$HOME/.claude/agents/fleet-verifier.md" && echo present || echo absent\` - verifierAgentFile = true on "present".
 Print no secret value: these three are paths, a version string and set/unset, nothing else. Make no repository change, no commit, no comment. Return structured output only.`,
   { label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: cfg.effort }
-)
+  )
+} catch (err) {
+  runHalt.note((err && err.message) || err, 'env-probe')
+  log(`${unusableReason('env-probe', (err && err.message) || err)} - read as a probe that returned nothing.`)
+  envFacts = null
+}
 // A failed probe must not silently become `gh` - that is the issue 322 failure: in a container
 // the gh path pins a verifier agent type the registry does not hold and reaches for a
 // GraphQL-backed PR call, so the wave neither verifies nor delivers. Two things may stand in for
@@ -2088,7 +2097,12 @@ Never invent a ticket, a branch, a URL or a verdict, and never infer one from a 
 }
 
 const scoutSource = explicitTickets.length ? rules.scoutExplicit(explicitTickets) : rules.scoutList(cfg.label)
-const scout = await agent(
+// Wrapped (aac-routines issue 270). A scout with no result listed nothing, which is not the same
+// as a listing that came back empty: without this the gate below reported a dead scout as "scout
+// found no open tickets" and the run ended ran: 0 as if the queue were clear.
+let scout = null, scoutError = null
+try {
+  scout = await agent(
   `Scout this repository for tickets to run. ${rules.scoutNotes} Steps:
 1. Read CLAUDE.md and any HANDOFF/CONTEXT docs at repo root.
 2. Collect the tickets: ${scoutSource}
@@ -2107,7 +2121,14 @@ const scout = await agent(
 7. Read the repo default branch (git symbolic-ref --short refs/remotes/origin/HEAD, strip the leading "origin/") - not every repo uses main.
 Return structured output only.`,
   { label: 'scout', phase: 'Scout', schema: SCOUT, model: cfg.scoutModel, effort: cfg.effort }
-)
+  )
+} catch (err) {
+  runHalt.note((err && err.message) || err, 'scout')
+  scoutError = unusableReason('scout', (err && err.message) || err)
+}
+if (!scout) {
+  throw new Error(`ticket-fleet ABORTED at Scout: the scout returned no result (error=${scoutError || 'none - the agent was skipped or died'}${runHalt.halted() ? `; ${runHalt.failure()}` : ''}). Nothing was listed, so this is not an empty queue: re-run the wave.`)
+}
 // [FLEET-SCOUT-GATE-START]
 // A scout whose listing matched nothing is prone to route around the dead end and hand back every
 // open ticket it can find; the fleet would then spawn open-PR scans and implementer agents for work
@@ -2996,7 +3017,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       deliveryFailure = `deliver:#${t.number}: ${outcome.message}`
       if (outcome.kind === 'inconsistency') inconsistency = outcome.message
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
-      deliveryFailure = `deliver:#${t.number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${impl.branch} is verified but has no PR.`
+      deliveryFailure = `deliver:#${t.number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but has no PR.`
     }
     // Log before the checkpoint below: a Deliver-phase breach throws out of this stage, and the PR
     // URL (or the delivery failure) must not be lost with it.
