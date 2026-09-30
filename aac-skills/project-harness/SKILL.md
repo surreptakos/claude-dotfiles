@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-29T19:38:01Z"
-  previous-modified: "2026-09-29T18:44:14Z"
-  revision: "47"
-  content-sha: "140a4cd706b1"
+  modified: "2026-09-30T19:40:20Z"
+  previous-modified: "2026-09-29T19:38:01Z"
+  revision: "48"
+  content-sha: "c9aecb4f2210"
 ---
 
 # Project Harness
@@ -136,7 +136,7 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      `tools/tracker-audit-template.test.js` pins both halves.
 9. **Harness version marker** — copy `templates/harness-version.md` to
    `docs/agents/harness-version.md` and set the date. It is a dedicated file so one `cat` reads it in
-   every harnessed repo. **Current version: 36.** `/session-start` reads this marker every session and
+   every harnessed repo. **Current version: 37.** `/session-start` reads this marker every session and
    STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
 10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
     `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
