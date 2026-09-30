@@ -48,10 +48,11 @@ for the purpose: no skills, no governance hooks, no rules text, no `~/.claude/se
 `~/.claude/hooks` absent entirely (claude-dotfiles issue 649).
 
 `ls ~/.claude/skills/session-check/check.js` answers it. If it is missing, self-heal before
-anything else — the repo is public, so this needs no credential:
+anything else. `gh api` authenticates on a desktop, and in a cloud session the proxy does when
+claude-dotfiles is attached (issue 1049; `raw.githubusercontent.com` answers 404 for the repo after the flip):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/.claude/hooks/session-start.sh -o /tmp/aac-bootstrap.sh && bash /tmp/aac-bootstrap.sh
+gh api -H 'Accept: application/vnd.github.raw' 'repos/surreptakos/claude-dotfiles/contents/.claude/hooks/session-start.sh?ref=master' > /tmp/aac-bootstrap.sh && bash /tmp/aac-bootstrap.sh
 ```
 
 It installs the payload, the skills, the merged governance hooks and the home-anchored seat, and it

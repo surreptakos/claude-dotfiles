@@ -2527,9 +2527,14 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     turn_refusals = _turn_refusals(transcript) if transcript else None
     appeal = _current_appeal(state)
     appeal_violations, shaped = _appeal_lint(text, appeal)
+    # Issue 1150: the mandated appeal line carries a reason fixed at appeal time, so YES skips that
+    # exact line (as the sentence cap does, issue 1059); any other wording is still checked.
+    mandated = _appeal_line(appeal) if appeal else ""
+    body_lines = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().splitlines()
+    yes_text = shaped if mandated and body_lines and body_lines[0].strip() == mandated else text
     violations = (
         appeal_violations
-        + _yes_lint(text, turn_tools, turn_refusals)
+        + _yes_lint(yes_text, turn_tools, turn_refusals)
         + (_adhd_lint(shaped) if adhd == "on" else [])
         + _caveman_lint(text, mode, _appeal_line(appeal) if appeal else "")
         + _route_unchecked_lint(text, bool(state.get("route_unchecked")))

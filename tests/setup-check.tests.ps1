@@ -142,8 +142,20 @@ exit 0
 "@
     }
     Write-Utf8NoBom (Join-Path $stubs 'pyyaml-present') 'present'
+    # jev-key answers with where TYPESAFE_API_KEY is set (the jev-key-source file; empty = unset);
+    # jev-live fails when jev-live.dead exists.
+    Write-Utf8NoBom (Join-Path $stubs 'jev-key-source') 'user'
+    Write-Utf8NoBom (Join-Path $stubs 'jev-key.ps1') @'
+[System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'jev-key-source'))
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'jev-live.ps1') @'
+if (Test-Path (Join-Path $PSScriptRoot 'jev-live.dead')) { exit 1 }
+exit 0
+'@
     # Profile probes: master's plugin version comes from a file; caveman-live exits with the code
-    # in caveman-live.code (0 when absent); caveman-enable leaves a marker that it ran.
+    # in caveman-live.code (0 when absent); caveman-logon fails while caveman-logon.missing exists;
+    # caveman-enable leaves a marker that it ran and, as the real install does (issue 1110), starts
+    # the proxy and registers its logon start - unless caveman-proxy.exits says the proxy dies.
     Write-Utf8NoBom (Join-Path $stubs 'offered-version') $script:InstalledVersion
     Write-Utf8NoBom (Join-Path $stubs 'master-plugin-version.ps1') @'
 [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'offered-version'))
@@ -153,8 +165,16 @@ $f = Join-Path $PSScriptRoot 'caveman-live.code'
 if (Test-Path $f) { exit ([int](Get-Content $f)) }
 exit 0
 '@
+    Write-Utf8NoBom (Join-Path $stubs 'caveman-logon.ps1') @'
+if (Test-Path (Join-Path $PSScriptRoot 'caveman-logon.missing')) { exit 1 }
+exit 0
+'@
     Write-Utf8NoBom (Join-Path $stubs 'caveman-enable.ps1') @'
 Set-Content -Path (Join-Path $PSScriptRoot 'caveman-enabled') -Value 'ran'
+Remove-Item (Join-Path $PSScriptRoot 'caveman-logon.missing') -ErrorAction SilentlyContinue
+if (-not (Test-Path (Join-Path $PSScriptRoot 'caveman-proxy.exits'))) {
+    Remove-Item (Join-Path $PSScriptRoot 'caveman-live.code') -ErrorAction SilentlyContinue
+}
 exit 0
 '@
     # Projects probes. The PC is not the anchor unless computer-name says so; watchdog-state holds
@@ -234,9 +254,13 @@ function Invoke-Check {
     if ($Fix) { $argList += '-Fix' }
     $prevStubs = $env:SETUP_CHECK_STUBS
     $prevSkip = $env:CAVEMAN_DESKTOP_SKIP_CLI
+    $prevKey = $env:TYPESAFE_API_KEY
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        # The check's environment carries the sentinel as the TypeSafe key, so a line that ever
+        # echoed the key would fail the no-secret assertion below.
+        $env:TYPESAFE_API_KEY = $Sentinel
         if ($NoStubs) { $env:SETUP_CHECK_STUBS = $null } else { $env:SETUP_CHECK_STUBS = $Fixture.Stubs }
         # A -Fix pull runs the desktop caveman step; keep it offline, as the restore test does.
         $env:CAVEMAN_DESKTOP_SKIP_CLI = '1'
@@ -245,6 +269,7 @@ function Invoke-Check {
     } finally {
         $env:SETUP_CHECK_STUBS = $prevStubs
         $env:CAVEMAN_DESKTOP_SKIP_CLI = $prevSkip
+        $env:TYPESAFE_API_KEY = $prevKey
         $ErrorActionPreference = $prevEap
     }
     Assert ("no secret value in the output (case {0})" -f $script:Case) (-not $out.Contains($Sentinel)) $out
@@ -304,6 +329,25 @@ try {
     $r = Invoke-Check $f
     Assert 'unparseable service account key exits 1' ($r.Exit -eq 1) $r.Out
     Assert 'it is a STOP naming the file, not the content' ($r.Out -match 'STOP  service account key does not parse as JSON') $r.Out
+
+    Write-Host 'TypeSafe key and Jev'
+    $f = New-Fixture
+    $r = Invoke-Check $f
+    Assert 'a set key is ok, naming where it is set' ($r.Out -match 'ok    TypeSafe key \(TYPESAFE_API_KEY, set in the Windows user environment\)') $r.Out
+    Assert 'a live Jev answer is ok' ($r.Out -match 'ok    Jev answers a live call') $r.Out
+    Write-Utf8NoBom (Join-Path $f.Stubs 'jev-key-source') ''
+    $r = Invoke-Check $f -Fix
+    Assert 'a missing key exits 1, even with -Fix' ($r.Exit -eq 1) $r.Out
+    Assert 'a missing key is a STOP under Credentials' ($r.Out -match '(?ms)^Credentials\s*$.*STOP  TypeSafe key missing: TYPESAFE_API_KEY is not set.*^Projects\s*$') $r.Out
+    Assert 'its to-do names the Windows user environment and the command' `
+        (Test-Todo $r.Out 'Set TYPESAFE_API_KEY as a Windows user environment variable.*SetEnvironmentVariable\(''TYPESAFE_API_KEY'', \(Read-Host ''TypeSafe API key''\), ''User''\)') $r.Out
+    Assert 'no Jev call is made without a key' ($r.Out -notmatch 'Jev answers') $r.Out
+    Assert 'the key value never appears in the output' (-not $r.Out.Contains($Sentinel)) $r.Out
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'jev-live.dead') 'x'
+    $r = Invoke-Check $f
+    Assert 'a key Jev refuses is a STOP whose to-do replaces the key' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  Jev did not answer a live call') -and (Test-Todo $r.Out 'Replace the TypeSafe key')) $r.Out
 
     Write-Host 'Prerequisites'
     foreach ($t in $Tools) {
@@ -405,10 +449,32 @@ try {
     $r = Invoke-Check $f
     Assert 'a dead proxy port exits 1 as a STOP' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy port 8787 does not answer')) $r.Out
+    Assert 'its to-do names the proxy start and the binary to run by hand (issue 1110)' `
+        ((Test-Todo $r.Out 'Start the caveman proxy') -and (Test-Todo $r.Out 'caveman-proxy\.exe"')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix over a dead port with the binary present leaves the port answering, exit 0 (issue 1110)' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    claude -p answers, proxy port 8787 answering') -and
+         (Test-Path (Join-Path $f.Stubs 'caveman-enabled'))) $r.Out
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-live.code') '1'
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-proxy.exits') 'dies'
+    $r = Invoke-Check $f -Fix
+    Assert 'a proxy that still does not answer after -Fix is a STOP whose to-do runs it by hand' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy port 8787 does not answer, so claude -p cannot  \(after -Fix ran the caveman install\)') -and
+         (Test-Todo $r.Out 'run the proxy in a terminal')) $r.Out
     Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-live.code') '2'
     $r = Invoke-Check $f
     Assert 'a claude -p that does not answer exits 1 as a STOP' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  proxy port 8787 answers, but a terminal claude -p did not')) $r.Out
+
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-logon.missing') 'missing'
+    $r = Invoke-Check $f
+    Assert 'a proxy with no logon start exits 1 as a STOP with an install to-do (issue 1110)' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy is not registered to start at logon') -and
+         (Test-Todo $r.Out 'caveman-desktop-install\.ps1')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix registers the logon start and reports it ok (issue 1110)' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    caveman proxy starts at logon')) $r.Out
 
     Write-Host 'Profile: personal profile'
     $f = New-Fixture
@@ -526,7 +592,7 @@ try {
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, 3 logins, anchor)' ($skipped -eq 12) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 15) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'

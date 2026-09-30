@@ -21,21 +21,41 @@ function element(id){
 }
 const text = v => ({content: [{type: "text", text: JSON.stringify(v)}]});
 const ymd = d => d.toISOString().slice(0, 10);
+// The page runs at a fixed 11:00 local time, so "today's export" never straddles midnight.
+const NOW = new Date(); NOW.setHours(11, 0, 0, 0);
+class FixedDate extends Date { constructor(...a){ if (a.length) super(...a); else super(NOW.getTime()); } static now(){ return NOW.getTime(); } }
+const stampTitle = (source, at) => source + "__" + at.toISOString().slice(0, 16).replace(":", "") + ".json";
+// Drive's text view escapes markdown punctuation; the page must read the exports through it.
+const mdEscape = s => s.replace(/[\\<>&\[\]#_]/g, c => "\\" + c);
 
-function buildPage({tasks, lastPostHtml, onPrompt, triage = [], todoist = () => undefined}){
+// exportAgoMin: how long before NOW today's newest exports were stamped; null means none has landed yet.
+function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], todoist = () => undefined}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
-  const prompts = [];
-  const now = new Date();
+  const prompts = [], m365 = [];
+  const now = NOW;
+  const stamp = exportAgoMin == null ? null : new Date(now - exportAgoMin * 60000);
+  const exported = {
+    huddle: {value: [{id: "1", from: {user: {id: DAN, displayName: "Dan"}}, createdDateTime: new Date(now - 86400000).toISOString(), body: {contentType: "html", content: lastPostHtml}}]},
+    sent: {value: [{subject: "RE: vendor setup", sentDateTime: new Date(now - 2 * 3600000).toISOString(), body: {contentType: "html", content: "<html><body><p>Sent the vendor the setup documents</p></body></html>"}}]}
+  };
   const calls = [];
   const mcp = {async callTool(server, tool, input){
     calls.push({server, tool, input});
     const own = server === "Todoist" && todoist(tool, input);
     if (own) return text(own);
-    if (tool === "teams_list_channel_messages") return text([{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: lastPostHtml, messageType: "message"}]);
+    if (server === "Microsoft 365" || server === "ms365") m365.push({tool, input});
+    if (tool === "search_files"){
+      const src = /huddle__global/.test(input.query) ? "huddle__global" : /outlook_sent__sent/.test(input.query) ? "outlook_sent__sent" : null;
+      if (!src || !stamp) return text({files: []});
+      const id = src === "huddle__global" ? "huddle" : "sent";
+      return text({files: [{id: id + "-old", title: stampTitle(src, new Date(stamp - 3600000))}, {id, title: stampTitle(src, stamp)}]});
+    }
+    if (tool === "read_file_content") return text({fileContent: mdEscape(JSON.stringify(exported[input.fileId] || {value: []}))});
+    if (tool === "teams_list_channel_messages") return text([{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: "<p>live read of an old post</p>", messageType: "message"}]);
     if (tool === "find-tasks") return text({tasks: input.projectId === CURRENT_WORK ? tasks : [], hasMore: false});
     if (tool === "find-activity") return text({events: []});
-    if (tool === "outlook_email_search") return text([{subject: "RE: vendor setup", sentDateTime: now.toISOString(), summary: "Sent the vendor the setup documents"}]);
+    if (tool === "outlook_email_search") return text(liveMail);
     if (tool === "query_granola_meetings") return {content: [{type: "text", text: "(no meetings)"}]};
     return text({});
   }};
@@ -49,11 +69,11 @@ function buildPage({tasks, lastPostHtml, onPrompt, triage = [], todoist = () => 
     document: {getElementById: $, addEventListener(){}, activeElement: null, visibilityState: "visible"},
     window: {claude: {use: async name => ({mcp, db, sample})[name]}},
     DOMParser: class { parseFromString(h){ const t = String(h).replace(/<[^>]+>/g, ""); return {body: {textContent: t, querySelectorAll: () => []}}; } },
-    setInterval(){}, setTimeout, clearTimeout, AbortController, console, navigator: {}, Date, JSON, Math, Promise, Set, Map
+    setInterval(){}, setTimeout, clearTimeout, AbortController, console, navigator: {}, Date: FixedDate, JSON, Math, Promise, Set, Map
   };
   vm.createContext(ctx);
   vm.runInContext(script, ctx);
-  return {$, prompts, store, calls};
+  return {$, prompts, store, m365, stamp, calls};
 }
 
 const lastPostHtml = "<p>Dan | 9/29/2026</p><p>Yesterday's report</p><ul><li>Sent the vendor the supplier documents for setup</li></ul>" +
@@ -119,6 +139,60 @@ test("a blockers answer in the wrong shape requires every overdue item (fails to
 test("no prompt the page sends calls a review confidential (Dan, 2026-09-30: the Mireya review audit belongs in the post)", () => {
   const offending = script.split(/\r?\n/).filter(l => /(confidential|reveal|CONF_DETAIL|NEVER IN THE POST|no pay)/i.test(l) && /\breviews?\b/i.test(l) && !/is fine|is not confidential|not confidential/i.test(l));
   assert.deepStrictEqual(offending, []);
+});
+
+// Issue 1039: the huddle channel and Sent Items come from the newest export; live Microsoft 365 reads cover
+// only the hour after its stamp, and nothing is drafted or read live before the day's first export.
+const passAll = prompt => {
+  if (prompt.startsWith("For each of Dan Gatsakos's overdue work tasks")) return {items: []};
+  if (prompt.startsWith("You are a strict compliance judge")) return judgeAll(prompt);
+  if (prompt.includes("ITEMS TO ADD:")) return {add: []};
+  if (prompt.startsWith("Draft Dan Gatsakos's daily huddle post")) return {reportHeading: "Yesterday's report", report: [{text: "Decided the bid scope with the estimator", evidence: "meeting note: bid scope"}], focus: [{text: "Bid prep", evidence: "kept verbatim"}], risks: [{text: "Bid work is pushing every other task out, so smaller jobs slip a week", evidence: "kept verbatim"}], dropped: []};
+  return {fixes: []};
+};
+const noTasks = [];
+const draftPromptOf = page => page.prompts.find(p => p.startsWith("Draft Dan Gatsakos's daily huddle post")) || "";
+
+test("the last post and the sent mail come from the newest export; the live read covers only its tail", async () => {
+  const page = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll});
+  await new Promise(r => setImmediate(r));
+  page.m365.length = 0;
+  await page.$("hud-go").fire("click");
+  const draft = draftPromptOf(page);
+  assert.match(draft.split("HIS LAST POST (")[1].split("TASKS COMPLETED")[0], /Bid prep/, "last post read from the export");
+  assert.match(draft.split("MAIL HE SENT SINCE:")[1].split("MEETING NOTES")[0], /vendor setup/, "sent mail read from the export");
+  const mail = page.m365.find(c => c.tool === "outlook_email_search");
+  assert.strictEqual(mail.input.afterDateTime, page.stamp.toISOString());
+  assert.strictEqual(mail.input.beforeDateTime, NOW.toISOString());
+  assert.deepStrictEqual([...new Set(page.m365.map(c => c.tool))].sort(), ["outlook_email_search", "teams_list_channel_messages"]);
+  assert.match(page.$("hud-status").textContent, /Every source answered/);
+});
+
+test("before the day's first export the panel waits and makes no Microsoft 365 call", async () => {
+  const page = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll, exportAgoMin: null});
+  await new Promise(r => setImmediate(r));
+  assert.match(page.$("hud-status").textContent, /^Waiting for today's first export/);
+  assert.strictEqual(page.$("hud-go").disabled, true);
+  page.m365.length = 0;
+  await page.$("hud-go").fire("click");
+  assert.match(page.$("hud-status").textContent, /^Waiting for today's first export/);
+  assert.deepStrictEqual(page.m365, []);
+  assert.deepStrictEqual(page.prompts, []);
+});
+
+test("a live read stops one hour after a stale export, and the span past it is named under Could not read", async () => {
+  const at = min => new Date(NOW - 180 * 60000 + min * 60000).toISOString();
+  const liveMail = [{subject: "RE: inside the tail", sentDateTime: at(30), summary: "x"}, {subject: "RE: past the tail", sentDateTime: at(120), summary: "y"}];
+  const page = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll, exportAgoMin: 180, liveMail});
+  await new Promise(r => setImmediate(r));
+  page.m365.length = 0;
+  await page.$("hud-go").fire("click");
+  const mail = page.m365.find(c => c.tool === "outlook_email_search");
+  assert.strictEqual(new Date(mail.input.beforeDateTime) - new Date(mail.input.afterDateTime), 3600000);
+  const sent = draftPromptOf(page).split("MAIL HE SENT SINCE:")[1].split("MEETING NOTES")[0];
+  assert.match(sent, /inside the tail/);
+  assert.doesNotMatch(sent, /past the tail/);
+  assert.match(page.$("hud-status").textContent, /Could not read: .*huddle channel [^;]*past the one-hour live tail.*sent mail [^;]*past the one-hour live tail/);
 });
 
 // Issue 1074: update-tasks replaces the whole due string, so a do date sent that way wipes a recurring

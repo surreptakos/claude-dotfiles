@@ -18,6 +18,8 @@ Use one font family throughout a routine business document unless another font h
 
 Use an alternate font only when an approved template specifies it. A software default does not override this standard.
 
+On a fill-in form, field labels and statements printed inside a write cell are 9 pt, the source-note size. Written values, instructions and terms are at least 10 pt. Name the font on the text and in the document defaults; a font left only to the document theme falls back to Times New Roman in previews that do not read themes.
+
 ## 78. Text color
 
 Use black or near-black for body text. Approved company brand colors may be used for titles, headings, rules, table headers, and limited visual emphasis. Do not use color as the only way to communicate meaning. Documents must remain understandable when printed in grayscale.
@@ -55,6 +57,8 @@ Use bold for headings, important labels, and limited emphasis. Use italics for p
 Insert an actual page break when a new page is required; do not use repeated hard returns. Enable widow/orphan control so a paragraph split across pages leaves at least two lines on each page. Keep a heading with the following paragraph and a table caption with the first table row. A short paragraph or list may be kept together when doing so does not create a large gap.
 
 Do not leave a closing or signature block alone on a continuation page. Move at least two lines of the final body paragraph with it, or adjust the preceding layout without reducing legibility. Inspect every page after pagination changes; a clean first page does not establish that later pages are correct.
+
+A form longer than one page repeats its name and its identity fields (such as the employee or account) at the top of every continuation page, and keeps each signature block together with the statement it signs.
 
 ## 86. Headers and footers
 
@@ -126,9 +130,13 @@ Use adequate cell padding, intentional alignment, and limited borders. A distinc
 
 Fit the table to the usable page width. Wrap text or adjust column widths first. For a table that remains too wide, use a landscape section, split it at a logical boundary with repeated identifiers, or move it to an appendix. Do not shrink table text below 9 pt to force a fit. Preserve the relationships among data when splitting a table.
 
+Fill-in forms are the exception to limited borders. When a label sits inside the cell it names, the cell carries all four borders, and neighboring cells share them in one joined grid per section. A label without its box floats and reads as stray text. Do not use a typed line of _ characters or open space as write space. Data tables keep the limited-border treatment above.
+
 ## 99. Empty and zero values
 
 Distinguish among 0 for a measured or confirmed zero, N/A for not applicable, Unknown when information should exist but is not known, and Unlogged when activity or a value was not recorded. Use a dash for not applicable only when the table defines that convention. Do not leave an unexplained blank in a completed data table. Empty response or signature fields are permitted in an uncompleted form.
+
+On a form, a person marks a field that does not apply by writing N/A and initialing it. A blank field on a completed form means the entry is missing, not that it does not apply.
 
 # Appendix E - Word style definitions
 

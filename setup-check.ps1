@@ -18,11 +18,14 @@
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
                      every settings.json hook entry names files that exist; the caveman proxy
-                     binary is present and a terminal `claude -p` answers through its port.
+                     binary is present, registered to start at logon (HKCU Run CavemanProxy,
+                     issue 1110), and a terminal `claude -p` answers through its port.
                      ~/.claude-personal gets the plugin and hook checks when it exists and is
                      never created (issue 1070).
       Credentials    the service account key and the OAuth client secret under ~/.config exist
-                     and parse as JSON; the GitHub, Claude and gas logins answer a live probe.
+                     and parse as JSON; the GitHub, Claude and gas logins answer a live probe;
+                     TYPESAFE_API_KEY is set (user, machine or this process's environment) and
+                     Jev answers a live call with it (issue 1133).
       Projects       every repo in the shared repo list (lib/repos.json) is cloned at its path
                      with the right origin, its commit gate on (core.hooksPath .githooks when the
                      repo has that folder) and its Claude trust record written (by
@@ -33,7 +36,8 @@
 
     Without -Fix it only reports. With -Fix it first applies the fixes that are safe to repeat
     (pip-install PyYAML, run pull on drift, run the desktop caveman install when the wiring is
-    broken, clone a missing repo, set a commit gate, write trust records, install the watchdog
+    broken, the proxy port dead or its logon start missing - the install starts the proxy and
+    registers it - clone a missing repo, set a commit gate, write trust records, install the watchdog
     task on the anchor or disable it elsewhere), then reports. Whatever only the owner can do - install a
     binary, copy a secret file, log in - becomes a numbered to-do with the exact command.
 
@@ -46,10 +50,11 @@
     other home they are reported as skipped, so the restore test can drive install.ps1 into a fake
     home. A test controls them through SETUP_CHECK_STUBS: a directory holding <probe>.ps1 files,
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
-    command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth,
-    caveman-live, caveman-enable, clone (args: slug, path), watchdog-install, watchdog-disable.
+    command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
+    caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
     Text probes print their answer instead: master-plugin-version (the aac-skills version master
-    offers), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
+    offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
+    unset - never the value), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
     Exit 0 when no STOP remains, 1 when one does, 2 when the check itself could not run.
@@ -299,6 +304,68 @@ function Test-Credentials {
         -Real { Invoke-NativeExit 'node' @($GasCli, 'whoami') } `
         -TodoText 'Log in to Google for Apps Script (once per Google account):' `
         -Commands @(('node "{0}" login' -f $GasCli))
+    Test-JevKey $Found
+}
+
+# The TypeSafe key the ask-matt route gate sends to Jev (issue 1133). Without it every turn opens
+# 'route unchecked: Jev unavailable'. The value is never read into this script's output: the key
+# probe answers with where the key is set, and the live probe hands it to node through the
+# environment only.
+$JevJs      = Join-Path (Join-Path $RepoRoot 'tools') 'jev.js'
+$JevKeyVar  = 'TYPESAFE_API_KEY'
+$JevKeyTodo = ('Set {0} as a Windows user environment variable (not settings.json, not a repo) - the command asks for the key, so it stays out of the shell history - then open a new terminal and restart the Claude app:' -f $JevKeyVar)
+$JevKeySet  = ('[Environment]::SetEnvironmentVariable(''{0}'', (Read-Host ''TypeSafe API key''), ''User'')' -f $JevKeyVar)
+
+function Test-JevKey {
+    param($Found)
+    $source = Invoke-ProbeText -Name 'jev-key' -Real {
+        foreach ($scope in @('User', 'Machine')) {
+            if ([Environment]::GetEnvironmentVariable($JevKeyVar, $scope)) { return $scope.ToLower() }
+        }
+        if ([Environment]::GetEnvironmentVariable($JevKeyVar, 'Process')) { return 'process' }
+        return ''
+    }
+    if ($null -eq $source) {
+        Write-Line skip ('TypeSafe key ({0})  ({1})' -f $JevKeyVar, $SkipReason)
+        Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
+        return
+    }
+    if (-not $source) {
+        Write-Line stop ('TypeSafe key missing: {0} is not set, so the route gate reads ''route unchecked: Jev unavailable''' -f $JevKeyVar)
+        Add-Todo $JevKeyTodo @($JevKeySet)
+        return
+    }
+    $where = switch ($source) {
+        'user'    { 'the Windows user environment' }
+        'machine' { 'the Windows machine environment' }
+        'process' { 'this process only: not a Windows user or machine variable' }
+        default   { $source }
+    }
+    Write-Line ok ('TypeSafe key ({0}, set in {1})' -f $JevKeyVar, $where)
+    if ($Found.ContainsKey('node') -and $Found['node'] -eq $false) {
+        Write-Line skip 'Jev live call  (not probed: node is missing)'
+        return
+    }
+    $code = Invoke-Probe -Name 'jev-live' -Real {
+        $prev = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Process')
+        try {
+            if (-not $prev) {
+                $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'User')
+                if (-not $key) { $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Machine') }
+                [Environment]::SetEnvironmentVariable($JevKeyVar, $key, 'Process')
+            }
+            $js = 'const j=require(process.argv[1]);j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000}).then(a=>process.exit(a&&a.ok?0:1))'
+            Invoke-NativeExit 'node' @('-e', $js, $JevJs)
+        } finally { [Environment]::SetEnvironmentVariable($JevKeyVar, $prev, 'Process') }
+    }
+    if ($null -eq $code) {
+        Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
+    } elseif ($code -eq 0) {
+        Write-Line ok 'Jev answers a live call'
+    } else {
+        Write-Line stop ('Jev did not answer a live call with {0}: the key is refused or api.typesafe.ai is unreachable' -f $JevKeyVar)
+        Add-Todo ('Replace the TypeSafe key: {0}' -f $JevKeyTodo) @($JevKeySet)
+    }
 }
 
 # ------------------------------------------------------------------ profile
@@ -307,6 +374,9 @@ $PluginId        = 'aac-skills@claude-dotfiles'
 $PluginVersionJs = Join-Path (Join-Path (Join-Path $RepoRoot 'aac-skills') 'session-check') 'plugin-version.js'
 $ProxyPort       = 8787
 $CavemanInstall  = Join-Path (Join-Path $RepoRoot 'tools') 'caveman-desktop-install.ps1'
+# The logon start tools/caveman-desktop-install.ps1 registers (issue 1110).
+$CavemanRunKey   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$CavemanRunValue = 'CavemanProxy'
 
 function Test-SameBytes {
     param([string]$A, [string]$B)
@@ -516,14 +586,28 @@ function Test-CavemanLive {
     }
 }
 
+# 0 when the HKCU Run entry that starts the proxy at logon names this proxy binary, else 1.
+function Test-CavemanLogon {
+    param([string]$ProxyExe)
+    return Invoke-Probe -Name 'caveman-logon' -Arguments @($ProxyExe) -Real {
+        param($exe)
+        try {
+            $value = [string](Get-ItemProperty -LiteralPath $CavemanRunKey -Name $CavemanRunValue -ErrorAction Stop).$CavemanRunValue
+        } catch { return 1 }
+        if ($value.IndexOf($exe.Replace("'", "''"), [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { 0 } else { 1 }
+    }
+}
+
 function Test-Caveman {
     param([string]$InstallCommand)
     $settings = Join-Path $UserHome '.claude\settings.json'
     $proxyExe = Join-Path $UserHome '.caveman\bin\caveman-proxy.exe'
 
     $live = Test-CavemanLive
+    $logon = $null
+    if (Test-Path -LiteralPath $proxyExe) { $logon = Test-CavemanLogon $proxyExe }
     $broken = (-not (Test-Path -LiteralPath $proxyExe)) -or ($null -ne $live -and $live -ne 0) -or
-              (@(Get-DeadHookPaths $settings).Count -gt 0)
+              ($null -ne $logon -and $logon -ne 0) -or (@(Get-DeadHookPaths $settings).Count -gt 0)
     $note = ''
     if ($broken -and $Fix) {
         # tools/caveman-desktop-install.ps1 runs `caveman enable claude`, or strips dead wiring.
@@ -534,6 +618,8 @@ function Test-Caveman {
         if ($null -ne $code) {
             $note = '  (after -Fix ran the caveman install)'
             $live = Test-CavemanLive
+            $logon = $null
+            if (Test-Path -LiteralPath $proxyExe) { $logon = Test-CavemanLogon $proxyExe }
         }
     }
 
@@ -542,6 +628,16 @@ function Test-Caveman {
     } else {
         Write-Line warn ('caveman proxy binary missing  ({0}){1}' -f $proxyExe, $note)
         Add-Todo 'Install caveman (or re-run the setup check with -Fix):' @($InstallCommand)
+    }
+    if (-not (Test-Path -LiteralPath $proxyExe)) {
+        Write-Line skip 'caveman proxy logon start  (not probed: the proxy binary is missing)'
+    } elseif ($null -eq $logon) {
+        Write-Line skip ('caveman proxy logon start  ({0})' -f $SkipReason)
+    } elseif ($logon -eq 0) {
+        Write-Line ok ('caveman proxy starts at logon  ({0} {1})' -f $CavemanRunKey, $CavemanRunValue)
+    } else {
+        Write-Line stop ('caveman proxy is not registered to start at logon, so port {0} goes dead after a reboot{1}' -f $ProxyPort, $note)
+        Add-Todo 'Register the caveman proxy to start at logon: the caveman install writes the HKCU Run entry (or re-run the setup check with -Fix):' @($InstallCommand)
     }
     Test-HookPaths $settings $InstallCommand
     if ($null -eq $live) {
@@ -553,10 +649,17 @@ function Test-Caveman {
         Add-Todo 'Log in to Claude in a terminal, then type /login at its prompt:' @('claude')
     } else {
         Write-Line stop ('caveman proxy port {0} does not answer, so claude -p cannot{1}' -f $ProxyPort, $note)
-        # Re-running the install cannot fix this: it never starts the proxy, and nothing starts it
-        # at logon yet (issue 1110, AAC-AI 2026-09-30).
-        Add-Todo 'Start the caveman proxy, then check that a terminal claude -p "reply ok" answers:' @(
-            ('powershell -Command "Start-Process ''{0}'' -WindowStyle Hidden"' -f $proxyExe))
+        if (Test-Path -LiteralPath $proxyExe) {
+            # Issue 1110: the install starts the proxy and registers it at logon; Start-Process starts
+            # it now (PR 1127); when it still does not listen, the proxy itself exits, and only
+            # running it in a terminal shows why.
+            Add-Todo ('Start the caveman proxy: the caveman install starts it and registers it at logon, or start it directly; if port {0} still does not answer, run the proxy in a terminal and read why it exits:' -f $ProxyPort) @(
+                $InstallCommand,
+                ('powershell -Command "Start-Process ''{0}'' -WindowStyle Hidden"' -f $proxyExe),
+                ('& "{0}"' -f $proxyExe))
+        } else {
+            Add-Todo 'Install caveman - the install also starts its proxy - then check that a terminal claude -p "reply ok" answers:' @($InstallCommand)
+        }
     }
 }
 
