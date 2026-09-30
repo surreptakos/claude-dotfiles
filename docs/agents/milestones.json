@@ -6,5 +6,9 @@
   {
     "title": "Maybe Someday",
     "description": "Parking lot for tickets that solve a problem nobody has hit yet (speed over robustness, Dan 2026-09-18). Pull one back by changing its milestone; the ticket reaper never closes anything parked here."
+  },
+  {
+    "title": "Dotfiles private",
+    "description": "Take claude-dotfiles private without breaking cloud bootstrap, CI or the plugin: PRD issue 1045 and its children (2026-09-30). Closes when the PRD closes."
   }
 ]
