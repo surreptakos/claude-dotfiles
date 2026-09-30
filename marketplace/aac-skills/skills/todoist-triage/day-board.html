@@ -1319,6 +1319,191 @@ footer{font-size:12px;color:var(--muted)}
   const violationView = x => (RULE_TEXT[x.rule] || "rule failed") + (x.section && x.section !== "extra" ? " (" + x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ")" : "");
   const violationText = x => "[" + x.rule + "] " + (x.section ? x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ": " : "") + (x.text && x.rule !== "confidential" ? "\"" + x.text + "\" - " : "") + x.detail;
 
+  // ---------- HUDDLE REPAIR (Dan, 2026-09-30: "adjust based on what the checker says, not rewrite the whole thing") ----------
+  // One full draft, then the gate drives repairs: code fixes what it can decide on its own, Claude rewrites only
+  // the lines the gate names, and every line that already passed stays byte for byte. A line that still fails
+  // after the last round is removed rather than shipped; the post blocks only when what is left is not a post.
+  const HUD_REPAIR_ROUNDS = 3;
+  // Rules Claude may repair by rewriting one line; everything else is fixed or removed by code.
+  const REWRITE_RULES = new Set(["length", "rule2-outcome", "rule2-activity", "rule3-consequence", "evidence", "charset"]);
+  const LINE_SECTIONS = ["report", "focus", "risks"];
+  const clone = x => JSON.parse(JSON.stringify(x));
+
+  // Only the fields the gate knows; anything else is dropped before it can be shown or stored.
+  function sanitizeDraft(d){
+    const o = d && typeof d === "object" && !Array.isArray(d) ? d : {};
+    const line = x => x && typeof x === "object" && !Array.isArray(x) ? {text: String(x.text == null ? "" : x.text), evidence: String(x.evidence == null ? "" : x.evidence)} : null;
+    const drop = x => x && typeof x === "object" && !Array.isArray(x) ? {text: String(x.text == null ? "" : x.text), why: String(x.why == null ? "" : x.why)} : null;
+    const out = {reportHeading: String(o.reportHeading == null ? "" : o.reportHeading)};
+    LINE_SECTIONS.forEach(k => { out[k] = (Array.isArray(o[k]) ? o[k] : []).map(line).filter(Boolean); });
+    out.dropped = (Array.isArray(o.dropped) ? o.dropped : []).map(drop).filter(Boolean);
+    return out;
+  }
+
+  // Deterministic repairs: every change here follows from the rule and his last post alone.
+  function autoFix(d0, lastPost, now){
+    const d = sanitizeDraft(clone(d0));
+    const last = parseLastPost(lastPost ? lastPost.text : "");
+    const want = expectedHeading(lastPost && lastPost.at, now);
+    if (want ? hudNorm(d.reportHeading) !== want : ![HEAD_DAILY, HEAD_GAP].includes(hudNorm(d.reportHeading))) d.reportHeading = want || HEAD_DAILY;
+    const own = (section, t) => last[section].find(l => hudNorm(l) === hudNorm(t));
+    const withhold = l => ({text: l, why: "withheld: confidential detail"});
+    // Tags follow from the text: his exact line is kept, a one-span change is an edit, anything else is new.
+    ["focus", "risks"].forEach(k => d[k].forEach(it => {
+      if (own(k, it.text)) it.evidence = "kept verbatim";
+      else if (tagOfEvidence(it.evidence) === "kept" || !tagOfEvidence(it.evidence)) it.evidence = last[k].some(l => isNarrowEdit(l, it.text)) ? "edited: " + hudNorm(it.evidence).replace(/^(kept verbatim|edited:|new)\s*[:;,.-]?\s*/i, "") : "new: " + hudNorm(it.evidence).replace(/^(kept verbatim|edited:|new)\s*[:;,.-]?\s*/i, "");
+    }));
+    // A confidential line of his is withheld; a confidential line the draft wrote is removed, never reworded.
+    ["focus", "risks"].forEach(k => {
+      d[k].filter(it => tagOfEvidence(it.evidence) === "kept" && isConfidential(it.text)).forEach(it => d.dropped.push(withhold(own(k, it.text))));
+      d[k] = d[k].filter(it => !isConfidential(it.text) && !isConfidential(it.evidence));
+    });
+    d.report = d.report.filter(it => !isConfidential(it.text) && !isConfidential(it.evidence));
+    // Report lines that re-report his last post, or restate a line of his that is not dropped as done, go.
+    const doneFR = () => new Set(d.dropped.filter(x => /^done:/i.test(hudNorm(x.why))).map(x => hudNorm(x.text)));
+    d.report = d.report.filter(it => !last.report.some(l => hudNorm(l) === hudNorm(it.text) || hudJaccard(l, it.text) >= 0.5));
+    d.report = d.report.filter(it => !last.focus.concat(last.risks).some(l => hudJaccard(l, it.text) >= 0.4 && !doneFR().has(hudNorm(l))));
+    // A new line that rewords his line becomes his line, word for word.
+    ["focus", "risks"].forEach(k => { d[k] = d[k].map(it => {
+      if (tagOfEvidence(it.evidence) !== "new") return it;
+      const near = last[k].find(l => hudJaccard(l, it.text) >= 0.4);
+      return near ? {text: near, evidence: "kept verbatim"} : it;
+    }); });
+    // Generic risks go; "None today." only alone.
+    d.risks = d.risks.filter(it => tagOfEvidence(it.evidence) === "kept" || hudNorm(it.text) === "None today." || !GENERIC_RX.test(hudNorm(it.text)));
+    if (d.risks.length > 1) d.risks = d.risks.filter(it => hudNorm(it.text) !== "None today.");
+    // Dropped entries: only his lines, once, with a reason; nothing both carried and dropped.
+    const carried = k => new Set(d[k].map(it => hudNorm(it.text)));
+    const seen = new Set();
+    d.dropped = d.dropped.filter(x => {
+      const t = hudNorm(x.text), k = last.focus.some(l => hudNorm(l) === t) ? "focus" : last.risks.some(l => hudNorm(l) === t) ? "risks" : null;
+      if (!k || seen.has(t) || carried(k).has(t)) return false;
+      seen.add(t);
+      if (isConfidential(t)) x.why = "withheld: confidential detail";
+      else if (!DROP_WHY_RX.test(hudNorm(x.why)) || isConfidential(x.why) || hudNorm(x.why).length > 120) x.why = "cleared: no longer current";
+      return true;
+    });
+    // Duplicates go.
+    LINE_SECTIONS.forEach(k => { const s = new Set(); d[k] = d[k].filter(it => { const t = hudNorm(it.text); if (s.has(t)) return false; s.add(t); return true; }); });
+    // Every line of his is accounted for: carried if there is room and it is safe, otherwise dropped with a reason.
+    ["focus", "risks"].forEach(k => last[k].forEach(l => {
+      const t = hudNorm(l);
+      if (carried(k).has(t) || d.dropped.some(x => hudNorm(x.text) === t)) return;
+      if (isConfidential(l)) d.dropped.push(withhold(l));
+      else if (k === "focus" && d.focus.length >= 3) d.dropped.push({text: l, why: "trimmed: top 1-3 only"});
+      else if (k === "risks" && t === "None today." && d.risks.length) d.dropped.push({text: l, why: "cleared: real risks listed"});
+      else d[k].push({text: l, evidence: "kept verbatim"});
+    }));
+    // Rule 1: more than three focus lines keeps his carried lines first, then the draft's new ones.
+    if (d.focus.length > 3){
+      const keep = d.focus.filter(it => tagOfEvidence(it.evidence) === "kept").concat(d.focus.filter(it => tagOfEvidence(it.evidence) !== "kept")).slice(0, 3);
+      d.focus.filter(it => !keep.includes(it)).forEach(it => { if (tagOfEvidence(it.evidence) === "kept") d.dropped.push({text: it.text, why: "trimmed: top 1-3 only"}); });
+      d.focus = keep;
+    }
+    if (!d.risks.length) d.risks = [{text: "None today.", evidence: "new: no real risk in the evidence"}];
+    if (d.report.length > 7) d.report = d.report.slice(0, 7);
+    return d;
+  }
+
+  // Claude sees only the lines that failed, with the reasons, and returns replacements for exactly those lines.
+  function repairPrompt(d, violations, ctx){
+    const targets = [];
+    violations.filter(v => REWRITE_RULES.has(v.rule) && LINE_SECTIONS.includes(v.section) && v.index >= 0).forEach(v => {
+      let t = targets.find(x => x.section === v.section && x.index === v.index);
+      if (!t){ const it = d[v.section][v.index]; if (!it) return; t = {section: v.section, index: v.index, text: it.text, evidence: it.evidence, problems: []}; targets.push(t); }
+      t.problems.push(v.rule === "confidential" ? "confidential detail" : v.detail);
+    });
+    return {targets, prompt: [
+      "Fix ONLY the lines below from Dan Gatsakos's huddle post draft. Every other line already passed and is not yours to change.",
+      "",
+      "DAN'S RULES, WORD FOR WORD:",
+      DAN_RULES.join("\n"),
+      "",
+      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note or board ruling; a new risk says what slips or what cannot move; no pay, money, review, discipline, health, leave or identity detail anywhere. Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
+      "Change as little as the problem needs. If a line cannot be fixed from the evidence, drop it.",
+      "",
+      "LINES TO FIX:",
+      JSON.stringify(targets),
+      "",
+      "EVIDENCE YOU MAY USE:",
+      clip(ctx.evidence, 12000),
+      "",
+      'Reply with only JSON: {"fixes": [{"section": string, "index": number, "text": string, "evidence": string} or {"section": string, "index": number, "drop": true}]}'
+    ].join("\n")};
+  }
+  // Applies Claude's fixes to the named lines only; anything aimed elsewhere is ignored.
+  function applyRepairs(d0, targets, res){
+    const d = clone(d0);
+    const fixes = res && Array.isArray(res.fixes) ? res.fixes : [];
+    const drops = [];
+    targets.forEach(t => {
+      const f = fixes.find(x => x && x.section === t.section && x.index === t.index);
+      if (!f) return;
+      if (f.drop === true) drops.push(t);
+      else if (typeof f.text === "string" && typeof f.evidence === "string") d[t.section][t.index] = {text: f.text, evidence: f.evidence};
+    });
+    drops.sort((a, b) => b.index - a.index).forEach(t => d[t.section].splice(t.index, 1));
+    return d;
+  }
+  // Violations point at lines by content, not position, so removing one line never re-aims a fix at another.
+  const lineKey = (section, it) => section + "|" + hudNorm(it && it.text) + "|" + hudNorm(it && it.evidence);
+  const keyed = (d, v) => v.map(x => LINE_SECTIONS.includes(x.section) && x.index >= 0 && d[x.section][x.index] ? Object.assign({}, x, {key: lineKey(x.section, d[x.section][x.index])}) : x);
+  const locate = (d, v) => v.map(x => x.key ? Object.assign({}, x, {index: d[x.section].findIndex(it => lineKey(x.section, it) === x.key)}) : x).filter(x => !x.key || x.index >= 0);
+  const FATAL = x => x.rule === "no-last-post" || x.rule === "shape" || (x.rule === "judge" && x.index < 0);
+  const lineCount = d => LINE_SECTIONS.reduce((n, k) => n + d[k].length, 0);
+  // Removes the lines the violations name. His carried lines are never removed here: they only fail on
+  // confidentiality, which autoFix withholds.
+  function removeFailing(d0, v){
+    const d = clone(d0);
+    const gone = new Set(v.filter(x => x.key).map(x => x.key));
+    LINE_SECTIONS.forEach(k => { d[k] = d[k].filter(it => !gone.has(lineKey(k, it)) || tagOfEvidence(it.evidence) === "kept"); });
+    return d;
+  }
+
+  // The loop. One full draft goes in; the gate names failing lines; code fixes or removes what it can decide;
+  // Claude rewrites only the named lines; a line that still fails after the last round is removed.
+  // Judge verdicts are cached per line, so a line that passed is never re-judged and never changes.
+  async function gateLoop(first, last, now, ask, ctx, onStatus){
+    let d = autoFix(first, last, now), removed = 0, rounds = 0;
+    const verdicts = new Map();
+    const judgedKey = l => l.section === "dropped" ? "dropped|" + hudNorm(l.text) + "|" + hudNorm(l.evidence) : lineKey(l.section, d[l.section][l.index]);
+    const check = async () => {
+      const v = keyed(d, huddleGate(d, last, now));
+      if (v.some(FATAL)) return v;
+      const fresh = judgeLines(d).filter(l => !verdicts.has(judgedKey(l)));
+      if (fresh.length){
+        onStatus && onStatus("Checking " + fresh.length + " line" + (fresh.length === 1 ? "" : "s") + " against your rules…");
+        let res = null;
+        try { res = await ask(judgePrompt(fresh, last)); } catch(e){ if (e && e.code === "cancelled") throw e; }
+        const jv = judgeViolations(fresh, res);
+        if (jv.some(x => x.index < 0)) return v.concat(jv);      // a judge that failed wholesale caches nothing
+        fresh.forEach(l => verdicts.set(judgedKey(l), jv.filter(x => x.section === l.section && x.index === l.index)));
+      }
+      judgeLines(d).forEach(l => (verdicts.get(judgedKey(l)) || []).forEach(x => v.push(Object.assign({}, x, {index: l.index}))));
+      return keyed(d, v);
+    };
+    const drop = v => { const n = lineCount(d); d = autoFix(removeFailing(d, v), last, now); removed += Math.max(0, n - lineCount(d)); };
+    let v = await check();
+    while (v.length && !v.some(FATAL) && rounds < HUD_REPAIR_ROUNDS){
+      rounds++;
+      // Code-decidable failures (confidential, generic, re-reported, paraphrased) are removed, never reworded.
+      drop(v.filter(x => !REWRITE_RULES.has(x.rule)));
+      const rewrite = locate(d, v.filter(x => REWRITE_RULES.has(x.rule)));
+      const {targets, prompt} = repairPrompt(d, rewrite, ctx);
+      if (targets.length){
+        onStatus && onStatus("Fixing " + targets.length + " line" + (targets.length === 1 ? "" : "s") + " (round " + rounds + " of " + HUD_REPAIR_ROUNDS + ")…");
+        let res = null;
+        try { res = await ask(prompt); } catch(e){ if (e && e.code === "cancelled") throw e; }
+        const n = lineCount(d);
+        d = autoFix(applyRepairs(d, targets, res), last, now);
+        removed += Math.max(0, n - lineCount(d));
+      }
+      v = await check();
+    }
+    if (v.length && !v.some(FATAL)){ drop(v); v = await check(); }
+    return {d, passed: !v.length, violations: v, rounds, removed};
+  }
+
   function hudPrompt(ctx){
     const todayKey = ymd(new Date());
     const cw = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK)
@@ -1374,7 +1559,6 @@ footer{font-size:12px;color:var(--muted)}
       JSON.stringify(meetings),
       "",
       "SURFACES THAT FAILED THIS RUN: " + (ctx.gaps.length ? ctx.gaps.join("; ") : "none"),
-      ctx.violations && ctx.violations.length ? "\nYOUR PREVIOUS DRAFT WAS REJECTED BY THE GATE. Fix every item below and change nothing that passed:\n" + ctx.violations.map(violationText).join("\n") : "",
       "",
       'Reply with only JSON: {"reportHeading": string, "report": [{"text": string, "evidence": string}], "focus": [{"text": string, "evidence": string}], "risks": [{"text": string, "evidence": string}], "dropped": [{"text": string, "why": string}]}',
       'Each "evidence" names the source: mail subject and date, meeting note, task name, or post line.'
@@ -1427,23 +1611,17 @@ footer{font-size:12px;color:var(--muted)}
       ]);
       if (!db) gaps.push("board rulings: storage unavailable");
       const board = boardRulingsSince(logDocs, waitDocs, since);
-      // The gate: a draft is shown only when the code checks and the independent judge both pass it.
-      let d = null, violations = [], passed = false, attempt = 0;
-      while (attempt < HUD_MAX_ATTEMPTS && !passed){
-        attempt++;
-        hudStatus("Drafting, attempt " + attempt + " of " + HUD_MAX_ATTEMPTS + "… (20–60 seconds each)");
-        d = await sample.json(hudPrompt({last, done, sent, notes, board, gaps, violations}), {signal: hudCtl.signal, cache: false});
-        violations = huddleGate(d, last, new Date());
-        if (!violations.length){
-          hudStatus("Checking attempt " + attempt + " against your rules…");
-          const lines = judgeLines(d);
-          let verdict = null;
-          try { verdict = await sample.json(judgePrompt(lines, last), {signal: hudCtl.signal, cache: false}); }
-          catch(e){ if (e && e.code === "cancelled") throw e; verdict = null; }
-          violations = judgeViolations(lines, verdict);
-        }
-        passed = !violations.length;
-      }
+      // One full draft, then the gate drives line-by-line repairs (gateLoop). A draft is shown only when the
+      // code checks and the independent judge both pass every line that is left.
+      hudStatus("Drafting… (20–60 seconds)");
+      const ask = p => sample.json(p, {signal: hudCtl.signal, cache: false});
+      const first = await ask(hudPrompt({last, done, sent, notes, board, gaps}));
+      const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
+      const repairCtx = {maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
+        evidence: JSON.stringify({completed: done, sent, meetingNotes: notes, boardRulings: board})};
+      const result = await gateLoop(first, last, new Date(), ask, repairCtx, hudStatus);
+      let d = result.d, violations = result.violations;
+      const passed = result.passed, attempt = result.rounds + 1;
       const now = new Date();
       const id = ymd(now) + "T" + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
       if (!passed){
@@ -1452,7 +1630,7 @@ footer{font-size:12px;color:var(--muted)}
         $("hud-ev-body").innerHTML = '<div class="evsec">Why it was blocked</div>' + violations.map(x => '<div class="evrow"><b>' + esc(x.rule) + '</b><span>' + esc(violationView(x)) + '</span></div>').join("");
         $("hud-ev").hidden = false; $("hud-ev").open = true;
         try { if (db) await db.doc("huddle_drafts/" + id).set({draftedAt: now.toISOString(), day: ymd(now), blocked: true, attempts: attempt, violations: violations.map(x => ({rule: x.rule, section: x.section, index: x.index})), gaps}); } catch(e){}
-        hudStatus("Blocked: " + violations.length + " rule failure" + (violations.length === 1 ? "" : "s") + " after " + attempt + " drafts. Nothing to copy. Draft again, or write it yourself.", true);
+        hudStatus("Blocked: " + violations.length + " rule failure" + (violations.length === 1 ? "" : "s") + " left after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") + ". Nothing to copy. Draft again, or write it yourself.", true);
         return;
       }
       d.reportHeading = [HEAD_DAILY, HEAD_GAP].find(h => h === hudNorm(d.reportHeading));
@@ -1477,7 +1655,7 @@ footer{font-size:12px;color:var(--muted)}
         });
         saved = " Saved for review.";
       } catch(e){ saved = " Not saved for review (" + ((e && e.code) || "failed") + ")."; saveFailed = true; }
-      hudStatus("Passed every rule on attempt " + attempt + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + saved, gaps.length > 0 || saveFailed);
+      hudStatus("Passed every rule" + (result.rounds ? " after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") : "") + (result.removed ? "; " + result.removed + " line" + (result.removed === 1 ? "" : "s") + " removed that could not pass" : "") + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + saved, gaps.length > 0 || saveFailed);
     } catch(e){
       if (e && e.code === "cancelled"){ hudStatus("Stopped."); }
       else hudStatus(SAMPLE_COPY[e && e.code] || ("Draft failed: " + ((e && (e.code || e.message)) || "unknown") + ". Try again."), true);
