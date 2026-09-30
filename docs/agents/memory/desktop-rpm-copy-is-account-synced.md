@@ -25,8 +25,8 @@ read `rpm/manifest.json` for the plugin id in the session's plugin path. Do not 
 folder going stale on the Cowork side.
 
 **A new PC can come up without it (AAC-AI, 2026-09-30).** After install and a clean setup check,
-a desktop session there was sent to run the route gate from
-`%APPDATA%\Claude\local-agent-mode-sessions138160d-...y309ff-...pm\plugin_01GBedA5A59asvhKehjXd3sm\`,
+a desktop session there was sent to run the route gate from the account's
+`rpm\plugin_01GBedA5A59asvhKehjXd3sm\` folder under `%APPDATA%\Claude\local-agent-mode-sessions\`,
 and that whole tree did not exist; Dan created it and copied the plugin folder over by hand, and
 the gate ran. Why the app had not synced it there is not known. The setup check reads the CLI
 plugin under `~/.claude/plugins`, not this copy, so it did not report the gap. A hand copy is not
