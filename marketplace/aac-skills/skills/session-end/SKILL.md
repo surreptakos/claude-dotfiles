@@ -2,10 +2,10 @@
 name: session-end
 description: Land the session — commit, push, merge, file what was promised, re-run the end check — and end on the archive line. The checks already run as a hook when a turn reads as wrapping up; this is the sequence that clears them.
 metadata:
-  modified: '2026-09-23T15:56:18Z'
-  previous-modified: '2026-09-18T06:07:06Z'
-  revision: '19'
-  content-sha: d762a5cd4345
+  modified: '2026-09-30T23:23:36Z'
+  previous-modified: '2026-09-23T15:56:18Z'
+  revision: '20'
+  content-sha: 6e4ab10a0ec1
 ---
 
 # Finish a session
@@ -19,9 +19,16 @@ wording ("wrap up", "handing off") asks before each shared-state action instead.
 
 1. **Commit and push.** One commit that says what changed and why; never `--no-verify` (fix the
    hook failure and commit again). `git push -u origin <branch>` if there is no upstream.
-2. **Open and merge the PR.** `gh pr create --base <default> --head <branch>` with a `Closes #N`
-   line per issue the commits resolve, then `gh pr merge <n> --squash`. Branch protection,
-   pending checks or a refused merge: say so and stop short of the archive line.
+2. **Open, wait, merge, pull.** `gh pr create --base <default> --head <branch>` with a `Closes #N`
+   line per issue the commits resolve. Wait for the checks: `gh pr checks <n> --watch --fail-fast`
+   blocks until every check has a verdict (the Windows restore test takes about eight minutes;
+   rerun the command when the tool timeout cuts it off). Pending checks are a wait, never a stop
+   (Dan, 2026-09-30, after a session ended on "10 of 12 checks green, merge waits on CI"). Every
+   check green: `gh pr merge <n> --squash`, then on the anchor PC `git -C <main checkout> pull
+   --ff-only` so the scheduled task and the desktop routines run the merged code. Complete when
+   the PR reads MERGED and the main checkout's HEAD is the merge commit. Only a failing check,
+   branch protection or a refused merge ends the session short of the archive line, named in one
+   line.
 3. **File what was promised.** Read the conversation once for anything that will die with it: a
    thing the user deferred ("later", "after X"), a thing you offered and never did, a known limit
    you named, a question that got no answer, a step only the owner can take. Each is either

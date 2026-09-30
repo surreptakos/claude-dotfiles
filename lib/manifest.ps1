@@ -125,8 +125,12 @@ function Read-RepoList {
             }
             if ($priorities -contains [int]$entry.priority) { throw "served row $($entry.repo) repeats priority $($entry.priority)" }
             $priorities += [int]$entry.priority
-            $master = [string]$entry.master; $stateIssue = [int]$entry.stateIssue; $priority = [int]$entry.priority
+            $priority = [int]$entry.priority
         }
+        # An unserved row may keep its master and stateIssue (a repo the watchdog stopped
+        # launching): the watchdog still closes a master of that name when its pass completes.
+        if ($keys -contains 'master' -and $entry.master) { $master = [string]$entry.master }
+        if ($keys -contains 'stateIssue' -and $entry.stateIssue) { $stateIssue = [int]$entry.stateIssue }
         $relative = [string]$entry.path
         $rows += [pscustomobject]@{
             Repo         = [string]$entry.repo

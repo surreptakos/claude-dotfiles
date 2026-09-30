@@ -1,6 +1,6 @@
 name: Repair state refs
 
-# Issue 92: the master orchestrator state issues (#74-#77) live in claude-dotfiles, so a bare
+# Issue 92: the master orchestrator state issues (lib/repos.json rows) live in claude-dotfiles, so a bare
 # `#N` in one of them resolves against claude-dotfiles - and tools/tracker-audit.js flags any
 # such reference to a number that is not a claude-dotfiles issue/PR as `dangling-reference`.
 # Masters must write cross-repo references as `owner/repo#N`, and the boot prompt of the local
@@ -10,7 +10,7 @@ name: Repair state refs
 # idempotent: a clean body triggers no `gh issue edit`.
 #
 # Triggers:
-#   * `issues: edited` on #74-#77 - a cloud master's write is caught within a minute of landing.
+#   * `issues: edited` on an `orchestrator`-labelled issue - a cloud master's write is caught within a minute of landing.
 #     (Note: `types: edited` fires on body edits; label / assignee / milestone changes do NOT
 #     fire it. That is deliberate - only body edits can introduce a bare cross-repo `#N`.)
 #   * A 10-minute cron - matches the local watchdog cadence and covers historic content or any
@@ -43,14 +43,12 @@ concurrency:
 
 jobs:
   repair:
-    # Skip issue-edit runs that are not for one of the four state issues. Cron and manual runs
-    # have no `github.event.issue`, so they always pass.
+    # Skip issue-edit runs that are not for a master state issue (every one carries the
+    # `orchestrator` label; the rows are in lib/repos.json). Cron and manual runs have no
+    # `github.event.issue`, so they always pass.
     if: |
       github.event_name != 'issues' ||
-      github.event.issue.number == 74 ||
-      github.event.issue.number == 75 ||
-      github.event.issue.number == 76 ||
-      github.event.issue.number == 77
+      contains(github.event.issue.labels.*.name, 'orchestrator')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
