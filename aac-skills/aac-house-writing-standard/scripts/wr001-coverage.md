@@ -1,10 +1,10 @@
 # AAC-WR-001 coverage: how each of the 167 rules is checked
 
-Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit, warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
+Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit (a sentence, a paragraph, a term in context, or the whole document), warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
 
 Maintenance rule (Dan, September 29, 2026): a revision that adds or changes a rule lands with its check in `wr001-lint.js`, or with its row here saying why no pattern can decide it, in the same PR. `tools/wr001-lint-coverage.test.js` fails when this table and the linter disagree, when a rule number is missing or repeated, or when the count line below is stale.
 
-Counts: Pattern 54, Pattern and Jev 3, Jev 2, Reader 86, Layout 22.
+Counts: Pattern 54, Pattern and Jev 3, Jev 4, Reader 84, Layout 22.
 
 Table 1. Rule coverage
 
@@ -64,7 +64,7 @@ Table 1. Rule coverage
 | 52 | Ordinal numbers | Pattern | 1st through 10th as figures |
 | 53 | Telephone numbers | Pattern | a telephone number in parentheses |
 | 54 | General rule | Pattern | approx., w/, b/c, thru, pls, dept., mgmt. |
-| 55 | Acronyms | Reader | an acronym defined on first use needs the audience (a pattern cannot tell HDCS from a typo) |
+| 55 | Acronyms | Jev | Jev reads each all-capitals term of two to six letters that Appendix C does not list and that is not spelled out with the acronym in parentheses at first use, with the whole document as context, for a product identifier (HDCS) or a term the reader knows |
 | 56 | All-capital abbreviations | Pattern | periods in a capital abbreviation |
 | 57 | a.m. and p.m. | Pattern | AM, PM, A.M., P.M. |
 | 58 | Corporate suffixes | Reader | legal styling needs the source name |
@@ -170,7 +170,7 @@ Table 1. Rule coverage
 | 158 | Importance puffery | Pattern | the Appendix G5 puffery and G11 declaratives |
 | 159 | Superficial -ing analysis | Pattern | a trailing participial clause of the Appendix H9 kind |
 | 160 | Weasel attribution | Pattern | the Appendix G6 attributions |
-| 161 | Synonym cycling | Reader | one name per actor needs the whole message and the actors (a Jev document check is the next step) |
+| 161 | Synonym cycling | Jev | one question over the whole message: is one actor, system or tool named two ways; skipped for a formal document (reports and proposals are exempt by the rule) unless `--prose` forces narrative |
 | 162 | Fake-profound kickers and summary recaps | Pattern and Jev | the Appendix H11 kickers; Jev reads the last paragraph for a recap |
 | 163 | Interpretive metadiscourse | Pattern | the Appendix G1, G2, G7, G9 and G10 phrases |
 | 164 | Formulaic structures | Pattern and Jev | the Appendix H1 to H6 formulas that have a fixed shape; Jev reads each paragraph for fragmentation |

@@ -959,6 +959,53 @@ function haltReport(halt, results) {
   };
 }
 
+/**
+ * Issue 1093: an isolation checkpoint is ONE agent running ONE bash command. Each guard agent
+ * loads the whole session context before its one command, so the agent is the cost, not the
+ * command: run 6abd47d1 spent ~1.2M tokens on 16 of them, a HEAD-read agent and a tree-guard
+ * agent at every checkpoint. The HEAD read and the guard now share a command, and Setup's
+ * `pwd`, HEAD read and guard baseline are the same command again.
+ *
+ * Pure: what to read in, the command out. `cwd` is the orchestrator checkout's absolute path, or
+ * null to measure it with `pwd` in the same shell; `head` reads that checkout's HEAD; `guard` is
+ * the tree-guard invocation (or null), which names the checkout as `"$o"` and runs last, so the
+ * command's exit code is the guard's. Each read prints one tagged line - `cwd <path>`,
+ * `head <branch|DETACHED>`, `sha <sha|UNREADABLE>` - and the guard prints its own JSON line.
+ */
+function checkpointCommand({ cwd, head, guard }) {
+  const parts = [cwd ? `o='${String(cwd).replace(/'/g, `'\\''`)}'` : 'o="$(pwd)"'];
+  if (!cwd) parts.push(`printf 'cwd %s\\n' "$o"`);
+  if (head) {
+    parts.push(`printf 'head %s\\n' "$(git -C "$o" symbolic-ref --quiet --short HEAD || echo DETACHED)"`);
+    parts.push(`printf 'sha %s\\n' "$(git -C "$o" rev-parse HEAD || echo UNREADABLE)"`);
+  }
+  if (guard) parts.push(guard);
+  return parts.join('; ');
+}
+
+/**
+ * Issue 1093: the stdout of a checkpointCommand back into its parts. Pure: stdout in,
+ * { cwd, head, guard } out - cwd the measured path or null; head { branch (null when detached),
+ * sha } or null when either line is missing or the sha is not an object name; guard the parsed
+ * JSON line or null (absent, or not JSON: a paraphrase is could-not-audit, never a pass).
+ */
+function parseCheckpointOutput(stdout) {
+  const out = { cwd: null, head: null, guard: null };
+  let branch = null, sha = null;
+  for (const raw of String(stdout == null ? '' : stdout).split(/\r?\n/)) {
+    const line = raw.trim();
+    let m;
+    if ((m = /^cwd (.+)$/.exec(line))) out.cwd = m[1];
+    else if ((m = /^head (\S+)$/.exec(line))) branch = m[1];
+    else if ((m = /^sha (\S+)$/.exec(line))) sha = m[1];
+    else if (line.startsWith('{')) {
+      try { out.guard = JSON.parse(line); } catch (e) { out.guard = null; }
+    }
+  }
+  if (branch && sha && /^[0-9a-f]{40,64}$/.test(sha)) out.head = { branch: branch === 'DETACHED' ? null : branch, sha };
+  return out;
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -988,5 +1035,5 @@ module.exports = {
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
-  quotaFailure, createRunHalt, haltReport,
+  quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
 };
