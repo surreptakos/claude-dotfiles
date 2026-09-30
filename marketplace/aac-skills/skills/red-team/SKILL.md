@@ -2,10 +2,10 @@
 name: red-team
 description: Red-team a drafted answer against other vendors' models (GPT, Gemini, Grok) through OpenRouter before sending it. Use when the user asks to red-team, cross-check or get a second opinion on an answer from other models, or says a reply is important enough to check.
 metadata:
-  modified: '2026-09-29T22:30:10Z'
-  previous-modified: '2026-09-28T17:42:02Z'
-  revision: '4'
-  content-sha: d1aa9d332b20
+  modified: '2026-09-30T19:34:46Z'
+  previous-modified: '2026-09-29T22:30:10Z'
+  revision: '5'
+  content-sha: c1188ec683c7
 ---
 
 # red-team
@@ -20,6 +20,14 @@ merge is done by the strongest model with the others' names withheld.
 Each run costs several frontier calls and a minute or two. It fits a decision, a recommendation,
 research or advice where being wrong is expensive; a lookup or a code change with tests already
 has a better check.
+
+**Data safety.** What leaves the machine is the question file and the draft file, nothing else of
+the conversation: the panel gets the question, the critic gets the question, the draft and the
+panel answers. It goes to OpenRouter and on to each model's provider. Customer names, personal
+data, AAC financials and credentials go out only as placeholders (step 2). Every call carries
+`provider: { data_collection: "deny" }`, so OpenRouter routes it only to providers it classes as
+keeping no user data; a model with no such endpoint fails that call with a 404 in `errors`, and
+the run goes on with the rest.
 
 ## Steps
 
