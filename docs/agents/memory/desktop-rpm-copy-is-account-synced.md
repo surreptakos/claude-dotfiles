@@ -4,7 +4,7 @@ description: "The desktop app's rpm/plugin_<id>/ copy of aac-skills is the claud
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-28T16:40:00.000Z
+  modified: 2026-09-30T23:00:00.000Z
 ---
 
 Desktop Code sessions load aac-skills from
@@ -28,8 +28,17 @@ folder going stale on the Cowork side.
 a desktop session there was sent to run the route gate from the account's
 `rpm\plugin_01GBedA5A59asvhKehjXd3sm\` folder under `%APPDATA%\Claude\local-agent-mode-sessions\`,
 and that whole tree did not exist; Dan created it and copied the plugin folder over by hand, and
-the gate ran. Why the app had not synced it there is not known. The setup check reads the CLI
-plugin under `~/.claude/plugins`, not this copy, so it did not report the gap. A hand copy is not
-refreshed by `git pull`; the app's sync is what keeps it current.
+the gate ran. Why the app had not synced it there is not known. A hand copy is not refreshed by
+`git pull`; the app's sync is what keeps it current.
+
+**What syncs it (issue 1149, read from AAC-AI's `%LOCALAPPDATA%\Claude\logs\main.log`).** The
+app's `RemotePluginManager` downloads every plugin the signed-in account has installed into
+`rpm\` ("Downloaded N account-enabled plugin(s)") on a full pass: one at every app start, and one
+an hour after that (the 20-minute ticks are quick passes that carry plugins forward as-is). A full
+pass also re-downloads a stale one ("Refreshed 1 stale user-installed plugin(s) (remote_newer)"),
+replacing its folder. So the fix is aac-skills installed on the account, then quit and reopen the
+app. When a local and a remote copy both exist, the session log reads
+`Plugin "aac-skills@claude-dotfiles" exists in both remote and local. Using remote.`
+`setup-check.ps1` now reports this copy (ok, or STOP with that to-do).
 
 Source: https://github.com/surreptakos/claude-dotfiles/issues/943, https://github.com/surreptakos/claude-dotfiles/issues/857, https://github.com/surreptakos/claude-dotfiles/issues/948

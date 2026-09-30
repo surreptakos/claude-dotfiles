@@ -17,6 +17,8 @@
       Profile        the files pull restores match what the repo would write (compared through
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
+                     the desktop app holds its own aac-skills copy for the signed-in account,
+                     read from the app's rpm\manifest.json (issue 1149);
                      every settings.json hook entry names files that exist; the caveman proxy
                      binary is present, registered to start at logon (HKCU Run CavemanProxy,
                      issue 1110), and a terminal `claude -p` answers through its port.
@@ -53,8 +55,8 @@
     command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
     Text probes print their answer instead: master-plugin-version (the aac-skills version master
-    offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
-    unset - never the value), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
+    offers), desktop-app-root (the desktop app's data folder, %APPDATA%\Claude), jev-key (where
+    TYPESAFE_API_KEY is set: user, machine, process, or empty when unset - never the value), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
     Exit 0 when no STOP remains, 1 when one does, 2 when the check itself could not run.
@@ -526,6 +528,55 @@ function Test-Plugin {
     }
 }
 
+# The desktop app's own aac-skills copy (issue 1149): what a desktop Code session loads, synced
+# from the claude.ai account by the app's RemotePluginManager, never written by pull or by
+# `claude plugin install`. Judged by the app's rpm\manifest.json, not the folder layout: a folder
+# the manifest does not list is not the app's copy (memory note desktop-rpm-copy-is-account-synced).
+function Test-DesktopPluginCopy {
+    $root = Invoke-ProbeText -Name 'desktop-app-root' -Real { if ($env:APPDATA) { Join-Path $env:APPDATA 'Claude' } else { '' } }
+    if ($null -eq $root) {
+        Write-Line skip ('desktop app aac-skills copy  ({0})' -f $SkipReason)
+        return
+    }
+    $todo = 'Get the Claude desktop app to sync its aac-skills copy: sign in to the app, check aac-skills (marketplace claude-dotfiles) is installed on that account in the app''s plugin settings, then quit the app from the tray and reopen it. Its start-up plugin sync (RemotePluginManager in main.log) downloads every plugin the account has installed into local-agent-mode-sessions\<account>\<org>\rpm\, and an hourly full pass refreshes them. Fallback when it still brings nothing: copy the rpm\plugin_<id> folder and its rpm\manifest.json entry by hand from a PC that has them. To see the sync run:'
+    $logCmd = 'Select-String -Path "$env:LOCALAPPDATA\Claude\logs\main.log" -Pattern RemotePluginManager | Select-Object -Last 5'
+    # config.json also holds the app's token cache: parsed for one field, never echoed.
+    $config = Join-Path $root 'config.json'
+    $account = ''
+    try { $account = [string]([System.IO.File]::ReadAllText($config) | ConvertFrom-Json).lastKnownAccountUuid } catch { }
+    if (-not $account) {
+        Write-Line stop ('desktop app has no signed-in account, so no aac-skills copy  ({0} names no lastKnownAccountUuid)' -f $config)
+        Add-Todo $todo @($logCmd)
+        return
+    }
+    $short = $account.Substring(0, [Math]::Min(8, $account.Length))
+    $accountDir = Join-Path (Join-Path $root 'local-agent-mode-sessions') $account
+    $held = @()
+    $orgs = @()
+    if (Test-Path -LiteralPath $accountDir -PathType Container) { $orgs = @(Get-ChildItem -LiteralPath $accountDir -Directory) }
+    foreach ($org in $orgs) {
+        $rpm = Join-Path $org.FullName 'rpm'
+        $entries = @()
+        try { $entries = @(([System.IO.File]::ReadAllText((Join-Path $rpm 'manifest.json')) | ConvertFrom-Json).plugins) } catch { }
+        foreach ($e in $entries) {
+            try {
+                if ([string]$e.name -ne 'aac-skills' -or [string]$e.marketplaceName -notmatch '(^|/)claude-dotfiles$') { continue }
+                $dir = Join-Path $rpm ([string]$e.id)
+                if (-not $e.id -or -not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+                $version = '?'
+                try { $version = [string]([System.IO.File]::ReadAllText((Join-Path $dir '.claude-plugin\plugin.json')) | ConvertFrom-Json).version } catch { }
+                $held += ('{0} in org {1}, installed by {2}' -f $version, $org.Name.Substring(0, [Math]::Min(8, $org.Name.Length)), [string]$e.installedBy)
+            } catch { }
+        }
+    }
+    if ($held.Count -gt 0) {
+        Write-Line ok ('desktop app holds aac-skills for the signed-in account {0}  ({1})' -f $short, ($held -join '; '))
+    } else {
+        Write-Line stop ('desktop app holds no aac-skills copy for the signed-in account {0}  (no rpm\manifest.json under {1} lists one whose folder exists)' -f $short, $accountDir)
+        Add-Todo $todo @($logCmd)
+    }
+}
+
 # Every absolute path a hook command names - quoted or bare, drive-rooted or ~ (expanded to
 # $UserHome). Returns { Event; Path } objects.
 function Get-HookPaths {
@@ -669,6 +720,7 @@ function Test-Profile {
     Test-PullDrift
     $offered = Get-OfferedPluginVersion
     Test-Plugin (Join-Path $UserHome '.claude') $offered
+    Test-DesktopPluginCopy
     Test-Caveman $installCommand
 
     # Pull refreshes the personal profile from ~/.claude, so drift is judged on ~/.claude alone;

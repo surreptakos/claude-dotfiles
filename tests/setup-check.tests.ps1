@@ -202,6 +202,17 @@ exit 0
     Write-Utf8NoBom (Join-Path $stubs 'routine-registry.ps1') @'
 Join-Path $PSScriptRoot 'registry'
 '@
+    # The desktop app's data folder: a signed-in account whose org holds aac-skills in its rpm
+    # manifest and on disk, as the app's plugin sync leaves it (issue 1149).
+    $app = Join-Path $stubs 'desktop-app'
+    $rpm = Join-Path $app 'local-agent-mode-sessions\00000000-fixture-account\00000000-fixture-org\rpm'
+    New-Item -ItemType Directory -Path (Join-Path $rpm 'plugin_fixture\.claude-plugin') -Force | Out-Null
+    Write-Utf8NoBom (Join-Path $app 'config.json') '{ "lastKnownAccountUuid": "00000000-fixture-account" }'
+    Write-Utf8NoBom (Join-Path $rpm 'manifest.json') '{ "plugins": [ { "id": "plugin_other", "name": "sales", "marketplaceName": "knowledge-work-plugins", "installedBy": "user" }, { "id": "plugin_fixture", "name": "aac-skills", "marketplaceName": "claude-dotfiles", "installedBy": "user" } ] }'
+    Write-Utf8NoBom (Join-Path $rpm 'plugin_fixture\.claude-plugin\plugin.json') '{ "name": "aac-skills", "version": "2026.9.300000" }'
+    Write-Utf8NoBom (Join-Path $stubs 'desktop-app-root.ps1') @'
+Join-Path $PSScriptRoot 'desktop-app'
+'@
     Write-Utf8NoBom (Join-Path $stubs 'clone.ps1') (@'
 param($Slug, $Dest)
 & git clone -q '__BARE__' $Dest 2>$null
@@ -423,6 +434,25 @@ try {
     Assert 'a missing plugin is a STOP with an install to-do' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  aac-skills plugin not installed') -and (Test-Todo $r.Out 'claude plugin install aac-skills@claude-dotfiles')) $r.Out
 
+    Write-Host 'Profile: desktop app aac-skills copy'
+    $f = New-Fixture
+    $r = Invoke-Check $f
+    Assert 'an app copy listed in its rpm manifest is ok, naming version, org and installer' `
+        ($r.Out -match 'ok    desktop app holds aac-skills for the signed-in account 00000000  \(2026\.9\.300000 in org 00000000, installed by user\)') $r.Out
+    Remove-Item -LiteralPath (Join-Path $f.Stubs 'desktop-app\local-agent-mode-sessions') -Recurse -Force
+    $r = Invoke-Check $f -Fix
+    Assert 'no app copy (the AAC-AI case) exits 1 as a STOP, even with -Fix' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  desktop app holds no aac-skills copy for the signed-in account 00000000')) $r.Out
+    Assert 'its to-do names what makes the app sync it, and the hand copy as the fallback' `
+        ((Test-Todo $r.Out 'quit the app from the tray and reopen it\. Its start-up plugin sync \(RemotePluginManager') -and
+         (Test-Todo $r.Out 'Fallback when it still brings nothing: copy the rpm\\plugin_<id> folder')) $r.Out
+    $f = New-Fixture
+    $manifest = Join-Path $f.Stubs 'desktop-app\local-agent-mode-sessions\00000000-fixture-account\00000000-fixture-org\rpm\manifest.json'
+    Write-Utf8NoBom $manifest '{ "plugins": [ { "id": "plugin_other", "name": "sales", "marketplaceName": "knowledge-work-plugins" } ] }'
+    $r = Invoke-Check $f
+    Assert 'a plugin folder the rpm manifest does not list is not the app''s copy: STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  desktop app holds no aac-skills copy')) $r.Out
+
     Write-Host 'Profile: hooks and caveman'
     $f = New-Fixture
     $settingsPath = Join-Path $f.Home '.claude\settings.json'
@@ -592,7 +622,7 @@ try {
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 15) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, proxy logon start, desktop app copy, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 16) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'
