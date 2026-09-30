@@ -3,7 +3,7 @@
  * wr001-lint - deterministic checks for AAC-WR-001.
  *
  * Covers every rule a pattern can decide (see wr001-coverage.md beside this
- * file for all 167 rules: pattern, Jev, reader, or layout). Seven judgment
+ * file for all 170 rules: pattern, Jev, reader, or layout). Seven judgment
  * rules get a TypeSafe Jev Noul each (issues 731 and 1038): Rule 5 on the
  * opening paragraph, Rules 6 and 10 per sentence, Rule 162 on the last
  * paragraph, Rule 164 per paragraph, and two whole-document checks: Rule 55
@@ -41,7 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.11";
+const STANDARD_VERSION = "0.12";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
@@ -83,6 +83,8 @@ const LY_NOT_ADVERB = "family|supply|early|only|daily|weekly|monthly|yearly|quar
 // Phrase and word checks added 2026-09-29 (Dan: "shouldn't all rules be in the
 // linter?"). Each row: the rule it decides, the severity, the pattern, the
 // message. formalSev, when present, replaces sev in a formal document.
+// informal: true skips the row in a formal document (a contract keeps its
+// register under Rules 137 and 153).
 const PHRASE_CHECKS = [
   // --- Part II, house style -----------------------------------------------
   { rule: 9, sev: "warn", re: /\b(utili[sz]e[sd]?|utili[sz]ing|utili[sz]ation|prior to|subsequent to|commence[sd]?|commencing|due to the fact that|in the event that|at the present time|in close proximity to)\b/gi,
@@ -172,6 +174,11 @@ const PHRASE_CHECKS = [
     msg: "machine vocabulary (Rule 167, Appendix G3); cut or replace with the plain word" },
   { rule: 167, sev: "error", re: /\blandscape\b(?!\s*(?:orientation|mode|page|section|layout|view|printing|tab))/gi,
     msg: "'landscape' as an abstract noun; say situation or field (page orientation is exempt)" },
+  // Rule 169 and Appendix G12: contract register carried into correspondence.
+  // Warnings only, and only outside a formal document. 'please be advised' and
+  // 'shall' are in G12 too, but Rules 10 and 14 already report them.
+  { rule: 169, sev: "warn", informal: true, re: /\b(pursuant to|herein|hereby|hereto|notwithstanding|for the avoidance of doubt|please treat this(?: \w+)? as|without prejudice|reserves? the right|without waiving|in accordance with Section|it is our position)\b/gi,
+    msg: "legalistic register (Appendix G12); write it the way a colleague would, or cut the sentence (Rule 168)" },
 ];
 
 const CHECKS = [
@@ -270,6 +277,7 @@ function lintFile(file, opts) {
     const unquoted = line.replace(/["“][^"”\n]{3,}["”]/g, (q) => " ".repeat(q.length));
     for (const c of PHRASE_CHECKS) {
       if (c.prose && (formal || !opts.prose)) continue;
+      if (c.informal && formal) continue;
       if (c.noTables && hasTables) continue;
       c.re.lastIndex = 0;
       let m;
@@ -333,6 +341,25 @@ function lintFile(file, opts) {
       msg: `document mixes 'percent' (${wordPct}) and '%' (${signPct}); pick one`,
       text: "",
     });
+  }
+
+  // Rule 169. More than one contract-section citation in informal writing is
+  // the register of a contract, not of correspondence. One citation may be the
+  // point in dispute; the second is flagged. No length check here: Rule 170.
+  if (!formal) {
+    const cites = [];
+    body.forEach((l, i) => {
+      const unq = l.replace(/["“][^"”\n]{3,}["”]/g, (q) => " ".repeat(q.length));
+      const re = /(?:\bSection\s+|§\s*)\d+(?:\.\d+)*/g;
+      let m;
+      while ((m = re.exec(unq)) !== null) cites.push({ i, col: m.index + 1, text: m[0] });
+    });
+    if (cites.length > 1) {
+      const c = cites[1];
+      findings.push({ line: c.i + 1, col: c.col, rule: 169, sev: "warn",
+        msg: `${cites.length} contract-section citations; in correspondence cite a section only when the reader disputed the point or the citation changes the outcome`,
+        text: c.text });
+    }
   }
 
   // Rule 93. No more than three list levels.
