@@ -1509,7 +1509,8 @@ phase('Setup')
 // (`PROMPT_CONTRACT` for the cockpit fork) as a second rail, in case a fork is missing from
 // FLEET_FORKS or its remote no longer matches the name recorded here.
 const FLEET_SOURCE_REPO = 'surreptakos/claude-dotfiles'
-const FLEET_SOURCE_RAW = 'https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/aac-skills/ticket-fleet'
+// Issue 1049: fetched through `gh api` with the raw media type; raw.githubusercontent.com answers 404 for the repo after the flip.
+const FLEET_SOURCE_API = 'repos/surreptakos/claude-dotfiles/contents/aac-skills/ticket-fleet'
 const FLEET_FORKS = ['surreptakos/aac-routines', 'surreptakos/aac-sales-cockpit']
 const FLEET_FORK_MARKER = 'PROMPT_CONTRACT' // aac-sales-cockpit's fork edit; the refresh agent's second rail
 const FLEET_REFRESH_FILES = ['ticket-fleet.js', 'editable-install-guard.js']
@@ -1520,7 +1521,7 @@ const REFRESHED = { type: 'object', required: ['refreshed', 'unchanged', 'commit
   refreshed: { type: 'array', items: { type: 'string' }, description: 'paths overwritten because their sha256 differed from master' },
   unchanged: { type: 'array', items: { type: 'string' }, description: 'paths whose sha256 already matched master' },
   commit: { type: 'string', description: 'the sha of the refresh commit, "" when nothing changed' },
-  errors: { type: 'array', items: { type: 'string' }, description: 'each curl/git failure or refused overwrite, one per entry, verbatim' },
+  errors: { type: 'array', items: { type: 'string' }, description: 'each gh api/git failure or refused overwrite, one per entry, verbatim' },
 } }
 let servedRepo = null
 try {
@@ -1547,7 +1548,7 @@ if (!servedRepo) {
   try {
     refresh = await agent(
       `Refresh this repository's copy of the ticket-fleet script from its source (claude-dotfiles issue 770). servedRepo is already confirmed as ${servedRepo}, neither the source repo nor a listed fork - do not re-check it. Run from the repository root; make no other change.
-1. For each of ${FLEET_REFRESH_FILES.map(f => '`.claude/workflows/' + f + '`').join(' and ')} that EXISTS (\`test -f\`; a missing one is simply not listed, never created): first read the file and check whether it contains the string \`${FLEET_FORK_MARKER}\` anywhere. If it does, REFUSE to touch it - list it under errors as "<path>: refused, contains ${FLEET_FORK_MARKER} fork marker" and leave it exactly as it is (a second rail behind the servedRepo check above, issue 804). Otherwise \`curl -fsSL ${FLEET_SOURCE_RAW}/<name> -o /tmp/fleet-refresh-<name>\` and compare \`sha256sum\` of the download with the file. Different: \`cp /tmp/fleet-refresh-<name> .claude/workflows/<name>\` and list it under refreshed; same: list it under unchanged. A curl exit other than 0 goes under errors verbatim and that file is left alone. Also refresh \`tools/editable-install-guard.js\` the same way when it exists, including the ${FLEET_FORK_MARKER} check.
+1. For each of ${FLEET_REFRESH_FILES.map(f => '`.claude/workflows/' + f + '`').join(' and ')} that EXISTS (\`test -f\`; a missing one is simply not listed, never created): first read the file and check whether it contains the string \`${FLEET_FORK_MARKER}\` anywhere. If it does, REFUSE to touch it - list it under errors as "<path>: refused, contains ${FLEET_FORK_MARKER} fork marker" and leave it exactly as it is (a second rail behind the servedRepo check above, issue 804). Otherwise \`gh api -H "Accept: application/vnd.github.raw" "${FLEET_SOURCE_API}/<name>?ref=master" > /tmp/fleet-refresh-<name>\` and compare \`sha256sum\` of the download with the file. Different: \`cp /tmp/fleet-refresh-<name> .claude/workflows/<name>\` and list it under refreshed; same: list it under unchanged. A gh api exit other than 0 goes under errors verbatim and that file is left alone. Also refresh \`tools/editable-install-guard.js\` the same way when it exists, including the ${FLEET_FORK_MARKER} check.
 2. If refreshed is non-empty: \`git add\` exactly those paths and \`git commit -m "chore(fleet): refresh ticket-fleet script from claude-dotfiles master (issue 770)"\`; commit is the sha \`git rev-parse HEAD\` prints. No push, no other path staged, no rebase. If nothing was refreshed: neither add nor commit, commit "".
 Return structured output only.`,
       { label: 'fleet-refresh', phase: 'Setup', schema: REFRESHED, model: cfg.reportModel, effort: cfg.effort }
