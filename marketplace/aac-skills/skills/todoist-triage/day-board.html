@@ -1675,12 +1675,12 @@ footer{font-size:12px;color:var(--muted)}
       // code checks and the independent judge both pass every line that is left.
       hudStatus("Drafting… (20–60 seconds)");
       const ask = p => sample.json(p, {signal: hudCtl.signal, cache: false});
-      const first = await ask(hudPrompt({last, done, sent, notes, board, gaps, mustCover}));
-      const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
       const todayKey = ymd(new Date()), weekOut = ymd(new Date(Date.now() + 7 * 86400000));
       const dueNow = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK && (t.labels || []).includes("do")
         && ((t.dueDate && String(t.dueDate).slice(0, 10) <= todayKey) || (t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut))).map(t => t.content);
       const mustCover = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - mustCover.length;
+      const first = await ask(hudPrompt({last, done, sent, notes, board, gaps, mustCover}));
+      const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
       const repairCtx = {mustCover, maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
         evidence: JSON.stringify({completed: done, sent, meetingNotes: notes, boardRulings: board})};
       const result = await gateLoop(first, last, new Date(), ask, repairCtx, hudStatus);
