@@ -1,0 +1,16 @@
+{
+  "note": "Controlled copies of the source design skills, rule text only, byte for byte at the pinned commit. Never edit a file under vendor/: re-vendor at a new pin, update this entry, and run node tools/build-design-catalog.js (issue 1083). blob is the upstream git blob sha, so git hash-object on the vendored file must print it.",
+  "sources": [
+    {
+      "skill": "accessibility-review",
+      "repo": "anthropics/knowledge-work-plugins",
+      "path": "design/skills/accessibility-review",
+      "commit": "da38ec1ee89d41e5380e652a97382695003396e7",
+      "vendored": "accessibility-review",
+      "files": {
+        "SKILL.md": "3ef332cd837da5b4f7089503eb93e14c04090ccf"
+      },
+      "left_out": "The design plugin's CONNECTORS.md, which SKILL.md links for connector placeholders: it names tools, not rules."
+    }
+  ]
+}
