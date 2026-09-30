@@ -14,7 +14,8 @@
  *   baseline --cwd <dir> (--state <file> | --state-dir <dir>) [--force]
  *       Snapshot `git status --porcelain` once, at run start. Dirt that pre-dates the wave belongs
  *       to the operator and is never blamed on a ticket. `--state-dir` mints a fresh per-run
- *       filename and prints it as `statePath`, so two runs cannot land on the same file.
+ *       filename and prints it as `statePath`, so two runs cannot land on the same file. A relative
+ *       path starting `.git/` lands in --cwd's real git dir, a linked worktree's too (issue 1041).
  *
  *   check --cwd <dir> --state <file> --label <l> --ticket <n> [--candidate <ticket>=<branch>]...
  *       Re-read the tree and report every entry that is NOT in the baseline. Writes nothing.
@@ -109,6 +110,22 @@ function statusEntries(cwd) {
 function isGitWorkTree(cwd) {
   const r = git(cwd, ['rev-parse', '--is-inside-work-tree']);
   return !r.failedToSpawn && r.code === 0 && r.out.trim() === 'true';
+}
+
+// Issue 1041: a relative state path whose first segment is `.git` (the fleet's default
+// `.git/orchestrator-tree-guard`) names the REAL git dir of --cwd's checkout, read from
+// `git rev-parse --absolute-git-dir`. In a linked worktree (`.claude/worktrees/<name>`) `.git` is a
+// file, so resolving it as a directory failed with ENOTDIR and the wave aborted before Scout. The
+// git dir is `<main>/.git/worktrees/<name>` there and `.git` in a plain checkout - outside the
+// working tree in both, so the state never shows in `git status`. Any other path resolves as before.
+function resolveStatePath(cwd, p) {
+  const segs = String(p).split(/[\\/]/);
+  if (path.isAbsolute(p) || segs[0] !== '.git') return { path: path.resolve(p) };
+  const r = git(cwd, ['rev-parse', '--absolute-git-dir']);
+  if (r.failedToSpawn || r.code !== 0 || !r.out.trim()) {
+    return { error: `could not resolve ${p}: git rev-parse --absolute-git-dir failed in ${cwd} (exit ${r.code}): ${r.err || '(no stderr)'}` };
+  }
+  return { path: path.resolve(r.out.trim(), ...segs.slice(1)) };
 }
 
 // --- attribution ------------------------------------------------------------
@@ -232,17 +249,20 @@ function run(argv, { stdout = process.stdout, stderr = process.stderr } = {}) {
   if (cmd !== 'baseline' && cmd !== 'check' && cmd !== 'restore') {
     return fail(stderr, 'usage: orchestrator-tree-guard.js baseline --cwd <dir> (--state <file> | --state-dir <dir>) | check --cwd <dir> --state <file> --label L --ticket N [--candidate N=branch]... | restore --cwd <dir> --state <file> --path P [--path P]...');
   }
-  let statePath = opts.state ? path.resolve(opts.state) : null;
-  if (!statePath && cmd === 'baseline' && opts['state-dir']) {
-    statePath = path.resolve(opts['state-dir'], `run-${process.pid}-${process.hrtime.bigint().toString(36)}.json`);
-  }
-  if (!statePath) {
+  const stateArg = opts.state
+    || (cmd === 'baseline' && opts['state-dir']
+      ? path.join(opts['state-dir'], `run-${process.pid}-${process.hrtime.bigint().toString(36)}.json`)
+      : null);
+  if (!stateArg) {
     return fail(stderr, cmd === 'baseline'
       ? '--state <file> or --state-dir <dir> is required (the run baseline lives there)'
       : '--state <file> is required — pass the statePath the baseline step printed');
   }
   if (!fs.existsSync(cwd)) return fail(stderr, `--cwd ${cwd} does not exist`);
   if (!isGitWorkTree(cwd)) return fail(stderr, `--cwd ${cwd} is not inside a git work tree — cannot audit`);
+  const resolved = resolveStatePath(cwd, stateArg);
+  if (resolved.error) return fail(stderr, resolved.error);
+  const statePath = resolved.path;
 
   const snapshot = statusEntries(cwd);
   if (snapshot.error) return fail(stderr, snapshot.error);

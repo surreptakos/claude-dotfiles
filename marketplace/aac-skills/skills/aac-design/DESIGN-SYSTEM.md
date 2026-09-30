@@ -58,14 +58,14 @@ U.S. Letter, 0.5 in margins (TPS template), 10,800 twips usable, a 12-column gri
 |---|---|---|
 | Letterhead and title bar | from `assets/aac-letterhead.docx` | The title bar is bound to the document Title property; `title` sets both. Its capitals are the one caps exception. |
 | Intro | `{"type":"intro","text":...}` | Black body text, one to three sentences: ink, dates, corrections, N/A, signing order, the legal timing rule. No step list. |
-| Section | `{"type":"section","heading":...,"rows":[[field,...],...]}` | One joined grid per section; every cell fully bordered. Row spans sum to 12. Four fields or fewer per section. |
-| Field | `{"label":...,"prefill":...,"span":n,"height":twips,"format":"date"\|"money"}` | Label inside the cell, top left, caption style; write space below. State the unit in the label. `format` appends the entry format (below). |
-| Choice field | `{"label":...,"choices":[...],"other":true,"write":true}` | Drawn checkboxes, one fixed gap, no underline. Four options or fewer plus Other. `write` adds a write line for "describe" answers. |
+| Section | `{"type":"section","heading":...,"rows":[[field,...],...]}` | One joined grid per section; every cell fully bordered (Rule 98). Row spans sum to 12. Four fields or fewer per section. |
+| Field | `{"label":...,"prefill":...,"span":n,"height":twips,"format":"date"\|"money"}` | Label inside the cell, top left, caption style (9 pt, Rule 77); write space below. State the unit in the label. `format` appends the entry format (below; Rule 43). Rules 77, 98. |
+| Choice field | `{"label":...,"choices":[...],"other":true,"write":true}` | Drawn checkboxes, one fixed gap, no underline. Four options or fewer plus Other. `write` adds a write line for "describe" answers. Rules 77, 98. |
 | Bullets | `{"type":"bullets","heading":...,"items":[...]}` | Terms and conditions. Bullets, never numbers; the signing steps own numbering. |
-| Signatures | `{"type":"signatures","heading":...,"columns":[{"step","role","statement"\|"choices","prefill","labels"}],"rows":[...],"full_rows":[...]}` | One tinted card per signer in step order, then Signature (prefilled "X"), Printed name and Date rows. An approver gets Approved / Returned. `labels` renames a row for one column; `full_rows` adds full-width rows (return reason, late notice). The whole block is kept on one page. |
+| Signatures | `{"type":"signatures","heading":...,"columns":[{"step","role","statement"\|"choices","prefill","labels"}],"rows":[...],"full_rows":[...]}` | One tinted card per signer in step order, then Signature (prefilled "X"), Printed name and Date rows. An approver gets Approved / Returned. `labels` renames a row for one column; `full_rows` adds full-width rows (return reason, late notice). The whole block is kept on one page (Rule 85). Rules 85, 99. |
 | HR use | `{"type":"hr_use","step":n,"label":...,"statement":...,"fields":[label or {"label","span","format"}]}` | A tinted card plus one row of fields, the last step. `statement` says where the form goes. (`"office"` is accepted as an alias.) |
 | Page break | `{"type":"page_break"}` | Starts the next block on a new page; use only when a section must begin a page. |
-| Continuation header | `"continuation": {"identify": [labels], "label": optional}` | Pages 2 and on carry "<Form name>, continued" and a bordered row of the identity fields (employee, account), so a separated page can be matched to its first page. Page 1 keeps the letterhead. |
+| Continuation header | `"continuation": {"identify": [labels], "label": optional}` | Pages 2 and on carry "<Form name>, continued" and a bordered row of the identity fields (employee, account), so a separated page can be matched to its first page (Rule 85). Page 1 keeps the letterhead. |
 | Footer | `"footer": "Active Alarm Company, Inc. \| <Form name> \| Rev. YYYY-MM-DD"` | Page X of Y comes from the template. Bump the revision on every content change. |
 
 Spec top level: `title`, `footer`, `max_pages` (the budget `render.py` enforces under both stand-in fonts), optional `continuation`, `blocks`. References: `examples/employee-raise-form.json` (one page) and `examples/multi-page-sample.json` (two pages, continuation header).
@@ -99,17 +99,19 @@ Documents are built with the `docx` skill on the AAC template, using the tokens 
 
 ## Relation to AAC-WR-001
 
-The house writing standard governs every word and the release; this file governs layout. With the amendment in `assets/AAC-WR-001-amendment-forms.md` adopted, the form system has no exceptions left:
+The house writing standard governs every word and the release; this file governs layout. AAC-WR-001 v0.11 adopted the amendment in `assets/AAC-WR-001-amendment-forms.md` (issue 1090), so the form system has no exceptions left:
 
 | Standard | How the system meets it |
 |---|---|
 | Rules 1–74 | Every label, statement and term; Assessment B runs `wr001-lint.js` |
 | Rule 37 | Headings, labels and the continuation title in sentence case |
-| Rule 77 | Body 10 pt in tables; 9 pt captions under the amendment's fill-in form clause |
+| Rule 43 | Dates on forms are MM/DD/YYYY, format stated once in the intro or the field label |
+| Rule 77 | Body 10 pt in tables; 9 pt labels and statements under the fill-in form clause; font named on runs and defaults |
 | Rule 78 | Body text black; gray only for captions |
-| Rules 79–82, 85–86 | designlint D01, D02, D10, D11; keep-together signatures; continuation header; Page X of Y |
-| Rule 98 | Full grid only on fill-in cells, under the amendment |
-| Rule 99 | Blank write cells on an uncompleted form; N/A written and initialed |
+| Rules 79–82, 86 | designlint D01, D02, D10, D11; Page X of Y |
+| Rule 85 | Keep-together signatures; continuation header repeating the form name and identity fields |
+| Rule 98 | Full grid only on fill-in cells, under the fill-in form clause |
+| Rule 99 | Blank write cells on an uncompleted form; N/A written and initialed on a completed one |
 | Rules 145–147, 166 | Step 7 of the skill |
 
 Still open, and not this system's to fix: the TPS letterhead writes the phone number "(847) 438-2600"; Rule 53 says 847-438-2600. That belongs to the template owner.

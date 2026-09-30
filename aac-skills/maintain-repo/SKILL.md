@@ -3,10 +3,10 @@ name: maintain-repo
 description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-29T16:47:57Z"
-  previous-modified: "2026-09-24T05:27:51Z"
-  revision: "7"
-  content-sha: "67a750d4574b"
+  modified: "2026-09-30T21:51:23Z"
+  previous-modified: "2026-09-29T16:47:57Z"
+  revision: "8"
+  content-sha: "95d82a5f6013"
 ---
 
 # Maintain repo
@@ -30,6 +30,23 @@ container holds no copy of the desktop's auto-memory). Report the resolved path 
 unblocks it — run on the desktop, or commit the notes into the repo as `docs/agents/memory/` + `MEMORY.md` —
 and end there. Never run steps 0–2 on a repo whose memory is unreachable; "0 files, nothing to consolidate"
 is a false report. The one exception is a repo with fewer than ten commits, and the report says so.
+
+## Run as a subagent: draft the tickets, the parent files them (issue 1031)
+
+A background agent never files a ticket. The ask-matt publish gate refuses its `gh issue create`
+(and the MCP create): it has no nonce to declare a route with, and it cannot get the owner's
+approval for a ticket set. On 2026-09-29 seven `/maintain-repo` agents were each refused, and the
+parent filed 15 tickets by hand. The gate stays as it is (Dan, 2026-09-30, option 2).
+
+- **The subagent** writes each ticket it would file (steps 0 and 1) as one file in
+  `.scratch/maintain-repo-drafts/` at the root of the repo it audited, named
+  `<NN>-<slug>.md` and laid out as `/to-tickets`'s local-ticket template, with the `ready-for-*`
+  label on its **Status** line. It never commits that folder. Its report gives the folder's
+  absolute path and the draft count where the ticket numbers would go; that counts as done.
+- **The parent**, once every agent has reported, runs `/to-tickets` once over all the drafts
+  folders. The drafts are the breakdown, so one approval covers the whole batch, and each ticket
+  goes to the tracker of the repo whose folder holds it. It then deletes each folder and puts the
+  issue numbers in the report. It never files a draft by hand.
 
 ## Step 0 — ticket-reaper
 

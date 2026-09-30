@@ -31,6 +31,9 @@ const TIMEOUT_MS = 180000
 // Sent on every call: without it OpenRouter reserves the model's whole output window (64k-128k tokens)
 // against the balance and answers 402 even when the real answer would be cheap.
 const DEFAULT_MAX_TOKENS = 16000
+// Sent on every call: OpenRouter routes only to providers it classes as keeping no user data
+// (issue 1055). A model with no such endpoint answers 404, reported per model like any failure.
+const PROVIDER = { data_collection: 'deny' }
 
 const PANEL_SYSTEM = 'Answer the question as well as you can. Be concrete. State your assumptions, ' +
   'and say what you are unsure of and why. Leave out your own name and your maker\'s.'
@@ -80,7 +83,7 @@ const label = i => String.fromCharCode(65 + i)
 const callCost = u => Number(u.cost || 0) + (u.is_byok ? Number((u.cost_details && u.cost_details.upstream_inference_cost) || 0) : 0)
 
 function panelRequest(model, question, maxTokens = DEFAULT_MAX_TOKENS) {
-  return { model, max_tokens: maxTokens, messages: [{ role: 'system', content: PANEL_SYSTEM }, { role: 'user', content: question }] }
+  return { model, max_tokens: maxTokens, provider: PROVIDER, messages: [{ role: 'system', content: PANEL_SYSTEM }, { role: 'user', content: question }] }
 }
 
 function criticRequest(model, question, draft, answers, maxTokens = DEFAULT_MAX_TOKENS) {
@@ -88,6 +91,7 @@ function criticRequest(model, question, draft, answers, maxTokens = DEFAULT_MAX_
   return {
     model,
     max_tokens: maxTokens,
+    provider: PROVIDER,
     response_format: { type: 'json_object' },
     messages: [
       { role: 'system', content: CRITIC_SYSTEM },

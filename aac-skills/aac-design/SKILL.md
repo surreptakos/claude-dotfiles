@@ -2,17 +2,17 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-09-30T18:17:47Z"
-  previous-modified: "2026-09-30T17:29:41Z"
-  revision: "2"
-  content-sha: "f624e77f206e"
+  modified: "2026-09-30T22:23:11Z"
+  previous-modified: "2026-09-30T21:51:31Z"
+  revision: "4"
+  content-sha: "6669b16fa3e4"
 ---
 
 # AAC design
 
 Every deliverable is judged by what it looks like rendered, and it ships only with a passing **critique stamp**.
 
-**The gate hook is NOT wired yet (2026-09-30).** `hooks/hooks.fragment.json` is not merged into the plugin's hooks, because run plugin-wide it blocks ordinary code work: the linter reports 1 and 23 errors on two `.html` source files in a code repository. It gets wired once it fires only inside an opted-in folder (surreptakos/claude-dotfiles#1082). Until then nothing enforces the steps below: run the linter, the critique and the scorer yourself, and say in the reply which files shipped without a stamp. When wired, the hook works as follows:
+**The gate acts only inside an opted-in folder.** The plugin wires `hooks/hooks.fragment.json`, but the hook ignores every file outside a folder that holds the marker file `.aac-design` (empty; its content is not read). The marker covers the folder it sits in and every folder below it. To opt a deliverables folder in, create the file there: `touch .aac-design`, or `New-Item .aac-design` in PowerShell. Code repositories stay unmarked, so their `.html` sources never meet the gate. For a deliverable outside a marked folder, run the linter, the critique and the scorer yourself, and say in the reply which files shipped without a stamp. Inside a marked folder:
 
 - **After every write** it lints the `.docx`, `.pptx` or `.html` file just written.
 - **At every Stop** it refuses to end the turn while any deliverable changed this turn still has a design error, or has no stamp matching its current bytes.
@@ -38,7 +38,7 @@ Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only t
 
 ## Steps
 
-1. **Load the standards.** Load `aac-house-writing-standard` and read CORE, LAYOUT, CONTROL and DRAFT-QUALITY. It governs every word on the deliverable. Until `assets/AAC-WR-001-amendment-forms.md` is adopted, its form clauses are the approved exceptions to Rules 43, 77, 85, 98 and 99. Done when those four files are read this session.
+1. **Load the standards.** Load `aac-house-writing-standard` and read CORE, LAYOUT, CONTROL and DRAFT-QUALITY. It governs every word on the deliverable. AAC-WR-001 v0.11 carries the fill-in form clauses in Rules 43, 77, 85, 98 and 99; `assets/AAC-WR-001-amendment-forms.md` is the record of that amendment. Done when those four files are read this session.
 
 2. **Inventory the content.** List every section, field and sentence with its source. Tag each one:
    - *keep*;

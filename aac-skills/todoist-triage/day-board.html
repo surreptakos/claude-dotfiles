@@ -5,12 +5,14 @@ Source of record for the artifact. Edit here, then republish to that URL with th
 {"db": {}, "sample": {}, "mcp": {"servers": [
   {"server": "Microsoft 365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search", "read_resource"]},
   {"server": "ms365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search", "read_resource"]},
-  {"server": "Todoist", "tools": ["find-tasks", "fetch-object", "find-comments", "add-comments", "add-tasks", "update-tasks", "delete-object", "complete-tasks", "uncomplete-tasks", "find-activity"]},
+  {"server": "Todoist", "tools": ["find-tasks", "fetch-object", "find-comments", "add-comments", "add-tasks", "update-tasks", "reschedule-tasks", "delete-object", "complete-tasks", "uncomplete-tasks", "find-activity"]},
   {"server": "Granola", "tools": ["query_granola_meetings"]},
   {"server": "Google Drive", "tools": ["search_files", "read_file_content"]},
   {"server": "Claude Code Remote", "tools": ["create_session"]}]}}
+A do date on a recurring task goes through reschedule-tasks (date only): update-tasks would replace its due string and wipe the repeat (issue 1074).
 Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
 "Launch agents" starts one Claude Code cloud session per Todoist task labelled agent (todoist-triage agent-sweep.md, Dan 2026-09-30).
+The huddle draft reads the huddle channel and Sent Items from today's newest aacx-inbox export; a live Microsoft 365 read covers only the hour after that export's stamp, and before the day's first export the panel waits (issue 1039, aac-routines ADR 0010).
 Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
 Every triage answer is also logged to db ruling_log/<taskId>-<stamp> (undoneAt set on Undo); the huddle draft reads it, since the morning run deletes answered cards.
 "Apply my note" asks Claude (sample) to read the note as one update-tasks ruling, parks it on the card as `proposal`, and writes nothing until Dan clicks Apply.
@@ -189,7 +191,7 @@ footer{font-size:12px;color:var(--muted)}
                 <button class="refresh" id="hud-copy" type="button" hidden>Copy post</button>
               </div>
             </div>
-            <div class="hud-status" id="hud-status">Reads your last huddle post, what you finished and sent since, and your meeting notes — then drafts the three sections. You post it; this page never does.</div>
+            <div class="hud-status" id="hud-status">Reads your last huddle post and the mail you sent since from the hourly exports (live only for the hour after the newest), what you finished, and your meeting notes — then drafts the three sections. You post it; this page never does.</div>
             <div class="hud-post" id="hud-post" hidden></div>
             <details class="hud-ev" id="hud-ev" hidden><summary>What each line rests on</summary><div id="hud-ev-body"></div></details>
           </section>
@@ -573,7 +575,7 @@ footer{font-size:12px;color:var(--muted)}
   async function refreshAll(){
     if (!mcp || busy) return;
     busy = true;
-    try { await Promise.all([refreshCal(), refreshTasks(), refreshTeam(), refreshHealth()]); } finally { busy = false; }
+    try { await Promise.all([refreshCal(), refreshTasks(), refreshTeam(), refreshHealth(), refreshHuddleWait()]); } finally { busy = false; }
   }
 
   async function start(){
@@ -750,9 +752,38 @@ footer{font-size:12px;color:var(--muted)}
     } catch(e){}
     return {content:o.content || "", description:o.description || "", labels:o.labels || [], projectId:o.projectId || "",
             dueDate:String(o.dueDate || "").slice(0,10), deadlineDate:o.deadlineDate || "", priority:o.priority || "p4",
-            recurring:!!o.recurring, comments};
+            recurring:o.recurring || false, comments};
   }
   const addedIds = res => objectsOf(res).flatMap(x => Array.isArray(x.addedCommentIds) ? x.addedCommentIds : []);
+  // Reads a do date in Todoist words as YYYY-MM-DD, for reschedule-tasks, which takes a date only.
+  // Covers the words a ruling uses (today, tomorrow, a weekday, Oct 5, 10/5, in 3 days, next week);
+  // anything else returns null and the caller changes nothing.
+  const MONTHS = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+  const WEEKDAYS = ["sunday","monday","tuesday","wednesday","thursday","friday","saturday"];
+  const named = (list, w) => w.length >= 3 ? list.findIndex(n => n.startsWith(w)) : -1;
+  function doDate(words, now){
+    const s = String(words || "").toLowerCase().replace(/,/g, " ").replace(/\s+/g, " ").trim();
+    const today = new Date(now || Date.now()); today.setHours(0,0,0,0);
+    const plus = n => { const d = new Date(today); d.setDate(d.getDate() + n); return ymd(d); };
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s === "today" || s === "tod") return plus(0);
+    if (s === "tomorrow" || s === "tom") return plus(1);
+    if (s === "next week") return plus(((8 - today.getDay()) % 7) || 7);
+    let m = s.match(/^in (\d{1,3}) (day|week)s?$/);
+    if (m) return plus(+m[1] * (m[2] === "week" ? 7 : 1));
+    m = s.match(/^(?:on |next |this )?([a-z]+)$/);
+    const wd = m ? named(WEEKDAYS, m[1]) : -1;
+    if (wd >= 0) return plus(((wd - today.getDay() + 7) % 7) || 7);
+    let mon = -1, day = 0, year = 0;
+    if ((m = s.match(/^([a-z]+)\.? (\d{1,2})(?:st|nd|rd|th)?(?: (\d{4}))?$/))) { mon = named(MONTHS, m[1]); day = +m[2]; year = +(m[3] || 0); }
+    else if ((m = s.match(/^(\d{1,2})(?:st|nd|rd|th)? ([a-z]+)\.?(?: (\d{4}))?$/))) { mon = named(MONTHS, m[2]); day = +m[1]; year = +(m[3] || 0); }
+    else if ((m = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?$/))) { mon = +m[1] - 1; day = +m[2]; year = +(m[3] || 0); }
+    if (mon < 0 || mon > 11 || day < 1) return null;
+    const d = new Date(year || today.getFullYear(), mon, day);
+    if (d.getMonth() !== mon) return null;
+    if (!year && d < today) d.setFullYear(d.getFullYear() + 1);
+    return ymd(d);
+  }
   // Applies one ruling and returns the undo record stored on the question.
   async function applyRuling(p, o){
     const T = "Todoist";
@@ -777,14 +808,23 @@ footer{font-size:12px;color:var(--muted)}
     if (o.content) u.content = o.content;
     if (Array.isArray(o.labels)) u.labels = o.labels;
     if (o.projectId && (o.projectId === WONTFIX || PROJECTS.some(x => x.id === o.projectId))) u.projectId = o.projectId;
-    if (o.dueString) u.dueString = o.dueString;
+    // A recurring task moves by date through reschedule-tasks: update-tasks would replace its due
+    // string and wipe the repeat. prev (the read above) says whether it recurs.
+    let move = null;
+    if (o.dueString){
+      if (!prev.recurring) u.dueString = o.dueString;
+      else if (!(move = doDate(o.dueString))) throw {code:"bad_request", message:"this task repeats (" + prev.recurring + "), and \"" + o.dueString + "\" is not a date the board can move it to without wiping the repeat; nothing was changed"};
+    }
     if (o.deadlineDate) u.deadlineDate = o.deadlineDate;
     if (o.priority) u.priority = o.priority;
-    if (Object.keys(u).length === 1) return {kind:"none"};
-    const res = await call(T, "update-tasks", {tasks:[u]});
-    const body = objectsOf(res).find(o => Array.isArray(o.failures));
-    if (body && body.failures.length) throw {code:"tool_error", message: JSON.stringify(body.failures[0]).slice(0, 200)};
-    return {kind:"update", prev, changed:Object.keys(u).filter(k => k !== "id")};
+    if (Object.keys(u).length === 1 && !move) return {kind:"none"};
+    const writes = (Object.keys(u).length > 1 ? [["update-tasks", u]] : []).concat(move ? [["reschedule-tasks", {id:p.taskId, date:move}]] : []);
+    for (const [tool, t] of writes){
+      const res = await call(T, tool, {tasks:[t]});
+      const body = objectsOf(res).find(o => Array.isArray(o.failures));
+      if (body && body.failures.length) throw {code:"tool_error", message: JSON.stringify(body.failures[0]).slice(0, 200)};
+    }
+    return {kind:"update", prev, changed:Object.keys(u).filter(k => k !== "id").concat(move ? ["dueString"] : [])};
   }
   // Reverses one ruling. A deleted task comes back as a new task carrying its old fields and comments.
   async function undoRuling(p){
@@ -967,24 +1007,103 @@ footer{font-size:12px;color:var(--muted)}
 
   function hudStatus(msg, isErr){ const el = $("hud-status"); el.textContent = msg; el.className = "hud-status" + (isErr ? " err" : ""); }
 
-  async function lastOwnPost(){
-    const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:40});
-    const mine = objectsOf(res).filter(o => o.from && o.from.userId === HUDDLE.danId && o.createdDateTime && o.messageType !== "systemEventMessage");
-    mine.sort((a,b) => new Date(b.createdDateTime) - new Date(a.createdDateTime));
+  // ---------- EXPORTS + LIVE TAIL (aac-routines ADR 0010; claude-dotfiles issue 1039) ----------
+  // The huddle channel and Sent Items come from the newest Power Automate export of today in aacx-inbox.
+  // A live Microsoft 365 read covers only the tail from that export's stamp to now, and never more than
+  // one hour: a span past the hour is named under "Could not read", never read live. Before the day's
+  // first export lands (08:15 CT on weekdays) the panel waits and makes no Microsoft 365 call.
+  const LIVE_TAIL_MS = 3600000;
+  const HUD_SOURCES = {huddle:"huddle__global", sent:"outlook_sent__sent"};
+  const HUD_WAIT = "Waiting for today's first export of the huddle channel and your sent mail (08:15 CT on weekdays). The draft reads both from it, so nothing is drafted before it lands.";
+  // Export files are "<source>__<key>__YYYY-MM-DDTHHMM.json", stamped in UTC.
+  const exportStamp = title => { const m = String(title).match(/__(\d{4})-(\d{2})-(\d{2})T(\d{2})(\d{2})\.json$/); return m ? new Date(Date.UTC(+m[1], m[2]-1, +m[3], +m[4], +m[5])) : null; };
+  // Drive's text view escapes markdown punctuation (\< \& \[ and every backslash doubled); a raw file parses as is.
+  function exportJson(txt){
+    try { return JSON.parse(txt); } catch(e){}
+    return JSON.parse(String(txt).replace(/\\([\\`*_{}\[\]()#+\-.!<>&|~])/g, "$1"));
+  }
+  const fmtHM = d => d.toLocaleTimeString([], {hour:"numeric", minute:"2-digit"});
+  async function newestExport(source, dayStart){
+    const q = "parentId = '" + EXPORT_FOLDER + "' and title contains '" + source + "' and modifiedTime > '" + dayStart.toISOString().replace(/\.\d+Z$/, "Z") + "'";
+    const files = filesOf(await call("Google Drive", "search_files", {query:q, excludeContentSnippets:true, pageSize:50}, {cache:false}));
+    return files.filter(f => String(f.title).startsWith(source + "__")).map(f => ({id:f.id, title:String(f.title), at:exportStamp(f.title)}))
+      .filter(f => f.at && f.at >= dayStart).sort((a,b) => b.at - a.at)[0] || null;
+  }
+  // Today's newest export per source; a source whose search failed carries its error code instead.
+  async function todaysExports(){
+    const dayStart = new Date(); dayStart.setHours(0,0,0,0);
+    const out = {errors:{}};
+    await Promise.all(Object.keys(HUD_SOURCES).map(async k => {
+      try { out[k] = await newestExport(HUD_SOURCES[k], dayStart); } catch(e){ out[k] = null; out.errors[k] = (e && e.code) || "failed"; }
+    }));
+    if (out.errors.huddle && out.errors.sent) throw {code: out.errors.huddle, server:"Google Drive"};
+    return out;
+  }
+  async function readExport(file){
+    const o = objectsOf(await call("Google Drive", "read_file_content", {fileId:file.id})).find(x => typeof x.fileContent === "string");
+    if (!o) throw {code:"export_unreadable"};
+    let j; try { j = exportJson(o.fileContent); } catch(e){ throw {code:"export_unreadable"}; }
+    return Array.isArray(j) ? j : (j && Array.isArray(j.value)) ? j.value : [];
+  }
+  // The live window after an export: its stamp to now, capped at one hour. The rest is a named gap.
+  function tailOf(file, now, label, gaps){
+    const to = new Date(Math.min(now.getTime(), file.at.getTime() + LIVE_TAIL_MS));
+    if (now - to > 60000) gaps.push(label + " " + fmtHM(to) + "–" + fmtHM(now) + ": past the one-hour live tail after the " + fmtHM(file.at) + " export");
+    return {from: file.at, to};
+  }
+  const inTail = (at, tail) => { const t = new Date(at); return !isNaN(t) && t > tail.from && t <= tail.to; };
+
+  // A channel message in one shape, whether from the export (Graph) or the live listing.
+  const chanMsg = o => {
+    const f = o.from || {}, u = f.user || {};
+    const full = !!o.body && typeof o.body.content === "string";
+    return {id: String(o.id || ""), at: o.createdDateTime, userId: f.userId || u.id || null, name: f.displayName || u.displayName || "",
+      system: o.messageType === "systemEventMessage", html: full ? o.body.content : o.bodyPreview,
+      truncated: !full && !!o.bodyTruncated, uri: o.uri};
+  };
+  async function huddleMessages(file, now, gaps){
+    const msgs = (await readExport(file)).filter(o => o && typeof o === "object").map(chanMsg);
+    const tail = tailOf(file, now, "huddle channel", gaps);
+    if (tail.to > tail.from){
+      try {
+        const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:25});
+        const seen = new Set(msgs.map(m => m.id).filter(Boolean));
+        objectsOf(res).map(chanMsg).filter(m => m.at && !seen.has(m.id) && inTail(m.at, tail)).forEach(m => msgs.push(m));
+      } catch(e){ gaps.push("huddle channel " + fmtHM(tail.from) + "–" + fmtHM(tail.to) + ": " + ((e && e.code) || "failed")); }
+    }
+    return msgs;
+  }
+
+  // On every refresh: before today's first export the panel shows the waiting state and the draft button rests.
+  let hudIdle = null;
+  async function refreshHuddleWait(){
+    if (hudCtl) return;
+    let ex; try { ex = await todaysExports(); } catch(e){ return; }
+    if (hudCtl) return;
+    const waiting = !ex.huddle && !ex.sent && !ex.errors.huddle && !ex.errors.sent;
+    if (hudIdle === null) hudIdle = $("hud-status").textContent;
+    $("hud-go").disabled = waiting;
+    if (waiting) hudStatus(HUD_WAIT);
+    else if ($("hud-status").textContent === HUD_WAIT) hudStatus(hudIdle);
+  }
+
+  async function lastOwnPost(msgs){
+    const mine = msgs.filter(m => m.userId === HUDDLE.danId && m.at && !m.system);
+    mine.sort((a,b) => new Date(b.at) - new Date(a.at));
     // His last huddle post is his newest message that has the huddle sections, not his newest message:
     // on 2026-09-30 the newest was a one-word reply ("cancelling") and the draft started from that.
     for (const m of mine){
-      // The listing's bodyPreview stops at 1000 characters (bodyTruncated), which cut the last risk line of
-      // Dan's 2026-09-23 post mid-word. Lines are copied word for word, so read the full body when it was cut.
-      let html = m.bodyPreview;
-      if (m.bodyTruncated){
+      // The export carries the full body. A live-tail listing's bodyPreview stops at 1000 characters
+      // (bodyTruncated), which cut the last risk line of Dan's 2026-09-23 post mid-word: read it in full.
+      let html = m.html;
+      if (m.truncated){
         if (!m.uri) throw {code:"tool_error", message:"last post was cut off and carries no uri to read in full"};
         const full = objectsOf(await call("ms365", "read_resource", {uri:m.uri})).find(o => o.body && typeof o.body.content === "string");
         if (!full) throw {code:"tool_error", message:"last post was cut off and the full read returned no body"};
         html = full.body.content;
       }
       const text = stripHtml(html), p = parseLastPost(text);
-      if (p.focus.length || p.risks.length) return {at: new Date(m.createdDateTime), text};
+      if (p.focus.length || p.risks.length) return {at: new Date(m.at), text};
     }
     return null;
   }
@@ -1026,9 +1145,19 @@ footer{font-size:12px;color:var(--muted)}
     return {rulings, replied};
   }
 
-  async function sentSince(since){
-    const res = await call("ms365", "outlook_email_search", {folderName:"Sent Items", afterDateTime:since.toISOString(), limit:25});
-    return objectsOf(res).filter(o => o.subject !== undefined).map(o => ({subject:o.subject, sent:o.sentDateTime || o.receivedDateTime, gist: clip(o.summary, 200)}));
+  // Sent Items: the export's mail since his last post, plus the live tail (at most one hour past the export).
+  const sentRow = o => ({subject:o.subject, sent:o.sentDateTime || o.receivedDateTime, gist: clip(o.summary || o.bodyPreview || stripHtml(o.body && o.body.content), 200)});
+  async function sentSince(since, file, now, gaps){
+    const rows = (await readExport(file)).filter(o => o && o.subject !== undefined).map(sentRow);
+    const tail = tailOf(file, now, "sent mail", gaps);
+    if (tail.to > tail.from){
+      try {
+        const res = await call("ms365", "outlook_email_search", {folderName:"Sent Items", afterDateTime:tail.from.toISOString(), beforeDateTime:tail.to.toISOString(), limit:25});
+        const seen = new Set(rows.map(r => r.subject + "|" + r.sent));
+        objectsOf(res).filter(o => o.subject !== undefined).map(sentRow).filter(r => !seen.has(r.subject + "|" + r.sent) && inTail(r.sent, tail)).forEach(r => rows.push(r));
+      } catch(e){ gaps.push("sent mail " + fmtHM(tail.from) + "–" + fmtHM(tail.to) + ": " + ((e && e.code) || "failed")); }
+    }
+    return rows.filter(r => r.sent && new Date(r.sent) > since).sort((a,b) => new Date(b.sent) - new Date(a.sent));
   }
 
   async function notesSince(since){
@@ -1680,14 +1809,27 @@ footer{font-size:12px;color:var(--muted)}
     hudCtl = new AbortController();
     const gaps = [];
     try {
+      hudStatus("Finding today's exports…");
+      let ex;
+      try { ex = await todaysExports(); } catch(e){ hudStatus("Could not list today's exports: " + explain(e, "Google Drive") + " Nothing drafted.", true); return; }
+      if (!ex.huddle && !ex.sent && !ex.errors.huddle && !ex.errors.sent){ hudStatus(HUD_WAIT); return; }
+      const noExport = k => ex.errors[k] ? "export search " + ex.errors[k] : "no export yet today";
+      const now0 = new Date();
       hudStatus("Reading your last huddle post…");
       let last = null;
-      try { last = await lastOwnPost(); } catch(e){ gaps.push("huddle channel: " + (e.code || "failed")); }
+      if (!ex.huddle) gaps.push("huddle channel: " + noExport("huddle"));
+      else {
+        try {
+          last = await lastOwnPost(await huddleMessages(ex.huddle, now0, gaps));
+          if (!last) gaps.push("huddle channel: no post of yours in the " + fmtHM(ex.huddle.at) + " export or its live tail");
+        } catch(e){ gaps.push("huddle channel: " + ((e && e.code) || "failed")); }
+      }
       const since = last ? last.at : new Date(Date.now() - 3*86400000);
       hudStatus("Reading what you finished, sent and decided since " + since.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"}) + "…");
       const [done, sent, notes] = await Promise.all([
         completionsSince(since).catch(e => { gaps.push("Todoist completions: " + (e.code || "failed")); return []; }),
-        sentSince(since).catch(e => { gaps.push("sent mail: " + (e.code || "failed")); return []; }),
+        !ex.sent ? (gaps.push("sent mail: " + noExport("sent")), Promise.resolve([]))
+          : sentSince(since, ex.sent, now0, gaps).catch(e => { gaps.push("sent mail: " + ((e && e.code) || "failed")); return []; }),
         notesSince(since).catch(e => { gaps.push("meeting notes: " + (e.code || "failed")); return ""; })
       ]);
       if (!db) gaps.push("board rulings: storage unavailable");

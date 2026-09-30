@@ -153,7 +153,9 @@ if (Test-Path (Join-Path $PSScriptRoot 'jev-live.dead')) { exit 1 }
 exit 0
 '@
     # Profile probes: master's plugin version comes from a file; caveman-live exits with the code
-    # in caveman-live.code (0 when absent); caveman-enable leaves a marker that it ran.
+    # in caveman-live.code (0 when absent); caveman-logon fails while caveman-logon.missing exists;
+    # caveman-enable leaves a marker that it ran and, as the real install does (issue 1110), starts
+    # the proxy and registers its logon start - unless caveman-proxy.exits says the proxy dies.
     Write-Utf8NoBom (Join-Path $stubs 'offered-version') $script:InstalledVersion
     Write-Utf8NoBom (Join-Path $stubs 'master-plugin-version.ps1') @'
 [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'offered-version'))
@@ -163,8 +165,16 @@ $f = Join-Path $PSScriptRoot 'caveman-live.code'
 if (Test-Path $f) { exit ([int](Get-Content $f)) }
 exit 0
 '@
+    Write-Utf8NoBom (Join-Path $stubs 'caveman-logon.ps1') @'
+if (Test-Path (Join-Path $PSScriptRoot 'caveman-logon.missing')) { exit 1 }
+exit 0
+'@
     Write-Utf8NoBom (Join-Path $stubs 'caveman-enable.ps1') @'
 Set-Content -Path (Join-Path $PSScriptRoot 'caveman-enabled') -Value 'ran'
+Remove-Item (Join-Path $PSScriptRoot 'caveman-logon.missing') -ErrorAction SilentlyContinue
+if (-not (Test-Path (Join-Path $PSScriptRoot 'caveman-proxy.exits'))) {
+    Remove-Item (Join-Path $PSScriptRoot 'caveman-live.code') -ErrorAction SilentlyContinue
+}
 exit 0
 '@
     # Projects probes. The PC is not the anchor unless computer-name says so; watchdog-state holds
@@ -439,10 +449,32 @@ try {
     $r = Invoke-Check $f
     Assert 'a dead proxy port exits 1 as a STOP' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy port 8787 does not answer')) $r.Out
+    Assert 'its to-do names the proxy start and the binary to run by hand (issue 1110)' `
+        ((Test-Todo $r.Out 'Start the caveman proxy') -and (Test-Todo $r.Out 'caveman-proxy\.exe"')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix over a dead port with the binary present leaves the port answering, exit 0 (issue 1110)' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    claude -p answers, proxy port 8787 answering') -and
+         (Test-Path (Join-Path $f.Stubs 'caveman-enabled'))) $r.Out
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-live.code') '1'
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-proxy.exits') 'dies'
+    $r = Invoke-Check $f -Fix
+    Assert 'a proxy that still does not answer after -Fix is a STOP whose to-do runs it by hand' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy port 8787 does not answer, so claude -p cannot  \(after -Fix ran the caveman install\)') -and
+         (Test-Todo $r.Out 'run the proxy in a terminal')) $r.Out
     Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-live.code') '2'
     $r = Invoke-Check $f
     Assert 'a claude -p that does not answer exits 1 as a STOP' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  proxy port 8787 answers, but a terminal claude -p did not')) $r.Out
+
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'caveman-logon.missing') 'missing'
+    $r = Invoke-Check $f
+    Assert 'a proxy with no logon start exits 1 as a STOP with an install to-do (issue 1110)' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  caveman proxy is not registered to start at logon') -and
+         (Test-Todo $r.Out 'caveman-desktop-install\.ps1')) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix registers the logon start and reports it ok (issue 1110)' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    caveman proxy starts at logon')) $r.Out
 
     Write-Host 'Profile: personal profile'
     $f = New-Fixture
@@ -560,7 +592,7 @@ try {
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 14) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, PyYAML, master plugin version, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 15) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'

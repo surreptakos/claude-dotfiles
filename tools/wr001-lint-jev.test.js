@@ -1,6 +1,7 @@
 // wr001-lint Jev judgment rules (issue 731). Jev is stubbed throughout; the
 // fixtures are the standard's Preferred/Avoid pairs (references/CORE.md Rules 5,
-// 6, 10; references/DRAFT-QUALITY.md Appendix H3 and H11 for Rules 164 and 162).
+// 6, 10 and 55; references/DRAFT-QUALITY.md Rule 161 and Appendix H3 and H11
+// for Rules 164 and 162).
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("fs");
@@ -20,14 +21,16 @@ const write = (text) => {
 };
 
 // The stub answers yes (0.95) when the unit a question points at is one of the
-// Avoid texts registered for that question's rule, and no (0.05) otherwise.
+// Avoid texts registered for that question's rule, and no (0.05) otherwise. A
+// Rule 55 question points at a term; a Rule 161 question points at no unit, so
+// its text is the whole document, paragraphs joined by a blank line.
 function judge(avoid) {
   return async (state, questions) => {
     const answers = {};
     for (const [id, q] of Object.entries(questions)) {
       const rule = Number(/^r(\d+)_/.exec(id)[1]);
-      const [, kind, idx] = /`(paragraphs|sentences)\[(\d+)\]`/.exec(q.instructions);
-      const text = state[kind][Number(idx)];
+      const at = /`(paragraphs|sentences|terms)\[(\d+)\]`/.exec(q.instructions);
+      const text = at ? state[at[1]][Number(at[2])] : state.paragraphs.join("\n\n");
       answers[id] = { type: "noul", noul: (avoid[rule] || []).includes(text) ? 0.95 : 0.05 };
     }
     return answers;
@@ -66,6 +69,20 @@ const CASES = [
     pass: "The inspection is scheduled for September 15.\n",
   },
   {
+    rule: 55,
+    avoid: "NRTL",
+    fail: "Please confirm the NRTL listing before Friday.\n",
+    pass: "Please confirm the nationally recognized testing laboratory (NRTL) listing before Friday.\n",
+  },
+  {
+    // A whole-document finding: no line, no text.
+    rule: 161,
+    avoid: "The scheduler runs at 6 a.m.\n\nThe orchestrator then sends the report.",
+    fail: "The scheduler runs at 6 a.m.\n\nThe orchestrator then sends the report.\n",
+    pass: "The scheduler runs at 6 a.m.\n\nThe scheduler then sends the report.\n",
+    found: "",
+  },
+  {
     rule: 162,
     avoid: "And that changes everything.",
     fail: "Mark will send the revised proposal.\n\nAnd that changes everything.\n",
@@ -89,13 +106,44 @@ for (const c of CASES) {
     const hits = jev(bad.findings);
     assert.strictEqual(hits.length, 1, JSON.stringify(bad.findings));
     assert.strictEqual(hits[0].sev, "warn");
-    assert.strictEqual(hits[0].text, c.avoid);
+    assert.strictEqual(hits[0].text, "found" in c ? c.found : c.avoid);
     assert.strictEqual(bad.code, bad.findings.some((f) => f.sev === "error") ? 1 : 0);
 
     const good = await findings(c.pass, avoid);
     assert.deepStrictEqual(jev(good.findings), []);
   });
 }
+
+test("Rule 55 asks only about terms Appendix C and a first-use definition leave open", async () => {
+  const f = write("The AHJ and the RMR are on the list.\n\nThe fire alarm control unit (FACU) is new. The FACU and HDCS ship together. RS-485 wiring and the NRTL listing are next.\n");
+  const asked = [];
+  const spy = async (state, qs) => {
+    if (Object.values(qs).some((q) => /^Rule 55/.test(q.instructions))) asked.push(...state.terms);
+    return judge({ 55: ["HDCS"] })(state, qs);
+  };
+  const { out } = await runLint(f, spy, ["--json"]);
+  assert.deepStrictEqual([...new Set(asked)], ["HDCS", "NRTL"]);
+  const hits = JSON.parse(out).results[0].findings.filter((x) => x.rule === 55);
+  assert.deepStrictEqual(hits.map((x) => [x.line, x.text, x.sev]), [[3, "HDCS", "warn"]]);
+});
+
+test("Rule 161 skips a formal document and runs on it under --prose", async () => {
+  const c = CASES.find((x) => x.rule === 161);
+  const text = `# Scope of work\n\n${c.fail}`;
+  const avoid = { 161: [c.avoid] };
+  assert.deepStrictEqual((await findings(text, avoid)).findings.filter((x) => x.rule === 161), []);
+  const { out } = await runLint(write(text), judge(avoid), ["--json", "--prose"]);
+  const hits = JSON.parse(out).results[0].findings.filter((x) => x.rule === 161);
+  assert.deepStrictEqual(hits.map((x) => [x.line, x.sev]), [[0, "warn"]]);
+});
+
+test("the document checks flag at their own floor, the unit rules at JEV_FLOOR", async () => {
+  const at = async (_state, qs) =>
+    Object.fromEntries(Object.keys(qs).map((id) => [id, { type: "noul", noul: 0.65 }]));
+  const { out } = await runLint(write(CASES.find((x) => x.rule === 161).fail), at, ["--json"]);
+  const jev = JSON.parse(out).results[0].findings.filter((x) => /Jev/.test(x.msg));
+  assert.deepStrictEqual(jev.map((x) => x.rule), [161]);
+});
 
 test("a Jev finding names the unit's line", async () => {
   const { findings: fs2 } = await findings("# Heading\n\nMark will call.\nThe revised proposal will be sent.\n", { 6: ["The revised proposal will be sent."] });
@@ -109,7 +157,8 @@ test("no Jev answer produces an ERROR or moves the exit code", async () => {
   const { code, out } = await runLint(f, yesToAll, ["--json"]);
   const all = JSON.parse(out).results[0].findings;
   const jevOnes = all.filter((x) => /Jev/.test(x.msg));
-  assert.ok(jevOnes.length >= 5);
+  assert.ok(jevOnes.length >= 6);
+  assert.ok(jevOnes.some((x) => x.rule === 55), JSON.stringify(jevOnes));
   assert.ok(jevOnes.every((x) => x.sev === "warn"), JSON.stringify(jevOnes));
   // The exit code is the regex pass's alone: a Jev answer never moves it.
   const regexOnly = await runLint(f, null, ["--json"]);
