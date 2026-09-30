@@ -1086,6 +1086,11 @@ APPROVE_TICKETS_STANDALONE_TOKENS = frozenset(
         "that's fine go",
         "thats fine go",
         "go",
+        # Issue 1060: /to-tickets step 4 asks for `tickets ok`; a bare `ok` or `yes` is the same
+        # answer to that one question, and still only as the whole message.
+        "tickets ok",
+        "ok",
+        "yes",
     }
 )
 
@@ -1226,7 +1231,7 @@ def _publish_gate(
             "AskUserQuestion is not registered in every session; when it isn't, the user's "
             "explicit typed approval satisfies the gate — either the sentinel "
             f"`{APPROVE_TICKETS_SENTINEL}` anywhere in their message, or a standalone approval "
-            "token as the whole message (e.g. `approved`, `publish`, `lgtm`, `that's fine, go`)."
+            "token as the whole message (e.g. `tickets ok`, `approved`, `publish`, `lgtm`, `that's fine, go`)."
         )
     _bump_publish_count(session_id)
     return None
