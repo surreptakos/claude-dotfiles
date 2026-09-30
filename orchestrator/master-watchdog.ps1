@@ -204,7 +204,9 @@ function Get-StateBody {
     } finally {
         [Console]::OutputEncoding = $prevEnc
     }
-    if ($body -is [Array]) { $body = $body -join [Environment]::NewLine }
+    # Join with LF, not [Environment]::NewLine: Set-StateOutcome writes this text back, and a
+    # CRLF join would rewrite every line ending of the issue on the way.
+    if ($body -is [Array]) { $body = $body -join "`n" }
     if (-not $body -or $LASTEXITCODE -ne 0) { $body = $null }
     $script:StateBodies[$Issue] = $body
     return $body
@@ -397,8 +399,10 @@ function Set-StateOutcome {
         Write-Info "$Tag #${Issue}: no lastPassOutcome/lastPassAt fields - '$Outcome' not recorded"
         return
     }
-    $new = [regex]::Replace($body, $rxOutcome, ('${1}"' + $Outcome + '"'), 1)
-    $new = [regex]::Replace($new, $rxAt, ('${1}"' + $now + '"'), 1)
+    # Instance Replace(input, replacement, count): the static overload has no count argument, and
+    # a trailing 1 there binds to RegexOptions.IgnoreCase and replaces every match instead.
+    $new = (New-Object regex $rxOutcome).Replace($body, ('${1}"' + $Outcome + '"'), 1)
+    $new = (New-Object regex $rxAt).Replace($new, ('${1}"' + $now + '"'), 1)
     $tmp = Join-Path $env:TEMP ("watchdog-state-$Issue.md")
     [System.IO.File]::WriteAllText($tmp, $new, (New-Object System.Text.UTF8Encoding($false)))
     & gh issue edit $Issue --repo surreptakos/claude-dotfiles --body-file $tmp 2>$null | Out-Null
