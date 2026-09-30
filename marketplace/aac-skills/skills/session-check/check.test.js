@@ -95,6 +95,22 @@ test('reports timeout distinctly with command and configured duration', () => {
   assert.doesNotMatch(output, /tests FAIL/);
 });
 
+test('under the session gate budget a longer suite is cut, named and warned, never a STOP (issue 1061)', () => {
+  // The desktop shape: testTimeoutMs far past the gate's budget, so without the cut the gate kills
+  // the whole report and prints only its spawn error.
+  // `exec` off Windows: the kill reaches only the shell, and a surviving grandchild would hold
+  // the pipe open until it exits by itself (a discovery on issue 1061, not this test's subject).
+  const command = `${process.platform === 'win32' ? '' : 'exec '}${JSON.stringify(process.execPath)} -e "setTimeout(() => {}, 20000)"`;
+  const began = Date.now();
+  const output = runChecker({ test: command, testTimeoutMs: 600000 },
+    { env: { SESSION_CHECK_BUDGET_MS: '4000' } });
+  assert.ok(Date.now() - began < 12000, `the run must end inside the budget, took ${Date.now() - began} ms`);
+  assert.match(output, /!!\s+tests — no verdict, not a pass: .* needs longer than the 4 s the session gate gives/);
+  assert.match(output, /its own timeout is 600000 ms/);
+  assert.doesNotMatch(output, /STOP tests/);
+  assert.match(output, /Some things need a look/, 'the report completes after the cut');
+});
+
 // Issue 171: the cloud fallback path — a missing interpreter in half of an `&&` chain must not
 // STOP the run when the other half passes. Uses a nonexistent-binary token in place of powershell
 // so the test runs the same on every platform. IS_CLOUD is triggered by
@@ -345,6 +361,11 @@ test('cloud bootstrap: STOP names the failed stage and its cause when the hook c
     assert.match(output, /STOP aac-bootstrap clone failed — .*could not read Username/);
     assert.match(output, /ANTHROPIC_BASE_URL/);
     assert.match(output, /push_files/);
+    // Issue 1047: the note names the token variable and the attached-source fallback, and no longer
+    // claims the repo is public.
+    assert.match(output, /BOOTSTRAP_DOTFILES_TOKEN/);
+    assert.match(output, /add_repo/);
+    assert.doesNotMatch(output, /public since|is public|reads as private/);
     assert.doesNotMatch(output, /marker absent/);
     assert.doesNotMatch(output, /ok\s+aac-bootstrap payload/);
   } finally {

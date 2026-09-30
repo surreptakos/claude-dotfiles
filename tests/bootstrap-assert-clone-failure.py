@@ -72,6 +72,12 @@ else:
         pass_('the STOP line carries the self-heal: add_repo claude-dotfiles, then re-run the hook by path')
     elif ctx:
         fail(f'the STOP line lacks the add_repo / re-run self-heal: {ctx[:200]}')
+    # Issue 1047: the repo may be private, so the line names the token variable and the
+    # attached-source fallback instead of a visibility claim.
+    if 'BOOTSTRAP_DOTFILES_TOKEN' in ctx and 'attached-source fallback' in ctx and 'public' not in ctx.lower().replace('dotfiles-public-for-cloud-clone', ''):
+        pass_('the STOP line names BOOTSTRAP_DOTFILES_TOKEN and the attached-source fallback, with no visibility claim')
+    elif ctx:
+        fail(f'the STOP line does not name BOOTSTRAP_DOTFILES_TOKEN and the attached-source fallback: {ctx[:200]}')
     if len(ctx) > 2000:
         fail(f'additionalContext is {len(ctx)} chars, over the 2KB cap')
 
