@@ -345,6 +345,11 @@ test('cloud bootstrap: STOP names the failed stage and its cause when the hook c
     assert.match(output, /STOP aac-bootstrap clone failed — .*could not read Username/);
     assert.match(output, /ANTHROPIC_BASE_URL/);
     assert.match(output, /push_files/);
+    // Issue 1047: the note names the token variable and the attached-source fallback, and no longer
+    // claims the repo is public.
+    assert.match(output, /BOOTSTRAP_DOTFILES_TOKEN/);
+    assert.match(output, /add_repo/);
+    assert.doesNotMatch(output, /public since|is public|reads as private/);
     assert.doesNotMatch(output, /marker absent/);
     assert.doesNotMatch(output, /ok\s+aac-bootstrap payload/);
   } finally {

@@ -29,7 +29,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - cowork-transcripts-not-local: server-side
 - desktop-rpm-copy-is-account-synced: read rpm/manifest.json, not the path
 - desktop-scheduled-tasks-are-per-org: per org
-- dotfiles-public-for-cloud-clone: no env sources
+- dotfiles-public-for-cloud-clone: no env sources; BOOTSTRAP_DOTFILES_TOKEN askpass path for a private repo (issue 1047)
 - plugin-auto-updates-never-tell-dan: desktop marketplace autoUpdate true; never tell Dan to run claude plugin update
 - environment-verification-log: log
 - fable-usage-is-rationed: weekly cap; workers stay pinned, orchestrator runs Fable high
