@@ -111,11 +111,24 @@ writes nothing.
 
 ## New machine
 
+A bare PC needs `git` and `gh` first (`winget install --id Git.Git -e` and
+`winget install --id GitHub.cli -e`, then a new terminal). Then three commands, in Windows
+PowerShell; they work whether this repo is public or private:
+
 ```powershell
-git clone <this repo> ; cd claude-dotfiles ; .\install.ps1
+gh auth login
+gh repo clone surreptakos/claude-dotfiles "$env:USERPROFILE\Claude\Projects\Meta\claude-dotfiles"
+powershell -ExecutionPolicy Bypass -File "$env:USERPROFILE\Claude\Projects\Meta\claude-dotfiles\install.ps1"
 ```
 
-It restores the configuration, then runs the setup check (`setup-check.ps1 -Fix`): git, node, `py`,
+Type them in a terminal. Double-clicking a `.ps1` file opens it in Notepad, and a bare `.\install.ps1`
+fails on a fresh Windows install, whose execution policy blocks scripts (AAC-AI, 2026-09-30).
+
+Every later run is `/setup-check` from any Claude session on that PC: the aac-skills skill finds
+this clone (cloning it if absent), runs the setup check with `-Fix`, registers the desktop routines
+on the anchor PC or disables them elsewhere, and prints the owner to-do.
+
+`install.ps1` restores the configuration, then runs the setup check (`setup-check.ps1 -Fix`): git, node, `py`,
 `claude`, `gh` and PyYAML (installed when missing), the two secret files under `~/.config`, and live
 probes of the `gh`, Claude and `gas` logins (`clasp` is no longer a prerequisite — every AAC Apps
 Script repo deploys itself, see `gas/README.md`). What only you can do comes last, as numbered steps
