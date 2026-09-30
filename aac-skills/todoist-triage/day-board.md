@@ -30,6 +30,10 @@ The board shows a row whose task is also an open question once, as the question.
 
 The triage panel's **Launch agents** button starts one cloud session per open task labelled `agent`, per [`agent-sweep.md`](agent-sweep.md) § Launch. It needs the `Claude Code Remote` connector (`create_session`) in the page's capabilities; without it the button reports the failure and nothing changes. A started session cannot be undone, so this button stores no undo record: to stop one, archive the session and put `agent` back or remove it.
 
+## The huddle draft's evidence (issue 1039)
+
+The huddle draft reads the huddle channel (`huddle__global__…`) and Sent Items (`outlook_sent__sent__…`) from today's newest export in `aacx-inbox`, per [`sources.md`](sources.md) § Exports. A live Teams or Outlook read covers only the span from that export's stamp to now, never more than one hour (aac-routines ADR 0010, "Live tail"); any span past that hour is named in the draft's "Could not read". Before the day's first export (08:15 CT on weekdays) the panel shows a waiting state, drafts nothing and makes no Microsoft 365 call. Granola and Todoist completions are read live, as before.
+
 ## Changing the board page (Dan, 2026-09-24)
 
 The page source of record is [`day-board.html`](day-board.html). Edit that file and republish it to the board URL with the `capabilities` its header comment lists; build every change from that file, never from memory or the live page. Every button on it:
