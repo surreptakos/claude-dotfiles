@@ -61,9 +61,11 @@ bootstrap on its own.
 
 Then, before anything else:
 
-1. Read the per-repo state issue in `surreptakos/claude-dotfiles` — bill-intake #74,
-   contract-builder #75, sales-cockpit #76, zoho-source-of-truth #77. Issue #44 is the shared
-   registry (config defaults, the table of per-repo state issues) — read-only from here.
+1. Read the per-repo state issue in `surreptakos/claude-dotfiles` — the `stateIssue` of the
+   repo's row in `lib/repos.json` (claude-dotfiles #959, aac-routines #1100, osh-rfp #1141,
+   sales-cockpit #76; bill-intake #74, contract-builder #75, zoho-source-of-truth #77 are unserved
+   since 2026-09-30). Issue #44 is the shared registry (config defaults, the table of per-repo
+   state issues) — read-only from here.
 2. Read any Dan comments on the state issue posted since the last `Pass complete` line.
    Comments override everything else in this file.
 3. Then run the guard (below). Do not dispatch anything until both guards have passed.

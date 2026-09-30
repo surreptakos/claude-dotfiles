@@ -20,24 +20,30 @@ memory.
 
 **One master per repo, one master at a time (Dan, 2026-09-02; tickets #70 and #79).** Each master
 is rooted in the clone of the repo it serves and has its own state issue in `claude-dotfiles`
-(registry in issue #44: bill-intake #74, contract-builder #75, sales-cockpit #76,
-zoho-source-of-truth #77). They run in series, never side by side: the watchdog launches one, that
-master runs ONE pass over its repo and writes a `**Pass complete — YYYY-MM-DD HH:MM UTC**` line
-into its state issue, the watchdog closes that window and launches the next repo (never-served
-repos first in priority order, then least recently served). Before starting, a master checks ITS
+(the served rows of `lib/repos.json`, mirrored in the registry in issue #44: since 2026-09-30
+claude-dotfiles #959, aac-routines #1100, osh-rfp #1141, sales-cockpit #76; the earlier four,
+bill-intake #74, contract-builder #75, zoho-source-of-truth #77, are unserved but keep their
+rows so a running master is still closed). They run in series, never side by side: the watchdog
+launches one, that master runs ONE pass over its repo and writes a
+`**Pass complete — YYYY-MM-DD HH:MM UTC**` line into its state issue, the watchdog closes that
+window and launches the next repo. **Drain order (Dan, 2026-09-30):** the priority-1 repo is
+relaunched until its state issue says nothing is left, then priority 2, and so on; a drained repo
+comes back only on new tracker activity (rule under "Relaunch watchdog"). Before starting, a master checks ITS
 OWN state issue: if it records an active cloud master for that repo, do not start a local one, and
 vice versa. Record the venue on boot (`"venue": "local-pc"` in that issue's JSON) and clear it when
 the pass completes. Two masters on one repo is the double-run that exhausted the weekly limit on
 2026-09-01; two masters on two repos at once was ruled out on 2026-09-02 for the same usage reason.
 
-**The claude-dotfiles checkout is not a valid root for a master.** The plugin-served fleet
-(`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` in `aac-skills`) is cwd-relative
-throughout: its scout runs `gh api` with no `-R`, its implement stage uses
+**The claude-dotfiles checkout is not a valid root for a master serving another repo.** The
+plugin-served fleet (`${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js` in `aac-skills`)
+is cwd-relative throughout: its scout runs `gh api` with no `-R`, its implement stage uses
 `isolation: 'worktree'`, and its verifier runs `git worktree add` "in this repo". A Workflow
 launched from a session rooted in claude-dotfiles resolves all three against claude-dotfiles,
 and the run on 2026-09-02 stalled on exactly that (issue #44, heartbeats 7 and 8). Triage got
 away with it only because a subagent can `cd` first; the fleet cannot. The runbooks are read
-from the dotfiles checkout by absolute path; nothing else about a master lives there.
+from the dotfiles checkout by absolute path. The one master that IS rooted there is
+`master-dotfiles`, which serves claude-dotfiles itself (state issue #959, served since
+2026-09-30): cwd-relative resolves to the right repo for it.
 
 ## What changes from the cloud runbook
 
@@ -205,9 +211,10 @@ but cannot merge.
 > LOCAL-RUNBOOK.md), never from memory or an estimate (issue 711). My messages in this terminal
 > override everything.
 
-The remote-control session name is `master-<slug>` (`master-bill-intake`, `master-contract-builder`,
-`master-sales-cockpit`, `master-zoho`), which is also what the watchdog's alive check and the
-takeover guard's peer rule match on.
+The remote-control session name is `master-<slug>` (`master-dotfiles`, `master-routines`,
+`master-osh-rfp`, `master-sales-cockpit`; the unserved `master-bill-intake`,
+`master-contract-builder` and `master-zoho` are still recognised), which is also what the
+watchdog's alive check and the takeover guard's peer rule match on.
 
 ## Relaunch watchdog (issue 64; per repo since issue 70; serial since issue 79)
 
@@ -234,9 +241,20 @@ slot does this:
    session mid-work, idleness alone would kill a fresh master that has only written one
    Heartbeat. If only the marker is stale but the transcript has been touched inside M, the
    watchdog logs "possibly stalled; not killed" and moves on.
-3. **Launch the next repo.** With nothing alive, pick the repo never served yet (priority order:
-   bill-intake, contract-builder, sales-cockpit, zoho), else the one whose latest marker is oldest,
-   and run `Start-Process cmd.exe /k cd /d "<clone>" && claude --dangerously-skip-permissions
+3. **Launch the next repo — drain order (Dan, 2026-09-30).** With nothing alive, walk the served
+   rows of `lib/repos.json` in priority order (dotfiles, routines, osh-rfp, sales-cockpit) and
+   take the FIRST that still has work, read from its state issue's JSON block:
+   - `lastPassOutcome` null (never served), `success` or `worked`: has work.
+   - `empty`, `stalled-*`, `blocked-*`: drained. Has work again only when an issue or PR in that
+     repo was updated after `lastPassAt` (`gh api search/issues`, `-label:orchestrator` so the
+     state issues in claude-dotfiles do not count as claude-dotfiles activity). Relaunching a
+     stalled repo with nothing new would loop it every slot and starve the rest.
+   - `cap-*`: has work again once the UTC date has moved past `lastPassAt`'s.
+   - A live claim by another venue (`venue` set and not `local-pc`, `venueAt` under
+     `-ClaimMinutes`, default 90) skips the repo this slot: a cloud Routine holds it and the
+     local master would only boot, defer and exit.
+   When every served repo is drained, capped or claimed, the slot ends with no launch. Otherwise
+   run `Start-Process cmd.exe /k cd /d "<clone>" && claude --dangerously-skip-permissions
    --remote-control master-<slug> "<boot prompt>"` in a fresh visible window rooted in that clone,
    with `AAC_ORCHESTRATOR_AUTONOMOUS=1` set in that window's environment — the window stays on
    the desktop and the same session shows up at claude.ai/code and in the Claude mobile app.
