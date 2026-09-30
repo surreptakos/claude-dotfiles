@@ -1067,13 +1067,15 @@ footer{font-size:12px;color:var(--muted)}
     /\breviews?\b|apprais|\bPIP\b|\bwrite-?ups?\b|disciplin|terminat|\bfired\b|\blet go\b|\blaid off\b|\blayoffs?\b|\bprobation|\bwarning\b|harass|\bHR\b|resign|\bquit(s|ting)?\b|\bgrievance/i,
     // health, family and leave
     /\b(sick|flu|covid|ill|illness|FMLA|leave|PTO|vacation|funeral|baby|doctor|surgery|hospital|cancer|chemo|therapy|a procedure|mental health|health (issue|problem|condition|reason)s?)\b|\b(medical|medicat|pregnan|diagnos|injur|disabilit|maternity|paternity|bereave)/i,
+    // rates, adjustments and departures said in words
+    /\b(percent|an hour|a year|per (year|month|week)|payout|cost of living|COLA|evaluation|performance plan|suspen\w*|dismiss\w*|written up|last day|two weeks|notice period|time off|day off|days off|out of office for|migraine|passed away|died|death|diabetes|rehab|anxiety|depress\w*|dentist|appointment|passport|employee id|badge number)\b|\blet(ting)? \w+ go\b|\b(ten|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)\s?k\b|\b(one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|fifty)\s+(dollars|bucks|percent)\b/i,
     // identity
     /\b(SSN|social security|date of birth|DOB|driver'?s licen[cs]e|bank account|routing number)\b/i
   ];
   const hudNorm = s => String(s == null ? "" : s).normalize("NFKC").replace(/[​-‏⁠﻿­]/g, "").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/\s+/g, " ").trim();
   // Plain text only: lookalike letters, zero-width characters and markup cannot slip a word past the patterns.
   const PLAIN_RX = /^[ -~–—…]*$/;
-  const plainOk = s => PLAIN_RX.test(hudNorm(s)) && !/[<>]/.test(hudNorm(s)) && String(s).normalize("NFKC").replace(/[‘’“”]/g, "").length === String(s).normalize("NFKC").replace(/[‘’“”​-‏⁠﻿­]/g, "").length;
+  const plainOk = s => !/[\t\n\v\f\r\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]| {2}|^ | $/.test(String(s)) && PLAIN_RX.test(hudNorm(s)) && !/[<>]/.test(hudNorm(s)) && String(s).normalize("NFKC").replace(/[\u2018\u2019\u201C\u201D]/g, "").length === String(s).normalize("NFKC").replace(/[\u2018\u2019\u201C\u201D\u200B-\u200F\u2060\uFEFF\u00AD]/g, "").length;
   const hudWords = s => hudNorm(s).split(" ").filter(Boolean);
   const hudBag = s => new Set(hudNorm(s).toLowerCase().replace(/[^a-z0-9' ]/g, " ").split(/\s+/).filter(w => w.length >= 3));
   const isConfidential = s => CONFIDENTIAL_RX.some(rx => rx.test(hudNorm(s)));
@@ -1094,7 +1096,7 @@ footer{font-size:12px;color:var(--muted)}
       const h = t.toLowerCase().replace(/:$/, "").trim();
       if (h === "yesterday's report" || h === "yesterday's (& earlier) report"){ cur = "report"; return; }
       if (h === "today's focus"){ cur = "focus"; return; }
-      if (h === "risks/blockers" || h === "risks / blockers"){ cur = "risks"; return; }
+      if (h === "risks/blockers"){ cur = "risks"; return; }
       if (h === "not doing today"){ cur = "other"; return; }
       const line = t.replace(/^[•*·\-–]\s*/, "");
       if (cur && line) out[cur].push(line);
@@ -1138,7 +1140,7 @@ footer{font-size:12px;color:var(--muted)}
     const sections = ["report","focus","risks","dropped"];
     sections.forEach(k => { if (!Array.isArray(d[k])) add("shape", k, -1, "", "missing the " + k + " list"); });
     if (v.some(x => x.rule === "shape")) return v;
-    Object.keys(d).filter(k => !sections.includes(k) && k !== "reportHeading").forEach(k => add("shape", k, -1, "", "unexpected section " + k));
+    if (Object.keys(d).some(k => !sections.includes(k) && k !== "reportHeading")) add("shape", "extra", -1, "", "the draft has sections it should not have");
     const last = parseLastPost(lastPost ? lastPost.text : "");
     const lastLines = last.report.concat(last.focus, last.risks);
     const maxLen = lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120;
@@ -1165,7 +1167,7 @@ footer{font-size:12px;color:var(--muted)}
       const first = (t.split(" ")[0] || "").toLowerCase().replace(/[^a-z]/g, "");
       if (!OUTCOME_VERBS.includes(first)) add("rule2-outcome", "report", i, t, "must open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked...)");
       if (ACTIVITY_RX.test(t)) add("rule2-activity", "report", i, t, "reports activity, not an outcome");
-      if (last.report.some(l => hudNorm(l) === t || hudJaccard(l, t) >= 0.6)) add("rereport", "report", i, t, "your last post already claimed this");
+      if (last.report.some(l => hudNorm(l) === t || hudJaccard(l, t) >= 0.5)) add("rereport", "report", i, t, "your last post already claimed this");
       if (!/\b(mail|meeting|granola|board|replied|ruling|post|teams|note)\b/i.test(String(it.evidence || ""))) add("evidence", "report", i, t, "a ticked task alone is not evidence; name the mail, meeting note or board ruling");
       tooLong(t, "report", i);
     });
@@ -1193,7 +1195,7 @@ footer{font-size:12px;color:var(--muted)}
         }
         if (tag === "new"){
           if (mine.some(l => hudNorm(l) === t)) add("evidence", section, i, t, "this is your line word for word; tag it kept verbatim");
-          else { const near = mine.find(l => hudJaccard(l, t) >= 0.5); if (near) add("paraphrase", section, i, t, "rewords your line \"" + near + "\"; keep it verbatim or edit one span"); }
+          else if (lastLines.some(l => hudJaccard(l, t) >= 0.4)) add("paraphrase", section, i, t, "rewords one of your lines; keep it verbatim or edit one span");
         }
         if (tag !== "kept") tooLong(t, section, i);
         if (section === "risks" && tag !== "kept" && t !== "None today."){
@@ -1291,7 +1293,16 @@ footer{font-size:12px;color:var(--muted)}
     return v;
   }
   // A confidential line is never echoed back, not even in the blocked view.
-  const violationView = x => "[" + x.rule + "] " + (x.section ? x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ": " : "") + String(x.detail).replace(/ \(.*\)$/, "").replace(/"[^"]*"/g, "\"…\"");
+  const RULE_TEXT = {
+    "no-last-post": "your last huddle post could not be read", shape: "the draft came back in the wrong shape", heading: "wrong report heading",
+    charset: "hidden, lookalike or markup characters", evidence: "evidence missing, untagged or not backing the line", confidential: "a confidential detail",
+    "rule1-focus": "rule 1: focus is not 1-3 items", "rule2-outcome": "rule 2: activity, not an outcome", "rule2-activity": "rule 2: activity, not an outcome",
+    rereport: "re-reports your last post", paraphrase: "rewords one of your lines", duplicate: "a line used twice", length: "longer than your longest line",
+    "rule3-consequence": "rule 3: no consequence named", "rule4-generic": "rule 4: generic risk", "rule4-none": "rule 4: None today. misused",
+    "report-empty": "no report line", dropped: "a dropped entry that is not one of your lines, or has no reason", carry: "one of your lines disappeared",
+    amendment: "a not doing today section", judge: "the independent check did not answer cleanly"
+  };
+  const violationView = x => (RULE_TEXT[x.rule] || "rule failed") + (x.section && x.section !== "extra" ? " (" + x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ")" : "");
   const violationText = x => "[" + x.rule + "] " + (x.section ? x.section + (x.index >= 0 ? " #" + (x.index + 1) : "") + ": " : "") + (x.text && x.rule !== "confidential" ? "\"" + x.text + "\" - " : "") + x.detail;
 
   function hudPrompt(ctx){
@@ -1432,7 +1443,12 @@ footer{font-size:12px;color:var(--muted)}
       }
       d.reportHeading = [HEAD_DAILY, HEAD_GAP].find(h => h === hudNorm(d.reportHeading));
       // A withheld line of his never reaches the page or storage, not even under "Left out".
-      d.dropped = d.dropped.map(x => /^withheld:/i.test(hudNorm(x.why)) ? {text: "(withheld)", why: "withheld: confidential detail"} : x);
+      d.dropped = d.dropped.map(x => /^withheld:/i.test(hudNorm(x.why)) ? {text: "(withheld)", why: "withheld: confidential detail"} : {text: hudNorm(x.text), why: hudNorm(x.why)});
+      const mineLast = parseLastPost(last.text);
+      ["report","focus","risks"].forEach(k => { d[k] = d[k].map(it => {
+        const kept = k !== "report" && tagOfEvidence(it.evidence) === "kept" ? mineLast[k].find(l => hudNorm(l) === hudNorm(it.text)) : null;
+        return {text: kept || hudNorm(it.text), evidence: hudNorm(it.evidence)};
+      }); });
       renderHuddle(d);
       // Every passing draft is kept in board storage so a Claude session can read exactly what was generated
       // (Dan, 2026-09-25: a draft that lives only in the browser cannot be checked).
