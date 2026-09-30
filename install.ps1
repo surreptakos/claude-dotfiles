@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Checks prerequisites, restores the configuration (sync.ps1 -Mode pull), then
-    prints the short list of things a repo cannot carry: the three secret files
+    prints the short list of things a repo cannot carry: the two secret files
     and the two logins.
 
     Safe to re-run. The pull backs up whatever is already there first.
@@ -102,7 +102,7 @@ Write-Host ''
 Write-Host '  1. Secrets. Copy over a secure channel (password manager or encrypted drive),'
 Write-Host '     never email and never a repo:'
 Write-Host ("       {0}\.config\gpt-sheets-access-475817-853f8648243b.json   (service account key)" -f $UserHome)
-Write-Host ("       {0}\Downloads\client_secret_594980791877-*.json          (OAuth client)" -f $UserHome)
+Write-Host ("       {0}\.config\client_secret_594980791877-*.json            (OAuth client)" -f $UserHome)
 Write-Host ''
 Write-Host '  2. Logins:'
 Write-Host '       claude            then /login'
