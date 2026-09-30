@@ -103,8 +103,48 @@ function planLanding(repo, t, answer, submission, date) {
     close, action: l.action, outcome: opt.label, blocks: t.blocks || [], draftedAt: t.draftedAt };
 }
 
-function gh(args, input) {
+function execGh(args, input) {
   return execFileSync('gh', args, { encoding: 'utf8', input, stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
+/**
+ * `gh issue ...` spelled as REST calls through `gh api`. `gh issue view --json`, `edit` and `close`
+ * go through GitHub GraphQL, which a cloud session's proxy refuses (HTTP 403), so a landing run
+ * from a container wrote nothing on 2026-09-30. REST answers on the desktop and in a container
+ * alike, so it is the one path; the gh-shaped call stays the seam the tests fake.
+ */
+function gh(args, input, run = execGh) {
+  if (args[0] !== 'issue') return run(args, input);
+  const sub = args[1], n = args[2], repo = args[args.indexOf('--repo') + 1];
+  const base = `repos/${repo}/issues/${n}`;
+  const send = (method, url, body) => run(['api', '-X', method, url, '--input', '-'], JSON.stringify(body));
+  if (sub === 'view') {
+    const fields = (args[args.indexOf('--json') + 1] || '').split(',');
+    const issue = JSON.parse(run(['api', base]));
+    const out = {};
+    if (fields.includes('state')) out.state = String(issue.state).toUpperCase();
+    if (fields.includes('labels')) out.labels = (issue.labels || []).map(l => ({ name: l.name }));
+    if (fields.includes('body')) out.body = issue.body || '';
+    if (fields.includes('comments')) {
+      const pages = JSON.parse(run(['api', '--paginate', '--slurp', `${base}/comments?per_page=100`]));
+      out.comments = pages.flat().map(c => ({ body: c.body, createdAt: c.created_at }));
+    }
+    return JSON.stringify(out);
+  }
+  if (sub === 'comment') {
+    return send('POST', `${base}/comments`, { body: fs.readFileSync(args[args.indexOf('--body-file') + 1], 'utf8') });
+  }
+  if (sub === 'edit') {
+    const a = args.indexOf('--add-label'), r = args.indexOf('--remove-label');
+    if (a > 0) send('POST', `${base}/labels`, { labels: args[a + 1].split(',') });
+    if (r > 0) for (const l of args[r + 1].split(',')) run(['api', '-X', 'DELETE', `${base}/labels/${encodeURIComponent(l)}`]);
+    return '';
+  }
+  if (sub === 'close') {
+    const reason = args[args.indexOf('--reason') + 1] === 'not planned' ? 'not_planned' : 'completed';
+    return send('PATCH', base, { state: 'closed', state_reason: reason });
+  }
+  return run(args, input);
 }
 
 /**
@@ -223,4 +263,4 @@ function main(argv) {
 }
 
 if (require.main === module) main(process.argv.slice(2));
-module.exports = { readPageData, planQueue, buildPage, planLanding, executeLanding, fillBodies, readRulings, keyOf, marker };
+module.exports = { readPageData, planQueue, buildPage, planLanding, executeLanding, fillBodies, readRulings, keyOf, marker, gh };
