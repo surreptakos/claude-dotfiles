@@ -7,24 +7,27 @@
     "restore it into ~/.claude.",
     "anchor: the computer name of the one PC that runs the master watchdog and the desktop routines.",
     "repos[]: repo = GitHub slug; path = clone path relative to the user's home, '/' separated;",
-    "served = the master watchdog serves it. A served row also carries master (the watchdog's",
-    "--remote-control master-<name> and its -Only name), stateIssue (its 'Master orchestrator",
-    "state' issue in surreptakos/claude-dotfiles) and priority (1 is served first).",
+    "served = the master watchdog launches a master for it. A served row also carries master (the",
+    "watchdog's --remote-control master-<name> and its -Only name), stateIssue (its 'Master orchestrator",
+    "state' issue in surreptakos/claude-dotfiles) and priority (1 is drained first: the watchdog serves",
+    "priority 1 until its state issue says nothing is left, then priority 2, and so on - Dan,",
+    "2026-09-30). An unserved row may keep master and stateIssue: the watchdog never launches it but",
+    "still closes a master of that name when its pass completes.",
     "Seeded from the 12 clones on DAN-INSPIRON15, 2026-09-30."
   ],
   "anchor": "AAC-AI",
   "repos": [
-    { "repo": "surreptakos/aac-bill-intake",         "path": "Claude/Projects/Financial/aac-bill-intake",           "served": true, "master": "bill-intake",      "stateIssue": 74, "priority": 1 },
+    { "repo": "surreptakos/aac-bill-intake",         "path": "Claude/Projects/Financial/aac-bill-intake",           "served": false, "master": "bill-intake",      "stateIssue": 74 },
     { "repo": "surreptakos/aac-performance-reviews", "path": "Claude/Projects/HR/performance-reviews",              "served": false },
-    { "repo": "surreptakos/aac-routines",            "path": "Claude/Projects/Meta/aac-routines",                   "served": false },
-    { "repo": "surreptakos/claude-dotfiles",         "path": "Claude/Projects/Meta/claude-dotfiles",                "served": false },
+    { "repo": "surreptakos/aac-routines",            "path": "Claude/Projects/Meta/aac-routines",                   "served": true, "master": "routines",         "stateIssue": 1100, "priority": 2 },
+    { "repo": "surreptakos/claude-dotfiles",         "path": "Claude/Projects/Meta/claude-dotfiles",                "served": true, "master": "dotfiles",         "stateIssue": 959,  "priority": 1 },
     { "repo": "surreptakos/aac-message-board",       "path": "Claude/Projects/Meta/message-board",                  "served": false },
     { "repo": "surreptakos/aac-task-management",     "path": "Claude/Projects/Meta/task-management",                "served": false },
-    { "repo": "surreptakos/zoho-source-of-truth",    "path": "Claude/Projects/Operations/zoho-source-of-truth",     "served": true, "master": "zoho",             "stateIssue": 77, "priority": 4 },
+    { "repo": "surreptakos/zoho-source-of-truth",    "path": "Claude/Projects/Operations/zoho-source-of-truth",     "served": false, "master": "zoho",             "stateIssue": 77 },
     { "repo": "surreptakos/brazil-flights",          "path": "Claude/Projects/Personal/brazil-flights",             "served": false },
-    { "repo": "surreptakos/aac-sales-cockpit",       "path": "Claude/Projects/Sales Data KPIs/aac-cockpit",         "served": true, "master": "sales-cockpit",    "stateIssue": 76, "priority": 3 },
+    { "repo": "surreptakos/aac-sales-cockpit",       "path": "Claude/Projects/Sales Data KPIs/aac-cockpit",         "served": true, "master": "sales-cockpit",    "stateIssue": 76,   "priority": 4 },
     { "repo": "surreptakos/aac-sales-commissions",   "path": "Claude/Projects/Sales Data KPIs/commissions",         "served": false },
-    { "repo": "surreptakos/aac-contract-builder",    "path": "Claude/Projects/Sales Data KPIs/contract-builder",    "served": true, "master": "contract-builder", "stateIssue": 75, "priority": 2 },
-    { "repo": "surreptakos/osh-rfp",                 "path": "Claude/Projects/Sales Data KPIs/osh-rfp",             "served": false }
+    { "repo": "surreptakos/aac-contract-builder",    "path": "Claude/Projects/Sales Data KPIs/contract-builder",    "served": false, "master": "contract-builder", "stateIssue": 75 },
+    { "repo": "surreptakos/osh-rfp",                 "path": "Claude/Projects/Sales Data KPIs/osh-rfp",             "served": true, "master": "osh-rfp",          "stateIssue": 1141, "priority": 3 }
   ]
 }

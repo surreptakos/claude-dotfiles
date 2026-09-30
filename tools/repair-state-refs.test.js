@@ -138,15 +138,14 @@ test('an unrelated repo mention just before the bare #N leaves it bare', () => {
   assert.equal(n, 0);
 });
 
-test('REPOS table matches the watchdog $Repos rows (slug, repo, stateIssue triples)', () => {
-  assert.deepEqual(
-    REPOS.map((r) => [r.slug, r.repo, r.stateIssue]),
-    [
-      ['bill-intake',      'surreptakos/aac-bill-intake',      74],
-      ['contract-builder', 'surreptakos/aac-contract-builder', 75],
-      ['sales-cockpit',    'surreptakos/aac-sales-cockpit',    76],
-      ['zoho',             'surreptakos/zoho-source-of-truth', 77],
-    ]);
+test('REPOS table is every lib/repos.json row with a master and state issue, minus claude-dotfiles', () => {
+  const list = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'repos.json'), 'utf8'));
+  const expected = list.repos
+    .filter((r) => r.master && r.stateIssue && r.repo !== 'surreptakos/claude-dotfiles')
+    .map((r) => [r.master, r.repo, r.stateIssue]);
+  assert.ok(expected.length >= 4, 'the repo list names at least four masters');
+  assert.deepEqual(REPOS.map((r) => [r.slug, r.repo, r.stateIssue]), expected);
+  assert.ok(!REPOS.some((r) => r.repo === DOTFILES), 'the dotfiles state issue needs no cross-repo repair');
   assert.equal(DOTFILES, 'surreptakos/claude-dotfiles');
 });
 
