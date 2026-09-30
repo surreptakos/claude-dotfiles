@@ -24,6 +24,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { shell } = require('./posix-shell.js');
+const BASH = shell('bash');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const BOOTSTRAP = path.join(REPO_ROOT, '.claude', 'hooks', 'caveman-bootstrap.sh');
@@ -80,7 +82,7 @@ function run(hook, { home, source, remote = true, stdin = '', extraEnv = {} }) {
     ...extraEnv,
   };
   if (remote) env.CLAUDE_CODE_REMOTE = 'true';
-  return spawnSync('bash', [hook], { encoding: 'utf8', env, input: stdin, cwd: REPO_ROOT });
+  return BASH.run([hook], { encoding: 'utf8', env, input: stdin, cwd: REPO_ROOT });
 }
 
 function contextOf(result) {
@@ -90,7 +92,7 @@ function contextOf(result) {
   return JSON.parse(lines[0]).hookSpecificOutput.additionalContext;
 }
 
-test('local session: both hooks exit 0 and print nothing', () => {
+test('local session: both hooks exit 0 and print nothing', { skip: BASH.skip }, () => {
   const f = makeHome();
   for (const hook of [BOOTSTRAP, PROMPT]) {
     const r = run(hook, { ...f, remote: false, stdin: '{"prompt":"/caveman lite"}' });
@@ -100,7 +102,7 @@ test('local session: both hooks exit 0 and print nothing', () => {
   assert.ok(!fs.existsSync(path.join(f.home, '.claude', 'hook-state', 'caveman-bootstrap')));
 });
 
-test('skills land under ~/.claude/skills and the plugin copy of caveman replaces the payload copy', () => {
+test('skills land under ~/.claude/skills and the plugin copy of caveman replaces the payload copy', { skip: BASH.skip }, () => {
   const f = makeHome();
   const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{"session_id":"t","source":"startup"}' }));
   for (const name of ['caveman', 'caveman-commit', 'lean-build']) {
@@ -116,7 +118,7 @@ test('skills land under ~/.claude/skills and the plugin copy of caveman replaces
   assert.equal(marker.problems, 0);
 });
 
-test('a checkout path holding backslashes lands in the marker escaped, so the marker still parses (issue 482)', () => {
+test('a checkout path holding backslashes lands in the marker escaped, so the marker still parses (issue 482)', { skip: BASH.skip }, () => {
   // On Windows every temp path already carries backslashes; on POSIX a backslash is an ordinary
   // filename character, so put one in the checkout's own name.
   const f = makeHome();
@@ -143,7 +145,7 @@ function gitRepoWithTags(dir, tags) {
   for (const t of tags) g('tag', t);
 }
 
-test('the newest release tag is resolved, skipping pre-releases, and an unreachable remote keeps the last checkout', () => {
+test('the newest release tag is resolved, skipping pre-releases, and an unreachable remote keeps the last checkout', { skip: BASH.skip }, () => {
   const f = makeHome();
   const upstream = path.join(f.home, 'upstream');
   gitRepoWithTags(upstream, ['v1.0.0', 'v1.2.0', 'v1.10.0-rc1']);
@@ -154,7 +156,7 @@ test('the newest release tag is resolved, skipping pre-releases, and an unreacha
   assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'an offline run must not delete the checkout');
 });
 
-test('a failed clone never deletes the checkout a previous run left, whatever its HEAD is tagged', () => {
+test('a failed clone never deletes the checkout a previous run left, whatever its HEAD is tagged', { skip: BASH.skip }, () => {
   const f = makeHome();
   const upstream = path.join(f.home, 'upstream');
   gitRepoWithTags(upstream, ['v1.10.0-rc1']);
@@ -164,7 +166,7 @@ test('a failed clone never deletes the checkout a previous run left, whatever it
   assert.ok(fs.existsSync(path.join(f.home, '.aac-caveman', 'skills', 'caveman', 'SKILL.md')), 'the checkout must survive a clone that failed');
 });
 
-test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', () => {
+test('additionalContext is under the 2 KB cap, carries the activation banner and drops the statusline nudge', { skip: BASH.skip }, () => {
   const f = makeHome();
   const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{"session_id":"t","source":"startup"}' }));
   assert.ok(ctx.length <= 2000, `additionalContext is ${ctx.length} bytes; the platform cap is 2000`);
@@ -175,14 +177,14 @@ test('additionalContext is under the 2 KB cap, carries the activation banner and
   assert.match(ctx, /caveman retrieve <handle>/);
 });
 
-test('second run is a no-op: nothing copied, still zero problems', () => {
+test('second run is a no-op: nothing copied, still zero problems', { skip: BASH.skip }, () => {
   const f = makeHome();
   contextOf(run(BOOTSTRAP, { ...f, stdin: '{}' }));
   const ctx = contextOf(run(BOOTSTRAP, { ...f, stdin: '{}' }));
   assert.match(ctx, /skills copied=0 of 3;.*problems=0/);
 });
 
-test('a missing checkout is a named problem in the line, not a failed hook', () => {
+test('a missing checkout is a named problem in the line, not a failed hook', { skip: BASH.skip }, () => {
   const f = makeHome();
   const r = run(BOOTSTRAP, { ...f, source: path.join(f.home, 'nowhere'), stdin: '{}' });
   const ctx = contextOf(r);
@@ -190,7 +192,7 @@ test('a missing checkout is a named problem in the line, not a failed hook', () 
   assert.ok(ctx.length <= 2000);
 });
 
-test('prompt hook forwards /caveman lite to the mode tracker, which records the mode under the fake HOME', () => {
+test('prompt hook forwards /caveman lite to the mode tracker, which records the mode under the fake HOME', { skip: BASH.skip }, () => {
   const f = makeHome();
   const r = run(PROMPT, { ...f, stdin: '{"session_id":"t","prompt":"/caveman lite"}' });
   assert.equal(r.status, 0, r.stderr);
@@ -231,7 +233,7 @@ function cliRun({ latest, installed, extraEnv = {} }) {
   return { f, r, log, ctx: contextOf(r), binDir };
 }
 
-test('an older CLI upgrades to the current npm release, and the marker line names it (issue 931)', () => {
+test('an older CLI upgrades to the current npm release, and the marker line names it (issue 931)', { skip: BASH.skip }, () => {
   const { log, ctx, f } = cliRun({ latest: '9.9.9', installed: '1.0.0' });
   assert.match(log, /^view @caveman-ai\/cli version/m, log);
   assert.match(log, /install .*@caveman-ai\/cli@9\.9\.9/, log);
@@ -240,20 +242,20 @@ test('an older CLI upgrades to the current npm release, and the marker line name
   assert.equal(marker.cli_version, '9.9.9');
 });
 
-test('the current release already installed runs no npm install (issue 931)', () => {
+test('the current release already installed runs no npm install (issue 931)', { skip: BASH.skip }, () => {
   const { log, ctx } = cliRun({ latest: '9.9.9', installed: '9.9.9' });
   assert.doesNotMatch(log, /install/, log);
   assert.match(ctx, /cli: present 9\.9\.9/);
 });
 
-test('CAVEMAN_BOOTSTRAP_CLI_VERSION pins a one-off version without asking the registry (issue 931)', () => {
+test('CAVEMAN_BOOTSTRAP_CLI_VERSION pins a one-off version without asking the registry (issue 931)', { skip: BASH.skip }, () => {
   const { log, ctx } = cliRun({ latest: '9.9.9', installed: '1.0.0', extraEnv: { CAVEMAN_BOOTSTRAP_CLI_VERSION: '1.2.3' } });
   assert.doesNotMatch(log, /view/, log);
   assert.match(log, /install .*@caveman-ai\/cli@1\.2\.3/, log);
   assert.match(ctx, /cli: installed 1\.2\.3/);
 });
 
-test('an unreachable registry keeps the installed CLI untouched and the session starts (issue 931)', () => {
+test('an unreachable registry keeps the installed CLI untouched and the session starts (issue 931)', { skip: BASH.skip }, () => {
   const { r, log, ctx, binDir } = cliRun({ latest: null, installed: '1.0.0' });
   assert.equal(r.status, 0);
   assert.doesNotMatch(log, /install/, log);
@@ -261,7 +263,7 @@ test('an unreachable registry keeps the installed CLI untouched and the session 
   assert.match(fs.readFileSync(path.join(binDir, 'caveman'), 'utf8'), /"version": "1\.0\.0"/);
 });
 
-test('prompt hook stays silent when the checkout is absent', () => {
+test('prompt hook stays silent when the checkout is absent', { skip: BASH.skip }, () => {
   const f = makeHome();
   const r = run(PROMPT, { ...f, source: path.join(f.home, 'nowhere'), stdin: '{"prompt":"/caveman lite"}' });
   assert.equal(r.status, 0, r.stderr);
