@@ -442,7 +442,7 @@ try {
     Assert '-Fix clones it from the local bare repo (path with a space) and exits 0' `
         (($r.Exit -eq 0) -and ($r.Out -match 'ok    surreptakos/aac-sales-commissions .*\[cloned by -Fix, commit gate set by -Fix\]')) $r.Out
     Assert 'the clone is there, origin pointing home' `
-        ((& git -C $row.Path remote get-url origin) -eq 'https://github.com/surreptakos/aac-sales-commissions.git')
+        ((& git -C $row.Path config --get remote.origin.url) -eq 'https://github.com/surreptakos/aac-sales-commissions.git')
     Assert 'its commit gate is on' ((& git -C $row.Path config --get core.hooksPath) -eq '.githooks')
     $rec = Get-TrustRecord $f $row.Path
     Assert 'its trust record is written' ($null -ne $rec -and $rec.hasTrustDialogAccepted -eq $true)

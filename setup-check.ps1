@@ -677,7 +677,9 @@ function Test-Clones {
             continue
         }
         $problems = 0
-        $origin = (Invoke-Git @('-C', $row.Path, 'remote', 'get-url', 'origin')).Out
+        # The configured URL, not `remote get-url`: that applies url.*.insteadOf rewrites, which can
+        # splice a token into what this line would print.
+        $origin = (Invoke-Git @('-C', $row.Path, 'config', '--get', 'remote.origin.url')).Out
         if (-not (Test-OriginMatches $origin $row.Repo)) {
             $problems++
             Write-Line stop ('{0} origin is {1}, not {2}' -f $label, $(if ($origin) { $origin } else { 'unset' }), $row.Repo)
