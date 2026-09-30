@@ -53,6 +53,11 @@ const END_COOLDOWN_MS = Number(process.env.SESSION_GATE_END_COOLDOWN_MS || 5 * 6
 // Kept under the hook timeout in settings.json on purpose: overrunning here reports "did not
 // complete", which is honest; being killed by the harness reports nothing at all.
 const RUN_TIMEOUT_MS = Number(process.env.SESSION_GATE_TIMEOUT_MS || 180 * 1000);
+// What check.js may spend, a little under RUN_TIMEOUT_MS (issue 1061): it cuts its test run to fit
+// and reports the cut, because a kill here prints nothing but the spawn error.
+const CHECK_BUDGET_MS = RUN_TIMEOUT_MS - Math.min(15000, Math.floor(RUN_TIMEOUT_MS / 10));
+// check.js names each step on stderr under a budget; the last one is where a kill landed.
+const STEP_MARK = /^session-check: step ([^\r\n]*)\r?\n?/gm;
 
 /* ------------------------------------------------------------------ state ---------------------- */
 
@@ -132,11 +137,17 @@ function runCheck(repo, end) {
   try {
     out = execFileSync(process.execPath, args, {
       cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: RUN_TIMEOUT_MS,
+      env: Object.assign({}, process.env, { SESSION_CHECK_BUDGET_MS: String(CHECK_BUDGET_MS) }),
     });
   } catch (e) {
-    out = String(e.stdout || '') + String(e.stderr || '');
+    const err = String(e.stderr || '');
+    const steps = [...err.matchAll(STEP_MARK)].map((m) => m[1]);
+    out = String(e.stdout || '') + err.replace(STEP_MARK, '');
     code = typeof e.status === 'number' ? e.status : null;
-    if (code === null) out += `\n(session-gate: the checks did not complete — ${e.message})`;
+    if (code === null) {
+      const where = steps.length ? ` in the "${steps[steps.length - 1]}" step` : '';
+      out += `\n(session-gate: the checks did not complete — stopped${where} — ${e.message})`;
+    }
   }
   const meta = {
     kind: end ? 'end' : 'start',
