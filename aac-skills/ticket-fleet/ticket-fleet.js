@@ -30,7 +30,7 @@ export const meta = {
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
-    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after Verify, after Deliver, and before Report; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issue 807)' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after an unpinned Verify, after Deliver, and before Report - one agent each, reading HEAD and the tree in one command; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issues 807, 1093)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
@@ -1027,6 +1027,53 @@ function haltReport(halt, results) {
     notAttempted: list.filter((r) => r.notAttempted).map((r) => r.ticket),
   };
 }
+
+/**
+ * Issue 1093: an isolation checkpoint is ONE agent running ONE bash command. Each guard agent
+ * loads the whole session context before its one command, so the agent is the cost, not the
+ * command: run 6abd47d1 spent ~1.2M tokens on 16 of them, a HEAD-read agent and a tree-guard
+ * agent at every checkpoint. The HEAD read and the guard now share a command, and Setup's
+ * `pwd`, HEAD read and guard baseline are the same command again.
+ *
+ * Pure: what to read in, the command out. `cwd` is the orchestrator checkout's absolute path, or
+ * null to measure it with `pwd` in the same shell; `head` reads that checkout's HEAD; `guard` is
+ * the tree-guard invocation (or null), which names the checkout as `"$o"` and runs last, so the
+ * command's exit code is the guard's. Each read prints one tagged line - `cwd <path>`,
+ * `head <branch|DETACHED>`, `sha <sha|UNREADABLE>` - and the guard prints its own JSON line.
+ */
+function checkpointCommand({ cwd, head, guard }) {
+  const parts = [cwd ? `o='${String(cwd).replace(/'/g, `'\\''`)}'` : 'o="$(pwd)"'];
+  if (!cwd) parts.push(`printf 'cwd %s\\n' "$o"`);
+  if (head) {
+    parts.push(`printf 'head %s\\n' "$(git -C "$o" symbolic-ref --quiet --short HEAD || echo DETACHED)"`);
+    parts.push(`printf 'sha %s\\n' "$(git -C "$o" rev-parse HEAD || echo UNREADABLE)"`);
+  }
+  if (guard) parts.push(guard);
+  return parts.join('; ');
+}
+
+/**
+ * Issue 1093: the stdout of a checkpointCommand back into its parts. Pure: stdout in,
+ * { cwd, head, guard } out - cwd the measured path or null; head { branch (null when detached),
+ * sha } or null when either line is missing or the sha is not an object name; guard the parsed
+ * JSON line or null (absent, or not JSON: a paraphrase is could-not-audit, never a pass).
+ */
+function parseCheckpointOutput(stdout) {
+  const out = { cwd: null, head: null, guard: null };
+  let branch = null, sha = null;
+  for (const raw of String(stdout == null ? '' : stdout).split(/\r?\n/)) {
+    const line = raw.trim();
+    let m;
+    if ((m = /^cwd (.+)$/.exec(line))) out.cwd = m[1];
+    else if ((m = /^head (\S+)$/.exec(line))) branch = m[1];
+    else if ((m = /^sha (\S+)$/.exec(line))) sha = m[1];
+    else if (line.startsWith('{')) {
+      try { out.guard = JSON.parse(line); } catch (e) { out.guard = null; }
+    }
+  }
+  if (branch && sha && /^[0-9a-f]{40,64}$/.test(sha)) out.head = { branch: branch === 'DETACHED' ? null : branch, sha };
+  return out;
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -1361,7 +1408,13 @@ which prints no marker of its own).`,
 // exactly this index. The Deliver phase runs unisolated for the same reason (aac-routines 270).
 //
 // So the guard is wired at four checkpoints - after Implement, after Verify, after Deliver, and
-// before Report. A new entry a checkpoint finds is RESTORED and the wave continues (claude-dotfiles
+// before Report. Issue 1093 (run 6abd47d1: 16 guard agents, ~1.2M tokens for 16 one-line
+// commands) trimmed that to where a stage can write: the Verify checkpoint runs only for an
+// UNPINNED verifier (a pinned `fleet-verifier` has no Edit or Write), and each checkpoint is ONE
+// agent whose command reads HEAD and runs the tree check together - as Setup is one agent for the
+// path, HEAD and baseline. A 2-ticket wave with one attempt each now starts 1 + 2x3 + 1 = 8 of
+// them with an unpinned verifier and 6 with a pinned one (it was 4 Setup + 14 checkpoint agents,
+// more on a reread). A new entry a checkpoint finds is RESTORED and the wave continues (claude-dotfiles
 // issue 1020, the dirt half of issue 1006's restore-and-continue): the guard tool moves the tree's
 // copy into a quarantine inside .git, puts the path back as HEAD had it, and the run result lists
 // it under `inconsistent`. Only an entry the restore cannot put back THROWS. A throw inside a
@@ -1420,10 +1473,11 @@ let headWatchUnusable = null     // reason, when the Setup measurement failed
 const headRestores = []          // { label, observedBy, from, to } - one per restore, for the report
 const headRestoreSeen = new Set()
 
-// One command, one fixed two-line answer: the branch name (or DETACHED) and the full sha.
-// Joined like buildTipLookupCommand: the orchestrator checkout is not worktree-isolated, so no
-// caveman guard sits in front of these, and `instrument` (gitSpelling) is not known yet at Setup.
-const headCommand = (cwd) => ['git -C', cwd, 'symbolic-ref --quiet --short HEAD || echo DETACHED;', 'git -C', cwd, 'rev-parse HEAD'].join(' ')
+// Issue 1093: the HEAD read is no longer its own agent. It rides in the checkpoint's one command
+// (checkpointCommand, in the generated block) as two tagged lines - `head <branch|DETACHED>` and
+// `sha <sha>` - beside the tree guard's JSON line; parseCheckpointOutput splits them back apart.
+// Bare `git -C`, like buildTipLookupCommand: the orchestrator checkout is not worktree-isolated,
+// so no caveman guard sits in front of it, and `instrument` (gitSpelling) is not known at Setup.
 // Issue 1006: a deliverer that ran `git merge origin/master` and `git reset --hard <ticket sha>` in
 // this checkout left HEAD on the SAME branch name at a different sha, and could leave a merge in
 // progress. The restore therefore aborts any merge in progress, checks the start branch back out
@@ -1436,12 +1490,6 @@ const restoreCommand = (cwd, start) => [
     ? ['git -C', cwd, 'checkout', start.branch, '&& git -C', cwd, 'reset --keep', start.sha]
     : ['git -C', cwd, 'checkout --detach', start.sha]),
 ].join(' ')
-
-function parseHeadState(stdout) {
-  const lines = String(stdout || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean)
-  if (lines.length !== 2 || !/^[0-9a-f]{40,64}$/.test(lines[1])) return null
-  return { branch: lines[0] === 'DETACHED' ? null : lines[0], sha: lines[1] }
-}
 
 const describeHead = (h) => h.branch ? `${h.branch} (${h.sha.slice(0, 12)})` : `detached ${h.sha.slice(0, 12)}`
 
@@ -1474,6 +1522,28 @@ file. Do not interpret the output. Return the command's REAL exit code (0, 1, 2 
 code of a pipe) plus its stdout and stderr VERBATIM. When the guard ran at all its stdout is a
 single line of JSON: copy it character for character; do not reformat it, summarise it, or invent
 fields.`
+}
+
+// Issue 1093: the one agent a checkpoint (and Setup) now starts. Its command reads the checkout's
+// path, HEAD and tree in one shell, so one schema carries all three: tagged lines plus the guard's
+// JSON line, split apart by parseCheckpointOutput.
+const ISOLATION_READ = { type: 'object', required: ['exitCode', 'stdout', 'stderr'], properties: {
+  exitCode: { type: 'integer', description: 'REAL exit code of the whole command - the tree guard\'s when it ran (0 clean, 1 leak, 2 could-not-audit, 3 guard tool not present in this repo)' },
+  stdout: { type: 'string', description: 'the command stdout VERBATIM, every line: the tagged `cwd`/`head`/`sha` lines and, when the guard ran, its one line of JSON; do not reformat, summarise, re-key or drop any' },
+  stderr: { type: 'string', description: 'the command stderr verbatim ("" if none)' },
+} }
+
+function checkpointAgentPrompt(command) {
+  return `Run exactly this one bash command and report its result:
+
+${command}
+
+Do not cd anywhere first. Do not run any other command. Do not read, write, stage or delete any
+file, and never run \`git stash\` or any git command the command above does not contain. Do not
+interpret the output. Return the command's REAL exit code (not the exit code of a pipe) plus its
+stdout and stderr VERBATIM: stdout is a few tagged lines (\`cwd ...\`, \`head ...\`, \`sha ...\`)
+and, when the guard ran, one line of JSON - copy every line character for character; do not
+reformat, summarise, re-key or drop any.`
 }
 
 function breachMessage() {
@@ -1578,15 +1648,14 @@ Return structured output only.`,
 // itself off, or - worse - some other git repository sits there and the guard, or the tip check,
 // silently audits the wrong tree.
 //
-// So the ABSOLUTE path is measured ONCE, here, by an agent that runs nothing but `pwd`, right after
-// Setup's own repo-identifying work (fleet-refresh) and before anything that needs it. Every later
+// So the ABSOLUTE path is measured ONCE, here, by `pwd` in the Setup agent's command, right after
+// Setup's own repo-identifying work (fleet-refresh) and before anything that needs it. The same
+// shell reads HEAD and takes the tree-guard baseline against that path (issue 1093: one Setup
+// agent, where there were a `pwd` agent, a HEAD agent and a baseline agent). Every later
 // checkpoint is handed that literal string - a `cd` by the parent afterwards cannot touch a string
 // already baked into a prompt. A caller that already knows the absolute path (or wants the guard to
 // audit a different tree on purpose) can still pass `orchestratorCwd` itself; only the '.' default
 // triggers the measurement.
-const CWD_MEASURE = { type: 'object', required: ['cwd'], properties: {
-  cwd: { type: 'string', description: 'the absolute path `pwd` printed, verbatim - not abbreviated, not reconstructed from memory' },
-} }
 // Issue 1007: which spelling `pwd` comes back in depends on the shell the measuring agent picks,
 // not on the repo - a POSIX shell on Windows prints `/c/Users/...`, PowerShell `C:\Users\...`. A
 // drive-letter path (`X:\...` or `X:/...`) is folded to the `/x/...` spelling the guard and tip
@@ -1598,27 +1667,39 @@ function normaliseMeasuredCwd(cwd) {
   return m ? `/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}` : null
 }
 let orchestratorCwd = cfg.orchestratorCwd
-if (orchestratorCwd === '.') {
-  let measured = null, measureError = null
+const measureCwd = orchestratorCwd === '.'
+// Issue 1093: ONE Setup agent. Its command measures the path (when the default '.' asks for it),
+// reads HEAD (issue 807) and takes the tree-guard baseline (issue 192) in one shell, the baseline
+// last so the command's exit code is the guard's. Wrapped (aac-routines issue 270): an agent that
+// blows the StructuredOutput retry cap throws out of agent(...), and an unwrapped throw here would
+// abort the run with the harness's raw message instead of the ones below.
+let setupRes = null, setupError = null, setupSnap = { cwd: null, head: null, guard: null }
+if (measureCwd || headWatchOn || treeGuardOn) {
+  const baselineCmd = treeGuardOn
+    ? `[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd "$o" --state-dir ${cfg.treeGuardStateDir}`
+    : null
   try {
-    measured = await agent(
-      'Run exactly this one bash command and report its result: `pwd`. Do not cd anywhere first. Do not run any other command.',
-      { label: 'orchestrator-cwd', phase: 'Setup', schema: CWD_MEASURE, model: cfg.reportModel, effort: cfg.effort }
+    setupRes = await agent(
+      checkpointAgentPrompt(checkpointCommand({ cwd: measureCwd ? null : orchestratorCwd, head: headWatchOn, guard: baselineCmd })),
+      { label: 'isolation:setup', phase: 'Setup', schema: ISOLATION_READ, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
-    measureError = unusableReason('orchestrator-cwd', (err && err.message) || err)
+    setupError = unusableReason('isolation:setup', (err && err.message) || err)
   }
-  const normalisedCwd = measured ? normaliseMeasuredCwd(measured.cwd) : null
+  setupSnap = parseCheckpointOutput(setupRes && setupRes.stdout)
+}
+if (measureCwd) {
+  const normalisedCwd = normaliseMeasuredCwd(setupSnap.cwd)
   if (!normalisedCwd) {
     throw new Error(
       'ticket-fleet run ABORTED before Scout - could not measure the orchestrator checkout\'s absolute path (issue 562). '
-      + `cwd=${measured ? JSON.stringify(measured.cwd) : 'null'} error=${measureError || 'none'}. `
+      + `cwd=${setupSnap.cwd === null ? 'null' : JSON.stringify(setupSnap.cwd)} error=${setupError || 'none'}. `
       + 'Every guard and tip-check agent after this one is a fresh sub-agent whose shell cwd can drift from '
       + "the orchestrating session's if it `cd`s mid-run, so an unmeasured relative path is never used."
     )
   }
   orchestratorCwd = normalisedCwd
-  if (normalisedCwd !== measured.cwd) log(`Orchestrator cwd: pwd printed ${JSON.stringify(measured.cwd)}, drive-letter spelling normalised to ${normalisedCwd} (issue 1007).`)
+  if (normalisedCwd !== setupSnap.cwd) log(`Orchestrator cwd: pwd printed ${JSON.stringify(setupSnap.cwd)}, drive-letter spelling normalised to ${normalisedCwd} (issue 1007).`)
   log(`Orchestrator checkout measured at ${orchestratorCwd} (issue 562) - every guard and tip-check agent below is handed this absolute path, not cfg.orchestratorCwd's relative default, so a later \`cd\` in the parent session cannot misdirect one.`)
 } else {
   log(`Orchestrator checkout path from args.orchestratorCwd: ${orchestratorCwd} (already absolute or caller-set - measurement skipped).`)
@@ -1626,37 +1707,17 @@ if (orchestratorCwd === '.') {
 if (headWatchOn) {
   // Issue 807: the ref the orchestrator's own checkout starts this run on, measured before any
   // worker exists. Unmeasurable is flagged, not fatal: the dirt guard below still runs.
-  let headRes = null, headError = null
-  try {
-    headRes = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
-      { label: 'orchestrator-head:setup', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
-  } catch (err) {
-    headError = unusableReason('orchestrator-head:setup', (err && err.message) || err)
-  }
-  orchestratorHead = headRes && headRes.exitCode === 0 ? parseHeadState(headRes.stdout) : null
+  orchestratorHead = setupSnap.head
   if (orchestratorHead) {
     log(`Orchestrator HEAD at Setup: ${describeHead(orchestratorHead)} - every checkpoint puts it back here if the wave moves it (issue 807).`)
   } else {
     headWatchOn = false
-    headWatchUnusable = `orchestrator-head: unusable - could not read the orchestrator checkout's HEAD at Setup (exit=${headRes ? headRes.exitCode : 'null'} stdout=${JSON.stringify(headRes ? headRes.stdout : '')} error=${headError || 'none'}); no checkpoint can catch or undo a moved HEAD this run (issue 807).`
+    headWatchUnusable = `orchestrator-head: unusable - could not read the orchestrator checkout's HEAD at Setup (exit=${setupRes ? setupRes.exitCode : 'null'} stdout=${JSON.stringify(setupRes ? setupRes.stdout : '')} error=${setupError || 'none'}); no checkpoint can catch or undo a moved HEAD this run (issue 807).`
     log(headWatchUnusable)
   }
 }
 if (treeGuardOn) {
-  // Wrapped (aac-routines issue 270): a guard agent that blows the StructuredOutput retry cap
-  // throws out of agent(...), and an unwrapped throw here would abort the run with the harness's
-  // raw message instead of the one that tells the operator what it means.
-  let baseline = null, baselineError = null
-  try {
-    baseline = await agent(
-      guardAgentPrompt(`[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd ${orchestratorCwd} --state-dir ${cfg.treeGuardStateDir}`),
-      { label: 'tree-guard:baseline', phase: 'Setup', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
-    )
-  } catch (err) {
-    baselineError = unusableReason('tree-guard:baseline', (err && err.message) || err)
-  }
-  let parsed = null
-  try { parsed = JSON.parse(String((baseline && baseline.stdout) || '')) } catch (e) { parsed = null }
+  const baseline = setupRes, parsed = setupSnap.guard
   if (baseline && baseline.exitCode === 3) {
     if (cfg.treeGuard === 'auto') {
       treeGuardOn = false
@@ -1668,7 +1729,7 @@ if (treeGuardOn) {
   } else if (!baseline || baseline.exitCode !== 0 || !parsed || !parsed.statePath) {
     throw new Error(
       'ticket-fleet run ABORTED before Scout - could not baseline the orchestrator tree (aac-routines issue 192). '
-      + `exit=${baseline ? baseline.exitCode : 'null'} stderr=${baseline ? baseline.stderr : ''} error=${baselineError || 'none'}. `
+      + `exit=${baseline ? baseline.exitCode : 'null'} stderr=${baseline ? baseline.stderr : ''} error=${setupError || 'none'}. `
       + 'Exit 2 is never a pass: without a baseline a leak cannot be told from pre-existing dirt, '
       + 'so the run must not start.'
     )
@@ -1693,32 +1754,18 @@ async function treeGuardCheck(label, ticketNumber) {
   // A breach already recorded elsewhere in the wave fails this chain too, before it can spend
   // another sub-session or reach Deliver.
   assertNoBreach()
-  if (headWatchOn) await headCheck(label, ticketNumber)
+  // Issue 1093: one agent reads HEAD and the tree together. A moved HEAD is put back first and the
+  // re-read after the restore carries a fresh tree check, so the tree verdict below is never read
+  // off a checkout that was still on the wrong ref.
+  let snap = await isolationRead(label, ticketNumber)
+  if (snap === 'halted') return
+  if (headWatchOn) {
+    snap = await headCheck(label, ticketNumber, snap)
+    if (snap === 'halted') return
+  }
   if (!treeGuardOn) return
 
-  // Wrapped (aac-routines issue 270): a guard agent that cannot produce schema-conformant output
-  // throws out of agent(...) after the StructuredOutput retry cap. That throw is a
-  // could-not-audit, and could-not-audit is never a pass - so it is converted into the named
-  // throw below, carrying the harness's error text, rather than escaping unattributed.
-  let res = null, agentError = null
-  try {
-    res = await agent(
-      guardAgentPrompt(`${GUARD_CMD} check --cwd ${orchestratorCwd} --state ${guardStatePath} --label ${label} --ticket ${ticketNumber} ${guardCandidates}`),
-      { label: `tree-guard:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
-    )
-  } catch (err) {
-    agentError = unusableReason(`tree-guard:${label}#${ticketNumber}`, (err && err.message) || err)
-    // Issue 812: a guard agent that died on the quota is the run's halt, not an audit verdict. The
-    // run stops starting work and delivers nothing after a halt, so the checkpoint is logged as
-    // not audited instead of throwing the ticket (or, at pre-report, the whole run report) away.
-    if (runHalt.note((err && err.message) || err, `tree-guard:${label}#${ticketNumber}`) === true) {
-      log(`tree-guard:${label}#${ticketNumber} NOT AUDITED - its agent hit the limit the run halted on (issue 812); nothing is delivered after the halt, and the next session should run the guard before trusting this tree.`)
-      return
-    }
-  }
-  let report = null
-  try { report = JSON.parse(String((res && res.stdout) || '')) } catch (e) { report = null }
-
+  const { res, agentError, report } = snap
   if (!res || res.exitCode === 2 || !report || !Array.isArray(report.newEntries)) {
     throw new Error(
       `orchestrator-tree guard COULD NOT AUDIT at ${label} (ticket #${ticketNumber}) - aac-routines issue 192. `
@@ -1766,8 +1813,10 @@ async function treeGuardCheck(label, ticketNumber) {
 }
 
 /**
- * Issue 807: re-read the orchestrator checkout's HEAD and put it back on the Setup ref if the wave
- * moved it. Returns quietly when HEAD is where it started; a moved HEAD is restored and recorded
+ * Issue 807: given the checkpoint's read (`now`, from isolationRead), put the orchestrator
+ * checkout's HEAD back on the Setup ref if the wave moved it, and return the read the tree verdict
+ * is taken from - `now` when HEAD is where it started, else the re-read after the restore (which
+ * carries a fresh tree check, issue 1093), or 'halted'. Returns that read quietly when HEAD is where it started; a moved HEAD is restored and recorded
  * in `headRestores` (the run report flags it) and the wave carries on; only a HEAD the restore
  * cannot put back is a breach. A branch start is restored with `git checkout <branch>` plus
  * `reset --keep <setup sha>`, a detached start with `checkout --detach <sha>` (restoreCommand) -
@@ -1780,18 +1829,8 @@ async function treeGuardCheck(label, ticketNumber) {
  * three verified branches undelivered and no report writer. The breach still reaches the run
  * result, as an `orchestrator-head` entry in `inconsistent`.
  */
-async function headCheck(label, ticketNumber) {
+async function headCheck(label, ticketNumber, now) {
   const start = orchestratorHead
-  const read = async (tag) => {
-    let res = null
-    try {
-      res = await agent(headAgentPrompt(headCommand(orchestratorCwd)),
-        { label: `orchestrator-head:${tag}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
-    } catch (err) {
-      if (runHalt.note((err && err.message) || err, `orchestrator-head:${tag}#${ticketNumber}`) === true) return 'halted'
-    }
-    return res && res.exitCode === 0 ? parseHeadState(res.stdout) : null
-  }
   const moved = (h) => (start.branch ? h.branch !== start.branch : h.branch !== null) || h.sha !== start.sha
   const flag = (entry) => {
     breaches.push({ label, observedBy: ticketNumber, blamed: [], who: `ticket #${ticketNumber} (observed at its checkpoint; the HEAD move names no author)`, entries: [entry] })
@@ -1799,9 +1838,7 @@ async function headCheck(label, ticketNumber) {
     throw new Error(breachMessage())
   }
 
-  const now = await read(label)
-  if (now === 'halted') return
-  if (now && !moved(now)) return
+  if (now.head && !moved(now.head)) return now
 
   const target = describeHead(start)
   let res = null
@@ -1809,17 +1846,48 @@ async function headCheck(label, ticketNumber) {
     res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, start)),
       { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) { res = null }
-  const after = await read(`${label}-restored`)
-  if (after === 'halted') return
-  if (!after || moved(after)) {
-    flag(`orchestrator HEAD ${now ? `moved to ${describeHead(now)}` : `unreadable at ${label}`} and a restore onto ${target} did not put it back (exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''}); restore it by hand`)
+  const after = await isolationRead(`${label}-restored`, ticketNumber)
+  if (after === 'halted') return 'halted'
+  if (!after.head || moved(after.head)) {
+    flag(`orchestrator HEAD ${now.head ? `moved to ${describeHead(now.head)}` : `unreadable at ${label}`} and a restore onto ${target} did not put it back (exit=${res ? res.exitCode : 'null'} stderr=${res ? res.stderr : ''}); restore it by hand`)
   }
-  const from = now ? describeHead(now) : `unreadable at ${label}`
-  const key = now ? `${now.branch}|${now.sha}` : `unreadable|${label}#${ticketNumber}`
-  if (headRestoreSeen.has(key)) return
+  const from = now.head ? describeHead(now.head) : `unreadable at ${label}`
+  const key = now.head ? `${now.head.branch}|${now.head.sha}` : `unreadable|${label}#${ticketNumber}`
+  if (headRestoreSeen.has(key)) return after
   headRestoreSeen.add(key)
-  headRestores.push({ label, observedBy: ticketNumber, from, to: describeHead(after) })
-  log(`Orchestrator HEAD RESTORED at ${label} (ticket #${ticketNumber}, issues 807 and 1006): the wave left it ${now ? `on ${from}` : from}; put back onto ${describeHead(after)} and the wave continues. A sha the wave moved the branch to stays in the reflog of ${orchestratorCwd}; if the checkout held uncommitted work before the run, look in its stash list too - the fleet never pops a stash.`)
+  headRestores.push({ label, observedBy: ticketNumber, from, to: describeHead(after.head) })
+  log(`Orchestrator HEAD RESTORED at ${label} (ticket #${ticketNumber}, issues 807 and 1006): the wave left it ${now.head ? `on ${from}` : from}; put back onto ${describeHead(after.head)} and the wave continues. A sha the wave moved the branch to stays in the reflog of ${orchestratorCwd}; if the checkout held uncommitted work before the run, look in its stash list too - the fleet never pops a stash.`)
+  return after
+}
+
+/**
+ * Issue 1093: the one agent a checkpoint starts - HEAD (while the HEAD watch is on) and the tree
+ * guard's `check` (while the guard is on) in a single command against the Setup-measured path.
+ * Returns 'halted' when the agent died on the run's quota (issue 812: logged as not audited, never
+ * a verdict), else { res, agentError, head, report }: head null when unreadable, report the
+ * guard's parsed JSON or null (a could-not-audit for the caller to throw on).
+ */
+async function isolationRead(tag, ticketNumber) {
+  const who = `isolation:${tag}#${ticketNumber}`
+  const checkCmd = treeGuardOn
+    ? `${GUARD_CMD} check --cwd "$o" --state ${guardStatePath} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
+    : null
+  let res = null, agentError = null
+  // Wrapped (aac-routines issue 270): an agent that cannot produce schema-conformant output throws
+  // out of agent(...) after the StructuredOutput retry cap. That throw is a could-not-audit, and
+  // could-not-audit is never a pass - the caller turns it into the named throw, carrying this text.
+  try {
+    res = await agent(checkpointAgentPrompt(checkpointCommand({ cwd: orchestratorCwd, head: headWatchOn, guard: checkCmd })),
+      { label: who, phase: 'Isolation guard', schema: ISOLATION_READ, model: cfg.reportModel, effort: cfg.effort })
+  } catch (err) {
+    agentError = unusableReason(who, (err && err.message) || err)
+    if (runHalt.note((err && err.message) || err, who) === true) {
+      log(`${who} NOT AUDITED - its agent hit the limit the run halted on (issue 812); nothing is delivered after the halt, and the next session should run the guard before trusting this tree.`)
+      return 'halted'
+    }
+  }
+  const snap = parseCheckpointOutput(res && res.stdout)
+  return { res, agentError, head: res ? snap.head : null, report: res ? snap.guard : null }
 }
 // [FLEET-TREE-GUARD-CHECK-END]
 
@@ -1831,7 +1899,7 @@ async function headCheck(label, ticketNumber) {
 // is the one agent in the fleet with a reason to run arbitrary commands - it re-runs whatever a
 // probe ticket named - and, until then, no rule about where. `leakExample` is the ref that lane's
 // verifier would reach for first: the branch under review, or the tip a probe is about.
-const orchestratorTreeRail = (leakExample) => `Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${leakExample} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. A checkpoint runs straight after you and fails the whole run if this tree is dirty.`
+const orchestratorTreeRail = (leakExample) => `Orchestrator-tree rule (aac-routines issue 192, non-negotiable): unlike the implementer you are NOT worktree-isolated - the repository you start in IS the orchestrator's own checkout, and nothing stops you writing to it. Do not. The only commands allowed to touch it are \`git fetch\`, \`git worktree add\`, \`git worktree remove\`, and read-only \`git log\`/\`show\`/\`diff\`/\`rev-parse\`. \`git add\`, \`git checkout <branch> -- <path>\`, \`git restore\`, \`git stash\`, \`git reset\`, \`git apply\` and every file write belong inside your scratch worktree or nowhere: \`git checkout ${leakExample} -- .\` run here is precisely the leak issue 192 was filed for - it stages that branch's files in the orchestrator's index. An isolation checkpoint after you fails the whole run if this tree is dirty.`
 
 // [FLEET-EDITABLE-GUARD-START]
 // Every place a copy of the guard can be, in probe order, each with why it would be there. Literal
@@ -1958,41 +2026,6 @@ const powershellRail = (dir) => `PowerShell rail (issue 906; recipe from docs/ag
 const dedupeBrief = (t) => t.discoveryTriage ? `
 Discovery-triage dedupe rail: this ticket turns findings into tracker items. Before creating ANY ticket, search the OPEN issues for the same file, symbol or failure - by what the finding is about, not just its wording - and list them fresh at the moment you are about to file, not once at the start: another chore in this same wave may have filed one minutes ago. On a match, comment on that existing ticket with the new evidence instead of creating a second one, and record that comment's URL as the finding's outcome. File a new ticket only when no open ticket covers the finding.` : ''
 
-// [FLEET-WORKTREE-CANARY-START]
-// Worktree canary (issue 892): every implementer and prober runs with `isolation: 'worktree'`, and
-// the runtime cuts that worktree from the SESSION's root directory - not from the parent shell's
-// cwd, so a `cd` into the repo does not help. A resumed cloud session whose root is `/home/user`
-// (the clones side by side, not a checkout) refused every one of them with "Cannot create agent
-// worktree: not in a git repository and no WorktreeCreate hooks are configured" - but only after
-// the scout and every attempt had spent their tokens (runs wf_c979322f-62f and wf_58a8fd09-12e).
-// One cheap worktree agent here fails the same way before anything else is spent. Finish mode
-// spawns no worktree agent, so it skips the canary. Only the worktree-creation refusal aborts: a
-// canary that dies of anything else is logged and the run goes on, as it did before this check.
-const WORKTREE_CANARY = { type: 'object', required: ['head'], properties: {
-  head: { type: 'string', description: 'the full object name `git rev-parse HEAD` printed, verbatim' },
-} }
-const WORKTREE_CREATE_REFUSAL = /cannot create agent worktree|not in a git repository/i
-if (!cfg.finishRunId) {
-  let canary = null
-  try {
-    canary = await agent(
-      'Run exactly this one bash command and report its result: `git rev-parse HEAD`. Do not cd anywhere first. Do not run any other command. Make no change. Return structured output only.',
-      { label: 'worktree-canary', phase: 'Setup', schema: WORKTREE_CANARY, model: cfg.reportModel, effort: cfg.effort, isolation: 'worktree' }
-    )
-  } catch (err) {
-    const detail = String((err && err.message) || err)
-    if (WORKTREE_CREATE_REFUSAL.test(detail)) {
-      throw new Error(
-        'ticket-fleet run ABORTED before Scout - the runtime cannot create an agent worktree here (issue 892): '
-        + `"${detail}". Cause: this session's root directory is not a git repository (a resumed cloud session rooted at a parent folder such as /home/user, holding the clones side by side), and every implementer runs in a worktree cut from that root - a \`cd\` into the repo does not change it. `
-        + 'Fix: launch the fleet from a session whose root IS the repository checkout (start a new session on the repo), then re-run. No implementer was spawned.'
-      )
-    }
-    log(`worktree-canary did not run: ${unusableReason('worktree-canary', detail)} - the worktree was not refused, so the run continues.`)
-  }
-  if (canary && canary.head) log(`worktree-canary: an isolated worktree was created at HEAD ${canary.head} (issue 892).`)
-}
-// [FLEET-WORKTREE-CANARY-END]
 
 // ---- Scout ----
 phase('Scout')
@@ -2003,6 +2036,20 @@ phase('Scout')
 // remember `instrument: 'mcp'` in a container. Cheap tier, no judgment, three commands.
 // Wrapped (aac-routines issue 270): a probe that throws is a probe that returned nothing, so an
 // explicit `instrument` or `remote` still carries the run below instead of the throw ending it.
+// [FLEET-WORKTREE-CANARY-START]
+// Worktree canary (issue 892): every implementer and prober runs with `isolation: 'worktree'`, and
+// the runtime cuts that worktree from the SESSION's root directory - not from the parent shell's
+// cwd, so a `cd` into the repo does not help. A resumed cloud session whose root is `/home/user`
+// (the clones side by side, not a checkout) refused every one of them with "Cannot create agent
+// worktree: not in a git repository and no WorktreeCreate hooks are configured" - but only after
+// the scout and every attempt had spent their tokens (runs wf_c979322f-62f and wf_58a8fd09-12e).
+// The env probe runs in a worktree of its own, so that refusal stops the run here, before the
+// scout spends anything. Issue 1093: this used to be a separate `worktree-canary` agent at Setup;
+// the probe's three commands read the session, not the checkout, so the probe carries the check
+// for free. Finish mode spawns no worktree agent, so its probe runs unisolated. Only the
+// worktree-creation refusal aborts: a probe that dies of anything else is a probe that returned
+// nothing, as below.
+const WORKTREE_CREATE_REFUSAL = /cannot create agent worktree|not in a git repository/i
 let envFacts = null
 try {
   envFacts = await agent(
@@ -2011,13 +2058,22 @@ try {
 2. \`command -v gh && gh --version\` - hasGh = true only when a path is printed AND \`gh --version\` exits 0.
 3. \`test -f "$HOME/.claude/agents/fleet-verifier.md" && echo present || echo absent\` - verifierAgentFile = true on "present".
 Print no secret value: these three are paths, a version string and set/unset, nothing else. Make no repository change, no commit, no comment. Return structured output only.`,
-  { label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: cfg.effort }
+  Object.assign({ label: 'env-probe', phase: 'Scout', schema: ENVFACTS, model: cfg.reportModel, effort: cfg.effort }, cfg.finishRunId ? {} : { isolation: 'worktree' })
   )
 } catch (err) {
+  const detail = String((err && err.message) || err)
+  if (!cfg.finishRunId && WORKTREE_CREATE_REFUSAL.test(detail)) {
+    throw new Error(
+      'ticket-fleet run ABORTED before Scout - the runtime cannot create an agent worktree here (issue 892): '
+      + `"${detail}". Cause: this session's root directory is not a git repository (a resumed cloud session rooted at a parent folder such as /home/user, holding the clones side by side), and every implementer runs in a worktree cut from that root - a \`cd\` into the repo does not change it. `
+      + 'Fix: launch the fleet from a session whose root IS the repository checkout (start a new session on the repo), then re-run. No implementer was spawned.'
+    )
+  }
   runHalt.note((err && err.message) || err, 'env-probe')
   log(`${unusableReason('env-probe', (err && err.message) || err)} - read as a probe that returned nothing.`)
   envFacts = null
 }
+// [FLEET-WORKTREE-CANARY-END]
 // A failed probe must not silently become `gh` - that is the issue 322 failure: in a container
 // the gh path pins a verifier agent type the registry does not hold and reaches for a
 // GraphQL-backed PR call, so the wave neither verifies nor delivers. Two things may stand in for
@@ -2441,8 +2497,10 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
       // probe lane's verifier is the one probe-lane agent that is NOT worktree-isolated - the
       // prober above runs with isolation:'worktree', this one re-runs the same commands in the
       // orchestrator's own checkout. Same shape as the code lane's post-Verify checkpoint, and
-      // what makes the rail's closing sentence true here rather than a bluff.
-      await treeGuardCheck(pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`, t.number)
+      // what makes the rail's closing sentence true here rather than a bluff. Issue 1093: only for
+      // an unpinned verifier - a pinned `fleet-verifier` has no Edit or Write, and the pre-report
+      // checkpoint still covers this lane.
+      if (!verifierAgentType) await treeGuardCheck(pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`, t.number)
 
       if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
       // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
@@ -2960,8 +3018,11 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
 
       // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
       // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
-      // transcript forensics put the 2026-09-11 leak on.
-      await treeGuardCheck(pass === 1 ? `verify-attempt${attempt}` : `verify-attempt${attempt}-rerun`, t.number)
+      // transcript forensics put the 2026-09-11 leak on. Issue 1093: only for an UNPINNED
+      // verifier. A pinned one runs as `fleet-verifier`, whose tool set has no Edit or Write, so
+      // this checkpoint cost an agent per verdict to watch a read-only stage; the Deliver
+      // checkpoint (or pre-report, for a ticket that never delivers) still sees its tree.
+      if (!verifierAgentType) await treeGuardCheck(pass === 1 ? `verify-attempt${attempt}` : `verify-attempt${attempt}-rerun`, t.number)
 
       if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
       // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
