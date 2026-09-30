@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-09-30T16:13:51Z'
-  previous-modified: '2026-09-30T15:52:27Z'
-  revision: '26'
-  content-sha: 5ab3e8cbf1f7
+  modified: '2026-09-30T16:49:15Z'
+  previous-modified: '2026-09-30T16:13:51Z'
+  revision: '27'
+  content-sha: af466a0aab04
 ---
 
 # todoist-triage
@@ -37,7 +37,7 @@ Every open task carries exactly one ball label, or it is in the triage queue.
 
 **Dates carry the calendar.** The **do date** (Todoist's "due date") is Dan's plan — the day he intends to work it or look again — and moves freely. A backlog `do` with a do date resurfaces that day; without one it sits in the pool the Friday pass draws from. The **deadline** (Todoist's "deadline") is the world's constraint — the day after which something bad happens (IDFPR, tax extension, lien). Set one only when the source names it; it moves Dan, Dan leaves it where it is.
 
-**Other labels.** `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a task still carrying it is a nested duplicate from an older pass — propose it as a merge like any other. `agent` and `no-agent` are Dan's answer to the agent sweep (step 3) and never change the ball.
+**Other labels.** `claude` marks routine-created tasks and stays on. `no-sweep` marks tasks Dan runs himself; skip them. `merged` is retired (Dan, 2026-09-21): a task still carrying it is a nested duplicate from an older pass — propose it as a merge like any other. `agent`, `agent-running`, `agent-done` and `no-agent` track the agent sweep (step 3, [`agent-sweep.md`](agent-sweep.md)) and never change the ball.
 
 **Wontfix is where a task-shaped ruling sticks.** It is the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`). This skill's queue and the `aac-forgotten-tasks` guard read it through the same matcher with the same evidence bound, so a ruled-out item stays suppressed on both sides until evidence newer than the ruling arrives, then resurfaces (ADR 0009 in the routine repository).
 

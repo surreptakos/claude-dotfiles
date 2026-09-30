@@ -7,7 +7,7 @@ Disclosed reference for [`SKILL.md`](SKILL.md) steps 3 and 4. Dan, 2026-09-30: t
 Everything open in scope (Dan, 2026-09-30: "more than just the do tasks. my todoist inbox. everything really"): Current Work, the backlog and the Inbox, whatever the ball — `do`, a direct, `chase`, or none yet. Skip only:
 
 - `no-sweep`, `merged`, and anything in Wontfix;
-- a task already carrying `agent` or `no-agent` — Dan has answered it;
+- a task already carrying `agent`, `agent-running`, `agent-done` or `no-agent` — Dan has answered it;
 - a not-work Inbox item — it stays untouched, per step 2;
 - a task this run deletes or merges in tier 1;
 - the directs' shared projects — O3 agenda lists, read for context only (Scope).
@@ -45,6 +45,26 @@ An answer that arrives as a note (the board's Note only, the reason typed beside
 
 ## What the labels mean
 
-`agent` and `no-agent` are not ball labels: the ball stays where it was. `agent` says Dan approved the task for an agent; `no-agent` is his "no", landed durably so the sweep never asks again. Either one takes the task out of the sweep for good. Dan removes the label to reopen the question.
+None of them is a ball label: the ball stays where it was.
 
-This run does not start the agent. An `agent` task waits for a session to pick it up, and the result comes back to the ball holder as a draft or a task comment — never sent, filed or signed by the agent.
+- `agent` — Dan approved the task for an agent; it waits for the launch.
+- `agent-running` — the board launched its session; the task comment names the session link.
+- `agent-done` — the agent finished; its result is a comment on the task.
+- `no-agent` — Dan's "no", landed durably so the sweep never asks again.
+
+Any of them takes the task out of the sweep. Dan removes the label to reopen the question.
+
+## Launch (Dan, 2026-09-30)
+
+The triage run never starts an agent. Dan does, with the Day Board's **Launch agents** button, once he has answered the day's cards. One click finds every open task labelled `agent`, starts one Claude Code cloud session per task (Default environment, `aac-routines` checkout, auto permission mode), swaps `agent` for `agent-running`, and comments the session link on the task. A task whose session did not start keeps `agent` and is named on the board. The launch prompt only points here: it names the task and this section below.
+
+## Run an approved task
+
+The session the board starts works one Todoist task:
+
+1. Run `python3 .claude/hooks/check_payload.py`. A `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on.
+2. Read the task, its comments, and its source thread to the last message.
+3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named.
+4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made. Never send, file, sign, approve or pay anything.
+5. Swap `agent-running` for `agent-done` on the task, keeping every other label.
+6. If the work cannot be done from what the session can reach, say why in the comment and swap `agent-running` for `no-agent`, so the task is Dan's again.
