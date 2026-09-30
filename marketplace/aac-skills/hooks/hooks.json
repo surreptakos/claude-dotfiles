@@ -192,6 +192,18 @@
             "statusMessage": "Linting written prose..."
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" write",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" write",
+            "timeout": 20,
+            "statusMessage": "Design-linting the file..."
+          }
+        ]
       }
     ],
     "Stop": [
@@ -210,6 +222,17 @@
             "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/stopslop-stop.py\"",
             "timeout": 10,
             "statusMessage": "Linting the final message..."
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" stop",
+            "commandWindows": "py -3 \"${CLAUDE_PLUGIN_ROOT}/skills/aac-design/scripts/designgate.py\" stop",
+            "timeout": 30,
+            "statusMessage": "Checking deliverables against the design gate..."
           }
         ]
       }
