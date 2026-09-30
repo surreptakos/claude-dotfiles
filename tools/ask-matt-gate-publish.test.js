@@ -248,3 +248,37 @@ test('outside session-end the second gh issue create still asks for approval', (
   assert.strictEqual(permissionOf(stdout), 'deny', `to-tickets batch was not gated: ${stdout}`);
   assert.match(JSON.parse(stdout).hookSpecificOutput.permissionDecisionReason, /ticket SET/);
 });
+
+// Issue 1060: /to-tickets step 4 told the user to reply `tickets ok`, and the gate refused all
+// three publishes that followed. The phrase is read from the skill itself, so the prompt and the
+// gate cannot drift apart again; `ok` and `yes` are the same answer and pass the same way.
+const SKILL = path.join(REPO, 'aac-skills', 'to-tickets', 'SKILL.md');
+
+function secondPublishAfter(tag, userText) {
+  const stateDir = scratchStateDir(tag);
+  const sid = `sess-${tag}`;
+  writeSessionState(stateDir, sid, { nonce: 'n', flow: 'to-tickets', yes: true, caveman: 'ultra' });
+  writePublishCount(stateDir, sid, 1);
+  const transcript = path.join(stateDir, 'transcript.jsonl');
+  fs.writeFileSync(transcript,
+    JSON.stringify({ type: 'user', message: { role: 'user', content: userText } }) + '\n');
+  const event = { ...makeEvent(sid, ISSUE_CREATE_CMD), transcript_path: transcript };
+  return permissionOf(runGate('claude-pre-tool', event, { stateDir }).stdout);
+}
+
+test('the reply /to-tickets asks for passes the ticket-set gate', () => {
+  const asked = fs.readFileSync(SKILL, 'utf-8').match(/Next: reply (.+?) to publish\./);
+  assert.ok(asked, 'to-tickets step 4 no longer names the reply it asks for');
+  assert.strictEqual(asked[1], 'tickets ok');
+  assert.notStrictEqual(secondPublishAfter('asked-phrase', asked[1]), 'deny');
+});
+
+for (const reply of ['ok', 'yes', 'Tickets OK.']) {
+  test(`a whole-message \`${reply}\` passes the ticket-set gate`, () => {
+    assert.notStrictEqual(secondPublishAfter(`reply-${reply.replace(/\W/g, '')}`, reply), 'deny');
+  });
+}
+
+test('`tickets ok` inside a longer message is not approval', () => {
+  assert.strictEqual(secondPublishAfter('reply-embedded', 'tickets ok but split 3 first'), 'deny');
+});
