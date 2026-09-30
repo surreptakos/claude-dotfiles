@@ -3,6 +3,28 @@
 Terms settled while designing this repository's governance. One definition per term; a decision
 that is hard to reverse goes in `docs/adr/`, not here.
 
+## Local build
+
+Everything one desktop needs, beyond the operating system, to do Claude work the way this repo
+intends. Four layers: **prerequisites** (the tools), **profile** (what pull restores, the
+aac-skills plugin, the caveman wiring), **credentials** (the secret files and the logins) and
+**projects** (the working clones, each with its commit gate on, plus the master watchdog and the
+desktop routines). A cloud container is not a local build: the bootstrap gate covers that.
+
+## Setup check
+
+The command that inspects a local build, all four layers, on the machine it runs on. It fixes
+what is safe to repeat and lists the rest, the logins and secret copies only the owner can do, as
+numbered steps. Named `/setup-check` because Claude Code's own `/doctor` already exists (Dan,
+2026-09-30).
+
+## Anchor PC
+
+The one desktop that runs the master watchdog and the desktop routines. Exactly one at a time, so
+no repo gets two masters and no routine fires twice. AAC-AI from 2026-09-30, taking over from
+DAN-INSPIRON15 (Dan). Not "host": a session-check `checks` entry already uses `host` for the
+surface a check runs on, desktop or cloud.
+
 ## Route
 
 The ask-matt flow a turn runs under: `direct-answer`, `grill-with-docs`, `implement`, `to-spec`,
