@@ -1236,6 +1236,19 @@ for (const file of RESUME_GUARD_PAIR) {
       'the DELIVERED schema must accept the status the prompt asks for, or the deliverer cannot return it');
   });
 
+  // Run wf_29b636dd: #761 took A8, then STEP D merged the unmerged PR itself on a repo with no PR
+  // CI; its sibling #748, left open, conflicted on the main merge and hid a real break.
+  test(`${rel} deliver prompt never merges an unmerged-by-classifier PR in STEP D (issue 1132)`, () => {
+    const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
+    const stepD = prompt.slice(prompt.indexOf('STEP D - merge the PR you opened'), prompt.indexOf('D1. WAIT FOR CI'));
+    assert.match(stepD, /AN UNMERGED-BY-CLASSIFIER PR IS NOT MERGED BY THE DELIVERER/,
+      'STEP D must say, before D1, that the deliverer does not merge a PR that skipped the main merge');
+    assert.match(stepD, /When STEP A ended "unmerged-by-classifier" \(A8\), skip D1-D5: return merged false, mergeSha "", prState "not-attempted", blockedReason the refusal text VERBATIM/,
+      'the skip must return not-attempted with the refusal as blockedReason');
+    assert.match(stepD, /awaiting the orchestrator's merge of \$\{defaultBranch\}/,
+      'the PR must be left for the orchestrator to merge the default branch into');
+  });
+
   test(`${rel} runCodeLane keeps a delivery whose merge the classifier refused (issue 544)`, async () => {
     const refusal = 'Permission denied to execute git merge by Claude Code auto mode classifier - Modify Shared Resources';
     const agentMock = async (_prompt, opts) => {
