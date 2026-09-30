@@ -3,10 +3,10 @@ name: implement
 description: Implement a piece of work based on a spec or set of tickets.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-21T03:41:40Z'
-  previous-modified: '2026-08-20T00:41:59Z'
-  revision: '2'
-  content-sha: c82ce8144abb
+  modified: '2026-09-30T16:21:27Z'
+  previous-modified: '2026-09-21T03:41:40Z'
+  revision: '3'
+  content-sha: 0b028747711e
 ---
 
 Implement the work described by the user in the spec or tickets.
@@ -36,7 +36,7 @@ which this repeats at one-ticket scale:
   exit code rather than a pipeline's. "The tests pass" is not evidence.
 - It returns a verdict plus findings, one per unmet criterion, and proposes no diffs.
 
-You act on the findings: fix what it found, then put the new diff to another fresh reviewer. Reach
+You act on the findings: fix what it found, then put the new diff to another fresh reviewer. Fix a finding in the mechanism, never by shrinking the scope the user stated: re-read the request's own words ("anything", "everything", "all") before narrowing what the work covers, and when no mechanism fix exists, ask before shipping the narrower version. Reach
 for /code-review when you want its two-axis Standards + Spec read — as that sub-agent's
 instruction, never in this context.
 
