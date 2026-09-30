@@ -3,14 +3,16 @@
  * wr001-lint - deterministic checks for AAC-WR-001.
  *
  * Covers every rule a pattern can decide (see wr001-coverage.md beside this
- * file for all 167 rules: pattern, Jev, reader, or layout). Five judgment
- * rules that are yes/no on a single unit get a TypeSafe Jev Noul each (issue
- * 731): Rule 5 on the opening paragraph, Rules 6 and 10 per sentence, Rule 162
- * on the last paragraph, Rule 164 per paragraph. Those findings are WARN only
- * and never change the exit code. With Jev unavailable (no credential, a
- * timeout, the service down) the output is exactly the regex-only output.
- * A rule that needs the evidence, the audience or the whole document (8, 154,
- * 161, 166 among them) stays with a reader; the coverage table says which.
+ * file for all 167 rules: pattern, Jev, reader, or layout). Seven judgment
+ * rules get a TypeSafe Jev Noul each (issues 731 and 1038): Rule 5 on the
+ * opening paragraph, Rules 6 and 10 per sentence, Rule 162 on the last
+ * paragraph, Rule 164 per paragraph, and two whole-document checks: Rule 55
+ * per undefined all-capitals term, Rule 161 once over a message to a person.
+ * Those findings are WARN only and never change the exit code. With Jev
+ * unavailable (no credential, a timeout, the service down) the output is
+ * exactly the regex-only output. A rule that needs the evidence or the
+ * audience (8, 154, 166 among them) stays with a reader; the coverage table
+ * says which.
  *
  * Maintenance rule (Dan, 2026-09-29): a revision of the standard that adds or
  * changes a rule lands in the same PR as its check here, or as its row in
@@ -382,6 +384,27 @@ function lintFile(file, opts) {
 const JEV_FLOOR = 0.8;
 const JEV_BATCH = 40;
 const JEV_MAX_SENTENCES = 150;
+const JEV_MAX_TERMS = 40;
+// The two whole-document checks answer below the unit rules' floor on their own
+// Avoid texts: live jev-latest, 2026-09-30, gave NRTL and ACU undefined in an
+// email 0.72 to 0.74 and two scheduler/orchestrator and app/platform emails
+// 0.65 and 0.78, against 0.04 to 0.11 for HDCS, VISTA, AVA and PDF, 0.45 for
+// TBD, and 0.06 to 0.12 for one-name emails. A rule's own floor replaces JEV_FLOOR.
+const JEV_DOC_FLOOR = 0.6;
+
+// Appendix C (references/TERMINOLOGY.md) is the terminology list the standard
+// owns; its acronyms never need defining, so Rule 55 never asks about them.
+// Read from the reference itself, so a term added there needs no edit here.
+function appendixCAcronyms() {
+  let text = "";
+  try {
+    text = fs.readFileSync(path.join(__dirname, "..", "references", "TERMINOLOGY.md"), "utf8");
+  } catch {
+    return new Set();
+  }
+  const m = /^# Appendix C\b[\s\S]*?(?=^# )/m.exec(text);
+  return new Set(m ? m[0].split("\n").slice(1).join("\n").match(/\b[A-Z]{2,6}\b/g) || [] : []);
+}
 
 const noul = (instructions, yes, no) =>
   ({ type: "noul", instructions, criteria: { true: yes, false: no } });
@@ -407,6 +430,22 @@ const JEV_RULES = {
       `Rule 10 of a business writing standard: delete phrases that add no information, such as 'I am writing to inform you that', 'Please be advised that', 'It should be noted that', 'As you are aware', 'At this time', 'In order to', 'With regard to'. Does sentence \`sentences[${i}]\` contain such a filler phrase, so that it says the same thing with the phrase deleted?`,
       "The sentence carries a phrase that adds no information, such as 'Please be advised that the inspection is currently scheduled to take place on September 15.'",
       "Every phrase in the sentence carries information, such as 'The inspection is scheduled for September 15.'"),
+  },
+  55: {
+    floor: JEV_DOC_FLOOR,
+    msg: "acronym not spelled out on first use (Jev); write the term out with the acronym in parentheses, unless this reader knows it",
+    q: (i) => noul(
+      `Rule 55 of a business writing standard: on first use, spell out an unfamiliar term and place the acronym in parentheses, as in 'authority having jurisdiction (AHJ)'; after that, use the acronym. An acronym needs no definition when the intended reader can reasonably be expected to know it; customer-facing material should not carry unnecessary internal acronyms. A product, model or system identifier (such as HDCS, VISTA or AVA) is a name, not an acronym to define. \`paragraphs\` is the whole document in order and \`terms\` lists the all-capitals terms that are not on the company terminology list and are not spelled out with the acronym in parentheses at their first use. Is \`terms[${i}]\` an acronym the document uses without ever spelling it out, and one that is neither a product, model or system identifier nor an acronym nearly every business reader knows (such as PDF, CEO or HVAC)?`,
+      "An acronym the reader may not know, used with no earlier spelled-out form, such as 'Please confirm the NRTL listing before Friday.' sent to a customer.",
+      "A product, model or system identifier such as HDCS, VISTA or AVA, a term this reader knows (such as PDF or CEO), a proper name, or a word written in capitals for another reason."),
+  },
+  161: {
+    floor: JEV_DOC_FLOOR,
+    msg: "one actor, system or tool named two ways (Jev); pick one name and keep it",
+    q: () => noul(
+      "Rule 161 of a business writing standard: in a message written to a person (email, Teams, review feedback), name one actor, system or tool the same way throughout. Rotating synonyms, such as 'the scheduler' and later 'the orchestrator', or 'the app' and later 'the platform', for one thing makes the reader check whether a new thing has been introduced. `paragraphs` is the whole message in order. When two names for a system, tool or role do the same job in the message and nothing marks them as separate things, treat them as one thing named two ways. Does the message name the same actor, system or tool in two or more different ways?",
+      "At least one actor, system or tool is named two ways, such as 'The scheduler runs at 6 a.m.' followed by 'The orchestrator then sends the report.', where nothing says the orchestrator is a second component.",
+      "Each actor, system or tool keeps one name throughout (a pronoun may stand in for it), and any two names belong to things the message itself shows to be separate."),
   },
   162: {
     msg: "closing kicker or recap (Jev); end on the last real point",
@@ -459,9 +498,30 @@ function proseUnits(lines) {
   return { paragraphs, sentences: sentences.slice(0, JEV_MAX_SENTENCES) };
 }
 
+// Rule 55 candidates, first use first: each all-capitals term of two to six
+// letters that Appendix C does not list and whose first use is not the
+// parenthesized acronym after its spelled-out form. A term joined to a digit or
+// hyphen (RS-485, a model number) is an identifier and
+// never a candidate. Jev decides which of the rest the reader needs defined.
+function acronymCandidates(lines) {
+  const known = appendixCAcronyms();
+  const seen = new Map();
+  stripUncheckable(lines).forEach((l, i) => {
+    for (const m of l.matchAll(/(?<![\w-])[A-Z]{2,6}(?![\w-])/g)) {
+      if (seen.has(m[0])) continue;
+      const defined = l[m.index - 1] === "(" && l[m.index + m[0].length] === ")";
+      seen.set(m[0], { line: i + 1, text: m[0], defined });
+    }
+  });
+  return [...seen.values()].filter((t) => !t.defined && !known.has(t.text)).slice(0, JEV_MAX_TERMS);
+}
+
 // Resolves to WARN findings, or to [] when Jev is unavailable or any batch
 // fails: all or nothing, so an outage leaves the output exactly as it was.
-async function jevFindings(lines, ask) {
+// opts.formal is lintFile's verdict. Rule 161 binds only messages to people;
+// reports and proposals are exempt by its own scope, so a document the linter
+// reads as formal (and not forced narrative by --prose) is never asked.
+async function jevFindings(lines, ask, opts = {}) {
   const { paragraphs, sentences } = proseUnits(lines);
   if (paragraphs.length === 0) return [];
 
@@ -476,8 +536,16 @@ async function jevFindings(lines, ask) {
   if (paragraphs.length > 1) add(162, paragraphs.length - 1, paragraphs[paragraphs.length - 1]);
   paragraphs.forEach((p, i) => add(164, i, p));
   sentences.forEach((s, i) => { add(6, i, s); add(10, i, s); });
+  const terms = acronymCandidates(lines);
+  terms.forEach((t, i) => add(55, i, t));
+  // A whole-document finding carries line 0: the report prints the file alone.
+  if (!opts.formal) add(161, 0, { line: 0, text: "" });
 
-  const state = { paragraphs: paragraphs.map((p) => p.text), sentences: sentences.map((s) => s.text) };
+  const state = {
+    paragraphs: paragraphs.map((p) => p.text),
+    sentences: sentences.map((s) => s.text),
+    terms: terms.map((t) => t.text),
+  };
   const ids = Object.keys(questions);
   const batches = [];
   for (let i = 0; i < ids.length; i += JEV_BATCH) {
@@ -496,9 +564,9 @@ async function jevFindings(lines, ask) {
   const out = [];
   for (const id of ids) {
     const a = merged[id];
-    if (!a || typeof a.noul !== "number" || !(a.noul >= JEV_FLOOR)) continue;
     const { rule, unit } = units[id];
-    out.push({ line: unit.line, col: 1, rule, sev: "warn", msg: JEV_RULES[rule].msg, text: unit.text.trim() });
+    if (!a || typeof a.noul !== "number" || !(a.noul >= (JEV_RULES[rule].floor || JEV_FLOOR))) continue;
+    out.push({ line: unit.line, col: unit.line ? 1 : 0, rule, sev: "warn", msg: JEV_RULES[rule].msg, text: unit.text.trim() });
   }
   return out;
 }
@@ -527,7 +595,7 @@ async function run(argv, io = {}) {
   if (ask) {
     await Promise.all(results.filter((r) => !r.unreadable).map(async (r) => {
       const lines = fs.readFileSync(r.file, "utf8").split(/\r?\n/);
-      r.findings.push(...(await jevFindings(lines, ask)));
+      r.findings.push(...(await jevFindings(lines, ask, { formal: r.formal })));
     }));
   }
 

@@ -71,6 +71,17 @@ const path = require('node:path');
 const END = process.argv.includes('--end');
 const REPO = findRepoRoot(process.cwd());
 
+/** The session gate's time budget for this whole run, in ms (issue 1061). The gate spawns this
+ *  script with a timeout, and a kill prints nothing: on 2026-09-29 and -30 a desktop session
+ *  started with "spawnSync node.exe ETIMEDOUT" and no report at all, because the start test run
+ *  (316 s measured, `testTimeoutMs` 600000) outlived the gate's 180 s. Under a budget the test
+ *  run is cut to what is left of it, so the report still lands and names the step it cut. Unset
+ *  (a run by hand) means no budget. Each step also marks itself on stderr, so a gate that still
+ *  kills the run can say which step it was in. */
+const STARTED_MS = Date.now();
+const BUDGET_MS = Math.max(0, Number(process.env.SESSION_CHECK_BUDGET_MS) || 0);
+const markStep = (name) => { if (BUDGET_MS) process.stderr.write(`session-check: step ${name}\n`); };
+
 /** A Claude Code cloud container (claude.ai/code, Cowork). Several checks mean something
  *  different there: no GraphQL through the egress proxy, no clasp credential, and the machine is a
  *  downstream copy of the skills rather than where they are authored. gh itself is present once
@@ -422,13 +433,20 @@ async function workChecks() {
     if (gateGaps.length) {
       note(`the commit gate on this head is untrusted, so the suite runs rather than being skipped: ${gateGaps.join('; ')}`);
     }
-    const timeout = configuredTimeout('testTimeoutMs', 300000);
-    const r = await runReadingOutputAsync(
+    const configured = configuredTimeout('testTimeoutMs', 300000);
+    // Under the gate's budget, leave a quarter of it (at most 45 s) for the steps after this one.
+    const left = BUDGET_MS
+      ? STARTED_MS + BUDGET_MS - Math.min(45000, Math.floor(BUDGET_MS / 4)) - Date.now() : Infinity;
+    const cut = left < configured;
+    const timeout = cut ? Math.max(0, Math.floor(left)) : configured;
+    const budgetLine = () => warn(`tests — no verdict, not a pass: \`${t.label}\` needs longer than the ${Math.round(BUDGET_MS / 1000)} s the session gate gives this whole report, so it was ${timeout ? `stopped after ${timeout} ms` : 'not started'} (its own timeout is ${configured} ms); run it by hand for the verdict`);
+    const r = timeout === 0 ? null : await runReadingOutputAsync(
       t.shell ? t.argv.join(' ') : t.argv[0],
       t.shell ? [] : t.argv.slice(1),
       { timeout, shell: t.shell },
     );
-    if (r.code === 0) {
+    if (!r) budgetLine();
+    else if (r.code === 0) {
       const pass = (r.out.match(/^ℹ pass (\d+)/m) || [])[1];
       const skip = (r.out.match(/^ℹ skipped (\d+)/m) || [])[1];
       ok(`tests pass${pass ? ` (${pass}${skip && skip !== '0' ? `, ${skip} skipped` : ''})` : ''}`);
@@ -437,6 +455,8 @@ async function workChecks() {
           note(`\`${s.half}\` — \`${s.bin}\` is not on PATH in this container; covered by CI on the current head (issue 171)`);
         }
       }
+    } else if (r.timedOut && cut) {
+      budgetLine();
     } else if (r.timedOut) {
       stop(`tests TIMEOUT after ${timeout} ms — \`${t.label}\``);
       noteDiagnostics(r.out);
@@ -1153,7 +1173,7 @@ function bootstrapChecks() {
     stop(`aac-bootstrap ${r.stage} failed — ${r.reason}`);
     note(`marker ${r.path}${r.marker.failed_at ? ` written ${r.marker.failed_at}` : ''}; no aac payload, skills or governance hooks in this container`);
     if (r.stage === 'clone') {
-      note('if git could not read a username for github.com: the dotfiles repo is not a source of this session — self-heal now: call the Claude_Code_Remote add_repo tool for surreptakos/claude-dotfiles (read), then re-run the hook with `bash "<its path>"` (claude-dotfiles issue 614; the repo is public since 2026-09-21 precisely so the proxy clones it unattached, so a username failure means it reads as private again — tell the owner to check its visibility); or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
+      note('if git could not read a username for github.com: the dotfiles clone did not authenticate — either the environment lacks the BOOTSTRAP_DOTFILES_TOKEN variable (the clone credential for a private claude-dotfiles, handed to git through askpass; the owner sets it in the environment settings, PRD 1045), or the repo is not a source of this session; attached-source fallback, self-heal now: call the Claude_Code_Remote add_repo tool for surreptakos/claude-dotfiles (read), then re-run the hook with `bash "<its path>"` (claude-dotfiles issues 614, 1047; background in the memory note dotfiles-public-for-cloud-clone); or `env | grep ANTHROPIC_BASE_URL` shows a caveman proxy URL at environment level, which strips credential injection (issue 519); git push falls back to GitHub MCP push_files');
     }
     return;
   }
@@ -1279,17 +1299,17 @@ async function main() {
   console.log('');
   console.log(`${C.b}${END ? 'Finishing' : 'Starting'} a session — ${path.basename(REPO)}${C.x}`);
   if (IS_CLOUD) bootRead = bootstrap.awaitBootstrap(process.env);
-  gitChecks();
-  harnessChecks();
-  bootstrapChecks();
-  accountChecks();
-  claspChecks();
-  await workChecks();
-  ticketChecks();
-  installedPluginChecks();
-  pullNudgeChecks();
-  if (END) endGateChecks();
-  if (END) cloudSkillChecks();
+  markStep('git'); gitChecks();
+  markStep('harness'); harnessChecks();
+  markStep('bootstrap'); bootstrapChecks();
+  markStep('account'); accountChecks();
+  markStep('clasp'); claspChecks();
+  markStep('tests and configured checks'); await workChecks();
+  markStep('tickets'); ticketChecks();
+  markStep('installed plugin'); installedPluginChecks();
+  markStep('pull nudge'); pullNudgeChecks();
+  if (END) { markStep('end gate'); endGateChecks(); }
+  if (END) { markStep('cloud skills'); cloudSkillChecks(); }
   if (CFG.note) { head('Note'); note(CFG.note); }
   console.log(out.join('\n'));
   console.log('');

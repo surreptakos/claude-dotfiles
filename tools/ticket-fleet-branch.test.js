@@ -2555,7 +2555,8 @@ test(`${FLEET_SCRIPT_REL} deliver prompt runs STEP D: wait for CI, the runbook b
 test(`${FLEET_SCRIPT_REL} refreshes the served repo's copy from claude-dotfiles master, forks excepted (issue 770)`, () => {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const block = extractBetween(src, 'FLEET-REFRESH');
-  assert.match(block, /https:\/\/raw\.githubusercontent\.com\/surreptakos\/claude-dotfiles\/master\/aac-skills\/ticket-fleet/);
+  assert.match(block, /repos\/surreptakos\/claude-dotfiles\/contents\/aac-skills\/ticket-fleet/);
+  assert.match(block, /gh api -H "Accept: application\/vnd\.github\.raw"/, 'fetch through gh api, not raw.githubusercontent.com (issue 1049)');
   assert.match(block, /label: 'fleet-refresh', phase: 'Setup'/);
   assert.match(block, /sha256sum/, 'a copy that already matches must not be rewritten');
   assert.match(block, /git commit -m "chore\(fleet\): refresh ticket-fleet script from claude-dotfiles master \(issue 770\)"/);
@@ -2997,6 +2998,55 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     // The run result lists it under `inconsistent`, next to the HEAD restores.
     assert.match(src, /\.concat\(treeRestores\.map\(t => \(\{ ticket: t\.observedBy, kind: 'tree-guard'/,
       'a restored root-tree write must reach the run result, not only a log line');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Issue 1041: the desktop scheduled task launches the wave from `.claude/worktrees/<name>`, whose
+// `.git` is a file. With the DEFAULT treeGuardStateDir (no launcher argument) the baseline must land
+// in that worktree's real git dir and the guard report active, not abort on ENOTDIR or go unusable.
+test('tree guard from a .claude/worktrees/* checkout with the default state dir baselines active (issue 1041)', async (t) => {
+  const os = require('node:os');
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const defaultStateDir = (src.match(/treeGuardStateDir: '([^']+)'/) || [])[1];
+  assert.equal(defaultStateDir, '.git/orchestrator-tree-guard');
+  // The guard agents run bash; a Windows shell with no bash on PATH (PowerShell) cannot stand in.
+  if (BASH.skip) { t.skip(BASH.skip); return; }
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tree-guard-1041-'));
+  const main = path.join(tmp, 'main');
+  const wt = path.join(main, '.claude', 'worktrees', 'wave');
+  const git = (cwd, ...args) => {
+    const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd, encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${args.join(' ')}: ${r.stderr}`);
+    return r.stdout;
+  };
+  fs.mkdirSync(main);
+  try {
+    git(main, 'init', '-q');
+    fs.writeFileSync(path.join(main, '.gitignore'), '.claude/worktrees/\n');
+    git(main, 'add', '.gitignore');
+    git(main, 'commit', '-q', '-m', 'init');
+    git(main, 'worktree', 'add', '-q', '-b', 'wave', wt);
+    assert.ok(fs.statSync(path.join(wt, '.git')).isFile(), 'fixture: a linked worktree\'s .git is a file');
+    const wtPosix = BASH.run(['-c', 'pwd'], { cwd: wt, encoding: 'utf8' }).stdout.trim();
+    const bashAgent = async (prompt, opts) => {
+      if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `wave\n${'a'.repeat(40)}\n`, stderr: '' };
+      const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
+      return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
+    };
+    // No treeGuardStateDir override: driveTreeGuard's cfg carries the fleet default checked above.
+    const { treeGuardCheck, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, { orchestratorCwd: wtPosix });
+    assert.equal(treeGuardUnusable, null, 'the baseline must not report the guard unusable');
+    const active = logs.find((l) => /^tree-guard: active - orchestrator-tree baseline taken/.test(l));
+    assert.ok(active, JSON.stringify(logs));
+    const realGitDir = git(wt, 'rev-parse', '--absolute-git-dir').trim();
+    const stateFiles = fs.readdirSync(path.join(realGitDir, 'orchestrator-tree-guard')).filter((n) => n.endsWith('.json'));
+    assert.equal(stateFiles.length, 1, 'the baseline lives in the worktree\'s real git dir');
+    assert.equal(git(wt, 'status', '--porcelain'), '');
+    assert.equal(git(main, 'status', '--porcelain'), '');
+    await treeGuardCheck('implement-attempt1', 7);
+    assert.equal(breaches.length, 0);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
