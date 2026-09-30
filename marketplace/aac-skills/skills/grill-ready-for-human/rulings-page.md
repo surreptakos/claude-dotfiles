@@ -16,18 +16,22 @@ hand from any session.
   `detail`; the card shows it).
 - Drafts are never committed: the repo is public. They live in the published page (each ticket
   carries `draftedAt`) and in temp files.
-- **Submit goes to whichever session last republished the page.** The Submit button records the
-  batch in the page database and then sends "Rulings submitted: batch <id> ... Land them now." as an
-  artifact comment to Claude; the artifact service delivers that to the session holding the watch,
-  and publishing the page registers the watch for the publishing session (the `ArtifactComments`
-  tool contract). So a Cowork or claude.ai session that republishes the page, even for one redrafted
-  card, is the session the owner's next Submit lands in. Republish only from a session that can also
-  land (a claude-dotfiles checkout plus `gh` or the GitHub MCP tools with the batch's repos in
-  scope); a session that cannot land must not republish. Where does a batch stand: the page's
-  version stamp is the publish time (`Artifact` `list` with `scope: files`), the page's
-  `draftedAt` values say which session redrafted, and `ArtifactComments` `read` on the page shows
-  each Submit and the reply it got (2026-09-30: a Cowork session redrafted 11 cards, republished at
-  18:56Z, received the 73-ticket batch at 19:17Z and could not land it, no `gh` and a 403 from the
+- **Submit goes to whichever Claude session is watching the page, and to nothing else.** The
+  Submit button records the batch in the page database and then posts "Rulings submitted: batch
+  <id> ... Land them now." as a comment sent to Claude; the platform delivers that only to sessions
+  holding a watch on the artifact, and the page's `canSendToClaude` reads `no_session` when none
+  does (contract `comments.d.ts`, `SendToClaudeResult`, `CanSendToClaude`). A watch comes from
+  publishing the page or from `ArtifactComments` `watch` on its URL; reading the page registers
+  none (checked 2026-09-30: a session that had read it listed no watch). So the batch lands in
+  whatever session last took a watch, which need not be the session that built or published the
+  page, and that session may have no GitHub write path. Rules: a session that cannot land never
+  publishes the page or watches it; a session that cannot land and receives a Submit says so in
+  the thread and leaves the batch for the digest. Naming the receiver or the publisher is a read,
+  never an inference: the `submissions` doc and `ArtifactComments` `read` give the Submit and its
+  reply, `list_sessions` shows a cloud session's published artifacts under `external_metadata.
+  artifacts`, and the page's version stamp (`Artifact` `list`, `scope: files`) gives the publish
+  time. 2026-09-30: the page was republished at 18:56:47Z by no cloud session, the 19:17Z Submit
+  went to a Cowork session that had not published it, and nothing landed (no `gh`, 403 from the
   API).
 
 ## Land (step 1 of the digest; also runnable by hand)
