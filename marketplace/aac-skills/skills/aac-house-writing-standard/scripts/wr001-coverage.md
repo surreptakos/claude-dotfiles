@@ -52,7 +52,7 @@ Table 1. Rule coverage
 | 40 | Numbers at the beginning of a sentence | Pattern | a figure opening a sentence |
 | 41 | Indefinite numbers | Reader | indefinite amounts need the sense |
 | 42 | Dates | Pattern | an ordinal on a month-first date; a comma between month and year |
-| 43 | Numeric dates | Pattern | a numeric date |
+| 43 | Numeric dates | Pattern | a numeric date in narrative text; the hand-filled form clause (MM/DD/YYYY, format stated once) is a rendered-form check, so the warning stays |
 | 44 | Time | Pattern | ':00' on the hour; 12 a.m. or 12 p.m. |
 | 45 | Time ranges | Pattern | an en dash after 'from' |
 | 46 | Money | Pattern | '.00' on a whole-dollar amount; '$' with the word dollars |
@@ -86,7 +86,7 @@ Table 1. Rule coverage
 | 74 | Pronoun reference | Reader | vague pronoun reference needs the sense |
 | 75 | Page size | Layout | Word or PDF layout, not text; checked in the rendered document (page size) |
 | 76 | Margins | Layout | Word or PDF layout, not text; checked in the rendered document (margins) |
-| 77 | Default font | Layout | Word or PDF layout, not text; checked in the rendered document (font) |
+| 77 | Default font | Layout | Word or PDF layout, not text; checked in the rendered document (font, and the form clause: 9 pt labels, 10 pt values, font named on runs and defaults, `designlint.py` D07 and D18) |
 | 78 | Text color | Layout | Word or PDF layout, not text; checked in the rendered document (text color) |
 | 79 | Alignment | Layout | Word or PDF layout, not text; checked in the rendered document (alignment) |
 | 80 | Line and paragraph spacing | Layout | Word or PDF layout, not text; checked in the rendered document (line and paragraph spacing) |
@@ -94,7 +94,7 @@ Table 1. Rule coverage
 | 82 | Headings | Layout | Word or PDF layout, not text; checked in the rendered document (heading styles and spacing) |
 | 83 | Heading hierarchy | Layout | Word or PDF layout, not text; checked in the rendered document (heading hierarchy) |
 | 84 | Bold, italics, underlining, and capitals | Pattern | four or more words in all capitals in a row |
-| 85 | Page breaks | Layout | Word or PDF layout, not text; checked in the rendered document (page breaks and widows) |
+| 85 | Page breaks | Layout | Word or PDF layout, not text; checked in the rendered document (page breaks and widows; on a form, the continuation header and the kept-together signature block) |
 | 86 | Headers and footers | Layout | Word or PDF layout, not text; checked in the rendered document (headers and footers) |
 | 87 | First page | Layout | Word or PDF layout, not text; checked in the rendered document (first page) |
 | 88 | Hyperlinks | Pattern | 'Click here' |
@@ -107,8 +107,8 @@ Table 1. Rule coverage
 | 95 | Table titles | Pattern | a table with no title line above it |
 | 96 | Column headings | Reader | unit and scale in headings need the data |
 | 97 | Numeric alignment | Reader | alignment lives in the rendered table |
-| 98 | Table formatting | Reader | formatting lives in the rendered table |
-| 99 | Empty and zero values | Reader | N/A, Unknown, Unlogged need the data |
+| 98 | Table formatting | Reader | formatting lives in the rendered table; on a fill-in form, four borders on each labeled cell and no underscore write lines need the rendered form |
+| 99 | Empty and zero values | Reader | N/A, Unknown, Unlogged need the data; on a form, a blank in a completed form and an initialed N/A need the filled form |
 | 100 | Subject lines | Pattern | a subject line that is only Question, Update, FYI or the like |
 | 101 | Opening | Pattern | 'I hope this email finds you well' and its variants |
 | 102 | Long emails | Reader | bottom line first needs the reader; Jev Rule 5 covers the opening |

@@ -14,7 +14,7 @@ Owner and approver: Dan Gatsakos, General Manager. Proposed 2026-09-30.
 
 ## Rule 98. Table formatting (append)
 
-> Fill-in forms are the exception to limited borders. When a label sits inside the cell it names, the cell carries all four borders, and neighboring cells share them in one joined grid per section. A label without its box floats and reads as stray text. Do not use underscore lines or open space as write space. Data tables keep the limited-border treatment above.
+> Fill-in forms are the exception to limited borders. When a label sits inside the cell it names, the cell carries all four borders, and neighboring cells share them in one joined grid per section. A label without its box floats and reads as stray text. Do not use a typed line of _ characters or open space as write space. Data tables keep the limited-border treatment above.
 
 ## Rule 99. Empty and zero values (append)
 

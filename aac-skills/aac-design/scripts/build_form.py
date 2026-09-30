@@ -17,7 +17,7 @@ PT = 20  # twips per point
 T = {
     # color
     'accent': '1161A0', 'tint': 'E8F0F8', 'caption': '595959', 'border': '7F7F7F', 'text': '000000',
-    # type, in half-points (Word's unit): AAC-WR-001 Rule 77 plus the fill-in form amendment
+    # type, in half-points (Word's unit): AAC-WR-001 Rule 77, including its fill-in form clause (v0.11)
     'sz_caption': 18,   # 9 pt: field labels and signer statements
     'sz_body': 20,      # 10 pt: intro, terms
     'sz_value': 21,     # 10.5 pt: prefilled values and choice text
