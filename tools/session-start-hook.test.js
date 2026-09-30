@@ -22,6 +22,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { shell } = require('./posix-shell.js');
+const BASH = shell('bash');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const HOOK = path.join(REPO_ROOT, '.claude', 'hooks', 'session-start.sh');
@@ -32,7 +34,7 @@ function runHook() {
   fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
   const envFile = path.join(home, 'env-file');
   fs.writeFileSync(envFile, '');
-  const result = spawnSync('bash', [HOOK], {
+  const result = BASH.run([HOOK], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
@@ -50,7 +52,7 @@ function runHook() {
   return { result, home };
 }
 
-test('SessionStart additionalContext names the bare /<skill> spelling and flags /aac-skills:<skill> as non-resolving (issue 242)', () => {
+test('SessionStart additionalContext names the bare /<skill> spelling and flags /aac-skills:<skill> as non-resolving (issue 242)', { skip: BASH.skip }, () => {
   const { result } = runHook();
   assert.equal(result.status, 0, `hook exited ${result.status}\nstderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
   const payload = JSON.parse(result.stdout);
@@ -65,7 +67,7 @@ test('SessionStart additionalContext names the bare /<skill> spelling and flags 
   assert.match(ctx, /issue 242/, `additionalContext missing the issue-242 back-reference:\n${ctx}`);
 });
 
-test('SessionStart additionalContext states that custom agent types do not resolve here (issue 339)', () => {
+test('SessionStart additionalContext states that custom agent types do not resolve here (issue 339)', { skip: BASH.skip }, () => {
   const { result } = runHook();
   assert.equal(result.status, 0, `hook exited ${result.status}\nstderr:\n${result.stderr}`);
   const ctx = JSON.parse(result.stdout).hookSpecificOutput.additionalContext;
@@ -80,7 +82,7 @@ test('SessionStart additionalContext states that custom agent types do not resol
   assert.match(ctx, /issue 339/, `additionalContext missing the issue-339 back-reference:\n${ctx}`);
 });
 
-test('SessionStart additionalContext stays under the 2 KB platform cap (probe #175)', () => {
+test('SessionStart additionalContext stays under the 2 KB platform cap (probe #175)', { skip: BASH.skip }, () => {
   const { result } = runHook();
   assert.equal(result.status, 0);
   const payload = JSON.parse(result.stdout);

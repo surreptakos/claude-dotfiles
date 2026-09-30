@@ -15,7 +15,7 @@
  *     mcpServers of ~/.claude.json without touching servers already there.
  *
  * Fixture: a local git repo carrying all four shapes, cloned over file://, so the test runs
- * offline. Requires bash and git on PATH (Git Bash on Windows).
+ * offline. Requires git on PATH and a bash (tools/posix-shell.js falls back to Git for Windows').
  */
 'use strict';
 const assert = require('node:assert/strict');
@@ -24,6 +24,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { shell } = require('./posix-shell.js');
+const BASH = shell('bash');
 
 const HOOK = path.resolve(__dirname, '..', '.claude', 'hooks', 'upstream-skills.sh');
 
@@ -66,7 +68,7 @@ function makeFixtureRepo(root) {
 }
 
 function runHook(home, repoUrl, extraEnv) {
-  return spawnSync('bash', [HOOK], {
+  return BASH.run([HOOK], {
     encoding: 'utf8',
     env: {
       PATH: process.env.PATH,
@@ -82,7 +84,7 @@ function runHook(home, repoUrl, extraEnv) {
   });
 }
 
-test('a cloud session gets the nested skills, the agents and the MCP servers of an upstream plugin', () => {
+test('a cloud session gets the nested skills, the agents and the MCP servers of an upstream plugin', { skip: BASH.skip }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-skills-'));
   const home = path.join(root, 'home');
   fs.mkdirSync(home);
@@ -119,7 +121,7 @@ test('a cloud session gets the nested skills, the agents and the MCP servers of 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('a failed clone leaves the previous copies and ~/.claude.json alone', () => {
+test('a failed clone leaves the previous copies and ~/.claude.json alone', { skip: BASH.skip }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-skills-'));
   const home = path.join(root, 'home');
   write(path.join(home, '.claude', 'skills', 'alpha', 'SKILL.md'), 'kept\n');
@@ -132,11 +134,11 @@ test('a failed clone leaves the previous copies and ~/.claude.json alone', () =>
   fs.rmSync(root, { recursive: true, force: true });
 });
 
-test('outside a cloud container the hook exits 0 and touches nothing', () => {
+test('outside a cloud container the hook exits 0 and touches nothing', { skip: BASH.skip }, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-skills-'));
   const home = path.join(root, 'home');
   fs.mkdirSync(home);
-  const r = spawnSync('bash', [HOOK], {
+  const r = BASH.run([HOOK], {
     encoding: 'utf8',
     env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, TEMP: process.env.TEMP, TMP: process.env.TMP, UPSTREAM_SKILLS_HOME: home },
   });

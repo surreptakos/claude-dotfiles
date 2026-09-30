@@ -28,6 +28,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
+const { shell } = require('./posix-shell.js');
+const SH = shell('sh');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const SKILL_TEMPLATES = path.join(REPO_ROOT, 'aac-skills', 'project-harness', 'templates');
@@ -272,7 +274,7 @@ test('a repo at v27-v29 has its bare-path entry rewritten to the bash form in pl
   assert.deepStrictEqual(snapshot(root), before);
 });
 
-test('the wired command never depends on the executable bit', () => {
+test('the wired command never depends on the executable bit', { skip: SH.skip }, () => {
   const root = scratchRepo();
   deliver(root);
   const hook = path.join(root, '.claude', 'hooks', 'session-start.sh');
@@ -280,7 +282,7 @@ test('the wired command never depends on the executable bit', () => {
   const s = JSON.parse(fs.readFileSync(path.join(root, '.claude', 'settings.json'), 'utf8'));
   const command = s.hooks.SessionStart[0].hooks[0].command;
   // A local session (no CLAUDE_CODE_REMOTE) exits 0 at once; the bare-path form exits 126 here.
-  const r = spawnSync('sh', ['-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_PROJECT_DIR: root } });
+  const r = SH.run(['-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_PROJECT_DIR: root } });
   assert.strictEqual(r.status, 0, 'a 644 hook must still run through the wired command: ' + r.stderr);
 });
 
