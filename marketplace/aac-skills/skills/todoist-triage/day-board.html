@@ -727,7 +727,7 @@ footer{font-size:12px;color:var(--muted)}
       const taskId = await undoRuling(p);
       const undoneAt = new Date().toISOString();
       if (p.logId){ try { await db.doc("ruling_log/" + p.logId).update({undoneAt}); } catch(e){} }
-      await db.doc("triage/" + p._id).update({status:"open", taskId, choice:null, note:"", answeredAt:null, logId:null, undo:null, error:null, undoneAt});
+      await db.doc("triage/" + p._id).update({status:"open", taskId, choice:null, note:"", answeredAt:null, logId:null, proposal:null, undo:null, error:null, undoneAt});
       refreshTasks();
     } catch(err){
       const msg = (err && (err.message || err.code)) || "failed";
@@ -819,7 +819,9 @@ footer{font-size:12px;color:var(--muted)}
   }
   // A note read by Claude may only carry these update-tasks fields, and only a project this board writes to.
   // Merges are left to the triage run: they need the duplicate's markers and a survivor id.
-  function normalizeNoteRuling(raw){
+  // Labels: the note may only swap the ball label; every other label the task carries (claude, no-sweep) is kept.
+  const BALLS = ["do", "to-lynne", "to-steffi", "to-nick", "to-rob", "to-mark", "chase"];
+  function normalizeNoteRuling(raw, currentLabels){
     const r = raw && typeof raw === "object" ? raw : {};
     const summary = String(r.summary || "").replace(/\s+/g, " ").trim().slice(0, 120);
     const why = String(r.why || "").replace(/\s+/g, " ").trim().slice(0, 200);
@@ -827,7 +829,8 @@ footer{font-size:12px;color:var(--muted)}
     if (!x || !summary) return {summary, why, ruling:null};
     if (x.delete === true) return {summary, why, ruling:{delete:true}};
     const o = {};
-    if (Array.isArray(x.labels) && x.labels.every(l => typeof l === "string" && /^[\w-]{1,40}$/.test(l))) o.labels = x.labels;
+    const balls = Array.isArray(x.labels) ? [...new Set(x.labels.filter(l => BALLS.includes(l)))] : [];
+    if (balls.length === 1) o.labels = (Array.isArray(currentLabels) ? currentLabels : []).filter(l => !BALLS.includes(l)).concat(balls);
     if (typeof x.projectId === "string" && (x.projectId === WONTFIX || PROJECTS.some(q => q.id === x.projectId))) o.projectId = x.projectId;
     if (typeof x.dueString === "string" && x.dueString.trim()) o.dueString = x.dueString.trim().slice(0, 60);
     if (typeof x.deadlineDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.deadlineDate)) o.deadlineDate = x.deadlineDate;
@@ -859,7 +862,7 @@ footer{font-size:12px;color:var(--muted)}
       const sample = window.claude && window.claude.use ? await window.claude.use("sample").catch(() => null) : null;
       if (!sample) throw {code:"sample_unavailable", message:"Claude is not available in this view; open the page on claude.ai"};
       const task = await snapshotTask(p.taskId);
-      const d = normalizeNoteRuling(await sample.json(notePrompt(p, task, note), {cache:false}));
+      const d = normalizeNoteRuling(await sample.json(notePrompt(p, task, note), {cache:false}), task.labels);
       await db.doc("triage/" + p._id).update({proposal:{note, summary:d.summary, why:d.why, ruling:d.ruling, readAt:new Date().toISOString()}, error:null});
     } catch(err){
       const msg = (err && (SAMPLE_COPY[err.code] || err.message || err.code)) || "failed";
