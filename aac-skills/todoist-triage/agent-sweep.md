@@ -58,6 +58,8 @@ Any of them takes the task out of the sweep. Dan removes the label to reopen the
 
 The triage run never starts an agent. Dan does, with the Day Board's **Launch agents** button, once he has answered the day's cards. One click finds every open task labelled `agent`, starts one Claude Code cloud session per task (Default environment, `aac-routines` checkout, auto permission mode), swaps `agent` for `agent-running`, and comments the session link on the task. A task whose session did not start keeps `agent` and is named on the board. The launch prompt only points here: it names the task and this section below.
 
+**The button cannot start sessions on Dan's account today (2026-09-30).** No claude.ai connector named `Claude Code Remote` exists on the account or in the connector directory, so every `create_session` call is refused ("tool is not available on this connector or is blocked by your organization") and the board says so. Until a connector exists, a Claude Code session launches them when Dan asks ("launch my agent tasks"): read every open task labelled `agent`, start one background agent per task on this section's "Run an approved task" steps, and swap `agent` for `agent-running` with a comment naming the session as each starts. Never report an agent as started without that label swap on the task.
+
 ## Run an approved task
 
 The session the board starts works one Todoist task:
