@@ -4,7 +4,10 @@
     python3 designgate.py write     # PostToolUse, matcher Write|Edit|MultiEdit
     python3 designgate.py stop      # Stop
 
-A deliverable is a .docx, .pptx, .html or .htm file.
+A deliverable is a .docx, .pptx, .html or .htm file inside an opted-in folder: one that
+holds, or sits under a folder that holds, the marker file `.aac-design` (issue 1082). Outside
+one both modes exit 0 without reading the file, so a code repository's .html sources never
+meet the gate.
 
 - **write:** lints the file just written with designlint.py. Errors exit 2, and the
   findings go back to Claude on stderr, so it fixes the file before moving on.
@@ -17,8 +20,9 @@ A deliverable is a .docx, .pptx, .html or .htm file.
      gate passes.
   A missing or stale stamp exits 2 with the instruction to run the aac-design critique.
 
-The only files skipped are temporary ones: paths under a temp, render or .design
-directory, and Office lock files (~$*). The loop guard lets a turn end after three
+Inside a marked folder the only files skipped are temporary ones: paths under a temp,
+render or .design directory below the marker, and Office lock files (~$*). Folders above
+the marker do not count, so a folder marked on purpose is gated wherever it lives. The loop guard lets a turn end after three
 consecutive blocks, and says so loudly, so a broken linter cannot wedge a session.
 Standard library only; fails open (exit 0, message on stderr) when it cannot read its
 own input.
@@ -35,6 +39,7 @@ sys.path.insert(0, HERE)
 EXTS = ('.docx', '.pptx', '.html', '.htm')
 SKIP_PARTS = re.compile(r'[\\/](tmp|temp|render|\.design|node_modules|\.git)[\\/]', re.I)
 MAX_BLOCKS = 3
+MARKER = '.aac-design'
 STATE = os.path.join(tempfile.gettempdir(), 'aac-design-gate')
 
 
@@ -48,10 +53,24 @@ def payload():
     raise ValueError('design gate: hook payload is not JSON')
 
 
+def marked_root(p):
+    """The nearest folder at or above the file's own that holds the MARKER file, else None."""
+    d = os.path.dirname(os.path.abspath(p))
+    while True:
+        if os.path.isfile(os.path.join(d, MARKER)):
+            return d
+        parent = os.path.dirname(d)
+        if parent == d:
+            return None
+        d = parent
+
+
 def is_deliverable(p):
     base = os.path.basename(p)
-    return (p.lower().endswith(EXTS) and not base.startswith('~$')
-            and not SKIP_PARTS.search(os.path.abspath(p)) and os.path.isfile(p))
+    if not (p.lower().endswith(EXTS) and not base.startswith('~$') and os.path.isfile(p)):
+        return False
+    root = marked_root(p)
+    return root is not None and not SKIP_PARTS.search(os.sep + os.path.relpath(os.path.abspath(p), root))
 
 
 def sha256(p):
