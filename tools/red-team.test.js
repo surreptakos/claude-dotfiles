@@ -221,6 +221,20 @@ test('behind HTTPS_PROXY no key is needed and no Authorization header is sent (t
   } finally { server.close() }
 })
 
+test('every panel and critic call routes only to providers that keep no data (issue 1055)', async () => {
+  const { server, seen, base } = await mockServer(body => isCritic(body)
+    ? reply(JSON.stringify({ verdict: 'sound', findings: [], panelOnly: [] }))
+    : reply('ok'))
+  try {
+    const { q, d } = tmpFiles()
+    const r = await runScript(['--question', q, '--draft', d, '--panel', 'p/one,p/two', '--critic', 'c/critic'],
+      { OPENROUTER_API_KEY: 'k', OPENROUTER_BASE_URL: base })
+    assert.strictEqual(r.code, 0, r.err)
+    assert.strictEqual(seen.length, 3)
+    for (const s of seen) assert.strictEqual(s.body.provider.data_collection, 'deny', s.body.model)
+  } finally { server.close() }
+})
+
 test('a BYOK call counts the upstream provider cost, not only the OpenRouter fee', () => {
   // Shape of a live openai/gpt-5.5 usage block routed through the account's own OpenAI key.
   assert.strictEqual(callCost({ cost: 0, is_byok: true, cost_details: { upstream_inference_cost: 0.000785 } }), 0.000785)

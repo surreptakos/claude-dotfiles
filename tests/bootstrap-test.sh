@@ -21,7 +21,8 @@
 #      payload, with no `!!` stale-marker line (issue 669: the two SessionStart groups race)
 #   6  session-check — the copy the bootstrap installed — exits 0 and prints its payload-version
 #      line, which this script quotes; and its --end mechanical gate (issue 622) STOPs on a
-#      settings file naming a hook script nothing provides
+#      settings file naming a hook script nothing provides; under the session gate's budget it
+#      cuts a suite that would outlive the gate and still prints the report (issue 1061)
 #   7  every merged SessionStart and UserPromptSubmit command RUNS from the clean home and exits 0
 #      (issue 614: checks 3 and 5 passed for three harness versions while every merged command
 #      carried a literal ${CLAUDE_PLUGIN_ROOT} that Claude Code refuses in settings.json — a gate
@@ -52,6 +53,11 @@
 #                                                        # a STOP additionalContext line, and gh;
 #                                                        # session-check STOPs on the cause. Exits 0
 #                                                        # when that honesty holds, 1 when it does not.
+#   tests/bootstrap-test.sh --scenario token-clone      # issue 1047: BOOTSTRAP_DOTFILES_TOKEN set and
+#                                                        # the clone taken from a local bare repo: the
+#                                                        # marker reports success and the clone's
+#                                                        # remote URL, .git/config and the hook's
+#                                                        # output carry no userinfo and no token.
 #
 # ENV
 #   BOOTSTRAP_TEST_SCRATCH   scratch root to use instead of a fresh mktemp -d
@@ -81,8 +87,8 @@ case "$FAULT" in
   *) echo "bootstrap-test: unknown fault '$FAULT' (known: missing-hook-entry, verbatim-plugin-root, stale-payload, gate-before-bootstrap)" >&2; exit 64 ;;
 esac
 case "$SCENARIO" in
-  ""|clone-failure) ;;
-  *) echo "bootstrap-test: unknown scenario '$SCENARIO' (known: clone-failure)" >&2; exit 64 ;;
+  ""|clone-failure|token-clone) ;;
+  *) echo "bootstrap-test: unknown scenario '$SCENARIO' (known: clone-failure, token-clone)" >&2; exit 64 ;;
 esac
 
 fails=0
@@ -213,6 +219,81 @@ if [ "$SCENARIO" = "clone-failure" ]; then
     echo "bootstrap gate (clone-failure scenario): PASS"
   else
     echo "bootstrap gate (clone-failure scenario): FAIL ($fails check(s))"
+  fi
+  [ -n "${BOOTSTRAP_TEST_KEEP:-}" ] || rm -rf "$SCRATCH" 2>/dev/null || true
+  [ "$fails" -eq 0 ] || exit 1
+  exit 0
+fi
+
+# ------------------------------------------------ scenario: token-clone (issue 1047) ----------
+# BOOTSTRAP_DOTFILES_TOKEN is set and there is no BOOTSTRAP_SOURCE, so the hook takes its own
+# clone, here from a local bare repository (no network, no credential prompt). The token travels to
+# git through askpass and must land nowhere: the marker reports success, the clone's remote URL has
+# no `@`, and a sentinel token value appears in neither .git/config, the marker, the merged user
+# settings, the $CLAUDE_ENV_FILE nor the hook's stdout and stderr. A second run against the cached
+# clone takes the fetch path with the variable still set and must succeed too.
+if [ "$SCENARIO" = "token-clone" ]; then
+  TOKEN="ghp_sentinel1047TokenMustNotLeak"
+  WORK="$SCRATCH/dotfiles-work"
+  BARE="$SCRATCH/dotfiles-bare.git"
+  mkdir -p "$WORK/marketplace"
+  cp -r "$PAYLOAD" "$WORK/marketplace/aac-skills"
+  git -C "$WORK" init -q -b master
+  git -C "$WORK" add -A
+  git -C "$WORK" -c user.name=gate -c user.email=gate@example.invalid commit -q -m fixture
+  git clone -q --bare "$WORK" "$BARE"
+  : > "$ENV_FILE"
+  hook_out="$SCRATCH/hook-stdout.json"
+  hook_err="$SCRATCH/hook-stderr.txt"
+  MARKER="$CLEAN_HOME/.claude/hook-state/aac-bootstrap/state.json"
+  CLONE="$CLEAN_HOME/.aac-dotfiles"
+  for round in first cached; do
+    env -i \
+      PATH="$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE=true \
+      BOOTSTRAP_HOME="$CLEAN_HOME" \
+      BOOTSTRAP_DOTFILES_REPO="file://$BARE" \
+      BOOTSTRAP_DOTFILES_TOKEN="$TOKEN" \
+      BOOTSTRAP_SKIP_GH=1 \
+      CLAUDE_ENV_FILE="$ENV_FILE" \
+      ${passthrough[@]+"${passthrough[@]}"} \
+      bash "$HOOK" >"$hook_out" 2>"$hook_err"
+    hook_status=$?
+    if [ "$hook_status" -eq 0 ]; then
+      pass "hook exited 0 with the token set ($round run)"
+    else
+      fail "hook exited $hook_status with the token set ($round run); stderr: $(tail -3 "$hook_err" | tr '\n' ' ')"
+    fi
+    if python3 - "$MARKER" <<'PYMARK'
+import json, sys
+m = json.load(open(sys.argv[1]))
+sys.exit(0 if m.get('failed') is not True and m.get('payload_version') and m.get('skills') else 1)
+PYMARK
+    then
+      pass "marker reports success ($round run)"
+    else
+      fail "marker does not report success ($round run): $(head -c 300 "$MARKER" 2>/dev/null)"
+    fi
+    url="$(git -C "$CLONE" config --get remote.origin.url 2>/dev/null || true)"
+    case "$url" in
+      ""|*@*) fail "remote.origin.url is empty or carries userinfo ($round run): '$url'" ;;
+      *) pass "remote.origin.url has no '@' ($round run): $url" ;;
+    esac
+    # The second run must not be short-circuited by the fresh-marker rule.
+    touch -d '10 minutes ago' "$MARKER"
+  done
+  leaks=$(grep -rl --binary-files=text -F "$TOKEN" "$CLEAN_HOME" "$ENV_FILE" "$hook_out" "$hook_err" 2>/dev/null | head -3 | tr '\n' ' ')
+  if [ -z "$leaks" ]; then
+    pass "the token value appears nowhere under the home (.git/config included), the env file or the hook output"
+  else
+    fail "the token value leaked into: $leaks"
+  fi
+  echo ""
+  if [ "$fails" -eq 0 ]; then
+    echo "bootstrap gate (token-clone scenario): PASS"
+  else
+    echo "bootstrap gate (token-clone scenario): FAIL ($fails check(s))"
   fi
   [ -n "${BOOTSTRAP_TEST_KEEP:-}" ] || rm -rf "$SCRATCH" 2>/dev/null || true
   [ "$fails" -eq 0 ] || exit 1
@@ -424,6 +505,30 @@ else
   else
     fail "session-check printed no 'aac-bootstrap payload v$version' line"
     sed -n '1,40p' "$check_out" >&2
+  fi
+
+  # Issue 1061: under the session gate's budget the installed check cuts a suite that would
+  # outlive it and still prints the whole report, naming the cut, instead of being killed silent.
+  BUDGET_FIXTURE="$SCRATCH/fixture-budget"
+  mkdir -p "$BUDGET_FIXTURE/.git" "$BUDGET_FIXTURE/.claude"
+  echo '{"harness": false, "test": "exec node -e \"setTimeout(() => {}, 30000)\"", "testTimeoutMs": 600000}' \
+    > "$BUDGET_FIXTURE/.claude/session.json"
+  budget_out="$SCRATCH/session-check-budget.txt"
+  budget_began=$(date +%s)
+  ( cd "$BUDGET_FIXTURE" && env -i \
+      PATH="$CLEAN_HOME/.local/bin:$PATH_SHIM" \
+      HOME="$CLEAN_HOME" \
+      CLAUDE_CODE_REMOTE_SESSION_ID=ci-bootstrap-gate \
+      BOOTSTRAP_MASTER_MANIFEST="$PAYLOAD/.claude-plugin/plugin.json" \
+      SESSION_CHECK_BUDGET_MS=8000 \
+      node "$CHECK" ) >"$budget_out" 2>&1
+  budget_took=$(( $(date +%s) - budget_began ))
+  if grep -q 'tests — no verdict, not a pass' "$budget_out" && grep -q 'Some things need a look' "$budget_out" \
+      && [ "$budget_took" -lt 20 ]; then
+    pass "session-check under an 8 s budget cut the suite and finished in ${budget_took} s: $(grep -o 'tests — no verdict[^;]*' "$budget_out" | cut -c1-110)"
+  else
+    fail "session-check under an 8 s budget did not report the cut suite (took ${budget_took} s)"
+    sed -n '1,30p' "$budget_out" >&2
   fi
 
   # Without the pinned manifest the version master offers has to come off the REMOTE. Reading it

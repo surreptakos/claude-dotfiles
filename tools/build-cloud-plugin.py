@@ -979,6 +979,16 @@ def main():
                   "Checking the fleet is launched from its own repository..."),
         ]})
 
+    # Skill hook fragments (issue 1082): a packaged skill that carries hooks/hooks.fragment.json has
+    # each of its groups appended to the event's array. The commands name the script inside the
+    # skill through ${CLAUDE_PLUGIN_ROOT}/skills/<name>/, so nothing is copied. Keys starting with
+    # an underscore are notes, not events. aac-design's gate is the first: it acts only inside a
+    # folder carrying its opt-in marker, which is what makes it safe to run plugin-wide.
+    for fragment in sorted((plugin_root / "skills").glob("*/hooks/hooks.fragment.json")):
+        for event, groups in json.loads(fragment.read_text(encoding="utf-8")).items():
+            if not event.startswith("_"):
+                governance_hooks.setdefault(event, []).extend(groups)
+
     (hooks_dir / "hooks.json").write_bytes((
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )

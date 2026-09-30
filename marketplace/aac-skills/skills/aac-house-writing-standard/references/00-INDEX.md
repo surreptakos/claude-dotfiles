@@ -41,7 +41,7 @@ one of them, name that document and hand the work to it.
 
 ## Mechanical check
 
-`scripts/wr001-lint.js` decides 57 of the 167 rules by pattern and 5 by Jev
+`scripts/wr001-lint.js` decides 57 of the 167 rules by pattern and 7 by Jev
 (judgment, warning only); `scripts/wr001-coverage.md` says how every rule is
 checked, or why a reader decides it. Run the linter before reading, and read
 for the rest.
