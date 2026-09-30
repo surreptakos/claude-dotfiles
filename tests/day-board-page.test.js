@@ -111,3 +111,8 @@ test("a blockers answer in the wrong shape requires every overdue item (fails to
   assert.match(must, /annual review/);
   assert.match(must, /shared drive/);
 });
+
+test("no prompt the page sends calls a review confidential (Dan, 2026-09-30: the Mireya review audit belongs in the post)", () => {
+  const offending = script.split(/\r?\n/).filter(l => /(confidential|reveal|CONF_DETAIL|NEVER IN THE POST|no pay)/i.test(l) && /\breviews?\b/i.test(l) && !/is fine|is not confidential|not confidential/i.test(l));
+  assert.deepStrictEqual(offending, []);
+});

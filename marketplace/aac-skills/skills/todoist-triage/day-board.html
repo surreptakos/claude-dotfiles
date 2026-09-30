@@ -1131,7 +1131,7 @@ footer{font-size:12px;color:var(--muted)}
     const e = hudNorm(ev).toLowerCase();
     return /^kept verbatim($|[\s:;,.-])/.test(e) ? "kept" : /^edited:/.test(e) ? "edited" : /^new($|[\s:;,.-])/.test(e) ? "new" : "";
   };
-  const CONF_DETAIL = "pay, money, review, discipline, health, leave or identity detail in a team post";
+  const CONF_DETAIL = "pay, money, discipline, health, leave or identity detail in a team post";
   const LINE_KEYS = ["text","evidence"], DROP_KEYS = ["text","why"];
   const DROP_WHY_RX = /^(done|cleared|trimmed|withheld):\s*\S/i;
 
@@ -1268,7 +1268,7 @@ footer{font-size:12px;color:var(--muted)}
       "THE MANAGER'S RULES, WORD FOR WORD:",
       DAN_RULES.join("\n"),
       "",
-      "The post goes to the whole team, so neither a line nor its evidence may reveal anyone's pay, bonus, raise, promotion, performance review, discipline, health, sickness, leave, identity number, or any money amount.",
+      "The post goes to the whole team, so neither a line nor its evidence may reveal anyone's pay, bonus, raise, promotion, discipline, health, sickness, leave, identity number, or any money amount. Naming a review or an audit that is on someone's plate, or a quote, invoice or ticket number, is fine.",
       "",
       "HIS LAST POST'S LINES (his own words):",
       JSON.stringify({report: last.report, focus: last.focus, risks: last.risks}),
@@ -1280,7 +1280,7 @@ footer{font-size:12px;color:var(--muted)}
       "- outcome: (report lines) does it state an outcome (changed, moved forward, decided, sent, completed, now waiting on someone) rather than activity? Answer true for other sections.",
       "- consequence: (risks lines that are not kept) does it say what slips or what cannot move, or is it exactly \"None today.\"? Answer true for other lines.",
       "- generic: is it a generic item such as interruptions, traffic, meetings getting cancelled or emergencies?",
-      "- confidential: does the line or its evidence reveal pay, bonus, raise, promotion, review, discipline, health, sickness, leave, an identity number or a money amount?",
+      "- confidential: does the line or its evidence reveal pay, bonus, raise, promotion, discipline, health, sickness, leave, an identity number or a money amount? That a review or audit is due is not confidential.",
       "- supported: does its evidence field actually support what the line claims? Answer true for kept lines.",
       "- paraphrase: (lines that are not kept) does it restate one of his last post's lines, in any section, in different words? A report line that re-reports his last report is a paraphrase. Answer false for kept lines.",
       'Reply with only JSON: {"verdicts": [{"section": string, "index": number, "outcome": boolean, "consequence": boolean, "generic": boolean, "confidential": boolean, "supported": boolean, "paraphrase": boolean, "reason": string}]}'
@@ -1421,7 +1421,7 @@ footer{font-size:12px;color:var(--muted)}
       "DAN'S RULES, WORD FOR WORD:",
       DAN_RULES.join("\n"),
       "",
-      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note or board ruling; a new risk says what slips or what cannot move; no pay, money, review, discipline, health, leave or identity detail anywhere. Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
+      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note or board ruling; a new risk says what slips or what cannot move; no pay, money, discipline, health, leave or identity detail anywhere (naming a review, an audit or a document number is fine). Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
       "Change as little as the problem needs. If a line cannot be fixed from the evidence, drop it.",
       "",
       "LINES TO FIX:",
@@ -1612,7 +1612,7 @@ footer{font-size:12px;color:var(--muted)}
       "- Every line of his last focus and risks is carried verbatim, edited in one span, or listed under dropped with its text copied exactly and why starting \"done:\", \"cleared:\", \"trimmed:\" or \"withheld:\" (withheld = his line names a confidential detail, so it cannot be carried; write exactly \"withheld: confidential detail\"). Dropped lists only his lines.",
       "- No line longer than the longest line in his last post.",
       "- Every new risk says what slips or what cannot move. No generic risks. No real risk: the single line \"None today.\"",
-      "- CONFIDENTIAL, NEVER IN THE POST OR ITS EVIDENCE, NOT EVEN IN HIS CARRIED LINES: pay, bonus, raise, salary, stipend, promotion, any money amount, performance or annual reviews, discipline, health, sickness, leave, identity numbers. The whole team reads it.",
+      "- CONFIDENTIAL, NEVER IN THE POST OR ITS EVIDENCE, NOT EVEN IN HIS CARRIED LINES: pay, bonus, raise, salary, stipend, promotion, any money amount, discipline, health, sickness, leave, identity numbers. The whole team reads it.",
       "- Each line is exactly {\"text\", \"evidence\"}; each dropped entry exactly {\"text\", \"why\"}. No other fields.",
       "",
       "HIS LAST POST (" + (ctx.last ? ctx.last.at.toISOString() : "none found") + "):",
