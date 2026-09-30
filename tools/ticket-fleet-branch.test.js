@@ -2979,7 +2979,8 @@ test('tree guard from a .claude/worktrees/* checkout with the default state dir 
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const defaultStateDir = (src.match(/treeGuardStateDir: '([^']+)'/) || [])[1];
   assert.equal(defaultStateDir, '.git/orchestrator-tree-guard');
-  if (spawnSync('bash', ['-c', 'true']).error) { t.skip('no bash on PATH to run the guard commands; covered by the Linux gate and Git Bash'); return; }
+  // The guard agents run bash; a Windows shell with no bash on PATH (PowerShell) cannot stand in.
+  if (BASH.skip) { t.skip(BASH.skip); return; }
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tree-guard-1041-'));
   const main = path.join(tmp, 'main');
   const wt = path.join(main, '.claude', 'worktrees', 'wave');
@@ -2996,10 +2997,10 @@ test('tree guard from a .claude/worktrees/* checkout with the default state dir 
     git(main, 'commit', '-q', '-m', 'init');
     git(main, 'worktree', 'add', '-q', '-b', 'wave', wt);
     assert.ok(fs.statSync(path.join(wt, '.git')).isFile(), 'fixture: a linked worktree\'s .git is a file');
-    const wtPosix = spawnSync('bash', ['-c', 'pwd'], { cwd: wt, encoding: 'utf8' }).stdout.trim();
+    const wtPosix = BASH.run(['-c', 'pwd'], { cwd: wt, encoding: 'utf8' }).stdout.trim();
     const bashAgent = async (prompt, opts) => {
       if (opts.label.startsWith('orchestrator-head:')) return { exitCode: 0, stdout: `wave\n${'a'.repeat(40)}\n`, stderr: '' };
-      const r = spawnSync('bash', ['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
+      const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
       return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
     };
     // No treeGuardStateDir override: driveTreeGuard's cfg carries the fleet default checked above.
