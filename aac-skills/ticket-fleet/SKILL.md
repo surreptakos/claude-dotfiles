@@ -4,10 +4,10 @@ description: >
   Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the
   ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
 metadata:
-  modified: "2026-09-30T14:40:54Z"
-  previous-modified: "2026-09-30T14:34:34Z"
-  revision: "62"
-  content-sha: "e65c4b9121a3"
+  modified: "2026-09-30T18:24:28Z"
+  previous-modified: "2026-09-30T14:40:54Z"
+  revision: "63"
+  content-sha: "58239173d730"
 ---
 
 # ticket-fleet
@@ -20,6 +20,13 @@ result; every ticket is worked by subagents.
 
 **One fleet at a time (Dan, 2026-09-26).** Wait for a running wave's result before launching
 another in the same repo.
+
+**A desktop session runs the `ready-for-local-agent` tickets itself (Dan, 2026-09-30).** The wave
+serves one repo and skips a ticket labelled for a local agent, or one that changes another repo.
+When this session is on the desktop that ticket names, it is that local agent: start each one
+as a background agent in the right clone, in parallel with the wave, and never leave it out
+because the fleet cannot take it. Run 6abd47d1 left #1069 out this way while its dependant #1072
+waited on it.
 
 ## Launch a wave
 
