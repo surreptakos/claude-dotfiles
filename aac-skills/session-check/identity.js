@@ -169,14 +169,13 @@ function describe(registry, id) {
 }
 
 /**
- * Walk every <root>/<account>/<org>/scheduled-tasks.json and report enabled, cron-scheduled
- * routines sitting under an account or org other than the registry says. Manual-only tasks (no
- * cron) never fire on their own and are skipped. Tasks the registry does not know are reported
- * separately so the registry can be completed.
+ * Every enabled, cron-scheduled task in every <root>/<account>/<org>/scheduled-tasks.json, as
+ * { taskId, account, org, cron, file }. Manual-only tasks (no cron) never fire on their own and
+ * are skipped. `scanned` counts the registry files read. Read-only: nothing here writes a file.
  */
-function auditRoutines(registry, root) {
-  const result = { scanned: 0, stray: [], unregistered: [] };
-  if (!registry || !root || !fs.existsSync(root)) return result;
+function readLiveRoutines(root) {
+  const result = { scanned: 0, tasks: [] };
+  if (!root || !fs.existsSync(root)) return result;
   for (const account of safeReaddir(root)) {
     const accountDir = path.join(root, account);
     if (!isDir(accountDir)) continue;
@@ -194,22 +193,61 @@ function auditRoutines(registry, root) {
         if (!t || typeof t !== 'object' || !t.id || !t.enabled) continue;
         if (!t.cronExpression) continue; // manual-only: never fires by itself
         const taskId = t.filePath ? path.basename(path.dirname(t.filePath)) : t.id;
-        const want = registry.routines[taskId];
-        const where = `${labelFor(registry, account) || account.slice(0, 8)}/${orgLabelFor(registry, labelFor(registry, account), org) || org.slice(0, 8)}`;
-        if (!want) { result.unregistered.push({ taskId, where, cron: t.cronExpression }); continue; }
-        const ownerUuid = (registry.accounts[want.owner] || {}).uuid || '';
-        const accountOk = ownerUuid && ownerUuid.toLowerCase() === account.toLowerCase();
-        const orgOk = !want.org || want.org.toLowerCase() === org.toLowerCase();
-        if (!accountOk || !orgOk) {
-          result.stray.push({ taskId, where, owner: want.owner, cron: t.cronExpression, file });
-        }
+        result.tasks.push({ taskId, account, org, cron: t.cronExpression, file });
       }
     }
   }
   return result;
 }
 
+function isOwnerSeat(registry, want, account, org) {
+  const ownerUuid = (registry.accounts[want.owner] || {}).uuid || '';
+  const accountOk = ownerUuid && ownerUuid.toLowerCase() === account.toLowerCase();
+  const orgOk = !want.org || want.org.toLowerCase() === org.toLowerCase();
+  return Boolean(accountOk && orgOk);
+}
+
+/**
+ * Walk every <root>/<account>/<org>/scheduled-tasks.json and report enabled, cron-scheduled
+ * routines sitting under an account or org other than the registry says. Tasks the registry does
+ * not know are reported separately so the registry can be completed.
+ */
+function auditRoutines(registry, root) {
+  const result = { scanned: 0, stray: [], unregistered: [] };
+  if (!registry) return result;
+  const live = readLiveRoutines(root);
+  result.scanned = live.scanned;
+  for (const { taskId, account, org, cron, file } of live.tasks) {
+    const want = registry.routines[taskId];
+    const where = `${labelFor(registry, account) || account.slice(0, 8)}/${orgLabelFor(registry, labelFor(registry, account), org) || org.slice(0, 8)}`;
+    if (!want) { result.unregistered.push({ taskId, where, cron }); continue; }
+    if (!isOwnerSeat(registry, want, account, org)) {
+      result.stray.push({ taskId, where, owner: want.owner, cron, file });
+    }
+  }
+  return result;
+}
+
+/**
+ * Which registered routines this machine runs (setup check, issue 1071). `missing`: registered
+ * routines with no enabled, cron-scheduled task under their owner account/org - what the anchor
+ * PC still has to register. `live`: registered routines enabled under any account - what a PC
+ * other than the anchor has to disable.
+ */
+function routinePresence(registry, root) {
+  const ids = Object.keys((registry && registry.routines) || {});
+  const home = new Set();
+  const live = new Set();
+  for (const { taskId, account, org } of readLiveRoutines(root).tasks) {
+    const want = registry.routines[taskId];
+    if (!want) continue;
+    live.add(taskId);
+    if (isOwnerSeat(registry, want, account, org)) home.add(taskId);
+  }
+  return { registered: ids, missing: ids.filter((id) => !home.has(id)), live: ids.filter((id) => live.has(id)) };
+}
+
 module.exports = {
   resolveIdentity, loadRegistry, registryPath, labelFor, orgLabelFor, repoEntry, describe,
-  auditRoutines, desktopSessionsRoot, cliStateFile, findDesktopSession, isCloud,
+  auditRoutines, routinePresence, desktopSessionsRoot, cliStateFile, findDesktopSession, isCloud,
 };

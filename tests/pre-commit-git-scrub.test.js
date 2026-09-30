@@ -9,11 +9,13 @@
  * The hook strips the variables before the test command; these tests fail if an edit drops that.
  */
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { shell } = require('../tools/posix-shell.js');
+
+const SH = shell('sh');
 
 const ROOT = path.join(__dirname, '..');
 const TEMPLATE = path.join(ROOT, 'aac-skills', 'project-harness', 'templates', 'pre-commit');
@@ -37,11 +39,7 @@ test('every pre-commit hook unsets git\'s hook environment before it runs the te
 });
 
 test('the scrub really clears the variables for the test command the template runs', (t) => {
-  try {
-    execFileSync('sh', ['-c', 'exit 0'], { stdio: 'ignore' });
-  } catch {
-    return t.skip('no POSIX sh on this platform');
-  }
+  if (SH.skip) return t.skip(SH.skip);
   const probe = 'printf "%s\\n" ' + SCRUBBED.map((n) => `"${n}=[\${${n}-}]"`).join(' ');
   const src = fs.readFileSync(TEMPLATE, 'utf8');
   assert.match(src, /^TEST_COMMAND \|\| \{$/m, 'template no longer runs a bare TEST_COMMAND line');
@@ -55,7 +53,9 @@ test('the scrub really clears the variables for the test command the template ru
     fs.writeFileSync(file, hook);
     const env = Object.assign({}, process.env);
     for (const name of SCRUBBED) env[name] = `/leaked/${name}`;
-    const out = execFileSync('sh', [file], { cwd: dir, env, encoding: 'utf8' });
+    const r = SH.run([file], { cwd: dir, env, encoding: 'utf8' });
+    assert.equal(r.status, 0, `hook exited ${r.status}: ${r.stderr}`);
+    const out = r.stdout;
     for (const name of SCRUBBED) {
       assert.match(out, new RegExp(`^${name}=\\[\\]$`, 'm'),
         `${name} reached the test command as ${env[name]}`);
