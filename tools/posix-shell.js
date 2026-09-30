@@ -41,8 +41,9 @@ function shell(name) {
     skip: exe ? false : `no ${name}: not on PATH and no Git for Windows bin/${name}.exe`,
     run(args, opts) {
       const r = spawnSync(exe, args, opts);
-      // EPIPE with an exit status: the child ran and exited without reading `input`.
-      if (r.error && !(r.error.code === 'EPIPE' && r.status !== null)) throw new Error(`${exe} ${args.join(' ')} did not start: ${r.error.message}`);
+      // EPIPE with an exit status: the child ran and exited without reading `input`. Windows
+      // reports the same broken pipe as EOF (DAN-INSPIRON15, 2026-09-30: status 3, code EOF).
+      if (r.error && !((r.error.code === 'EPIPE' || r.error.code === 'EOF') && r.status !== null)) throw new Error(`${exe} ${args.join(' ')} did not start: ${r.error.message}`);
       return r;
     },
   };
