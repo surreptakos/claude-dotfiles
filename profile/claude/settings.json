@@ -108,7 +108,7 @@
       "**Internal package registry**: None configured",
       "**Sensitive data locations & audiences**: config/people.yaml (person records), M365 export snapshots and extracted thread files (full mail, Teams, and calendar bodies), and generated O3 briefs in the OneDrive O3 Prep folder hold personal and confidential employee data; also any file or store holding credentials or regulated data; preserve exact handles when known and share only with audiences cleared at the [named+specifics] bar",
       "**Data retention / declassification**: None configured",
-      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment (hyphen/underscore/dot-delimited); additionally, per this repo's own boundary, direct Todoist writes — only `python -m aac_routines.todoist_guard` may create or change Todoist tasks",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries `prod` or `production` as a whole word or name segment (hyphen/underscore/dot-delimited); additionally, per this repo's own boundary, direct Todoist writes — only these sanctioned writers may create or change Todoist tasks: `python -m aac_routines.todoist_guard`, the todoist-triage skill and its Day Board (through the Todoist connector), post-O3 intake, and REST fallback writes Dan asks for; any other Todoist write is out of bounds",
       "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
       "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries `prod` or `production` as a whole word or name segment",
       "### User-specific",
