@@ -1462,6 +1462,41 @@ class AskMattGateTests(unittest.TestCase):
             )["hookSpecificOutput"]["additionalContext"]
             self.assertNotIn("CORRECTION NOT CLOSED", again)  # consumed once
 
+    # Issue 1213: session ba3aee66 fixed two corrections in a worktree beside the checkout and
+    # merged the PRs, all from the shell and the GitHub tools, and was still told it changed no file.
+    def test_a_commit_in_a_worktree_closes_a_correction_turn(self) -> None:
+        worktree = "C:/repo/.claude/worktrees/links-fix"
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(Path(folder), "s-wt", "Wrong, links not IDs", [
+                ("Bash", {"command": f'git -C "{worktree}" add -A && git -C "{worktree}" commit -m "fix: links"'}),
+            ])
+            self.assertNotIn("pending_correction", turn["state"])
+            self.assertEqual(
+                turn["state"]["correction_closed"]["landings"], [{"kind": "commit", "dir": worktree}]
+            )
+
+    def test_a_pr_merge_closes_a_correction_turn_and_records_the_pr(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(Path(folder), "s-merge", "Wrong, links not IDs", [
+                ("Bash", {"command": "gh pr merge 1206 --squash --delete-branch"}),
+                ("mcp__github__merge_pull_request", {"owner": "o", "repo": "r", "pullNumber": 1208}),
+            ])
+            self.assertNotIn("pending_correction", turn["state"])
+            self.assertEqual(
+                [landing["pr"] for landing in turn["state"]["correction_closed"]["landings"]],
+                [1206, 1208],
+            )
+            log = (Path(folder) / "governance.log").read_text(encoding="utf-8")
+            self.assertIn("merge of PR 1206, merge of PR 1208", log)
+
+    def test_reading_git_and_prs_does_not_close_a_correction_turn(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            turn = self._correction_turn(Path(folder), "s-read", "Wrong, links not IDs", [
+                ("Bash", {"command": "git status && git log -1 && gh pr view 1206"}),
+            ])
+            self.assertIn("CORRECTION NOT CLOSED", turn["state"]["pending_correction"])
+            self.assertNotIn("correction_closed", turn["state"])
+
     def test_an_ordinary_prompt_is_not_a_correction(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             turn = self._correction_turn(Path(folder), "s-plain", "do them all", ["Bash"])
@@ -1808,18 +1843,22 @@ class AskMattGateTests(unittest.TestCase):
             self.assertEqual(lint.returncode, 0, lint.stdout)
             self.assertIn("caveman off", lint.stdout)
 
-    def _transcript_with_tools(self, folder: Path, tools: list[str], text: str) -> str:
-        """A transcript: one user prompt, then tool calls, then the assistant's final text."""
+    def _transcript_with_tools(self, folder: Path, tools: list, text: str) -> str:
+        """A transcript: one user prompt, then tool calls, then the assistant's final text.
+        A tool is a name, or a (name, input) pair."""
         path = folder / "transcript.jsonl"
         records = [{"type": "user", "message": {"role": "user", "content": "do it"}}]
-        for name in tools:
+        for n, tool in enumerate(tools):
+            name, tool_input = (tool, {}) if isinstance(tool, str) else tool
             records.append({
                 "type": "assistant",
-                "message": {"content": [{"type": "tool_use", "name": name, "input": {}}]},
+                "message": {"content": [
+                    {"type": "tool_use", "id": f"t{n}", "name": name, "input": tool_input}
+                ]},
             })
             records.append({
                 "type": "user",
-                "message": {"content": [{"type": "tool_result", "tool_use_id": "x", "content": "ok"}]},
+                "message": {"content": [{"type": "tool_result", "tool_use_id": f"t{n}", "content": "ok"}]},
             })
         records.append({"type": "assistant", "message": {"content": [{"type": "text", "text": text}]}})
         path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
