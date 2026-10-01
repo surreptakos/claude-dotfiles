@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-10-01T03:25:55Z"
-  previous-modified: "2026-10-01T03:11:13Z"
-  revision: "10"
-  content-sha: "f4a1b979ac70"
+  modified: "2026-10-01T03:58:33Z"
+  previous-modified: "2026-10-01T03:25:55Z"
+  revision: "11"
+  content-sha: "867e3954df91"
 ---
 
 # AAC design
@@ -86,6 +86,15 @@ Audit an existing page, document, deck or PDF against every catalog row that app
    python3 scripts/score.py ledger.json --markdown --report findings.html --stamp <file|url|Drive link>
    ```
    It rejects (exit 3) a ledger missing an applicable id, an N/A without a reason, or detector output shown before the rows were in. The gate needs full coverage, no open P0 or P1 owned by the ledger's `auditor`, and a dual-agent method. A file is stamped by its sha256, a URL by its address plus deployed commit, a Drive file by its file id plus revision id (copy the bundle's `subject` into the ledger); `score.py --check-stamp <target> [--commit SHA]` says whether the stamp is still fresh, and asks Drive for a Drive file's revision now. The report lists every catalogued conflict whose two rows are in the ledger, with the rule that won, its source and the precedence reason; a FAIL on the losing row while the winner PASSes is settled by precedence and is not open. To overrule a decision, change the ledger row and say so in the report. Publish `findings.html` as the findings page; its first line is the method line. Done when score.py exits 0, or the report names what blocks.
+4. **Hand off, then draft tickets.**
+   ```bash
+   python3 scripts/score.py ledger.json --handoff handoff/ --tickets tickets.json --markdown
+   ```
+   `--handoff` writes one list per owner (`handoff/<owner>.md`) of its findings, fixes and priorities, taken from each FAIL row's `owner`; a FAIL with no owner makes the ledger invalid (exit 3) instead of landing in a list. `--tickets` drafts one ticket per open accessibility FAIL with its WCAG criterion and severity, and files nothing; a rule whose catalog row names no criterion takes the row's `"wcag": "n.n.n"`. Show the user every draft and ask which repository they go to: never assume one. Only once the user names it, file them:
+   ```bash
+   python3 scripts/score.py --file-tickets tickets.json --repo OWNER/NAME
+   ```
+   It prints the drafts again, files each unfiled one with `gh`, and records its URL so a rerun files nothing twice; without `--repo` it files nothing and exits 2. Done when each owner has its list and the drafts are shown, or filed into the repository the user named.
 
 ## Rules the steps depend on
 
