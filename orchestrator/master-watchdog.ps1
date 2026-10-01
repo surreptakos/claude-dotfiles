@@ -9,8 +9,10 @@
     master runs at a time (Dan, 2026-09-02): the watchdog launches one repo's master, rooted in
     that repo's clone; that master runs ONE pass, writes a `**Pass complete - <UTC>**` line into
     its state issue and stops; a later watchdog slot sees the marker, closes that window, and
-    launches the next repo. Repos are served in the shared repo list's priority order (lib/repos.json) the first time round,
-    then least-recently-served first, so every repo gets a turn.
+    launches the next repo. Repos are DRAINED in the shared repo list's priority order
+    (lib/repos.json; Dan, 2026-09-30): the priority-1 repo is launched again and again until its
+    state issue says nothing is left, then priority 2, and so on. A drained repo is served again
+    only when its tracker shows new activity.
 
     A master must run inside the repo it serves: the plugin-served ticket-fleet script
     (aac-skills/ticket-fleet/ticket-fleet.js, invoked via Workflow scriptPath) is cwd-relative
@@ -43,8 +45,20 @@
          its own -IdleMinutes (default 5). If only the marker is stale but the transcript has
          been touched inside -StallIdleMinutes, log "possibly stalled; not killed" and leave
          it alone.
-      3. Nothing alive: pick the next repo - never-served repos first in priority order, then
-         the one whose latest marker (heartbeat or pass complete) is oldest - and launch it:
+      3. Nothing alive: walk the served repos in priority order and launch the FIRST one that
+         still has work. A repo's state-issue JSON decides (the master writes it at Pass
+         complete, RUNBOOK.md "Pass complete"):
+           - lastPassOutcome null or absent (never served): has work.
+           - `empty`, `stalled-*`, `blocked-*`: drained. Has work again only when an issue or
+             PR in that repo (state issues in claude-dotfiles, label `orchestrator`, excluded)
+             was updated after lastPassAt. Relaunching a stalled repo with nothing new would
+             loop it every slot and starve the rest.
+           - `cap-*`: has work again once the UTC date has moved past lastPassAt's.
+           - anything else (`success`, `worked`): has work.
+         A repo whose JSON carries a live claim by another venue (venue set, not local-pc,
+         venueAt under -ClaimMinutes old) is skipped this slot: a cloud Routine is serving it
+         and the local master would only boot, defer and exit. When every served repo is
+         drained or claimed, nothing is launched. Then launch the pick:
            set AAC_ORCHESTRATOR_AUTONOMOUS=1 && claude --dangerously-skip-permissions
              --remote-control master-<slug> "<boot prompt>"
          in a visible cmd.exe window with the working directory set to the repo clone.
@@ -83,6 +97,10 @@
     least this long. Default 30. Keep it above the master's own heartbeat cadence so a slow
     but live pass is not recycled.
 
+.PARAMETER ClaimMinutes
+    A state issue's venue claim by another venue counts as live for this long after venueAt
+    (RUNBOOK.md's venue guard uses 90). A repo under a live foreign claim is skipped this slot.
+
 .PARAMETER LogFile
     Append-only decision log. Empty string disables it.
 
@@ -103,6 +121,7 @@ param(
     [int]$MaxHeartbeatAgeMinutes = 120,
     [int]$IdleMinutes = 5,
     [int]$StallIdleMinutes = 30,
+    [int]$ClaimMinutes = 90,
     [string]$LogFile = (Join-Path $env:USERPROFILE '.claude\hook-state\master-watchdog\watchdog.log'),
     [string]$ClaudeExe = 'claude',
     [switch]$Force,
@@ -128,21 +147,25 @@ function Write-Info {
     }
 }
 
-# The repos served: the rows the shared repo list (lib/repos.json in this checkout, issue 1067)
-# flags served, in its priority order. StateIssue is that repo's "Master orchestrator state -
-# <owner/repo>" issue in surreptakos/claude-dotfiles; #44 is the registry and must never be a
-# master's state issue again. The child scope keeps the manifest's Set-StrictMode out of this script.
+# The repos this watchdog knows: every row of the shared repo list (lib/repos.json in this
+# checkout, issue 1067) that names a master and a state issue. $Repos (launchable) is the served
+# subset in priority order; $Known also carries the unserved rows that kept their master name, so
+# a master launched before a row was unserved is still closed when its pass completes instead of
+# blocking the slot for ever. StateIssue is that repo's "Master orchestrator state - <owner/repo>"
+# issue in surreptakos/claude-dotfiles; #44 is the registry and must never be a master's state
+# issue again. The child scope keeps the manifest's Set-StrictMode out of this script.
 $repoListLib = Join-Path (Split-Path -Parent $PSScriptRoot) 'lib\manifest.ps1'
 try {
-    $Repos = @(& {
+    $Known = @(& {
         . $repoListLib
-        (Read-RepoList -UserHome $env:USERPROFILE).Repos | Where-Object { $_.Served } | Sort-Object Priority |
-            ForEach-Object { @{ Slug = $_.Master; Repo = $_.Repo; StateIssue = $_.StateIssue; Root = $_.Path } }
+        (Read-RepoList -UserHome $env:USERPROFILE).Repos | Where-Object { $_.Master -and $_.StateIssue } |
+            ForEach-Object { @{ Slug = $_.Master; Repo = $_.Repo; StateIssue = $_.StateIssue; Root = $_.Path; Served = $_.Served; Priority = $_.Priority } }
     })
 } catch {
     Write-Info "repo list: unreadable ($($_.Exception.Message)) - nothing served"
     exit 1
 }
+$Repos = @($Known | Where-Object { $_.Served } | Sort-Object { $_.Priority })
 if ($Repos.Count -eq 0) { Write-Info 'repo list: no row is flagged served - nothing to do'; exit 0 }
 
 function Get-RemoteControlProcesses {
@@ -166,10 +189,12 @@ function Test-LegacyMasterProcess {
     return , @($Procs | Where-Object { $_.CommandLine -match '--remote-control\s+master(?=\s|"|$)' })
 }
 
-function Get-StateMarkers {
+$script:StateBodies = @{}
+function Get-StateBody {
     param([int]$Issue)
-    # Reads the state issue body and returns @{ Heartbeat = <utc or null>; PassComplete = <utc or null> },
-    # each the latest of its kind, or $null when gh could not read the issue.
+    # The state issue body, read once per slot (the marker check and the drain check both
+    # need it), or $null when gh could not read the issue.
+    if ($script:StateBodies.ContainsKey($Issue)) { return $script:StateBodies[$Issue] }
     # PS 5.1 reads console output as ANSI by default. Force UTF-8 so em dashes in the
     # marker lines do not get mangled into three garbage chars that never match.
     $prevEnc = [Console]::OutputEncoding
@@ -179,8 +204,44 @@ function Get-StateMarkers {
     } finally {
         [Console]::OutputEncoding = $prevEnc
     }
-    if ($body -is [Array]) { $body = $body -join [Environment]::NewLine }
-    if (-not $body -or $LASTEXITCODE -ne 0) {
+    # Join with LF, not [Environment]::NewLine: Set-StateOutcome writes this text back, and a
+    # CRLF join would rewrite every line ending of the issue on the way.
+    if ($body -is [Array]) { $body = $body -join "`n" }
+    if (-not $body -or $LASTEXITCODE -ne 0) { $body = $null }
+    $script:StateBodies[$Issue] = $body
+    return $body
+}
+
+function ConvertTo-UtcOrNull {
+    param($Text)
+    # The masters write timestamps two ways: ISO ("2026-09-29T21:36:11Z") and the marker shape
+    # ("2026-09-24 21:07"). Either parses as UTC; anything else is $null.
+    if (-not $Text) { return $null }
+    # PowerShell 7's ConvertFrom-Json turns an ISO string into a DateTime already (5.1 keeps the string).
+    if ($Text -is [datetime]) { return $Text.ToUniversalTime() }
+    try {
+        return [datetime]::Parse([string]$Text, [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal)
+    } catch { return $null }
+}
+
+function Get-StateJson {
+    param([int]$Issue)
+    # The first ```json block of the state issue body (RUNBOOK.md "state issue" shape) as an
+    # object, or $null when the issue is unreadable or carries no parseable block.
+    $body = Get-StateBody -Issue $Issue
+    if (-not $body) { return $null }
+    $m = [regex]::Match($body, '(?s)```json\s*(\{.*?\})\s*```')
+    if (-not $m.Success) { return $null }
+    try { return ($m.Groups[1].Value | ConvertFrom-Json) } catch { return $null }
+}
+
+function Get-StateMarkers {
+    param([int]$Issue)
+    # Reads the state issue body and returns @{ Heartbeat = <utc or null>; PassComplete = <utc or null> },
+    # each the latest of its kind, or $null when gh could not read the issue.
+    $body = Get-StateBody -Issue $Issue
+    if (-not $body) {
         Write-Info "gh could not read issue #$Issue; marker check inconclusive"
         return $null
     }
@@ -221,6 +282,66 @@ function Get-LatestMarkerUtc {
     return $latest
 }
 
+function Get-RepoActivityUtc {
+    param([string]$Repo)
+    # When an issue or PR in $Repo was last updated (a comment updates its parent), or $null
+    # when the search failed. One search call covers issues and PRs. The master orchestrator
+    # state issues live in claude-dotfiles under the `orchestrator` label and are edited by
+    # every pass and by the state-ref repair, so they are excluded: otherwise the pass that
+    # drained claude-dotfiles would count as new activity in claude-dotfiles.
+    $q = "repo:$Repo -label:orchestrator"
+    $out = & gh api -X GET search/issues -f q="$q" -f sort=updated -f order=desc -F per_page=1 --jq '.items[0].updated_at' 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    if ($out -is [Array]) { $out = ($out -join '').Trim() }
+    return (ConvertTo-UtcOrNull -Text $out)
+}
+
+function Test-RepoHasWork {
+    param([hashtable]$R)
+    # The drain rule (Dan, 2026-09-30): serve one repo until nothing is left, then the next.
+    # Returns $true when the repo should be launched, $false when it is drained, capped for
+    # today, or claimed live by another venue. Logs the reason either way.
+    $tag = "[$($R.Slug)]"
+    $state = Get-StateJson -Issue $R.StateIssue
+    if ($null -eq $state) { Write-Info "$tag no readable state JSON in #$($R.StateIssue) - treated as never served, has work"; return $true }
+    $props = @($state.PSObject.Properties.Name)
+
+    # A live claim by another venue (a cloud Routine) means a local master would boot, read the
+    # same claim, defer and exit. Skip the repo this slot instead of paying that boot.
+    $venue = $null; if ($props -contains 'venue') { $venue = [string]$state.venue }
+    if ($venue -and $venue -ne 'local-pc') {
+        $venueAt = $null; if ($props -contains 'venueAt') { $venueAt = ConvertTo-UtcOrNull -Text $state.venueAt }
+        if ($venueAt) {
+            $claimMin = [int](([datetime]::UtcNow - $venueAt).TotalMinutes)
+            if ($claimMin -lt $ClaimMinutes) {
+                Write-Info "$tag claimed by venue '$venue' ${claimMin}m ago (< ${ClaimMinutes}m) - skipped this slot"
+                return $false
+            }
+        }
+    }
+
+    $outcome = $null; if ($props -contains 'lastPassOutcome') { $outcome = [string]$state.lastPassOutcome }
+    $lastAt = $null; if ($props -contains 'lastPassAt') { $lastAt = ConvertTo-UtcOrNull -Text $state.lastPassAt }
+    if (-not $outcome) { Write-Info "$tag never served (no lastPassOutcome) - has work"; return $true }
+    if (-not $lastAt) { Write-Info "$tag lastPassOutcome '$outcome' with no parseable lastPassAt - has work"; return $true }
+    $lastText = $lastAt.ToString('u')
+
+    if ($outcome -like 'cap-*') {
+        if ([datetime]::UtcNow.Date -gt $lastAt.Date) { Write-Info "$tag '$outcome' at $lastText, UTC date has moved on - has work"; return $true }
+        Write-Info "$tag '$outcome' at $lastText, same UTC date - capped, skipped"
+        return $false
+    }
+    if ($outcome -eq 'empty' -or $outcome -like 'stalled-*' -or $outcome -like 'blocked-*') {
+        $activity = Get-RepoActivityUtc -Repo $R.Repo
+        if ($null -eq $activity) { Write-Info "$tag '$outcome' at $lastText, activity search failed - drained until it reads"; return $false }
+        if ($activity -gt $lastAt) { Write-Info "$tag '$outcome' at $lastText, tracker activity $($activity.ToString('u')) is newer - has work"; return $true }
+        Write-Info "$tag '$outcome' at $lastText, no tracker activity since (latest $($activity.ToString('u'))) - drained, skipped"
+        return $false
+    }
+    Write-Info "$tag '$outcome' at $lastText - has work"
+    return $true
+}
+
 function Get-TranscriptLastWriteUtc {
     param([hashtable]$R, [datetime]$StartedUtc)
     # Claude Code keeps one transcript per session under ~/.claude/projects/<cwd slug>/<id>.jsonl,
@@ -250,7 +371,7 @@ function Get-BootPrompt {
             "CROSS-REPO REFERENCE RULE (issue 92): your state issue lives in claude-dotfiles, so a bare ``#N`` in its body points " +
             "to a claude-dotfiles issue. Every reference to work in $($R.Repo) - including issues, PRs, and heartbeat citations - " +
             "MUST be written as owner/repo#N (e.g. $($R.Repo)#N); a bare ``#N`` for a $($R.Repo) number trips the tracker audit's " +
-            "dangling-reference check. The watchdog sweeps all four state issues on every tick and again after your pass, so a " +
+            "dangling-reference check. The watchdog sweeps every state issue on every tick and again after your pass, so a " +
             "bare cross-repo ``#N`` written where context names $($R.Repo) is auto-qualified within about ten minutes - but " +
             "writing them right the first time keeps every heartbeat honest and stops needless issue edits. " +
             "Check your state issue for the current state and that no other master serves " +
@@ -262,6 +383,32 @@ function Get-BootPrompt {
             "before doing anything else, so the watchdog does not close you mid-work. Take the time on every Heartbeat and " +
             "Pass complete line from running date -u at the moment you write it (format in LOCAL-RUNBOOK.md), never from " +
             "memory or an estimate (issue 711). My messages in this terminal override everything.")
+}
+
+function Set-StateOutcome {
+    param([int]$Issue, [string]$Outcome, [string]$Tag)
+    # Rewrite lastPassOutcome and lastPassAt in the state issue's JSON block (RUNBOOK.md "Pass
+    # complete" writes the same two fields). Text substitution on the two lines, nothing else
+    # in the body moves; a body without both fields is left alone and logged.
+    $body = Get-StateBody -Issue $Issue
+    if (-not $body) { Write-Info "$Tag could not read #$Issue to record '$Outcome'"; return }
+    $now = [datetime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    $rxOutcome = '(?m)^(\s*"lastPassOutcome"\s*:\s*)(null|"[^"\r\n]*")'
+    $rxAt = '(?m)^(\s*"lastPassAt"\s*:\s*)(null|"[^"\r\n]*")'
+    if (-not ([regex]::IsMatch($body, $rxOutcome) -and [regex]::IsMatch($body, $rxAt))) {
+        Write-Info "$Tag #${Issue}: no lastPassOutcome/lastPassAt fields - '$Outcome' not recorded"
+        return
+    }
+    # Instance Replace(input, replacement, count): the static overload has no count argument, and
+    # a trailing 1 there binds to RegexOptions.IgnoreCase and replaces every match instead.
+    $new = (New-Object regex $rxOutcome).Replace($body, ('${1}"' + $Outcome + '"'), 1)
+    $new = (New-Object regex $rxAt).Replace($new, ('${1}"' + $now + '"'), 1)
+    $tmp = Join-Path $env:TEMP ("watchdog-state-$Issue.md")
+    [System.IO.File]::WriteAllText($tmp, $new, (New-Object System.Text.UTF8Encoding($false)))
+    & gh issue edit $Issue --repo surreptakos/claude-dotfiles --body-file $tmp 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $script:StateBodies[$Issue] = $new; Write-Info "$Tag #${Issue}: lastPassOutcome '$Outcome', lastPassAt $now" }
+    else { Write-Info "$Tag #${Issue}: gh issue edit failed - '$Outcome' not recorded" }
+    Remove-Item $tmp -ErrorAction SilentlyContinue
 }
 
 function Stop-MasterWindow {
@@ -278,7 +425,7 @@ function Stop-MasterWindow {
 }
 
 function Invoke-StateRefRepair {
-    # Issue 92: sweep the master orchestrator state issues (#74-#77) so a bare `#N` reference
+    # Issue 92: sweep the master orchestrator state issues (every lib/repos.json row that names one) so a bare `#N` reference
     # to work in the owning repo is qualified to `owner/repo#N`. Deterministic backstop for
     # the prose rule in Get-BootPrompt; idempotent (no `gh issue edit` call when nothing needs
     # changing). Node is already required elsewhere in this repo (tracker-audit, the code
@@ -286,7 +433,7 @@ function Invoke-StateRefRepair {
     #
     # Called two ways:
     #   * -Slug '<slug>' for a targeted sweep right after that master closes.
-    #   * with no -Slug for a sweep of ALL four state issues on every watchdog tick.
+    #   * with no -Slug for a sweep of EVERY state issue on every watchdog tick.
     # The tick-wide sweep is what keeps "the next heartbeat carries no bare cross-repo #N"
     # true within one watchdog interval regardless of which master (local or cloud) wrote.
     param([string]$Slug, [string]$Tag = '[repair]')
@@ -346,7 +493,7 @@ $selected = @($Repos | Where-Object { $Only.Count -eq 0 -or $Only -contains $_.S
 
 $rcProcs = Get-RemoteControlProcesses
 
-# --- State-ref repair (issue 92): every tick, all four state issues -------------------
+# --- State-ref repair (issue 92): every tick, every state issue ----------------------
 # A bare cross-repo `#N` written into a master's state issue trips the tracker audit's
 # `dangling-reference` check. The prose rule in Get-BootPrompt / LOCAL-RUNBOOK / RUNBOOK is
 # the weaker half - the same prose rule already lived in RUNBOOK.md on 2026-09-03 and was
@@ -373,9 +520,9 @@ foreach ($p in $rcProcs) {
     $slug = Get-MasterSlug -Proc $p
     if (-not $slug) { continue }
     $tag = "[$slug]"
-    $row = $Repos | Where-Object { $_.Slug -eq $slug } | Select-Object -First 1
+    $row = $Known | Where-Object { $_.Slug -eq $slug } | Select-Object -First 1
     if (-not $row) {
-        Write-Info "$tag master alive (pid=$($p.ProcessId)) for a repo not in this table - left alone, blocks the launch"
+        Write-Info "$tag master alive (pid=$($p.ProcessId)) for a repo the repo list does not name - left alone, blocks the launch"
         $stillWorking++
         continue
     }
@@ -399,8 +546,9 @@ foreach ($p in $rcProcs) {
         else {
             Stop-MasterWindow -Proc $p -Tag $tag
             # Issue 92: sweep this master's state issue for bare cross-repo #N refs now
-            # that the window has closed and no one else is writing to it.
-            Invoke-StateRefRepair -Slug $slug -Tag $tag
+            # that the window has closed and no one else is writing to it. The dotfiles
+            # master's state issue lives in the repo it serves: nothing to qualify there.
+            if ($row.Repo -ne 'surreptakos/claude-dotfiles') { Invoke-StateRefRepair -Slug $slug -Tag $tag }
         }
         continue
     }
@@ -419,7 +567,14 @@ foreach ($p in $rcProcs) {
                 if ($idleMin -ge $StallIdleMinutes -and -not $Force) {
                     Write-Info "$tag STALLED at $($latest.ToString('u')) (${ageMin}m old, transcript idle ${idleMin}m >= ${StallIdleMinutes}m) - recycling pid=$($p.ProcessId)"
                     if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
-                    else { Stop-MasterWindow -Proc $p -Tag $tag }
+                    else {
+                        Stop-MasterWindow -Proc $p -Tag $tag
+                        # A recycled master never writes its outcome. Without one the drain rule reads
+                        # the previous outcome (`success`) and relaunches the same stall every slot,
+                        # starving the lower priorities; record it here so the repo waits for new
+                        # tracker activity like any other stalled pass.
+                        Set-StateOutcome -Issue $row.StateIssue -Outcome 'stalled-recycled' -Tag $tag
+                    }
                     continue
                 }
                 Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old, transcript idle ${idleMin}m (< ${StallIdleMinutes}m) - possibly stalled; not killed"
@@ -437,23 +592,25 @@ if ($stillWorking -gt 0 -and -not $Force) {
     exit 0
 }
 
-# --- Pick the next repo: never served first (priority order), then least recently served ---
+# --- Pick the next repo: the first in priority order that still has work (drain rule) ---
 # The -Only check sits here, after the close-finished-masters stage, so `-Only <bogus>` is a way
 # to run that stage for real without launching anything.
 if ($selected.Count -eq 0) { Write-Info "ERROR: -Only matched no repo; nothing launched"; exit 1 }
-$candidates = @()
+$next = $null
+$launchable = 0
 foreach ($r in $selected) {
     if (-not (Test-Path $r.Root)) { Write-Info "[$($r.Slug)] clone not found: $($r.Root) - skipped"; continue }
+    $launchable++
     $markers = $markersBySlug[$r.Slug]
     if (-not $markersBySlug.ContainsKey($r.Slug)) { $markers = Get-StateMarkers -Issue $r.StateIssue }
     $last = Get-LatestMarkerUtc -Markers $markers
     $lastText = 'never'
     if ($last) { $lastText = $last.ToString('u') }
-    Write-Info "[$($r.Slug)] last served: $lastText"
-    $candidates += [pscustomobject]@{ Row = $r; Last = $last; Order = [array]::IndexOf(@($Repos | ForEach-Object { $_.Slug }), $r.Slug) }
+    Write-Info "[$($r.Slug)] priority $($r.Priority), last served: $lastText"
+    if (Test-RepoHasWork -R $r) { $next = $r; break }
 }
-if ($candidates.Count -eq 0) { Write-Info "ERROR: no launchable repo"; exit 1 }
-$next = ($candidates | Sort-Object @{ Expression = { if ($_.Last) { 1 } else { 0 } } }, @{ Expression = { if ($_.Last) { $_.Last } else { [datetime]::MinValue } } }, Order | Select-Object -First 1).Row
+if ($launchable -eq 0) { Write-Info "ERROR: no launchable repo"; exit 1 }
+if ($null -eq $next) { Write-Info "every served repo is drained, capped or claimed - exit 0, no launch"; exit 0 }
 
 # --- Launch exactly one ----------------------------------------------------------------
 $tag = "[$($next.Slug)]"

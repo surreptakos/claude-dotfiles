@@ -852,6 +852,26 @@ class AskMattGateTests(unittest.TestCase):
             self.assertEqual(refused.returncode, 1)
             self.assertIn("over 28 words", refused.stdout)
 
+    def test_the_mandated_appeal_line_is_exempt_from_the_yes_checks(self) -> None:
+        # Issue 1150: the reason is fixed at appeal time, so a reason that trips a YES pattern left
+        # no reply that could pass: keep the line and YES refuses it, drop it and the appeal does.
+        reason = "releasing the claim, no review requested"
+        body = "Grill started.\nNext: answer question one."
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._appealed_turn(state_dir, "s-yes", reason)
+            # The review-claim rule reads the turn's tools, so the session needs a transcript.
+            projects = state_dir / "claude-home" / "projects" / "p"
+            projects.mkdir(parents=True)
+            Path(self._transcript_with_tools(state_dir, ["Bash"], "")).replace(projects / "s-yes.jsonl")
+            line = f"Route appeal: grill-with-docs instead of direct-answer, because {reason}"
+            accepted = self.run_presend_lint("s-yes", f"{line}\n{body}", state_dir)
+            self.assertEqual(accepted.returncode, 0, accepted.stdout)
+            # Only the exact mandated line is exempt: the same words in the body are still refused.
+            refused = self.run_presend_lint("s-yes", f"{line}\n{body}\nThere is no review.", state_dir)
+            self.assertEqual(refused.returncode, 1)
+            self.assertIn('"no review"', refused.stdout)
+
     def test_appeals_off_in_the_settings_file_refuses_the_appeal(self) -> None:
         committed = json.loads((SCRIPT.parent / "route-gate.json").read_text(encoding="utf-8"))
         self.assertIs(committed["appeals"], True)  # the committed default
