@@ -21,8 +21,38 @@ critique.json:
 
 Exit 0 = release gate passes, 1 = gate fails, 3 = the critique file is invalid (a missing key,
 an out-of-range score, n/a without a reason, an unknown checklist item or severity).
+
+Audit mode (issue 1084): the same command on an audit ledger instead of a critique.
+
+    python3 score.py ledger.json [--markdown] [--report PAGE.html] [--stamp FILE_OR_URL]
+    python3 score.py --check-stamp FILE_OR_URL [--commit SHA]
+
+ledger.json:
+{
+  "method": "dual-agent (reviewers: accessibility-review=<id> · detector: <id>)" | "DEGRADED: ...",
+  "surface": "web",                                             # a CATALOG.json surface
+  "subject": {"kind": "file", "path": "...", "sha256": "<64 hex>"}
+           | {"kind": "url", "url": "https://...", "commit": "<deployed commit>"},
+  "auditor": "Design",                                          # the owner whose open P0/P1 block
+  "reviewers": [{"skill": "accessibility-review", "agent": "<id>",
+                 "rows_in": "<ISO time>", "detector_shown": "<ISO time>"}],
+  "rows": [{"id": "A11Y-003", "verdict": "FAIL", "evidence": "findings.json#/faults/0",
+            "owner": "Design", "file": "page.html", "fix": "...", "priority": "P1"},
+           {"id": "A11Y-026", "verdict": "N/A", "reason": "..."}]
+}
+
+A ledger is invalid (exit 3) when it misses an applicable catalog id, repeats or invents one, gives
+N/A without a reason, a PASS or FAIL without evidence, a FAIL without owner, fix and priority, a
+catalogued skill without its reviewer, or detector output shown to a reviewer before its rows were
+in. The gate: coverage complete, no open P0 or P1 owned by the auditor, not degraded. --stamp binds
+a file stamp to the audited sha256 and a URL stamp (.design/url-<hash>.json under the current
+folder) to the address plus deployed commit; --check-stamp exits 0 while the stamp is fresh and 1
+once the file's bytes or the deployed commit moved.
 """
-import argparse, datetime, hashlib, json, os, sys
+import argparse, datetime, hashlib, html, json, os, re, sys
+
+CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'catalog', 'CATALOG.json')
+VERDICTS = ('PASS', 'FAIL', 'N/A')
 
 HEURISTICS = {
     1: 'Visibility of status', 2: 'Match to the real world', 3: 'User control and freedom',
@@ -137,12 +167,252 @@ def markdown(c, r):
     return '\n'.join(out)
 
 
+# ------------------------------------------------------------------ audit mode: the ledger
+def when(ts, what):
+    try:
+        t = datetime.datetime.fromisoformat(str(ts).replace('Z', '+00:00'))
+    except ValueError:
+        raise Invalid(f'{what}: {ts!r} is not an ISO time')
+    return t if t.tzinfo else t.replace(tzinfo=datetime.timezone.utc)
+
+
+def validate_ledger(l, catalog):
+    for k in ('method', 'surface', 'subject', 'auditor', 'reviewers', 'rows'):
+        if k not in l:
+            raise Invalid(f'missing "{k}"')
+    m = l['method']
+    if not (m.startswith('dual-agent') or m.startswith('DEGRADED')):
+        raise Invalid('method must start with "dual-agent" or "DEGRADED"')
+    if l['surface'] not in catalog['surfaces']:
+        raise Invalid(f'surface {l["surface"]!r} is not one of {catalog["surfaces"]}')
+    sub = l['subject']
+    if sub.get('kind') == 'file':
+        if not re.fullmatch(r'[0-9a-f]{64}', str(sub.get('sha256', ''))) or not sub.get('path'):
+            raise Invalid('a file subject needs its path and sha256')
+    elif sub.get('kind') == 'url':
+        if not sub.get('url') or not str(sub.get('commit') or '').strip():
+            raise Invalid('a URL subject needs its address and deployed commit')
+    else:
+        raise Invalid('subject.kind must be "file" or "url"')
+    known = {r['id']: r for r in catalog['rows']}
+    applicable = {i: r for i, r in known.items() if l['surface'] in r['surfaces']}
+    seen = set()
+    for row in l['rows']:
+        rid = row.get('id')
+        if rid not in known:
+            raise Invalid(f'row {rid!r} is not a catalog id')
+        if rid not in applicable:
+            raise Invalid(f'{rid} does not apply to surface {l["surface"]}')
+        if rid in seen:
+            raise Invalid(f'{rid} has two rows')
+        seen.add(rid)
+        v = row.get('verdict')
+        if v not in VERDICTS:
+            raise Invalid(f'{rid}: verdict must be one of {VERDICTS}')
+        if v == 'N/A':
+            if len(str(row.get('reason') or '').strip()) < 3:
+                raise Invalid(f'{rid}: N/A needs a reason')
+            continue
+        if not str(row.get('evidence') or '').strip():
+            raise Invalid(f'{rid}: {v} needs an evidence reference')
+        if v == 'FAIL' and (row.get('priority') not in SEVERITIES or not row.get('owner') or not row.get('fix')):
+            raise Invalid(f'{rid}: FAIL needs owner, fix and priority in {SEVERITIES}')
+    missing = sorted(set(applicable) - seen)
+    if missing:
+        raise Invalid(f'ledger misses {len(missing)} applicable catalog id(s): {", ".join(missing)}')
+    # One isolated reviewer per catalogued skill; detector output reaches it only after its rows.
+    by_skill = {r.get('skill'): r for r in l['reviewers']}
+    for skill in sorted({r['skill'] for r in applicable.values()}):
+        r = by_skill.get(skill)
+        if not r or not r.get('agent'):
+            raise Invalid(f'no reviewer recorded for {skill}')
+        rows_in = when(r.get('rows_in'), f'{skill} rows_in')
+        if r.get('detector_shown') is not None and when(r['detector_shown'], f'{skill} detector_shown') < rows_in:
+            raise Invalid(f'detector output reached the {skill} reviewer before its rows were in')
+    return applicable
+
+
+def score_ledger(l, catalog):
+    applicable = validate_ledger(l, catalog)
+    rows = l['rows']
+    fails = [r for r in rows if r['verdict'] == 'FAIL']
+    blocking = [r for r in fails if r['priority'] in ('P0', 'P1') and r['owner'] == l['auditor']]
+    owners = {}
+    for r in fails:
+        owners.setdefault(r['owner'], []).append(r['id'])
+    gate = {
+        f'coverage_complete ({len(rows)}/{len(applicable)} applicable ids)': len(rows) == len(applicable),
+        f'no_open_P0_or_P1_owned_by_{l["auditor"]}': not blocking,
+        'not_degraded': not l['method'].startswith('DEGRADED'),
+    }
+    return {
+        'mode': 'audit', 'surface': l['surface'], 'subject': l['subject'],
+        'coverage': {'applicable': len(applicable), 'rows': len(rows)},
+        'verdicts': {v: sum(1 for r in rows if r['verdict'] == v) for v in VERDICTS},
+        'open': {s: sum(1 for r in fails if r['priority'] == s) for s in SEVERITIES},
+        'open_by_owner': owners, 'blocking': [r['id'] for r in blocking],
+        'gate': gate, 'passes': all(gate.values()),
+    }
+
+
+def method_line(m):
+    return ('Method: ' + m) if m.startswith('dual') else '⚠️ ' + m
+
+
+def subject_line(sub):
+    return (f'{sub["path"]} (sha256 {sub["sha256"][:12]})' if sub['kind'] == 'file'
+            else f'{sub["url"]} (deployed commit {sub["commit"]})')
+
+
+def ledger_markdown(l, r):
+    out = [method_line(l['method']), '', f'Subject: {subject_line(l["subject"])}',
+           f'Coverage: {r["coverage"]["rows"]}/{r["coverage"]["applicable"]} applicable catalog ids; '
+           + ', '.join(f'{k} {v}' for k, v in r['verdicts'].items()),
+           'Open: ' + ', '.join(f'{k} {v}' for k, v in r['open'].items()), '', 'Release gate:']
+    out += [f'- {"PASS" if ok else "FAIL"} {k}' for k, ok in r['gate'].items()]
+    for owner in r['open_by_owner']:
+        out += ['', f'Open for {owner}:']
+        out += [f'- {x["id"]} {x["priority"]}: {x["fix"]}' for x in l['rows'] if x['verdict'] == 'FAIL' and x['owner'] == owner]
+    out.append(f'\n**Gate: {"PASS" if r["passes"] else "FAIL"}**')
+    return '\n'.join(out)
+
+
+PAGE_CSS = (
+    ':root{--bg:#fff;--fg:#1a1a1a;--line:#bbb;--bad:#a4161a;--ok:#1b5e20;--warn:#fff4d6}'
+    '@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#121212;--fg:#eee;--line:#555;--bad:#ff8a80;--ok:#9ccc65;--warn:#3a2f00}}'
+    ':root[data-theme="dark"]{--bg:#121212;--fg:#eee;--line:#555;--bad:#ff8a80;--ok:#9ccc65;--warn:#3a2f00}'
+    'body{background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif;margin:0 auto;max-width:960px;padding:16px}'
+    '.method{font-weight:600;margin:0 0 8px}.degraded{background:var(--warn);padding:8px}'
+    'table{border-collapse:collapse;display:block;overflow-x:auto}td,th{border:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}'
+    '.fail{color:var(--bad)}.pass{color:var(--ok)}')
+
+
+def ledger_page(l, r, catalog):
+    """The findings page, rendered in the session. Its first line is the method line."""
+    e = html.escape
+    # A house row (AAC-WR-001, the tokens) cites its rule instead of restating it.
+    words = {row['id']: row.get('words') or row.get('cites', '') for row in catalog['rows']}
+    degraded = l['method'].startswith('DEGRADED')
+    fails = sorted((x for x in l['rows'] if x['verdict'] == 'FAIL'), key=lambda x: (x['priority'], x['id']))
+    parts = [f'<p class="method{" degraded" if degraded else ""}" id="method">{e(method_line(l["method"]))}</p>',
+             f'<h1>Design audit findings</h1><p>{e(subject_line(l["subject"]))} · surface {e(l["surface"])} · '
+             f'{r["coverage"]["rows"]}/{r["coverage"]["applicable"]} catalog ids · '
+             + ' · '.join(f'{k} {v}' for k, v in r['verdicts'].items()) + '</p>',
+             f'<h2>Gate: {"PASS" if r["passes"] else "FAIL"}</h2><ul>']
+    parts += [f'<li class="{"pass" if ok else "fail"}">{"PASS" if ok else "FAIL"} {e(k)}</li>' for k, ok in r['gate'].items()]
+    parts.append('</ul>')
+    for owner in r['open_by_owner']:
+        parts.append(f'<h2>Open for {e(owner)}</h2><table><tr><th>P</th><th>Rule</th><th>File</th><th>Evidence</th><th>Fix</th></tr>')
+        parts += [f'<tr><td>{e(x["priority"])}</td><td>{e(x["id"])}: {e(words.get(x["id"], ""))}</td><td>{e(str(x.get("file", "")))}</td>'
+                  f'<td>{e(x["evidence"])}</td><td>{e(x["fix"])}</td></tr>' for x in fails if x['owner'] == owner]
+        parts.append('</table>')
+    na = [x for x in l['rows'] if x['verdict'] == 'N/A']
+    if na:
+        parts.append('<h2>Not applicable</h2><ul>')
+        parts += [f'<li>{e(x["id"])}: {e(words.get(x["id"], ""))}. {e(x["reason"])}</li>' for x in na]
+        parts.append('</ul>')
+    return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1"><title>Design audit findings</title>'
+            f'<style>{PAGE_CSS}</style></head><body>' + ''.join(parts) + '</body></html>\n')
+
+
+def sha256_file(p):
+    return hashlib.sha256(open(p, 'rb').read()).hexdigest()
+
+
+def file_stamp_path(p):
+    return os.path.join(os.path.dirname(os.path.abspath(p)), '.design', os.path.basename(p) + '.json')
+
+
+def url_stamp_path(url):
+    return os.path.join('.design', 'url-' + hashlib.sha256(url.encode('utf-8')).hexdigest()[:16] + '.json')
+
+
+def is_url(t):
+    return bool(re.match(r'^[a-z][a-z0-9+.-]*://', t, re.I)) and not t.lower().startswith('file://')
+
+
+def stamp_ledger(target, l, r):
+    """Write the stamp; return its path, or a line starting 'not written' saying why not."""
+    sub = l['subject']
+    if is_url(target):
+        if sub['kind'] != 'url' or sub['url'] != target:
+            return f'not written, the ledger audits {sub.get("url") or sub.get("path")}, not {target}'
+        out, body = url_stamp_path(target), {'url': target, 'commit': sub['commit']}
+    else:
+        if sub['kind'] != 'file':
+            return f'not written, the ledger audits {sub["url"]}, not a file'
+        if sha256_file(target) != sub['sha256']:
+            return f'not written, {target} changed since the audit (its sha256 no longer matches the ledger)'
+        out, body = file_stamp_path(target), {'file': os.path.basename(target), 'sha256': sub['sha256']}
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    body.update({'passes': True, 'mode': 'audit', 'method': l['method'], 'surface': l['surface'],
+                 'coverage': r['coverage'], 'verdicts': r['verdicts'], 'open_by_owner': r['open_by_owner'],
+                 'stamped': datetime.datetime.now().isoformat(timespec='seconds')})
+    json.dump(body, open(out, 'w', encoding='utf-8'), indent=2)
+    return out
+
+
+def check_stamp(target, commit):
+    if is_url(target):
+        if not commit:
+            return 2, 'a URL stamp is checked against the deployed commit: pass --commit'
+        sp = url_stamp_path(target)
+    else:
+        sp = file_stamp_path(target)
+    try:
+        s = json.load(open(sp, encoding='utf-8'))
+    except (OSError, ValueError):
+        return 1, f'no stamp at {sp}'
+    if is_url(target) and s.get('commit') != commit:
+        return 1, f'stale: stamped at commit {s.get("commit")}, deployed is {commit}'
+    if not is_url(target) and s.get('sha256') != sha256_file(target):
+        return 1, f'stale: {target} changed since it was stamped'
+    if not s.get('passes'):
+        return 1, 'the stamp records a failed gate'
+    return 0, f'fresh: {sp}'
+
+
+def audit_main(a, ledger):
+    catalog = json.load(open(CATALOG, encoding='utf-8'))
+    try:
+        r = score_ledger(ledger, catalog)
+    except Invalid as e:
+        print(f'invalid ledger: {e}', file=sys.stderr); sys.exit(3)
+    print(ledger_markdown(ledger, r) if a.markdown else json.dumps(r, indent=2))
+    if a.report:
+        open(a.report, 'w', encoding='utf-8').write(ledger_page(ledger, r, catalog))
+        print(f'report: {a.report}', file=sys.stderr)
+    if a.stamp and r['passes']:
+        out = stamp_ledger(a.stamp, ledger, r)
+        print(f'stamp: {out}', file=sys.stderr)
+        if out.startswith('not written'):
+            sys.exit(1)
+    elif a.stamp:
+        print('stamp: not written, the gate failed', file=sys.stderr)
+    sys.exit(0 if r['passes'] else 1)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('critique'); ap.add_argument('--markdown', action='store_true')
+    ap.add_argument('critique', nargs='?', help='critique.json (build mode) or ledger.json (audit mode)')
+    ap.add_argument('--markdown', action='store_true')
     ap.add_argument('--stamp', metavar='DELIVERABLE')
+    ap.add_argument('--report', metavar='PAGE', help='audit mode: write the findings page (HTML) here')
+    ap.add_argument('--check-stamp', metavar='FILE_OR_URL')
+    ap.add_argument('--commit', help='with --check-stamp on a URL: the commit deployed now')
     a = ap.parse_args()
+    if a.check_stamp:
+        code, msg = check_stamp(a.check_stamp, a.commit)
+        print(f'stamp: {msg}', file=sys.stderr if code else sys.stdout)
+        sys.exit(code)
+    if not a.critique:
+        ap.error('a critique or ledger file is required')
     c = json.load(open(a.critique, encoding='utf-8'))
+    if 'rows' in c:
+        audit_main(a, c)
+    if a.report:
+        ap.error('--report takes an audit ledger')
     try:
         r = score(c)
     except Invalid as e:

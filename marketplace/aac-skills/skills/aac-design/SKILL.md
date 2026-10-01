@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: '2026-10-01T00:35:55Z'
-  previous-modified: '2026-09-30T23:08:42Z'
-  revision: '6'
-  content-sha: 9f80b81da8cf
+  modified: '2026-10-01T01:45:12Z'
+  previous-modified: '2026-10-01T00:35:55Z'
+  revision: '7'
+  content-sha: a2b17d54c66a
 ---
 
 # AAC design
@@ -74,6 +74,18 @@ Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only t
    - Confirm AAC-WR-001 Rule 166 item by item.
    - Name the file per Rule 145 and bump its revision.
    - Present it with its rendered page.
+
+## Audit mode (web)
+
+Audit an existing page, by URL or HTML file, against every catalog row that applies to the `web` surface (`catalog/CATALOG.json`). Same run every time:
+
+1. **Evidence.** `node scripts/web_audit.js <url|page.html> --out evidence/` writes one bundle: screenshots at 1440, 768 and 390 px, 200% zoom, reduced motion, forced colours and offline; the DOM with computed styles; the accessibility tree; a scripted keyboard walk; axe-core; the plain text. It uses the local Chromium, Chrome or Edge (`CHROME_PATH` to pick one) and downloads no browser; axe-core is fetched at a pinned version and refused unless its sha256 matches. A local harness is just its address. A gated page takes `--signin steps.json` (goto, fill, click, waitFor; secrets as `{"env": "NAME"}`). A URL takes `--commit <deployed commit>`, or the page's `<meta name="deployed-commit">`. Done when `bundle.json` exists.
+2. **Ledger.** One isolated sub-agent per catalogued skill. Give it its vendored copy under `vendor/` in full, its applicable catalog rows, and only the files in the bundle's `review_set`. It returns one row per applicable id: `verdict` PASS, FAIL or N/A, with `evidence` (a bundle file), `owner`, `file`, `fix` and `priority` P0 to P3 on a FAIL, and a `reason` on an N/A. Only after its rows are in does it see the `detector_set` (`findings.json`, `axe.json`) and mark each finding real or false positive; record both times in `reviewers[]`. With no Agent tool, do it yourself in that order and write a `DEGRADED` method. The ledger shape is in `scripts/score.py`.
+3. **Score, stamp, report.**
+   ```bash
+   python3 scripts/score.py ledger.json --markdown --report findings.html --stamp <page.html|url>
+   ```
+   It rejects (exit 3) a ledger missing an applicable id, an N/A without a reason, or detector output shown before the rows were in. The gate needs full coverage, no open P0 or P1 owned by the ledger's `auditor`, and a dual-agent method. A file is stamped by its sha256, a URL by its address plus deployed commit; `score.py --check-stamp <target> [--commit SHA]` says whether the stamp is still fresh. Publish `findings.html` as the findings page; its first line is the method line. Done when score.py exits 0, or the report names what blocks.
 
 ## Rules the steps depend on
 
