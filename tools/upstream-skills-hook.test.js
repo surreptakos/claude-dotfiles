@@ -200,7 +200,7 @@ test('the committed marketplace.json names an upstream subset for every skill th
       for (const s of p.skills) served.add(path.posix.basename(s));
     }
   }
-  for (const name of ['tdd', 'to-spec', 'grill-me', 'grilling', 'teach', 'prototype', 'wizard', 'wait-what',
+  for (const name of ['tdd', 'grill-me', 'grilling', 'teach', 'prototype', 'wizard', 'wait-what',
     'to-questionnaire', 'writing-for-agents', 'codebase-design', 'domain-modeling', 'improve-codebase-architecture',
     'composition-patterns', 'react-best-practices', 'react-native-skills', 'react-view-transitions',
     'web-design-guidelines', 'agent-browser', 'find-skills']) {
@@ -208,9 +208,16 @@ test('the committed marketplace.json names an upstream subset for every skill th
     assert.ok(!fs.existsSync(path.resolve(__dirname, '..', 'aac-skills', name)), `${name} no longer has an aac-skills copy`);
   }
   assert.ok(!served.has('writing-guidelines'), 'writing-guidelines is killed, not served');
-  for (const local of ['ask-matt', 'code-review', 'triage', 'to-tickets', 'implement', 'grill-with-docs', 'handoff',
+  for (const local of ['ask-matt', 'code-review', 'triage', 'to-tickets', 'to-spec', 'implement', 'grill-with-docs', 'handoff',
     'research', 'wayfinder', 'diagnosing-bugs', 'setup-matt-pocock-skills']) {
     assert.ok(!served.has(local), `${local} (locally edited) is not also served upstream`);
+    assert.ok(fs.existsSync(path.resolve(__dirname, '..', 'aac-skills', local, 'SKILL.md')), `${local} stays vendored`);
+  }
+  // A frontmatter flag flip is a local edit (Dan, 2026-10-01): the ask-matt flows call these two,
+  // so the vendored copies must keep model invocation on, where upstream turns it off.
+  for (const flow of ['to-spec', 'to-tickets']) {
+    const text = fs.readFileSync(path.resolve(__dirname, '..', 'aac-skills', flow, 'SKILL.md'), 'utf8');
+    assert.match(text, /^disable-model-invocation: false\r?$/m, `${flow} keeps disable-model-invocation: false`);
   }
 });
 

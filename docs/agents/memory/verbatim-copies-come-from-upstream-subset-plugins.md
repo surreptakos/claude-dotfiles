@@ -9,7 +9,7 @@ metadata:
 
 Dan, 2026-10-01, after a provenance audit of the payload (every file hashed against every commit
 of six upstream repos): "drop everything that is a verbatim copy for its upstream payload. kill
-writing-guidelines". Twenty-one directories left `aac-skills/`: thirteen mattpocock/skills
+writing-guidelines". Twenty directories left `aac-skills/`: twelve mattpocock/skills
 copies, five vercel-labs/agent-skills copies, agent-browser, find-skills, and writing-guidelines
 (killed, no replacement).
 
@@ -29,9 +29,17 @@ two-item list), nested paths included, and the skill's name is the SKILL.md fron
 whole subdir; only the listed directories load.
 
 **Why the subset matters.** The locally edited copies (ask-matt, code-review, triage, to-tickets,
-implement, grill-with-docs, handoff, research, wayfinder, diagnosing-bugs,
+to-spec, implement, grill-with-docs, handoff, research, wayfinder, diagnosing-bugs,
 setup-matt-pocock-skills) stay in `aac-skills/`; listing their upstream directory too would put
-two skills of one name in a session. The same guard keeps writing-guidelines out. Two copies
+two skills of one name in a session.
+
+**A one-line frontmatter flip is a local edit, not a verbatim copy.** The first cut of PR 1217
+dropped to-spec because its only local line was `disable-model-invocation: false`; Dan reverted
+it the same day ("revert /to-spec") and asked for the same flag on to-tickets, which already had
+it. The ask-matt flows call both, and upstream's `true` would stop the model from loading them.
+The stand-in was the similarity ratio: a near-total match read as "verbatim" where the diff
+itself said what the line did. Read the local-only lines, never the score; the hook test now asserts
+both flags. The same guard keeps writing-guidelines out. Two copies
 stay vendored because upstream retired them: resolving-merge-conflicts (deleted in
 mattpocock/skills daa01d8) and writing-great-skills (renamed to writing-for-agents in 1fc6573).
 `tests/bootstrap-assert.py` fails the payload if any dropped name comes back;
