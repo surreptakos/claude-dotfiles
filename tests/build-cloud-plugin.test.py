@@ -508,10 +508,9 @@ def _iter_hook_commands(manifest):
     for event_entries in (manifest.get("hooks") or {}).values():
         for group in event_entries:
             for hook in group.get("hooks", []):
-                for key in ("command", "commandWindows"):
-                    cmd = hook.get(key)
-                    if cmd:
-                        yield cmd
+                cmd = hook.get("command")
+                if cmd:
+                    yield cmd
 
 
 class PluginHooksManifest(unittest.TestCase):
@@ -519,6 +518,18 @@ class PluginHooksManifest(unittest.TestCase):
         text = (MARKETPLACE_HOOKS / "hooks.json").read_text(encoding="utf-8")
         self.manifest = json.loads(text)
         self.scripts_dir = MARKETPLACE_HOOKS / "scripts"
+
+    def test_hook_entries_carry_only_documented_fields(self):
+        # Claude Code's command-hook schema (code.claude.com/docs/en/hooks, 2026-10-01). A key
+        # outside it is ignored locally and logged as unrecognised by claude.ai's plugin server:
+        # the `commandWindows` spelling this manifest carried until 2026-10-01 never ran anywhere.
+        allowed = {"type", "command", "args", "async", "asyncRewake", "shell", "if",
+                   "timeout", "statusMessage", "once"}
+        for event_entries in self.manifest["hooks"].values():
+            for group in event_entries:
+                for hook in group["hooks"]:
+                    self.assertEqual(set(hook) - allowed, set(),
+                                     f"unknown hook field in {hook.get('command')!r}")
 
     def test_manifest_names_only_scripts_that_exist_in_the_payload(self):
         referenced = set()
