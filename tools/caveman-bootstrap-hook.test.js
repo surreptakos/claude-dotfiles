@@ -269,3 +269,14 @@ test('prompt hook stays silent when the checkout is absent', { skip: BASH.skip }
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout, '');
 });
+
+// Issue 1143: the hook above exits before reading its stdin, and a piped prompt raced that exit:
+// CI run 36780048572 reported "did not start: spawnSync bash EPIPE". A prompt larger than a pipe
+// buffer loses that race every time (EPIPE on Linux, EOF on Windows), so it pins the fix here.
+test('prompt hook stays silent when the checkout is absent and never reads a 1 MiB prompt', { skip: BASH.skip }, () => {
+  const f = makeHome();
+  const stdin = JSON.stringify({ prompt: '/caveman lite ' + 'x'.repeat(1 << 20) });
+  const r = run(PROMPT, { ...f, source: path.join(f.home, 'nowhere'), stdin });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, '');
+});
