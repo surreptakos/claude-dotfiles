@@ -18,8 +18,8 @@ Then read only what the deliverable needs.
 | File | Read it when | Rules |
 |---|---|---|
 | `CORE.md` | **Always, first.** Order of authority, house style, punctuation, capitalization, numbers, abbreviations, spelling, grammar | 1-74 |
-| `DELIVERABLES.md` | The deliverable is an email, Teams message, letter, memo, report, proposal, scope of work, SOP, contract or legal text, or technical writing | 103-144 |
-| `LAYOUT.md` | Producing a Word document, a table, or any list; setting margins, fonts, headings or styles | 75-102 |
+| `DELIVERABLES.md` | The deliverable is an email, Teams message, letter, memo, report, proposal, scope of work, SOP, contract or legal text, or technical writing | 100-144 |
+| `LAYOUT.md` | Producing a Word document, a table, or any list; setting margins, fonts, headings or styles | 75-99 |
 | `DRAFT-QUALITY.md` | Any original prose. AI tells, machine vocabulary, plus the release check that closes the work | 153-170 |
 | `CONTROL.md` | Naming a file, running the pre-send review, or choosing the format for a document type | 145-152 |
 | `TERMINOLOGY.md` | An AAC term, acronym or product name is in question, or you need the decision register | — |
