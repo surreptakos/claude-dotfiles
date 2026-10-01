@@ -1270,14 +1270,21 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     # happened to be in flight when a new user prompt reset the state.
     if state and state.get("last_flow"):
         return {}
-    if not state:
+    # Issue 1163: a subagent call (hook input carries `agent_id`) is exempt, as the route gate's
+    # is. Starting the helper already passed this gate, and a helper never sees the prompt hook's
+    # nonce: a build agent resumed with SendMessage got this deny on every call and could not work.
+    if event.get("agent_id"):
+        return {}
+    if not state or not nonce:
         # No state file at all means the UserPromptSubmit hook never ran for this session, so there
         # is no nonce and the declaration this deny demands cannot be written — the gate refuses
         # every tool call including the declaration itself, and nothing the session can do satisfies
         # it. Seen 2026-09-21 in the master-zoho-source-of-truth Routine: the payload merged these
         # hooks into live user settings mid-session, every subsequent call came back denied, and the
         # master could not even send a notification. Fail open; the next prompt writes state and the
-        # gate resumes with full force.
+        # gate resumes with full force. A state with no nonce is the same case (issue 1163): the
+        # PostToolUse hook writes a failure counter even when no prompt ever ran, and a deny then
+        # printed `declare-claude "<session>" ""`, which declare-claude always rejects.
         return {}
     # Issue 608 item 3: a surface whose tools are neither Claude Code's nor an MCP shell can never
     # run the declaration, so an unconditional deny is a permanent deadlock. Refuse ONCE per

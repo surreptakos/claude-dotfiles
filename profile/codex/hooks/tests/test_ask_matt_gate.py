@@ -1125,6 +1125,47 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn('declare-claude "session-B" "bbbbbbbbbbbbbbbb" <flow>', reason)
             self.assertNotIn("session-A", reason)
 
+    def test_resumed_subagent_first_tool_call_is_not_refused(self) -> None:
+        """Issue 1163: a build agent resumed with SendMessage was refused on every call, the deny
+        naming an empty nonce. Replay its hook input: the session state carries a nonce but no
+        route yet (a prompt landed mid-run), and the call carries `agent_id`."""
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            (state_dir / "claude--session-R.json").write_text(
+                json.dumps({"nonce": "cccccccccccccccc", "flow": None, "last_flow": None,
+                            "yes": True, "caveman": "ultra"}), encoding="utf-8")
+            for tool, tool_input in (("Bash", {"command": "ls"}),
+                                     ("Read", {"file_path": "README.md"}),
+                                     ("Skill", {"skill": "implement"})):
+                allowed = self.run_gate(
+                    "claude-pre-tool",
+                    {"session_id": "session-R", "agent_id": "build-agent-1",
+                     "hook_event_name": "PreToolUse", "tool_name": tool,
+                     "tool_input": tool_input},
+                    state_dir,
+                )
+                self.assertEqual(json.loads(allowed.stdout), {}, tool)
+
+    def test_claude_deny_never_prints_an_empty_nonce(self) -> None:
+        """Issue 1163: PostToolUse writes a failure counter into a session no prompt ever ran
+        for, leaving state with no nonce. The deny then printed `declare-claude "<id>" ""`, which
+        declare-claude always rejects; a nonce-less state fails open as a missing one does."""
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            call = {"session_id": "session-N", "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash", "tool_input": {"command": "ls"}}
+            self.run_gate("claude-pre-tool", call, state_dir)
+            self.run_gate(
+                "claude-post-tool",
+                dict(call, hook_event_name="PostToolUse", tool_response={"exit_code": 0}),
+                state_dir,
+            )
+            state = json.loads((state_dir / "claude--session-N.json").read_text(encoding="utf-8"))
+            self.assertFalse(state.get("nonce"))
+            second = self.run_gate("claude-pre-tool", call, state_dir)
+            self.assertNotIn('"session-N" ""', second.stdout)
+            self.assertEqual(json.loads(second.stdout), {})
+
     def test_claude_bootstrap_accepts_yes_exit_check_but_no_other_suffix(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
