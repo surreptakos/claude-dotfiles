@@ -1,0 +1,58 @@
+{
+  "note": "The one source of every AAC design token (issue 1091). Hand-edited. `node tools/build-design-tokens.js` writes the three copies from it: the Tokens section of DESIGN-SYSTEM.md, the token block in scripts/build_form.py and assets/aac-tokens.css. Never edit a copy; `--check` and tools/design-tokens.test.js fail when one differs from a fresh generation. Colors are hex without the #; contrast ratios are computed, never typed.",
+  "paper": "FFFFFF",
+  "color": [
+    { "token": "accent", "hex": "1161A0", "use": "Section headings, step numbers, bullets, the title bar",
+      "contrast": [{ "on": "white" }, { "on": "tint" }], "source": "AAC brand blue, TPS title bar" },
+    { "token": "tint", "hex": "E8F0F8", "use": "Fill for signer cards and the HR card; nothing else",
+      "contrast": [{ "of": "text" }], "source": "Approved 2026-09-30", "web_note": "card and header fill only" },
+    { "token": "caption", "hex": "595959", "use": "Field labels and signer statements only",
+      "contrast": [{ "on": "white" }, { "on": "tint" }], "source": "Approved 2026-09-30", "web_note": "field labels and statements only" },
+    { "token": "border", "hex": "7F7F7F", "width_pt": 0.5, "use": "Every cell border",
+      "contrast": [{ "on": "white", "note": "non-text minimum 3:1" }], "source": "Approved 2026-09-30" },
+    { "token": "text", "hex": "000000", "name": "black", "use": "Everything else, including the intro (Rule 78)",
+      "contrast": [], "source": "AAC-WR-001 Rule 78" }
+  ],
+  "color_rule": "One accent hue per deliverable. No color carries meaning alone.",
+  "font": "Aptos",
+  "type": [
+    { "token": "heading", "pt": 11, "style": "bold, accent", "use": "Section heading (Rule 77, third level)",
+      "web_rem": 1.375, "web_note": "section heading, bold, accent" },
+    { "token": "role", "pt": 10, "style": "bold, black; step number in accent", "use": "Signer and HR card heading",
+      "web_rem": 1, "web_note": "card heading, bold" },
+    { "token": "value", "pt": 10.5, "style": "regular, black", "use": "Prefilled values, choice text", "web_rem": 1.0625 },
+    { "token": "body", "pt": 10, "style": "regular, black", "use": "Intro, terms", "web_rem": 1 },
+    { "token": "caption", "pt": 9, "style": "regular, caption gray", "use": "Field labels, signer statements",
+      "web_rem": 0.875, "web_note": "labels and statements; the screen floor" }
+  ],
+  "floor_pt": { "paper": 9, "slides": 12 },
+  "spacing": [
+    { "token": "hair", "pt": 1, "use": "Space around a written value", "web": true },
+    { "token": "tight", "pt": 2, "use": "Gap between a card heading and its statement or choices", "web": true },
+    { "token": "snug", "pt": 3, "use": "Heading after (Rule 82), term item after, cell top padding", "web": true },
+    { "token": "base", "pt": 4, "use": "Card top padding, gap after an acknowledgment line", "web": true },
+    { "token": "loose", "pt": 6, "use": "Cell and card side padding; spacer before the HR row", "web": true },
+    { "token": "open", "pt": 8, "use": "Card bottom padding, space before the intro", "web": true },
+    { "token": "heading_before", "pt": 9, "use": "Space above a section heading (Rule 82)", "web": true },
+    { "token": "value_row", "pt": 27, "use": "Minimum height of a field row (0.375 in)" },
+    { "token": "hr_row", "pt": 28, "use": "Minimum height of the HR row" },
+    { "token": "signature_row", "pt": 34, "use": "Minimum height of a signature row (0.47 in)" },
+    { "token": "indent", "pt": 18, "use": "Bullet hanging indent" }
+  ],
+  "padding": { "cell": ["snug", "loose", "tight"], "card": ["base", "loose", "open"] },
+  "line_terms": 1.05,
+  "choice_gap_em": 2,
+  "step_sep_en": 1,
+  "page": { "name": "U.S. Letter", "width_in": 8.5, "margin_in": 0.5, "margin_source": "TPS template", "grid": 12, "hr_label_span": 4 },
+  "web": {
+    "font_fallbacks": ["Segoe UI", "Helvetica Neue", "Arial", "sans-serif"],
+    "dark": [
+      { "token": "bg", "hex": "111418" },
+      { "token": "text", "hex": "F2F4F7" },
+      { "token": "caption", "hex": "B8C0CC" },
+      { "token": "border", "hex": "5A6472" },
+      { "token": "tint", "hex": "1B2633" },
+      { "token": "accent", "hex": "6FA8DC", "note": "lightened for contrast on the dark background" }
+    ]
+  }
+}

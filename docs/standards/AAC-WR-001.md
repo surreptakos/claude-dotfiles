@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.10 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.12 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.10 |
+| **Version** | 0.12 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -41,6 +41,8 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
 | 0.9 | 2026-09-22 | Rule 161 scoped to responses and messages to people, not prose deliverables: Rule 161; Appendix F. | Pending |
 | 0.10 | 2026-09-26 | Machine-vocabulary word list: Rule 167. Straight-quote mandate rejected: Appendix F. | Pending |
+| 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
+| 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
 
 # How to use this standard
 
@@ -398,6 +400,8 @@ The agreement signed April 15, 2026, remains in effect.
 
 Avoid numeric dates in narrative documents because formats can be misread. Use numeric dates in forms, space-constrained tables, software fields, file names, and system exports. Use **YYYY-MM-DD** where a machine-sortable date is useful.
 
+On a form that a person fills in by hand, write dates as MM/DD/YYYY. State the format once in the form's instructions, or in the field label when the form has one date field.
+
 ## 44. Time
 
 Use figures: **8 a.m., 8:30 a.m., 3 p.m., 3:15 p.m.** Use lowercase **a.m.** and **p.m.** with periods in formal prose. Do not use unnecessary zeros. Use **noon** and **midnight** when clearer than 12 a.m. or 12 p.m.
@@ -572,6 +576,8 @@ Use one font family throughout a routine business document unless another font h
 
 Use an alternate font only when an approved template specifies it. A software default does not override this standard.
 
+On a fill-in form, field labels and statements printed inside a write cell are 9 pt, the source-note size. Written values, instructions and terms are at least 10 pt. Name the font on the text and in the document defaults; a font left only to the document theme falls back to Times New Roman in previews that do not read themes.
+
 ## 78. Text color
 
 Use black or near-black for body text. Approved company brand colors may be used for titles, headings, rules, table headers, and limited visual emphasis. Do not use color as the only way to communicate meaning. Documents must remain understandable when printed in grayscale.
@@ -609,6 +615,8 @@ Use bold for headings, important labels, and limited emphasis. Use italics for p
 Insert an actual page break when a new page is required; do not use repeated hard returns. Enable widow/orphan control so a paragraph split across pages leaves at least two lines on each page. Keep a heading with the following paragraph and a table caption with the first table row. A short paragraph or list may be kept together when doing so does not create a large gap.
 
 Do not leave a closing or signature block alone on a continuation page. Move at least two lines of the final body paragraph with it, or adjust the preceding layout without reducing legibility. Inspect every page after pagination changes; a clean first page does not establish that later pages are correct.
+
+A form longer than one page repeats its name and its identity fields (such as the employee or account) at the top of every continuation page, and keeps each signature block together with the statement it signs.
 
 ## 86. Headers and footers
 
@@ -680,9 +688,13 @@ Use adequate cell padding, intentional alignment, and limited borders. A distinc
 
 Fit the table to the usable page width. Wrap text or adjust column widths first. For a table that remains too wide, use a landscape section, split it at a logical boundary with repeated identifiers, or move it to an appendix. Do not shrink table text below 9 pt to force a fit. Preserve the relationships among data when splitting a table.
 
+Fill-in forms are the exception to limited borders. When a label sits inside the cell it names, the cell carries all four borders, and neighboring cells share them in one joined grid per section. A label without its box floats and reads as stray text. Do not use a typed line of _ characters or open space as write space. Data tables keep the limited-border treatment above.
+
 ## 99. Empty and zero values
 
 Distinguish among 0 for a measured or confirmed zero, N/A for not applicable, Unknown when information should exist but is not known, and Unlogged when activity or a value was not recorded. Use a dash for not applicable only when the table defines that convention. Do not leave an unexplained blank in a completed data table. Empty response or signature fields are permitted in an uncompleted form.
+
+On a form, a person marks a field that does not apply by writing N/A and initialing it. A blank field on a completed form means the entry is missing, not that it does not apply.
 
 # Part XII - Email
 
@@ -1070,7 +1082,7 @@ Do not use emoji in headings, decorative bold inside a sentence, or a heading fo
 
 ## 166. Draft quality check before release
 
-Before release, confirm the draft under Appendix A, then confirm this part: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. A draft that fails any item returns to the writer.
+Before release, confirm the draft under Appendix A, then confirm this part: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap, every sentence passes the reader-need test (Rule 168), and nothing the reader needs was cut (Rule 170). The last item keeps the check from producing a terse draft. A draft that fails any item returns to the writer.
 
 ## 167. Machine vocabulary
 
@@ -1085,6 +1097,43 @@ A formal word outside this list is not a fault by itself.
 Preferred: The new panel cuts false alarms at the site and sends every trouble signal to one queue.
 
 Avoid: The new panel will enhance site security and streamline monitoring.
+
+## 168. Every sentence earns its place
+
+Extends Rules 4 and 10. Each sentence must do at least one of three things: tell the reader something they do not already know, ask the reader to act, or change rights, money, scope, or dates. Cut a sentence that does none of these, even when it is accurate. The test is what the sentence does for the reader, not how long the draft is. Rule 170 sets the limit on the cut.
+
+Three kinds of sentence fail the test most often:
+
+- A restatement of what a governing document already says. A change order does not restate unchanged terms; one line saying all other terms remain unchanged is enough.
+- Language that heads off a dispute nobody has raised. Leave out notice language, reservation of rights, and **for the avoidance of doubt** unless counsel asks for it or the relationship is already adversarial.
+- Working the reader does not need. Give the result, not the steps that produced it, unless the reader asked how the number was reached.
+
+Preferred: Your $55,700 balance less the 10 percent retainage of $13,895 is due on receipt.
+
+Avoid: Five lines of contract-sum arithmetic ending in the same figure.
+
+## 169. Formality follows stakes and relationship, not topic
+
+Correspondence with a working partner reads like a colleague writing, even when the subject is money or a contract. In email and text messages, do not cite a contract section unless the reader has disputed the point or the citation changes the outcome. Contract language belongs in the contract, not in the email that sends it.
+
+Appendix G12 registers the legalistic phrases that show an email has taken on the voice of a contract. Rule 137 still governs contract language itself, and Rule 153 keeps this part out of contracts.
+
+Preferred: We are holding the retainage until the closeout items arrive.
+
+Avoid: Under Section 12.3, please treat this email as our written notice that retainage will be withheld pending receipt of the closeout items.
+
+## 170. Cut for need, never for length
+
+Rules 168 and 169 cut sentences that do nothing for the reader. Neither one licenses a cut made for length. Before cutting a sentence, ask whether the reader would have to write back to ask for it. If the reader would, the sentence stays.
+
+Always keep the reason behind a request; the owner, the amount, and the deadline; one line of courtesy; and complete sentences under Rule 67. A short draft that makes the reader ask a follow-up question fails Rule 5.
+
+The ForeFront closeout of September 28, 2026 applied Rules 168 through 170 to one set of documents:
+
+- Change Order No. 2 restated the contract time and the payment terms. Both lines came out, because neither term changed (Rule 168).
+- The cover email read "Under Section 12.3, please treat this email as our written notice." It came out, because saying in writing that retainage is held until the closeout items arrive already covers the notice (Rule 169).
+- Five lines of contract-sum arithmetic became "your $55,700 balance less the 10% retainage of $13,895." The reader needed the result, not the working (Rule 168).
+- The closeout list carried section citations and serial-number detail. All five items stayed, each as a plain one-line request: the detail was cut, not the needs (Rule 170).
 
 # Appendix A - Writing and release checklist
 
@@ -1269,11 +1318,13 @@ Table F1. House decision register
 | 5 | State the main point early, before supporting detail. A short courtesy opening, such as a thank-you or an introduction to a new contact, may come first. | Owner ruling, September 25, 2026. "Main point first" left no room for a courtesy opening. | 0.8 |
 | 161 | Consistent naming binding in responses and messages to people (email, Teams, review feedback); free in prose deliverables (reports, proposals, scopes, procedures). | Owner ruling, September 22, 2026, issue 627, superseding a September 21, 2026 draft ruling that split the rule by document type instead. `blader/humanizer` 3.0.0 dropped its equivalent pattern as an AI tell; Rule 161 answers a different question (precision, not machine detection), so the rule stands but is scoped to correspondence. | 0.9 |
 | 167 | Machine-vocabulary word list adopted across the board, not scoped to one document class. Beacon, harness, gate, and robust stay exempt when literal. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Lists compared: `petergyang/no-ai-slop` and `blader/humanizer`. Checked by the stop-slop detector, issue 620. | 0.10 |
+| 166; 168; 169; 170; G12 | Cut sentences that do nothing for the reader: restated terms, unraised disputes, and shown working (Rule 168). Formality follows stakes and relationship, not topic; no contract citations in email unless disputed or outcome-changing (Rule 169). Cut for need, never for length (Rule 170). Legalistic register in Appendix G12, checked as warnings outside formal documents. No length check. | Owner ruling, September 28, 2026, from the ForeFront closeout: the drafts were accurate but overdefensive, legalistic, and redundant. Length is the wrong target, so Rule 170 and its release-check item keep the fix from turning terse. | 0.12 |
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
+| 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
 
 # Appendix G - Phrase register
 
-Registers the phrase patterns Rules 155 through 163 prohibit. The register is a reference, not an exhaustive list; a phrase absent from it is still subject to the rule it offends. Source recorded in References.
+Registers the phrase patterns Rules 155 through 163 and Rule 169 prohibit. The register is a reference, not an exhaustive list; a phrase absent from it is still subject to the rule it offends. Source recorded in References.
 
 ## G1. Throat-Clearing Openers
 
@@ -1440,6 +1491,27 @@ Sentences that announce importance without naming the specific thing. Kill these
 - "The consequences are real"
 
 If a sentence says something is important/deep/structural without showing the specific thing, cut it or replace it with the specific thing.
+
+## G12. Legalistic Register
+
+Contract phrasing carried into correspondence (Rule 169). Contracts, and the contract language Rule 137 protects, are exempt. In email and other informal writing, say it the way a colleague would, or cut the sentence under Rule 168.
+
+- "pursuant to"
+- "herein"
+- "hereby"
+- "hereto"
+- "notwithstanding"
+- "for the avoidance of doubt"
+- "please be advised" (Rule 10 already treats it as filler)
+- "please treat this as"
+- "without prejudice"
+- "reserve the right" and "reserves the right"
+- "without waiving"
+- "in accordance with Section"
+- "it is our position"
+- **shall** in an email (Rule 14 already governs it)
+
+More than one "Section N" citation in one email is itself a sign of the register. The linter reports the phrases above that Rules 10 and 14 do not already check, and a second section citation, as warnings in informal writing and not at all in a formal document. It checks no length: length is the wrong target (Rule 170).
 
 # Appendix H - Structure register
 

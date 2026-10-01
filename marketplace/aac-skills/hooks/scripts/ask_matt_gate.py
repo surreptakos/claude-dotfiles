@@ -1095,6 +1095,11 @@ APPROVE_TICKETS_STANDALONE_TOKENS = frozenset(
         "that's fine go",
         "thats fine go",
         "go",
+        # Issue 1060: /to-tickets step 4 asks for `tickets ok`; a bare `ok` or `yes` is the same
+        # answer to that one question, and still only as the whole message.
+        "tickets ok",
+        "ok",
+        "yes",
     }
 )
 
@@ -1235,7 +1240,7 @@ def _publish_gate(
             "AskUserQuestion is not registered in every session; when it isn't, the user's "
             "explicit typed approval satisfies the gate — either the sentinel "
             f"`{APPROVE_TICKETS_SENTINEL}` anywhere in their message, or a standalone approval "
-            "token as the whole message (e.g. `approved`, `publish`, `lgtm`, `that's fine, go`)."
+            "token as the whole message (e.g. `tickets ok`, `approved`, `publish`, `lgtm`, `that's fine, go`)."
         )
     _bump_publish_count(session_id)
     return None
@@ -1274,14 +1279,21 @@ def _claude_pre_tool(event: dict[str, Any]) -> dict[str, Any]:
     # happened to be in flight when a new user prompt reset the state.
     if state and state.get("last_flow"):
         return {}
-    if not state:
+    # Issue 1163: a subagent call (hook input carries `agent_id`) is exempt, as the route gate's
+    # is. Starting the helper already passed this gate, and a helper never sees the prompt hook's
+    # nonce: a build agent resumed with SendMessage got this deny on every call and could not work.
+    if event.get("agent_id"):
+        return {}
+    if not state or not nonce:
         # No state file at all means the UserPromptSubmit hook never ran for this session, so there
         # is no nonce and the declaration this deny demands cannot be written — the gate refuses
         # every tool call including the declaration itself, and nothing the session can do satisfies
         # it. Seen 2026-09-21 in the master-zoho-source-of-truth Routine: the payload merged these
         # hooks into live user settings mid-session, every subsequent call came back denied, and the
         # master could not even send a notification. Fail open; the next prompt writes state and the
-        # gate resumes with full force.
+        # gate resumes with full force. A state with no nonce is the same case (issue 1163): the
+        # PostToolUse hook writes a failure counter even when no prompt ever ran, and a deny then
+        # printed `declare-claude "<session>" ""`, which declare-claude always rejects.
         return {}
     # Issue 608 item 3: a surface whose tools are neither Claude Code's nor an MCP shell can never
     # run the declaration, so an unconditional deny is a permanent deadlock. Refuse ONCE per
@@ -1565,7 +1577,7 @@ def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
     ]
 
 
-def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
+def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list[str]:
     profile = LINT_PROFILES.get(mode)
     if profile is None:
         return []  # caveman off: nothing to lint
@@ -1612,7 +1624,13 @@ def _caveman_lint(text: str, mode: str = "ultra") -> list[str]:
             violations.append(
                 f"article density {density:.1f}/100 words (cap {articles_cap:g}) — drop a/an/the"
             )
-    sentences = [s.strip() for s in SENTENCE_SPLIT.split(prose) if s.strip()]
+    # Issue 1059: the route-appeal line is text the gate itself mandates, word for word, so the
+    # sentence cap never judges it: capping it left no reply that passed both rules.
+    sentence_prose = prose
+    lines = text.lstrip().splitlines()
+    if appeal_line and lines and lines[0].strip() == appeal_line:
+        sentence_prose = _strip_code("\n".join(lines[1:]))
+    sentences = [s.strip() for s in SENTENCE_SPLIT.split(sentence_prose) if s.strip()]
     long_sentences = [s for s in sentences if len(s.split()) > sentence_cap]
     if long_sentences:
         worst = max(long_sentences, key=lambda s: len(s.split()))
@@ -2523,12 +2541,18 @@ def _lint_draft(path: str, session_id: str = "") -> int:
     adhd = _adhd_state()
     transcript = _find_transcript(session_id) if session_id else ""
     turn_refusals = _turn_refusals(transcript) if transcript else None
-    appeal_violations, shaped = _appeal_lint(text, _current_appeal(state))
+    appeal = _current_appeal(state)
+    appeal_violations, shaped = _appeal_lint(text, appeal)
+    # Issue 1150: the mandated appeal line carries a reason fixed at appeal time, so YES skips that
+    # exact line (as the sentence cap does, issue 1059); any other wording is still checked.
+    mandated = _appeal_line(appeal) if appeal else ""
+    body_lines = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().splitlines()
+    yes_text = shaped if mandated and body_lines and body_lines[0].strip() == mandated else text
     violations = (
         appeal_violations
-        + _yes_lint(text, turn_tools, turn_refusals)
+        + _yes_lint(yes_text, turn_tools, turn_refusals)
         + (_adhd_lint(shaped) if adhd == "on" else [])
-        + _caveman_lint(text, mode)
+        + _caveman_lint(text, mode, _appeal_line(appeal) if appeal else "")
         + _route_unchecked_lint(text, bool(state.get("route_unchecked")))
     )
     if not violations:

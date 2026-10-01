@@ -47,8 +47,10 @@ Exit 0 on success, 1 on any skill that could not be packaged.
 import argparse
 import importlib.util
 import json
+import os
 import re
 import shutil
+import subprocess
 import sys
 import zipfile
 from datetime import datetime, timezone
@@ -66,6 +68,9 @@ PLUGIN_NAME = "aac-skills"
 MANIFEST_REL = ".claude-plugin/plugin.json"
 # Stands in until the payload is assembled and resolve_version() can read it (issue 432).
 PLACEHOLDER_VERSION = "0.0.0"
+# The branch whose committed payload a desktop installs: the merge to master is the release.
+# resolve_version() never reuses the version master ships for a payload master does not (issue 1142).
+BASE_REFS = ("origin/master", "master")
 # What the rotation report prints as the "from" revision of a skill that had none.
 NONE_REVISION = "none"
 NL = chr(10)
@@ -519,13 +524,71 @@ def payload_fingerprint(root):
     return files
 
 
-def resolve_version(payload_root, published_root, now=None):
+def _git(repo, *args):
+    """Run git in `repo` with any inherited GIT_DIR-style overrides dropped; None if git is absent."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in {"GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                        "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY"}}
+    try:
+        return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, env=env,
+                              check=False)
+    except OSError:
+        return None
+
+
+def base_release(repo, rel, refs=BASE_REFS):
+    """(version, moved) for the payload the base branch has committed at `rel`, else None.
+
+    `version` is the plugin.json version the first of `refs` that exists commits; `moved` says
+    whether the working-tree copy at `rel` differs from that commit's. Git makes the comparison,
+    in its own object space - `git diff <ref>` plus the untracked files beside it - so line-ending
+    settings (core.autocrlf, .gitattributes) cannot make equal content read as moved or moved
+    content read as equal. Files the fingerprint treats as noise (a hook's __pycache__) are not
+    counted here either.
+
+    None when `repo` is not the top of a git checkout, no ref exists, or the base ships no
+    payload: resolve_version then has only the working tree to go on.
+    """
+    top = _git(repo, "rev-parse", "--show-prefix")
+    if top is None or top.returncode != 0 or top.stdout.strip():
+        return None  # not a checkout, or `repo` sits inside some other repository
+    ref = next((r for r in refs
+                if _git(repo, "rev-parse", "--verify", "--quiet", r + "^{commit}").returncode == 0),
+               None)
+    if ref is None:
+        return None
+    shown = _git(repo, "show", f"{ref}:{rel}/{MANIFEST_REL}")
+    try:
+        version = json.loads(shown.stdout.decode("utf-8")).get("version")
+    except (ValueError, AttributeError):
+        version = None
+    if shown.returncode != 0 or not version:
+        return None
+    diff = _git(repo, "diff", "--quiet", "--no-ext-diff", ref, "--", rel)
+    untracked = _git(repo, "ls-files", "-z", "--others", "--exclude-standard", "--", rel)
+    if diff.returncode not in (0, 1) or untracked.returncode != 0:
+        return None
+    extra = [p for p in untracked.stdout.decode("utf-8", "replace").split("\0")
+             if p and not any(skill_stamps.is_noise(part) for part in p.split("/"))]
+    return version, diff.returncode == 1 or bool(extra)
+
+
+def resolve_version(payload_root, published_root, now=None, base=None):
     """The version an assembled payload ships: the published one when nothing moved.
 
     plugin_version() is a wall clock, so stamping it on every build made every rebuild of an
     unchanged mirror a two-file diff - plugin.json and marketplace.json - that no content movement
     explained (issue 432). A rebuild whose payload reproduces the published one byte for byte
     keeps the published version; only a payload that really moved takes a fresh stamp.
+
+    `base` is base_release()'s (version, moved) for master's committed payload. The published
+    copy alone is not enough: after `git merge origin/master` git can auto-merge that copy to the
+    very bytes the branch assembles while the conflicted version files are taken from master, and
+    reusing that version named new content with a version a desktop already holds, so the desktop
+    never updated (issue 1142). A carried version that master ships for a payload this published
+    copy does not match is therefore never reused. One master ships for these same bytes, or one
+    master does not ship at all (the branch's own stamp), still is, so an unchanged tree rebuilds
+    byte for byte on master and on a branch alike.
 
     Versions still never go backwards across machines, which is the whole point of the clock
     (see plugin_version): every value returned here is either a fresh UTC reading, which outranks
@@ -538,6 +601,8 @@ def resolve_version(payload_root, published_root, now=None):
     except (OSError, ValueError, AttributeError):
         carried = None
     if carried and payload_fingerprint(payload_root) == payload_fingerprint(published_root):
+        if base is not None and base[0] == carried and base[1]:
+            return plugin_version(now)
         return carried
     return plugin_version(now)
 
@@ -979,6 +1044,16 @@ def main():
                   "Checking the fleet is launched from its own repository..."),
         ]})
 
+    # Skill hook fragments (issue 1082): a packaged skill that carries hooks/hooks.fragment.json has
+    # each of its groups appended to the event's array. The commands name the script inside the
+    # skill through ${CLAUDE_PLUGIN_ROOT}/skills/<name>/, so nothing is copied. Keys starting with
+    # an underscore are notes, not events. aac-design's gate is the first: it acts only inside a
+    # folder carrying its opt-in marker, which is what makes it safe to run plugin-wide.
+    for fragment in sorted((plugin_root / "skills").glob("*/hooks/hooks.fragment.json")):
+        for event, groups in json.loads(fragment.read_text(encoding="utf-8")).items():
+            if not event.startswith("_"):
+                governance_hooks.setdefault(event, []).extend(groups)
+
     (hooks_dir / "hooks.json").write_bytes((
         json.dumps({"hooks": governance_hooks}, indent=2) + "\n").encode("utf-8")
     )
@@ -986,7 +1061,8 @@ def main():
     # ------------------------------------------------------------------------ version
     # Last, because it is a fact about the assembled payload. The zip follows it (and the team
     # skills above), so every surface ships the same bytes under the same version.
-    version = resolve_version(plugin_root, REPO / "marketplace" / PLUGIN_NAME)
+    version = resolve_version(plugin_root, REPO / "marketplace" / PLUGIN_NAME,
+                              base=base_release(REPO, "marketplace/" + PLUGIN_NAME))
     (plugin_root / MANIFEST_REL).write_bytes(plugin_manifest(version))
 
     zip_path = out / f"{PLUGIN_NAME}.zip"

@@ -1,16 +1,21 @@
-// wr001-coverage.md must agree with wr001-lint.js: every rule 1..167 once, every
+// wr001-coverage.md must agree with wr001-lint.js: every rule 1..N once, every
 // rule the linter decides marked Pattern or Jev, and nothing marked Pattern or
 // Jev that the linter does not decide. Dan, 2026-09-29: Rule 37 sat in the
 // standard as an owner ruling for six days with no check; this test makes a
-// silent gap impossible.
+// silent gap impossible. N is the master's last rule, and 00-INDEX.md must be
+// exactly what build_references.py writes (issue 1164).
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
+const { spawnSync } = require("child_process");
 
 const SCRIPTS = path.join(__dirname, "..", "aac-skills", "aac-house-writing-standard", "scripts");
 const js = fs.readFileSync(path.join(SCRIPTS, "wr001-lint.js"), "utf8");
 const md = fs.readFileSync(path.join(SCRIPTS, "wr001-coverage.md"), "utf8");
+const MASTER = path.join(__dirname, "..", "docs", "standards", "AAC-WR-001.md");
+const RULES = [...fs.readFileSync(MASTER, "utf8").matchAll(/^## (\d+)\. /gm)].length;
 
 function linterRules() {
   const nums = new Set();
@@ -32,10 +37,10 @@ function tableRows() {
   return rows;
 }
 
-test("every rule 1 through 167 has exactly one row", () => {
+test("every rule 1 through N has exactly one row", () => {
   const rows = tableRows();
   const nums = rows.map((r) => r.rule).sort((a, b) => a - b);
-  assert.deepStrictEqual(nums, Array.from({ length: 167 }, (_, i) => i + 1));
+  assert.deepStrictEqual(nums, Array.from({ length: RULES }, (_, i) => i + 1));
 });
 
 test("the table's Pattern and Jev rows are exactly the rules the linter decides", () => {
@@ -56,7 +61,21 @@ test("the counts line matches the rows", () => {
 
 test("the index paragraph names the same pattern count as the linter", () => {
   const idx = fs.readFileSync(path.join(SCRIPTS, "..", "references", "00-INDEX.md"), "utf8");
-  const m = /decides (\d+) of the 167 rules by pattern/.exec(idx);
+  const m = /decides (\d+) of the (\d+) rules by pattern/.exec(idx);
   assert.ok(m, "index paragraph");
   assert.strictEqual(Number(m[1]), linterRules().pattern.size);
+  assert.strictEqual(Number(m[2]), RULES);
+});
+
+test("00-INDEX.md is exactly what the reference build writes", () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "wr001-refs-"));
+  try {
+    const r = spawnSync("python3", [path.join(SCRIPTS, "build_references.py"), MASTER, out], { encoding: "utf8" });
+    assert.strictEqual(r.status, 0, r.stderr);
+    const built = fs.readFileSync(path.join(out, "00-INDEX.md"), "utf8");
+    const committed = fs.readFileSync(path.join(SCRIPTS, "..", "references", "00-INDEX.md"), "utf8");
+    assert.strictEqual(committed, built, "00-INDEX.md is stale: rerun scripts/build_references.py");
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
 });

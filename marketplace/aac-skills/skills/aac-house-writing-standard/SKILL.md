@@ -2,11 +2,11 @@
 name: aac-house-writing-standard
 description: 'AAC-WR-001, the controlled copy of AAC''s house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit.'
 metadata:
-  standard-version: '0.10'
-  modified: '2026-09-29T21:09:31Z'
-  previous-modified: '2026-09-29T18:23:41Z'
-  revision: '16'
-  content-sha: 1e13c256a016
+  standard-version: '0.12'
+  modified: '2026-10-01T04:10:22Z'
+  previous-modified: '2026-09-30T23:32:51Z'
+  revision: '20'
+  content-sha: '556935359234'
 ---
 
 # AAC house writing standard
@@ -63,7 +63,10 @@ python3 scripts/build_references.py ../../docs/standards/AAC-WR-001.md reference
 ```
 
 The script exits non-zero if any section of the source lands in no file, so a
-new Part cannot go missing.
+new Part cannot go missing. It writes `references/00-INDEX.md` too: the rule
+range and each file's span from the master, the pattern and Jev counts from
+`scripts/wr001-coverage.md`. Its prose lives in the script's `INDEX` template, so
+update the coverage table first, then run the build; never edit the index.
 When a revision adds or changes a rule, the same PR adds its check to `scripts/wr001-lint.js`
 or its row to `scripts/wr001-coverage.md` saying why no pattern can decide it;
 `tools/wr001-lint-coverage.test.js` fails when the two disagree (Dan, September 29, 2026,

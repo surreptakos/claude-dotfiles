@@ -356,6 +356,8 @@ The agreement signed April 15, 2026, remains in effect.
 
 Avoid numeric dates in narrative documents because formats can be misread. Use numeric dates in forms, space-constrained tables, software fields, file names, and system exports. Use **YYYY-MM-DD** where a machine-sortable date is useful.
 
+On a form that a person fills in by hand, write dates as MM/DD/YYYY. State the format once in the form's instructions, or in the field label when the form has one date field.
+
 ## 44. Time
 
 Use figures: **8 a.m., 8:30 a.m., 3 p.m., 3:15 p.m.** Use lowercase **a.m.** and **p.m.** with periods in formal prose. Do not use unnecessary zeros. Use **noon** and **midnight** when clearer than 12 a.m. or 12 p.m.

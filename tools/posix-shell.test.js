@@ -45,3 +45,21 @@ test('a missing shell is a named skip, never a null exit status', () => {
   assert.equal(none.path, null);
   assert.match(none.skip, /^no no-such-shell-for-posix-shell-test: not on PATH/);
 });
+
+// A child that exits without reading its stdin (a hook's local-session early exit) used to race
+// spawnSync's piped `input` write, which failed with EPIPE (Linux) or EOF (Windows) after the
+// child already ran; CI saw it as an intermittent "did not start: spawnSync bash EPIPE" in
+// tools/caveman-bootstrap-hook.test.js (issue 1143). 1 MiB outgrows any pipe buffer, so the child
+// wins that race every time. `input` is a file now: no write, so no error to classify.
+test('a child that ignores its stdin returns its exit status with no pipe error', { skip: shell('bash').skip }, () => {
+  const r = shell('bash').run(['-c', 'exit 3'], { input: 'x'.repeat(1 << 20), encoding: 'utf8' });
+  assert.equal(r.error, undefined);
+  assert.equal(r.status, 3);
+});
+
+test('a child that reads its stdin gets every byte of `input`', { skip: shell('bash').skip }, () => {
+  const input = 'café '.repeat(1 << 17);
+  const r = shell('bash').run(['-c', 'cat'], { input, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout, input);
+});

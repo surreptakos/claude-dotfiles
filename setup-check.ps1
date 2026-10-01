@@ -13,16 +13,23 @@
 
     Four layers:
 
-      Prerequisites  git, node, py, claude, gh on PATH; PyYAML importable by py -3.
+      Prerequisites  git, node, py, claude, gh on PATH; PyYAML importable by py -3; global git
+                     user.name and user.email set (issue 1157: without them commit and merge
+                     refuse; -Fix copies them from the owner's ~/.claude/accounts.json entry).
       Profile        the files pull restores match what the repo would write (compared through
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
-                     every settings.json hook entry names files that exist; the caveman proxy
-                     binary is present and a terminal `claude -p` answers through its port.
+                     the desktop app holds its own synced copy under each desktop account's org
+                     folders (rpm\manifest.json lists it and its folder holds the plugin, issue
+                     1149); every settings.json hook entry names files that exist; the caveman proxy
+                     binary is present, registered to start at logon (HKCU Run CavemanProxy,
+                     issue 1110), and a terminal `claude -p` answers through its port.
                      ~/.claude-personal gets the plugin and hook checks when it exists and is
                      never created (issue 1070).
       Credentials    the service account key and the OAuth client secret under ~/.config exist
-                     and parse as JSON; the GitHub, Claude and gas logins answer a live probe.
+                     and parse as JSON; the GitHub, Claude and gas logins answer a live probe;
+                     TYPESAFE_API_KEY is set (user, machine or this process's environment) and
+                     Jev answers a live call with it (issue 1133).
       Projects       every repo in the shared repo list (lib/repos.json) is cloned at its path
                      with the right origin, its commit gate on (core.hooksPath .githooks when the
                      repo has that folder) and its Claude trust record written (by
@@ -33,7 +40,8 @@
 
     Without -Fix it only reports. With -Fix it first applies the fixes that are safe to repeat
     (pip-install PyYAML, run pull on drift, run the desktop caveman install when the wiring is
-    broken, clone a missing repo, set a commit gate, write trust records, install the watchdog
+    broken, the proxy port dead or its logon start missing - the install starts the proxy and
+    registers it - clone a missing repo, set a commit gate, write trust records, install the watchdog
     task on the anchor or disable it elsewhere), then reports. Whatever only the owner can do - install a
     binary, copy a secret file, log in - becomes a numbered to-do with the exact command.
 
@@ -46,10 +54,14 @@
     other home they are reported as skipped, so the restore test can drive install.ps1 into a fake
     home. A test controls them through SETUP_CHECK_STUBS: a directory holding <probe>.ps1 files,
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
-    command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth,
-    caveman-live, caveman-enable, clone (args: slug, path), watchdog-install, watchdog-disable.
-    Text probes print their answer instead: master-plugin-version (the aac-skills version master
-    offers), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
+    command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
+    caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
+    git-identity-set (args: git key, value) writes one global git setting.
+    Text probes print their answer instead: git-user-name and git-user-email (the global value,
+    empty when unset), master-plugin-version (the aac-skills version master
+    offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
+    unset - never the value), desktop-plugin-root (the desktop app's local-agent-mode-sessions
+    folder), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
     Exit 0 when no STOP remains, 1 when one does, 2 when the check itself could not run.
@@ -178,6 +190,65 @@ function Invoke-ProbeText {
 
 $SkipReason = 'machine probe skipped: -UserHome is not this user''s profile'
 
+# The owner's git identity from ~/.claude/accounts.json: accounts.<label>.git = { name, email } on
+# the account that owns the registered desktop routines. $null when the registry, the owner or
+# the entry is missing or incomplete (issue 1157).
+function Get-RegistryGitIdentity {
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $node) { return $null }
+    $js = 'const id=require(process.argv[1]);const r=id.loadRegistry({USERPROFILE:process.argv[2]});let o=null;if(r&&!r.error){for(const t of Object.values(r.routines)){const a=r.accounts[t.owner];const g=a&&a.git;if(g&&g.name&&g.email){o={name:String(g.name),email:String(g.email)};break}}}process.stdout.write(JSON.stringify(o))'
+    $identityJs = Join-Path (Join-Path (Join-Path $RepoRoot 'aac-skills') 'session-check') 'identity.js'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $raw = [string](& $node.Source -e $js $identityJs $UserHome 2>$null) } catch { $raw = '' }
+    finally { $ErrorActionPreference = $prev }
+    try { return ($raw | ConvertFrom-Json) } catch { return $null }
+}
+
+# The global value of one git key: $null when machine probes are skipped, '' when unset.
+function Get-GitConfigValue {
+    param([string]$Key)
+    $v = Invoke-ProbeText -Name ('git-' + $Key.Replace('.', '-')) -Real {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { [string](& git config --global --get $Key 2>$null | Out-String) } catch { '' }
+        finally { $ErrorActionPreference = $prev }
+    }
+    if ($null -eq $v) { return $null }
+    return $v.Trim()
+}
+
+function Set-GitConfigValue {
+    param([string]$Key, [string]$Value)
+    [void](Invoke-Probe -Name 'git-identity-set' -Arguments @($Key, $Value) -Real {
+        param($k, $v)
+        Invoke-NativeExit 'git' @('config', '--global', $k, $v)
+    })
+}
+
+function Test-GitIdentity {
+    $name = Get-GitConfigValue 'user.name'
+    if ($null -eq $name) { Write-Line skip ('git user.name and user.email  ({0})' -f $SkipReason); return }
+    $email = Get-GitConfigValue 'user.email'
+    if ($name -and $email) { Write-Line ok 'git user.name and user.email'; return }
+
+    $reg = Get-RegistryGitIdentity
+    if ($Fix -and $reg) {
+        if (-not $name) { Set-GitConfigValue 'user.name' ([string]$reg.name) }
+        if (-not $email) { Set-GitConfigValue 'user.email' ([string]$reg.email) }
+        $name = Get-GitConfigValue 'user.name'
+        $email = Get-GitConfigValue 'user.email'
+        if ($name -and $email) { Write-Line ok 'git user.name and user.email  (set by -Fix from the owner''s accounts.json entry)'; return }
+    }
+    $missing = (@(if (-not $name) { 'user.name' }; if (-not $email) { 'user.email' })) -join ' and '
+    Write-Line warn ('git {0} not set: commits and merges refuse without them  (-Fix sets them when accounts.json records the owner''s git name and email)' -f $missing)
+    $n = if ($reg) { [string]$reg.name } else { 'Your Name' }
+    $e = if ($reg) { [string]$reg.email } else { 'you@example.com' }
+    Add-Todo 'Set the global git identity (or record it as accounts.<owner>.git { name, email } in ~/.claude/accounts.json and re-run with -Fix):' @(
+        ('git config --global user.name "{0}"' -f $n),
+        ('git config --global user.email "{0}"' -f $e))
+}
+
 # ------------------------------------------------------------------ prerequisites
 
 function Test-Prerequisites {
@@ -200,6 +271,9 @@ function Test-Prerequisites {
             $found[$tool] = $false
         }
     }
+
+    if ($found['git'] -eq $false) { Write-Line skip 'git user.name and user.email  (not probed: git is missing)' }
+    else { Test-GitIdentity }
 
     if ($found['py'] -eq $false) {
         Write-Line skip 'PyYAML  (not probed: py is missing)'
@@ -299,6 +373,68 @@ function Test-Credentials {
         -Real { Invoke-NativeExit 'node' @($GasCli, 'whoami') } `
         -TodoText 'Log in to Google for Apps Script (once per Google account):' `
         -Commands @(('node "{0}" login' -f $GasCli))
+    Test-JevKey $Found
+}
+
+# The TypeSafe key the ask-matt route gate sends to Jev (issue 1133). Without it every turn opens
+# 'route unchecked: Jev unavailable'. The value is never read into this script's output: the key
+# probe answers with where the key is set, and the live probe hands it to node through the
+# environment only.
+$JevJs      = Join-Path (Join-Path $RepoRoot 'tools') 'jev.js'
+$JevKeyVar  = 'TYPESAFE_API_KEY'
+$JevKeyTodo = ('Set {0} as a Windows user environment variable (not settings.json, not a repo) - the command asks for the key, so it stays out of the shell history - then open a new terminal and restart the Claude app:' -f $JevKeyVar)
+$JevKeySet  = ('[Environment]::SetEnvironmentVariable(''{0}'', (Read-Host ''TypeSafe API key''), ''User'')' -f $JevKeyVar)
+
+function Test-JevKey {
+    param($Found)
+    $source = Invoke-ProbeText -Name 'jev-key' -Real {
+        foreach ($scope in @('User', 'Machine')) {
+            if ([Environment]::GetEnvironmentVariable($JevKeyVar, $scope)) { return $scope.ToLower() }
+        }
+        if ([Environment]::GetEnvironmentVariable($JevKeyVar, 'Process')) { return 'process' }
+        return ''
+    }
+    if ($null -eq $source) {
+        Write-Line skip ('TypeSafe key ({0})  ({1})' -f $JevKeyVar, $SkipReason)
+        Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
+        return
+    }
+    if (-not $source) {
+        Write-Line stop ('TypeSafe key missing: {0} is not set, so the route gate reads ''route unchecked: Jev unavailable''' -f $JevKeyVar)
+        Add-Todo $JevKeyTodo @($JevKeySet)
+        return
+    }
+    $where = switch ($source) {
+        'user'    { 'the Windows user environment' }
+        'machine' { 'the Windows machine environment' }
+        'process' { 'this process only: not a Windows user or machine variable' }
+        default   { $source }
+    }
+    Write-Line ok ('TypeSafe key ({0}, set in {1})' -f $JevKeyVar, $where)
+    if ($Found.ContainsKey('node') -and $Found['node'] -eq $false) {
+        Write-Line skip 'Jev live call  (not probed: node is missing)'
+        return
+    }
+    $code = Invoke-Probe -Name 'jev-live' -Real {
+        $prev = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Process')
+        try {
+            if (-not $prev) {
+                $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'User')
+                if (-not $key) { $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Machine') }
+                [Environment]::SetEnvironmentVariable($JevKeyVar, $key, 'Process')
+            }
+            $js = 'const j=require(process.argv[1]);j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000}).then(a=>process.exit(a&&a.ok?0:1))'
+            Invoke-NativeExit 'node' @('-e', $js, $JevJs)
+        } finally { [Environment]::SetEnvironmentVariable($JevKeyVar, $prev, 'Process') }
+    }
+    if ($null -eq $code) {
+        Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
+    } elseif ($code -eq 0) {
+        Write-Line ok 'Jev answers a live call'
+    } else {
+        Write-Line stop ('Jev did not answer a live call with {0}: the key is refused or api.typesafe.ai is unreachable' -f $JevKeyVar)
+        Add-Todo ('Replace the TypeSafe key: {0}' -f $JevKeyTodo) @($JevKeySet)
+    }
 }
 
 # ------------------------------------------------------------------ profile
@@ -307,6 +443,9 @@ $PluginId        = 'aac-skills@claude-dotfiles'
 $PluginVersionJs = Join-Path (Join-Path (Join-Path $RepoRoot 'aac-skills') 'session-check') 'plugin-version.js'
 $ProxyPort       = 8787
 $CavemanInstall  = Join-Path (Join-Path $RepoRoot 'tools') 'caveman-desktop-install.ps1'
+# The logon start tools/caveman-desktop-install.ps1 registers (issue 1110).
+$CavemanRunKey   = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$CavemanRunValue = 'CavemanProxy'
 
 function Test-SameBytes {
     param([string]$A, [string]$B)
@@ -456,6 +595,70 @@ function Test-Plugin {
     }
 }
 
+# The desktop app's own copy of aac-skills (issue 1149). Desktop sessions load the plugin from
+# %APPDATA%\Claude\local-agent-mode-sessions\<account>\<org>\rpm\<plugin id>\, not from
+# ~/.claude/plugins. The app writes that folder itself: it syncs every plugin the signed-in
+# account has installed into rpm\ at launch and on a timer, and re-downloads a plugin's folder
+# when a newer version is published (memory note desktop-rpm-copy-is-account-synced). The org's
+# rpm\manifest.json names each synced plugin and its folder id; the folder layout alone misleads.
+# Checked for every org folder on disk of every accounts.json account whose surfaces include
+# desktop, read through session-check's registry reader.
+function Test-DesktopPluginCopy {
+    $root = Invoke-ProbeText -Name 'desktop-plugin-root' -Real { Join-Path (Join-Path $env:APPDATA 'Claude') 'local-agent-mode-sessions' }
+    if ($null -eq $root) { Write-Line skip ('desktop app aac-skills copy  ({0})' -f $SkipReason); return }
+    $node = Get-Node
+    if (-not $node) { Write-Line skip 'desktop app aac-skills copy  (not checked: node is missing)'; return }
+    $js = 'const id=require(process.argv[1]);const r=id.loadRegistry({USERPROFILE:process.argv[2]});const out=[];if(r&&!r.error){for(const [label,a] of Object.entries(r.accounts)){if(a&&a.uuid&&(a.surfaces||[]).includes(''desktop''))out.push({label,uuid:a.uuid,orgs:Object.entries(a.orgs||{}).map(([uuid,name])=>({uuid,name}))})}}process.stdout.write(JSON.stringify({accounts:out}))'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $raw = [string](& $node.Source -e $js $IdentityJs $UserHome 2>$null) } catch { $raw = '' }
+    finally { $ErrorActionPreference = $prev }
+    $accounts = @()
+    try { $accounts = @(($raw | ConvertFrom-Json).accounts) } catch { }
+    if ($accounts.Count -eq 0) {
+        Write-Line skip 'desktop app aac-skills copy  (accounts.json names no desktop account with a uuid)'
+        return
+    }
+    $syncTodo = 'Get the Claude desktop app to sync aac-skills for {0}: the app downloads every plugin the signed-in account has installed into {1}\<org>\rpm\ by itself, at launch and then on a timer (AAC-AI, 2026-09-30: an hour after launch), and re-downloads the folder when a newer version is published. Sign in to the app as {0}, check that aac-skills from the claude-dotfiles marketplace is installed on that account, quit and reopen the app, leave it open an hour, then re-run the setup check. If it is still missing, copy rpm\<plugin id>\ by hand from a PC that has it; the app replaces a hand copy at its next sync after a newer version is published.'
+    foreach ($a in $accounts) {
+        $acctDir = Join-Path $root $a.uuid
+        $orgs = @(@($a.orgs) | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $acctDir $_.uuid) -PathType Container) })
+        if ($orgs.Count -eq 0) {
+            Write-Line stop ('desktop app has no aac-skills copy for {0}: the app has not synced that account on this PC (no org folder under {1})' -f $a.label, $acctDir)
+            Add-Todo ($syncTodo -f $a.label, $acctDir)
+            continue
+        }
+        foreach ($org in $orgs) {
+            $rpm = Join-Path (Join-Path $acctDir $org.uuid) 'rpm'
+            $what = '{0} {1} org' -f $a.label, $org.name
+            $entries = $null
+            try { $entries = @((([System.IO.File]::ReadAllText((Join-Path $rpm 'manifest.json'))) | ConvertFrom-Json).plugins | Where-Object { $_ -and $_.name -eq 'aac-skills' -and $_.id }) } catch { }
+            $why = ''
+            $hit = $null
+            if ($null -eq $entries) {
+                $why = 'no readable rpm\manifest.json'
+            } elseif ($entries.Count -eq 0) {
+                $why = 'rpm\manifest.json does not list it'
+            } else {
+                foreach ($e in $entries) {
+                    try {
+                        $v = [string](([System.IO.File]::ReadAllText((Join-Path (Join-Path $rpm $e.id) '.claude-plugin\plugin.json'))) | ConvertFrom-Json).version
+                        $hit = '{0}, version {1}' -f $e.id, $v
+                        break
+                    } catch { }
+                }
+                if (-not $hit) { $why = ('rpm\manifest.json lists {0} but rpm\{0}\.claude-plugin\plugin.json is missing' -f $entries[0].id) }
+            }
+            if ($hit) {
+                Write-Line ok ('desktop app aac-skills copy for {0}  ({1})' -f $what, $hit)
+                continue
+            }
+            Write-Line stop ('desktop app has no aac-skills copy for {0}: {1}  ({2})' -f $what, $why, $rpm)
+            Add-Todo ($syncTodo -f $a.label, $acctDir)
+        }
+    }
+}
+
 # Every absolute path a hook command names - quoted or bare, drive-rooted or ~ (expanded to
 # $UserHome). Returns { Event; Path } objects.
 function Get-HookPaths {
@@ -516,14 +719,28 @@ function Test-CavemanLive {
     }
 }
 
+# 0 when the HKCU Run entry that starts the proxy at logon names this proxy binary, else 1.
+function Test-CavemanLogon {
+    param([string]$ProxyExe)
+    return Invoke-Probe -Name 'caveman-logon' -Arguments @($ProxyExe) -Real {
+        param($exe)
+        try {
+            $value = [string](Get-ItemProperty -LiteralPath $CavemanRunKey -Name $CavemanRunValue -ErrorAction Stop).$CavemanRunValue
+        } catch { return 1 }
+        if ($value.IndexOf($exe.Replace("'", "''"), [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { 0 } else { 1 }
+    }
+}
+
 function Test-Caveman {
     param([string]$InstallCommand)
     $settings = Join-Path $UserHome '.claude\settings.json'
     $proxyExe = Join-Path $UserHome '.caveman\bin\caveman-proxy.exe'
 
     $live = Test-CavemanLive
+    $logon = $null
+    if (Test-Path -LiteralPath $proxyExe) { $logon = Test-CavemanLogon $proxyExe }
     $broken = (-not (Test-Path -LiteralPath $proxyExe)) -or ($null -ne $live -and $live -ne 0) -or
-              (@(Get-DeadHookPaths $settings).Count -gt 0)
+              ($null -ne $logon -and $logon -ne 0) -or (@(Get-DeadHookPaths $settings).Count -gt 0)
     $note = ''
     if ($broken -and $Fix) {
         # tools/caveman-desktop-install.ps1 runs `caveman enable claude`, or strips dead wiring.
@@ -534,6 +751,8 @@ function Test-Caveman {
         if ($null -ne $code) {
             $note = '  (after -Fix ran the caveman install)'
             $live = Test-CavemanLive
+            $logon = $null
+            if (Test-Path -LiteralPath $proxyExe) { $logon = Test-CavemanLogon $proxyExe }
         }
     }
 
@@ -542,6 +761,16 @@ function Test-Caveman {
     } else {
         Write-Line warn ('caveman proxy binary missing  ({0}){1}' -f $proxyExe, $note)
         Add-Todo 'Install caveman (or re-run the setup check with -Fix):' @($InstallCommand)
+    }
+    if (-not (Test-Path -LiteralPath $proxyExe)) {
+        Write-Line skip 'caveman proxy logon start  (not probed: the proxy binary is missing)'
+    } elseif ($null -eq $logon) {
+        Write-Line skip ('caveman proxy logon start  ({0})' -f $SkipReason)
+    } elseif ($logon -eq 0) {
+        Write-Line ok ('caveman proxy starts at logon  ({0} {1})' -f $CavemanRunKey, $CavemanRunValue)
+    } else {
+        Write-Line stop ('caveman proxy is not registered to start at logon, so port {0} goes dead after a reboot{1}' -f $ProxyPort, $note)
+        Add-Todo 'Register the caveman proxy to start at logon: the caveman install writes the HKCU Run entry (or re-run the setup check with -Fix):' @($InstallCommand)
     }
     Test-HookPaths $settings $InstallCommand
     if ($null -eq $live) {
@@ -553,7 +782,17 @@ function Test-Caveman {
         Add-Todo 'Log in to Claude in a terminal, then type /login at its prompt:' @('claude')
     } else {
         Write-Line stop ('caveman proxy port {0} does not answer, so claude -p cannot{1}' -f $ProxyPort, $note)
-        Add-Todo 'Re-run the caveman install, then check that a terminal claude -p "reply ok" answers:' @($InstallCommand)
+        if (Test-Path -LiteralPath $proxyExe) {
+            # Issue 1110: the install starts the proxy and registers it at logon; Start-Process starts
+            # it now (PR 1127); when it still does not listen, the proxy itself exits, and only
+            # running it in a terminal shows why.
+            Add-Todo ('Start the caveman proxy: the caveman install starts it and registers it at logon, or start it directly; if port {0} still does not answer, run the proxy in a terminal and read why it exits:' -f $ProxyPort) @(
+                $InstallCommand,
+                ('powershell -Command "Start-Process ''{0}'' -WindowStyle Hidden"' -f $proxyExe),
+                ('& "{0}"' -f $proxyExe))
+        } else {
+            Add-Todo 'Install caveman - the install also starts its proxy - then check that a terminal claude -p "reply ok" answers:' @($InstallCommand)
+        }
     }
 }
 
@@ -563,6 +802,7 @@ function Test-Profile {
     Test-PullDrift
     $offered = Get-OfferedPluginVersion
     Test-Plugin (Join-Path $UserHome '.claude') $offered
+    Test-DesktopPluginCopy
     Test-Caveman $installCommand
 
     # Pull refreshes the personal profile from ~/.claude, so drift is judged on ~/.claude alone;

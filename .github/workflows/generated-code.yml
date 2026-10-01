@@ -48,6 +48,11 @@ jobs:
         # both, rather than send you back for a second round.
         if: ${{ !cancelled() }}
         run: node tools/build-harness-tracker-audit.js --check
+      - name: aac-design token copies match assets/aac-tokens.json
+        # Issue 1091: DESIGN-SYSTEM.md's Tokens section, build_form.py's token block and
+        # aac-tokens.css are written by tools/build-design-tokens.js from one source.
+        if: ${{ !cancelled() }}
+        run: node tools/build-design-tokens.js --check
       - name: A harness template change bumps the harness version
         if: ${{ !cancelled() }}
         env:

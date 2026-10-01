@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { readPageData, planQueue, buildPage, planLanding, executeLanding, fillBodies, marker } = require('./rulings-page.js');
+const { readPageData, planQueue, buildPage, planLanding, executeLanding, fillBodies, marker, gh } = require('./rulings-page.js');
 
 const TEMPLATE = fs.readFileSync(path.join(__dirname, 'rulings-page-template.html'), 'utf8');
 const REPO = 'surreptakos/aac-routines';
@@ -176,4 +176,33 @@ test('a rerun still holds when a new comment arrived after the ruling was posted
   const r = executeLanding(p, 's1', run);
   assert.equal(r.held, true);
   assert.deepEqual(state.labels, ['ready-for-human'], 'no label written');
+});
+
+// GraphQL is refused from a cloud session (403), so every `gh issue` call is spelled as REST
+// through `gh api`, with the shapes executeLanding reads reproduced from the REST answers.
+test('gh issue calls are sent as REST through gh api', () => {
+  const calls = [];
+  const api = (args, input) => {
+    calls.push([args.join(' '), input]);
+    if (args[1] === 'repos/o/r/issues/7') return JSON.stringify({ state: 'open', labels: [{ name: 'ready-for-human' }], body: 'B' });
+    if (args[1] === '--paginate') return JSON.stringify([[{ body: 'c1', created_at: '2026-09-26T09:00:00Z' }], [{ body: 'c2', created_at: '2026-09-27T09:00:00Z' }]]);
+    return '';
+  };
+  const view = JSON.parse(gh(['issue', 'view', '7', '--repo', 'o/r', '--json', 'comments,labels,state'], undefined, api));
+  assert.deepEqual(view, { state: 'OPEN', labels: [{ name: 'ready-for-human' }],
+    comments: [{ body: 'c1', createdAt: '2026-09-26T09:00:00Z' }, { body: 'c2', createdAt: '2026-09-27T09:00:00Z' }] });
+  assert.deepEqual(JSON.parse(gh(['issue', 'view', '7', '--repo', 'o/r', '--json', 'body'], undefined, api)), { body: 'B' });
+  const f = path.join(os.tmpdir(), 'rp-rest-' + Date.now() + '.md');
+  fs.writeFileSync(f, 'hello');
+  gh(['issue', 'comment', '7', '--repo', 'o/r', '--body-file', f], undefined, api);
+  gh(['issue', 'edit', '7', '--repo', 'o/r', '--add-label', 'a,b', '--remove-label', 'ready-for-human'], undefined, api);
+  gh(['issue', 'close', '7', '--repo', 'o/r', '--reason', 'not planned'], undefined, api);
+  fs.rmSync(f, { force: true });
+  assert.deepEqual(calls.slice(3), [
+    ['api -X POST repos/o/r/issues/7/comments --input -', '{"body":"hello"}'],
+    ['api -X POST repos/o/r/issues/7/labels --input -', '{"labels":["a","b"]}'],
+    ['api -X DELETE repos/o/r/issues/7/labels/ready-for-human', undefined],
+    ['api -X PATCH repos/o/r/issues/7 --input -', '{"state":"closed","state_reason":"not_planned"}'],
+  ]);
+  assert.equal(calls.length, 7);
 });

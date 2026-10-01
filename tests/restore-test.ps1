@@ -25,7 +25,8 @@
       9  the restored hooks actually RUN from their new home, and the payload's skills from the clone
       6e the caveman desktop installer (issue 825): -DryRun, the offline fail-closed path, the
          no-op second install, and settings.json carries a caveman hook or route only when the
-         binary it names is on disk
+         binary it names is on disk; with the binary present it starts the proxy and registers
+         its HKCU Run logon start, into a scratch key (issue 1110)
       9f the profile carries no caveman wiring, and a pull over a live settings.json keeps
          caveman's own hooks and route while every other key is the profile's (issue 826)
      10  two overlapping runs do not delete each other's scratch directory
@@ -87,10 +88,13 @@ param(
     #                exist -> check 6e1 (issue 825)
     #   caveman-overwrite  pull copies settings.json over a live one instead of merging -> check 9f (issue 826)
     #   repo-list    the trust writer covers only four rows of the shared repo list -> check 6a2 (issue 1067)
+    #   no-upstream  the clone sits on a fresh branch with no upstream and session-check runs under
+    #                the gate's budget, so it marks its steps on stderr -> verdict must stay 0
+    #                (issue 1158: stderr is read as output, never raised as NativeCommandError)
     [ValidateSet('none', 'missing', 'crlf', 'home-leak', 'secret', 'drift', 'broken-hook',
                  'collision', 'locked-scratch', 'lint-root', 'lint-mirror', 'sandbox-identity',
                  'plugin-downgrade', 'rules-copy', 'governance-entry', 'hooks-dir', 'tools-dir', 'skill-tree',
-                 'dead-caveman-hook', 'caveman-overwrite', 'repo-list')]
+                 'dead-caveman-hook', 'caveman-overwrite', 'repo-list', 'no-upstream')]
     [string]$Fault = 'none',
 
     # Internal, used by check 10. Runs ONLY the scratch-root setup - derive, wipe, create - then
@@ -860,6 +864,36 @@ Check 'CAVEMAN_DESKTOP_CLI_VERSION pins a one-off version without asking the reg
     (($pinned.Exit -eq 0) -and ($pinned.Argv -notmatch 'view') -and ($pinned.Argv -match 'install .*@caveman-ai/cli@1\.2\.3')) `
     @($pinned.Text, $pinned.Argv)
 
+# 6e4. issue 1110: with the proxy binary on disk the installer starts it when 8787 does not answer
+# and registers its logon start under HKCU Run. The binary here is a stand-in that cannot run, so
+# the start fails (reported, still exit 0), and the Run key is a per-run scratch key, never the
+# real one; both are removed afterwards so the checks below see the home they expect.
+$fakeProxy = Join-Path $FakeHome '.caveman\bin\caveman-proxy.exe'
+$fakeProxyPlanted = -not (Test-Path -LiteralPath $fakeProxy)
+if ($fakeProxyPlanted) {
+    New-Item -ItemType Directory -Path (Split-Path -Parent $fakeProxy) -Force | Out-Null
+    Set-Content -LiteralPath $fakeProxy -Value 'restore-test stand-in' -Encoding ascii
+}
+$testRunKey = 'HKCU:\Software\claude-dotfiles-restore-test\' + [guid]::NewGuid().ToString('N')
+$previousRunKey = $env:CAVEMAN_DESKTOP_RUN_KEY
+$env:CAVEMAN_DESKTOP_RUN_KEY = $testRunKey
+try {
+    $logon1 = Invoke-CavemanWithStubNpm -Installed '9.9.9' -Latest '9.9.9' -Name 'logon1'
+    $runValue = [string](Get-ItemProperty -LiteralPath $testRunKey -Name 'CavemanProxy' -ErrorAction SilentlyContinue).CavemanProxy
+    $logon2 = Invoke-CavemanWithStubNpm -Installed '9.9.9' -Latest '9.9.9' -Name 'logon2'
+} finally {
+    $env:CAVEMAN_DESKTOP_RUN_KEY = $previousRunKey
+    Remove-Item -LiteralPath (Split-Path -Parent $testRunKey) -Recurse -Force -ErrorAction SilentlyContinue
+    if ($fakeProxyPlanted) { Remove-Item -LiteralPath $fakeProxy -Force -ErrorAction SilentlyContinue }
+}
+Check 'with the proxy binary present the installer tries to start it and registers a logon start naming it (issue 1110)' `
+    (($logon1.Exit -eq 0) -and ($logon1.Text -match 'proxy (started|failed to start|already answering)') -and
+     ($logon1.Text -match 'logon start registered now \(CavemanProxy\)') -and
+     ($runValue.IndexOf($fakeProxy, [System.StringComparison]::OrdinalIgnoreCase) -ge 0)) `
+    @($logon1.Text, ("Run value: {0}" -f $runValue))
+Check 'a second install leaves the logon start as it is (issue 1110)' `
+    (($logon2.Exit -eq 0) -and ($logon2.Text -match 'logon start registered \(CavemanProxy\)')) @($logon2.Text)
+
 # ------------------------------------------------------------------ 6a2. per-project trust records (issue 199)
 
 # The other half of AC1: sync.ps1 -Mode pull invokes tools/settings-invariants.ps1 with -Trust,
@@ -1313,13 +1347,51 @@ if ((Test-Path $slopModule) -and (Test-Path $slopHook)) {
 
 # Issue 734: pull no longer writes the skills, so session-check runs from the plugin payload the
 # desktop now loads it from - the clone's marketplace/aac-skills, which is what a merge publishes.
+# Issue 1158: under the session gate's budget (SESSION_CHECK_BUDGET_MS, inherited when the gate's
+# test run spawns this suite) check.js marks each step on stderr, and Windows PowerShell 5.1 raises a
+# native stderr line under `2>&1` as a terminating NativeCommandError while the preference is Stop:
+# a false tests-FAIL STOP on a freshly cut branch. Stderr is output here, so the preference drops to
+# Continue around the call, and the check is judged by its exit code and its ok/STOP lines, which
+# must agree - exit 0 with no STOP line, exit 1 with one.
 $check = Join-Path $Clone 'marketplace\aac-skills\skills\session-check\check.js'
-Push-Location $Clone
-$out = & node $check 2>&1
-$checkExit = $LASTEXITCODE
-Pop-Location
-$ran = ($checkExit -eq 0 -or $checkExit -eq 1) -and (($out -join "`n") -match 'Starting a session')
-Check 'plugin-served session-check reports on a repo' $ran @($out | Select-Object -Last 10)
+$prevBudget = $env:SESSION_CHECK_BUDGET_MS
+$faultGitDir = $null
+$prev = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+    if ($Fault -eq 'no-upstream') {
+        # Plumbing only (no checkout, no commit), so no git hook runs in the scratch clone.
+        $freshSha = $null
+        if (-not (Test-Path (Join-Path $Clone '.git'))) {
+            # -From worktree copies files with no .git: give the clone one to cut the branch in.
+            & git -C $Clone init --quiet 2>&1 | Out-Null
+            $faultGitDir = Join-Path $Clone '.git'
+            $freshSha = & git -C $Clone -c user.name=Test -c user.email=test@example.com `
+                commit-tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904 -m 'restore-test fault: no-upstream' 2>$null
+        } else {
+            $freshSha = & git -C $Clone rev-parse HEAD 2>$null
+        }
+        & git -C $Clone update-ref refs/heads/restore-test-no-upstream $freshSha 2>&1 | Out-Null
+        & git -C $Clone symbolic-ref HEAD refs/heads/restore-test-no-upstream 2>&1 | Out-Null
+        $env:SESSION_CHECK_BUDGET_MS = '165000'
+        Note 'fault: the clone is on a fresh branch with no upstream, and session-check runs under a gate budget'
+    }
+    Push-Location $Clone
+    try {
+        $out = @(& node $check 2>&1 | ForEach-Object { "$_" })
+        $checkExit = $LASTEXITCODE
+    } finally { Pop-Location }
+} finally {
+    $ErrorActionPreference = $prev
+    $env:SESSION_CHECK_BUDGET_MS = $prevBudget
+    if ($faultGitDir) { Remove-Item -Path $faultGitDir -Recurse -Force -ErrorAction SilentlyContinue }
+}
+$stopLines = @($out | Where-Object { $_ -match '^\s+STOP\s' })
+$okLines   = @($out | Where-Object { $_ -match '^\s+ok\s' })
+$ran = (($out -join "`n") -match 'Starting a session') -and (($okLines.Count + $stopLines.Count) -gt 0) -and
+       (($checkExit -eq 0 -and $stopLines.Count -eq 0) -or ($checkExit -eq 1 -and $stopLines.Count -gt 0))
+Check 'plugin-served session-check reports on a repo' $ran `
+    (@("exit $checkExit, $($okLines.Count) ok line(s), $($stopLines.Count) STOP line(s)") + @($out | Select-Object -Last 10))
 
 # Issue 103: the account registry travels, parses, and names every repo in the shared repo list
 # (issue 1067: the watchdog's served rows come from that list, so they are covered too). The rows
