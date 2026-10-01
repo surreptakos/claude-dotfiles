@@ -9,7 +9,79 @@
       "name": "aac-skills",
       "source": "./marketplace/aac-skills",
       "description": "AAC Skills - Dan's full skill set plus the Active Alarm Company team skills, one package for every surface.",
-      "version": "2026.10.11521"
+      "version": "2026.10.11657"
+    },
+    {
+      "name": "mattpocock-skills",
+      "description": "Matt Pocock's engineering and productivity skills, the ones the AAC skills route to unchanged, loaded from mattpocock/skills at its main branch head.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/mattpocock/skills.git",
+        "path": "skills",
+        "ref": "main"
+      },
+      "strict": false,
+      "skills": [
+        "./engineering/codebase-design",
+        "./engineering/domain-modeling",
+        "./engineering/improve-codebase-architecture",
+        "./engineering/prototype",
+        "./engineering/tdd",
+        "./engineering/to-spec",
+        "./engineering/wizard",
+        "./productivity/grill-me",
+        "./productivity/grilling",
+        "./productivity/teach",
+        "./productivity/to-questionnaire",
+        "./productivity/wait-what",
+        "./productivity/writing-for-agents"
+      ]
+    },
+    {
+      "name": "vercel-agent-skills",
+      "description": "Vercel's React, Next.js, composition and web-design review skills, loaded from vercel-labs/agent-skills at its main branch head.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/vercel-labs/agent-skills.git",
+        "path": "skills",
+        "ref": "main"
+      },
+      "strict": false,
+      "skills": [
+        "./composition-patterns",
+        "./react-best-practices",
+        "./react-native-skills",
+        "./react-view-transitions",
+        "./web-design-guidelines"
+      ]
+    },
+    {
+      "name": "agent-browser",
+      "description": "Vercel's agent-browser CLI skill, loaded from vercel-labs/agent-browser at its main branch head.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/vercel-labs/agent-browser.git",
+        "path": "skills",
+        "ref": "main"
+      },
+      "strict": false,
+      "skills": [
+        "./agent-browser"
+      ]
+    },
+    {
+      "name": "find-skills",
+      "description": "Vercel's find-skills discovery skill, loaded from vercel-labs/skills at its main branch head.",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/vercel-labs/skills.git",
+        "path": "skills",
+        "ref": "main"
+      },
+      "strict": false,
+      "skills": [
+        "./find-skills"
+      ]
     }
   ]
 }

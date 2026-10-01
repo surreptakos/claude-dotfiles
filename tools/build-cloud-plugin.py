@@ -75,6 +75,89 @@ BASE_REFS = ("origin/master", "master")
 NONE_REVISION = "none"
 NL = chr(10)
 
+# ------------------------------------------------------ upstream plugins (2026-10-01, Dan's ruling)
+# Skills that were verbatim copies of another repo's skill no longer ship in aac-skills. Each
+# comes from its upstream instead, as a plugin entry of this marketplace that points at the
+# upstream repo (`git-subdir` source) and lists the subset of its skills to load: a desktop
+# installs `<name>@claude-dotfiles` like any plugin and the marketplace's autoUpdate follows the
+# upstream branch head (the plugin version is the commit SHA); a cloud container, which clones no
+# marketplace (SKIP_PLUGIN_MARKETPLACE=true), gets the same subset from
+# .claude/hooks/upstream-skills.sh, which reads these entries out of the generated
+# .claude-plugin/marketplace.json. Only the listed directories load, so `writing-guidelines`
+# (killed) and the rest of each upstream tree stay out. The locally edited copies (ask-matt,
+# code-review, triage, ...) stay in aac-skills/ and are NOT listed here: a name in both places
+# would be two skills. Verified 2026-10-01 in an isolated CLAUDE_CONFIG_DIR: `claude plugin
+# install` of such an entry loads exactly the listed skills, nested paths included, under the
+# SKILL.md frontmatter name.
+UPSTREAM_PLUGINS = [
+    {
+        "name": "mattpocock-skills",
+        "description": "Matt Pocock's engineering and productivity skills, the ones the AAC skills "
+        "route to unchanged, loaded from mattpocock/skills at its main branch head.",
+        "url": "https://github.com/mattpocock/skills.git",
+        "path": "skills",
+        "skills": [
+            "./engineering/codebase-design",
+            "./engineering/domain-modeling",
+            "./engineering/improve-codebase-architecture",
+            "./engineering/prototype",
+            "./engineering/tdd",
+            "./engineering/to-spec",
+            "./engineering/wizard",
+            "./productivity/grill-me",
+            "./productivity/grilling",
+            "./productivity/teach",
+            "./productivity/to-questionnaire",
+            "./productivity/wait-what",
+            "./productivity/writing-for-agents",
+        ],
+    },
+    {
+        "name": "vercel-agent-skills",
+        "description": "Vercel's React, Next.js, composition and web-design review skills, loaded "
+        "from vercel-labs/agent-skills at its main branch head.",
+        "url": "https://github.com/vercel-labs/agent-skills.git",
+        "path": "skills",
+        "skills": [
+            "./composition-patterns",
+            "./react-best-practices",
+            "./react-native-skills",
+            "./react-view-transitions",
+            "./web-design-guidelines",
+        ],
+    },
+    {
+        "name": "agent-browser",
+        "description": "Vercel's agent-browser CLI skill, loaded from vercel-labs/agent-browser "
+        "at its main branch head.",
+        "url": "https://github.com/vercel-labs/agent-browser.git",
+        "path": "skills",
+        "skills": ["./agent-browser"],
+    },
+    {
+        "name": "find-skills",
+        "description": "Vercel's find-skills discovery skill, loaded from vercel-labs/skills at "
+        "its main branch head.",
+        "url": "https://github.com/vercel-labs/skills.git",
+        "path": "skills",
+        "skills": ["./find-skills"],
+    },
+]
+
+
+def upstream_plugin_entries():
+    """The marketplace.json plugin entries for UPSTREAM_PLUGINS (official-marketplace shape)."""
+    return [
+        {
+            "name": p["name"],
+            "description": p["description"],
+            "source": {"source": "git-subdir", "url": p["url"], "path": p["path"], "ref": "main"},
+            "strict": False,
+            "skills": list(p["skills"]),
+        }
+        for p in UPSTREAM_PLUGINS
+    ]
+
 # ------------------------------------------------------------- dead-load decisions (issue 530)
 # A skill in the payload costs its description on EVERY turn of every session that installs the
 # plugin, invoked or not. caveman learn (30-day window, 3594 sessions, 2026-09-16) found no
@@ -100,9 +183,9 @@ DEAD_LOAD_DROPPED = {
                        "calls it.",
     "design-handoff": "handoff-spec prompt, no files but its own; nothing in the payload calls "
                       "it.",
-    "design-system": "design-system audit prompt, no files but its own; the only payload matches "
-                     "for the name are prose in vercel-react-native-skills and a keyword row in "
-                     "find-skills, neither an invocation.",
+    "design-system": "design-system audit prompt, no files but its own; nothing in the payload "
+                     "calls it (the two prose mentions it had left with the vercel and "
+                     "find-skills copies, 2026-10-01).",
     "research-synthesis": "research-synthesis prompt, no files but its own; nothing in the "
                           "payload calls it.",
     "user-research": "research-planning prompt, no files but its own; nothing in the payload "
@@ -1099,7 +1182,8 @@ def main():
                             "description": "AAC Skills - Dan's full skill set plus the Active "
                             "Alarm Company team skills, one package for every surface.",
                             "version": version,
-                        }
+                        },
+                        *upstream_plugin_entries(),
                     ],
                 },
                 indent=2,

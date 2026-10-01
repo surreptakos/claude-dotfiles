@@ -17,6 +17,15 @@
 #     which is where the API keys such a server needs must be set (the claude.ai environment
 #     variables for a container; never this repo).
 # A failed clone copies nothing and leaves the previous copies in place. Never fails the session.
+#
+# Second source (2026-10-01): the upstream-subset plugins of this repo's own marketplace. Since the
+# verbatim copies left aac-skills/, .claude-plugin/marketplace.json (generated from UPSTREAM_PLUGINS
+# in tools/build-cloud-plugin.py) carries entries whose `source` is an upstream git repo and whose
+# `skills` list names the directories to load (mattpocock-skills, vercel-agent-skills, agent-browser,
+# find-skills). A desktop installs those from the marketplace; a container cannot, so the same
+# entries drive a clone here, and ONLY the listed directories are copied: the rest of each upstream
+# tree (writing-guidelines, the mattpocock skills the AAC payload edits) stays out, so no upstream
+# copy lands beside the aac-skills copy of the same name.
 [ "${CLAUDE_CODE_REMOTE:-}" = "true" ] || exit 0
 
 UPSTREAM_HOME="${UPSTREAM_SKILLS_HOME:-$HOME}"
@@ -24,6 +33,7 @@ SKILLS_DIR="$UPSTREAM_HOME/.claude/skills"
 AGENTS_DIR="$UPSTREAM_HOME/.claude/agents"
 USER_CONFIG="$UPSTREAM_HOME/.claude.json"
 REPOS="${UPSTREAM_SKILLS_REPOS:-https://github.com/ayghri/i-have-adhd.git https://github.com/typesafe-ai/skills.git https://github.com/borski/travel-hacking-toolkit.git}"
+MARKETPLACE="${UPSTREAM_SKILLS_MARKETPLACE:-${CLAUDE_PROJECT_DIR:-.}/.claude-plugin/marketplace.json}"
 mkdir -p "$SKILLS_DIR" "$AGENTS_DIR"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -72,4 +82,32 @@ for repo in $REPOS; do
   done
   merge_mcp "$dest/.mcp.json" "$repo"
 done
+
+# Marketplace entries with an upstream git source: one line per entry, "<url> <ref> <path> <skills...>".
+if [ -f "$MARKETPLACE" ] && command -v node >/dev/null 2>&1; then
+  node - "$MARKETPLACE" <<'EOF' 2>/dev/null | while read -r url ref subdir skills; do
+const fs = require('fs');
+const m = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+for (const p of m.plugins || []) {
+  const s = p.source;
+  if (!s || typeof s !== 'object' || !s.url || !Array.isArray(p.skills) || !p.skills.length) continue;
+  console.log([s.url, s.ref || 'main', s.path || '.', ...p.skills.map((k) => k.replace(/^\.\//, ''))].join(' '));
+}
+EOF
+    [ -n "$url" ] || continue
+    dest="$tmp/mkt-$(basename "$url" .git)"
+    rm -rf "$dest"
+    if ! git clone -q --depth 1 --branch "$ref" "$url" "$dest" 2>/dev/null; then
+      echo "upstream-skills: clone of $url failed; previous copies kept" >&2
+      continue
+    fi
+    for skill in $skills; do
+      if [ -f "$dest/$subdir/$skill/SKILL.md" ]; then
+        copy_skill "$dest/$subdir/$skill"
+      else
+        echo "upstream-skills: $url has no $subdir/$skill/SKILL.md; skipped" >&2
+      fi
+    done
+  done
+fi
 exit 0

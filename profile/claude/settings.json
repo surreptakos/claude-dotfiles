@@ -21,7 +21,11 @@
     "typesafe@typesafe-ai": true,
     "aac-skills@claude-dotfiles": true,
     "yes@sstklen": true,
-    "travel-hacker@borski": true
+    "travel-hacker@borski": true,
+    "mattpocock-skills@claude-dotfiles": true,
+    "vercel-agent-skills@claude-dotfiles": true,
+    "agent-browser@claude-dotfiles": true,
+    "find-skills@claude-dotfiles": true
   },
   "extraKnownMarketplaces": {
     "sstklen": {

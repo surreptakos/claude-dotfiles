@@ -983,23 +983,31 @@ $staleNow = if (Test-Path $StaleSkill) { [System.IO.File]::ReadAllText($StaleSki
 Check 'a skill tree an older pull wrote is left in place (pull never deletes)' ($staleNow -ceq $StaleSkillText) `
     @(("{0}: {1}" -f $StaleSkill, $(if ($null -eq $staleNow) { 'gone' } else { 'changed' })))
 
-# With no tree, a skill the rules name reaches a session only through the plugin payload, so every
-# aac skill the global rules invoke by short name (/ask-matt, the `yes` skill) must ship in it. The
-# packager's DEAD_LOAD_DROPPED list is how one would silently stop resolving.
+# With no tree, a skill the rules name reaches a session only through a plugin, so every skill the
+# global rules invoke by short name (/ask-matt, /tdd, the `yes` skill) must be served: by the aac-skills
+# payload, or (since 2026-10-01) by an upstream-subset entry of .claude-plugin/marketplace.json, whose
+# `skills` list names the directories a desktop install and the cloud hook load. The packager's
+# DEAD_LOAD_DROPPED list, or a subset entry that drops a name, is how one would silently stop resolving.
 $rulesText  = [System.IO.File]::ReadAllText((Join-Path $Clone 'profile\claude\CLAUDE.md'))
 $repoSkills = @(Get-ChildItem -Path (Join-Path $Clone 'aac-skills') -Directory -ErrorAction SilentlyContinue |
                 Where-Object { Test-Path (Join-Path $_.FullName 'SKILL.md') } | ForEach-Object { $_.Name })
+$marketplace = [System.IO.File]::ReadAllText((Join-Path $Clone '.claude-plugin\marketplace.json')) | ConvertFrom-Json
+$upstreamServed = @()
+foreach ($p in @($marketplace.plugins)) {
+    if ($p.source -is [string] -or -not $p.skills) { continue }
+    foreach ($s in @($p.skills)) { $upstreamServed += [System.IO.Path]::GetFileName(($s -replace '/$', '')) }
+}
 $named = @('ask-matt', 'implement', 'tdd', 'triage', 'handoff', 'to-spec', 'to-tickets',
            'code-review', 'diagnosing-bugs', 'grill-with-docs', 'wayfinder', 'research', 'yes')
 foreach ($m in ([regex]'(?<![\w/.:~$-])/([a-z][a-z0-9-]+)\b|`([a-z][a-z0-9-]+)` skill\b').Matches($rulesText)) {
     $name = if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }
-    if ($repoSkills -contains $name) { $named += $name }
+    if (($repoSkills -contains $name) -or ($upstreamServed -contains $name)) { $named += $name }
 }
 $named = @($named | Select-Object -Unique)
 $payloadSkills = Join-Path $Clone 'marketplace\aac-skills\skills'
-$unserved = @($named | Where-Object { -not (Test-Path (Join-Path $payloadSkills ($_ + '\SKILL.md'))) } |
-              ForEach-Object { "{0}: named in the global rules, not in marketplace/aac-skills/skills" -f $_ })
-Check ("all {0} skills the global rules name by short name are served by the plugin" -f $named.Count) `
+$unserved = @($named | Where-Object { -not (Test-Path (Join-Path $payloadSkills ($_ + '\SKILL.md'))) -and -not ($upstreamServed -contains $_) } |
+              ForEach-Object { "{0}: named in the global rules, in neither marketplace/aac-skills/skills nor an upstream subset entry" -f $_ })
+Check ("all {0} skills the global rules name by short name are served by a plugin" -f $named.Count) `
     ($unserved.Count -eq 0) $unserved
 
 # ------------------------------------------------------------------ 6b2. PowerShell profiles
