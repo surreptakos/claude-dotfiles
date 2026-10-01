@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-09-30T22:23:11Z"
-  previous-modified: "2026-09-30T21:51:31Z"
-  revision: "4"
-  content-sha: "6669b16fa3e4"
+  modified: "2026-09-30T23:08:42Z"
+  previous-modified: "2026-09-30T22:23:11Z"
+  revision: "5"
+  content-sha: "a372cf57c031"
 ---
 
 # AAC design
@@ -22,7 +22,8 @@ Clearing the gate means finishing the steps below. See `scripts/designgate.py`.
 Reference files, each loaded when its step needs it:
 
 - [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md): the approved AAC tokens, spacing scale, form components, document parts and web tokens (`assets/aac-tokens.css`).
-- [TELLS.md](TELLS.md): the patterns to refuse, each tagged with the linter rule that catches it.
+- [TELLS.md](TELLS.md): every catalog rule grouped by surface, tagged with the linter rule that catches it, with the precedence order and the catalogued conflicts. Generated from `catalog/CATALOG.json` by `node tools/build-design-catalog.js`; never edit it by hand.
+- `catalog/CATALOG.json`: one row per rule, citing its source file and line. The sources are AAC-WR-001 Rules 75 to 102 and the tokens (cited, never restated), and six design skills vendored as rule text under `vendor/` (pins in `vendor/PROVENANCE.json`). `scripts/fetch_engine.py` fetches a source's engine or data, such as impeccable's detector, and hash-checks it against the pin.
 - [CRITIQUE.md](CRITIQUE.md): the scoring protocol.
 
 Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only the standard library, so the hook also runs them on the host.
@@ -47,7 +48,7 @@ Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only t
 
    Done when every item has a tag and a reason.
 
-3. **Plan, then check the plan.** Write the build input: a spec for a form, an outline and token plan for the other branches. Sketch the page as an ASCII wireframe. Check the wireframe against every section of TELLS.md, including the branch's own section, and revise whatever matches. Done when the plan names its page budget and nothing in it matches a tell.
+3. **Plan, then check the plan.** Write the build input: a spec for a form, an outline and token plan for the other branches. Sketch the page as an ASCII wireframe. Check the wireframe against the TELLS.md section for the deliverable's surface, and revise whatever breaks a rule there. Done when the plan names its page budget and breaks no rule in that section.
 
 4. **Build, lint, render.** Build with the branch's tool, then run:
    ```bash
@@ -77,6 +78,6 @@ Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only t
 ## Rules the steps depend on
 
 - **The stamp is bound to the bytes.** Any edit after stamping, even a typo fix, makes the gate block until steps 4–6 run again. Batch edits before critiquing.
-- **The brief wins.** When the user asks for a pattern TELLS.md lists, build it, and record it in the report as an accepted exception.
+- **Precedence decides a conflict.** AAC tokens and AAC-WR-001 first, then the design skills, then the brief (the catalog's `precedence` field; Dan, 2026-09-30). When two rules conflict, report the rule that won and why: a catalogued conflict carries both in TELLS.md. When the user asks for a pattern a rule refuses, name the rule, and record any exception they confirm in the report.
 - **Cut before you squeeze.** Only reduce type sizes or spacing to meet the page budget after the duplicate and parked content is gone.
 - **Gate override.** After three consecutive blocks in one turn the gate lets the turn end so a broken linter cannot wedge a session. When that happens, the reply names every file that shipped unstamped and why.
