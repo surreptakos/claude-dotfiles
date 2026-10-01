@@ -179,3 +179,93 @@ test('the findings page opens with the method line, dual-agent or degraded', () 
     assert.equal(r.stdout.split('\n')[0], first);
   }
 });
+
+// The last two outputs (issue 1086): the handoff split by owner, and one ticket per open accessibility FAIL.
+const webRows = CATALOG.rows.filter((r) => r.surfaces.includes('web'));
+const at = (id) => webRows.findIndex((r) => r.id === id);
+function twoOwners() {
+  const l = ledger();
+  l.rows[at('A11Y-003')] = { id: 'A11Y-003', verdict: 'FAIL', evidence: 'findings.json#/faults/2', owner: 'Design', file: 'signup.html',
+    fix: 'Darken the hint text to #595959', priority: 'P2' };
+  l.rows[at('A11Y-013')] = { id: 'A11Y-013', verdict: 'FAIL', evidence: 'shot-1440.png', owner: 'Design', file: 'signup.html',
+    fix: 'Use the token ink colour for hints', priority: 'P3', wcag: '1.4.3' };
+  return l;
+}
+
+test('a ledger with findings for two owners gives two handoff lists and nothing unassigned', () => {
+  const dir = path.join(root, 'handoff-two');
+  const r = score(twoOwners(), ['--handoff', dir]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['code.md', 'design.md']);
+  const listed = (f) => [...fs.readFileSync(path.join(dir, f), 'utf8').matchAll(/^\| P\d \| ([A-Z0-9-]+):/gm)].map((m) => m[1]);
+  const fails = twoOwners().rows.filter((x) => x.verdict === 'FAIL');
+  assert.deepEqual(listed('design.md').sort(), fails.filter((x) => x.owner === 'Design').map((x) => x.id).sort());
+  assert.deepEqual(listed('code.md').sort(), fails.filter((x) => x.owner === 'Code').map((x) => x.id).sort());
+  assert.equal(listed('design.md').length + listed('code.md').length, fails.length, 'every open finding is in one list');
+  assert.match(fs.readFileSync(path.join(dir, 'code.md'), 'utf8'), /\| P1 \| .*\| Darken the hint text to #595959 \|/);
+});
+
+test('a FAIL with no owner fails the run instead of landing in a list', () => {
+  for (const owner of [undefined, '  ']) {
+    const l = twoOwners();
+    l.rows[at('A11Y-003')].owner = owner;
+    const dir = path.join(root, `handoff-none-${owner === undefined ? 'missing' : 'blank'}`);
+    const r = score(l, ['--handoff', dir]);
+    assert.equal(r.status, 3, r.stdout);
+    assert.match(r.stderr, /A11Y-003: FAIL has no owner/);
+    assert.ok(!fs.existsSync(dir), 'no handoff list is written');
+  }
+});
+
+test('each open accessibility FAIL gives one ticket draft with WCAG criterion and severity; PASS and N/A none', () => {
+  const drafts = path.join(root, 'tickets.json');
+  const r = score(twoOwners(), ['--tickets', drafts, '--markdown']);
+  assert.equal(r.status, 0, r.stderr);
+  const got = JSON.parse(fs.readFileSync(drafts, 'utf8')).drafts;
+  // Not the tokens FAIL, no PASS row, and not A11Y-020, which is N/A.
+  assert.deepEqual(got.map((d) => [d.id, d.wcag, d.severity]).sort(),
+    [['A11Y-003', '1.4.3', 'P2'], ['A11Y-005', '2.1.1', 'P2'], ['A11Y-013', '1.4.3', 'P3']]);
+  for (const d of got) {
+    assert.ok(d.title.includes(`WCAG ${d.wcag} (${d.severity})`), d.title);
+    assert.ok(d.body.includes(`**WCAG criterion:** ${d.wcag}`) && d.body.includes(`**Severity:** ${d.severity}`), d.body);
+    assert.ok(r.stdout.includes(`Title: ${d.title}`), 'the draft is shown');
+  }
+  assert.match(r.stderr, /not filed/);
+
+  const l = twoOwners();
+  delete l.rows[at('A11Y-013')].wcag;
+  const bad = score(l, ['--tickets', path.join(root, 'tickets-bad.json')]);
+  assert.equal(bad.status, 3, bad.stdout);
+  assert.match(bad.stderr, /A11Y-013: an accessibility FAIL needs its WCAG criterion/);
+});
+
+test('filing shows the drafts and needs the target repository named', () => {
+  const drafts = path.join(root, 'tickets-file.json');
+  assert.equal(score(twoOwners(), ['--tickets', drafts]).status, 0);
+  const calls = path.join(root, 'gh-calls.log');
+  const stub = path.join(root, 'gh-stub.js');
+  fs.writeFileSync(stub, `const fs = require('fs'); let s = '';
+process.stdin.on('data', (d) => { s += d; }).on('end', () => {
+  fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+  const n = fs.readFileSync(${JSON.stringify(calls)}, 'utf8').trim().split('\\n').length;
+  process.stdout.write(JSON.stringify({ html_url: 'https://example.test/issues/' + n, title: JSON.parse(s).title }));
+});`);
+  const env = { ...process.env, AAC_DESIGN_GH: JSON.stringify([process.execPath, stub]) };
+  const file = (extra) => spawnSync('python3', [SCORER, '--file-tickets', drafts, ...extra], { encoding: 'utf8', cwd: root, env });
+
+  const unnamed = file([]);
+  assert.equal(unnamed.status, 2, unnamed.stderr);
+  assert.match(unnamed.stdout, /Ticket drafts: 3[\s\S]*Title: /);
+  assert.match(unnamed.stderr, /name the target repository with --repo OWNER\/NAME/);
+  assert.ok(!fs.existsSync(calls), 'nothing is filed without a repository');
+
+  const named = file(['--repo', 'example-org/example-site']);
+  assert.equal(named.status, 0, named.stderr);
+  assert.match(named.stdout, /Ticket drafts: 3[\s\S]*Title: /);
+  const made = fs.readFileSync(calls, 'utf8').trim().split('\n').map((x) => JSON.parse(x));
+  assert.equal(made.length, 3);
+  for (const argv of made) assert.deepEqual(argv, ['api', 'repos/example-org/example-site/issues', '--method', 'POST', '--input', '-']);
+  assert.ok(JSON.parse(fs.readFileSync(drafts, 'utf8')).drafts.every((d) => d.filed));
+  assert.equal(file(['--repo', 'example-org/example-site']).status, 0);
+  assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 3, 'a rerun files nothing twice');
+});

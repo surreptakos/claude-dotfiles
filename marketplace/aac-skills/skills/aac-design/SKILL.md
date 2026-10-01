@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: '2026-10-01T01:45:12Z'
-  previous-modified: '2026-10-01T00:35:55Z'
-  revision: '7'
-  content-sha: a2b17d54c66a
+  modified: '2026-10-01T02:06:55Z'
+  previous-modified: '2026-10-01T01:45:12Z'
+  revision: '8'
+  content-sha: 705ed607faee
 ---
 
 # AAC design
@@ -86,6 +86,15 @@ Audit an existing page, by URL or HTML file, against every catalog row that appl
    python3 scripts/score.py ledger.json --markdown --report findings.html --stamp <page.html|url>
    ```
    It rejects (exit 3) a ledger missing an applicable id, an N/A without a reason, or detector output shown before the rows were in. The gate needs full coverage, no open P0 or P1 owned by the ledger's `auditor`, and a dual-agent method. A file is stamped by its sha256, a URL by its address plus deployed commit; `score.py --check-stamp <target> [--commit SHA]` says whether the stamp is still fresh. Publish `findings.html` as the findings page; its first line is the method line. Done when score.py exits 0, or the report names what blocks.
+4. **Hand off, then draft tickets.**
+   ```bash
+   python3 scripts/score.py ledger.json --handoff handoff/ --tickets tickets.json --markdown
+   ```
+   `--handoff` writes one list per owner (`handoff/<owner>.md`) of its findings, fixes and priorities, taken from each FAIL row's `owner`; a FAIL with no owner makes the ledger invalid (exit 3) instead of landing in a list. `--tickets` drafts one ticket per open accessibility FAIL with its WCAG criterion and severity, and files nothing; a rule whose catalog row names no criterion takes the row's `"wcag": "n.n.n"`. Show the user every draft and ask which repository they go to: never assume one. Only once the user names it, file them:
+   ```bash
+   python3 scripts/score.py --file-tickets tickets.json --repo OWNER/NAME
+   ```
+   It prints the drafts again, files each unfiled one with `gh`, and records its URL so a rerun files nothing twice; without `--repo` it files nothing and exits 2. Done when each owner has its list and the drafts are shown, or filed into the repository the user named.
 
 ## Rules the steps depend on
 

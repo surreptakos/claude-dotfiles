@@ -48,6 +48,18 @@ in. The gate: coverage complete, no open P0 or P1 owned by the auditor, not degr
 a file stamp to the audited sha256 and a URL stamp (.design/url-<hash>.json under the current
 folder) to the address plus deployed commit; --check-stamp exits 0 while the stamp is fresh and 1
 once the file's bytes or the deployed commit moved.
+
+The last two outputs (issue 1086), written whatever the gate says:
+
+    python3 score.py ledger.json --handoff handoff/ --tickets tickets.json
+    python3 score.py --file-tickets tickets.json --repo OWNER/NAME
+
+--handoff writes one list per owner (handoff/<owner>.md) of its findings, fixes and priorities; the
+owner is each FAIL row's own field, and a FAIL with none makes the ledger invalid rather than land in
+a list. --tickets drafts one ticket per open accessibility FAIL with its WCAG criterion (the catalog
+row's, or the row's "wcag" field where the rule names none) and severity, prints the drafts and files
+nothing. --file-tickets prints the drafts again and files the unfiled ones with gh; without --repo it
+files nothing and exits 2, because the target repository is an input, never assumed.
 """
 import argparse, datetime, hashlib, html, json, os, re, sys
 
@@ -215,7 +227,10 @@ def validate_ledger(l, catalog):
             continue
         if not str(row.get('evidence') or '').strip():
             raise Invalid(f'{rid}: {v} needs an evidence reference')
-        if v == 'FAIL' and (row.get('priority') not in SEVERITIES or not row.get('owner') or not row.get('fix')):
+        if v == 'FAIL' and not str(row.get('owner') or '').strip():
+            # Every open finding lands in exactly one owner's handoff list (issue 1086); none goes unassigned.
+            raise Invalid(f'{rid}: FAIL has no owner, so it would land in no handoff list')
+        if v == 'FAIL' and (row.get('priority') not in SEVERITIES or not row.get('fix')):
             raise Invalid(f'{rid}: FAIL needs owner, fix and priority in {SEVERITIES}')
     missing = sorted(set(applicable) - seen)
     if missing:
@@ -316,6 +331,110 @@ def ledger_page(l, r, catalog):
             f'<style>{PAGE_CSS}</style></head><body>' + ''.join(parts) + '</body></html>\n')
 
 
+# ------------------------------------------------------------------ audit mode: handoff and tickets (issue 1086)
+def open_findings(l, catalog):
+    words = {row['id']: row.get('words') or row.get('cites', '') for row in catalog['rows']}
+    return [dict(x, owner=x['owner'].strip(), rule=words.get(x['id'], '').replace('**', '')) for x in
+            sorted((x for x in l['rows'] if x['verdict'] == 'FAIL'), key=lambda x: (x['priority'], x['id']))]
+
+
+def owner_slug(owner):
+    return re.sub(r'[^a-z0-9]+', '-', owner.lower()).strip('-') or 'owner'
+
+
+def write_handoff(folder, l, r, catalog):
+    """One list per owner of its findings, fixes and priorities, as <folder>/<owner>.md; returns the paths.
+    Validation already refused a FAIL with no owner, so no finding is left unassigned."""
+    lists = {}
+    for x in open_findings(l, catalog):
+        lists.setdefault(x['owner'], []).append(x)
+    slugs = {}
+    for owner in lists:
+        if owner_slug(owner) in slugs:
+            raise Invalid(f'owners {slugs[owner_slug(owner)]!r} and {owner!r} would share one handoff file')
+        slugs[owner_slug(owner)] = owner
+    os.makedirs(folder, exist_ok=True)
+    cell = lambda v: str(v).replace('|', '\\|').replace('\n', ' ')
+    paths = []
+    for owner, rows in lists.items():
+        out = [f'# Design audit handoff: {owner}', '', method_line(l['method']), '',
+               f'Subject: {subject_line(l["subject"])}', f'Gate: {"PASS" if r["passes"] else "FAIL"}',
+               f'Open for {owner}: {len(rows)} ('
+               + ', '.join(f'{s} {sum(1 for x in rows if x["priority"] == s)}' for s in SEVERITIES) + ')',
+               '', '| P | Rule | File | Evidence | Fix |', '|---|---|---|---|---|']
+        out += [f'| {x["priority"]} | {cell(x["id"] + ": " + x["rule"])} | {cell(x.get("file", ""))} | '
+                f'{cell(x["evidence"])} | {cell(x["fix"])} |' for x in rows]
+        p = os.path.join(folder, owner_slug(owner) + '.md')
+        open(p, 'w', encoding='utf-8').write('\n'.join(out) + '\n')
+        paths.append(p)
+    return paths
+
+
+def ticket_drafts(l, catalog):
+    """One draft per open accessibility FAIL, carrying its WCAG criterion and severity; PASS and N/A give none."""
+    skill = {row['id']: row['skill'] for row in catalog['rows']}
+    drafts = []
+    for x in open_findings(l, catalog):
+        if skill.get(x['id']) != 'accessibility-review':
+            continue
+        # The criterion is the catalog row's own (**1.4.3** ...) or, for a rule that names none (the
+        # common issues, the testing steps), the ledger row's "wcag" field.
+        m = re.match(r'(\d+\.\d+\.\d+) ', x['rule'])
+        crit = str(x.get('wcag') or (m.group(1) if m else '')).strip()
+        if not re.fullmatch(r'\d+\.\d+\.\d+', crit):
+            raise Invalid(f'{x["id"]}: an accessibility FAIL needs its WCAG criterion; its catalog row names '
+                          'none, so give the ledger row "wcag": "<n.n.n>"')
+        rule = x['rule'][len(m.group(0)):] if m else x['rule']
+        title = f'[a11y] WCAG {crit} ({x["priority"]}): {rule}' + (f' in {x["file"]}' if x.get('file') else '')
+        body = '\n'.join([
+            f'**WCAG criterion:** {crit} (WCAG 2.1 AA)', f'**Severity:** {x["priority"]}',
+            f'**Rule:** {x["id"]}: {x["rule"]}', f'**Owner:** {x["owner"]}', f'**File:** {x.get("file", "")}',
+            f'**Evidence:** {x["evidence"]}', f'**Subject:** {subject_line(l["subject"])}', '',
+            f'**Fix:** {x["fix"]}', '', f'From an aac-design audit. {method_line(l["method"])}'])
+        drafts.append({'id': x['id'], 'wcag': crit, 'severity': x['priority'], 'owner': x['owner'],
+                       'title': title, 'body': body})
+    return drafts
+
+
+def drafts_markdown(drafts):
+    out = [f'Ticket drafts: {len(drafts)}, one per open accessibility FAIL']
+    for i, d in enumerate(drafts, 1):
+        out += ['', f'--- ticket {i} of {len(drafts)}' + (f', filed: {d["filed"]}' if d.get('filed') else ', not filed'),
+                f'Title: {d["title"]}', '', d['body']]
+    return '\n'.join(out)
+
+
+def file_tickets(path, repo):
+    """Show every draft, then file the unfiled ones into the named repository. The repository is an
+    input, never guessed. AAC_DESIGN_GH (a JSON array) stands in for gh in the tests."""
+    import subprocess
+    doc = json.load(open(path, encoding='utf-8'))
+    print(drafts_markdown(doc['drafts']))
+    if not repo or not re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
+        print('\nnot filed: name the target repository with --repo OWNER/NAME', file=sys.stderr)
+        return 2
+    gh = json.loads(os.environ['AAC_DESIGN_GH']) if os.environ.get('AAC_DESIGN_GH') else ['gh']
+    failed = 0
+    for d in doc['drafts']:
+        if d.get('filed'):
+            continue
+        p = subprocess.run(gh + ['api', f'repos/{repo}/issues', '--method', 'POST', '--input', '-'],
+                           input=json.dumps({'title': d['title'], 'body': d['body']}),
+                           capture_output=True, text=True, encoding='utf-8')
+        try:
+            url = json.loads(p.stdout)['html_url'] if p.returncode == 0 else None
+        except (ValueError, KeyError, TypeError):
+            url = None
+        if not url:
+            failed += 1
+            print(f'not filed: {d["id"]}: {(p.stderr or p.stdout).strip()}', file=sys.stderr)
+            continue
+        d['filed'] = url
+        json.dump(doc, open(path, 'w', encoding='utf-8'), indent=2)   # a rerun skips what is filed
+        print(f'filed: {d["id"]} {url}', file=sys.stderr)
+    return 1 if failed else 0
+
+
 def sha256_file(p):
     return hashlib.sha256(open(p, 'rb').read()).hexdigest()
 
@@ -377,9 +496,23 @@ def audit_main(a, ledger):
     catalog = json.load(open(CATALOG, encoding='utf-8'))
     try:
         r = score_ledger(ledger, catalog)
+        drafts = ticket_drafts(ledger, catalog) if a.tickets else None
+        handoff = write_handoff(a.handoff, ledger, r, catalog) if a.handoff else []
     except Invalid as e:
         print(f'invalid ledger: {e}', file=sys.stderr); sys.exit(3)
-    print(ledger_markdown(ledger, r) if a.markdown else json.dumps(r, indent=2))
+    if drafts is None:
+        print(ledger_markdown(ledger, r) if a.markdown else json.dumps(r, indent=2))
+    else:   # the drafts are shown here, before anything is filed
+        print(ledger_markdown(ledger, r) + '\n\n' + drafts_markdown(drafts) if a.markdown
+              else json.dumps(dict(r, ticket_drafts=drafts), indent=2))
+        json.dump({'method': ledger['method'], 'subject': ledger['subject'], 'drafts': drafts},
+                  open(a.tickets, 'w', encoding='utf-8'), indent=2)
+        print(f'tickets: {len(drafts)} draft(s) in {a.tickets}, not filed; file them with '
+              f'--file-tickets {a.tickets} --repo OWNER/NAME once the target repository is named', file=sys.stderr)
+    for p in handoff:
+        print(f'handoff: {p}', file=sys.stderr)
+    if a.handoff and not handoff:
+        print('handoff: nothing open, no list written', file=sys.stderr)
     if a.report:
         open(a.report, 'w', encoding='utf-8').write(ledger_page(ledger, r, catalog))
         print(f'report: {a.report}', file=sys.stderr)
@@ -394,6 +527,10 @@ def audit_main(a, ledger):
 
 
 def main():
+    # The method line (· and the degraded ⚠️) and the ticket drafts carrying it must print the same on a
+    # Windows desktop, whose piped stdout is otherwise cp1252 with CRLF.
+    for s in (sys.stdout, sys.stderr):
+        s.reconfigure(encoding='utf-8', newline='\n')
     ap = argparse.ArgumentParser()
     ap.add_argument('critique', nargs='?', help='critique.json (build mode) or ledger.json (audit mode)')
     ap.add_argument('--markdown', action='store_true')
@@ -401,7 +538,13 @@ def main():
     ap.add_argument('--report', metavar='PAGE', help='audit mode: write the findings page (HTML) here')
     ap.add_argument('--check-stamp', metavar='FILE_OR_URL')
     ap.add_argument('--commit', help='with --check-stamp on a URL: the commit deployed now')
+    ap.add_argument('--handoff', metavar='FOLDER', help='audit mode: write one handoff list per owner here')
+    ap.add_argument('--tickets', metavar='DRAFTS', help='audit mode: draft one ticket per open accessibility FAIL')
+    ap.add_argument('--file-tickets', metavar='DRAFTS', help='show the drafts, then file them into --repo')
+    ap.add_argument('--repo', metavar='OWNER/NAME', help='with --file-tickets: the target repository')
     a = ap.parse_args()
+    if a.file_tickets:
+        sys.exit(file_tickets(a.file_tickets, a.repo))
     if a.check_stamp:
         code, msg = check_stamp(a.check_stamp, a.commit)
         print(f'stamp: {msg}', file=sys.stderr if code else sys.stdout)
@@ -411,8 +554,8 @@ def main():
     c = json.load(open(a.critique, encoding='utf-8'))
     if 'rows' in c:
         audit_main(a, c)
-    if a.report:
-        ap.error('--report takes an audit ledger')
+    if a.report or a.handoff or a.tickets:
+        ap.error('--report, --handoff and --tickets take an audit ledger')
     try:
         r = score(c)
     except Invalid as e:
