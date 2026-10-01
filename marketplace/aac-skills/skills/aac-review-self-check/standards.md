@@ -12,7 +12,7 @@ The one copy of the standard a One Page performance review is written to and che
 
 - SEER is exactly four sentences: Summarize, Elaborate, Example, Restate. Summarize states the pattern. Elaborate adds details or explains further. Example gives one specific example. Restate says the same thing again in a new way, without a new theme and without an instruction. "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
 - Sum-Ex is exactly two sentences: Summarize, then Example. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
-- One example per item, always. SEER for the points that matter most; Sum-Ex when SEER will not fit.
+- One example per item, always. At least four items on the page are SEER; the rest may be Sum-Ex (Dan, October 1, 2026, after a review of six two-sentence items read as thin next to one built mostly in SEER). SEER for the points that matter most.
 - Keep commas in a review cell to a minimum: the fewer commas, the less room to misread it.
 - A Weakness that also appeared in the prior review says so in the body: "which was also noted in his last review."
 - "Opportunities for Improvement" means Weaknesses.
@@ -38,7 +38,7 @@ Mechanical: each is a yes or no on the text, with no judgment in it. `review_for
 
 1. Header: dates covered start and end on the period's start and end.
 2. Nothing anywhere on the page is dated after the period end, and no figure that runs from the period start stops before the period end. "From 7/24/25 through 6/30/26" against a 7/23/26 header fails. "As of 6/30/26" on a status is a data date and passes.
-3. Every Strength and Weakness is exactly two sentences or exactly four. Count them.
+3. Every Strength and Weakness is exactly two sentences or exactly four, and at least four of them are four. Count them.
 4. No Strength or Weakness contains "should," "must," "needs to," "would benefit from," "ought to," "is expected to," or "shall." The behavior goes in the item; an instruction belongs in Guidance.
 5. Core Message is three sentences or fewer and names one Rating and one Result.
 6. No "you" or "your" anywhere on the page, and no "his manager," "her manager," or "their manager" where the reviewer is meant.

@@ -2,10 +2,10 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-10-01T21:18:18Z"
-  previous-modified: "2026-10-01T21:01:08Z"
-  revision: "11"
-  content-sha: "eea0fbf1f3d4"
+  modified: "2026-10-01T21:49:08Z"
+  previous-modified: "2026-10-01T21:18:18Z"
+  revision: "12"
+  content-sha: "80f29a8be466"
 ---
 
 # AAC performance review audit
@@ -47,7 +47,7 @@ Gate 1 email:
 >
 > See the standards below:
 >
-> 1. Strengths and Weaknesses. Each is two sentences (Sum-Ex) or four sentences (SEER). None contains "should," "must," "needs to," "would benefit from," "ought to," or "is expected to." Write the behavior; an instruction belongs in Guidance.
+> 1. Strengths and Weaknesses. Each is two sentences (Sum-Ex) or four sentences (SEER), and at least four are SEER. None contains "should," "must," "needs to," "would benefit from," "ought to," or "is expected to." Write the behavior; an instruction belongs in Guidance.
 > 2. Core Message. Three sentences or fewer. Exactly one Rating phrase and one Result phrase. Third person about the direct, first person for the reviewer.
 > 3. Voice. No "you" or "your" anywhere on the page. The reviewer is "me," not "his manager."
 > 4. Review period. Dates covered are 12 months. A first review runs from the start date; every later review runs from the day after the prior review's period ended. For this review: [start] through [end]. Nothing on the page is dated after [end], and a figure that runs from [start] runs to [end].
@@ -97,7 +97,7 @@ If the house skill's version is newer than the pinned copy, use the house skill'
 
 ## Rebuilding the review itself
 
-When Dan takes a draft the rest of the way himself, the rebuilt review goes on the approved template beside this file, "DIRECT NAME - Annual Performance Review - YEAR (template, 2026-09-23).docx": title, header fields, Core Message, one table row per Strength and Weakness pair (extra rows removed), Guidance as the template's plain bullets with any "Guidance Point N:" label dropped. Never edit the manager's own file and call it the next revision: his file can carry an old layout, and Dan reads that as not the review template (Dan, October 1, 2026, Mireya Torres Rev 1.5). Leave the Date and Method of delivery placeholders for the manager. Run Gate 1 on the result, count pages in Word or LibreOffice, and save it beside the manager's draft so Dan can attach it.
+When Dan takes a draft the rest of the way himself, the rebuilt review goes on the approved template beside this file, "DIRECT NAME - Annual Performance Review - YEAR (template, 2026-09-23).docx": title, header fields, Core Message, one table row per Strength and Weakness pair (extra rows removed), Guidance as the template's plain bullets with any "Guidance Point N:" label dropped. Never edit the manager's own file and call it the next revision: his file can carry an old layout, and Dan reads that as not the review template (Dan, October 1, 2026, Mireya Torres Rev 1.5). Leave the Date and Method of delivery placeholders for the manager. Before showing it, set it beside Dan's most recent rebuilt review in the project folder (Erich Rojek Rev 5, 9/23/26, as of October 1, 2026) and match its depth and form: SEER where the manager's own material supports it, Guidance without added measures, a Ramification in the template's "in the areas of" form. The reasons behind that rebuild are in the Notes of "Erich Rojek 2026 - Audit of Rev 4.md"; the conversation itself ran on another PC and is not on this one. A Mireya Torres rebuild shipped first as six Sum-Ex items, and Dan called it weak (October 1, 2026). Run Gate 1 on the result, count pages in Word or LibreOffice, and save it beside the manager's draft so Dan can attach it.
 
 ## Building the Outlook docx
 
