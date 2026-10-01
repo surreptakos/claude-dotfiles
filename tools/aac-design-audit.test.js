@@ -97,6 +97,9 @@ test('the four-fault fixture yields an evidence bundle listing each fault', { sk
     assert.ok(bundle.review_set.includes(shot), shot);
   }
   assert.ok(!bundle.review_set.includes('findings.json') && !bundle.review_set.includes('axe.json'), 'detector output is withheld from reviewers');
+  // The shape every adapter writes (issue 1088): the document, deck and PDF bundles validate against it too.
+  const shape = spawnSync('python3', [path.join(SKILL, 'scripts', 'evidence.py'), 'validate', bundleDir], { encoding: 'utf8' });
+  assert.equal(shape.status, 0, shape.stdout + shape.stderr);
 
   const { faults } = JSON.parse(fs.readFileSync(path.join(bundleDir, 'findings.json'), 'utf8'));
   const has = (kind, where, role) => faults.some((f) => f.kind === kind && f.where.includes(where) && (!role || f.role === role));
