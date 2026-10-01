@@ -4,7 +4,7 @@ description: "The desktop app's rpm/plugin_<id>/ copy of aac-skills is the claud
 metadata:
   node_type: memory
   type: project
-  modified: 2026-09-28T16:40:00.000Z
+  modified: 2026-10-01T01:30:00.000Z
 ---
 
 Desktop Code sessions load aac-skills from
@@ -28,8 +28,25 @@ folder going stale on the Cowork side.
 a desktop session there was sent to run the route gate from the account's
 `rpm\plugin_01GBedA5A59asvhKehjXd3sm\` folder under `%APPDATA%\Claude\local-agent-mode-sessions\`,
 and that whole tree did not exist; Dan created it and copied the plugin folder over by hand, and
-the gate ran. Why the app had not synced it there is not known. The setup check reads the CLI
-plugin under `~/.claude/plugins`, not this copy, so it did not report the gap. A hand copy is not
-refreshed by `git pull`; the app's sync is what keeps it current.
+the gate ran. The setup check now reads this copy too (issue 1149): an ok line per org folder
+when `rpm\manifest.json` lists aac-skills and its folder holds `.claude-plugin\plugin.json`, a
+STOP otherwise.
 
-Source: https://github.com/surreptakos/claude-dotfiles/issues/943, https://github.com/surreptakos/claude-dotfiles/issues/857, https://github.com/surreptakos/claude-dotfiles/issues/948
+**What writes and refreshes it: the app's own plugin sync (found 2026-09-30 on AAC-AI, issue
+1149).** The app downloads every plugin the signed-in account has installed into `rpm\`, at
+launch and then on a timer, and re-downloads a plugin's folder when a newer version is published.
+How it was found, read-only, from timestamps on AAC-AI: the app process started 18:03:33 local;
+the server published aac-skills 2026.9.302329 (manifest `updatedAt` 23:42:23Z, 18:42 local); at
+19:03:38 local, an hour after launch, the whole `plugin_01GBedA5A59asvhKehjXd3sm\` folder was
+re-created with all 419 files written within 1.2 s at version 2026.9.302329, replacing Dan's
+hand copy made between 17:05 and 17:19; the manifest was rewritten again at 19:43:37
+(`lastUpdated`). The other orgs' plugin folders all date from the first sign-in sync (2026-09-24
+12:01). The gap itself came
+after the app updated to 2.16120.0 at 15:49 local (`version_first_launch` in
+`%APPDATA%\Claude\config.json`): from 16:57 a desktop session ran hooks from that folder before
+any sync had written it. So the fix is to let the app sync (account has aac-skills installed,
+quit and reopen, leave it open), and a hand copy is only a stopgap the next sync replaces.
+Not yet seen: whether a launch alone, with no new version published, writes a missing folder.
+`%APPDATA%\Claude\logs` is empty on AAC-AI, so the timestamps are the only record.
+
+Source: https://github.com/surreptakos/claude-dotfiles/issues/943, https://github.com/surreptakos/claude-dotfiles/issues/857, https://github.com/surreptakos/claude-dotfiles/issues/948, https://github.com/surreptakos/claude-dotfiles/issues/1149

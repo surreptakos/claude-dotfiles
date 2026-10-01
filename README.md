@@ -129,7 +129,8 @@ this clone (cloning it if absent), runs the setup check with `-Fix`, registers t
 on the anchor PC or disables them elsewhere, and prints the owner to-do.
 
 `install.ps1` restores the configuration, then runs the setup check (`setup-check.ps1 -Fix`): git, node, `py`,
-`claude`, `gh` and PyYAML (installed when missing), the two secret files under `~/.config`, and live
+`claude`, `gh` and PyYAML (installed when missing), the desktop app's own synced aac-skills copy (the
+app writes it, apart from the command-line plugin), the two secret files under `~/.config`, and live
 probes of the `gh`, Claude and `gas` logins (`clasp` is no longer a prerequisite — every AAC Apps
 Script repo deploys itself, see `gas/README.md`). What only you can do comes last, as numbered steps
 with the exact command; the exit code is 1 while any STOP remains. Re-run
