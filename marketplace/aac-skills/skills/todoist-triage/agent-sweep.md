@@ -96,5 +96,6 @@ The session the board starts works one Todoist task:
 2. Read the task, its comments, and its source thread to the last message.
 3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named.
 4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made. Never send, file, sign, approve or pay anything.
+   To revise a Google Doc an agent made (Dan's answers to fold in, a second pass), rewrite that Doc in place: `python3 <claude-dotfiles>/tools/google-rest.py doc-replace <docId> <file.md>`, after sharing it Editor with the service account, per `aac-google-access` § *Revising a Google Doc in place*. The Drive connector's `update_file` cannot change a Doc's text, and a "v2" beside the first leaves Dan two documents for one piece of work (issue 1216).
 5. Swap `agent-running` for `agent-done` on the task, keeping every other label.
 6. If the work cannot be done from what the session can reach, say why in the comment and swap `agent-running` for `no-agent`, so the task is Dan's again.
