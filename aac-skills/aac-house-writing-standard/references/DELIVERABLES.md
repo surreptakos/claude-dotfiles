@@ -32,6 +32,8 @@ Tina: Hold scheduling until the proposal is signed.
 
 Use a specific deadline when timing matters. Prefer **Friday, September 11, at 3 p.m.** to **ASAP**. Use **ASAP** only when immediate action is genuinely required and the timing cannot be stated more accurately. When the sender controls the next step, a sequence may replace a clock deadline: **call him before Lynne sends the letter**.
 
+A request to a direct report that is due within the next couple of weeks names their next one-on-one as the deadline (**by our next O3**), not a calendar date: the meeting is already on both calendars and is where the answer gets discussed. A calendar date stays for external readers, for anything due before that meeting, and for work with a date of its own.
+
 ## 105. To and Cc
 
 Put in **To** the people expected to act, directly responsible, or directly addressed. Put in **Cc** people who need visibility or a record but do not own the requested action. Do not use Cc as a substitute for telling someone what they need to do.

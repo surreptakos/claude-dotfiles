@@ -60,6 +60,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - status-report-is-not-a-request: past tense is a report; check Teams first
 - chain-prompts-keep-skill-labels: never force a label upstream; widen the fleet's tickets list
 - artifact-submit-goes-to-last-publisher: Submit reaches only sessions watching the page; publishing watches, reading does not; name receiver and publisher from records
+- windowsapps-python-hides-appdata-npm: py/python3 aliases hide the Roaming npm dir; run python.exe by its real path
 
 Source: tools/repo-memory-load.js, tools/repo-memory-load.test.js, https://github.com/surreptakos/claude-dotfiles/issues/210, https://github.com/surreptakos/claude-dotfiles/issues/589, profile/claude/CLAUDE.md, docs/agents/memory/hook-exit-126-is-the-mode-bit.md, docs/agents/memory/cloud-containers-can-run-powershell.md, https://github.com/surreptakos/claude-dotfiles/pull/652
 - keep-dans-name-for-the-thing: his word for the deliverable, not the transcript's

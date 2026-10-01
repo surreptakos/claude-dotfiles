@@ -58,7 +58,35 @@ Any of them takes the task out of the sweep. Dan removes the label to reopen the
 
 The triage run never starts an agent. Dan does, with the Day Board's **Launch agents** button, once he has answered the day's cards. One click finds every open task labelled `agent`, starts one Claude Code cloud session per task (Default environment, `aac-routines` checkout, auto permission mode), swaps `agent` for `agent-running`, and comments the session link on the task. A task whose session did not start keeps `agent` and is named on the board. The launch prompt only points here: it names the task and this section below.
 
-**The button cannot start sessions on Dan's account today (2026-09-30).** No claude.ai connector named `Claude Code Remote` exists on the account or in the connector directory, so every `create_session` call is refused ("tool is not available on this connector or is blocked by your organization") and the board says so. Until a connector exists, a Claude Code session launches them when Dan asks ("launch my agent tasks"): read every open task labelled `agent`, start one background agent per task on this section's "Run an approved task" steps, and swap `agent` for `agent-running` with a comment naming the session as each starts. Never report an agent as started without that label swap on the task.
+**The button cannot start sessions on Dan's account (2026-09-30, confirmed 2026-10-01).** On
+2026-10-01 every `create_session` call rejected `blocked_by_policy` ("Your organization blocks this
+Claude Code Remote call"): the runtime contract defines that code as a tool in the manifest that
+org policy blocks for this viewer. The account's Connectors page (Customize, Yours) lists no
+`Claude Code Remote` connector and the directory has none to add; the Team organization's admin settings
+(Active Alarm, read 2026-10-01) have Cloud sessions, Remote Control, Routines and Enable artifact
+connectors all on, list no `Claude Code Remote` connector and offer none in the directory, so no
+organization toggle changes the block. It is platform policy for artifact pages calling that connector (claude-dotfiles issue
+1162 holds the reading and the decision). Claude Code's settings reference (code.claude.com,
+read 2026-10-01) has no key that reaches an artifact page's connector call: `disableRemoteControl`,
+`disableClaudeAiConnectors` and `deniedMcpServers` govern Claude Code on the device, and this PC
+sets none of them. What a session or routine on the desktop can do instead is create the cloud
+session itself: `claude --cloud "<task description>"` (optionally `--environment <id>`) or the
+claude.ai remote-trigger API. Until a launch path exists, a Claude Code session
+launches them when Dan asks ("launch my agent tasks"): read every open task labelled `agent`,
+start one background agent per task on this section's "Run an approved task" steps, and swap
+`agent` for `agent-running` with a comment naming the session as each starts. Never report an
+agent as started without that label swap on the task.
+
+Every record mentioned in a reply to Dan, in a launch report, in an agent's result or in a draft
+he will paste elsewhere carries its link in its own system of record, never a bare id or number
+(Dan, 2026-10-01: "I need links to the todoist items referenced, not the IDs"; same day, on a Teams
+draft that said `#43850`: "your message to Nick links to github instead of linking to zoho desk",
+because the Claude app renders `#<number>` as a GitHub issue link). Todoist tasks:
+`https://app.todoist.com/app/task/<id>`; the v1 REST task object carries no `url` field, so build it
+from the id. Zoho Desk tickets: the ticket's `webUrl`, from
+`tools/zoho-rest.py get "https://desk.zoho.com/api/v1/tickets/search?ticketNumber=<n>&orgId=874367220"`
+in claude-dotfiles (the Desk connector's `searchTickets` ignored `ticketNumber` on 2026-10-01 and
+returned the whole list). Drive files: the document link.
 
 ## Run an approved task
 
