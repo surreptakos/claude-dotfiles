@@ -1,13 +1,13 @@
 ---
 name: ticket-fleet
-description: >
-  Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the
-  ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
+description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
+
+  '
 metadata:
-  modified: "2026-10-01T00:23:31Z"
-  previous-modified: "2026-09-30T22:55:52Z"
-  revision: "69"
-  content-sha: "b23da8e603c1"
+  modified: '2026-10-01T00:23:31Z'
+  previous-modified: '2026-09-30T22:55:52Z'
+  revision: '69'
+  content-sha: b23da8e603c1
 ---
 
 # ticket-fleet
