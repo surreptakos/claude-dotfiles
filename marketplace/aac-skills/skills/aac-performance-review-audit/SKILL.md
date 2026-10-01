@@ -2,10 +2,10 @@
 name: aac-performance-review-audit
 description: Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email.
 metadata:
-  modified: '2026-10-01T20:44:24Z'
-  previous-modified: '2026-09-29T21:14:45Z'
-  revision: '8'
-  content-sha: d35628ae29a1
+  modified: '2026-10-01T20:52:06Z'
+  previous-modified: '2026-10-01T20:44:24Z'
+  revision: '9'
+  content-sha: 4b7400def48e
 ---
 
 # AAC performance review audit
@@ -93,6 +93,10 @@ Nothing leaves this skill until it passes this gate: every gate email, the coach
 4. Record the result under the Notes line: linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.
 
 If the house skill's version is newer than the pinned copy, use the house skill's and say so in the Notes.
+
+## Rebuilding the review itself
+
+When Dan takes a draft the rest of the way himself, the rebuilt review goes on the approved template beside this file, "DIRECT NAME - Annual Performance Review - YEAR (template, 2026-09-23).docx": title, header fields, Core Message, one table row per Strength and Weakness pair (extra rows removed), Guidance as the template's plain bullets with any "Guidance Point N:" label dropped. Never edit the manager's own file and call it the next revision: his file can carry an old layout, and Dan reads that as not the review template (Dan, October 1, 2026, Mireya Torres Rev 1.5). Leave the Date and Method of delivery placeholders for the manager. Run Gate 1 on the result, count pages in Word or LibreOffice, and save it beside the manager's draft so Dan can attach it.
 
 ## Building the Outlook docx
 
