@@ -57,7 +57,10 @@
            - anything else (`success`, `worked`): has work.
          A repo whose JSON carries a live claim by another venue (venue set, not local-pc,
          venueAt under -ClaimMinutes old) is skipped this slot: a cloud Routine is serving it
-         and the local master would only boot, defer and exit. When every served repo is
+         and the local master would only boot, defer and exit. A live `local-pc` claim is
+         skipped the same way unless its venueSessionId is the session id (transcript name) of a
+         `--remote-control master-<slug>` process seen this slot (issue 1160): a desktop-app or
+         Cowork session running a pass by hand carries no such flag. When every served repo is
          drained or claimed, nothing is launched. Then launch the pick:
            set AAC_ORCHESTRATOR_AUTONOMOUS=1 && claude --dangerously-skip-permissions
              --remote-control master-<slug> "<boot prompt>"
@@ -99,7 +102,8 @@
 
 .PARAMETER ClaimMinutes
     A state issue's venue claim by another venue counts as live for this long after venueAt
-    (RUNBOOK.md's venue guard uses 90). A repo under a live foreign claim is skipped this slot.
+    (RUNBOOK.md's venue guard uses 90). A repo under a live foreign claim is skipped this slot;
+    so is one under a live local-pc claim held by a session no master-<slug> process carries.
 
 .PARAMETER LogFile
     Append-only decision log. Empty string disables it.
@@ -307,15 +311,27 @@ function Test-RepoHasWork {
     $props = @($state.PSObject.Properties.Name)
 
     # A live claim by another venue (a cloud Routine) means a local master would boot, read the
-    # same claim, defer and exit. Skip the repo this slot instead of paying that boot.
+    # same claim, defer and exit. Skip the repo this slot instead of paying that boot. A live
+    # local-pc claim is the same case unless a master this watchdog launched holds it (issue
+    # 1160): a desktop-app or Cowork session running a pass by hand has no --remote-control
+    # master-<slug> flag, so the alive check never sees it.
     $venue = $null; if ($props -contains 'venue') { $venue = [string]$state.venue }
-    if ($venue -and $venue -ne 'local-pc') {
+    if ($venue) {
         $venueAt = $null; if ($props -contains 'venueAt') { $venueAt = ConvertTo-UtcOrNull -Text $state.venueAt }
         if ($venueAt) {
             $claimMin = [int](([datetime]::UtcNow - $venueAt).TotalMinutes)
             if ($claimMin -lt $ClaimMinutes) {
-                Write-Info "$tag claimed by venue '$venue' ${claimMin}m ago (< ${ClaimMinutes}m) - skipped this slot"
-                return $false
+                if ($venue -ne 'local-pc') {
+                    Write-Info "$tag claimed by venue '$venue' ${claimMin}m ago (< ${ClaimMinutes}m) - skipped this slot"
+                    return $false
+                }
+                $sid = $null; if ($props -contains 'venueSessionId') { $sid = [string]$state.venueSessionId }
+                if (-not ($sid -and ($script:MasterSessionIds -contains $sid))) {
+                    $who = 'no venueSessionId'; if ($sid) { $who = "session $sid" }
+                    Write-Info "$tag claimed by venue 'local-pc' ($who) ${claimMin}m ago (< ${ClaimMinutes}m), held by no master-<slug> process - skipped this slot"
+                    return $false
+                }
+                Write-Info "$tag local-pc claim by session $sid ${claimMin}m ago is a master-<slug> session this watchdog launched - not a block"
             }
         }
     }
@@ -342,20 +358,19 @@ function Test-RepoHasWork {
     return $true
 }
 
-function Get-TranscriptLastWriteUtc {
+function Get-MasterTranscripts {
     param([hashtable]$R, [datetime]$StartedUtc)
     # Claude Code keeps one transcript per session under ~/.claude/projects/<cwd slug>/<id>.jsonl,
     # where the slug is the clone path with every non-alphanumeric run turned into '-'. The
-    # master's transcript is the newest one in that folder CREATED after the process started
-    # (creation time, not last write: the whole point is to read how long ago it was last written).
+    # master's transcripts are the ones in that folder CREATED after the process started
+    # (creation time, not last write: the idle check reads how long ago one was last written),
+    # newest write first; each file name is a session id.
     $slug = ($R.Root -replace '[^A-Za-z0-9]', '-')
     $dir = Join-Path $env:USERPROFILE (Join-Path '.claude\projects' $slug)
-    if (-not (Test-Path $dir)) { return $null }
-    $files = @(Get-ChildItem -Path $dir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue |
+    if (-not (Test-Path $dir)) { return , @() }
+    return , @(Get-ChildItem -Path $dir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue |
         Where-Object { $_.CreationTimeUtc -gt $StartedUtc } |
         Sort-Object LastWriteTimeUtc -Descending)
-    if ($files.Count -eq 0) { return $null }
-    return $files[0].LastWriteTimeUtc
 }
 
 function Get-BootPrompt {
@@ -515,6 +530,9 @@ if ($legacy.Count -gt 0 -and -not $Force) {
 
 # --- Alive masters: finished AND idle ones get closed, everything else blocks the launch ---
 $markersBySlug = @{}
+# Session ids of every master-<slug> process seen this slot, closed or not: a local-pc claim
+# carrying one of them is the watchdog's own, not a foreign session's (Test-RepoHasWork, issue 1160).
+$script:MasterSessionIds = @()
 $stillWorking = 0
 foreach ($p in $rcProcs) {
     $slug = Get-MasterSlug -Proc $p
@@ -533,7 +551,10 @@ foreach ($p in $rcProcs) {
     if ($markers) { $pc = $markers.PassComplete }
     $hb = $null
     if ($markers) { $hb = $markers.HeartbeatTrusted }   # issue 711: a clamped future stamp never reopens a pass
-    $lastWrite = Get-TranscriptLastWriteUtc -R $row -StartedUtc $started
+    $transcripts = Get-MasterTranscripts -R $row -StartedUtc $started
+    $script:MasterSessionIds += @($transcripts | ForEach-Object { $_.BaseName })
+    $lastWrite = $null
+    if ($transcripts.Count -gt 0) { $lastWrite = $transcripts[0].LastWriteTimeUtc }
     $idleMin = -1
     if ($lastWrite) { $idleMin = [int](([datetime]::UtcNow - $lastWrite).TotalMinutes) }
 

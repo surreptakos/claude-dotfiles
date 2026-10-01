@@ -253,6 +253,12 @@ slot does this:
    - A live claim by another venue (`venue` set and not `local-pc`, `venueAt` under
      `-ClaimMinutes`, default 90) skips the repo this slot: a cloud Routine holds it and the
      local master would only boot, defer and exit.
+   - A live `local-pc` claim is skipped the same way unless its `venueSessionId` is the session
+     id (transcript file name) of a `--remote-control master-<slug>` process seen this slot
+     (issue 1160). A desktop-app or Cowork session running a pass by hand carries no such flag,
+     so the alive check cannot see it; launching on top of it only boots a master that defers.
+     The log line names the claim's session id and age. A claim older than `-ClaimMinutes` is
+     stale and blocks nothing.
    When every served repo is drained, capped or claimed, the slot ends with no launch. Otherwise
    run `Start-Process cmd.exe /k cd /d "<clone>" && claude --dangerously-skip-permissions
    --remote-control master-<slug> "<boot prompt>"` in a fresh visible window rooted in that clone,
