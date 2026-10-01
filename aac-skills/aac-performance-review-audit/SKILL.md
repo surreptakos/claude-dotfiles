@@ -2,10 +2,10 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-10-01T21:01:08Z"
-  previous-modified: "2026-10-01T20:52:06Z"
-  revision: "10"
-  content-sha: "d7957f9ba706"
+  modified: "2026-10-01T21:18:18Z"
+  previous-modified: "2026-10-01T21:01:08Z"
+  revision: "11"
+  content-sha: "eea0fbf1f3d4"
 ---
 
 # AAC performance review audit
@@ -26,7 +26,7 @@ The "Performance Review Audits" project folder, when mounted, holds prior review
 
 ## Before anything
 
-0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC House Layout Standard (Gregg-based).md", "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked Nick to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
+0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC House Layout Standard (Gregg-based).md" (Dan, October 1, 2026: it belongs inside aac-house-writing-standard; read the project file only until that fold-in merges, then drop it from this list), "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked Nick to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the repeat check in Gate 2 cannot run without it.
 2. Compute the period start and end by the review-period rule in `standards.md` before running anything.
 3. One output file: "[Direct] [Year] - Audit of Rev [N].md". Email on top. Below a line reading "Notes for Dan (delete before sending)": file identification, period, gate reached and result, the script output, anything parked for a later gate, and the source behind every figure checked. Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
