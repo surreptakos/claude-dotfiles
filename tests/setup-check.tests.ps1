@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Drive setup-check.ps1 against seeded fake homes (issues 1068, 1070, 1071).
+    Drive setup-check.ps1 against seeded fake homes (issues 1068, 1070, 1071, 1149).
 
 .DESCRIPTION
     Each case seeds a fake home and a stub directory (SETUP_CHECK_STUBS), runs the engine the way
@@ -153,6 +153,21 @@ exit 0
 Set-Content -Path (Join-Path $PSScriptRoot ('git-' + $args[0].Replace('.', '-'))) -Value $args[1] -NoNewline
 exit 0
 '@
+    # The desktop app's synced plugin copies (issue 1149): under <stubs>\desktop-plugins, every
+    # org of every desktop account in accounts.json holds rpm\manifest.json listing aac-skills and
+    # the plugin folder it names.
+    Write-Utf8NoBom (Join-Path $stubs 'desktop-plugin-root.ps1') @'
+Join-Path $PSScriptRoot 'desktop-plugins'
+'@
+    $reg = [System.IO.File]::ReadAllText((Join-Path $fhome '.claude\accounts.json')) | ConvertFrom-Json
+    foreach ($a in @($reg.accounts.PSObject.Properties | Where-Object { $_.Value.uuid -and (@($_.Value.surfaces) -contains 'desktop') })) {
+        foreach ($org in @($a.Value.orgs.PSObject.Properties)) {
+            $rpm = Join-Path (Join-Path (Join-Path (Join-Path $stubs 'desktop-plugins') $a.Value.uuid) $org.Name) 'rpm'
+            New-Item -ItemType Directory -Path (Join-Path $rpm 'plugin_fixture01\.claude-plugin') -Force | Out-Null
+            Write-Utf8NoBom (Join-Path $rpm 'plugin_fixture01\.claude-plugin\plugin.json') '{ "name": "aac-skills", "version": "2026.9.300000" }'
+            Write-Utf8NoBom (Join-Path $rpm 'manifest.json') '{ "lastUpdated": 1, "plugins": [ { "id": "plugin_fixture01", "name": "aac-skills", "marketplaceName": "claude-dotfiles", "installedBy": "user" } ] }'
+        }
+    }
     # jev-key answers with where TYPESAFE_API_KEY is set (the jev-key-source file; empty = unset);
     # jev-live fails when jev-live.dead exists.
     Write-Utf8NoBom (Join-Path $stubs 'jev-key-source') 'user'
@@ -434,6 +449,31 @@ try {
     Assert 'a missing plugin is a STOP with an install to-do' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  aac-skills plugin not installed') -and (Test-Todo $r.Out 'claude plugin install aac-skills@claude-dotfiles')) $r.Out
 
+    Write-Host 'Profile: the desktop app''s aac-skills copy (issue 1149)'
+    $f = New-Fixture
+    $r = Invoke-Check $f
+    Assert 'a synced copy is ok for each org, naming its folder and version' `
+        (($r.Out -match 'ok    desktop app aac-skills copy for Dan-AAC team org  \(plugin_fixture01, version 2026\.9\.300000\)') -and
+         ($r.Out -match 'ok    desktop app aac-skills copy for Dan-AAC work org  \(plugin_fixture01')) $r.Out
+    $acct = @(Get-ChildItem -LiteralPath (Join-Path $f.Stubs 'desktop-plugins') -Directory)[0].FullName
+    $rpm = @(Get-ChildItem -LiteralPath $acct -Recurse -Directory -Filter 'rpm')[0].FullName
+    Remove-Item -LiteralPath (Join-Path $rpm 'plugin_fixture01') -Recurse -Force
+    $r = Invoke-Check $f -Fix
+    Assert 'a manifest entry whose folder is gone is a STOP, even with -Fix' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  desktop app has no aac-skills copy for Dan-AAC \w+ org: rpm\\manifest\.json lists plugin_fixture01 but')) $r.Out
+    Assert 'its to-do names what makes the app sync it, and the hand-copy fallback' `
+        (Test-Todo $r.Out 'Get the Claude desktop app to sync aac-skills for Dan-AAC: .*at launch and then on a timer.*re-downloads the folder when a newer version is published.*quit and reopen the app.*copy rpm\\<plugin id>\\ by hand') $r.Out
+    New-Item -ItemType Directory -Path (Join-Path $rpm 'plugin_fixture01\.claude-plugin') -Force | Out-Null
+    Write-Utf8NoBom (Join-Path $rpm 'plugin_fixture01\.claude-plugin\plugin.json') '{ "name": "aac-skills", "version": "1" }'
+    Write-Utf8NoBom (Join-Path $rpm 'manifest.json') '{ "lastUpdated": 1, "plugins": [ { "id": "plugin_fixture01", "name": "other-plugin" } ] }'
+    $r = Invoke-Check $f
+    Assert 'a folder the manifest does not list as aac-skills is a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  desktop app has no aac-skills copy for Dan-AAC \w+ org: rpm\\manifest\.json does not list it')) $r.Out
+    Remove-Item -LiteralPath $acct -Recurse -Force
+    $r = Invoke-Check $f
+    Assert 'an account the app never synced on this PC is a STOP' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  desktop app has no aac-skills copy for Dan-AAC: the app has not synced that account on this PC')) $r.Out
+
     Write-Host 'Profile: hooks and caveman'
     $f = New-Fixture
     $settingsPath = Join-Path $f.Home '.claude\settings.json'
@@ -639,7 +679,7 @@ try {
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, git identity, PyYAML, master plugin version, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 16) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, git identity, PyYAML, master plugin version, desktop plugin copy, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 17) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'
