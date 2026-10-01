@@ -2,10 +2,10 @@
 name: aac-google-access
 description: Durable owner-grade access to the AAC Google stack (GCP project, service account, clasp token, Apps Script projects). Load before any Sheets, Drive, Gmail or Apps Script work in an AAC project, when a Google API call fails on auth or scope, when clasp needs re-authenticating, or before claiming you lack Google access.
 metadata:
-  modified: "2026-09-30T20:40:07Z"
-  previous-modified: "2026-09-30T14:58:47Z"
-  revision: "65"
-  content-sha: "530a579533d4"
+  modified: "2026-10-01T21:09:51Z"
+  previous-modified: "2026-09-30T20:40:07Z"
+  revision: "66"
+  content-sha: "b71c303c4483"
 ---
 
 # AAC Google Cloud & Apps Script access
