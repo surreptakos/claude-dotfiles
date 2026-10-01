@@ -12,7 +12,8 @@ plugin, plain `<name>` from here):
     AppData/Roaming/Claude/local-agent-mode-sessions/<host-session>/<session>/rpm/
       plugin_01XXJmxLXPEhPMmnxmrgntNw/skills/
 
-- `accessibility-review`
+- `accessibility-review` (undated. For design audits, the copy vendored at pin da38ec1 under
+  `aac-design/vendor/accessibility-review` supersedes it, issue 1079)
 - `design-critique`
 - `design-handoff`
 - `design-system`
