@@ -75,3 +75,23 @@ jobs:
           fi
           grep -q "^not ok .* - fault: planted by skill-tests.yml" "$RUNNER_TEMP/fault.log"
           git checkout -- "$f"
+
+  # aac-design's document, deck and PDF adapters (issue 1088) render through LibreOffice and poppler,
+  # which repo-tests does not install, so there their cases skip. This job installs both and the two
+  # Aptos stand-in fonts, and AAC_DESIGN_REQUIRE_RENDERER turns a skip into a failure.
+  design-adapters:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: LibreOffice, poppler and the stand-in fonts (Carlito, Liberation Sans)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress \
+            poppler-utils fonts-crosextra-carlito fonts-liberation
+      - name: The .docx, .pptx and .pdf fixtures through their adapters, from a file and from a Drive link
+        env:
+          AAC_DESIGN_REQUIRE_RENDERER: '1'
+        run: node --test tools/aac-design-doc-audit.test.js tools/aac-design-drive-audit.test.js

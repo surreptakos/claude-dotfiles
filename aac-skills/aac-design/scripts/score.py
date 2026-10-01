@@ -25,14 +25,15 @@ an out-of-range score, n/a without a reason, an unknown checklist item or severi
 Audit mode (issue 1084): the same command on an audit ledger instead of a critique.
 
     python3 score.py ledger.json [--markdown] [--report PAGE.html] [--stamp FILE_OR_URL]
-    python3 score.py --check-stamp FILE_OR_URL [--commit SHA]
+    python3 score.py --check-stamp FILE_OR_URL [--commit SHA] [--revision REV]
 
 ledger.json:
 {
   "method": "dual-agent (reviewers: accessibility-review=<id> · detector: <id>)" | "DEGRADED: ...",
   "surface": "web",                                             # a CATALOG.json surface
   "subject": {"kind": "file", "path": "...", "sha256": "<64 hex>"}
-           | {"kind": "url", "url": "https://...", "commit": "<deployed commit>"},
+           | {"kind": "url", "url": "https://...", "commit": "<deployed commit>"}
+           | {"kind": "drive", "file_id": "...", "revision": "..."},  # the bundle's Drive subject
   "auditor": "Design",                                          # the owner whose open P0/P1 block
   "reviewers": [{"skill": "accessibility-review", "agent": "<id>",
                  "rows_in": "<ISO time>", "detector_shown": "<ISO time>"}],
@@ -46,8 +47,15 @@ N/A without a reason, a PASS or FAIL without evidence, a FAIL without owner, fix
 catalogued skill without its reviewer, or detector output shown to a reviewer before its rows were
 in. The gate: coverage complete, no open P0 or P1 owned by the auditor, not degraded. --stamp binds
 a file stamp to the audited sha256 and a URL stamp (.design/url-<hash>.json under the current
-folder) to the address plus deployed commit; --check-stamp exits 0 while the stamp is fresh and 1
-once the file's bytes or the deployed commit moved.
+folder) to the address plus deployed commit, and a Drive link's stamp (.design/drive-<file id>.json,
+issue 1089) to its file id plus revision id; --check-stamp exits 0 while the stamp is fresh and 1
+once the file's bytes, the deployed commit or the Drive revision moved. A Drive revision is asked of
+the Drive API (drive.py) unless --revision gives it; when Drive cannot answer, the check exits 2.
+
+A catalogued conflict (CATALOG.json "conflicts") whose two rows are both in the ledger is reported
+with the rule that won, its source and the precedence reason. A FAIL on the losing row while the
+winning row PASSes is settled by precedence: it is listed with the conflict, not counted as open,
+and never blocks the gate. When the winning row is not a PASS the loser's FAIL stays open.
 
 The last two outputs (issue 1086), written whatever the gate says:
 
@@ -62,6 +70,9 @@ nothing. --file-tickets prints the drafts again and files the unfiled ones with 
 files nothing and exits 2, because the target repository is an input, never assumed.
 """
 import argparse, datetime, hashlib, html, json, os, re, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import drive  # noqa: E402
 
 CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'catalog', 'CATALOG.json')
 VERDICTS = ('PASS', 'FAIL', 'N/A')
@@ -204,8 +215,11 @@ def validate_ledger(l, catalog):
     elif sub.get('kind') == 'url':
         if not sub.get('url') or not str(sub.get('commit') or '').strip():
             raise Invalid('a URL subject needs its address and deployed commit')
+    elif sub.get('kind') == 'drive':
+        if not str(sub.get('file_id') or '').strip() or not str(sub.get('revision') or '').strip():
+            raise Invalid('a Drive subject needs its file id and revision id')
     else:
-        raise Invalid('subject.kind must be "file" or "url"')
+        raise Invalid('subject.kind must be "file", "url" or "drive"')
     known = {r['id']: r for r in catalog['rows']}
     applicable = {i: r for i, r in known.items() if l['surface'] in r['surfaces']}
     seen = set()
@@ -247,10 +261,30 @@ def validate_ledger(l, catalog):
     return applicable
 
 
+def ledger_conflicts(l, catalog):
+    """The catalogued conflicts with both rows in the ledger, each with both verdicts and whether
+    precedence settles the loser's FAIL (the winner PASSes)."""
+    verdict = {r['id']: r['verdict'] for r in l['rows']}
+    out = []
+    for c in catalog.get('conflicts', []):
+        if c['winner'] in verdict and c['loser'] in verdict:
+            out.append({k: c[k] for k in ('id', 'topic', 'winner', 'winner_source', 'loser', 'loser_source', 'reason')}
+                       | {'winner_verdict': verdict[c['winner']], 'loser_verdict': verdict[c['loser']],
+                          'settled': verdict[c['loser']] == 'FAIL' and verdict[c['winner']] == 'PASS'})
+    return out
+
+
+def open_fails(l, r):
+    """FAIL rows still open: a losing row's FAIL settled by precedence is not."""
+    settled = {c['loser'] for c in r['conflicts'] if c['settled']}
+    return [x for x in l['rows'] if x['verdict'] == 'FAIL' and x['id'] not in settled]
+
+
 def score_ledger(l, catalog):
     applicable = validate_ledger(l, catalog)
     rows = l['rows']
-    fails = [r for r in rows if r['verdict'] == 'FAIL']
+    conflicts = ledger_conflicts(l, catalog)
+    fails = open_fails(l, {'conflicts': conflicts})
     blocking = [r for r in fails if r['priority'] in ('P0', 'P1') and r['owner'] == l['auditor']]
     owners = {}
     for r in fails:
@@ -265,7 +299,7 @@ def score_ledger(l, catalog):
         'coverage': {'applicable': len(applicable), 'rows': len(rows)},
         'verdicts': {v: sum(1 for r in rows if r['verdict'] == v) for v in VERDICTS},
         'open': {s: sum(1 for r in fails if r['priority'] == s) for s in SEVERITIES},
-        'open_by_owner': owners, 'blocking': [r['id'] for r in blocking],
+        'open_by_owner': owners, 'blocking': [r['id'] for r in blocking], 'conflicts': conflicts,
         'gate': gate, 'passes': all(gate.values()),
     }
 
@@ -275,8 +309,17 @@ def method_line(m):
 
 
 def subject_line(sub):
+    if sub['kind'] == 'drive':
+        return f'Drive file {sub["file_id"]} (revision {sub["revision"]})'
     return (f'{sub["path"]} (sha256 {sub["sha256"][:12]})' if sub['kind'] == 'file'
             else f'{sub["url"]} (deployed commit {sub["commit"]})')
+
+
+def conflict_line(c):
+    tail = (f' {c["loser"]} FAIL is settled by precedence, not open.' if c['settled']
+            else f' Verdicts: {c["winner"]} {c["winner_verdict"]}, {c["loser"]} {c["loser_verdict"]}.')
+    return (f'{c["id"]}: {c["winner"]} ({c["winner_source"]}) won over {c["loser"]} ({c["loser_source"]}). '
+            f'{c["reason"]}{tail}')
 
 
 def ledger_markdown(l, r):
@@ -287,7 +330,10 @@ def ledger_markdown(l, r):
     out += [f'- {"PASS" if ok else "FAIL"} {k}' for k, ok in r['gate'].items()]
     for owner in r['open_by_owner']:
         out += ['', f'Open for {owner}:']
-        out += [f'- {x["id"]} {x["priority"]}: {x["fix"]}' for x in l['rows'] if x['verdict'] == 'FAIL' and x['owner'] == owner]
+        out += [f'- {x["id"]} {x["priority"]}: {x["fix"]}' for x in open_fails(l, r) if x['owner'] == owner]
+    if r['conflicts']:
+        out += ['', 'Conflicts, decided by precedence (house, design skills, brief):']
+        out += [f'- {conflict_line(c)}' for c in r['conflicts']]
     out.append(f'\n**Gate: {"PASS" if r["passes"] else "FAIL"}**')
     return '\n'.join(out)
 
@@ -308,7 +354,7 @@ def ledger_page(l, r, catalog):
     # A house row (AAC-WR-001, the tokens) cites its rule instead of restating it.
     words = {row['id']: row.get('words') or row.get('cites', '') for row in catalog['rows']}
     degraded = l['method'].startswith('DEGRADED')
-    fails = sorted((x for x in l['rows'] if x['verdict'] == 'FAIL'), key=lambda x: (x['priority'], x['id']))
+    fails = sorted(open_fails(l, r), key=lambda x: (x['priority'], x['id']))
     parts = [f'<p class="method{" degraded" if degraded else ""}" id="method">{e(method_line(l["method"]))}</p>',
              f'<h1>Design audit findings</h1><p>{e(subject_line(l["subject"]))} · surface {e(l["surface"])} · '
              f'{r["coverage"]["rows"]}/{r["coverage"]["applicable"]} catalog ids · '
@@ -320,6 +366,14 @@ def ledger_page(l, r, catalog):
         parts.append(f'<h2>Open for {e(owner)}</h2><table><tr><th>P</th><th>Rule</th><th>File</th><th>Evidence</th><th>Fix</th></tr>')
         parts += [f'<tr><td>{e(x["priority"])}</td><td>{e(x["id"])}: {e(words.get(x["id"], ""))}</td><td>{e(str(x.get("file", "")))}</td>'
                   f'<td>{e(x["evidence"])}</td><td>{e(x["fix"])}</td></tr>' for x in fails if x['owner'] == owner]
+        parts.append('</table>')
+    if r['conflicts']:
+        parts.append('<h2>Conflicts, decided by precedence</h2><table><tr><th>Conflict</th><th>Won</th><th>Lost</th>'
+                     '<th>Why</th><th>Verdicts</th></tr>')
+        parts += [f'<tr><td>{e(c["id"])}: {e(c["topic"])}</td><td>{e(c["winner"])} ({e(c["winner_source"])})</td>'
+                  f'<td>{e(c["loser"])} ({e(c["loser_source"])})</td><td>{e(c["reason"])}</td>'
+                  f'<td>{e(c["winner"])} {e(c["winner_verdict"])}, {e(c["loser"])} {e(c["loser_verdict"])}'
+                  f'{"; the FAIL is settled, not open" if c["settled"] else ""}</td></tr>' for c in r['conflicts']]
         parts.append('</table>')
     na = [x for x in l['rows'] if x['verdict'] == 'N/A']
     if na:
@@ -451,10 +505,34 @@ def is_url(t):
     return bool(re.match(r'^[a-z][a-z0-9+.-]*://', t, re.I)) and not t.lower().startswith('file://')
 
 
-def stamp_ledger(target, l, r):
+def drive_stamp_path(fid):
+    return os.path.join('.design', f'drive-{fid}.json')
+
+
+def drive_revision(fid, given):
+    """(revision now, None) or (None, why not): --revision when given, else asked of Drive."""
+    if given:
+        return given, None
+    try:
+        return drive.revision(fid), None
+    except drive.DriveError as e:
+        return None, str(e)
+
+
+def stamp_ledger(target, l, r, revision=None):
     """Write the stamp; return its path, or a line starting 'not written' saying why not."""
     sub = l['subject']
-    if is_url(target):
+    if drive.is_link(target):
+        fid = drive.file_id(target)
+        if sub['kind'] != 'drive' or sub['file_id'] != fid:
+            return f'not written, the ledger audits {sub.get("file_id") or sub.get("url") or sub.get("path")}, not Drive file {fid}'
+        now, why = drive_revision(fid, revision)
+        if why:
+            return f'not written, {why}'
+        if now != sub['revision']:
+            return f'not written, Drive file {fid} changed since the audit (revision {sub["revision"]} audited, {now} now)'
+        out, body = drive_stamp_path(fid), {'drive': fid, 'url': target, 'revision': now}
+    elif is_url(target):
         if sub['kind'] != 'url' or sub['url'] != target:
             return f'not written, the ledger audits {sub.get("url") or sub.get("path")}, not {target}'
         out, body = url_stamp_path(target), {'url': target, 'commit': sub['commit']}
@@ -472,7 +550,22 @@ def stamp_ledger(target, l, r):
     return out
 
 
-def check_stamp(target, commit):
+def check_stamp(target, commit, revision=None):
+    if drive.is_link(target):
+        fid = drive.file_id(target)
+        sp = drive_stamp_path(fid)
+        try:
+            s = json.load(open(sp, encoding='utf-8'))
+        except (OSError, ValueError):
+            return 1, f'no stamp at {sp}'
+        now, why = drive_revision(fid, revision)
+        if why:
+            return 2, f'cannot check: {why}'
+        if s.get('revision') != now:
+            return 1, f'stale: Drive file {fid} stamped at revision {s.get("revision")}, now at {now}'
+        if not s.get('passes'):
+            return 1, 'the stamp records a failed gate'
+        return 0, f'fresh: {sp}'
     if is_url(target):
         if not commit:
             return 2, 'a URL stamp is checked against the deployed commit: pass --commit'
@@ -517,7 +610,10 @@ def audit_main(a, ledger):
         open(a.report, 'w', encoding='utf-8').write(ledger_page(ledger, r, catalog))
         print(f'report: {a.report}', file=sys.stderr)
     if a.stamp and r['passes']:
-        out = stamp_ledger(a.stamp, ledger, r)
+        try:
+            out = stamp_ledger(a.stamp, ledger, r, a.revision)
+        except drive.DriveError as e:
+            out = f'not written, {e}'
         print(f'stamp: {out}', file=sys.stderr)
         if out.startswith('not written'):
             sys.exit(1)
@@ -527,10 +623,14 @@ def audit_main(a, ledger):
 
 
 def main():
-    # The method line (· and the degraded ⚠️) and the ticket drafts carrying it must print the same on a
-    # Windows desktop, whose piped stdout is otherwise cp1252 with CRLF.
-    for s in (sys.stdout, sys.stderr):
-        s.reconfigure(encoding='utf-8', newline='\n')
+    # The method line opens with a warning sign and a middle dot: a Windows pipe's code page would
+    # mangle the one and refuse the other (UnicodeEncodeError), so py -3 writes UTF-8 like python3.
+    # The ticket drafts carry it too, and print with LF so a desktop's piped stdout matches the file.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace', newline='\n')
+        except Exception:
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument('critique', nargs='?', help='critique.json (build mode) or ledger.json (audit mode)')
     ap.add_argument('--markdown', action='store_true')
@@ -538,6 +638,8 @@ def main():
     ap.add_argument('--report', metavar='PAGE', help='audit mode: write the findings page (HTML) here')
     ap.add_argument('--check-stamp', metavar='FILE_OR_URL')
     ap.add_argument('--commit', help='with --check-stamp on a URL: the commit deployed now')
+    ap.add_argument('--revision', help='with --stamp or --check-stamp on a Drive link: its revision now '
+                    '(default: asked of the Drive API)')
     ap.add_argument('--handoff', metavar='FOLDER', help='audit mode: write one handoff list per owner here')
     ap.add_argument('--tickets', metavar='DRAFTS', help='audit mode: draft one ticket per open accessibility FAIL')
     ap.add_argument('--file-tickets', metavar='DRAFTS', help='show the drafts, then file them into --repo')
@@ -546,7 +648,10 @@ def main():
     if a.file_tickets:
         sys.exit(file_tickets(a.file_tickets, a.repo))
     if a.check_stamp:
-        code, msg = check_stamp(a.check_stamp, a.commit)
+        try:
+            code, msg = check_stamp(a.check_stamp, a.commit, a.revision)
+        except drive.DriveError as e:
+            code, msg = 2, f'cannot check: {e}'
         print(f'stamp: {msg}', file=sys.stderr if code else sys.stdout)
         sys.exit(code)
     if not a.critique:

@@ -16,7 +16,8 @@
 //
 // The bundle (DIR):
 //   bundle.json        target, subject (file sha256, or URL plus deployed commit), measures,
-//                      and which files reviewers may see before their ledger rows are in
+//                      and which files reviewers may see before their ledger rows are in; the
+//                      shape every adapter writes, checked by evidence.py validate DIR
 //   shot-*.png         1440, 768 and 390 px, 200% zoom, reduced motion, forced colours, offline
 //   dom.json           every element with its computed styles and box
 //   a11y-tree.json     the browser accessibility tree
@@ -526,11 +527,16 @@ async function audit(a) {
 
     write('findings.json', { target: a.target, faults });
     const bundle = {
-      schema: 'aac-design/web-evidence@1',
+      schema: 'aac-design/evidence@1', // the shape every adapter writes: scripts/evidence.py
+      adapter: 'web',
+      surface: 'web',
       target: a.target,
       subject,
       captured: new Date().toISOString(),
       browser: version.product,
+      images: REVIEW_SET.filter((f) => f.endsWith('.png')),
+      structure: ['dom.json', 'a11y-tree.json', 'keyboard-walk.json'],
+      text: 'text.txt',
       review_set: REVIEW_SET,
       detector_set: DETECTOR_SET,
       measures,

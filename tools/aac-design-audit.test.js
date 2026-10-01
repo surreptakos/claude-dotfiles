@@ -97,6 +97,9 @@ test('the four-fault fixture yields an evidence bundle listing each fault', { sk
     assert.ok(bundle.review_set.includes(shot), shot);
   }
   assert.ok(!bundle.review_set.includes('findings.json') && !bundle.review_set.includes('axe.json'), 'detector output is withheld from reviewers');
+  // The shape every adapter writes (issue 1088): the document, deck and PDF bundles validate against it too.
+  const shape = spawnSync('python3', [path.join(SKILL, 'scripts', 'evidence.py'), 'validate', bundleDir], { encoding: 'utf8' });
+  assert.equal(shape.status, 0, shape.stdout + shape.stderr);
 
   const { faults } = JSON.parse(fs.readFileSync(path.join(bundleDir, 'findings.json'), 'utf8'));
   const has = (kind, where, role) => faults.some((f) => f.kind === kind && f.where.includes(where) && (!role || f.role === role));
@@ -176,7 +179,7 @@ test('the findings page opens with the method line, dual-agent or degraded', () 
     const body = fs.readFileSync(out, 'utf8').split('<body>')[1];
     const first = body.match(/^<p[^>]*>([^<]*)<\/p>/)[1];
     assert.equal(first, method.startsWith('DEGRADED') ? `⚠️ ${method}` : `Method: ${method}`);
-    assert.equal(r.stdout.split('\n')[0], first);
+    assert.equal(r.stdout.split(/\r?\n/)[0], first);
   }
 });
 
@@ -268,4 +271,29 @@ process.stdin.on('data', (d) => { s += d; }).on('end', () => {
   assert.ok(JSON.parse(fs.readFileSync(drafts, 'utf8')).drafts.every((d) => d.filed));
   assert.equal(file(['--repo', 'example-org/example-site']).status, 0);
   assert.equal(fs.readFileSync(calls, 'utf8').trim().split('\n').length, 3, 'a rerun files nothing twice');
+});
+
+test('a catalogued conflict is reported with the rule that won and why; the loser FAIL is settled, not open', () => {
+  const onWeb = (id) => CATALOG.rows.find((r) => r.id === id).surfaces.includes('web');
+  const conflict = CATALOG.conflicts.find((c) => onWeb(c.winner) && onWeb(c.loser));
+  assert.ok(conflict, 'a conflict whose two rows apply to the web surface');
+  const l = ledger();
+  const set = (id, row) => { l.rows[l.rows.findIndex((x) => x.id === id)] = { id, ...row }; };
+  set(conflict.loser, { verdict: 'FAIL', evidence: 'dom.json', owner: 'Design', file: 'signup.html', fix: 'Invent a palette', priority: 'P1' });
+  set(conflict.winner, { verdict: 'PASS', evidence: 'dom.json' });
+  const out = path.join(root, 'findings-conflict.html');
+  const r = score(l, ['--report', out, '--markdown']);
+  assert.equal(r.status, 0, `precedence settles the losing row's P1, so the auditor's gate passes\n${r.stdout}`);
+  const line = r.stdout.split(/\r?\n/).find((x) => x.startsWith(`- ${conflict.id}:`));
+  assert.ok(line, r.stdout);
+  assert.ok(line.includes(`${conflict.winner} (${conflict.winner_source}) won over ${conflict.loser} (${conflict.loser_source})`), line);
+  assert.ok(line.includes(conflict.reason) && line.includes('settled by precedence, not open'), line);
+  assert.ok(!r.stdout.split('Conflicts,')[0].includes(`- ${conflict.loser} P1`), 'the settled FAIL is not listed as open');
+  const pageHtml = fs.readFileSync(out, 'utf8');
+  assert.ok(pageHtml.includes('Conflicts, decided by precedence') && pageHtml.includes(conflict.id), 'the findings page carries the conflict');
+
+  set(conflict.winner, { verdict: 'FAIL', evidence: 'dom.json', owner: 'Code', file: 'signup.html', fix: 'Use the accent token', priority: 'P2' });
+  const open = score(l, ['--markdown']);
+  assert.equal(open.status, 1, 'with the winner failing too, the loser FAIL stays open and blocks the auditor');
+  assert.ok(open.stdout.includes(`Verdicts: ${conflict.winner} FAIL, ${conflict.loser} FAIL.`), open.stdout);
 });
