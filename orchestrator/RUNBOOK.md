@@ -62,9 +62,11 @@ bootstrap on its own.
 
 Then, before anything else:
 
-1. Read the per-repo state issue in `surreptakos/claude-dotfiles` — bill-intake #74,
-   contract-builder #75, sales-cockpit #76, zoho-source-of-truth #77. Issue #44 is the shared
-   registry (config defaults, the table of per-repo state issues) — read-only from here.
+1. Read the per-repo state issue in `surreptakos/claude-dotfiles` — the `stateIssue` of the
+   repo's row in `lib/repos.json` (claude-dotfiles #959, aac-routines #1100, osh-rfp #1141,
+   sales-cockpit #76; bill-intake #74, contract-builder #75, zoho-source-of-truth #77 are unserved
+   since 2026-09-30). Issue #44 is the shared registry (config defaults, the table of per-repo
+   state issues) — read-only from here.
 2. Read any Dan comments on the state issue posted since the last `Pass complete` line.
    Comments override everything else in this file.
 3. Then run the guard (below). Do not dispatch anything until both guards have passed.
@@ -296,7 +298,7 @@ run or skip via the empty-pass guard. Do not schedule anything — the Routine i
 
 ## Grill phase
 
-When every open ticket across the four repos is either closed or `ready-for-human`, the master
+When every open ticket across the served repos is either closed or `ready-for-human`, the master
 enters the grill phase. Follow `grill-ready-for-human` from the plugin one ticket at a time — no
 batch rulings — with the master grilling itself first. Per ticket:
 

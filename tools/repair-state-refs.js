@@ -2,7 +2,7 @@
 /**
  * node tools/repair-state-refs.js [--dry-run] [--only <slug>]
  *
- * Rewrites the master orchestrator state issues (surreptakos/claude-dotfiles#74–#77) so that a
+ * Rewrites the master orchestrator state issues (the rows of lib/repos.json that name one) so that a
  * bare `#N` reference to work in the OWNING repo becomes `owner/repo#N`. Issue 92: masters
  * were writing bare `#N` for cross-repo work, which the tracker audit then flagged as
  * `dangling-reference` — the state issues live in claude-dotfiles, so a bare `#N` resolves
@@ -12,7 +12,7 @@
  * identical prose rule already existed in RUNBOOK.md and was ignored on 2026-09-03, which is
  * what filed this ticket. This script is the deterministic backstop, invoked from:
  *   * `orchestrator/master-watchdog.ps1` on every tick and again after a master closes.
- *   * `.github/workflows/repair-state-refs.yml` on `issues:edited` for #74–#77 and on cron —
+ *   * `.github/workflows/repair-state-refs.yml` on `issues:edited` for a state issue and on cron —
  *     the cloud-master path never touches the local watchdog.
  *   * A human running `node tools/repair-state-refs.js --dry-run` at any time.
  *
@@ -42,17 +42,25 @@
 'use strict';
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 
-// Same order, slugs and issue numbers as the served rows of lib/repos.json (priority, master,
-// stateIssue; the watchdog reads them there) and the registry in claude-dotfiles issue #44.
-// Keep the three in step.
-const REPOS = [
-  { slug: 'bill-intake',      repo: 'surreptakos/aac-bill-intake',      stateIssue: 74 },
-  { slug: 'contract-builder', repo: 'surreptakos/aac-contract-builder', stateIssue: 75 },
-  { slug: 'sales-cockpit',    repo: 'surreptakos/aac-sales-cockpit',    stateIssue: 76 },
-  { slug: 'zoho',             repo: 'surreptakos/zoho-source-of-truth', stateIssue: 77 },
-];
 const DOTFILES = 'surreptakos/claude-dotfiles';
+
+// The rows come from lib/repos.json (issue 1067): every row that names a master and a state
+// issue, served or not (an unserved row's state issue can still carry a bare ref from an
+// earlier pass), in file order. The claude-dotfiles row is left out: its state issue lives in
+// the repo it serves, so a bare `#N` there already points at the right number. The registry in
+// claude-dotfiles issue #44 repeats the same rows; keep it in step by hand.
+const REPOS = readRepoRows();
+
+function readRepoRows() {
+  const listPath = path.join(__dirname, '..', 'lib', 'repos.json');
+  const data = JSON.parse(fs.readFileSync(listPath, 'utf8'));
+  return data.repos
+    .filter((r) => r.master && r.stateIssue && r.repo !== DOTFILES)
+    .map((r) => ({ slug: r.master, repo: r.repo, stateIssue: r.stateIssue }));
+}
 
 // How far back to look for the disambiguating owner/repo mention. A tight window (120 chars,
 // about one clause of prose) matches the observed pattern: a slip like

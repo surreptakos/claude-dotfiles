@@ -1,10 +1,10 @@
-# AAC-WR-001 coverage: how each of the 167 rules is checked
+# AAC-WR-001 coverage: how each of the 170 rules is checked
 
 Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit (a sentence, a paragraph, a term in context, or the whole document), warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
 
 Maintenance rule (Dan, September 29, 2026): a revision that adds or changes a rule lands with its check in `wr001-lint.js`, or with its row here saying why no pattern can decide it, in the same PR. `tools/wr001-lint-coverage.test.js` fails when this table and the linter disagree, when a rule number is missing or repeated, or when the count line below is stale.
 
-Counts: Pattern 54, Pattern and Jev 3, Jev 4, Reader 84, Layout 22.
+Counts: Pattern 55, Pattern and Jev 3, Jev 4, Reader 86, Layout 22.
 
 Table 1. Rule coverage
 
@@ -177,3 +177,6 @@ Table 1. Rule coverage
 | 165 | Formatting slop | Pattern | an emoji in a heading; decorative bold inside a sentence |
 | 166 | Draft quality check before release | Reader | the release check is the reader's own work |
 | 167 | Machine vocabulary | Pattern | the Rule 167 word list and the Appendix G3 jargon, with beacon, harness, gate and robust exempt |
+| 168 | Every sentence earns its place | Reader | whether a sentence informs, asks, or changes rights, money, scope, or dates needs the reader and what the reader already has |
+| 169 | Formality follows stakes and relationship, not topic | Pattern | the Appendix G12 legalistic phrases and a second contract-section citation, warnings in informal writing only (formal documents exempt) |
+| 170 | Cut for need, never for length | Reader | whether the reader would have to write back to ask needs the reader; no length check by design |

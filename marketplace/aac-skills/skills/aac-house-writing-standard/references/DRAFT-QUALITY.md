@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 153-167. AI tells, machine vocabulary, phrase register, structure register
+# AAC-WR-001 - Rules 153-170. AI tells, machine vocabulary, reader need, phrase register, structure register
 
 # Part XXV - Draft quality and AI tells
 
@@ -78,7 +78,7 @@ Do not use emoji in headings, decorative bold inside a sentence, or a heading fo
 
 ## 166. Draft quality check before release
 
-Before release, confirm the draft under Appendix A, then confirm this part: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. A draft that fails any item returns to the writer.
+Before release, confirm the draft under Appendix A, then confirm this part: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap, every sentence passes the reader-need test (Rule 168), and nothing the reader needs was cut (Rule 170). The last item keeps the check from producing a terse draft. A draft that fails any item returns to the writer.
 
 ## 167. Machine vocabulary
 
@@ -94,9 +94,46 @@ Preferred: The new panel cuts false alarms at the site and sends every trouble s
 
 Avoid: The new panel will enhance site security and streamline monitoring.
 
+## 168. Every sentence earns its place
+
+Extends Rules 4 and 10. Each sentence must do at least one of three things: tell the reader something they do not already know, ask the reader to act, or change rights, money, scope, or dates. Cut a sentence that does none of these, even when it is accurate. The test is what the sentence does for the reader, not how long the draft is. Rule 170 sets the limit on the cut.
+
+Three kinds of sentence fail the test most often:
+
+- A restatement of what a governing document already says. A change order does not restate unchanged terms; one line saying all other terms remain unchanged is enough.
+- Language that heads off a dispute nobody has raised. Leave out notice language, reservation of rights, and **for the avoidance of doubt** unless counsel asks for it or the relationship is already adversarial.
+- Working the reader does not need. Give the result, not the steps that produced it, unless the reader asked how the number was reached.
+
+Preferred: Your $55,700 balance less the 10 percent retainage of $13,895 is due on receipt.
+
+Avoid: Five lines of contract-sum arithmetic ending in the same figure.
+
+## 169. Formality follows stakes and relationship, not topic
+
+Correspondence with a working partner reads like a colleague writing, even when the subject is money or a contract. In email and text messages, do not cite a contract section unless the reader has disputed the point or the citation changes the outcome. Contract language belongs in the contract, not in the email that sends it.
+
+Appendix G12 registers the legalistic phrases that show an email has taken on the voice of a contract. Rule 137 still governs contract language itself, and Rule 153 keeps this part out of contracts.
+
+Preferred: We are holding the retainage until the closeout items arrive.
+
+Avoid: Under Section 12.3, please treat this email as our written notice that retainage will be withheld pending receipt of the closeout items.
+
+## 170. Cut for need, never for length
+
+Rules 168 and 169 cut sentences that do nothing for the reader. Neither one licenses a cut made for length. Before cutting a sentence, ask whether the reader would have to write back to ask for it. If the reader would, the sentence stays.
+
+Always keep the reason behind a request; the owner, the amount, and the deadline; one line of courtesy; and complete sentences under Rule 67. A short draft that makes the reader ask a follow-up question fails Rule 5.
+
+The ForeFront closeout of September 28, 2026 applied Rules 168 through 170 to one set of documents:
+
+- Change Order No. 2 restated the contract time and the payment terms. Both lines came out, because neither term changed (Rule 168).
+- The cover email read "Under Section 12.3, please treat this email as our written notice." It came out, because saying in writing that retainage is held until the closeout items arrive already covers the notice (Rule 169).
+- Five lines of contract-sum arithmetic became "your $55,700 balance less the 10% retainage of $13,895." The reader needed the result, not the working (Rule 168).
+- The closeout list carried section citations and serial-number detail. All five items stayed, each as a plain one-line request: the detail was cut, not the needs (Rule 170).
+
 # Appendix G - Phrase register
 
-Registers the phrase patterns Rules 155 through 163 prohibit. The register is a reference, not an exhaustive list; a phrase absent from it is still subject to the rule it offends. Source recorded in References.
+Registers the phrase patterns Rules 155 through 163 and Rule 169 prohibit. The register is a reference, not an exhaustive list; a phrase absent from it is still subject to the rule it offends. Source recorded in References.
 
 ## G1. Throat-Clearing Openers
 
@@ -263,6 +300,27 @@ Sentences that announce importance without naming the specific thing. Kill these
 - "The consequences are real"
 
 If a sentence says something is important/deep/structural without showing the specific thing, cut it or replace it with the specific thing.
+
+## G12. Legalistic Register
+
+Contract phrasing carried into correspondence (Rule 169). Contracts, and the contract language Rule 137 protects, are exempt. In email and other informal writing, say it the way a colleague would, or cut the sentence under Rule 168.
+
+- "pursuant to"
+- "herein"
+- "hereby"
+- "hereto"
+- "notwithstanding"
+- "for the avoidance of doubt"
+- "please be advised" (Rule 10 already treats it as filler)
+- "please treat this as"
+- "without prejudice"
+- "reserve the right" and "reserves the right"
+- "without waiving"
+- "in accordance with Section"
+- "it is our position"
+- **shall** in an email (Rule 14 already governs it)
+
+More than one "Section N" citation in one email is itself a sign of the register. The linter reports the phrases above that Rules 10 and 14 do not already check, and a second section citation, as warnings in informal writing and not at all in a formal document. It checks no length: length is the wrong target (Rule 170).
 
 # Appendix H - Structure register
 

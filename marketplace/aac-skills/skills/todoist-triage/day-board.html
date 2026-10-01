@@ -15,7 +15,7 @@ Every Todoist write stores an undo record; no confirm()/alert() (the artifact fr
 The huddle draft reads the huddle channel and Sent Items from today's newest aacx-inbox export; a live Microsoft 365 read covers only the hour after that export's stamp, and before the day's first export the panel waits (issue 1039, aac-routines ADR 0010).
 Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
 Every triage answer is also logged to db ruling_log/<taskId>-<stamp> (undoneAt set on Undo); the huddle draft reads it, since the morning run deletes answered cards.
-"Apply my note" asks Claude (sample) to read the note as one update-tasks ruling, parks it on the card as `proposal`, and writes nothing until Dan clicks Apply.
+"Apply my note" asks Claude (sample) to read the note as one update-tasks ruling, records it on the card as `proposal`, and applies it in the same click (Undo reverses it); a note with no Todoist change writes nothing.
 -->
 <html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Dan&#39;s Day Board</title>
@@ -897,20 +897,25 @@ footer{font-size:12px;color:var(--muted)}
       'Reply with only JSON: {"summary": "<the change in under 12 words, e.g. Hand to Lynne, look again Oct 5>", "why": "<one clause>", "ruling": {"labels"?: [..], "projectId"?: "..", "dueString"?: "..", "deadlineDate"?: "..", "priority"?: "..", "content"?: "..", "delete"?: true} or null}'
     ].join("\n");
   }
-  // Reads the note with Claude and parks the proposal on the card; nothing touches Todoist until Dan clicks Apply.
+  // Reads the note with Claude and records what it read on the card. Returns the proposal when the note
+  // names a Todoist change, so "Apply my note" writes it in the same click (Dan, 2026-09-30: a button
+  // called Apply that only read the note looked broken). Undo on the answered card reverses it.
   async function readNote(row, p, note){
-    const status = row.querySelector(".why") || row;
     row.querySelectorAll("button,textarea").forEach(b => b.disabled = true);
     try {
       const sample = window.claude && window.claude.use ? await window.claude.use("sample").catch(() => null) : null;
       if (!sample) throw {code:"sample_unavailable", message:"Claude is not available in this view; open the page on claude.ai"};
       const task = await snapshotTask(p.taskId);
       const d = normalizeNoteRuling(await sample.json(notePrompt(p, task, note), {cache:false}), task.labels);
-      await db.doc("triage/" + p._id).update({proposal:{note, summary:d.summary, why:d.why, ruling:d.ruling, readAt:new Date().toISOString()}, error:null});
+      const proposal = {note, summary:d.summary, why:d.why, ruling:d.ruling, readAt:new Date().toISOString()};
+      await db.doc("triage/" + p._id).update({proposal, error:null});
+      if (!d.ruling) row.querySelectorAll("button,textarea").forEach(b => b.disabled = false);
+      return d.ruling ? proposal : null;
     } catch(err){
       const msg = (err && (SAMPLE_COPY[err.code] || err.message || err.code)) || "failed";
       try { await db.doc("triage/" + p._id).update({error: msg}); } catch(e){}
       row.querySelectorAll("button,textarea").forEach(b => b.disabled = false);
+      return null;
     }
   }
   async function answer(row, key){
@@ -919,8 +924,13 @@ footer{font-size:12px;color:var(--muted)}
     const note = row.querySelector("textarea").value.trim();
     if (key === "read"){
       if (!note){ row.querySelector("textarea").focus(); return; }
-      if (p.taskId) return readNote(row, p, note);
-      key = "note";
+      if (!p.taskId) key = "note";
+      else {
+        const proposal = await readNote(row, p, note);
+        if (!proposal) return;
+        p.proposal = proposal;
+        key = "proposal";
+      }
     }
     const prop = key === "proposal" && p.proposal && p.proposal.ruling ? Object.assign({label:"Your note: " + p.proposal.summary}, p.proposal.ruling) : null;
     const o = key === "wontfix" ? {label:"Rule out", projectId:WONTFIX} : key === "note" ? {label:"Note only"} : key === "proposal" ? prop : (p.options || [])[+key];
@@ -1934,10 +1944,15 @@ footer{font-size:12px;color:var(--muted)}
           if (body && body.failures.length) throw stuck;
           const c = await call("Todoist", "add-comments", {comments:[{taskId:t.id, content:"Agent started: " + url, notifyUsers:["none"]}]}).catch(() => null);
           ok.push({t, url, note: c ? "" : " (session link not added to the task; it is here)"});
-        } catch(err){ bad.push({t, msg:(err && (err.message || err.code)) || "failed"}); }
+        } catch(err){ bad.push({t, code:err && err.code, msg:(err && err.code ? explain(err, "Claude Code Remote") : (err && err.message)) || "failed"}); }
       }
+      // No claude.ai connector can start a Claude Code session on Dan's account (2026-09-30: every call came
+      // back "tool is not available on this connector or is blocked by your organization"). The tasks keep
+      // their agent label; a Claude Code session launches them instead (agent-sweep.md § Launch).
+      const noConnector = bad.length && bad.every(x => ["server_not_connected","not_in_manifest","blocked_by_policy","approval_required","server_not_found"].includes(x.code));
       st.className = "hud-status" + (bad.length ? " err" : "");
       st.innerHTML = esc("Started " + ok.length + " of " + tasks.length + " agents.") +
+        (noConnector ? '<div>' + esc("This page cannot start agents on your account. The tasks keep their agent label: tell a Claude Code session “launch my agent tasks”.") + '</div>' : '') +
         ok.map(x => '<div><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.t.content) + '</a>' + esc(x.note) + '</div>').join("") +
         bad.map(x => '<div>' + esc(x.t.content) + ' — ' + esc(x.msg) + '</div>').join("");
       if (ok.length) refreshTasks();
