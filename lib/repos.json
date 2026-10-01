@@ -24,6 +24,7 @@
     { "repo": "surreptakos/aac-message-board",       "path": "Claude/Projects/Meta/message-board",                  "served": false },
     { "repo": "surreptakos/aac-task-management",     "path": "Claude/Projects/Meta/task-management",                "served": false },
     { "repo": "surreptakos/zoho-source-of-truth",    "path": "Claude/Projects/Operations/zoho-source-of-truth",     "served": false, "master": "zoho",             "stateIssue": 77 },
+    { "repo": "surreptakos/aac-nexus",               "path": "Claude/Projects/Operations/aac-nexus",                "served": false },
     { "repo": "surreptakos/brazil-flights",          "path": "Claude/Projects/Personal/brazil-flights",             "served": false },
     { "repo": "surreptakos/aac-sales-cockpit",       "path": "Claude/Projects/Sales Data KPIs/aac-cockpit",         "served": true, "master": "sales-cockpit",    "stateIssue": 76,   "priority": 4 },
     { "repo": "surreptakos/aac-sales-commissions",   "path": "Claude/Projects/Sales Data KPIs/commissions",         "served": false },
