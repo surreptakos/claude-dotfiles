@@ -3,10 +3,10 @@ name: implement
 description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-30T16:21:27Z"
-  previous-modified: "2026-09-21T03:41:40Z"
-  revision: "3"
-  content-sha: "0b028747711e"
+  modified: "2026-09-30T21:48:11Z"
+  previous-modified: "2026-09-30T16:21:27Z"
+  revision: "4"
+  content-sha: "6ac0431c58bc"
 ---
 
 Implement the work described by the user in the spec or tickets.
@@ -35,6 +35,14 @@ which this repeats at one-ticket scale:
 - Its evidence is a command it ran plus the decisive output line, quoted verbatim, with the real
   exit code rather than a pipeline's. "The tests pass" is not evidence.
 - It returns a verdict plus findings, one per unmet criterion, and proposes no diffs.
+- A criterion that says where code must never run ("never inside the snapshot job", "never on
+  the write path") is checked transitively: trace every caller chain of the new function back to
+  its entry points, not only the direct call sites. Write the criterion into the brief that way.
+  (2026-09-30: a live Zoho read reached the Monday snapshot through the board builder; three
+  reviews that grepped for a direct call passed it.)
+- A doc-consistency criterion names every document that states the rule, and the guard it asks
+  for is positive (each statement of the rule says the current thing), not a ban on one old
+  phrase: a reworded stale copy passes a phrase ban.
 
 You act on the findings: fix what it found, then put the new diff to another fresh reviewer. Fix a finding in the mechanism, never by shrinking the scope the user stated: re-read the request's own words ("anything", "everything", "all") before narrowing what the work covers, and when no mechanism fix exists, ask before shipping the narrower version. Reach
 for /code-review when you want its two-axis Standards + Spec read — as that sub-agent's

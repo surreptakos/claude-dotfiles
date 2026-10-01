@@ -5,7 +5,7 @@ metadata:
   node_type: memory
   type: project
   originSessionId: session_01Dr2uNRuPb1h8oDXE9Bo1VL
-  modified: 2026-09-18T21:00:00.000Z
+  modified: 2026-09-30T23:40:00.000Z
 ---
 
 Recorded 2026-09-18. A cloud container from the owner's environment starts with these variables
@@ -21,6 +21,18 @@ them):
 - Also present, origin unverified: `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` and
   `CLOUDSDK_AUTH_ACCESS_TOKEN`. `~/.aws/config` holds only an S3 signing flag. Read them as platform
   plumbing until a probe says otherwise.
+
+**Desktop sessions carry the same kind of environment (AAC-AI, 2026-09-30).** A Claude desktop
+session on the anchor PC starts with these names set (read from `env`; values never copied):
+`AWARDWALLET_API_KEY`, `DUFFEL_API_KEY_LIVE`, `GAS_GITHUB_TOKEN`, `GRANOLA_API_KEY`,
+`IGNAV_API_KEY`, `LEAVEDATES_TOKEN`, `OPENROUTER_API_KEY`, `SEATS_AERO_API_KEY`,
+`TODOIST_API_KEY`, `TYPESAFE_API_KEY`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`. A background
+agent spawned from the session inherits every one of them. **Rule (Dan, 2026-09-30):** before a
+brief tells an agent a credential may be missing, or an agent reports one missing, run
+`env | grep -i -E 'key|token|secret'` and read the names; a key that is in the environment is
+never "unavailable". What the environment does not carry is a claude.ai *web* sign-in: an
+artifact page that runs `window.claude.*` calls needs a browser signed in to the owning account,
+and no variable above substitutes for that.
 
 **Where the values belong:** the cloud environment's variables (claude.ai/code, environment
 settings) and nothing else. Not a note, not `profile/`, not a `.env` in a checkout — the whitelist
