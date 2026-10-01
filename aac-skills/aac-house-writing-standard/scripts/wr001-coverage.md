@@ -17,7 +17,7 @@ Table 1. Rule coverage
 | 5 | State the main point early | Jev | Jev reads the opening paragraph for background before the point |
 | 6 | Identify the actor | Jev | Jev reads each sentence for passive voice that hides the actor |
 | 7 | Assign actions precisely | Reader | whether who, what, where, when and condition are answered needs the facts |
-| 8 | Match certainty to the evidence | Reader | certainty against the evidence; needs the evidence |
+| 8 | Match certainty to the evidence | Reader | certainty against the evidence; needs the evidence. Whether a draft is AI-produced for a person to send, and what the record showed, are facts of the job, not the text |
 | 9 | Plain language | Pattern | the listed inflated words and phrases (utilize, prior to, subsequent to, commence, due to the fact that) |
 | 10 | Avoid filler | Pattern and Jev | the seven filler openers the rule names, plus Please note that; Jev reads for the rest |
 | 11 | Paragraphs | Reader | paragraph focus needs the sense of the text |
@@ -113,7 +113,7 @@ Table 1. Rule coverage
 | 101 | Opening | Pattern | 'I hope this email finds you well' and its variants |
 | 102 | Long emails | Reader | bottom line first needs the reader; Jev Rule 5 covers the opening |
 | 103 | Action ownership | Reader | named owners need the facts |
-| 104 | Deadlines | Pattern | 'ASAP' |
+| 104 | Deadlines | Pattern | 'ASAP'. Whether a reader is a direct report with an O3 on the calendar needs the audience, so the next-O3 clause is the release check's |
 | 105 | To and Cc | Reader | To versus Cc needs the recipients |
 | 106 | Attachments | Reader | attachment naming needs the attachments |
 | 107 | Email closing | Reader | the loop closure needs the ask |

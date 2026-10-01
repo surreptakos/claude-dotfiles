@@ -108,6 +108,12 @@ Use **is** or **will** for established facts or firm commitments; **should** for
 
 Use wording such as **appears** or **based on the information available** when the evidence is incomplete. Do not add qualifiers automatically.
 
+A draft an AI assistant produces for a person to send states only what the record shows and hedges everything else. Name the system the fact came from (**Zoho Desk shows**, **the board showed**), write what the sender could not verify as not known (**I can't tell whether**, **I don't see a message after May 20**), and leave the conclusion to the reader. The drafter reads a record; the sender knows the people, so a flat assertion in the draft commits the sender to more than the record supports. The two hedging rules above still apply: the hedge marks real uncertainty, never a reflex.
+
+Preferred: Zoho Desk shows Matt closed it July 31 with no closing note, and I don't see a message to Tom after May 20. Was Tom told?
+
+Avoid: Matt closed it July 31 with no note and no message to Tom Kazda. What was the decision, and was Tom told?
+
 ## 9. Plain language
 
 Prefer the shortest familiar word that preserves the intended meaning. Prefer **use** to **utilize**, **before** to **prior to**, **after** to **subsequent to**, **start** to **commence** in ordinary prose, and **because** to **due to the fact that**.

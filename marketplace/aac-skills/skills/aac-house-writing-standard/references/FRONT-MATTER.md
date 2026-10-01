@@ -7,14 +7,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.12 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.13 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.12 |
+| **Version** | 0.13 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -45,3 +45,4 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.10 | 2026-09-26 | Machine-vocabulary word list: Rule 167. Straight-quote mandate rejected: Appendix F. | Pending |
 | 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 | 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
+| 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
