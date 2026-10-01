@@ -4,10 +4,17 @@ description: >
   Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the
   ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
 metadata:
+<<<<<<< HEAD
   modified: "2026-10-01T00:18:57Z"
   previous-modified: "2026-09-30T22:33:22Z"
   revision: "68"
   content-sha: "a6cd8f15f398"
+=======
+  modified: "2026-09-30T22:55:52Z"
+  previous-modified: "2026-09-30T22:33:22Z"
+  revision: "68"
+  content-sha: "a4cb56e4072a"
+>>>>>>> origin/master
 ---
 
 # ticket-fleet

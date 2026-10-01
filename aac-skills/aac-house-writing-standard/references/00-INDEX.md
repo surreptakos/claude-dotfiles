@@ -1,7 +1,7 @@
 # AAC-WR-001 index
 
 The controlled copy of AAC's house writing and document standard, partitioned
-for reading. Rules are numbered 1 through 167 and each number lives in exactly
+for reading. Rules are numbered 1 through 170 and each number lives in exactly
 one file.
 
 Generated, never hand-edited. `SKILL.md` carries the regeneration procedure.
@@ -20,7 +20,7 @@ Then read only what the deliverable needs.
 | `CORE.md` | **Always, first.** Order of authority, house style, punctuation, capitalization, numbers, abbreviations, spelling, grammar | 1-74 |
 | `DELIVERABLES.md` | The deliverable is an email, Teams message, letter, memo, report, proposal, scope of work, SOP, contract or legal text, or technical writing | 103-144 |
 | `LAYOUT.md` | Producing a Word document, a table, or any list; setting margins, fonts, headings or styles | 75-102 |
-| `DRAFT-QUALITY.md` | Any original prose. AI tells, machine vocabulary, plus the release check that closes the work | 153-167 |
+| `DRAFT-QUALITY.md` | Any original prose. AI tells, machine vocabulary, plus the release check that closes the work | 153-170 |
 | `CONTROL.md` | Naming a file, running the pre-send review, or choosing the format for a document type | 145-152 |
 | `TERMINOLOGY.md` | An AAC term, acronym or product name is in question, or you need the decision register | — |
 | `FRONT-MATTER.md` | Reporting which version governs | — |
@@ -41,7 +41,7 @@ one of them, name that document and hand the work to it.
 
 ## Mechanical check
 
-`scripts/wr001-lint.js` decides 57 of the 167 rules by pattern and 7 by Jev
+`scripts/wr001-lint.js` decides 58 of the 170 rules by pattern and 7 by Jev
 (judgment, warning only); `scripts/wr001-coverage.md` says how every rule is
 checked, or why a reader decides it. Run the linter before reading, and read
 for the rest.

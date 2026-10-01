@@ -33,6 +33,12 @@
       "type": "expected-text",
       "doc": "CLAUDE.md",
       "expected": "`.github/workflows/bootstrap-test.yml` is the **bootstrap gate**"
+    },
+    {
+      "id": "runbook-heartbeat-write-path",
+      "type": "expected-text",
+      "doc": "orchestrator/RUNBOOK.md",
+      "expected": "goes through the connector issue-write tool (the\n   one whose suffix is `issue_write`)"
     }
   ]
 }
