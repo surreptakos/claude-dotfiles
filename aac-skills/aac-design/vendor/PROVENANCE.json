@@ -1,5 +1,5 @@
 {
-  "note": "Controlled copies of the source design skills, rule text only, byte for byte at the pinned commit. Never edit a file under vendor/: re-vendor at a new pin, update this entry, and run node tools/build-design-catalog.js (issue 1083). blob is the upstream git blob sha, so git hash-object on the vendored file must print it.",
+  "note": "Controlled copies of the source design skills, rule text only, byte for byte at the pinned commit. Never edit a file under vendor/: re-vendor at a new pin, update this entry, and run node tools/build-design-catalog.js (issues 1083, 1085). blob is the upstream git blob sha, so git hash-object on the vendored file must print it. fetched lists the engines and large data a source needs at run time: scripts/fetch_engine.py downloads each one and refuses it unless its hash matches the pin here, so the plugin payload carries rule text, not binaries.",
   "sources": [
     {
       "skill": "accessibility-review",
@@ -11,6 +11,116 @@
         "SKILL.md": "3ef332cd837da5b4f7089503eb93e14c04090ccf"
       },
       "left_out": "The design plugin's CONNECTORS.md, which SKILL.md links for connector placeholders: it names tools, not rules."
+    },
+    {
+      "skill": "frontend-design",
+      "repo": "anthropics/skills",
+      "path": "skills/frontend-design",
+      "commit": "8a1541c4a3ffa5a20a5a91de0dcf3f0bab1d1ef4",
+      "vendored": "frontend-design",
+      "files": {
+        "LICENSE.txt": "f433b1a53f5b830a205fd2df78e2b34974656c7b",
+        "SKILL.md": "a5333457c414d20d625f307df945842c0952ecc3"
+      },
+      "left_out": "Nothing: the skill folder is SKILL.md and its LICENSE.txt, both vendored."
+    },
+    {
+      "skill": "impeccable",
+      "repo": "pbakaus/impeccable",
+      "path": ".claude/skills/impeccable",
+      "commit": "0d6b47ea19b63afe15e3f93a44d5d9fbbc6fd275",
+      "vendored": "impeccable",
+      "files": {
+        "SKILL.md": "7de6ac606c9bf3eafe17b3783d1a590abd286451",
+        "reference/adapt.md": "58d54aa3e6b1dfb34622d7b99e51c9c9c660b69a",
+        "reference/animate.md": "4ae4cc5fcd7ae4341f4f130ab67a7d9b03c00562",
+        "reference/audit.md": "98c56d066e4c9ae1e8d3dac786ee668f5dc0abe1",
+        "reference/bolder.md": "1cad2f1d1bbec240aaf39f2332e83c25dcc20cd0",
+        "reference/clarify.md": "3047a9d82b9cfa31b392e35c643d82bcdb50250a",
+        "reference/colorize.md": "dc45f88c5f81c61355a915c6ea1391b1a36c9ba8",
+        "reference/craft-floor.md": "9653b980895fa343127982ba575085c31726eecc",
+        "reference/critique.md": "f4a2f3f6eb99d551ce2501274a83c32a73494076",
+        "reference/degraded/finish-reviewer.md": "af7c451dfcbf2f753603a00089f35ac87aa575f9",
+        "reference/delight.md": "798c43a5b735a5b75b67484c516821f1355dfbd6",
+        "reference/distill.md": "7b93f0fb72bb296ad2cacd20428c6a0b6b4fb909",
+        "reference/harden.md": "cbe2941e5e9959dc5b475da24d33aecbff090e5a",
+        "reference/layout.md": "7f3b30d80964a21776ec9dd7bb2a9d5db0075003",
+        "reference/new-work.md": "15d4575e4ff2b21fe571d924cec72197e501db52",
+        "reference/onboard.md": "d6a6de372d527d232c60f8317a077b5c5405b927",
+        "reference/operate.md": "524f2c3ae9fa497284e9699f3ca5320cce5d05cf",
+        "reference/optimize.md": "cc6ce4925266bf3c4a7d40b5a435fe315cbf6f1a",
+        "reference/overdrive.md": "764740e4e910a64d5b570c71b9347bb326a05bc8",
+        "reference/polish.md": "d981459468a485dc3b3e8add112ea0f5e6b9e576",
+        "reference/quieter.md": "5c1331c252b47bf2262b9a11248e54c56bf9c164",
+        "reference/shape.md": "90a74ae813331cbce8fff6beb498ced77970fadf",
+        "reference/typeset.md": "9fcdc5b637614e333878ea9ad2175f70dfea543b"
+      },
+      "left_out": "Rule text only. Its detector binary and font index are fetched at run time and hash-checked, never vendored: see fetched. The rest of scripts/ (the launcher, the live-mode browser scripts, command-metadata.json) drives impeccable's own tooling, which no audit step runs, so it is left out. Left out as tool operation, not design rules: reference/live.md, live-setup.md, generate.md, hooks.md, doctor.md, region-map.md, component-review.md, routing.md, craft.md (a deprecated alias with no rules), init.md, document.md, extract.md, visualize.md, and degraded/asset-producer.md, documenter.md, manual-edit-applier.md. Left out as native-app rules, out of scope for AAC deliverables (issue 1079): reference/ios.md, android.md, adapt.native.md, audit.native.md."
+    },
+    {
+      "skill": "taste-skill",
+      "repo": "leonxlnx/taste-skill",
+      "path": "skills/taste-skill",
+      "commit": "ce26fc25c0e5e8cab638f883de62d9a86ee5e45b",
+      "vendored": "taste-skill",
+      "files": {
+        "SKILL.md": "b72132fcd466da605623ffe96e370b3991fc5285"
+      },
+      "left_out": "Nothing: the skill folder is SKILL.md alone. The repository root LICENSE (MIT) is outside the pinned path."
+    },
+    {
+      "skill": "ui-ux-pro-max",
+      "repo": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "path": ".claude/skills/ui-ux-pro-max",
+      "commit": "09170eec67eefd46a7ae85de61b40c194020f997",
+      "vendored": "ui-ux-pro-max",
+      "files": {
+        "SKILL.md": "41f8e2fd7f8c568228d0b55186ebe3f7b4007377",
+        "references/pro-rules.md": "b2ce233287e37ec9ca13476c4014b922e9d5a0e9",
+        "references/quick-reference.md": "7acc7e7540ca6981d878a90aae4455c1638e2385"
+      },
+      "left_out": "Rule text only. data/ (the CSV style, palette and guideline databases) and scripts/ (the search engine and its tests) are the skill's engine and data: the catalog reads rule text only and no audit step runs the search, so neither is vendored or fetched. The repository root LICENSE is outside the pinned path."
+    },
+    {
+      "skill": "emil-design-eng",
+      "repo": "emilkowalski/skill",
+      "path": "skills/emil-design-eng",
+      "commit": "d16ebe60d09a5ba2afcb7054ede9d0a10c9f6128",
+      "vendored": "emil-design-eng",
+      "files": {
+        "SKILL.md": "62ce902af8dd32c590ea7203e9ab2edb1d6ef81a"
+      },
+      "left_out": "Nothing: the skill folder is SKILL.md alone. The repository root LICENSE is outside the pinned path."
+    }
+  ],
+  "fetched": [
+    {
+      "name": "impeccable-detector",
+      "skill": "impeccable",
+      "version": "0.1.8",
+      "note": "The impeccable engine binary its scripts/impeccable launcher runs (scripts/VERSION 0.1.8 at the pin). sha256 per platform, from the release sidecars on 2026-09-30.",
+      "url": "https://github.com/pbakaus/impeccable/releases/download/engine-v0.1.8/impeccable-{platform}",
+      "sha256": {
+        "linux-x64": "7853508983e8ece3aa8e76f077406e18860aef1773370d57a61f554cd8039102",
+        "linux-arm64": "61a2fd4cd24ae97a7688e932ee8ffcb931999611877a283c0291b4ec9f2cb1a6",
+        "darwin-x64": "0ea9662448691d3d27e2086ace0b78e04d2477943708c61158725d8ed03ab509",
+        "darwin-arm64": "4a06cc4ebeac2f1dd327ea98f32c55571076086c01ea3739de998d6924706b61",
+        "windows-x64.exe": "5f39934bdbc24cd414173fd55a7bbd7a3b497646ce3d5124ba93eb591fa0ddcd"
+      }
+    },
+    {
+      "name": "impeccable-font-index",
+      "skill": "impeccable",
+      "path": "scripts/data/font-index.json",
+      "url": "https://raw.githubusercontent.com/pbakaus/impeccable/0d6b47ea19b63afe15e3f93a44d5d9fbbc6fd275/.claude/skills/impeccable/scripts/data/font-index.json",
+      "blob": "9d2029971df232a72ff6584d264c104490521742"
+    },
+    {
+      "name": "impeccable-font-index-failures",
+      "skill": "impeccable",
+      "path": "scripts/data/font-index-failures.json",
+      "url": "https://raw.githubusercontent.com/pbakaus/impeccable/0d6b47ea19b63afe15e3f93a44d5d9fbbc6fd275/.claude/skills/impeccable/scripts/data/font-index-failures.json",
+      "blob": "1aca67220413ef163570c75405b444d7a27a32be"
     }
   ]
 }

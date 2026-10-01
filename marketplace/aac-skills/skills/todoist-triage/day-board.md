@@ -28,7 +28,7 @@ The board shows a row whose task is also an open question once, as the question.
 
 ## Launch agents (Dan, 2026-09-30)
 
-The triage panel's **Launch agents** button starts one cloud session per open task labelled `agent`, per [`agent-sweep.md`](agent-sweep.md) § Launch. It needs the `Claude Code Remote` connector (`create_session`) in the page's capabilities; without it the button reports the failure and nothing changes. A started session cannot be undone, so this button stores no undo record: to stop one, archive the session and put `agent` back or remove it.
+The triage panel's **Launch agents** button starts one cloud session per open task labelled `agent`, per [`agent-sweep.md`](agent-sweep.md) § Launch. It needs the `Claude Code Remote` connector (`create_session`) in the page's capabilities and on the viewer's account; without it the button reports the failure, names the fallback, and nothing changes. Dan's account has no such connector (2026-09-30), so launching falls to a Claude Code session per [`agent-sweep.md`](agent-sweep.md) § Launch. A started session cannot be undone, so this button stores no undo record: to stop one, archive the session and put `agent` back or remove it.
 
 ## The huddle draft's evidence (issue 1039)
 
@@ -36,7 +36,7 @@ The huddle draft reads the huddle channel (`huddle__global__…`) and Sent Items
 
 ## Changing the board page (Dan, 2026-09-24)
 
-The page source of record is [`day-board.html`](day-board.html). Edit that file and republish it to the board URL with the `capabilities` its header comment lists; build every change from that file, never from memory or the live page. Every button on it:
+The page source of record is [`day-board.html`](day-board.html). A button that writes is not done until a test drives its click through the page script and asserts the write (`tests/day-board-*.test.js`); a button that calls a connector is not done until one real call from the published page has succeeded or its failure copy names the fallback (Dan, 2026-09-30: "Apply my note" wrote nothing and "Launch agents" called a connector the account does not have). Edit that file and republish it to the board URL with the `capabilities` its header comment lists; build every change from that file, never from memory or the live page. Every button on it:
 
 - stores what each Todoist write changed, so the card offers Undo;
 - works without `confirm()` or `alert()`, which the artifact frame blocks silently;

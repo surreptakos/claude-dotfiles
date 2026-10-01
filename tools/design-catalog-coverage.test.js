@@ -26,11 +26,82 @@ test("running the generator twice produces identical output", () => {
 
 test("every row cites skill, file and line, and that line holds the rule's words", () => {
   const inputs = cat.readInputs();
-  for (const r of committed().rows) {
+  for (const r of committed().rows.filter((x) => "words" in x)) {
     const rel = r.file.replace(`vendor/${r.skill}/`, "");
     const line = inputs.vendored[r.skill][rel].toString("utf8").replace(/\r\n/g, "\n").split("\n")[r.line - 1];
     assert.ok(line.includes(r.words), `${r.id}: ${r.file}:${r.line}`);
   }
+});
+
+test("all six sources are vendored at their pins, each with provenance", () => {
+  const pins = { "accessibility-review": "da38ec1", "frontend-design": "8a1541c", impeccable: "0d6b47e",
+    "taste-skill": "ce26fc2", "ui-ux-pro-max": "09170ee", "emil-design-eng": "d16ebe6" };
+  const { sources } = cat.readInputs().provenance;
+  assert.deepStrictEqual(sources.map((s) => s.skill).sort(), Object.keys(pins).sort());
+  for (const s of sources) {
+    assert.ok(s.commit.startsWith(pins[s.skill]), `${s.skill} is at ${s.commit}`);
+    assert.ok(s.repo && s.path && Object.keys(s.files).length, `${s.skill} has no provenance`);
+  }
+});
+
+test("AAC-WR-001 Rules 75 to 102 and every token are rows that cite, never restate", () => {
+  const rows = committed().rows;
+  for (let n = 75; n <= 102; n++) {
+    const r = rows.filter((x) => x.skill === "AAC-WR-001" && x.cites === `Rule ${n}`);
+    assert.strictEqual(r.length, 1, `Rule ${n}`);
+    assert.ok(!("words" in r[0]));
+  }
+  const tokens = cat.designTokens(fs.readFileSync(require("path").join(cat.TARGET, "..", "..", "DESIGN-SYSTEM.md"), "utf8"));
+  assert.ok(tokens.length > 0);
+  assert.strictEqual(rows.filter((x) => x.skill === "AAC tokens").length, tokens.length);
+});
+
+test("impeccable's side-stripe rule has its own row, caught by D08", () => {
+  const r = committed().rows.filter((x) => x.skill === "impeccable" && /border-left/.test(x.words || "")
+    && x.file === "vendor/impeccable/reference/craft-floor.md");
+  assert.strictEqual(r.length, 1);
+  assert.ok(r[0].checks.some((c) => c.detector === "D08"), JSON.stringify(r[0]));
+});
+
+test("TELLS.md is what the generator writes, and a hand edit is reported stale", () => {
+  const fresh = cat.outputs(cat.readInputs());
+  const current = { [cat.TARGET]: fs.readFileSync(cat.TARGET, "utf8"), [cat.TELLS]: fs.readFileSync(cat.TELLS, "utf8") };
+  assert.deepStrictEqual(cat.stale(fresh, current), []);
+  current[cat.TELLS] = current[cat.TELLS].replace("- `A11Y-001`", "- `A11Y-001` (edited)");
+  assert.deepStrictEqual(cat.stale(fresh, current), [cat.TELLS]);
+});
+
+test("a catalogued conflict names the winning source and the precedence reason", () => {
+  const c = committed();
+  assert.ok(c.conflicts.length > 0);
+  for (const k of c.conflicts) {
+    const win = c.rows.find((r) => r.id === k.winner);
+    assert.strictEqual(win.skill, k.winner_source);
+    assert.match(k.reason, new RegExp(`^${k.winner_source} is rank 1 .* precedence field`));
+  }
+});
+
+test("mutation: a conflict won by the lower-ranked source fails", () => {
+  const c = committed();
+  const k = c.conflicts[0];
+  [k.winner, k.loser] = [k.loser, k.winner];
+  k.winner_source = c.rows.find((r) => r.id === k.winner).skill;
+  assert.ok(flags(cat.check(c, cat.readInputs()), new RegExp(`^${k.id} names ${k.winner_source} the winner`)));
+});
+
+test("mutation: a same-tier conflict with no ruling fails the build", () => {
+  const inputs = cat.readInputs();
+  inputs.conflicts.conflicts.push({ id: "CONFLICT-900", rows: ["A11Y-008", "UUX-059"], topic: "target size" });
+  assert.throws(() => cat.build(inputs), /CONFLICT-900: .* share a precedence tier; the entry needs a ruling/);
+});
+
+test("mutation: an AAC-WR-001 rule with no row fails", () => {
+  const inputs = cat.readInputs();
+  inputs.house.wr001 = inputs.house.wr001.filter((e) => e.rule !== 80);
+  assert.throws(() => cat.build(inputs), /AAC-WR-001 Rule 80 has no entry in catalog\/aac\.checks\.json/);
+  const c = committed();
+  c.rows = c.rows.filter((r) => r.id !== "AAC-WR-080");
+  assert.ok(flags(cat.check(c, cat.readInputs()), /^AAC-WR-001 Rule 80 has 0 rows, not 1$/));
 });
 
 test("the precedence order is a catalog field: house, design skills, brief", () => {
