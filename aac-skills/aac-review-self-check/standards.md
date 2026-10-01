@@ -8,12 +8,18 @@ The one copy of the standard a One Page performance review is written to and che
 
 **Voice.** Third person about the direct and first person for the reviewer, in every section including the Core Message. No "you" or "your" anywhere on the page. The reviewer is "me," not "his manager." Guidance points stay imperative with the possessives removed.
 
-**Strengths and Weaknesses.** Every item is SEER or Sum-Ex.
+**Strengths and Weaknesses.** Every item is SEER or Sum-Ex, chosen by how much room there is and how important the point is. Try SEER first; use Sum-Ex when SEER does not fit. The definitions below are Dan's wording (September 9, restated October 1, 2026) and are not paraphrased anywhere else.
 
-- SEER is exactly four sentences: Summarize, Elaborate, Example, Restate. Summarize states the pattern. Elaborate adds details or explains further. Example gives one specific example. Restate says the same thing again in a new way, without a new theme and without an instruction. "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
-- Sum-Ex is exactly two sentences: Summarize, then Example. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
+- SEER takes more room and is for the more important points. Exactly four sentences:
+  1. Summarize: state the strength or weakness as a behavioral pattern, typical work product, or performance in a short, clear form.
+  2. Elaborate: add details or explain further.
+  3. Example: provide a specific example of the behavioral pattern, work product, or performance indicator that supports the claim.
+  4. Restate: write the strength or weakness again in a new way to make the meaning clear. No new theme and no instruction.
+
+  "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
+- Sum-Ex is two sentences, no more: Summarize, then Example, each as defined above. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
 - One example per item, always. At least four items on the page are SEER; the rest may be Sum-Ex (Dan, October 1, 2026, after a review of six two-sentence items read as thin next to one built mostly in SEER). SEER for the points that matter most.
-- Keep commas in a review cell to a minimum: the fewer commas, the less room to misread it.
+- In both techniques, avoid commas where possible: the fewer commas in a review, the less likely others will misunderstand it.
 - A Weakness that also appeared in the prior review says so in the body: "which was also noted in his last review."
 - "Opportunities for Improvement" means Weaknesses.
 
@@ -53,7 +59,7 @@ Reading, and still a yes or no about one item. Run them after the format tests p
 
 Per Strength and Weakness, in this order:
 
-1. **Sentence roles match.** In SEER, sentence 1 is the pattern, sentence 2 adds detail about that same behavior (how often, how much, where, with whom, or what the work involves), sentence 3 is one specific event or figure, and sentence 4 restates sentence 1 rather than adding a new theme or an instruction. In Sum-Ex, sentence 1 is the pattern and sentence 2 is the example. A sentence 2 that says why the behavior matters or what it costs the company (“Past-due invoices are revenue we would otherwise chase for months”) is not Elaborate; it fails (Dan, September 9 and October 1, 2026). The example is one specific thing that happened, not a generic descriptor such as "stepped in." A date, figure or name helps and is not required: Manager Tools' own "He recently saved a difficult call after three other reps had failed" passes.
+1. **Sentence roles match.** In SEER, sentence 1 is the pattern, sentence 2 adds details about or explains further that same behavior, with the direct still its subject (“He consistently exceeds every standard”; how often, how much, where, with whom, or what the work involves), sentence 3 is one specific event or figure, and sentence 4 restates sentence 1 rather than adding a new theme or an instruction. In Sum-Ex, sentence 1 is the pattern and sentence 2 is the example. A sentence 2 that says why the behavior matters or what it costs the company (“Past-due invoices are revenue we would otherwise chase for months”) is not Elaborate; it fails (Dan, September 9 and October 1, 2026). The example is one specific thing that happened, not a generic descriptor such as "stepped in." A date, figure or name helps and is not required: Manager Tools' own "He recently saved a difficult call after three other reps had failed" passes.
 2. **Behavior, not inference.** Sentence 1 names something the direct does that the reviewer can see or hear: what he says, how he says it, his expressions or body language, or his work product (quality, quantity, accuracy, timeliness, documents, relationships). A trait, motive, attitude, intent, idea or circumstance fails. "He is not committed to the team" is an inference; "he missed three of the last five team meetings" is behavior. "He owns a complex account book" is a circumstance: what does he do with it? An attitude or trait word may stand in sentence 1 only when the item's other sentences give the behavior it is read from: "shows good judgment" followed by what he did passes, and "lacks decisiveness" followed by "the clearest documented case" fails (Manager Tools, Aggregated Behaviors Are Performance; Shot Across The Bow Review).
 3. **Pattern, not one-off.** Sentence 1 says what he does repeatedly or how he performs over the period, even though only one example follows. "He closed the largest deal of the year" is a one-off. "He closes large multi-site projects" is a pattern, and the largest deal is the example under it.
 4. **One example.** One event: not two dated events in one sentence, not a list of accounts or functions, not his own self-appraisal quoted back as though the reviewer had observed it.
