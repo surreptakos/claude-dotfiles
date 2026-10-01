@@ -30,6 +30,10 @@ const DATA_OPEN = '/*DATA*/', DATA_CLOSE = '/*END*/';
 const REPO_ORDER = ['claude-dotfiles', 'zoho-source-of-truth', 'aac-sales-commissions', 'aac-sales-cockpit',
   'aac-bill-intake', 'aac-contract-builder', 'aac-routines'];
 
+/** Every surface a drafting agent must search per card; the card carries one line each, hit or none. */
+const SURFACES = ['github', 'drive', 'm365', 'gmail', 'sor'];
+const missingSurfaces = t => SURFACES.filter(s => !(t.searched && typeof t.searched[s] === 'string' && t.searched[s].trim()));
+
 const short = repo => repo.split('/')[1];
 const keyOf = (repo, n) => `${short(repo)}~${n}`;
 const marker = (submission, key) => `<!-- rulings-page:${submission}:${key} -->`;
@@ -48,7 +52,7 @@ function planQueue(data, queue) {
   const keep = {}, toDraft = {};
   for (const q of queue) {
     const repo = q.repository.nameWithOwner, k = keyOf(repo, q.number), d = drafts.get(k);
-    const fresh = d && d.t.draftedAt && Date.parse(q.updatedAt) <= Date.parse(d.t.draftedAt);
+    const fresh = d && d.t.draftedAt && Date.parse(q.updatedAt) <= Date.parse(d.t.draftedAt) && !missingSurfaces(d.t).length;
     const bucket = fresh ? keep : toDraft;
     (bucket[repo] = bucket[repo] || []).push(fresh ? d.t : q.number);
   }
@@ -67,6 +71,8 @@ function buildPage(draftsDir, template) {
       const recs = t.options.filter(o => o.recommended).length;
       if (recs !== 1) throw new Error(`${name}#${t.n}: ${recs} recommended options, need exactly 1`);
       if (t.options.some(o => o.id === 'other')) throw new Error(`${name}#${t.n}: option id "other" is reserved`);
+      const miss = missingSurfaces(t);
+      if (miss.length) throw new Error(`${name}#${t.n}: searched lacks ${miss.join(', ')} (every surface needs a line, hit or none)`);
     }
     j.tickets.sort((a, b) => a.n - b.n);
     repos.push({ repo: j.repo, labels: j.labels || [], tickets: j.tickets });
