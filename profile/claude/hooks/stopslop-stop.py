@@ -90,7 +90,7 @@ def main():
             f"(keys: {', '.join(sorted(data))})\n")
         return 0
 
-    hits = stopslop.scan(msg, technical=False)
+    hits = stopslop.scan(msg, technical=False, informal=True)
     errors = [h for h in hits if h["severity"] == "ERROR"]
     if not errors:
         return 0
