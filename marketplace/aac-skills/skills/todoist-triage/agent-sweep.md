@@ -65,7 +65,12 @@ org policy blocks for this viewer. The account's Connectors page (Customize, You
 `Claude Code Remote` connector and the directory has none to add; the admin settings page answers
 that organization settings are not available on this plan, so nothing on the account changes the
 block. It is platform policy for artifact pages calling that connector (claude-dotfiles issue
-1162 holds the reading and the decision). Until a launch path exists, a Claude Code session
+1162 holds the reading and the decision). Claude Code's settings reference (code.claude.com,
+read 2026-10-01) has no key that reaches an artifact page's connector call: `disableRemoteControl`,
+`disableClaudeAiConnectors` and `deniedMcpServers` govern Claude Code on the device, and this PC
+sets none of them. What a session or routine on the desktop can do instead is create the cloud
+session itself: `claude --cloud "<task description>"` (optionally `--environment <id>`) or the
+claude.ai remote-trigger API. Until a launch path exists, a Claude Code session
 launches them when Dan asks ("launch my agent tasks"): read every open task labelled `agent`,
 start one background agent per task on this section's "Run an approved task" steps, and swap
 `agent` for `agent-running` with a comment naming the session as each starts. Never report an
