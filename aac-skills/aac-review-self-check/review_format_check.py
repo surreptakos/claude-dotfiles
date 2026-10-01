@@ -2,6 +2,8 @@
 """AAC performance review format check. Run this on your draft before you send it.
 
   python3 review_format_check.py REVIEW.docx --end 7/23/2026 [--start 7/24/2025] [--direct FIRSTNAME] [--no-render]
+  python3 review_format_check.py meaning REVIEW.docx --end 7/23/2026 [--start 7/24/2025] --direct FIRSTNAME
+      the meaning checks (review_meaning.py beside this file); exit 0 clean, 1 fixes, 2 could not check
 
   --end    required: the last day of the review period
   --start  optional: the first day; checks the span
@@ -348,6 +350,9 @@ def main():
         return stamp(argv[1:])
     if argv and argv[0] == "verify":
         return verify(argv[1:])
+    if argv and argv[0] == "meaning":
+        import review_meaning
+        return review_meaning.main(argv[1:], sys.modules[__name__])
     return format_check(argv)
 
 

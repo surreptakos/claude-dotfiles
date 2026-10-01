@@ -3,6 +3,9 @@
 
   python3 review_gate_tools.py check REVIEW.docx --end 7/23/2026 [--start 7/24/2025] [--direct Erich] [--no-render]
       Gate 1 mechanical format check. Prints fix lines for the Gate 1 email and what passed.
+  python3 review_gate_tools.py meaning REVIEW.docx --end 7/23/2026 [--start 7/24/2025] --direct Erich
+      Gate 2 meaning checks (review_meaning.py beside this file). Fix lines in the Gate 2 form.
+      Exit 0 clean, 1 fixes, 2 could not check (never a pass).
   python3 review_gate_tools.py build BODY.py OUT.docx [--template PATH.docx]
       Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (embedded
       below as base64; --template overrides). BODY.py sets `body = [...]` using
@@ -358,10 +361,13 @@ def build_docx(body_path, out_path, template_path=None):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("check", "build", "template"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("check", "meaning", "build", "template"):
         print(__doc__); return 2
     cmd, rest = sys.argv[1], sys.argv[2:]
     if cmd == "check": return gate1_main(rest)
+    if cmd == "meaning":
+        import review_meaning
+        return review_meaning.main(rest, sys.modules[__name__])
     if cmd == "build":
         ap = argparse.ArgumentParser(); ap.add_argument("body"); ap.add_argument("out"); ap.add_argument("--template")
         a = ap.parse_args(rest); build_docx(a.body, a.out, a.template); return 0

@@ -1,0 +1,36 @@
+name: review-meaning tests
+
+# The review scripts' `meaning` command (issue 1243): the audit's review_gate_tools.py and the
+# self-check's review_format_check.py, run at the CLI on synthetic docx fixtures built from the
+# approved template. python-docx is the one dependency, so it gets its own job; the pin that keeps
+# the two review_meaning.py and jev.py copies identical is tools/review-meaning-copies.test.js,
+# which runs with the rest of tools/ in skill-tests.yml. Jev is stubbed off: no network.
+
+on:
+  push:
+    paths:
+      - 'aac-skills/aac-performance-review-audit/**'
+      - 'aac-skills/aac-review-self-check/**'
+      - 'tests/review-meaning.test.py'
+      - '.github/workflows/review-meaning-tests.yml'
+  pull_request:
+    paths:
+      - 'aac-skills/aac-performance-review-audit/**'
+      - 'aac-skills/aac-review-self-check/**'
+      - 'tests/review-meaning.test.py'
+      - '.github/workflows/review-meaning-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install python-docx
+      - run: python3 tests/review-meaning.test.py -v
