@@ -13,7 +13,9 @@
 
     Four layers:
 
-      Prerequisites  git, node, py, claude, gh on PATH; PyYAML importable by py -3.
+      Prerequisites  git, node, py, claude, gh on PATH; PyYAML importable by py -3; global git
+                     user.name and user.email set (issue 1157: without them commit and merge
+                     refuse; -Fix copies them from the owner's ~/.claude/accounts.json entry).
       Profile        the files pull restores match what the repo would write (compared through
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
@@ -52,7 +54,9 @@
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
     command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
-    Text probes print their answer instead: master-plugin-version (the aac-skills version master
+    git-identity-set (args: git key, value) writes one global git setting.
+    Text probes print their answer instead: git-user-name and git-user-email (the global value,
+    empty when unset), master-plugin-version (the aac-skills version master
     offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
     unset - never the value), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
@@ -183,6 +187,65 @@ function Invoke-ProbeText {
 
 $SkipReason = 'machine probe skipped: -UserHome is not this user''s profile'
 
+# The owner's git identity from ~/.claude/accounts.json: accounts.<label>.git = { name, email } on
+# the account that owns the registered desktop routines. $null when the registry, the owner or
+# the entry is missing or incomplete (issue 1157).
+function Get-RegistryGitIdentity {
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $node) { return $null }
+    $js = 'const id=require(process.argv[1]);const r=id.loadRegistry({USERPROFILE:process.argv[2]});let o=null;if(r&&!r.error){for(const t of Object.values(r.routines)){const a=r.accounts[t.owner];const g=a&&a.git;if(g&&g.name&&g.email){o={name:String(g.name),email:String(g.email)};break}}}process.stdout.write(JSON.stringify(o))'
+    $identityJs = Join-Path (Join-Path (Join-Path $RepoRoot 'aac-skills') 'session-check') 'identity.js'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $raw = [string](& $node.Source -e $js $identityJs $UserHome 2>$null) } catch { $raw = '' }
+    finally { $ErrorActionPreference = $prev }
+    try { return ($raw | ConvertFrom-Json) } catch { return $null }
+}
+
+# The global value of one git key: $null when machine probes are skipped, '' when unset.
+function Get-GitConfigValue {
+    param([string]$Key)
+    $v = Invoke-ProbeText -Name ('git-' + $Key.Replace('.', '-')) -Real {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { [string](& git config --global --get $Key 2>$null | Out-String) } catch { '' }
+        finally { $ErrorActionPreference = $prev }
+    }
+    if ($null -eq $v) { return $null }
+    return $v.Trim()
+}
+
+function Set-GitConfigValue {
+    param([string]$Key, [string]$Value)
+    [void](Invoke-Probe -Name 'git-identity-set' -Arguments @($Key, $Value) -Real {
+        param($k, $v)
+        Invoke-NativeExit 'git' @('config', '--global', $k, $v)
+    })
+}
+
+function Test-GitIdentity {
+    $name = Get-GitConfigValue 'user.name'
+    if ($null -eq $name) { Write-Line skip ('git user.name and user.email  ({0})' -f $SkipReason); return }
+    $email = Get-GitConfigValue 'user.email'
+    if ($name -and $email) { Write-Line ok 'git user.name and user.email'; return }
+
+    $reg = Get-RegistryGitIdentity
+    if ($Fix -and $reg) {
+        if (-not $name) { Set-GitConfigValue 'user.name' ([string]$reg.name) }
+        if (-not $email) { Set-GitConfigValue 'user.email' ([string]$reg.email) }
+        $name = Get-GitConfigValue 'user.name'
+        $email = Get-GitConfigValue 'user.email'
+        if ($name -and $email) { Write-Line ok 'git user.name and user.email  (set by -Fix from the owner''s accounts.json entry)'; return }
+    }
+    $missing = (@(if (-not $name) { 'user.name' }; if (-not $email) { 'user.email' })) -join ' and '
+    Write-Line warn ('git {0} not set: commits and merges refuse without them  (-Fix sets them when accounts.json records the owner''s git name and email)' -f $missing)
+    $n = if ($reg) { [string]$reg.name } else { 'Your Name' }
+    $e = if ($reg) { [string]$reg.email } else { 'you@example.com' }
+    Add-Todo 'Set the global git identity (or record it as accounts.<owner>.git { name, email } in ~/.claude/accounts.json and re-run with -Fix):' @(
+        ('git config --global user.name "{0}"' -f $n),
+        ('git config --global user.email "{0}"' -f $e))
+}
+
 # ------------------------------------------------------------------ prerequisites
 
 function Test-Prerequisites {
@@ -205,6 +268,9 @@ function Test-Prerequisites {
             $found[$tool] = $false
         }
     }
+
+    if ($found['git'] -eq $false) { Write-Line skip 'git user.name and user.email  (not probed: git is missing)' }
+    else { Test-GitIdentity }
 
     if ($found['py'] -eq $false) {
         Write-Line skip 'PyYAML  (not probed: py is missing)'
