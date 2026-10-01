@@ -21,7 +21,14 @@ redrafted at 18:30Z and 18:53Z). No cloud session's record lists that publish un
 said "the Cowork session republished it": a tool contract plus a memory note about where routines
 run, standing in for the records above. Dan: "inference is the tool of the devil."
 
-**How to apply:** name the receiver from `ArtifactComments` `read` on the page, the publisher from
+Seen again 2026-10-01: Dan's Submit at 21:10:19Z (batch s1790889019918, 21 tickets) reached a Cowork
+session that replied "Not landed" at 21:12Z; the desktop session that had published version 13 had
+ended at 21:05Z. The `rulings-lander` desktop task had been disabled since 2026-09-29, in the app
+and in aac-routines' `config/desktop-routines.json`, so nothing else would land it. Both were
+flipped to enabled on 2026-10-01 (aac-routines PR 677) and the lander's first tick landed the batch.
+
+**How to apply:** the landing path is the `rulings-lander` task on the anchor PC, never the
+session that happens to hold a watch; a Submit comment reaching a session is a courtesy. Name the receiver from `ArtifactComments` `read` on the page, the publisher from
 the session record that lists the artifact (`list_sessions`, `external_metadata.artifacts`) or the
 publish result in that session's own transcript, and the publish time from `Artifact` `list` with
 `scope: files`. A session that cannot land never publishes or watches the rulings page (rule in
