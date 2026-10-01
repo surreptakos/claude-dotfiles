@@ -3,10 +3,10 @@ name: setup-matt-pocock-skills
 description: 'Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.'
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-28T21:53:59Z'
-  previous-modified: '2026-08-20T00:41:59Z'
-  revision: '2'
-  content-sha: aa3a3fa6af91
+  modified: '2026-10-01T23:30:31Z'
+  previous-modified: '2026-09-28T21:53:59Z'
+  revision: '3'
+  content-sha: 49551239e27d
 ---
 
 # Setup Matt Pocock's Skills
