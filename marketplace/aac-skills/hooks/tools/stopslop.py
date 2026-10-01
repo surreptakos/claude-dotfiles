@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stopslop - the deterministic half of AAC-WR-001 Part XXV (Rules 153-167).
+stopslop - the deterministic half of AAC-WR-001 Part XXV (Rules 153-169).
 
 `profile/claude/hooks/stopslop-write.py` and `stopslop-stop.py` import this
 module and call `scan(text, technical=False)`. Both were written against a
@@ -35,6 +35,13 @@ false agency, the narrator voice, wh- openers and synonym cycling. A runbook
 legitimately writes "the scheduler returns", "this happens because" and "when
 the panel faults"; a memo does not.
 
+`informal=True` adds the checks marked `informal_only`: Appendix G12, the
+legalistic register (Rule 169). G12 exempts contracts and formal documents, and
+the write hook cannot tell a contract file from a memo, so only the Stop hook
+passes it: Claude's reply to the person it works with is correspondence with a
+working partner, the case Rule 169 names. They are ERROR there because the
+Stop hook reports nothing else, and its loop guard lets the rewrite through.
+
 Hit shape (the keys the two hooks read)
 ---------------------------------------
     line      1-based; 0 for a document-level finding
@@ -46,13 +53,13 @@ Hit shape (the keys the two hooks read)
     message   what to do about it
     source    where in the controlled copy the pattern is registered
 
-Pinned to AAC-WR-001 v0.10, the version TERMINOLOGY.md records for Rule 167,
-the latest change to Part XXV.
+Pinned to AAC-WR-001 v0.12, the version TERMINOLOGY.md records for Rules
+168-170 and Appendix G12, the latest change to Part XXV.
 """
 import re
 import sys
 
-STANDARD_VERSION = "0.10"
+STANDARD_VERSION = "0.12"
 
 # ' and the curly apostrophe, since Claude writes both.
 _APOS = "['’]?"
@@ -60,7 +67,8 @@ _APOS = "['’]?"
 _EMOJI = "[\U0001F300-\U0001FAFF☀-➿]"
 
 
-def _c(cell, rule, severity, pattern, message, source, prose_only=False):
+def _c(cell, rule, severity, pattern, message, source, prose_only=False,
+       informal_only=False):
     return {
         "id": cell,
         "rule": rule,
@@ -69,6 +77,7 @@ def _c(cell, rule, severity, pattern, message, source, prose_only=False):
         "message": message,
         "source": source,
         "prose_only": prose_only,
+        "informal_only": informal_only,
     }
 
 
@@ -410,6 +419,20 @@ CHECKS = [
        r"\bThe consequences are real\b",
        "vague declarative; name the consequence",
        "Appendix G11"),
+
+    # --------------------------------------------------------- Appendix G12
+    # Legalistic register. Rule 169: in correspondence, say it the way a
+    # colleague would, or cut the sentence (Rule 168). The same phrase list
+    # wr001-lint.js carries; "please be advised" and "shall" are in G12 too,
+    # but Rules 10 and 14 govern them. informal_only: a contract is exempt.
+    _c("G12", 169, "ERROR",
+       r"\b(?:pursuant to|herein|hereby|hereto|notwithstanding"
+       r"|for the avoidance of doubt|please treat this(?: \w+)? as"
+       r"|without prejudice|reserves? the right|without waiving"
+       r"|in accordance with Section|it is our position)\b",
+       "legalistic register; write it the way a colleague would, or cut the "
+       "sentence (Rule 168)",
+       "Rule 169, Appendix G12", informal_only=True),
 
     # ---------------------------------------------------------- Appendix H1
     # Binary contrasts. Rule 164: state Y directly, drop the negation.
@@ -847,13 +870,16 @@ def _blank_uncheckable(lines):
     return out
 
 
-def scan(text, technical=False):
+def scan(text, technical=False, informal=False):
     """Scan `text` for the mechanically decidable patterns of AAC-WR-001
     Part XXV. Returns a list of hit dicts (see the module docstring).
 
     technical=True drops the checks that honest technical prose trips: the
     adverb register, false agency, the narrator voice, wh- openers, synonym
     cycling.
+
+    informal=True adds the Appendix G12 legalistic register, which applies to
+    correspondence and never to a contract (Rule 169).
     """
     if not text:
         return []
@@ -867,6 +893,8 @@ def scan(text, technical=False):
             continue
         for check in CHECKS:
             if technical and check["prose_only"]:
+                continue
+            if not informal and check["informal_only"]:
                 continue
             for match in check["re"].finditer(line):
                 if not match.group(0).strip():

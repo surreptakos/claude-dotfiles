@@ -62,3 +62,35 @@ test('an ordinary markdown file using the same phrase in plain prose still repor
   assert.match(res.stderr, /Here's the thing/);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+// Issue 1165: the Stop hook knows Appendix G12, the legalistic register (Rule 169). A reply is
+// correspondence, so the phrase in Claude's own prose blocks the stop; the same phrase inside a
+// quoted contract excerpt is the contract's language, which Rule 153 puts out of reach.
+const STOP_HOOK = path.join(REPO_ROOT, 'profile', 'claude', 'hooks', 'stopslop-stop.py');
+
+function runStopHook(message) {
+  return spawnSync('python3', [STOP_HOOK], {
+    input: JSON.stringify({ last_assistant_message: message }),
+    cwd: REPO_ROOT,
+    encoding: 'utf-8',
+  });
+}
+
+test('Stop hook: a G12 phrase in informal prose is flagged', () => {
+  const res = runStopHook('Pursuant to our call, the panel ships Monday and we reserve the right to bill the second trip.');
+  assert.equal(res.status, 2, `expected exit 2 (blocked), got ${res.status}\nstderr: ${res.stderr}`);
+  assert.match(res.stderr, /\[G12\] "Pursuant to"/);
+  assert.match(res.stderr, /\[G12\] "reserve the right"/);
+});
+
+test('Stop hook: the same G12 phrase inside a quoted contract excerpt is not flagged', () => {
+  const res = runStopHook([
+    'Section 4 of the subcontract covers it:',
+    '',
+    '> Pursuant to Section 4, the Contractor reserves the right to withhold retainage.',
+    '',
+    'It also says "notwithstanding any other provision, retainage is released at closeout", so the money comes back once the closeout items arrive.',
+  ].join('\n'));
+  assert.equal(res.status, 0, `expected exit 0, got ${res.status}\nstderr: ${res.stderr}`);
+  assert.equal(res.stderr.trim(), '');
+});
