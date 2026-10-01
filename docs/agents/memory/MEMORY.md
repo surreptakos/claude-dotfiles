@@ -62,3 +62,4 @@ and give the note a name that says what it is — adding one costs its own line 
 - artifact-submit-goes-to-last-publisher: Submit reaches only sessions watching the page; publishing watches, reading does not; name receiver and publisher from records
 
 Source: tools/repo-memory-load.js, tools/repo-memory-load.test.js, https://github.com/surreptakos/claude-dotfiles/issues/210, https://github.com/surreptakos/claude-dotfiles/issues/589, profile/claude/CLAUDE.md, docs/agents/memory/hook-exit-126-is-the-mode-bit.md, docs/agents/memory/cloud-containers-can-run-powershell.md, https://github.com/surreptakos/claude-dotfiles/pull/652
+- [Keep Dan's name for the thing](keep-dans-name-for-the-thing.md) — call a deliverable by the word he used; a new name reads as a different thing
