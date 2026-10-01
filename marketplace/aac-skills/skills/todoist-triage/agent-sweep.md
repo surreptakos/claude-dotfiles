@@ -77,6 +77,17 @@ start one background agent per task on this section's "Run an approved task" ste
 `agent` for `agent-running` with a comment naming the session as each starts. Never report an
 agent as started without that label swap on the task.
 
+Every record mentioned in a reply to Dan, in a launch report, in an agent's result or in a draft
+he will paste elsewhere carries its link in its own system of record, never a bare id or number
+(Dan, 2026-10-01: "I need links to the todoist items referenced, not the IDs"; same day, on a Teams
+draft that said `#43850`: "your message to Nick links to github instead of linking to zoho desk",
+because the Claude app renders `#<number>` as a GitHub issue link). Todoist tasks:
+`https://app.todoist.com/app/task/<id>`; the v1 REST task object carries no `url` field, so build it
+from the id. Zoho Desk tickets: the ticket's `webUrl`, from
+`tools/zoho-rest.py get "https://desk.zoho.com/api/v1/tickets/search?ticketNumber=<n>&orgId=874367220"`
+in claude-dotfiles (the Desk connector's `searchTickets` ignored `ticketNumber` on 2026-10-01 and
+returned the whole list). Drive files: the document link.
+
 ## Run an approved task
 
 The session the board starts works one Todoist task:

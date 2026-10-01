@@ -5,14 +5,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.12 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.13 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.12 |
+| **Version** | 0.13 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -43,6 +43,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.10 | 2026-09-26 | Machine-vocabulary word list: Rule 167. Straight-quote mandate rejected: Appendix F. | Pending |
 | 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 | 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
+| 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
 
 # How to use this standard
 
@@ -151,6 +152,12 @@ Do not use **we** when one person owns the action.
 Use **is** or **will** for established facts or firm commitments; **should** for a recommendation or expected result; **may, might,** or **could** for genuine uncertainty; and **estimate** or **approximately** when a value is estimated.
 
 Use wording such as **appears** or **based on the information available** when the evidence is incomplete. Do not add qualifiers automatically.
+
+A draft an AI assistant produces for a person to send states only what the record shows and hedges everything else. Name the system the fact came from (**Zoho Desk shows**, **the board showed**), write what the sender could not verify as not known (**I can't tell whether**, **I don't see a message after May 20**), and leave the conclusion to the reader. The drafter reads a record; the sender knows the people, so a flat assertion in the draft commits the sender to more than the record supports. The two hedging rules above still apply: the hedge marks real uncertainty, never a reflex.
+
+Preferred: Zoho Desk shows Matt closed it July 31 with no closing note, and I don't see a message to Tom after May 20. Was Tom told?
+
+Avoid: Matt closed it July 31 with no note and no message to Tom Kazda. What was the decision, and was Tom told?
 
 ## 9. Plain language
 
@@ -727,6 +734,8 @@ Tina: Hold scheduling until the proposal is signed.
 ## 104. Deadlines
 
 Use a specific deadline when timing matters. Prefer **Friday, September 11, at 3 p.m.** to **ASAP**. Use **ASAP** only when immediate action is genuinely required and the timing cannot be stated more accurately. When the sender controls the next step, a sequence may replace a clock deadline: **call him before Lynne sends the letter**.
+
+A request to a direct report that is due within the next couple of weeks names their next one-on-one as the deadline (**by our next O3**), not a calendar date: the meeting is already on both calendars and is where the answer gets discussed. A calendar date stays for external readers, for anything due before that meeting, and for work with a date of its own.
 
 ## 105. To and Cc
 
@@ -1319,6 +1328,7 @@ Table F1. House decision register
 | 161 | Consistent naming binding in responses and messages to people (email, Teams, review feedback); free in prose deliverables (reports, proposals, scopes, procedures). | Owner ruling, September 22, 2026, issue 627, superseding a September 21, 2026 draft ruling that split the rule by document type instead. `blader/humanizer` 3.0.0 dropped its equivalent pattern as an AI tell; Rule 161 answers a different question (precision, not machine detection), so the rule stands but is scoped to correspondence. | 0.9 |
 | 167 | Machine-vocabulary word list adopted across the board, not scoped to one document class. Beacon, harness, gate, and robust stay exempt when literal. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Lists compared: `petergyang/no-ai-slop` and `blader/humanizer`. Checked by the stop-slop detector, issue 620. | 0.10 |
 | 166; 168; 169; 170; G12 | Cut sentences that do nothing for the reader: restated terms, unraised disputes, and shown working (Rule 168). Formality follows stakes and relationship, not topic; no contract citations in email unless disputed or outcome-changing (Rule 169). Cut for need, never for length (Rule 170). Legalistic register in Appendix G12, checked as warnings outside formal documents. No length check. | Owner ruling, September 28, 2026, from the ForeFront closeout: the drafts were accurate but overdefensive, legalistic, and redundant. Length is the wrong target, so Rule 170 and its release-check item keep the fix from turning terse. | 0.12 |
+| 8; 104 | An AI-drafted message states only what the record shows, names the system it came from, and writes what the sender could not verify as not known (Rule 8). A request to a direct report due within a couple of weeks names the next O3 as the deadline, not a calendar date (Rule 104). | Owner ruling, October 1, 2026, on a drafted Teams message to a manager: "AI drafted messages should lean hard into hedging & stating only what we can absolutely be sure of" and "instead of putting dates/deadlines for internal team members, if the deadline is relatively soon, ask for it by their next O3." | 0.13 |
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
 | 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
 

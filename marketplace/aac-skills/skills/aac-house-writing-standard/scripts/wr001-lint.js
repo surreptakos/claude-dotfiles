@@ -41,7 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.12";
+const STANDARD_VERSION = "0.13";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
