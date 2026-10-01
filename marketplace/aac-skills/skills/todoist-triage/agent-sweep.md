@@ -62,9 +62,10 @@ The triage run never starts an agent. Dan does, with the Day Board's **Launch ag
 2026-10-01 every `create_session` call rejected `blocked_by_policy` ("Your organization blocks this
 Claude Code Remote call"): the runtime contract defines that code as a tool in the manifest that
 org policy blocks for this viewer. The account's Connectors page (Customize, Yours) lists no
-`Claude Code Remote` connector and the directory has none to add; the admin settings page answers
-that organization settings are not available on this plan, so nothing on the account changes the
-block. It is platform policy for artifact pages calling that connector (claude-dotfiles issue
+`Claude Code Remote` connector and the directory has none to add; the Team organization's admin settings
+(Active Alarm, read 2026-10-01) have Cloud sessions, Remote Control, Routines and Enable artifact
+connectors all on, list no `Claude Code Remote` connector and offer none in the directory, so no
+organization toggle changes the block. It is platform policy for artifact pages calling that connector (claude-dotfiles issue
 1162 holds the reading and the decision). Claude Code's settings reference (code.claude.com,
 read 2026-10-01) has no key that reaches an artifact page's connector call: `disableRemoteControl`,
 `disableClaudeAiConnectors` and `deniedMcpServers` govern Claude Code on the device, and this PC
