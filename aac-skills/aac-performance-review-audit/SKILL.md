@@ -2,10 +2,10 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-09-29T21:14:45Z"
-  previous-modified: "2026-09-29T21:05:36Z"
-  revision: "7"
-  content-sha: "8e4af5ad3f1c"
+  modified: "2026-10-01T20:44:24Z"
+  previous-modified: "2026-09-29T21:14:45Z"
+  revision: "8"
+  content-sha: "d35628ae29a1"
 ---
 
 # AAC performance review audit
@@ -28,7 +28,7 @@ The "Performance Review Audits" project folder, when mounted, holds prior review
 
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the repeat check in Gate 2 cannot run without it.
 2. Compute the period start and end by the review-period rule in `standards.md` before running anything.
-3. One output file: "[Direct] [Year] - Audit of Rev [N].md". Email on top. Below a line reading "Notes for Dan (delete before sending)": file identification, period, gate reached and result, the script output, anything parked for a later gate, and the reason behind every "please confirm." Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
+3. One output file: "[Direct] [Year] - Audit of Rev [N].md". Email on top. Below a line reading "Notes for Dan (delete before sending)": file identification, period, gate reached and result, the script output, anything parked for a later gate, and the source behind every figure checked. Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
 4. `pip install python-docx --break-system-packages` if the script cannot import it. Page count needs LibreOffice (`soffice`) and `pdfinfo`; if absent pass `--no-render` and count pages another way (say so).
 5. If the manager's draft arrives with its own unanswered "open items" or notes from a drafting tool, those are the manager's to answer. The Gate 1 opener may say so in one sentence, because they are his own document, not a preview of a later gate.
 
