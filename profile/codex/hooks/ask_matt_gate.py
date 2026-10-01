@@ -663,7 +663,8 @@ def _route_gate_setting(name: str) -> Any:
 
 
 def _appeal_line(appeal: dict[str, Any]) -> str:
-    """The reply's first line on an appealed turn, as the lint demands it and Dan reads it."""
+    """The reply's first line after the PYLONS prefix on an appealed turn (issue 1221), as the
+    lint demands it and Dan reads it."""
     return (
         f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, "
         f"because {appeal['reason']}"
@@ -882,8 +883,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
             context += (
                 "Jev wrong? Appeal ONCE this turn: `"
                 f'{_runner_spelling()} "{SCRIPT}" appeal-claude "{session_id}" "{nonce}" <route> "<reason>"'
-                "`; the reply's first line must then read `Route appeal: <route> instead of "
-                f"{jev_route}, because <reason>`. "
+                "`; the reply's first line after the PYLONS prefix must then read `Route appeal: "
+                f"<route> instead of {jev_route}, because <reason>`. "
             )
         else:
             context += "Appeals are off: Jev's pick is final. "
@@ -1384,7 +1385,7 @@ def _appeal_log_path() -> Path:
 def _claude_appeal(session_id: str, nonce: str, wanted: str, reason: str) -> int:
     """Issue 841: the model's one appeal of Jev's route this turn (ADR 0002). Switches the turn's
     route, logs both routes and the reason, and arms the pre-send lint to refuse the reply until
-    its first line states the appeal, so Dan always sees it."""
+    its first line after the PYLONS prefix states the appeal, so Dan always sees it."""
     reason = " ".join(reason.split())
     if not _route_gate_setting("appeals"):
         print(
@@ -1428,24 +1429,32 @@ def _claude_appeal(session_id: str, nonce: str, wanted: str, reason: str) -> int
     )
     print(
         f"Route appeal recorded: {wanted} instead of {jev_route}. Open and follow {wanted}. "
-        f"The reply's first line must read: {_appeal_line(appeal)}"
+        f"The reply's first line after the PYLONS prefix must read: {_appeal_line(appeal)}"
     )
     return 0
 
 
 def _appeal_lint(text: str, appeal: dict[str, Any] | None) -> tuple[list[str], str]:
     """(violations, text left for the ADHD shape). On an appealed turn the first line after the
-    PYLONS canary must state the appeal; the ADHD opener rule then applies to the line after it."""
+    PYLONS canary must state the appeal; the ADHD opener rule then applies to the line after it.
+    Issue 1221: canary then appeal line is the one documented shape. The canary stays optional,
+    but a canary below the appeal line is refused here, at every caveman level."""
     if not appeal:
         return [], text
     lines = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().splitlines()
     first = lines[0].strip() if lines else ""
     prefix = f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, because "
     if first.startswith(prefix) and first[len(prefix):].strip():
-        return [], "\n".join(lines[1:])
+        rest = "\n".join(lines[1:])
+        if PYLONS_PREFIX_PATTERN.match(rest):
+            return [
+                "route appeal above the PYLONS prefix: the prefix opens the reply, so move it "
+                "above the route appeal line"
+            ], text
+        return [], rest
     return [
-        "route appeal not shown: this turn appealed Jev's route, so the reply's first line must "
-        f'read "{_appeal_line(appeal)}"'
+        "route appeal not shown: this turn appealed Jev's route, so the reply's first line after "
+        f'the PYLONS prefix must read "{_appeal_line(appeal)}"'
     ], text
 
 

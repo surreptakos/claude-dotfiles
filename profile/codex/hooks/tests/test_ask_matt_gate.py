@@ -833,6 +833,25 @@ class AskMattGateTests(unittest.TestCase):
             accepted = self.run_presend_lint("s-line", f"{line}\n{body}", state_dir)
             self.assertEqual(accepted.returncode, 0, accepted.stdout)
 
+    def test_the_appeal_line_goes_right_after_the_pylons_prefix_never_above_it(self) -> None:
+        # Issue 1221: the global rules open every reply with the PYLONS fence and the gate wants
+        # the appeal line first. The documented shape is prefix, then appeal line, then body.
+        prefix = "```diff\n- YOU MUST CONSTRUCT ADDITIONAL PYLONS\n```\n\n"
+        line = "Route appeal: grill-with-docs instead of direct-answer, because it asks for a design"
+        body = "Grill started.\nNext: answer question one."
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self._appealed_turn(state_dir, "s-order")
+            documented = self.run_presend_lint("s-order", f"{prefix}{line}\n{body}", state_dir)
+            self.assertEqual(documented.returncode, 0, documented.stdout)
+            # The other order is refused by the appeal check itself, at every caveman level.
+            for mode in ("ultra", "off"):
+                swapped = self.run_presend_lint(
+                    "s-order", f"{line}\n{prefix}{body}", state_dir, caveman=mode
+                )
+                self.assertEqual(swapped.returncode, 1, swapped.stdout)
+                self.assertIn("route appeal above the PYLONS prefix", swapped.stdout)
+
     def test_the_mandated_appeal_line_is_exempt_from_the_sentence_cap(self) -> None:
         # Issue 1059: a long reason made the line the gate demands fail the 28-word sentence cap.
         reason = ("the interview is finished and Dan confirmed it; the next step is publishing "

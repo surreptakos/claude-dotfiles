@@ -13,7 +13,8 @@ Personal instructions that apply to every project and session on this machine.
 ````
 
 A `diff` fence, so the leading `-` renders red. Emit it verbatim. Every response, every session,
-every project, before any other text.
+every project, before any other text. A line the gate requires first (`Route appeal: ...`,
+`route unchecked: Jev unavailable`) goes on the line right after this block, never above it.
 
 ## Fundamental Workflow and Governance
 
