@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Equipment request (audit fixture)</title>
+<!-- aac-design audit fixture (issue 1079). Four known faults, nothing else wrong:
+     1. the "Room" input has no label;
+     2. the note under the heading is low-contrast text (#b0b0b0 on white);
+     3. a focusable link is zero width;
+     4. the "Priority" select has no label.
+     Invented content only: this repository is public. -->
+<style>
+  body { font: 16px/1.5 Arial, sans-serif; color: #1a1a1a; background: #ffffff; margin: 0; }
+  main { max-width: 40rem; margin: 0 auto; padding: 24px 16px; }
+  .note { color: #b0b0b0; }
+  label { display: block; margin-top: 16px; min-height: 44px; }
+  input, select, button { display: block; min-height: 44px; min-width: 44px; font: inherit; margin-top: 4px; }
+  button { margin-top: 24px; padding: 0 16px; }
+  .ghost { display: inline-block; width: 0; overflow: hidden; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Equipment request</h1>
+  <p class="note">Requests are reviewed every Monday.</p>
+  <form action="#">
+    <label for="item">Item</label>
+    <input id="item" name="item" type="text">
+    <input id="room" name="room" type="text">
+    <select id="priority" name="priority">
+      <option>Normal</option>
+      <option>Urgent</option>
+    </select>
+    <a class="ghost" href="#help">Help</a>
+    <button type="submit">Send request</button>
+  </form>
+</main>
+</body>
+</html>

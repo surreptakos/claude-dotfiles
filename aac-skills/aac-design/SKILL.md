@@ -1,11 +1,11 @@
 ---
 name: aac-design
-description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
+description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, when asked to audit an existing file or URL, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-09-30T22:23:11Z"
-  previous-modified: "2026-09-30T21:51:31Z"
-  revision: "4"
-  content-sha: "6669b16fa3e4"
+  modified: "2026-09-30T23:55:08Z"
+  previous-modified: "2026-09-30T22:23:11Z"
+  revision: "5"
+  content-sha: "ad47a0cdeaed"
 ---
 
 # AAC design
@@ -25,7 +25,7 @@ Reference files, each loaded when its step needs it:
 - [TELLS.md](TELLS.md): the patterns to refuse, each tagged with the linter rule that catches it.
 - [CRITIQUE.md](CRITIQUE.md): the scoring protocol.
 
-Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only the standard library, so the hook also runs them on the host.
+Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only the standard library, so the hook also runs them on the host. So do `audit.py` and `score.py`; the web adapter `web_adapter.js` needs Node 22 or later and a Chromium, Chrome or Edge (`AAC_DESIGN_CHROME` names one).
 
 ## Branches
 
@@ -74,9 +74,40 @@ Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only t
    - Name the file per Rule 145 and bump its revision.
    - Present it with its rendered page.
 
+## Audit mode
+
+Audits an existing `.html` file, URL (a local harness address included), `.docx`, `.pptx` or `.pdf`, the same way every time. The build steps above stay for new work.
+
+1. **Collect the evidence.** Run:
+   ```bash
+   python3 scripts/audit.py TARGET
+   ```
+   It writes `render/audit-<name>/`:
+   - `evidence/`: page images, the structure dump and a plain-text export;
+   - `detector/`: the measures, the linter and axe-core results;
+   - `bundle.json`: the manifest, listing every fault found.
+
+   A web page is rendered in the Chromium already on the machine. It is captured at 1440, 768 and 390 px and at 200% zoom, with computed styles, the accessibility tree and a scripted Tab walk, then again under reduced motion, forced colours and offline. axe-core is fetched on first use and checked against its pinned hash. `--signin steps.json` runs a sign-in first (goto, fill, click, waitFor; `${env:NAME}` keeps a password out of the file). `--commit SHA` names a URL's deployed commit when the page carries no `<meta name="aac-commit">`. A document or deck is linted and, where LibreOffice exists, rendered under both stand-in fonts. A PDF is read from its text layer and page images. Whatever the machine cannot measure is listed under `unavailable`. Done when audit.py exits 0.
+
+2. **Fill the ledger.** Run one isolated reviewer per source skill in `catalog/CATALOG.json`:
+   - Give it its vendored copy under `vendor/`, to read in full, and `evidence/`. Never give it `detector/` or the faults.
+   - It returns one row per catalog id of its skill that applies to the bundle's `catalog_surface`. Each row has a verdict (PASS, FAIL, or N/A with a `reason`), an `evidence` path in the bundle, an `owner`, and on a FAIL a `fix` and a `priority` from P0 to P3.
+
+   When every reviewer's rows are in, open the detector output and match each fault to a row. An unmatched fault becomes a FAIL on the rule it breaks. Merge the rows into `ledger.json` (shape in `scripts/score.py`), with `auditor_owns` naming the owners whose files you edit. With no Agent tool, review in one context and start the method with `DEGRADED`. Done when every applicable catalog id has a row.
+
+3. **Score, stamp, report.** Run:
+   ```bash
+   python3 scripts/score.py --ledger ledger.json --markdown --stamp
+   ```
+   - It rejects (exit 3) a ledger missing an applicable id, an N/A without a reason, or a row without an owner.
+   - It passes (exit 0) on full coverage, no open P0 or P1 in the auditor's own files, a dual-agent method and, for a URL, a known commit.
+   - The stamp is the file's sha256, or the URL plus its commit. `score.py --verify TARGET` tells whether a stamp is still current.
+
+   Report in the session, never as a Markdown file. The findings page opens with the method line, then the handoff by owner, then the accessibility ticket drafts (`--tickets`). Show the drafts before filing, and file them only to a repository Dan names.
+
 ## Rules the steps depend on
 
 - **The stamp is bound to the bytes.** Any edit after stamping, even a typo fix, makes the gate block until steps 4–6 run again. Batch edits before critiquing.
-- **The brief wins.** When the user asks for a pattern TELLS.md lists, build it, and record it in the report as an accepted exception.
+- **Precedence.** AAC tokens and AAC-WR-001 come first, then the design skills, then the brief (Dan, 2026-09-30; the `precedence` field of `catalog/CATALOG.json`). When two sources disagree, the higher one wins, and the report names the rule that won and why. When Dan overrules it knowingly, build what he asked and record it in the report as an accepted exception.
 - **Cut before you squeeze.** Only reduce type sizes or spacing to meet the page budget after the duplicate and parked content is gone.
 - **Gate override.** After three consecutive blocks in one turn the gate lets the turn end so a broken linter cannot wedge a session. When that happens, the reply names every file that shipped unstamped and why.
