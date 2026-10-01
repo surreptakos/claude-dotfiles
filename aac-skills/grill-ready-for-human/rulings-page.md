@@ -51,8 +51,10 @@ session with `gh` and a checkout.
    after its card was drafted, so nothing was written: read the new comments, land the pick by hand
    only if it still fits them, otherwise tell the owner what changed and leave the ticket as it is.
 4. Every result with `needsJudgment` (an "Other" pick, or a pick that spawns child tickets): the
-   note or ruling is already posted. A spawn-children pick: run `/to-tickets` for the children.
-   An "Other" pick: Read
+   note or ruling is already posted. A spawn-children pick: the lander task opens no tickets (its
+   write list is comments, labels, closes and the page database), so apply the option's labels and
+   name each follow-up in a comment for the agent that picks the ticket up; an interactive run
+   opens them with `/to-tickets`. An "Other" pick: Read
    the ticket, then land it by the ruling shapes in `SKILL.md` (relabel, close, wontfix, or keep
    with a note); a note that leaves a fork keeps `ready-for-human` with the question in a comment.
 5. Unblock: for every closed ticket, each number in its `blocks` — if all of that ticket's blockers
