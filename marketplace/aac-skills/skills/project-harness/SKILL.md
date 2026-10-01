@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: '2026-10-01T19:24:56Z'
-  previous-modified: '2026-09-30T19:40:20Z'
-  revision: '49'
-  content-sha: ff03b9edc6cc
+  modified: '2026-10-01T21:05:48Z'
+  previous-modified: '2026-10-01T19:24:56Z'
+  revision: '50'
+  content-sha: e0580bb7fb6a
 ---
 
 # Project Harness
@@ -30,6 +30,15 @@ cat docs/agents/harness-version.md 2>/dev/null; ls scripts/build-dashboard.js 2>
 - **Either present → UPGRADE. Go straight to step 7** and install only what that repo's version
   lacks. A `build-dashboard.js` with no marker file is **version 1**.
 - **Neither present → fresh install.** Continue to step 1.
+- **The owner asks for the skill to run, on a repo whose marker is current → run it anyway, as a
+  verification pass.** "Current" says the marker was bumped, not that every piece still matches its
+  template: on 2026-10-01 osh-rfp read v37 while `tools/tracker-audit.js` lacked the template's
+  issue 946 change, no Projects board existed, and the tracker audit was red. So walk steps 1-6
+  against the live repo: diff every template the repo carries (with `TEST_COMMAND`, `DEFAULT_BRANCH`
+  and the `CONFIG` splice applied) and apply only the differences under `MERGING-TEMPLATES.md`,
+  run every check in step 4 and report each line, and do step 5. Report "nothing to do" only after
+  that pass shows it; a marker read alone is not the answer (Dan, 2026-10-01: "Run it again as if
+  you had none and needed to do every single step").
 
 Steps 1–6 read as a fresh install; run against an existing install they churn every file and revert
 hand-tuned configuration (a corrected test command, the comments explaining it) that detection cannot
