@@ -91,7 +91,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libreoffice-writer libreoffice-impress \
             poppler-utils fonts-crosextra-carlito fonts-liberation
-      - name: The .docx, .pptx and .pdf fixtures through their adapters
+      - name: The .docx, .pptx and .pdf fixtures through their adapters, from a file and from a Drive link
         env:
           AAC_DESIGN_REQUIRE_RENDERER: '1'
-        run: node --test tools/aac-design-doc-audit.test.js
+        run: node --test tools/aac-design-doc-audit.test.js tools/aac-design-drive-audit.test.js

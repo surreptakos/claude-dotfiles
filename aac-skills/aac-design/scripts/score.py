@@ -25,14 +25,15 @@ an out-of-range score, n/a without a reason, an unknown checklist item or severi
 Audit mode (issue 1084): the same command on an audit ledger instead of a critique.
 
     python3 score.py ledger.json [--markdown] [--report PAGE.html] [--stamp FILE_OR_URL]
-    python3 score.py --check-stamp FILE_OR_URL [--commit SHA]
+    python3 score.py --check-stamp FILE_OR_URL [--commit SHA] [--revision REV]
 
 ledger.json:
 {
   "method": "dual-agent (reviewers: accessibility-review=<id> · detector: <id>)" | "DEGRADED: ...",
   "surface": "web",                                             # a CATALOG.json surface
   "subject": {"kind": "file", "path": "...", "sha256": "<64 hex>"}
-           | {"kind": "url", "url": "https://...", "commit": "<deployed commit>"},
+           | {"kind": "url", "url": "https://...", "commit": "<deployed commit>"}
+           | {"kind": "drive", "file_id": "...", "revision": "..."},  # the bundle's Drive subject
   "auditor": "Design",                                          # the owner whose open P0/P1 block
   "reviewers": [{"skill": "accessibility-review", "agent": "<id>",
                  "rows_in": "<ISO time>", "detector_shown": "<ISO time>"}],
@@ -46,8 +47,10 @@ N/A without a reason, a PASS or FAIL without evidence, a FAIL without owner, fix
 catalogued skill without its reviewer, or detector output shown to a reviewer before its rows were
 in. The gate: coverage complete, no open P0 or P1 owned by the auditor, not degraded. --stamp binds
 a file stamp to the audited sha256 and a URL stamp (.design/url-<hash>.json under the current
-folder) to the address plus deployed commit; --check-stamp exits 0 while the stamp is fresh and 1
-once the file's bytes or the deployed commit moved.
+folder) to the address plus deployed commit, and a Drive link's stamp (.design/drive-<file id>.json,
+issue 1089) to its file id plus revision id; --check-stamp exits 0 while the stamp is fresh and 1
+once the file's bytes, the deployed commit or the Drive revision moved. A Drive revision is asked of
+the Drive API (drive.py) unless --revision gives it; when Drive cannot answer, the check exits 2.
 
 A catalogued conflict (CATALOG.json "conflicts") whose two rows are both in the ledger is reported
 with the rule that won, its source and the precedence reason. A FAIL on the losing row while the
@@ -55,6 +58,9 @@ winning row PASSes is settled by precedence: it is listed with the conflict, not
 and never blocks the gate. When the winning row is not a PASS the loser's FAIL stays open.
 """
 import argparse, datetime, hashlib, html, json, os, re, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import drive  # noqa: E402
 
 CATALOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'catalog', 'CATALOG.json')
 VERDICTS = ('PASS', 'FAIL', 'N/A')
@@ -197,8 +203,11 @@ def validate_ledger(l, catalog):
     elif sub.get('kind') == 'url':
         if not sub.get('url') or not str(sub.get('commit') or '').strip():
             raise Invalid('a URL subject needs its address and deployed commit')
+    elif sub.get('kind') == 'drive':
+        if not str(sub.get('file_id') or '').strip() or not str(sub.get('revision') or '').strip():
+            raise Invalid('a Drive subject needs its file id and revision id')
     else:
-        raise Invalid('subject.kind must be "file" or "url"')
+        raise Invalid('subject.kind must be "file", "url" or "drive"')
     known = {r['id']: r for r in catalog['rows']}
     applicable = {i: r for i, r in known.items() if l['surface'] in r['surfaces']}
     seen = set()
@@ -285,6 +294,8 @@ def method_line(m):
 
 
 def subject_line(sub):
+    if sub['kind'] == 'drive':
+        return f'Drive file {sub["file_id"]} (revision {sub["revision"]})'
     return (f'{sub["path"]} (sha256 {sub["sha256"][:12]})' if sub['kind'] == 'file'
             else f'{sub["url"]} (deployed commit {sub["commit"]})')
 
@@ -375,10 +386,34 @@ def is_url(t):
     return bool(re.match(r'^[a-z][a-z0-9+.-]*://', t, re.I)) and not t.lower().startswith('file://')
 
 
-def stamp_ledger(target, l, r):
+def drive_stamp_path(fid):
+    return os.path.join('.design', f'drive-{fid}.json')
+
+
+def drive_revision(fid, given):
+    """(revision now, None) or (None, why not): --revision when given, else asked of Drive."""
+    if given:
+        return given, None
+    try:
+        return drive.revision(fid), None
+    except drive.DriveError as e:
+        return None, str(e)
+
+
+def stamp_ledger(target, l, r, revision=None):
     """Write the stamp; return its path, or a line starting 'not written' saying why not."""
     sub = l['subject']
-    if is_url(target):
+    if drive.is_link(target):
+        fid = drive.file_id(target)
+        if sub['kind'] != 'drive' or sub['file_id'] != fid:
+            return f'not written, the ledger audits {sub.get("file_id") or sub.get("url") or sub.get("path")}, not Drive file {fid}'
+        now, why = drive_revision(fid, revision)
+        if why:
+            return f'not written, {why}'
+        if now != sub['revision']:
+            return f'not written, Drive file {fid} changed since the audit (revision {sub["revision"]} audited, {now} now)'
+        out, body = drive_stamp_path(fid), {'drive': fid, 'url': target, 'revision': now}
+    elif is_url(target):
         if sub['kind'] != 'url' or sub['url'] != target:
             return f'not written, the ledger audits {sub.get("url") or sub.get("path")}, not {target}'
         out, body = url_stamp_path(target), {'url': target, 'commit': sub['commit']}
@@ -396,7 +431,22 @@ def stamp_ledger(target, l, r):
     return out
 
 
-def check_stamp(target, commit):
+def check_stamp(target, commit, revision=None):
+    if drive.is_link(target):
+        fid = drive.file_id(target)
+        sp = drive_stamp_path(fid)
+        try:
+            s = json.load(open(sp, encoding='utf-8'))
+        except (OSError, ValueError):
+            return 1, f'no stamp at {sp}'
+        now, why = drive_revision(fid, revision)
+        if why:
+            return 2, f'cannot check: {why}'
+        if s.get('revision') != now:
+            return 1, f'stale: Drive file {fid} stamped at revision {s.get("revision")}, now at {now}'
+        if not s.get('passes'):
+            return 1, 'the stamp records a failed gate'
+        return 0, f'fresh: {sp}'
     if is_url(target):
         if not commit:
             return 2, 'a URL stamp is checked against the deployed commit: pass --commit'
@@ -427,7 +477,10 @@ def audit_main(a, ledger):
         open(a.report, 'w', encoding='utf-8').write(ledger_page(ledger, r, catalog))
         print(f'report: {a.report}', file=sys.stderr)
     if a.stamp and r['passes']:
-        out = stamp_ledger(a.stamp, ledger, r)
+        try:
+            out = stamp_ledger(a.stamp, ledger, r, a.revision)
+        except drive.DriveError as e:
+            out = f'not written, {e}'
         print(f'stamp: {out}', file=sys.stderr)
         if out.startswith('not written'):
             sys.exit(1)
@@ -451,9 +504,14 @@ def main():
     ap.add_argument('--report', metavar='PAGE', help='audit mode: write the findings page (HTML) here')
     ap.add_argument('--check-stamp', metavar='FILE_OR_URL')
     ap.add_argument('--commit', help='with --check-stamp on a URL: the commit deployed now')
+    ap.add_argument('--revision', help='with --stamp or --check-stamp on a Drive link: its revision now '
+                    '(default: asked of the Drive API)')
     a = ap.parse_args()
     if a.check_stamp:
-        code, msg = check_stamp(a.check_stamp, a.commit)
+        try:
+            code, msg = check_stamp(a.check_stamp, a.commit, a.revision)
+        except drive.DriveError as e:
+            code, msg = 2, f'cannot check: {e}'
         print(f'stamp: {msg}', file=sys.stderr if code else sys.stdout)
         sys.exit(code)
     if not a.critique:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Document, deck and PDF adapters for aac-design audit mode (issue 1088): one run, one evidence bundle.
 
-    python3 doc_audit.py <file.docx | file.pptx | file.pdf> --out DIR [--surface S] [--max-pages N]
+    python3 doc_audit.py <file.docx | file.pptx | file.pdf | Drive link> --out DIR [--surface S] [--max-pages N]
 
 The bundle has the web adapter's shape (evidence.py): rendered page images, a structure dump, the
 plain text and the adapter's measures, with the detector output (findings.json) withheld from
@@ -14,6 +14,11 @@ reviewers until their ledger rows are in.
   structure dump is the document XML (word/*.xml, or ppt/presentation.xml and every slide).
 - .pdf is judged as printed: its page images (pdftoppm) and its text layer (pdftotext -bbox-layout,
   the structure dump), with the linter's text rules run on the text layer and its fonts listed.
+
+A Google Doc, Slides deck or Sheet is given by its Drive link (issue 1089, drive.py): the Drive API
+exports it to DIR/export/ as .docx, .pptx or .pdf, which then takes the path above. Its subject is
+the file id plus revision id, not a sha256, so an edit to the file makes its stamp stale. A link the
+account cannot open exits 3 naming the file id, and writes no bundle.
 
 Surfaces default to document (.docx, .pdf) and deck (.pptx); --surface names another catalog surface
 (a PDF of slides is a deck, a fill-in PDF a form). --max-pages records a page budget fault when a
@@ -29,6 +34,7 @@ import xml.etree.ElementTree as ET
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import designlint  # noqa: E402
+import drive  # noqa: E402
 import evidence  # noqa: E402
 import render  # noqa: E402
 
@@ -212,18 +218,28 @@ def main():
     ap.add_argument('--surface')
     ap.add_argument('--max-pages', type=int)
     a = ap.parse_args()
+    link = drive.is_link(a.file)
     ext = os.path.splitext(a.file)[1].lower()
-    if ext not in KINDS:
-        ap.error(f'unsupported file type {ext or "(none)"}: use .docx, .pptx or .pdf')
-    if not os.path.isfile(a.file):
+    if not link and ext not in KINDS:
+        ap.error(f'unsupported file type {ext or "(none)"}: use .docx, .pptx or .pdf, or a Drive link')
+    if not link and not os.path.isfile(a.file):
         ap.error(f'no such file: {a.file}')
     catalog = evidence.load_catalog()
-    adapter, surface = KINDS[ext][0], a.surface or KINDS[ext][1]
-    if surface not in catalog['surfaces']:
+    if a.surface and a.surface not in catalog['surfaces']:
         ap.error(f'--surface must be one of {catalog["surfaces"]}')
-    path, out = os.path.abspath(a.file), os.path.abspath(a.out)
-    os.makedirs(out, exist_ok=True)
-    subject = evidence.file_subject(path)
+    out, extra = os.path.abspath(a.out), []
+    if link:
+        try:
+            path, subject = drive.fetch(a.file, os.path.join(out, 'export'))
+        except drive.DriveError as e:
+            print(f'doc_audit: {e}', file=sys.stderr)
+            return 3
+        ext, extra = os.path.splitext(path)[1], ['export/' + os.path.basename(path)]
+    else:
+        path = os.path.abspath(a.file)
+        os.makedirs(out, exist_ok=True)
+        subject = evidence.file_subject(path)
+    adapter, surface = KINDS[ext][0], a.surface or KINDS[ext][1]
     try:
         parts = (pdf(path, out, surface, a.max_pages, catalog) if adapter == 'pdf'
                  else office(path, out, adapter, surface, a.max_pages, catalog))
@@ -233,6 +249,7 @@ def main():
     except (OSError, KeyError, zipfile.BadZipFile, ET.ParseError, subprocess.SubprocessError) as e:
         print(f'doc_audit: cannot read {a.file}: {e}', file=sys.stderr)
         return 3
+    parts['extra_review'] = parts.get('extra_review', []) + extra
     evidence.write_bundle(out, adapter=adapter, surface=surface, target=a.file, subject=subject, **parts)
     problems = evidence.validate(out, catalog)
     if problems:

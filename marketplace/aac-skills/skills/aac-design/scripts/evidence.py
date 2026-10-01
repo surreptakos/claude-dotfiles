@@ -13,7 +13,8 @@ DIR/bundle.json:
   "surface": "<a CATALOG.json surface: the ledger's surface for this bundle>",
   "target": "<what was audited, as given>",
   "subject": {"kind": "file", "path": "...", "sha256": "<64 hex>"}
-           | {"kind": "url", "url": "...", "commit": "<deployed commit or null>"},
+           | {"kind": "url", "url": "...", "commit": "<deployed commit or null>"}
+           | {"kind": "drive", "url": "<Drive link>", "file_id": "...", "revision": "...", ...},  # drive.py
   "captured": "<ISO time>",
   "images":    ["<rendered page image>", ...],        # PNG, at least one
   "structure": ["<structure dump>", ...],             # DOM and accessibility tree, document XML, text layer
@@ -97,8 +98,11 @@ def validate(d, catalog=None):
     elif s.get('kind') == 'url':
         if not s.get('url') or 'commit' not in s:
             p.append('a URL subject needs its address and a commit key')
+    elif s.get('kind') == 'drive':
+        if not s.get('file_id') or not s.get('revision'):
+            p.append('a Drive subject needs its file id and revision id')
     else:
-        p.append('subject.kind must be "file" or "url"')
+        p.append('subject.kind must be "file", "url" or "drive"')
     try:
         datetime.datetime.fromisoformat(str(b.get('captured')).replace('Z', '+00:00'))
     except ValueError:
