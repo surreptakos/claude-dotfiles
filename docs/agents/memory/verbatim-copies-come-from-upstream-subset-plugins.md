@@ -9,10 +9,12 @@ metadata:
 
 Dan, 2026-10-01, after a provenance audit of the payload (every file hashed against every commit
 of six upstream repos): "drop everything that is a verbatim copy for its upstream payload. kill
-writing-guidelines". Twenty-one directories left `aac-skills/`: thirteen mattpocock/skills
-copies (twelve current ones plus writing-great-skills, the old name of writing-for-agents), five
+writing-guidelines". Twenty directories left `aac-skills/`: twelve mattpocock/skills
+copies (eleven current ones plus writing-great-skills, the old name of writing-for-agents), five
 vercel-labs/agent-skills copies, agent-browser, find-skills, and writing-guidelines (killed, no
-replacement).
+replacement). grilling was on the list until master took a local edit on it the same day
+(AskUserQuestion rounds, PR 1211): a copy that gains a local edit moves back to vendored and
+out of the entry, which is what the merge did.
 
 **The mechanism.** `UPSTREAM_PLUGINS` in `tools/build-cloud-plugin.py` emits one plugin entry per
 upstream into `.claude-plugin/marketplace.json`: `source` is `git-subdir` at the upstream repo's
@@ -30,7 +32,7 @@ two-item list), nested paths included, and the skill's name is the SKILL.md fron
 whole subdir; only the listed directories load.
 
 **Why the subset matters.** The locally edited copies (ask-matt, code-review, triage, to-tickets,
-to-spec, implement, grill-with-docs, handoff, research, wayfinder, diagnosing-bugs,
+to-spec, implement, grill-with-docs, grilling, handoff, research, wayfinder, diagnosing-bugs,
 setup-matt-pocock-skills) stay in `aac-skills/`; listing their upstream directory too would put
 two skills of one name in a session.
 

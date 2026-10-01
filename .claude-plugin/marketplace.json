@@ -9,7 +9,7 @@
       "name": "aac-skills",
       "source": "./marketplace/aac-skills",
       "description": "AAC Skills - Dan's full skill set plus the Active Alarm Company team skills, one package for every surface.",
-      "version": "2026.10.11801"
+      "version": "2026.10.11813"
     },
     {
       "name": "mattpocock-skills",
@@ -29,7 +29,6 @@
         "./engineering/tdd",
         "./engineering/wizard",
         "./productivity/grill-me",
-        "./productivity/grilling",
         "./productivity/teach",
         "./productivity/to-questionnaire",
         "./productivity/wait-what",

@@ -63,7 +63,7 @@ REQUIRED_SKILLS = ['session-check', 'project-harness', 'ticket-fleet']
 # upstream-subset entries of .claude-plugin/marketplace.json (tools/build-cloud-plugin.py
 # UPSTREAM_PLUGINS; upstream-skills.sh in a container). writing-guidelines was killed outright.
 UPSTREAM_SKILLS = ['caveman', 'i-have-adhd',
-                   'codebase-design', 'domain-modeling', 'grill-me', 'grilling',
+                   'codebase-design', 'domain-modeling', 'grill-me',
                    'improve-codebase-architecture', 'prototype', 'tdd', 'teach', 'to-questionnaire',
                    'wait-what', 'wizard', 'writing-for-agents', 'writing-great-skills',
                    'vercel-composition-patterns', 'vercel-react-best-practices',

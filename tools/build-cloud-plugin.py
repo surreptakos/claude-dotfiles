@@ -85,7 +85,7 @@ NL = chr(10)
 # .claude/hooks/upstream-skills.sh, which reads these entries out of the generated
 # .claude-plugin/marketplace.json. Only the listed directories load, so `writing-guidelines`
 # (killed) and the rest of each upstream tree stay out. The locally edited copies (ask-matt,
-# code-review, triage, to-tickets, to-spec, ...) stay in aac-skills/ and are NOT listed here: a
+# code-review, triage, to-tickets, to-spec, grilling, ...) stay in aac-skills/ and are NOT listed here: a
 # name in both places would be two skills. A frontmatter flag flip counts as a local edit: to-spec
 # and to-tickets carry `disable-model-invocation: false` so the ask-matt flows can call them
 # (Dan, 2026-10-01, reverting a drop that had classed the one-line flip as verbatim). Verified 2026-10-01 in an isolated CLAUDE_CONFIG_DIR: `claude plugin
@@ -106,7 +106,8 @@ UPSTREAM_PLUGINS = [
             "./engineering/tdd",
             "./engineering/wizard",
             "./productivity/grill-me",
-            "./productivity/grilling",
+            # grilling stays vendored: master took a local edit (AskUserQuestion rounds, PR 1211)
+            # while this list was on a branch, so it is no longer a verbatim copy.
             "./productivity/teach",
             "./productivity/to-questionnaire",
             "./productivity/wait-what",
