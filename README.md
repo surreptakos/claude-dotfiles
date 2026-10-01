@@ -19,7 +19,7 @@ script or the global rules text is edited here, on a branch, and merging to mast
 
 | Path | Restores to | Why it matters |
 |---|---|---|
-| `aac-skills/` | — (not restored) | every skill, one hand-edited tree; what the plugin payload is built from. A desktop gets the skills from the aac-skills plugin, as `aac-skills:<name>`, like a container; pull stopped writing `~/.claude/skills` (issue 734) |
+| `aac-skills/` | — (not restored) | every skill this repo authors or edits, one hand-edited tree; what the plugin payload is built from. A desktop gets the skills from the aac-skills plugin, as `aac-skills:<name>`, like a container; pull stopped writing `~/.claude/skills` (issue 734). A skill that is a verbatim copy of another repo's is not here: it is an upstream-subset entry of the marketplace (PR 1217) |
 | `profile/claude/CLAUDE.md` | — (not restored) | global governance — caveman, YES, ask-matt, the AAC Google access notes. The one source the payload's rules text is copied from; a desktop gets it from the aac-skills plugin's global-rules hook, like a container (issue 732) |
 | `profile/claude/global-pointer.md` | `~/.claude/CLAUDE.md` | a short pointer: rules arrive via the plugin, their source is the file above, then a heading for machine-local notes. It must never carry the rules file's first line, because the hook stays silent when the global CLAUDE.md does |
 | `profile/claude/settings.json` | `~/.claude/settings.json` | plugin marketplaces, status line. No caveman proxy hook or model route: `caveman enable claude` writes those on the machine and pull merges around them (issues 825, 826). No governance hook entry: the plugin dispatches those, and an entry here would silence or double its copy (issue 733) |
@@ -170,7 +170,17 @@ That arrangement existed because the machine was the source. It no longer is. `a
 hand-edited tree and the packager builds the plugin from it. Pull wrote it back under
 `~/.claude/skills` until issue 734, which listed every skill twice in a desktop session - bare from
 that copy and `aac-skills:<name>` from the plugin - so pull no longer writes it, and never deletes
-the copy an older pull left. To move that copy aside, from this checkout's root (only the names
+the copy an older pull left.
+
+Since PR 1217 the tree holds only skills this repo authors or edits. A skill that was a verbatim
+copy of another repo's (the unmodified Matt Pocock set, the Vercel agent-skills, agent-browser,
+find-skills) comes from its upstream instead: `UPSTREAM_PLUGINS` in `tools/build-cloud-plugin.py`
+writes one `git-subdir` plugin entry per upstream into `.claude-plugin/marketplace.json`, listing
+only the directories to load, and a desktop installs that entry (`mattpocock-skills@claude-dotfiles`
+and the rest) from this marketplace. A container clones no marketplace, so
+`.claude/hooks/upstream-skills.sh` reads the same entries and copies the same subset. A copy that
+gains a local edit moves back into `aac-skills/` and out of the entry in the same commit; a name is
+never in both places. To move that copy aside, from this checkout's root (only the names
 `aac-skills/` carries, because `~/.claude/skills` also holds Claude Code's own `synced/` bucket):
 
 ```powershell
