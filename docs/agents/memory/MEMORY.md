@@ -54,7 +54,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - verify-before-filing-a-sweep-ticket: re-list first
 - workflow-runtime-quirks: scriptPath; no Date.now; LF; absolute scriptPath, cwd stale; no cd mid-run
 - workflow-prompt-needs-allow-rule: bare Workflow in allow
-- vendored-copy-provenance-needs-upstream-history: diff every upstream revision
+- vendored-copy-provenance-needs-upstream-history: diff every upstream revision; a verbatim copy is an upstream-subset marketplace entry, never an aac-skills dir
 - cloud-skips-third-party-marketplaces: hooks clone and copy skills, agents, MCP; keys stay in the environment
 - cloud-cannot-reach-user-projects: GraphQL and /users REST both 403; Sales Report auto-add is on, nothing owed; GH_DEBUG=api before naming a gh cause
 - status-report-is-not-a-request: past tense is a report; check Teams first

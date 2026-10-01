@@ -312,7 +312,7 @@ class AskMattGateTests(unittest.TestCase):
     def test_canonical_ask_matt_routes_are_accepted(self) -> None:
         for route in (
             "codebase-design",
-            "writing-great-skills",
+            "writing-for-agents",
             "setup-matt-pocock-skills",
         ):
             with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:

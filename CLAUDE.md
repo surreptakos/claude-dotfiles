@@ -56,9 +56,14 @@ never from an intermediate one, so `previous-modified` names the published versi
 
 - `aac-skills/` — every skill, one tree, hand-edited. The packager builds the plugin payload from
   it, and that plugin is how a desktop gets the skills too: pull no longer writes `~/.claude/skills`
-  (issue 734), so a skill named by short name must ship in the payload. Skills copied from another
-  repo (the matt-pocock set) are resynced only after diffing each file against every upstream
-  revision: lines matching no revision are local edits to re-apply, not drift (PR 928).
+  (issue 734), so a skill named by short name must ship in the payload or in an upstream-subset
+  entry. A skill that is a verbatim copy of another repo's never lives here (Dan, 2026-10-01):
+  `UPSTREAM_PLUGINS` in `tools/build-cloud-plugin.py` writes it into `.claude-plugin/marketplace.json`
+  as a `git-subdir` entry naming the upstream directories to load, a desktop installs that entry,
+  and `upstream-skills.sh` copies the same subset into a container. The copies that carry local
+  edits (ask-matt, code-review, triage, to-tickets, implement, ...) stay in `aac-skills/` and are
+  resynced only after diffing each file against every upstream revision: lines matching no
+  revision are local edits to re-apply, not drift (PR 928). A name must never be in both places.
 - `profile/` — what a desktop consumer needs beyond the skills: `profile/claude/CLAUDE.md` (the
   global rules, and the one source the payload's rules text is copied from; pull does not restore
   it - a desktop gets the rules from the plugin hook and pull writes `global-pointer.md` to

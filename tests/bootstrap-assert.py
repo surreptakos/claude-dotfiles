@@ -58,7 +58,17 @@ REQUIRED_SKILLS = ['session-check', 'project-harness', 'ticket-fleet']
 # Upstream plugins a container installs from their own marketplace (.claude/settings.json
 # enabledPlugins, with caveman-bootstrap.sh as the cloud fallback). A vendored copy in the payload
 # would pin an old release and shadow the upstream one, so the payload must not carry them.
-UPSTREAM_SKILLS = ['caveman', 'i-have-adhd']
+# Since 2026-10-01 the same holds for every skill that was a verbatim copy of mattpocock/skills,
+# vercel-labs/agent-skills, vercel-labs/agent-browser or vercel-labs/skills: they come from the
+# upstream-subset entries of .claude-plugin/marketplace.json (tools/build-cloud-plugin.py
+# UPSTREAM_PLUGINS; upstream-skills.sh in a container). writing-guidelines was killed outright.
+UPSTREAM_SKILLS = ['caveman', 'i-have-adhd',
+                   'codebase-design', 'domain-modeling', 'grill-me',
+                   'improve-codebase-architecture', 'prototype', 'tdd', 'teach', 'to-questionnaire',
+                   'wait-what', 'wizard', 'writing-for-agents', 'writing-great-skills',
+                   'vercel-composition-patterns', 'vercel-react-best-practices',
+                   'vercel-react-native-skills', 'vercel-react-view-transitions',
+                   'web-design-guidelines', 'writing-guidelines', 'agent-browser', 'find-skills']
 
 fails = []
 

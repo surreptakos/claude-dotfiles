@@ -19,6 +19,11 @@
     "installed_plugins.json was empty (evidence on issue 106).",
     "",
     "The same two keys declare the third-party plugins a desktop runs (profile/claude/settings.json):",
+    "The four <name>@claude-dotfiles entries are upstream-subset plugins of THIS marketplace (mattpocock-skills,",
+    "vercel-agent-skills, agent-browser, find-skills): git-subdir entries that tools/build-cloud-plugin.py",
+    "UPSTREAM_PLUGINS writes into .claude-plugin/marketplace.json, replacing the verbatim copies aac-skills/",
+    "carried until 2026-10-01. A desktop installs them from the marketplace; upstream-skills.sh copies the",
+    "same subset into a container from the same entries.",
     "yes@sstklen (issue 1018), caveman@caveman, i-have-adhd@i-have-adhd, typesafe@typesafe-ai, travel-hacker@borski, and",
     "pyright-lsp and typescript-lsp from claude-plugins-official, none vendored into the aac-skills",
     "payload. A desktop installs each from its upstream marketplace. A cloud container sets",
@@ -148,7 +153,11 @@
     "travel-hacker@borski": true,
     "pyright-lsp@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "yes@sstklen": true
+    "yes@sstklen": true,
+    "mattpocock-skills@claude-dotfiles": true,
+    "vercel-agent-skills@claude-dotfiles": true,
+    "agent-browser@claude-dotfiles": true,
+    "find-skills@claude-dotfiles": true
   },
   "hooks": {
     "SessionStart": [

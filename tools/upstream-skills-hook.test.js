@@ -147,6 +147,80 @@ test('outside a cloud container the hook exits 0 and touches nothing', { skip: B
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('a marketplace entry with an upstream git source copies only its listed skills, nested paths included', { skip: BASH.skip }, () => {
+  // The upstream-subset plugins (tools/build-cloud-plugin.py UPSTREAM_PLUGINS) reach a container
+  // through this path: the entry's skills list is the allowlist, so a sibling directory the
+  // upstream also ships (here `unwanted`, standing for writing-guidelines or an upstream copy of
+  // a skill the AAC payload edits) must not land in ~/.claude/skills.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'upstream-skills-'));
+  const home = path.join(root, 'home');
+  fs.mkdirSync(home);
+  const repo = path.join(root, 'subset.git-src');
+  fs.mkdirSync(repo, { recursive: true });
+  git(repo, ['init', '-q', '-b', 'main']);
+  git(repo, ['config', 'user.email', 'fixture@example.invalid']);
+  git(repo, ['config', 'user.name', 'fixture']);
+  write(path.join(repo, 'skills', 'engineering', 'tdd', 'SKILL.md'), '---\nname: tdd\n---\nupstream tdd\n');
+  write(path.join(repo, 'skills', 'engineering', 'tdd', 'tests.md'), 'sidecar\n');
+  write(path.join(repo, 'skills', 'productivity', 'grill-me', 'SKILL.md'), '---\nname: grill-me\n---\ngrill\n');
+  write(path.join(repo, 'skills', 'unwanted', 'SKILL.md'), '---\nname: unwanted\n---\nnot listed\n');
+  git(repo, ['add', '-A']);
+  git(repo, ['commit', '-q', '-m', 'fixture']);
+  const marketplace = path.join(root, 'marketplace.json');
+  write(marketplace, JSON.stringify({
+    name: 'fixture',
+    plugins: [
+      { name: 'aac-skills', source: './marketplace/aac-skills', version: '0.0.0' },
+      {
+        name: 'subset',
+        source: { source: 'git-subdir', url: fileUrl(repo), path: 'skills', ref: 'main' },
+        strict: false,
+        skills: ['./engineering/tdd', './productivity/grill-me', './missing/nope'],
+      },
+    ],
+  }));
+  const r = runHook(home, fileUrl(path.join(root, 'no-such-repo')), { UPSTREAM_SKILLS_MARKETPLACE: marketplace });
+  assert.equal(r.status, 0, `hook exited ${r.status}: ${r.stderr}`);
+  const skills = path.join(home, '.claude', 'skills');
+  assert.equal(fs.readFileSync(path.join(skills, 'tdd', 'SKILL.md'), 'utf8').trim().split('\n').pop(), 'upstream tdd',
+    'a nested skill path lands under its own name');
+  assert.ok(fs.existsSync(path.join(skills, 'tdd', 'tests.md')), 'the skill directory is copied whole');
+  assert.ok(fs.existsSync(path.join(skills, 'grill-me', 'SKILL.md')), 'every listed skill is copied');
+  assert.ok(!fs.existsSync(path.join(skills, 'unwanted')), 'an upstream skill the entry does not list stays out');
+  assert.ok(!fs.existsSync(path.join(skills, 'engineering')), 'the upstream tree is not copied as a whole');
+  assert.match(r.stderr, /has no skills\/missing\/nope\/SKILL\.md; skipped/, 'a listed path the upstream lacks is reported, not fatal');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the committed marketplace.json names an upstream subset for every skill that left aac-skills', () => {
+  const m = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', '.claude-plugin', 'marketplace.json'), 'utf8'));
+  const served = new Set();
+  for (const p of m.plugins) {
+    if (p.source && typeof p.source === 'object' && Array.isArray(p.skills)) {
+      for (const s of p.skills) served.add(path.posix.basename(s));
+    }
+  }
+  for (const name of ['tdd', 'grill-me', 'teach', 'prototype', 'wizard', 'wait-what',
+    'to-questionnaire', 'writing-for-agents', 'codebase-design', 'domain-modeling', 'improve-codebase-architecture',
+    'composition-patterns', 'react-best-practices', 'react-native-skills', 'react-view-transitions',
+    'web-design-guidelines', 'agent-browser', 'find-skills']) {
+    assert.ok(served.has(name), `${name} is served by an upstream marketplace entry`);
+    assert.ok(!fs.existsSync(path.resolve(__dirname, '..', 'aac-skills', name)), `${name} no longer has an aac-skills copy`);
+  }
+  assert.ok(!served.has('writing-guidelines'), 'writing-guidelines is killed, not served');
+  for (const local of ['ask-matt', 'code-review', 'triage', 'to-tickets', 'to-spec', 'implement', 'grill-with-docs', 'grilling', 'handoff',
+    'research', 'wayfinder', 'diagnosing-bugs', 'setup-matt-pocock-skills']) {
+    assert.ok(!served.has(local), `${local} (locally edited) is not also served upstream`);
+    assert.ok(fs.existsSync(path.resolve(__dirname, '..', 'aac-skills', local, 'SKILL.md')), `${local} stays vendored`);
+  }
+  // A frontmatter flag flip is a local edit (Dan, 2026-10-01): the ask-matt flows call these two,
+  // so the vendored copies must keep model invocation on, where upstream turns it off.
+  for (const flow of ['to-spec', 'to-tickets']) {
+    const text = fs.readFileSync(path.resolve(__dirname, '..', 'aac-skills', flow, 'SKILL.md'), 'utf8');
+    assert.match(text, /^disable-model-invocation: false\r?$/m, `${flow} keeps disable-model-invocation: false`);
+  }
+});
+
 test('the default repo list names the travel-hacker toolkit beside i-have-adhd and typesafe', () => {
   const text = fs.readFileSync(HOOK, 'utf8');
   const line = text.split('\n').find((l) => l.startsWith('REPOS='));
