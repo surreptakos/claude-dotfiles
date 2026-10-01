@@ -786,9 +786,13 @@ def main():
     # copied from the repo profile (profile/claude/hooks/, profile/codex/hooks/) into
     # hooks/scripts/ and each hook
     # command names its script through ${CLAUDE_PLUGIN_ROOT}, never through a home path. Every
-    # script runs on `node` or `python3` (Linux/cloud container) with a `commandWindows` counterpart
-    # that uses `py -3`; nothing here requires pwsh, and no pwsh-only invocation is emitted -- a
-    # branch that wanted one would print a reason and skip. The caveman hook is delivered by the
+    # script runs on `node` or `python3`, one spelling for every surface: `python3` resolves on a
+    # Windows desktop through Git Bash (the WindowsApps alias, or %LOCALAPPDATA%\Python\bin once
+    # the alias is off), and Claude Code has no Windows-specific command field -- the
+    # `commandWindows` key this file once emitted appears nowhere in the cli.js binary (2.1.287)
+    # and claude.ai's plugin server logged it as an unrecognised field on every hook (2026-10-01).
+    # Nothing here requires pwsh, and no pwsh-only invocation is emitted -- a branch that wanted
+    # one would print a reason and skip. The caveman hook is delivered by the
     # separate caveman@caveman plugin (already declared in the mirror's settings.json under
     # enabledPlugins) and its statusLine is not re-vendored here. session-gate.js needs to find the
     # session-check engine, which ships in this same payload under skills/session-check/; a small
@@ -995,19 +999,14 @@ def main():
         (scripts_dir / MEMORY_LOADER).write_bytes(
             memory_loader_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
 
-    def _cmd(runner_unix, runner_win, script_name, argv):
-        """Two spellings of the same command: Linux (command) and Windows (commandWindows)."""
+    def _cmd(runner, script_name, argv):
         argv_str = (" " + " ".join(argv)) if argv else ""
-        base = "\"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/" + script_name + "\""
-        return (runner_unix + " " + base + argv_str,
-                runner_win + " " + base + argv_str)
+        return runner + " \"${CLAUDE_PLUGIN_ROOT}/hooks/scripts/" + script_name + "\"" + argv_str
 
-    def _hook(runner_unix, runner_win, script, argv, timeout, status, extra=None):
-        cmd_unix, cmd_win = _cmd(runner_unix, runner_win, script, argv)
+    def _hook(runner, script, argv, timeout, status, extra=None):
         entry = {
             "type": "command",
-            "command": cmd_unix,
-            "commandWindows": cmd_win,
+            "command": _cmd(runner, script, argv),
             "timeout": timeout,
             "statusMessage": status,
         }
@@ -1029,52 +1028,52 @@ def main():
      governance_hooks = {
         "SessionStart": [
             {"hooks": [
-                _hook("node", "node", "session-gate.js", ["start"], 200,
+                _hook("node", "session-gate.js", ["start"], 200,
                       "Running session-start checks..."),
-                _hook("node", "node", "state-rehydrate.js", [], 15,
+                _hook("node", "state-rehydrate.js", [], 15,
                       "Rehydrating stashed state..."),
             ]},
             {"hooks": [marker_hook]},
         ],
         "PreCompact": [
             {"hooks": [
-                _hook("node", "node", "state-stash.js", [], 30,
+                _hook("node", "state-stash.js", [], 30,
                       "Stashing durable state before compaction..."),
             ]},
         ],
         "SessionEnd": [
             {"hooks": [
-                _hook("node", "node", "session-gate.js", ["end"], 200,
+                _hook("node", "session-gate.js", ["end"], 200,
                       "Recording session-end checks..."),
-                _hook("node", "node", "state-stash.js", [], 120,
+                _hook("node", "state-stash.js", [], 120,
                       "Stashing durable state at session end..."),
             ]},
         ],
         "UserPromptSubmit": [
             {"hooks": [
-                _hook("node", "node", "governance-reminder.js", [], 5,
+                _hook("node", "governance-reminder.js", [], 5,
                       "Asserting governance..."),
-                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-prompt"], 5,
+                _hook("python3", "ask_matt_gate.py", ["claude-prompt"], 5,
                       "Locking Ask Matt, Yes, and caveman ultra..."),
-                _hook("node", "node", "session-gate.js", ["prompt"], 200,
+                _hook("node", "session-gate.js", ["prompt"], 200,
                       "Checking session gate..."),
             ]},
         ],
         "PreToolUse": [
             {"hooks": [
-                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-pre-tool"], 5,
+                _hook("python3", "ask_matt_gate.py", ["claude-pre-tool"], 5,
                       "Checking governance gate..."),
             ]},
         ],
         "PostToolUse": [
             {"matcher": "Bash|PowerShell", "hooks": [
-                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-post-tool"], 5,
+                _hook("python3", "ask_matt_gate.py", ["claude-post-tool"], 5,
                       "Counting failures for the YES escalation ladder..."),
             ]},
         ],
         "Stop": [
             {"hooks": [
-                _hook("python3", "py -3", "ask_matt_gate.py", ["claude-stop"], 5,
+                _hook("python3", "ask_matt_gate.py", ["claude-stop"], 5,
                       "Verifying governance gate..."),
             ]},
         ],
@@ -1084,18 +1083,18 @@ def main():
         # Same two events and the same matcher the desktop wires in settings.json, so prose written
         # in a container faces the linter prose written on the PC has faced since issue 620.
         governance_hooks["PostToolUse"].append({"matcher": "Write|Edit|MultiEdit", "hooks": [
-            _hook("python3", "py -3", "stopslop-write.py", [], 10,
+            _hook("python3", "stopslop-write.py", [], 10,
                   "Linting written prose..."),
         ]})
         governance_hooks["Stop"][0]["hooks"].append(
-            _hook("python3", "py -3", "stopslop-stop.py", [], 10,
+            _hook("python3", "stopslop-stop.py", [], 10,
                   "Linting the final message..."))
 
     if memory_loader_present:
         # Its own SessionStart group: the memory injection must not wait on (or be skipped with)
         # the session gate's 200s group, and a repo with no index makes it a no-op.
         governance_hooks.setdefault("SessionStart", []).append({"hooks": [
-            _hook("node", "node", MEMORY_LOADER, [], 10,
+            _hook("node", MEMORY_LOADER, [], 10,
                   "Loading this repo's memory notes..."),
         ]})
 
@@ -1108,12 +1107,12 @@ def main():
     # governance scripts have no mirror to be copied from.
     if rules_parts:
         governance_hooks.setdefault("SessionStart", []).append({"hooks": [
-            _hook("node", "node", "global-rules.js", ["start", str(i)], 10,
+            _hook("node", "global-rules.js", ["start", str(i)], 10,
                   f"Delivering global rules ({i}/{len(rules_parts)})...")
             for i in range(1, len(rules_parts) + 1)
         ]})
         governance_hooks.setdefault("UserPromptSubmit", []).append({"hooks": [
-            _hook("node", "node", "global-rules.js", ["digest"], 10,
+            _hook("node", "global-rules.js", ["digest"], 10,
                   "Recalling the global rules digest..."),
         ]})
 
@@ -1125,7 +1124,7 @@ def main():
         (scripts_dir / "fleet-launch-guard.js").write_bytes(
             fleet_guard_src.read_text(encoding="utf-8").replace("\r\n", "\n").encode("utf-8"))
         governance_hooks["PreToolUse"].append({"matcher": "Workflow", "hooks": [
-            _hook("node", "node", "fleet-launch-guard.js", [], 10,
+            _hook("node", "fleet-launch-guard.js", [], 10,
                   "Checking the fleet is launched from its own repository..."),
         ]})
 
