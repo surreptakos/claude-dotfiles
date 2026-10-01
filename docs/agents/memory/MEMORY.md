@@ -6,7 +6,8 @@ to external artifacts — never anything derivable from the repo or the tracker 
 "Memory governance"). The plugin's SessionStart hook (`tools/repo-memory-load.js`) injects the
 note names below, so a cloud session and a desktop session start from the same memory.
 
-Add one: write `docs/agents/memory/<name>.md`, add its line here, commit. That commit is the
+Add one: write `docs/agents/memory/<name>.md`, add its line here as `- <name>: <hook>` (the bare
+name, never a Markdown link; the loader test fails on any other shape, 2026-10-01), commit. That commit is the
 whole publish — there is no live `~/.claude` copy to keep in step (issue 210), and
 `node --test tools/repo-memory-load.test.js` fails when a note and this index drift apart.
 
