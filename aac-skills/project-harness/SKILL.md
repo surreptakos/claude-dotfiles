@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: "2026-09-30T19:40:20Z"
-  previous-modified: "2026-09-29T19:38:01Z"
-  revision: "48"
-  content-sha: "c9aecb4f2210"
+  modified: "2026-10-01T19:24:56Z"
+  previous-modified: "2026-09-30T19:40:20Z"
+  revision: "49"
+  content-sha: "ff03b9edc6cc"
 ---
 
 # Project Harness
@@ -245,6 +245,12 @@ Done when every line below holds.
 
 Needs the `project` token scope (`gh auth status`; if missing, `gh auth refresh -s project` and the
 user completes the device code in their own browser).
+
+**A missing scope is never a reason to skip the board.** Start `gh auth refresh -h github.com -s project`
+as a background task, hand the owner the one-time code in the same turn (it expires in ~15 min), and
+wait on the task; re-mint the code if it lapses. Only the owner's explicit "no board" skips this step.
+In aac-nexus (2026-10-01) the agent let a code expire, then recommended skipping the board; the owner
+had to overrule it.
 
 - Per-repo board: `gh project create --owner <user> --title "<repo title>"`, link it, add open issues.
   Or the shared board (one board, every repo): ask once; `gh project item-add <n>` works cross-repo.
