@@ -91,7 +91,16 @@ Outlook and calendar exports in Google Drive (folder `1ZSqv0g3JcomibZ3aFHT84eq0F
 `teams__<person-or-chat>__<stamp>.json`, `outlook_inbox__…`, `outlook_sent__…`, `calendar__…`;
 Drive connector `search_files` with `title contains '…'`), the Microsoft 365 connector for mail and
 chats the exports miss, Gmail, and the repo's own system of record (Zoho, BILL, the sheet). Search
-by the people, customers, job numbers and amounts the ticket names. When the evidence moves the
+by the people, customers, job numbers and amounts the ticket names. Every one of the five surfaces
+is searched for every ticket, and the card carries `searched`: `{"github","drive","m365","gmail",
+"sor"}`, one line each saying what was searched and what came back (`"none for Rob after
+2026-09-30"` is a result; `"n/a: ticket names no customer or system"` is the only skip). `build`
+refuses a card missing any of the five, and `queue` redrafts a kept card that lacks them, so a
+surface an agent skipped never passes silently (2026-10-01: two runs reported "no agent searched
+Microsoft 365 or Gmail" after the brief had merely listed them). Drive exports are hourly during
+business hours and the folder sorts newest first: list `createdTime > <today 00:00Z>` on
+`parentId` before saying the exports stop at yesterday (2026-10-01 19:00Z: two agents reported
+"exports stop at 2026-09-30 22:16Z" while 18:16Z files existed). When the evidence moves the
 ticket (a reply arrived, the action was done, the fact changed), the card says so: `plain`,
 `background` and the options describe today's state, the recommended option lands it, and
 `evidence` on the ticket, `[{"source","date","gist"}]`, lists each source (file or message, date,
@@ -100,7 +109,7 @@ senders; never infer an event the evidence does not show. Frame each ticket's
 one decision in plain real-world English: the owner holds no coding context and never opens the
 ticket. 2-4 options, the ticket's own when it lists them, exactly one `recommended`; the id `other`
 is reserved. Write `{"repo","labels","tickets":[{"n","title","url","plain","question","blockedBy",
-"blocks","needsDanOnly","draftedAt","explainer":{"what","background","stakes"},"options":[{"id","label","detail","recommended","landing":
+"blocks","needsDanOnly","draftedAt","searched","explainer":{"what","background","stakes"},"options":[{"id","label","detail","recommended","landing":
 {"action":"relabel|close-completed|close-wontfix|keep|spawn-children","addLabels","removeLabels",
 "ruling"}}]}]}`, `draftedAt` the ISO time drafting began. `explainer` is the ticket itself in plain English, shown
 beside its GitHub text: `what` (what it is about, one breath), `background` (how we got here, what

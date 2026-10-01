@@ -23,6 +23,7 @@ function ticket(n, over = {}) {
   return {
     n, title: `t${n}`, url: `https://github.com/${REPO}/issues/${n}`, plain: 'p', question: 'q',
     blockedBy: [], blocks: [], needsDanOnly: '', draftedAt: '2026-09-25T13:55:00Z',
+    searched: { github: 'issue and 3 comments read', drive: 'none for Rob after 2026-09-24', m365: 'none', gmail: 'none', sor: 'n/a: no system of record' },
     options: [
       { id: 'a', label: 'Hand to agent', detail: 'd', recommended: true,
         landing: { action: 'relabel', addLabels: ['ready-for-agent'], removeLabels: ['ready-for-human'], ruling: 'Build it.' } },
@@ -51,6 +52,21 @@ test('build embeds drafts the page and the lander both read back', () => {
 test('build refuses a draft without exactly one recommended option', () => {
   const bad = ticket(1); bad.options[1].recommended = true;
   assert.throws(() => buildPage(draftsDir([bad]), TEMPLATE), /2 recommended/);
+});
+
+test('build refuses a card that does not account for every search surface', () => {
+  const bad = ticket(1); delete bad.searched.m365;
+  assert.throws(() => buildPage(draftsDir([bad]), TEMPLATE), /searched lacks m365/);
+  const blank = ticket(2); blank.searched.gmail = '  ';
+  assert.throws(() => buildPage(draftsDir([blank]), TEMPLATE), /searched lacks gmail/);
+});
+
+test('queue redrafts a kept card drafted before the search surfaces were required', () => {
+  const old = ticket(1); delete old.searched;
+  const data = { repos: [{ repo: REPO, tickets: [old] }] };
+  const plan = planQueue(data, [{ repository: { nameWithOwner: REPO }, number: 1, updatedAt: '2026-09-25T13:00:00Z' }]);
+  assert.deepEqual(plan.toDraft[REPO], [1]);
+  assert.equal(plan.keep[REPO], undefined);
 });
 
 test('queue carries a draft over only while the ticket is unchanged since drafting', () => {
