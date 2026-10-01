@@ -8,8 +8,8 @@ recorded and writes each ruling to GitHub. Two desktop scheduled tasks on AAC-AI
 redrafts. The lander was off from 2026-09-29 to 2026-10-01; in that window two Submits (73 tickets
 on 2026-09-30, 21 on 2026-10-01) reached only a Cowork session with no GitHub write path and sat
 unlanded until a person noticed. Dan, 2026-10-01: "fix this so it never happens again". The lander
-stays enabled; the page promises a landing window, never "at once"; and the Submit comment sent to
-a watching session is a courtesy, not the landing path. Land may still be run by hand from any
+stays enabled; the page promises a landing window, never "at once"; and Submit sends no comment to
+any session (issue 1239). Land may still be run by hand from any
 session with `gh` and a checkout.
 
 - Page: https://claude.ai/artifact/9wnfsMJFtUNGGoSh46bmDE (one URL for good; republish in place,
@@ -21,23 +21,20 @@ session with `gh` and a checkout.
   `detail`; the card shows it).
 - Drafts are never committed: the repo is public. They live in the published page (each ticket
   carries `draftedAt`) and in temp files.
-- **Submit goes to whichever Claude session is watching the page, and to nothing else.** The
-  Submit button records the batch in the page database and then posts "Rulings submitted: batch
-  <id> ... Land them now." as a comment sent to Claude; the platform delivers that only to sessions
-  holding a watch on the artifact, and the page's `canSendToClaude` reads `no_session` when none
-  does (contract `comments.d.ts`, `SendToClaudeResult`, `CanSendToClaude`). A watch comes from
-  publishing the page or from `ArtifactComments` `watch` on its URL; reading the page registers
-  none (checked 2026-09-30: a session that had read it listed no watch). So the batch lands in
-  whatever session last took a watch, which need not be the session that built or published the
-  page, and that session may have no GitHub write path. Rules: a session that cannot land never
-  publishes the page or watches it; a session that cannot land and receives a Submit says so in
-  the thread and leaves the batch for the digest. Naming the receiver or the publisher is a read,
-  never an inference: the `submissions` doc and `ArtifactComments` `read` give the Submit and its
-  reply, `list_sessions` shows a cloud session's published artifacts under `external_metadata.
-  artifacts`, and the page's version stamp (`Artifact` `list`, `scope: files`) gives the publish
-  time. 2026-09-30: the page was republished at 18:56:47Z by no cloud session, the 19:17Z Submit
-  went to a Cowork session that had not published it, and nothing landed (no `gh`, 403 from the
-  API).
+- **Submit goes to the page database, and the lander is the only path from there to GitHub.** The
+  Submit button writes `submissions/<id>` (`status: "submitted"`) and sets the status line to the
+  landing window; `rulings-lander` (and the 5 AM digest) pick the batch up from that doc. Submit
+  used to also post "Rulings submitted: batch <id> ... Land them now." as a comment sent to
+  Claude, which the platform delivers only to a session holding a watch on the artifact, whichever
+  one that is. 2026-09-30: the 19:17Z Submit (73 tickets) reached a Cowork session that had not
+  published the page; it had no `gh`, got 403 from the API, and nothing landed. 2026-10-01: the
+  21:10Z Submit (21 tickets) reached a Cowork session that replied "Not landed" in the thread. Both
+  times the owner read that reply as the page failing, so the comment is gone (issue 1239): it
+  added confusion and no landing.
+- **The page declares the `db` capability only.** Nothing on it uses `comments` any more. The
+  stored declaration still read `{"comments":{},"db":{}}` on 2026-10-01, and a publish that omits
+  `capabilities` carries that forward, so publish with `capabilities: {"db": {}}` until a read of
+  the page shows `db` alone. A session that cannot land still never publishes the page.
 
 ## Land (step 1 of the digest; also runnable by hand)
 
@@ -79,7 +76,7 @@ session with `gh` and a checkout.
    71 cards drafted from ticket text alone was "lots of text out of date").
 4. `node tools/rulings-page.js bodies --drafts <dir>` (each card shows the ticket's own GitHub text
    beside the explainer), then `node tools/rulings-page.js build --drafts <dir> --out <page.html>`;
-   publish it with `url` set to the page URL. The page's database, and the owner's saved picks, carry over.
+   publish it with `url` set to the page URL and `capabilities: {"db": {}}`. The page's database, and the owner's saved picks, carry over.
 5. Email with the Gmail connector `send_message` to dgatsakos@activealarm.com. Subject:
    `<N> tickets need your ruling`. HTML body: count per repo, up to five tickets whose drafts carry
    money, tax, customer-data or delete decisions (one line each: repo, number, the question), and

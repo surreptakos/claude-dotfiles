@@ -153,7 +153,7 @@ const wide = () => { try { return matchMedia("(min-width: 761px)").matches; } ca
 const key = (repo, n) => short(repo) + "~" + n;
 const answers = {};   // key -> {choice, note, at}
 const landed = {};    // key -> {outcome, ok, at, detail}
-let db = null, comments = null;
+let db = null;
 let active = null;
 try { active = localStorage.getItem("rfh-tab"); } catch (e) {}
 if (!DATA.repos.some(r => r.repo === active)) active = DATA.repos[0].repo;
@@ -278,21 +278,12 @@ async function submit(keys){
   try {
     await db.doc("submissions/" + id).set({id, keys, count: keys.length, at: new Date().toISOString(), status: "submitted"});
   } catch (e) { st.textContent = "Could not record the submission (" + ((e&&e.code)||"unknown") + "). Try again."; $("goBtn").disabled = false; return; }
-  const text = "Rulings submitted: batch " + id + ", " + keys.length + " tickets. Land them now.";
-  let sent = false;
-  try {
-    if (comments && (await comments.canSendToClaude()) === "available"){
-      const anchor = await comments.anchorFor($("submitBtn"));
-      await comments.sendToClaude({anchor, text}); sent = true;
-    }
-  } catch (e) { sent = false; }
-  st.textContent = "Saved as batch " + id + ". The lander run on AAC-AI writes them to GitHub within 30 minutes on weekdays 8 AM to 6 PM Central, otherwise by 5:30 AM the next weekday; each card then shows “Landed”." + (sent ? " A watching Claude session was also told." : "");
+  st.textContent = "Saved as batch " + id + ". The lander run on AAC-AI writes them to GitHub within 30 minutes on weekdays 8 AM to 6 PM Central, otherwise by 5:30 AM the next weekday; each card then shows “Landed”.";
 }
 
 (async () => {
   renderNav(); renderPanel(); paintCounts();
   try { db = await window.claude.use("db"); } catch (e) { db = null; }
-  try { comments = await window.claude.use("comments"); } catch (e) { comments = null; }
   if (!db){ $("saveState").textContent = "Storage unavailable in this view: picks will not save"; return; }
   $("saveState").textContent = "Connected · picks save as you click";
   db.collection("rulings").onSnapshot(snap => {

@@ -148,6 +148,15 @@ test('bodies puts each ticket\'s GitHub text in its draft, cutting a very long o
   assert.equal(data.repos[0].tickets[0].body, 'Short **body**');
 });
 
+test('Submit records the batch and names the landing window, and sends no comment to Claude', () => {
+  // 2026-09-30 and 2026-10-01: the Submit comment reached a Cowork session that could not land and
+  // replied "Not landed"; the rulings-lander task is the landing path (issue 1239).
+  const submit = TEMPLATE.slice(TEMPLATE.indexOf('async function submit('), TEMPLATE.indexOf('\n}\n', TEMPLATE.indexOf('async function submit(')));
+  assert.match(submit, /db\.doc\("submissions\/" \+ id\)\.set\(/);
+  assert.match(submit, /within 30 minutes on weekdays 8 AM to 6 PM Central/);
+  assert.doesNotMatch(TEMPLATE, /sendToClaude|use\("comments"\)|watching Claude session/);
+});
+
 test('a saved pick or landing for a ticket no longer on the page does not count', () => {
   // The page's database keeps every earlier round's rulings and landings. Counting them made a
   // 37-ticket page read "47 answered, -10 still open, 47 landed" (2026-09-28).
