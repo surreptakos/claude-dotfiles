@@ -2,10 +2,10 @@
 name: aac-design
 description: Design and release gate for anything an AAC reader will look at, including forms, Word documents, letters, reports, slide decks, web pages and HTML artifacts. Use when creating or revising one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-10-01T01:45:12Z"
-  previous-modified: "2026-10-01T00:35:55Z"
-  revision: "7"
-  content-sha: "a2b17d54c66a"
+  modified: "2026-10-01T02:06:43Z"
+  previous-modified: "2026-10-01T01:45:12Z"
+  revision: "8"
+  content-sha: "fe289b0cceb5"
 ---
 
 # AAC design
@@ -23,7 +23,7 @@ Reference files, each loaded when its step needs it:
 
 - [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md): the approved AAC tokens, spacing scale, form components, document parts and web tokens (`assets/aac-tokens.css`).
 - [TELLS.md](TELLS.md): every catalog rule grouped by surface, tagged with the linter rule that catches it, with the precedence order and the catalogued conflicts. Generated from `catalog/CATALOG.json` by `node tools/build-design-catalog.js`; never edit it by hand.
-- `catalog/CATALOG.json`: one row per rule, citing its source file and line. The sources are AAC-WR-001 Rules 75 to 102 and the tokens (cited, never restated), and six design skills vendored as rule text under `vendor/` (pins in `vendor/PROVENANCE.json`). `scripts/fetch_engine.py` fetches a source's engine or data, such as impeccable's detector, and hash-checks it against the pin.
+- `catalog/CATALOG.json`: one row per rule, citing its source file and line. The sources are AAC-WR-001 Rules 75 to 102 and the tokens (cited, never restated), and six design skills vendored as rule text under `vendor/` (pins in `vendor/PROVENANCE.json`). For audits the vendored `accessibility-review` pin supersedes the undated session copy at `aac-skills/accessibility-review`. `scripts/fetch_engine.py` fetches a source's engine or data, such as impeccable's detector, and hash-checks it against the pin.
 - [CRITIQUE.md](CRITIQUE.md): the scoring protocol.
 
 Scripts run in the Linux sandbox. `designlint.py` and `designgate.py` use only the standard library, so the hook also runs them on the host.
@@ -85,11 +85,11 @@ Audit an existing page, by URL or HTML file, against every catalog row that appl
    ```bash
    python3 scripts/score.py ledger.json --markdown --report findings.html --stamp <page.html|url>
    ```
-   It rejects (exit 3) a ledger missing an applicable id, an N/A without a reason, or detector output shown before the rows were in. The gate needs full coverage, no open P0 or P1 owned by the ledger's `auditor`, and a dual-agent method. A file is stamped by its sha256, a URL by its address plus deployed commit; `score.py --check-stamp <target> [--commit SHA]` says whether the stamp is still fresh. Publish `findings.html` as the findings page; its first line is the method line. Done when score.py exits 0, or the report names what blocks.
+   It rejects (exit 3) a ledger missing an applicable id, an N/A without a reason, or detector output shown before the rows were in. The gate needs full coverage, no open P0 or P1 owned by the ledger's `auditor`, and a dual-agent method. A file is stamped by its sha256, a URL by its address plus deployed commit; `score.py --check-stamp <target> [--commit SHA]` says whether the stamp is still fresh. The report lists every catalogued conflict whose two rows are in the ledger, with the rule that won, its source and the precedence reason; a FAIL on the losing row while the winner PASSes is settled by precedence and is not open. To overrule a decision, change the ledger row and say so in the report. Publish `findings.html` as the findings page; its first line is the method line. Done when score.py exits 0, or the report names what blocks.
 
 ## Rules the steps depend on
 
 - **The stamp is bound to the bytes.** Any edit after stamping, even a typo fix, makes the gate block until steps 4–6 run again. Batch edits before critiquing.
-- **Precedence decides a conflict.** AAC tokens and AAC-WR-001 first, then the design skills, then the brief (the catalog's `precedence` field; Dan, 2026-09-30). When two rules conflict, report the rule that won and why: a catalogued conflict carries both in TELLS.md. When the user asks for a pattern a rule refuses, name the rule, and record any exception they confirm in the report.
+- **Precedence decides a conflict.** AAC tokens and AAC-WR-001 first, then the design skills, then the brief (the catalog's `precedence` field; Dan, 2026-09-30). When two rules conflict, report the rule that won and why: a catalogued conflict carries both in TELLS.md, and an audit's report names it. When the user asks for a pattern a rule refuses, name the rule, and record any exception they confirm in the report.
 - **Cut before you squeeze.** Only reduce type sizes or spacing to meet the page budget after the duplicate and parked content is gone.
 - **Gate override.** After three consecutive blocks in one turn the gate lets the turn end so a broken linter cannot wedge a session. When that happens, the reply names every file that shipped unstamped and why.

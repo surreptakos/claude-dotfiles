@@ -48,6 +48,11 @@ in. The gate: coverage complete, no open P0 or P1 owned by the auditor, not degr
 a file stamp to the audited sha256 and a URL stamp (.design/url-<hash>.json under the current
 folder) to the address plus deployed commit; --check-stamp exits 0 while the stamp is fresh and 1
 once the file's bytes or the deployed commit moved.
+
+A catalogued conflict (CATALOG.json "conflicts") whose two rows are both in the ledger is reported
+with the rule that won, its source and the precedence reason. A FAIL on the losing row while the
+winning row PASSes is settled by precedence: it is listed with the conflict, not counted as open,
+and never blocks the gate. When the winning row is not a PASS the loser's FAIL stays open.
 """
 import argparse, datetime, hashlib, html, json, os, re, sys
 
@@ -232,10 +237,30 @@ def validate_ledger(l, catalog):
     return applicable
 
 
+def ledger_conflicts(l, catalog):
+    """The catalogued conflicts with both rows in the ledger, each with both verdicts and whether
+    precedence settles the loser's FAIL (the winner PASSes)."""
+    verdict = {r['id']: r['verdict'] for r in l['rows']}
+    out = []
+    for c in catalog.get('conflicts', []):
+        if c['winner'] in verdict and c['loser'] in verdict:
+            out.append({k: c[k] for k in ('id', 'topic', 'winner', 'winner_source', 'loser', 'loser_source', 'reason')}
+                       | {'winner_verdict': verdict[c['winner']], 'loser_verdict': verdict[c['loser']],
+                          'settled': verdict[c['loser']] == 'FAIL' and verdict[c['winner']] == 'PASS'})
+    return out
+
+
+def open_fails(l, r):
+    """FAIL rows still open: a losing row's FAIL settled by precedence is not."""
+    settled = {c['loser'] for c in r['conflicts'] if c['settled']}
+    return [x for x in l['rows'] if x['verdict'] == 'FAIL' and x['id'] not in settled]
+
+
 def score_ledger(l, catalog):
     applicable = validate_ledger(l, catalog)
     rows = l['rows']
-    fails = [r for r in rows if r['verdict'] == 'FAIL']
+    conflicts = ledger_conflicts(l, catalog)
+    fails = open_fails(l, {'conflicts': conflicts})
     blocking = [r for r in fails if r['priority'] in ('P0', 'P1') and r['owner'] == l['auditor']]
     owners = {}
     for r in fails:
@@ -250,7 +275,7 @@ def score_ledger(l, catalog):
         'coverage': {'applicable': len(applicable), 'rows': len(rows)},
         'verdicts': {v: sum(1 for r in rows if r['verdict'] == v) for v in VERDICTS},
         'open': {s: sum(1 for r in fails if r['priority'] == s) for s in SEVERITIES},
-        'open_by_owner': owners, 'blocking': [r['id'] for r in blocking],
+        'open_by_owner': owners, 'blocking': [r['id'] for r in blocking], 'conflicts': conflicts,
         'gate': gate, 'passes': all(gate.values()),
     }
 
@@ -264,6 +289,13 @@ def subject_line(sub):
             else f'{sub["url"]} (deployed commit {sub["commit"]})')
 
 
+def conflict_line(c):
+    tail = (f' {c["loser"]} FAIL is settled by precedence, not open.' if c['settled']
+            else f' Verdicts: {c["winner"]} {c["winner_verdict"]}, {c["loser"]} {c["loser_verdict"]}.')
+    return (f'{c["id"]}: {c["winner"]} ({c["winner_source"]}) won over {c["loser"]} ({c["loser_source"]}). '
+            f'{c["reason"]}{tail}')
+
+
 def ledger_markdown(l, r):
     out = [method_line(l['method']), '', f'Subject: {subject_line(l["subject"])}',
            f'Coverage: {r["coverage"]["rows"]}/{r["coverage"]["applicable"]} applicable catalog ids; '
@@ -272,7 +304,10 @@ def ledger_markdown(l, r):
     out += [f'- {"PASS" if ok else "FAIL"} {k}' for k, ok in r['gate'].items()]
     for owner in r['open_by_owner']:
         out += ['', f'Open for {owner}:']
-        out += [f'- {x["id"]} {x["priority"]}: {x["fix"]}' for x in l['rows'] if x['verdict'] == 'FAIL' and x['owner'] == owner]
+        out += [f'- {x["id"]} {x["priority"]}: {x["fix"]}' for x in open_fails(l, r) if x['owner'] == owner]
+    if r['conflicts']:
+        out += ['', 'Conflicts, decided by precedence (house, design skills, brief):']
+        out += [f'- {conflict_line(c)}' for c in r['conflicts']]
     out.append(f'\n**Gate: {"PASS" if r["passes"] else "FAIL"}**')
     return '\n'.join(out)
 
@@ -293,7 +328,7 @@ def ledger_page(l, r, catalog):
     # A house row (AAC-WR-001, the tokens) cites its rule instead of restating it.
     words = {row['id']: row.get('words') or row.get('cites', '') for row in catalog['rows']}
     degraded = l['method'].startswith('DEGRADED')
-    fails = sorted((x for x in l['rows'] if x['verdict'] == 'FAIL'), key=lambda x: (x['priority'], x['id']))
+    fails = sorted(open_fails(l, r), key=lambda x: (x['priority'], x['id']))
     parts = [f'<p class="method{" degraded" if degraded else ""}" id="method">{e(method_line(l["method"]))}</p>',
              f'<h1>Design audit findings</h1><p>{e(subject_line(l["subject"]))} · surface {e(l["surface"])} · '
              f'{r["coverage"]["rows"]}/{r["coverage"]["applicable"]} catalog ids · '
@@ -305,6 +340,14 @@ def ledger_page(l, r, catalog):
         parts.append(f'<h2>Open for {e(owner)}</h2><table><tr><th>P</th><th>Rule</th><th>File</th><th>Evidence</th><th>Fix</th></tr>')
         parts += [f'<tr><td>{e(x["priority"])}</td><td>{e(x["id"])}: {e(words.get(x["id"], ""))}</td><td>{e(str(x.get("file", "")))}</td>'
                   f'<td>{e(x["evidence"])}</td><td>{e(x["fix"])}</td></tr>' for x in fails if x['owner'] == owner]
+        parts.append('</table>')
+    if r['conflicts']:
+        parts.append('<h2>Conflicts, decided by precedence</h2><table><tr><th>Conflict</th><th>Won</th><th>Lost</th>'
+                     '<th>Why</th><th>Verdicts</th></tr>')
+        parts += [f'<tr><td>{e(c["id"])}: {e(c["topic"])}</td><td>{e(c["winner"])} ({e(c["winner_source"])})</td>'
+                  f'<td>{e(c["loser"])} ({e(c["loser_source"])})</td><td>{e(c["reason"])}</td>'
+                  f'<td>{e(c["winner"])} {e(c["winner_verdict"])}, {e(c["loser"])} {e(c["loser_verdict"])}'
+                  f'{"; the FAIL is settled, not open" if c["settled"] else ""}</td></tr>' for c in r['conflicts']]
         parts.append('</table>')
     na = [x for x in l['rows'] if x['verdict'] == 'N/A']
     if na:
@@ -394,6 +437,13 @@ def audit_main(a, ledger):
 
 
 def main():
+    # The method line opens with a warning sign and a middle dot: a Windows pipe's code page would
+    # mangle the one and refuse the other (UnicodeEncodeError), so py -3 writes UTF-8 like python3.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
     ap = argparse.ArgumentParser()
     ap.add_argument('critique', nargs='?', help='critique.json (build mode) or ledger.json (audit mode)')
     ap.add_argument('--markdown', action='store_true')
