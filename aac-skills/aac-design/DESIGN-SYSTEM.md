@@ -1,9 +1,9 @@
 # AAC design system
 
-Approved by Dan Gatsakos on 2026-09-30, line by line. The tokens apply to every AAC deliverable. The components are the form branch, which `scripts/build_form.py` implements; its `T`, `S` and constant block is the executable copy of the tables below, so change a token in both places or neither.
+Approved by Dan Gatsakos on 2026-09-30, line by line. The tokens apply to every AAC deliverable. The components are the form branch, which `scripts/build_form.py` implements; its `T`, `S` and constant block, the tables below and `assets/aac-tokens.css` are all generated from one source, `assets/aac-tokens.json`: change a token there and run `node tools/build-design-tokens.js`.
 
 ## Tokens
-
+<!-- BEGIN GENERATED TOKENS: tools/build-design-tokens.js writes this section from assets/aac-tokens.json. Never hand-edit. -->
 ### Color
 
 | Token | Value | Use | Contrast (`designlint.py --contrast`) | Source |
@@ -46,12 +46,12 @@ Floor: 9 pt on paper, 12 pt on slides (designlint D07).
 | `signature_row` | 34 | Minimum height of a signature row (0.47 in) |
 | `indent` | 18 | Bullet hanging indent |
 
-Other constants: terms line spacing 1.05; two em spaces between checkbox options; an en space between a step number and its role.
+Other constants: terms line spacing 1.05; two em spaces between checkbox options; an en space between a step number and its role; cell padding snug, loose and tight (top, sides, bottom); card padding base, loose and open.
 
 ### Page and grid
 
 U.S. Letter, 0.5 in margins (TPS template), 10,800 twips usable, a 12-column grid of 900 twips. The HR card takes 4 of the 12 columns.
-
+<!-- END GENERATED TOKENS -->
 ## Components (form branch)
 
 | Component | Spec block | Rules |

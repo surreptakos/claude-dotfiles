@@ -12,31 +12,45 @@ from xml.sax.saxutils import escape as E
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_TEMPLATE = os.path.join(HERE, '..', 'assets', 'aac-letterhead.docx')
 
-# ---- tokens: the executable copy of DESIGN-SYSTEM.md "Tokens". Change both or neither. ----
+# ---- tokens ----
 PT = 20  # twips per point
+# ---- BEGIN GENERATED TOKENS: tools/build-design-tokens.js writes this block from assets/aac-tokens.json. Never hand-edit. ----
+# The executable copy of DESIGN-SYSTEM.md "Tokens": change assets/aac-tokens.json, then run the generator.
 T = {
     # color
     'accent': '1161A0', 'tint': 'E8F0F8', 'caption': '595959', 'border': '7F7F7F', 'text': '000000',
+    'border_sz': 4,     # 0.5 pt cell border, in eighths of a point (Word's unit)
+    'font': 'Aptos',
     # type, in half-points (Word's unit): AAC-WR-001 Rule 77, including its fill-in form clause (v0.11)
-    'sz_caption': 18,   # 9 pt: field labels and signer statements
-    'sz_body': 20,      # 10 pt: intro, terms
-    'sz_value': 21,     # 10.5 pt: prefilled values and choice text
-    'sz_role': 20,      # 10 pt bold: signer role
-    'sz_heading': 22,   # 11 pt bold accent: section heading (Rule 77 third level)
+    'sz_heading': 22,   # 11 pt, bold, accent: Section heading (Rule 77, third level)
+    'sz_role': 20,      # 10 pt, bold, black; step number in accent: Signer and HR card heading
+    'sz_value': 21,     # 10.5 pt, regular, black: Prefilled values, choice text
+    'sz_body': 20,      # 10 pt, regular, black: Intro, terms
+    'sz_caption': 18,   # 9 pt, regular, caption gray: Field labels, signer statements
     # grid
     'page_w': 10800, 'grid': 12, 'hr_label_span': 4,
 }
 # spacing scale, in points; every vertical or inner space the builder uses comes from here
 S = {
-    'hair': 1, 'tight': 2, 'snug': 3, 'base': 4, 'loose': 6, 'open': 8, 'heading_before': 9,
-    'value_row': 27, 'hr_row': 28, 'signature_row': 34, 'indent': 18,
+    'hair': 1,              # Space around a written value
+    'tight': 2,             # Gap between a card heading and its statement or choices
+    'snug': 3,              # Heading after (Rule 82), term item after, cell top padding
+    'base': 4,              # Card top padding, gap after an acknowledgment line
+    'loose': 6,             # Cell and card side padding; spacer before the HR row
+    'open': 8,              # Card bottom padding, space before the intro
+    'heading_before': 9,    # Space above a section heading (Rule 82)
+    'value_row': 27,        # Minimum height of a field row (0.375 in)
+    'hr_row': 28,           # Minimum height of the HR row
+    'signature_row': 34,    # Minimum height of a signature row (0.47 in)
+    'indent': 18,           # Bullet hanging indent
 }
-sp = lambda k: S[k] * PT
-LINE_TERMS = 252         # 1.05 line spacing for multi-line terms (240 = single)
+LINE_TERMS = 252  # 1.05 line spacing for multi-line terms (240 = single)
 CHOICE_GAP = '\u2003\u2003'  # two em spaces between checkbox options
-STEP_SEP = '\u2002'       # en space between a step number and its role
-CELL_PAD = ('snug', 'loose', 'tight')   # top, sides, bottom
-CARD_PAD = ('base', 'loose', 'open')
+STEP_SEP = '\u2002'  # an en space between a step number and its role
+CELL_PAD = ('snug', 'loose', 'tight')  # top, sides, bottom
+CARD_PAD = ('base', 'loose', 'open')  # top, sides, bottom
+# ---- END GENERATED TOKENS ----
+sp = lambda k: S[k] * PT
 COLW = T['page_w'] // T['grid']  # 900 twips per grid column
 
 
@@ -45,7 +59,7 @@ class SpecError(Exception):
 
 
 # ---------------------------------------------------------------- primitives
-FONT = '<w:rFonts w:ascii="Aptos" w:hAnsi="Aptos" w:eastAsia="Aptos" w:cs="Aptos"/>'
+FONT = f'<w:rFonts w:ascii="{T["font"]}" w:hAnsi="{T["font"]}" w:eastAsia="{T["font"]}" w:cs="{T["font"]}"/>'
 
 
 def rpr(b=False, sz=None, color=None, i=False):
@@ -117,7 +131,7 @@ def spacer(sz=2 * S['loose']):
 def cell(w, content, fill=None, span=1, pad=CELL_PAD):
     # Full borders on every cell: a label inside the cell floats without its box (Dan, 2026-09-30).
     mar = tuple(sp(k) for k in pad)
-    b = ''.join(f'<w:{s} w:val="single" w:sz="4" w:space="0" w:color="{T["border"]}"/>'
+    b = ''.join(f'<w:{s} w:val="single" w:sz="{T["border_sz"]}" w:space="0" w:color="{T["border"]}"/>'
                 for s in ('top', 'left', 'bottom', 'right'))
     g = f'<w:gridSpan w:val="{span}"/>' if span > 1 else ''
     f = f'<w:shd w:val="clear" w:color="auto" w:fill="{fill}"/>' if fill else ''
