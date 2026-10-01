@@ -77,6 +77,11 @@ start one background agent per task on this section's "Run an approved task" ste
 `agent` for `agent-running` with a comment naming the session as each starts. Never report an
 agent as started without that label swap on the task.
 
+Every mention of a task in a reply to Dan, in a launch report or an agent's result, carries its
+link, `https://app.todoist.com/app/task/<id>`, never the bare id (Dan, 2026-10-01: "I need links
+to the todoist items referenced, not the IDs"). The v1 REST task object carries no `url` field, so
+build the link from the id.
+
 ## Run an approved task
 
 The session the board starts works one Todoist task:
