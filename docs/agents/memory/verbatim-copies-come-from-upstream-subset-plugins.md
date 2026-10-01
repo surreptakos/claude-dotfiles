@@ -43,4 +43,4 @@ other way: vendor it (full-history diff first, see
 [[vendored-copy-provenance-needs-upstream-history]]) and remove it from the entry in the same
 commit.
 
-Source: tools/build-cloud-plugin.py, .claude/hooks/upstream-skills.sh, tools/upstream-skills-hook.test.js, tests/bootstrap-assert.py, https://github.com/surreptakos/claude-dotfiles/issues/928
+Source: https://github.com/surreptakos/claude-dotfiles/pull/1217, tools/build-cloud-plugin.py, .claude/hooks/upstream-skills.sh, tools/upstream-skills-hook.test.js, tests/bootstrap-assert.py, https://github.com/surreptakos/claude-dotfiles/issues/928
