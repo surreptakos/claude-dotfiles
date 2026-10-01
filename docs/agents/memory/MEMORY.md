@@ -66,3 +66,4 @@ and give the note a name that says what it is — adding one costs its own line 
 Source: tools/repo-memory-load.js, tools/repo-memory-load.test.js, https://github.com/surreptakos/claude-dotfiles/issues/210, https://github.com/surreptakos/claude-dotfiles/issues/589, profile/claude/CLAUDE.md, docs/agents/memory/hook-exit-126-is-the-mode-bit.md, docs/agents/memory/cloud-containers-can-run-powershell.md, https://github.com/surreptakos/claude-dotfiles/pull/652
 - keep-dans-name-for-the-thing: his word for the deliverable, not the transcript's
 - byte-diff-is-not-drift: diff --strip-trailing-cr before calling copies drifted
+- commandwindows-is-a-codex-field: commandWindows is Codex-only; Claude Code hooks get one python3/node command
