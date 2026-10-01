@@ -3,7 +3,7 @@
  * wr001-lint - deterministic checks for AAC-WR-001.
  *
  * Covers every rule a pattern can decide (see wr001-coverage.md beside this
- * file for all 170 rules: pattern, Jev, reader, or layout). Seven judgment
+ * file for all 185 rules: pattern, Jev, reader, or layout). Seven judgment
  * rules get a TypeSafe Jev Noul each (issues 731 and 1038): Rule 5 on the
  * opening paragraph, Rules 6 and 10 per sentence, Rule 162 on the last
  * paragraph, Rule 164 per paragraph, and two whole-document checks: Rule 55
@@ -41,7 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.13";
+const STANDARD_VERSION = "0.14";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;

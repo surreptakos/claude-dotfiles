@@ -7,14 +7,14 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.13 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.14 \| DRAFT FOR APPROVAL** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.13 |
+| **Version** | 0.14 |
 | **Status** | Draft for Approval |
 | **Effective date** | Upon approval |
 | **Review cycle** | Annual, or upon material change |
@@ -46,3 +46,4 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 | 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
+| 0.14 | 2026-10-01 | Performance review layout and mechanics folded in from the retired layout draft: Rule 2; Part XXVI, Rules 171–185; Appendix F; References. | Pending |

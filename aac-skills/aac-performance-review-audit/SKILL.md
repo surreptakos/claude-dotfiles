@@ -2,10 +2,10 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-09-29T21:14:45Z"
-  previous-modified: "2026-09-29T21:05:36Z"
-  revision: "7"
-  content-sha: "8e4af5ad3f1c"
+  modified: "2026-10-01T23:09:59Z"
+  previous-modified: "2026-09-29T21:14:45Z"
+  revision: "8"
+  content-sha: "153f07ecb0aa"
 ---
 
 # AAC performance review audit
@@ -87,7 +87,7 @@ Only after Gates 1 and 2 pass. **Read `gate3.md` in this skill directory before 
 
 Nothing leaves this skill until it passes this gate: every gate email, the coaching email, and any review text the audit writes or rewrites (a model item, a full rewrite, or a rebuilt review docx). A draft that has not passed it is not finished, whatever the three gates said. Dan made this mandatory on 9/24/26 after an email went out for review having been only spot-checked.
 
-1. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md` and `DRAFT-QUALITY.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards and the House Layout Standard where they conflict with WR-001 (serial comma, headings, "should," e.g./i.e., the % sign and numeric dates in review material). Every other WR-001 rule applies.
+1. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md` and `REVIEW.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards (`standards.md`) and to WR-001's own review part, Rules 171 to 185 in `REVIEW.md`, where they conflict with the rest of WR-001: the serial comma and "should" in review cells (Rule 175), numeric dates (Rule 174), e.g./i.e. and the % sign (Rule 178), email headings (Rule 182). The same part carries the review page, the audit email's salutation, numbered fix lists, subject line and attachments, and the templates and gate script. Every other WR-001 rule applies.
 2. Run the house linter on each text: `../aac-house-writing-standard/scripts/wr001-lint.js`, the one copy that moves with the standard (a pinned copy beside this file sat at WR-001 v0.6 while the standard reached v0.10; deleted 2026-09-29). For a docx, extract the paragraphs and table cells to a .md file first. Email: `node ../aac-house-writing-standard/scripts/wr001-lint.js EMAIL.md`. Review: `node ../aac-house-writing-standard/scripts/wr001-lint.js REVIEW.md --prose`. Exit 0 is required. Fix every error and every warning that is not a Rule 2 exception.
 3. Read for the rules the linter cannot see, and confirm Rule 166 item by item: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. Also Rule 106 (the attachment is named) and Rule 107 (an email that asks for action ends with how Dan learns it is done).
 4. Record the result under the Notes line: linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.
