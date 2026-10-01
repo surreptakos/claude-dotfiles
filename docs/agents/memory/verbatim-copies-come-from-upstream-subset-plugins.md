@@ -9,9 +9,10 @@ metadata:
 
 Dan, 2026-10-01, after a provenance audit of the payload (every file hashed against every commit
 of six upstream repos): "drop everything that is a verbatim copy for its upstream payload. kill
-writing-guidelines". Twenty directories left `aac-skills/`: twelve mattpocock/skills
-copies, five vercel-labs/agent-skills copies, agent-browser, find-skills, and writing-guidelines
-(killed, no replacement).
+writing-guidelines". Twenty-one directories left `aac-skills/`: thirteen mattpocock/skills
+copies (twelve current ones plus writing-great-skills, the old name of writing-for-agents), five
+vercel-labs/agent-skills copies, agent-browser, find-skills, and writing-guidelines (killed, no
+replacement).
 
 **The mechanism.** `UPSTREAM_PLUGINS` in `tools/build-cloud-plugin.py` emits one plugin entry per
 upstream into `.claude-plugin/marketplace.json`: `source` is `git-subdir` at the upstream repo's
@@ -39,9 +40,12 @@ it the same day ("revert /to-spec") and asked for the same flag on to-tickets, w
 it. The ask-matt flows call both, and upstream's `true` would stop the model from loading them.
 The stand-in was the similarity ratio: a near-total match read as "verbatim" where the diff
 itself said what the line did. Read the local-only lines, never the score; the hook test now asserts
-both flags. The same guard keeps writing-guidelines out. Two copies
-stay vendored because upstream retired them: resolving-merge-conflicts (deleted in
-mattpocock/skills daa01d8) and writing-great-skills (renamed to writing-for-agents in 1fc6573).
+both flags. The same guard keeps writing-guidelines out. One copy
+stays vendored because upstream deleted it with no successor: resolving-merge-conflicts
+(mattpocock/skills daa01d8). A renamed upstream skill is not that case: writing-great-skills was
+the old name of writing-for-agents (renamed in 1fc6573), so the old copy went and the ask-matt
+gate's route became writing-for-agents (Dan, 2026-10-01: "yes, writing-great-skills gets
+dropped").
 `tests/bootstrap-assert.py` fails the payload if any dropped name comes back;
 `tools/upstream-skills-hook.test.js` pins the hook's subset copy and the marketplace entries.
 

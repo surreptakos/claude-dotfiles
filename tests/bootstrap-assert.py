@@ -65,7 +65,7 @@ REQUIRED_SKILLS = ['session-check', 'project-harness', 'ticket-fleet']
 UPSTREAM_SKILLS = ['caveman', 'i-have-adhd',
                    'codebase-design', 'domain-modeling', 'grill-me', 'grilling',
                    'improve-codebase-architecture', 'prototype', 'tdd', 'teach', 'to-questionnaire',
-                   'wait-what', 'wizard', 'writing-for-agents',
+                   'wait-what', 'wizard', 'writing-for-agents', 'writing-great-skills',
                    'vercel-composition-patterns', 'vercel-react-best-practices',
                    'vercel-react-native-skills', 'vercel-react-view-transitions',
                    'web-design-guidelines', 'writing-guidelines', 'agent-browser', 'find-skills']

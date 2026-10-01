@@ -57,7 +57,10 @@ ALLOWED_FLOWS = {
     "to-tickets",
     "triage",
     "wayfinder",
-    "writing-great-skills",
+    # mattpocock/skills renamed writing-great-skills to writing-for-agents (1fc6573); the vendored
+    # copy of the old name left aac-skills on 2026-10-01 and the skill now loads from the
+    # mattpocock-skills marketplace entry under the new name.
+    "writing-for-agents",
 }
 
 # ---------------------------------------------------------------------------- caveman mode
