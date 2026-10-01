@@ -4,10 +4,10 @@ description: >
   Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the
   ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
 metadata:
-  modified: "2026-10-01T00:02:19Z"
-  previous-modified: "2026-09-30T22:33:22Z"
-  revision: "68"
-  content-sha: "5144c1682e41"
+  modified: "2026-10-01T00:23:31Z"
+  previous-modified: "2026-09-30T22:55:52Z"
+  revision: "69"
+  content-sha: "b23da8e603c1"
 ---
 
 # ticket-fleet
@@ -26,7 +26,12 @@ serves one repo and skips a ticket labelled for a local agent, or one that chang
 When this session is on the desktop that ticket names, it is that local agent: start each one
 as a background agent in the right clone, in parallel with the wave, and never leave it out
 because the fleet cannot take it. Run 6abd47d1 left #1069 out this way while its dependant #1072
-waited on it.
+waited on it. A local agent inherits this session's environment, API keys and tokens included:
+read `env | grep -i -E 'key|token|secret'` before writing its brief, and never tell it a
+credential may be missing without that check (Dan, 2026-09-30; the names are in the
+`session-env-carries-zoho-and-gas-tokens` memory note). What no variable supplies is a claude.ai
+web sign-in: a page that runs `window.claude.*` calls needs a browser signed in to the owning
+account.
 
 ## Launch a wave
 

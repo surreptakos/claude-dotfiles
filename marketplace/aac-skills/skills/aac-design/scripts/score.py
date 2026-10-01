@@ -290,7 +290,8 @@ PAGE_CSS = (
 def ledger_page(l, r, catalog):
     """The findings page, rendered in the session. Its first line is the method line."""
     e = html.escape
-    words = {row['id']: row['words'] for row in catalog['rows']}
+    # A house row (AAC-WR-001, the tokens) cites its rule instead of restating it.
+    words = {row['id']: row.get('words') or row.get('cites', '') for row in catalog['rows']}
     degraded = l['method'].startswith('DEGRADED')
     fails = sorted((x for x in l['rows'] if x['verdict'] == 'FAIL'), key=lambda x: (x['priority'], x['id']))
     parts = [f'<p class="method{" degraded" if degraded else ""}" id="method">{e(method_line(l["method"]))}</p>',

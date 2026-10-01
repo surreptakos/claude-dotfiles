@@ -79,3 +79,24 @@ journal's discoveries, so a dead run's follow-ups still land.
 The run must happen where the dead run ran: the journal is machine-local and dies with its
 container. It starts no scout, no implementer, no prober and no verifier, so a finish pass costs
 one journal read plus one deliverer per undelivered branch.
+
+## A deliverer whose shell command was refused
+
+Run `6abd62b5` (`wf_9506b505-ac3`, issue 1139) verified and pushed the branches for #177 and
+#17, then both deliverers stopped on `blocked by safety classifier: [Auto-Mode Bypass]` with no
+PR, and the result listed each under `failed` as `did not deliver: pushed=null prUrl=(none) -
+branch ... is verified but has no PR`. A refused `git merge` already had its route (A8); a
+refusal in a step with no route of its own - the fetch, the worktree, a `cd`, the marker scan -
+ended the delivery. It now goes to the deliver prompt's A9: the deliverer runs no further shell
+command, confirms the branch on origin with the GitHub connector, opens the PR with
+`mcp__github__create_pull_request` from the branch as origin holds it (the refused command and
+its refusal text quoted under "Not merged with `<defaultBranch>`: classifier refusal"), posts
+the ticket comment with `mcp__github__add_issue_comment`, and returns
+`mergeStatus: "unmerged-by-classifier"` with `blockedReason` naming the refused command. The run
+records it as delivered, with a `mergeNote` carrying the refusal, and STEP D leaves the PR open
+for the orchestrator to merge the default branch into it, as it does after A8.
+
+A result that still reads `pushed=null prUrl=(none)` over a verified branch means the deliverer
+returned nothing at all. The branch is on origin: open its PR with the connector (head the
+branch, base the default branch, the verifier's evidence from the journal in the body), or
+relaunch with `finishRunId` as above - never re-implement the ticket.

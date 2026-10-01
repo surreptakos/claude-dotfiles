@@ -53,6 +53,11 @@ function score(ledger, args = [], cwd = root) {
 const checkStamp = (target, extra = [], cwd = root) =>
   spawnSync('python3', [SCORER, '--check-stamp', target, ...extra], { encoding: 'utf8', cwd });
 
+// One isolated reviewer per catalogued skill on the web surface, accessibility-review first so the
+// detector-order case below can move its time.
+const WEB_SKILLS = [...new Set(CATALOG.rows.filter((r) => r.surfaces.includes('web')).map((r) => r.skill))]
+  .sort((a, b) => (a === 'accessibility-review' ? -1 : b === 'accessibility-review' ? 1 : a.localeCompare(b)));
+
 // A complete web ledger: every applicable id, two open findings owned by Code, none by the auditor.
 function ledger(overrides = {}) {
   const rows = CATALOG.rows.filter((r) => r.surfaces.includes('web')).map((r) => ({
@@ -68,7 +73,7 @@ function ledger(overrides = {}) {
     surface: 'web',
     subject: { kind: 'file', path: page, sha256: sha(page) },
     auditor: 'Design',
-    reviewers: [{ skill: 'accessibility-review', agent: 'agent-a', rows_in: '2026-09-30T10:00:00Z', detector_shown: '2026-09-30T10:05:00Z' }],
+    reviewers: WEB_SKILLS.map((skill, i) => ({ skill, agent: `agent-a${i}`, rows_in: '2026-09-30T10:00:00Z', detector_shown: '2026-09-30T10:05:00Z' })),
     rows,
     ...overrides,
   };

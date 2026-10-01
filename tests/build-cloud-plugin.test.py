@@ -268,6 +268,70 @@ class VersionFollowsThePayload(unittest.TestCase):
             self.assertEqual(self._version(repo), "2099.1.10000",
                              "an edited skill should have taken the fresh clock stamp")
 
+    # Issue 1142: after `git merge origin/master` git auto-merged the published copy to the bytes
+    # the branch assembles, and the conflicted version files were taken from master. Against the
+    # working tree alone nothing had moved, so the build kept master's version for new content
+    # and a desktop already on that version never took it. Run under both line-ending settings:
+    # the comparison with master's committed payload must not depend on core.autocrlf.
+    def test_a_merge_that_moved_the_payload_never_keeps_masters_version(self):
+        for autocrlf in ("true", "false"):
+            with self.subTest(autocrlf=autocrlf), tempfile.TemporaryDirectory() as tmp:
+                self._merge_case(Path(tmp), autocrlf)
+
+    @staticmethod
+    def _git(repo, *args):
+        env = {k: v for k, v in os.environ.items()
+               if k not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE", "GIT_PREFIX",
+                            "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY")}
+        subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@x",
+                        "-c", "commit.gpgsign=false", *args],
+                       check=True, capture_output=True, env=env)
+
+    def _merge_case(self, tmp, autocrlf):
+        def clock(version):
+            return mock.patch.object(bcp, "plugin_version", lambda now=None: version)
+
+        repo = self._make_fake_repo(tmp)
+        self._git(repo, "init", "-q", "-b", "master")
+        self._git(repo, "config", "core.autocrlf", autocrlf)
+        with clock("2026.9.301924"):
+            self._rebuild(repo, tmp / "dist1")
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "master")
+        # On master the committed payload is the base itself: an unchanged rebuild keeps it.
+        master_tree = self._tracked(repo)
+        with clock("2099.1.29999"):
+            self._rebuild(repo, tmp / "dist2")
+        self.assertEqual(master_tree, self._tracked(repo), "an unchanged master moved a byte")
+
+        self._git(repo, "checkout", "-q", "-b", "feature")
+        skill = repo / "aac-skills" / "foo" / "SKILL.md"
+        skill.write_text(skill.read_text(encoding="utf-8") + "\nA new paragraph.\n",
+                         encoding="utf-8")
+        with clock("2026.9.301950"):
+            self._rebuild(repo, tmp / "dist3")
+        # The merge: the published copy already holds the assembled bytes, the two version
+        # files came from master.
+        for f in (repo / "marketplace" / bcp.PLUGIN_NAME / bcp.MANIFEST_REL,
+                  repo / ".claude-plugin" / "marketplace.json"):
+            f.write_bytes(f.read_bytes().replace(b"2026.9.301950", b"2026.9.301924"))
+        self.assertEqual(self._version(repo), "2026.9.301924")
+
+        with clock("2026.9.302016"):
+            self._rebuild(repo, tmp / "dist4")
+        self.assertEqual(self._version(repo), "2026.9.302016",
+                         "a payload master does not ship kept master's version")
+
+        # The stamps CI job: the branch's committed payload, under its own stamp, rebuilds byte
+        # for byte.
+        self._git(repo, "add", "-A")
+        self._git(repo, "commit", "-q", "-m", "feature")
+        branch_tree = self._tracked(repo)
+        with clock("2099.1.29999"):
+            self._rebuild(repo, tmp / "dist5")
+        self.assertEqual(branch_tree, self._tracked(repo),
+                         "a rebuild of the branch's unchanged tree moved a tracked byte")
+
     # Issue 484: running the plugin's Python hook leaves hooks/scripts/__pycache__/ inside the
     # published tree. It is git-ignored, so the tree reads clean, yet a fingerprint that counted
     # it took a fresh version on every rebuild - the churn issue 432 fixed, back on any tree that

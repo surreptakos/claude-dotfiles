@@ -13,11 +13,15 @@
 
     Four layers:
 
-      Prerequisites  git, node, py, claude, gh on PATH; PyYAML importable by py -3.
+      Prerequisites  git, node, py, claude, gh on PATH; PyYAML importable by py -3; global git
+                     user.name and user.email set (issue 1157: without them commit and merge
+                     refuse; -Fix copies them from the owner's ~/.claude/accounts.json entry).
       Profile        the files pull restores match what the repo would write (compared through
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
-                     every settings.json hook entry names files that exist; the caveman proxy
+                     the desktop app holds its own synced copy under each desktop account's org
+                     folders (rpm\manifest.json lists it and its folder holds the plugin, issue
+                     1149); every settings.json hook entry names files that exist; the caveman proxy
                      binary is present, registered to start at logon (HKCU Run CavemanProxy,
                      issue 1110), and a terminal `claude -p` answers through its port.
                      ~/.claude-personal gets the plugin and hook checks when it exists and is
@@ -52,9 +56,12 @@
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
     command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
-    Text probes print their answer instead: master-plugin-version (the aac-skills version master
+    git-identity-set (args: git key, value) writes one global git setting.
+    Text probes print their answer instead: git-user-name and git-user-email (the global value,
+    empty when unset), master-plugin-version (the aac-skills version master
     offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
-    unset - never the value), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
+    unset - never the value), desktop-plugin-root (the desktop app's local-agent-mode-sessions
+    folder), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
     Exit 0 when no STOP remains, 1 when one does, 2 when the check itself could not run.
@@ -183,6 +190,65 @@ function Invoke-ProbeText {
 
 $SkipReason = 'machine probe skipped: -UserHome is not this user''s profile'
 
+# The owner's git identity from ~/.claude/accounts.json: accounts.<label>.git = { name, email } on
+# the account that owns the registered desktop routines. $null when the registry, the owner or
+# the entry is missing or incomplete (issue 1157).
+function Get-RegistryGitIdentity {
+    $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $node) { return $null }
+    $js = 'const id=require(process.argv[1]);const r=id.loadRegistry({USERPROFILE:process.argv[2]});let o=null;if(r&&!r.error){for(const t of Object.values(r.routines)){const a=r.accounts[t.owner];const g=a&&a.git;if(g&&g.name&&g.email){o={name:String(g.name),email:String(g.email)};break}}}process.stdout.write(JSON.stringify(o))'
+    $identityJs = Join-Path (Join-Path (Join-Path $RepoRoot 'aac-skills') 'session-check') 'identity.js'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $raw = [string](& $node.Source -e $js $identityJs $UserHome 2>$null) } catch { $raw = '' }
+    finally { $ErrorActionPreference = $prev }
+    try { return ($raw | ConvertFrom-Json) } catch { return $null }
+}
+
+# The global value of one git key: $null when machine probes are skipped, '' when unset.
+function Get-GitConfigValue {
+    param([string]$Key)
+    $v = Invoke-ProbeText -Name ('git-' + $Key.Replace('.', '-')) -Real {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try { [string](& git config --global --get $Key 2>$null | Out-String) } catch { '' }
+        finally { $ErrorActionPreference = $prev }
+    }
+    if ($null -eq $v) { return $null }
+    return $v.Trim()
+}
+
+function Set-GitConfigValue {
+    param([string]$Key, [string]$Value)
+    [void](Invoke-Probe -Name 'git-identity-set' -Arguments @($Key, $Value) -Real {
+        param($k, $v)
+        Invoke-NativeExit 'git' @('config', '--global', $k, $v)
+    })
+}
+
+function Test-GitIdentity {
+    $name = Get-GitConfigValue 'user.name'
+    if ($null -eq $name) { Write-Line skip ('git user.name and user.email  ({0})' -f $SkipReason); return }
+    $email = Get-GitConfigValue 'user.email'
+    if ($name -and $email) { Write-Line ok 'git user.name and user.email'; return }
+
+    $reg = Get-RegistryGitIdentity
+    if ($Fix -and $reg) {
+        if (-not $name) { Set-GitConfigValue 'user.name' ([string]$reg.name) }
+        if (-not $email) { Set-GitConfigValue 'user.email' ([string]$reg.email) }
+        $name = Get-GitConfigValue 'user.name'
+        $email = Get-GitConfigValue 'user.email'
+        if ($name -and $email) { Write-Line ok 'git user.name and user.email  (set by -Fix from the owner''s accounts.json entry)'; return }
+    }
+    $missing = (@(if (-not $name) { 'user.name' }; if (-not $email) { 'user.email' })) -join ' and '
+    Write-Line warn ('git {0} not set: commits and merges refuse without them  (-Fix sets them when accounts.json records the owner''s git name and email)' -f $missing)
+    $n = if ($reg) { [string]$reg.name } else { 'Your Name' }
+    $e = if ($reg) { [string]$reg.email } else { 'you@example.com' }
+    Add-Todo 'Set the global git identity (or record it as accounts.<owner>.git { name, email } in ~/.claude/accounts.json and re-run with -Fix):' @(
+        ('git config --global user.name "{0}"' -f $n),
+        ('git config --global user.email "{0}"' -f $e))
+}
+
 # ------------------------------------------------------------------ prerequisites
 
 function Test-Prerequisites {
@@ -205,6 +271,9 @@ function Test-Prerequisites {
             $found[$tool] = $false
         }
     }
+
+    if ($found['git'] -eq $false) { Write-Line skip 'git user.name and user.email  (not probed: git is missing)' }
+    else { Test-GitIdentity }
 
     if ($found['py'] -eq $false) {
         Write-Line skip 'PyYAML  (not probed: py is missing)'
@@ -526,6 +595,70 @@ function Test-Plugin {
     }
 }
 
+# The desktop app's own copy of aac-skills (issue 1149). Desktop sessions load the plugin from
+# %APPDATA%\Claude\local-agent-mode-sessions\<account>\<org>\rpm\<plugin id>\, not from
+# ~/.claude/plugins. The app writes that folder itself: it syncs every plugin the signed-in
+# account has installed into rpm\ at launch and on a timer, and re-downloads a plugin's folder
+# when a newer version is published (memory note desktop-rpm-copy-is-account-synced). The org's
+# rpm\manifest.json names each synced plugin and its folder id; the folder layout alone misleads.
+# Checked for every org folder on disk of every accounts.json account whose surfaces include
+# desktop, read through session-check's registry reader.
+function Test-DesktopPluginCopy {
+    $root = Invoke-ProbeText -Name 'desktop-plugin-root' -Real { Join-Path (Join-Path $env:APPDATA 'Claude') 'local-agent-mode-sessions' }
+    if ($null -eq $root) { Write-Line skip ('desktop app aac-skills copy  ({0})' -f $SkipReason); return }
+    $node = Get-Node
+    if (-not $node) { Write-Line skip 'desktop app aac-skills copy  (not checked: node is missing)'; return }
+    $js = 'const id=require(process.argv[1]);const r=id.loadRegistry({USERPROFILE:process.argv[2]});const out=[];if(r&&!r.error){for(const [label,a] of Object.entries(r.accounts)){if(a&&a.uuid&&(a.surfaces||[]).includes(''desktop''))out.push({label,uuid:a.uuid,orgs:Object.entries(a.orgs||{}).map(([uuid,name])=>({uuid,name}))})}}process.stdout.write(JSON.stringify({accounts:out}))'
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { $raw = [string](& $node.Source -e $js $IdentityJs $UserHome 2>$null) } catch { $raw = '' }
+    finally { $ErrorActionPreference = $prev }
+    $accounts = @()
+    try { $accounts = @(($raw | ConvertFrom-Json).accounts) } catch { }
+    if ($accounts.Count -eq 0) {
+        Write-Line skip 'desktop app aac-skills copy  (accounts.json names no desktop account with a uuid)'
+        return
+    }
+    $syncTodo = 'Get the Claude desktop app to sync aac-skills for {0}: the app downloads every plugin the signed-in account has installed into {1}\<org>\rpm\ by itself, at launch and then on a timer (AAC-AI, 2026-09-30: an hour after launch), and re-downloads the folder when a newer version is published. Sign in to the app as {0}, check that aac-skills from the claude-dotfiles marketplace is installed on that account, quit and reopen the app, leave it open an hour, then re-run the setup check. If it is still missing, copy rpm\<plugin id>\ by hand from a PC that has it; the app replaces a hand copy at its next sync after a newer version is published.'
+    foreach ($a in $accounts) {
+        $acctDir = Join-Path $root $a.uuid
+        $orgs = @(@($a.orgs) | Where-Object { $_ -and (Test-Path -LiteralPath (Join-Path $acctDir $_.uuid) -PathType Container) })
+        if ($orgs.Count -eq 0) {
+            Write-Line stop ('desktop app has no aac-skills copy for {0}: the app has not synced that account on this PC (no org folder under {1})' -f $a.label, $acctDir)
+            Add-Todo ($syncTodo -f $a.label, $acctDir)
+            continue
+        }
+        foreach ($org in $orgs) {
+            $rpm = Join-Path (Join-Path $acctDir $org.uuid) 'rpm'
+            $what = '{0} {1} org' -f $a.label, $org.name
+            $entries = $null
+            try { $entries = @((([System.IO.File]::ReadAllText((Join-Path $rpm 'manifest.json'))) | ConvertFrom-Json).plugins | Where-Object { $_ -and $_.name -eq 'aac-skills' -and $_.id }) } catch { }
+            $why = ''
+            $hit = $null
+            if ($null -eq $entries) {
+                $why = 'no readable rpm\manifest.json'
+            } elseif ($entries.Count -eq 0) {
+                $why = 'rpm\manifest.json does not list it'
+            } else {
+                foreach ($e in $entries) {
+                    try {
+                        $v = [string](([System.IO.File]::ReadAllText((Join-Path (Join-Path $rpm $e.id) '.claude-plugin\plugin.json'))) | ConvertFrom-Json).version
+                        $hit = '{0}, version {1}' -f $e.id, $v
+                        break
+                    } catch { }
+                }
+                if (-not $hit) { $why = ('rpm\manifest.json lists {0} but rpm\{0}\.claude-plugin\plugin.json is missing' -f $entries[0].id) }
+            }
+            if ($hit) {
+                Write-Line ok ('desktop app aac-skills copy for {0}  ({1})' -f $what, $hit)
+                continue
+            }
+            Write-Line stop ('desktop app has no aac-skills copy for {0}: {1}  ({2})' -f $what, $why, $rpm)
+            Add-Todo ($syncTodo -f $a.label, $acctDir)
+        }
+    }
+}
+
 # Every absolute path a hook command names - quoted or bare, drive-rooted or ~ (expanded to
 # $UserHome). Returns { Event; Path } objects.
 function Get-HookPaths {
@@ -669,6 +802,7 @@ function Test-Profile {
     Test-PullDrift
     $offered = Get-OfferedPluginVersion
     Test-Plugin (Join-Path $UserHome '.claude') $offered
+    Test-DesktopPluginCopy
     Test-Caveman $installCommand
 
     # Pull refreshes the personal profile from ~/.claude, so drift is judged on ~/.claude alone;
