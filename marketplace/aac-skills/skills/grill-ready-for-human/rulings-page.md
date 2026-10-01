@@ -3,9 +3,14 @@
 The same two phases as `SKILL.md`, across every repo at once, with a page in place of the question
 batch. **Ask** is a published artifact holding every open `ready-for-human` ticket with drafted
 options; the owner clicks through it and presses Submit. **Land** is a run that reads what Submit
-recorded and writes each ruling to GitHub. The weekday-morning digest task drives both: it lands
-first, then redrafts. The 30-minute lander task is off (Dan, 2026-09-29); Land may still be run by
-hand from any session.
+recorded and writes each ruling to GitHub. Two desktop scheduled tasks on AAC-AI drive it: `rulings-lander` runs Land every
+30 minutes on weekdays 8 AM to 6 PM Central, and the 5 AM `rulings-digest` lands first, then
+redrafts. The lander was off from 2026-09-29 to 2026-10-01; in that window two Submits (73 tickets
+on 2026-09-30, 21 on 2026-10-01) reached only a Cowork session with no GitHub write path and sat
+unlanded until a person noticed. Dan, 2026-10-01: "fix this so it never happens again". The lander
+stays enabled; the page promises a landing window, never "at once"; and the Submit comment sent to
+a watching session is a courtesy, not the landing path. Land may still be run by hand from any
+session with `gh` and a checkout.
 
 - Page: https://claude.ai/artifact/9wnfsMJFtUNGGoSh46bmDE (one URL for good; republish in place,
   never publish a second page, or the owner's saved picks stay behind on the old one).
