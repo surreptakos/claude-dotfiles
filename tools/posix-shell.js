@@ -14,9 +14,16 @@
  * `skip` is false when a shell was found, else the reason node:test prints. `run` is spawnSync
  * with that shell, and throws when the process never started, so a failure names the cause
  * instead of a null exit status.
+ *
+ * `input` reaches the child as a file on its stdin, never a pipe (issue 1143). spawnSync writes
+ * piped `input` while the child runs, so a child that exits without reading it (a hook's early
+ * `exit 0`) races that write: when the child wins, the write fails with EPIPE on Linux and EOF
+ * on Windows after a clean exit. A 1 MiB prompt, larger than any pipe buffer, loses every time.
+ * A file has no writer to fail, so the child may read all of its stdin or none of it.
  */
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 function gitForWindowsRoots() {
@@ -34,17 +41,33 @@ function resolve(name) {
   return gitForWindowsRoots().map((root) => path.join(root, 'bin', `${name}.exe`)).find((p) => fs.existsSync(p)) || null;
 }
 
+function started(r, exe, args) {
+  if (r.error) throw new Error(`${exe} ${args.join(' ')} did not start: ${r.error.message}`);
+  return r;
+}
+
 function shell(name) {
   const exe = resolve(name);
   return {
     path: exe,
     skip: exe ? false : `no ${name}: not on PATH and no Git for Windows bin/${name}.exe`,
-    run(args, opts) {
-      const r = spawnSync(exe, args, opts);
-      // EPIPE with an exit status: the child ran and exited without reading `input`. Windows
-      // reports the same broken pipe as EOF (DAN-INSPIRON15, 2026-09-30: status 3, code EOF).
-      if (r.error && !((r.error.code === 'EPIPE' || r.error.code === 'EOF') && r.status !== null)) throw new Error(`${exe} ${args.join(' ')} did not start: ${r.error.message}`);
-      return r;
+    run(args, opts = {}) {
+      const { input, ...rest } = opts;
+      if (input == null) return started(spawnSync(exe, args, rest), exe, args);
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'posix-shell-stdin-'));
+      const file = path.join(dir, 'stdin');
+      const enc = rest.encoding && rest.encoding !== 'buffer' ? rest.encoding : 'utf8';
+      fs.writeFileSync(file, typeof input === 'string' ? Buffer.from(input, enc) : input);
+      const fd = fs.openSync(file, 'r');
+      try {
+        const stdio = Array.isArray(rest.stdio) ? rest.stdio.slice() : [null, rest.stdio || 'pipe', rest.stdio || 'pipe'];
+        stdio[0] = fd;
+        return started(spawnSync(exe, args, { ...rest, stdio }), exe, args);
+      } finally {
+        fs.closeSync(fd);
+        // Tidy-up never decides the verdict: a grandchild the child left running may hold the file.
+        try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* left in the temp dir */ }
+      }
     },
   };
 }

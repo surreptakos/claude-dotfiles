@@ -30,7 +30,7 @@ PARTS = [
      ["Part XXI ", "Part XXII ", "Part XXIII ", "Part XXIV ", "Appendix A",
       "Appendix B"]),
     ("DRAFT-QUALITY.md",
-     "Rules 153-167. AI tells, machine vocabulary, phrase register, "
+     "Rules 153-170. AI tells, machine vocabulary, reader need, phrase register, "
      "structure register",
      ["Part XXV ", "Appendix G", "Appendix H"]),
     ("TERMINOLOGY.md",
@@ -80,11 +80,14 @@ def main(src, outdir):
         if not body:
             sys.exit(f"ERROR: no source sections matched {fname}")
         content = f"# AAC-WR-001 - {desc}\n\n" + "\n".join(body).strip() + "\n"
-        (out / fname).write_text(content, encoding="utf-8")
+        # newline="\n": on Windows the default turns every line into CRLF and
+        # the committed LF copies show as rewritten end to end.
+        (out / fname).write_text(content, encoding="utf-8", newline="\n")
         written.append((fname, len(content.split())))
 
     (out / "FRONT-MATTER.md").write_text(
-        "# AAC-WR-001 - control block\n\n" + front + "\n", encoding="utf-8")
+        "# AAC-WR-001 - control block\n\n" + front + "\n", encoding="utf-8",
+        newline="\n")
 
     orphans = [blocks[i][0] for i in range(len(blocks))
                if i not in used and blocks[i][0] not in DROP]
