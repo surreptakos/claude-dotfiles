@@ -62,7 +62,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      # tools/review-meaning.test.js drives the review scripts, which read the .docx through
+      # python-docx (issue 1242); it skips without it, and this variable turns that skip red.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -m pip install python-docx
       - name: tests/*.test.js and tools/*.test.js
+        env:
+          REVIEW_MEANING_REQUIRE_DOCX: '1'
         run: node --test tests/*.test.js tools/*.test.js
       # A gate never seen to fail is not known to work: plant one broken assertion and require the
       # same command to go red, then put the file back.

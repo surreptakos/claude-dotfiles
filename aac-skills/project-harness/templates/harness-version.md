@@ -1,6 +1,6 @@
 # Harness version
 
-    harness-version: 37
+    harness-version: 38
 
 Installed/upgraded: YYYY-MM-DD by the `project-harness` skill.
 

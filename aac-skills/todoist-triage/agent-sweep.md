@@ -102,8 +102,33 @@ returned the whole list). Drive files: the document link.
 The session the launcher starts works one Todoist task:
 
 1. Run `python3 .claude/hooks/check_payload.py`. A `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on.
-2. Read the task, its comments, and its source thread to the last message.
+2. Read the task, its comments, and its source thread to the last message; a meeting, by its Fathom transcript (§ Meeting content).
 3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named.
 4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made. Never send, file, sign, approve or pay anything.
 5. Swap `agent-running` for `agent-done` on the task, keeping every other label.
 6. If the work cannot be done from what the session can reach, say why in the comment and swap `agent-running` for `no-agent`, so the task is Dan's again.
+
+## Meeting content (Fathom)
+
+A task whose input is a meeting reads the meeting, not its recap email (issue 1215). The call that
+returns a transcript, run 2026-10-01 from a desktop Claude Code session on a meeting
+`search_meetings` found:
+
+1. `search_meetings` (`{"query": "<topic words>", "recorded_by": "anyone"}`) or `list_meetings`.
+   Each hit prints `id: <n>` and `url: https://fathom.video/calls/<m>`. The `id` is the
+   recording_id; the number in the URL is a call id, a different number.
+2. `get_meeting_transcript` with the id as a JSON integer, unquoted:
+   `{"recording_id": 123456789, "url": "<the hit's url>"}`. It returns the whole transcript, each
+   turn linked to its timestamp. `get_meeting_summary` takes `{"recording_id": 123456789}`.
+
+A quoted id fails. On 2026-10-01 (session ba3aee66) three agents passed it as a string and every
+summary and transcript call was rejected with:
+
+```
+Invalid arguments: value at /recording_id is not an integer
+```
+
+Holding only a Fathom link, `get_recording_by_url` (`{"url": "<link>"}`) returns the recording_id.
+No Fathom API key is in the desktop environment, so the connector is the only path. Where it still
+rejects an integer id, the Fathom recap email in Outlook is the fallback: it carries the summary but
+not the transcript, so the result says the transcript was not read.
