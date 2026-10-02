@@ -3,10 +3,10 @@ name: grill-with-docs
 description: A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.
 disable-model-invocation: false
 metadata:
-  modified: "2026-09-27T19:31:03Z"
-  previous-modified: "2026-09-21T03:41:57Z"
-  revision: "3"
-  content-sha: "bf380e304f51"
+  modified: "2026-10-01T23:30:29Z"
+  previous-modified: "2026-09-27T19:31:03Z"
+  revision: "4"
+  content-sha: "2028b062ed9d"
 ---
 
 Call the Skill tool twice, for "grilling" and "domain-modeling".

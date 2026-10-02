@@ -49,7 +49,7 @@ Two things neither the scripts nor a reading can see. An example with no date on
 
 ## Meaning checks
 
-Reading, and still a yes or no about one item. Run them after the format tests pass.
+Reading, and still a yes or no about one item. Run them after the format tests pass. The `meaning` command of either script runs every one it can decide: `review_meaning.py` holds one table that makes each check a rule, a Jev judgment or a reader check, so a new check here gets a row there.
 
 Per Strength and Weakness, in this order:
 
