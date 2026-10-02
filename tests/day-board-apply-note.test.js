@@ -19,7 +19,7 @@ function element(id){
 }
 const text = v => ({content: [{type: "text", text: JSON.stringify(v)}]});
 
-function buildPage({card, task, ruling, agentTasks, createSession}){
+function buildPage({card, task, ruling, agentTasks}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const calls = [];
@@ -28,7 +28,6 @@ function buildPage({card, task, ruling, agentTasks, createSession}){
     if (tool === "fetch-object") return text({type: "task", id: task.id, object: task});
     if (tool === "find-comments") return text({comments: []});
     if (tool === "find-tasks") return text({tasks: input.labels && agentTasks ? agentTasks : [], hasMore: false});
-    if (tool === "create_session") return createSession(input);
     if (tool === "update-tasks") return text({tasks: [], failures: []});
     return text({});
   }};
@@ -94,14 +93,20 @@ test("Apply my note on a note with no Todoist change writes nothing and leaves t
   assert.strictEqual(page.store["triage/t1"].proposal.ruling, null);
 });
 
-test("Launch agents without a session connector says so, keeps the agent label, and writes nothing", async () => {
-  const blocked = () => { throw {code: "not_in_manifest", message: "tool is not available on this connector or is blocked by your organization"}; };
-  const page = buildPage({card, task, ruling: null, agentTasks: [{id: "a1", content: "Investigate the deals report", labels: ["do", "agent"]}], createSession: blocked});
+// Issue 1202: every Claude Code Remote call rejects blocked_by_policy on Dan's account, so Launch agents
+// starts nothing. It counts the tasks labelled agent and says the agent-launcher routine starts them.
+test("Launch agents counts the agent tasks, says the routine starts them within 30 minutes, and writes nothing", async () => {
+  const agentTasks = [{id: "a1", content: "Investigate the deals report", labels: ["do", "agent"]}, {id: "a2", content: "Pull the permit list", labels: ["agent"]},
+    {id: "a3", content: "Already running", labels: ["agent-running"]}];
+  const page = buildPage({card, task, ruling: null, agentTasks});
   await new Promise(r => setImmediate(r));
+  page.calls.length = 0;
   await page.$("agent-go").fire("click");
   await settle();
   const status = page.$("agent-status").innerHTML;
-  assert.match(status, /Started 0 of 1 agents/);
-  assert.match(status, /cannot start agents on your account/);
-  assert.strictEqual(page.calls.filter(c => c.tool === "update-tasks").length, 0);
+  assert.match(status, /^2 tasks carry the agent label\. The agent-launcher routine on your PC starts each one in its own cloud session within 30 minutes/, status);
+  assert.match(status, /https:\/\/app\.todoist\.com\/app\/task\/a1/);
+  assert.doesNotMatch(status, /Already running/);
+  assert.deepStrictEqual(page.calls.map(c => c.server + " " + c.tool), ["Todoist find-tasks"]);
+  assert.doesNotMatch(script, /Claude Code Remote"\s*,\s*"create_session/);
 });
