@@ -2,10 +2,10 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-10-02T20:39:08Z"
-  previous-modified: "2026-10-02T20:32:06Z"
-  revision: "15"
-  content-sha: "e30340a0af9f"
+  modified: "2026-10-02T21:14:40Z"
+  previous-modified: "2026-10-02T20:39:08Z"
+  revision: "16"
+  content-sha: "b350be32b340"
 ---
 
 # AAC performance review audit
@@ -48,7 +48,7 @@ Gate 1 email:
 >
 > See the standards below:
 >
-> 1. Strengths and Weaknesses. Each is two sentences (Sum-Ex) or four sentences (SEER), and at least one in ten (rounded down, never fewer than one) is SEER. None contains "should," "must," "needs to," "would benefit from," "ought to," or "is expected to." Write the behavior; an instruction belongs in Guidance.
+> 1. Strengths and Weaknesses. Each is two sentences (Sum-Ex) or four sentences (SEER), and at least 30% (rounded down, never fewer than one) are SEER. None contains "should," "must," "needs to," "would benefit from," "ought to," or "is expected to." Write the behavior; an instruction belongs in Guidance.
 > 2. Core Message. Three sentences or fewer. Exactly one Rating phrase and one Result phrase. Third person about the direct, first person for the reviewer.
 > 3. Voice. No "you" or "your" anywhere on the page. The reviewer is "me," not "his manager."
 > 4. Review period. Dates covered are 12 months. A first review runs from the start date; every later review runs from the day after the prior review's period ended. For this review: [start] through [end]. Nothing on the page is dated after [end], and a figure that runs from [start] runs to [end].
