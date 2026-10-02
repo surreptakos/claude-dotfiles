@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when t
 
   '
 metadata:
-  modified: '2026-10-02T04:39:00Z'
-  previous-modified: '2026-10-02T00:15:18Z'
-  revision: '73'
-  content-sha: 8e57f8941bb8
+  modified: '2026-10-02T16:45:56Z'
+  previous-modified: '2026-10-02T04:39:00Z'
+  revision: '74'
+  content-sha: 1ee0316337fb
 ---
 
 # ticket-fleet
@@ -112,6 +112,12 @@ account.
 
    Done when the args carry the three required keys and every bullet above that fits this
    session.
+
+**While it runs, report only what a live check shows.** A launch is not evidence the wave is alive.
+Before saying a wave is running, check its process (or Workflow task) is alive and name the newest
+`agent/issue-*-wf_<runId>-*` branch push time (`git for-each-ref --sort=-committerdate`). On
+2026-10-02 a session told Dan a headless wave was "still running" three times on the strength of
+its launch; Dan asked whether that was true before anyone had looked.
 
 4. **Record the run.** When the workflow returns, run `node tools/fleet-run-record.js --latest` in
    the served repo from this session, not a subagent: the journal dies with the container. Where
