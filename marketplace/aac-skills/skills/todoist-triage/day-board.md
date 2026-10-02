@@ -29,7 +29,7 @@ After tier 1 is applied and the page is republished, before the status, one `Art
 
 ## The "Waiting on you" list (step 4, same batch)
 
-This run owns it. The forgotten-tasks routine runs on Dan's desktop without board access; the task it creates overnight carries only `claude`, so it lands in this queue — that is the handoff.
+This run owns it. The forgotten-task capture never writes to the board; the task it creates carries only `claude`, so it lands in this queue — that is the handoff.
 
 1. Read `waiting` first.
 2. For every open task whose source thread (read to its last message in step 3) ends with a named person asking Dan for something he has not answered, `set` `waiting/<taskId>`: `from` (that person), `subject` (thread subject), `receivedAt` (that last message's date), `link` (thread URL), `ask` (one clause), `todoistId`, `status: "open"`.
