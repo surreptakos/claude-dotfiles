@@ -8,12 +8,18 @@ The one copy of the standard a One Page performance review is written to and che
 
 **Voice.** Third person about the direct and first person for the reviewer, in every section including the Core Message. No "you" or "your" anywhere on the page. The reviewer is "me," not "his manager." Guidance points stay imperative with the possessives removed.
 
-**Strengths and Weaknesses.** Every item is SEER or Sum-Ex.
+**Strengths and Weaknesses.** Every item is SEER or Sum-Ex, chosen by how much room there is and how important the point is. Try SEER first; use Sum-Ex when SEER does not fit. The definitions below are Dan's wording (September 9, restated October 1, 2026) and are not paraphrased anywhere else.
 
-- SEER is exactly four sentences: Summarize, Elaborate, Example, Restate. Summarize states the pattern. Elaborate adds details or explains further. Example gives one specific example. Restate says the same thing again in a new way, without a new theme and without an instruction. "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
-- Sum-Ex is exactly two sentences: Summarize, then Example. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
-- One example per item, always. SEER for the points that matter most; Sum-Ex when SEER will not fit.
-- Keep commas in a review cell to a minimum: the fewer commas, the less room to misread it.
+- SEER takes more room and is for the more important points. Exactly four sentences:
+  1. Summarize: state the strength or weakness as a behavioral pattern, typical work product, or performance in a short, clear form.
+  2. Elaborate: add details or explain further.
+  3. Example: provide a specific example of the behavioral pattern, work product, or performance indicator that supports the claim.
+  4. Restate: write the strength or weakness again in a new way to make the meaning clear. No new theme and no instruction.
+
+  "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
+- Sum-Ex is two sentences, no more: Summarize, then Example, each as defined above. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
+- One example per item, always. At least four items on the page are SEER; the rest may be Sum-Ex (Dan, October 1, 2026, after a review of six two-sentence items read as thin next to one built mostly in SEER). SEER for the points that matter most.
+- In both techniques, avoid commas where possible: the fewer commas in a review, the less likely others will misunderstand it.
 - A Weakness that also appeared in the prior review says so in the body: "which was also noted in his last review."
 - "Opportunities for Improvement" means Weaknesses.
 
@@ -26,7 +32,7 @@ The one copy of the standard a One Page performance review is written to and che
 
 **Result definitions.** Promotion: ready now or during the year, and only after the reviewer has done the homework with HR and the skip-level first. Vertical Growth: more responsibility in areas he already works in, which in practice means the reviewer's own work handed down, including leadership tasks such as meetings, administration, reporting, or developing other reps. Horizontal Growth: tasks in an area he is not in today. No Change: he holds his current role and responsibilities for the year. It is fine for one year and a problem for two in a row; in the second year the reviewer tells him one more year is the limit before he is expected to broaden. A Ramification that lists the accounts he already owns is No Change. A Ramification that lists his Weaknesses is not a Ramification at all. The work handed over in a Vertical or Horizontal Growth Ramification is new to him, so no Strength has to show him already doing it, and the reviewer is never asked to evidence each item (Dan, September 24, 2026).
 
-**Guidance.** Every Guidance point is a bullet under "Guidance for the next year" that starts with an action verb and names a behavior or piece of work the reviewer wants to see next year. One to three sentences. It needs no details or measure yet (Manager Tools, OnePage section 7): "Successfully complete Project X" is enough when the two will settle what success means in the weeks after the review. Every Weakness has at least one Guidance point. Guidance can also carry new work and professional development that no Weakness asked for.
+**Guidance.** Every Guidance point is a bullet under "Guidance for the next year" that starts with an action verb and names a behavior or piece of work the reviewer wants to see next year. One to three sentences, every one of them an instruction for next year: no sentence that switches to describing the direct in the third person, no comment in the present tense on what the direct already does, and no promise in the future tense from the reviewer (Dan, October 1, 2026). It needs no details or measure yet (Manager Tools, OnePage section 7): "Successfully complete Project X" is enough when the two will settle what success means in the weeks after the review. Every Weakness has at least one Guidance point. Guidance can also carry new work and professional development that no Weakness asked for.
 
 **Length.** One page.
 
@@ -38,7 +44,7 @@ Mechanical: each is a yes or no on the text, with no judgment in it. `review_for
 
 1. Header: dates covered start and end on the period's start and end.
 2. Nothing anywhere on the page is dated after the period end, and no figure that runs from the period start stops before the period end. "From 7/24/25 through 6/30/26" against a 7/23/26 header fails. "As of 6/30/26" on a status is a data date and passes.
-3. Every Strength and Weakness is exactly two sentences or exactly four. Count them.
+3. Every Strength and Weakness is exactly two sentences or exactly four, and at least four of them are four. Count them.
 4. No Strength or Weakness contains "should," "must," "needs to," "would benefit from," "ought to," "is expected to," or "shall." The behavior goes in the item; an instruction belongs in Guidance.
 5. Core Message is three sentences or fewer and names one Rating and one Result.
 6. No "you" or "your" anywhere on the page, and no "his manager," "her manager," or "their manager" where the reviewer is meant.
@@ -53,7 +59,7 @@ Reading, and still a yes or no about one item. Run them after the format tests p
 
 Per Strength and Weakness, in this order:
 
-1. **Sentence roles match.** In SEER, sentence 1 is the pattern, sentence 2 adds detail, sentence 3 is one specific event or figure, and sentence 4 restates sentence 1 rather than adding a new theme or an instruction. In Sum-Ex, sentence 1 is the pattern and sentence 2 is the example. The example is one specific thing that happened, not a generic descriptor such as "stepped in." A date, figure or name helps and is not required: Manager Tools' own "He recently saved a difficult call after three other reps had failed" passes.
+1. **Sentence roles match.** In SEER, sentence 1 is the pattern, sentence 2 adds details about or explains further that same behavior, with the direct still its subject (“He consistently exceeds every standard”; how often, how much, where, with whom, or what the work involves), sentence 3 is one specific event or figure, and sentence 4 restates sentence 1 rather than adding a new theme or an instruction. In Sum-Ex, sentence 1 is the pattern and sentence 2 is the example. A sentence 2 that says why the behavior matters or what it costs the company is not Elaborate; it fails (Dan, September 9 and October 1, 2026). The example is one specific thing that happened, not a generic descriptor such as "stepped in." A date, figure or name helps and is not required: Manager Tools' own "He recently saved a difficult call after three other reps had failed" passes.
 2. **Behavior, not inference.** Sentence 1 names something the direct does that the reviewer can see or hear: what he says, how he says it, his expressions or body language, or his work product (quality, quantity, accuracy, timeliness, documents, relationships). A trait, motive, attitude, intent, idea or circumstance fails. "He is not committed to the team" is an inference; "he missed three of the last five team meetings" is behavior. "He owns a complex account book" is a circumstance: what does he do with it? An attitude or trait word may stand in sentence 1 only when the item's other sentences give the behavior it is read from: "shows good judgment" followed by what he did passes, and "lacks decisiveness" followed by "the clearest documented case" fails (Manager Tools, Aggregated Behaviors Are Performance; Shot Across The Bow Review).
 3. **Pattern, not one-off.** Sentence 1 says what he does repeatedly or how he performs over the period, even though only one example follows. "He closed the largest deal of the year" is a one-off. "He closes large multi-site projects" is a pattern, and the largest deal is the example under it.
 4. **One example.** One event: not two dated events in one sentence, not a list of accounts or functions, not his own self-appraisal quoted back as though the reviewer had observed it.

@@ -2,10 +2,10 @@
 name: aac-performance-review-audit
 description: Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit or gate a review, or asks for its rejection or coaching email.
 metadata:
-  modified: '2026-10-02T18:10:24Z'
-  previous-modified: '2026-10-01T23:09:59Z'
-  revision: '9'
-  content-sha: 105f2c8c4115
+  modified: '2026-10-02T19:34:43Z'
+  previous-modified: '2026-10-01T21:49:08Z'
+  revision: '13'
+  content-sha: f1d18914425d
 ---
 
 # AAC performance review audit
@@ -20,6 +20,7 @@ The "Performance Review Audits" project folder, when mounted, holds prior review
 
 ## Before anything
 
+0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). The House Layout Standard is now WR-001 Part XXVI, read through `aac-house-writing-standard`, so the project's layout file is no longer on this list. standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked a manager to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the Gate 2 repeat check cannot run without it.
 2. Compute the period start and end by the review-period rule in `standards.md`.
 3. Run both checks on the draft, whatever gate it stops at:
@@ -28,7 +29,7 @@ The "Performance Review Audits" project folder, when mounted, holds prior review
    python3 review_gate_tools.py meaning REVIEW.docx --direct FIRSTNAME
    ```
    Each writes `REVIEW.docx.gate.json`, and `build` refuses a Gate 1 or Gate 2 email without both runs on the file as it stands. `meaning` exit 2 means Jev could not answer (no key, 401, 402, timeout): it counts as not run, so stop and fix the access. If python-docx will not import, `pip install python-docx --break-system-packages`. Without LibreOffice (`soffice`) and `pdfinfo`, pass `--no-render`, count pages another way, and say so.
-4. Write one output file, "[Direct] [Year] - Audit of Rev [N].md": the email on top; below a line reading "Notes for Dan (delete before sending)", the file identification, period, gate reached and result, the script output with the `check` and `meaning` exit codes, anything parked for a later gate, and the reason behind every "please confirm." Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
+4. Write one output file, "[Direct] [Year] - Audit of Rev [N].md": the email on top; below a line reading "Notes for Dan (delete before sending)", the file identification, period, gate reached and result, the script output with the `check` and `meaning` exit codes, anything parked for a later gate, and the source behind every figure checked. Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
 5. Unanswered "open items" or drafting-tool notes in the manager's draft are his to answer. The Gate 1 opener may say so in one sentence, because they are his own document, not a preview of a later gate.
 
 Done when every file is named, the period is computed, and both exit codes are recorded under the Notes line.
@@ -47,7 +48,7 @@ Gate 1 email:
 >
 > See the standards below:
 >
-> 1. Strengths and Weaknesses. Each is two sentences (Sum-Ex) or four sentences (SEER). None contains "should," "must," "needs to," "would benefit from," "ought to," or "is expected to." Write the behavior; an instruction belongs in Guidance.
+> 1. Strengths and Weaknesses. Each is two sentences (Sum-Ex) or four sentences (SEER), and at least four are SEER. None contains "should," "must," "needs to," "would benefit from," "ought to," or "is expected to." Write the behavior; an instruction belongs in Guidance.
 > 2. Core Message. Three sentences or fewer. Exactly one Rating phrase and one Result phrase. Third person about the direct, first person for the reviewer.
 > 3. Voice. No "you" or "your" anywhere on the page. The reviewer is "me," not "his manager."
 > 4. Review period. Dates covered are 12 months. A first review runs from the start date; every later review runs from the day after the prior review's period ended. For this review: [start] through [end]. Nothing on the page is dated after [end], and a figure that runs from [start] runs to [end].
@@ -91,6 +92,10 @@ Every gate email, the coaching email, and any review text the audit writes or re
 3. Lint each text with the house skill's own linter, `../aac-house-writing-standard/scripts/wr001-lint.js` (a pinned copy beside this file sat at WR-001 v0.6 while the standard reached v0.10, and was deleted 2026-09-29). For a docx, extract the paragraphs and table cells to a .md file first. Email: `node ../aac-house-writing-standard/scripts/wr001-lint.js EMAIL.md`. Review: `node ../aac-house-writing-standard/scripts/wr001-lint.js REVIEW.md --prose`. Exit 0 is required: fix every error and every warning that is not a Rule 2 exception.
 4. Read for what the linter cannot see, and confirm Rule 166 item by item: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. Also Rule 106 (the attachment is named) and Rule 107 (an email that asks for action ends with how Dan learns it is done).
 5. Record under the Notes line: the `check`, `meaning` and `gate` exit codes for any review text, the linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.
+
+## Rebuilding the review itself
+
+When Dan takes a draft the rest of the way himself, the rebuilt review goes on the approved template beside this file, "DIRECT NAME - Annual Performance Review - YEAR (template, 2026-09-23).docx": title, header fields, Core Message, one table row per Strength and Weakness pair (extra rows removed), Guidance as the template's plain bullets with any "Guidance Point N:" label dropped. Never edit the manager's own file and call it the next revision: his file can carry an old layout, and Dan reads that as not the review template (Dan, October 1, 2026). Leave the Date and Method of delivery placeholders for the manager. Before showing it, set it beside Dan's most recent rebuilt review in the project folder and match its depth and form: SEER where the manager's own material supports it, Guidance without added measures, a Ramification in the template's "in the areas of" form. The reasons behind that rebuild are in the Notes of its audit file in the project folder; the conversation itself ran on another PC and is not on this one. A rebuild that shipped first as six Sum-Ex items read as weak to Dan (October 1, 2026). Run Gate 1 on the result, count pages in Word or LibreOffice, and save it beside the manager's draft so Dan can attach it.
 
 ## Building the Outlook docx
 
