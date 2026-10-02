@@ -30,7 +30,7 @@ const {
   classifyBranchLookup, classifyDelivery,
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
-  quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
+  quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput, normaliseShellResult,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -618,6 +618,10 @@ function laneScope(stubs) {
       if (typeof prop === 'symbol') return undefined;
       if (Object.prototype.hasOwnProperty.call(target, prop)) return target[prop];
       if (prop in globalThis) return globalThis[prop];
+      // Issue 1190: the workflow runtime's optional shell hook. Absent unless a harness stubs it,
+      // as it is absent from a runtime that does not offer one - never PERMISSIVE, which is a
+      // function and would read as "the runtime has a shell".
+      if (prop === 'shell') return undefined;
       return PERMISSIVE;
     },
   });
@@ -2695,6 +2699,7 @@ for (const instrument of ['gh', 'mcp']) {
 // consumes it. Extracted from the real source (not re-described) so drift is caught here.
 function treeGuardSetupBody(src) {
   return [
+    extractMarked(src, 'FLEET-SCRIPT-SHELL'),
     extractMarked(src, 'FLEET-TREE-GUARD-DEFS'),
     extractMarked(src, 'FLEET-TREE-GUARD-SETUP'),
     extractMarked(src, 'FLEET-TREE-GUARD-CHECK'),
@@ -2783,12 +2788,12 @@ const CLEAN = { newEntries: [] };
 // session's `cd` after Setup (simulated by never letting anything downstream re-consult
 // cfg.orchestratorCwd or a live cwd) cannot misdirect a later checkpoint, because the absolute
 // path was already baked into the command as a literal string at Setup.
-async function driveTreeGuard(agentMock, cfgOverrides = {}) {
+async function driveTreeGuard(agentMock, cfgOverrides = {}, extraScope = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
   const logs = [];
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable };\n}`);
-  const inner = await wrapper(laneScope({
+  const inner = await wrapper(laneScope(Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
     cfg: Object.assign({
@@ -2796,8 +2801,8 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
       treeGuardStateDir: '.git/orchestrator-tree-guard', reportModel: 'r', orchestratorCwd: '.',
     }, cfgOverrides),
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
-    checkpointCommand, parseCheckpointOutput,
-  }));
+    checkpointCommand, parseCheckpointOutput, normaliseShellResult,
+  }, extraScope)));
   return Object.assign(inner, { logs });
 }
 
@@ -2981,8 +2986,11 @@ test('treeGuardCheck: a reported root-tree write throws, naming the checkpoint a
 // checkout's root must be caught at the next checkpoint, moved aside and recorded for the run
 // result while the wave continues (issue 1006's restore-and-continue), not thrown. Issue 1093: the
 // commands are the combined ones - HEAD and tree in one shell - and the write is still attributed
-// to the ticket whose checkpoint saw it.
-test('tree guard present in this repo: default args baseline it active, and a root-tree write is caught, restored and recorded (issue 1020)', async (t) => {
+// to the ticket whose checkpoint saw it. Issue 1190: the same planted write, run twice - once with
+// each command run by a one-command agent (a runtime with no shell hook), once script-side through
+// the runtime's shell() with no agent at all - and both attribute it to the observing ticket.
+for (const mode of ['one-command agents', 'the runtime shell, no agent']) test(`tree guard present in this repo: default args baseline it active, and a root-tree write is caught, restored and recorded (issue 1020) - via ${mode} (issue 1190)`, async (t) => {
+  const viaShell = mode !== 'one-command agents';
   const os = require('node:os');
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const defaultScript = (src.match(/treeGuardScript: '([^']+)'/) || [])[1];
@@ -3006,14 +3014,23 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     fs.writeFileSync(path.join(orch, 'operator-notes.txt'), 'dirt from before the run\n');
     const orchPosix = BASH.run(['-c', 'pwd'], { cwd: orch, encoding: 'utf8' }).stdout.trim();
     const labels = [];
+    const shellCommands = [];
     const bashAgent = async (prompt, opts) => {
       labels.push(opts.label);
+      if (viaShell) throw new Error(`no agent may start when the runtime has a shell: ${opts.label}`);
       const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
       return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
     };
+    // The runtime's shell: the command itself, spawned here, answering in spawnSync's own shape
+    // ({status, stdout, stderr}) so normaliseShellResult is what the script reads it through.
+    const runtimeShellHook = (command) => {
+      shellCommands.push(command);
+      const r = BASH.run(['-c', command], { cwd: REPO_ROOT, encoding: 'utf8' });
+      return { status: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
     const { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, {
       orchestratorCwd: orchPosix, treeGuardStateDir: `${orchPosix}/.git/orchestrator-tree-guard`,
-    });
+    }, viaShell ? { shell: runtimeShellHook } : {});
     assert.equal(treeGuardUnusable, null, 'the baseline must not report the guard unusable');
     assert.ok(logs.some((l) => /^tree-guard: active - orchestrator-tree baseline taken .*1 pre-existing entry/.test(l)), JSON.stringify(logs));
     assert.ok(logs.some((l) => /^Orchestrator HEAD at Setup: \S+ \([0-9a-f]{12}\)/.test(l)), 'the same Setup command read HEAD for real');
@@ -3037,8 +3054,15 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     assert.ok(fs.existsSync(path.join(stateDir, quarantine[0], 'discoveries-bullets.json')), 'nothing is deleted: the write is moved aside inside .git');
     await treeGuardCheck('pre-report', 0); // the next checkpoint sees a clean tree again
     assert.equal(treeRestores.length, 1);
-    assert.deepEqual(labels, ['isolation:setup', 'isolation:implement-attempt1#7', 'isolation:deliver#7', 'tree-guard:restore:deliver#7', 'isolation:pre-report#0'],
-      'one agent per checkpoint; a second only to restore a write (issue 1093)');
+    if (viaShell) {
+      assert.deepEqual(labels, [], 'with a runtime shell no isolation agent starts (issue 1190)');
+      assert.deepEqual(shellCommands.map((c) => (/ (baseline|check|restore) /.exec(c) || [])[1]), ['baseline', 'check', 'check', 'restore', 'check'],
+        'Setup, each checkpoint and the restore each ran as one script-side command');
+    } else {
+      assert.deepEqual(labels, ['isolation:setup', 'isolation:implement-attempt1#7', 'isolation:deliver#7', 'tree-guard:restore:deliver#7', 'isolation:pre-report#0'],
+        'one agent per checkpoint; a second only to restore a write (issue 1093)');
+      assert.deepEqual(shellCommands, []);
+    }
 
     // The run result lists it under `inconsistent`, next to the HEAD restores.
     assert.match(src, /\.concat\(treeRestores\.map\(t => \(\{ ticket: t\.observedBy, kind: 'tree-guard'/,
@@ -3181,10 +3205,21 @@ test('treeGuardCheck: the start branch moved to another sha at deliver is reset 
 // A whole wave - Setup, the lanes, the pre-report checkpoint and the report writer - with the
 // real guard block and a mocked agent. `wave` is ticket numbers; `hooks.deliver(n)` runs inside
 // each deliverer; `hooks.isolation(label)` may answer an isolation read before the default does.
-async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', hooks = {}, head = () => 'a'.repeat(40) } = {}) {
+// `runtimeShell: true` (issue 1190) gives the wave a workflow runtime that offers shell(): the real
+// revParse runs too, and every one-command step - Setup, tip reads, checkpoints - is answered by
+// that shell and recorded in `shellCommands`, never by an agent.
+const BRANCH_TIP = 'b'.repeat(40);
+async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', hooks = {}, head = () => 'a'.repeat(40), runtimeShell = false } = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const helpers = loadStableHelpers(FLEET_SCRIPT);
-  const calls = [], restores = [];
+  const calls = [], restores = [], shellCommands = [];
+  const shellHook = (command) => {
+    shellCommands.push(command);
+    if (/ baseline /.test(command)) return { exitCode: 0, stdout: isolationStdout({ cwd: '/m', head: { branch: 'main', sha: head() }, guard: { statePath: '/m/s.json', baselineCount: 0 } }), stderr: '' };
+    if (/ check /.test(command)) return { exitCode: 0, stdout: isolationStdout({ head: { branch: 'main', sha: head() }, guard: CLEAN }), stderr: '' };
+    if (/rev-parse --verify/.test(command)) return { exitCode: 0, stdout: `${BRANCH_TIP}\nSPELLING=origin\n`, stderr: '' };
+    throw new Error(`unexpected script-side command: ${command}`);
+  };
   const agentMock = async (prompt, opts) => {
     const l = opts.label;
     calls.push(l);
@@ -3198,7 +3233,7 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     if (l.startsWith('impl:')) {
       return { branch: prompt.match(/agent\/issue-\d+-attempt\d+-wf_testrun-w\d+/)[0], committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [`${n} found a thing`] };
     }
-    if (l.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (l.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [], worktree: { path: '/scratch/v', head: BRANCH_TIP } };
     if (l.startsWith('deliver:')) {
       if (hooks.deliver) hooks.deliver(n);
       return { pushed: true, prUrl: `https://github.com/x/y/pull/${n}`, mergeStatus: 'clean', conflictPaths: [] };
@@ -3206,7 +3241,8 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     if (l === 'followups-writer') return { branch: 'b', sha: 's', prUrl: '', appended: 3 };
     throw new Error(`unexpected agent label: ${l}`);
   };
-  const body = [treeGuardSetupBody(src), extractMarked(src, 'FLEET-DELIVER-PROMPT'), extractCodeLane(src),
+  const body = [treeGuardSetupBody(src), runtimeShell ? extractMarked(src, 'FLEET-TIP-REVPARSE') : '',
+    extractMarked(src, 'FLEET-DELIVER-PROMPT'), extractCodeLane(src),
     extractMarked(src, 'FLEET-LANES'), extractMarked(src, 'FLEET-REPORT')].join('\n');
   // What the script runs after the wave: the pre-report checkpoint, then the report writer.
   const tail = "await treeGuardCheck('pre-report', 0)\nassertNoBreach()\n"
@@ -3214,7 +3250,7 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     + 'return { results, breaches, headRestores, discoveryReport }';
   const logs = [];
   const run = new AsyncFunction('scope', `with (scope) {\n${body}\n${tail}\n}`);
-  const out = await run(laneScope({
+  const out = await run(laneScope(Object.assign({
     agent: agentMock, log: (m) => logs.push(m),
     cfg: {
       treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js', treeGuardStateDir: '.git/orchestrator-tree-guard',
@@ -3232,8 +3268,8 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     wave: wave.map((number) => ({ number, kind: 'code', title: 't', criteria: '', blockedBy: [] })),
     buildLanes, chainGate, DISCOVERY_REPORT: {},
     pipeline: async (items, fn) => { const res = []; for (const i of items) res.push(await fn(i)); return res; },
-  }));
-  return { out, calls, restores, logs, src };
+  }, runtimeShell ? { shell: shellHook, normaliseShellResult, buildTipLookupCommand, parseTipLookupOutput } : {})));
+  return { out, calls, restores, logs, src, shellCommands };
 }
 
 test('a wave whose deliverer merges and resets the orchestrator checkout still delivers every other ticket and runs the report writer, and the run result names the breach (issue 1006)', async () => {
@@ -3290,6 +3326,38 @@ test('a 2-ticket wave with one attempt each starts at most 8 guard or probe agen
   }
   // The worktree canary rides in the env probe (Scout) now: no Setup agent of its own.
   assert.ok(!unpinned.src.includes("label: 'worktree-canary'"), 'the worktree canary is not a separate agent any more');
+});
+
+// Issue 1190 acceptance: run 6abddb76 started 43 agents for 5 tickets, 17 of them `isolation:*`
+// and `tip:*` agents running one command each. With a runtime shell those commands run
+// script-side, so a 4-ticket, 1-attempt wave starts at most 20 agents: its implementers,
+// verifiers and deliverers, the report writer, and the once-per-run agents listed below. Every
+// agent label in the script must sit in one of the three lists, so a new per-run agent cannot slip
+// past this count unnoticed.
+test('a 4-ticket wave with one attempt each starts at most 20 agents when the runtime has a shell - tip reads and checkpoints run script-side (issue 1190)', async () => {
+  const { out, calls, shellCommands, src } = await driveGuardedWave([21, 22, 23, 24], { verifierAgentType: null, runtimeShell: true });
+  // Agents this harness does not drive, each started once per run in a claude-dotfiles code wave.
+  const PER_RUN = ['fleet-refresh-repo', 'env-probe', 'scout', 'blocker-state', 'open-pr-scan@', 'difficulty', 'editable-guard:post-wave'];
+  // Labels that start nothing in such a wave: a cfg default, another served repo's refresh, finish
+  // mode, the probe and human lanes, and the push retry for an implementer that did not push.
+  const NOT_THIS_WAVE = ['ready-for-agent', 'fleet-refresh', 'journal-read:', 'probe:#', 'handoff:#', 'push:#'];
+  // Labels driveGuardedWave runs for real (restores only start when something moved).
+  const HARNESSED = ['isolation:setup', 'tree-guard:restore:', 'orchestrator-head:restore:', 'impl:#', 'deliver:#', 'followups-writer'];
+  const literal = [...src.matchAll(/label: (?:'([^']+)'|`([^`$]*))/g)].map((m) => (m[1] !== undefined ? m[1] : m[2]));
+  for (const l of literal) {
+    assert.ok(PER_RUN.includes(l) || NOT_THIS_WAVE.includes(l) || HARNESSED.includes(l), `agent label ${l} is in no list - count it`);
+  }
+  for (const l of PER_RUN) assert.ok(literal.includes(l), `${l} is no longer an agent label; drop it from PER_RUN`);
+
+  assert.deepEqual(calls.filter((l) => /^(isolation:|tip:|tree-guard:|orchestrator-head:)/.test(l)), [], 'no isolation or tip agent starts');
+  assert.deepEqual(calls, [21, 22, 23, 24].flatMap((n) => [`impl:#${n}.1`, `verify:#${n}.1`, `deliver:#${n}`]).concat('followups-writer'));
+  const total = calls.length + PER_RUN.length;
+  assert.ok(total <= 20, `a 4-ticket, 1-attempt wave starts ${total} agents; the budget is 20`);
+  // The commands still all ran - script-side: Setup, then per ticket the Implement checkpoint, the
+  // tip read, the (unpinned) Verify checkpoint and the Deliver checkpoint, then pre-report.
+  const kind = (c) => (/ baseline /.test(c) ? 'setup' : / check .*--label (\S+)/.test(c) ? / check .*--label (\S+)/.exec(c)[1] : /rev-parse --verify/.test(c) ? 'tip' : c);
+  assert.deepEqual(shellCommands.map(kind), ['setup'].concat([21, 22, 23, 24].flatMap(() => ['implement-attempt1', 'tip', 'verify-attempt1', 'deliver']), 'pre-report'));
+  assert.deepEqual(out.results.map((r) => r && r.prUrl), [21, 22, 23, 24].map((n) => `https://github.com/x/y/pull/${n}`), 'the tip read still feeds the verdict cross-check: every verdict matched it');
 });
 
 test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
@@ -3379,18 +3447,18 @@ test('parseTipLookupOutput: an unrecognised marker value is ignored, falling thr
 // that returns exactly the shape the tip agent would report - so the acceptance criterion "a mocked
 // agent whose first rev-parse fails and whose origin/ fallback answers" is driven at the same
 // abstraction the agent itself operates at: what came back on stdout, not which JS branch ran.
-function driveRevParse(agentMock, logs = []) {
+function driveRevParse(agentMock, logs = [], extraScope = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const generated = generatedBlock(FLEET_SCRIPT); // buildTipLookupCommand, parseTipLookupOutput live here
-  const revParseBody = extractMarked(src, 'FLEET-TIP-REVPARSE');
+  const revParseBody = extractMarked(src, 'FLEET-SCRIPT-SHELL') + '\n' + extractMarked(src, 'FLEET-TIP-REVPARSE');
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${generated}\n${revParseBody}\nreturn revParse;\n}`);
-  return wrapper(laneScope({
+  return wrapper(laneScope(Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
     cfg: { deliverModel: 'z' },
     orchestratorCwd: '/abs/orchestrator',
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
-  }));
+  }, extraScope)));
 }
 
 test('revParse: a branch present only as origin/<branch> still returns its tip and the run is told which spelling answered (issue 561)', async () => {
@@ -3443,6 +3511,48 @@ test('revParse: an agent() throw is still caught and reported through unusableRe
   assert.equal(logs.length, 1);
   assert.match(logs[0], /output unusable.*StructuredOutput retry cap exceeded/);
   assert.match(logs[0], /worktree HEAD cannot be cross-checked/);
+});
+
+// Issue 1190: with a runtime shell the tip read is a script-side step - the same fallback-chain
+// command, run by the runtime against a real checkout, and no tip agent at all. The result is the
+// sha the verdict cross-check reads either way.
+test('revParse: with a runtime shell the tip is read script-side, no agent, and resolves to the same sha (issue 1190)', async (t) => {
+  if (BASH.skip) { t.skip(BASH.skip); return; }
+  const os = require('node:os');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-tip-1190-'));
+  try {
+    const run = (...args) => spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: tmp, encoding: 'utf8' });
+    run('init', '-q'); fs.writeFileSync(path.join(tmp, 'f'), 'x\n'); run('add', 'f'); run('commit', '-q', '-m', 'c');
+    run('branch', 'agent/issue-1190-attempt1');
+    const want = run('rev-parse', 'agent/issue-1190-attempt1').stdout.trim();
+    const orchPosix = BASH.run(['-c', 'pwd'], { cwd: tmp, encoding: 'utf8' }).stdout.trim();
+    const logs = [], agents = [], commands = [];
+    const shellHook = async (command) => {
+      commands.push(command);
+      const r = BASH.run(['-c', command], { cwd: tmp, encoding: 'utf8' });
+      return { exitCode: r.status, stdout: r.stdout, stderr: r.stderr };
+    };
+    const revParse = await driveRevParse(async (p, opts) => { agents.push(opts.label); throw new Error('no tip agent'); }, logs,
+      { shell: shellHook, orchestratorCwd: orchPosix, normaliseShellResult });
+    assert.equal(await revParse('agent/issue-1190-attempt1', 'tip:#1190.1'), want, 'the script-side read returns the branch tip');
+    assert.equal(await revParse('agent/issue-1190-absent', 'tip:#1190.2'), null, 'an unresolvable ref is still null, not a guess');
+    assert.deepEqual(agents, [], 'no tip agent starts when the runtime has a shell');
+    assert.equal(commands.length, 2);
+    assert.equal(commands[0], buildTipLookupCommand(orchPosix, 'agent/issue-1190-attempt1'), 'the runtime runs the same fallback-chain command the agent was handed');
+    assert.ok(logs.includes(`tip:#1190.1: resolved agent/issue-1190-attempt1 via given to ${want}`), JSON.stringify(logs));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('normaliseShellResult: any runtime shell answer becomes the one {exitCode, stdout, stderr} shape, never a guessed exit 0 (issue 1190)', () => {
+  assert.deepEqual(normaliseShellResult({ exitCode: 1, stdout: 'o', stderr: 'e' }), { exitCode: 1, stdout: 'o', stderr: 'e' });
+  assert.deepEqual(normaliseShellResult({ status: 3, stdout: Buffer.from('b') }), { exitCode: 3, stdout: 'b', stderr: '' });
+  assert.deepEqual(normaliseShellResult({ code: 0, stdout: null }), { exitCode: 0, stdout: '', stderr: '' });
+  assert.deepEqual(normaliseShellResult('just stdout'), { exitCode: null, stdout: 'just stdout', stderr: '' });
+  assert.deepEqual(normaliseShellResult({ stdout: 'x' }), { exitCode: null, stdout: 'x', stderr: '' });
+  assert.equal(normaliseShellResult(undefined), null);
+  assert.equal(normaliseShellResult(42), null);
 });
 
 test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries a spelling field (issue 561)`, () => {

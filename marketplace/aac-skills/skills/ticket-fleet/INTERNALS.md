@@ -63,7 +63,9 @@ The two forks carry the isolation guard too, and a fleet-refresh never touches t
 a guard change reaches them the same way: re-copy. Issue 1093 changed its shape without a contract
 bump - one Setup agent, one agent per checkpoint, no Verify checkpoint for a pinned verifier, the
 canary in `env-probe` - and until a fork is re-copied it still starts the old two agents per
-checkpoint.
+checkpoint. Issue 1190 moved the same commands script-side without a bump either: a fork that has
+not been re-copied still starts one agent for every tip read and checkpoint, even under a runtime
+that offers `shell()`.
 
 Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
 `tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
@@ -231,6 +233,26 @@ each 74-76k tokens to run one line of shell (issue 1093). So one agent now does 
 A 2-ticket wave with one attempt each starts 8 of these agents with an unpinned verifier (a cloud
 session) and 6 with a pinned one, where it started 20 (4 Setup, 16 checkpoint); the budget test in
 `tools/ticket-fleet-branch.test.js` counts them.
+
+## Script-side shell steps
+
+Run `6abddb76` (2026-10-01, 5 tickets) still started 43 agents, 17 of them `isolation:*` and `tip:*`
+agents running one command each (issue 1190). None of those commands needs judgement, so the
+script runs each itself through `runOneCommand`: Setup, every tip read, every checkpoint and both
+restores go to the workflow runtime's `shell(command)` hook when the runtime offers one, and no
+agent starts. The hook must run the command in a POSIX shell (the commands use `$(...)`, `[ -f ]`
+and `||` chains). Its answer goes through `normaliseShellResult` into the `{exitCode, stdout,
+stderr}` shape the one-command agent reports, so `parseTipLookupOutput` and
+`parseCheckpointOutput` read the same thing either way; an exit code it cannot read is `null`,
+never 0, so it can never pass as a clean tree. A runtime without the hook gets the one-command
+agent, prompt and schema unchanged, and the run log says which of the two the wave used.
+
+With the hook, a 4-ticket wave with one attempt each starts at most 20 agents: 12 implementers,
+verifiers and deliverers, the report writer, and seven once-per-run agents (`fleet-refresh-repo`,
+`env-probe`, `scout`, `blocker-state`, `open-pr-scan`, `difficulty`, `editable-guard:post-wave`;
+a served repo whose copy is refreshed adds `fleet-refresh`). The budget test in `tools/ticket-fleet-branch.test.js` counts them and fails on an agent label it
+cannot place. The planted-write test runs once each way and attributes the write to the observing
+ticket both times.
 
 ## The scratchpad is one per run, not one per worker
 

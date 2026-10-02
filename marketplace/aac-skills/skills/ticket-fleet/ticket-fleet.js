@@ -30,7 +30,7 @@ export const meta = {
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
-    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after an unpinned Verify, after Deliver, and before Report - one agent each, reading HEAD and the tree in one command; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issues 807, 1093)' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after an unpinned Verify, after Deliver, and before Report - one command each, reading HEAD and the tree together, run script-side in the runtime shell (no agent) where the runtime has one, else by one agent; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issues 807, 1093, 1190)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
@@ -1075,6 +1075,29 @@ function parseCheckpointOutput(stdout) {
   if (branch && sha && /^[0-9a-f]{40,64}$/.test(sha)) out.head = { branch: branch === 'DETACHED' ? null : branch, sha };
   return out;
 }
+
+/**
+ * Issue 1190: a tip read or an isolation checkpoint is ONE fixed shell command, and when the
+ * workflow runtime offers a shell of its own the script runs that command itself - no agent - and
+ * hands the result to the same parser the one-command agent's report goes through. Pure: whatever
+ * the runtime's shell returned in, the `{exitCode, stdout, stderr}` shape the REV, TREE_GUARD and
+ * ISOLATION_READ schemas carry out, so every caller reads one shape whichever ran the command.
+ * Accepts an object naming the exit code `exitCode`, `code` or `status`, or a bare stdout string
+ * (no exit code).
+ * An exit code it cannot read is null - never 0: the guard callers treat anything but 0 as
+ * could-not-audit, and a guessed 0 would read as a clean tree.
+ *
+ * @param {string|{exitCode?: number, code?: number, status?: number, stdout?: string, stderr?: string}|null|undefined} raw
+ * @returns {{exitCode: number|null, stdout: string, stderr: string}|null} null when nothing came back.
+ */
+function normaliseShellResult(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') return { exitCode: null, stdout: raw, stderr: '' };
+  if (typeof raw !== 'object') return null;
+  const exitCode = [raw.exitCode, raw.code, raw.status].find((c) => Number.isInteger(c));
+  const text = (v) => (v === null || v === undefined ? '' : String(v));
+  return { exitCode: exitCode === undefined ? null : exitCode, stdout: text(raw.stdout), stderr: text(raw.stderr) };
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -1339,11 +1362,34 @@ function failuresOf(verdict) {
 // the reason and reset time once (halt) and the tickets that never started (notAttempted).
 const runHalt = createRunHalt(log)
 
+// ---- script-side shell steps (issue 1190) ----
+// A tip read, Setup, every isolation checkpoint and both restores are each ONE fixed shell command
+// whose output the script parses itself; the agent that used to run it judged nothing and was
+// pure boot cost (run 6abddb76: 17 of 43 agents ran one command each, about 75k tokens apiece).
+// `runOneCommand` runs that command script-side through the workflow runtime's own shell hook,
+// `shell(command)`, whenever the runtime offers one: no agent starts, and the runtime's answer is
+// normalised (normaliseShellResult, generated block) to the {exitCode, stdout, stderr} shape the
+// one-command agent reports, so every caller below parses one shape whichever ran the command.
+// The commands are bash (`o="$(pwd)"`, `[ -f ... ]`, `||` chains), so the hook must run them in a
+// POSIX shell. A runtime without the hook gets the one-command agent, prompt and schema unchanged.
+// A throw from the hook is handled exactly as an agent() throw is: the caller's catch.
+// [FLEET-SCRIPT-SHELL-START]
+const runtimeShell = typeof shell === 'function' ? shell : null
+async function runOneCommand(command, prompt, opts) {
+  if (runtimeShell) return normaliseShellResult(await runtimeShell(command))
+  return agent(prompt(command), Object.assign({}, opts, { effort: cfg.effort }))
+}
+// [FLEET-SCRIPT-SHELL-END]
+log(runtimeShell
+  ? 'Script-side shell (issue 1190): the workflow runtime offers shell() - tip reads, Setup, isolation checkpoints and restores run in it, with no agent each.'
+  : 'Script-side shell (issue 1190): this workflow runtime offers no shell() hook - each tip read, Setup, isolation checkpoint and restore runs as a one-command agent instead.')
+
 // ---- the expected tip a verdict is cross-checked against (issue 404) ----
-// A workflow script has no shell of its own, so the tip is read by an agent that runs ONE fixed
-// command and copies its output back - the shape the tree guard already uses, for the same reason:
-// nothing is left to the agent's judgement, so a paraphrase is detectable. The prompt names only a
-// ref, so its cache key is stable across a resume and a resumed run replays the same sha.
+// The tip is read by ONE fixed command whose output the script parses - script-side through the
+// runtime's shell (issue 1190, above), else by an agent that runs it and copies its output back -
+// the shape the tree guard already uses, for the same reason: nothing is left to judgement, so a
+// paraphrase is detectable. The prompt names only a ref, so its cache key is stable across a
+// resume and a resumed run replays the same sha.
 //
 // Issue 561: a branch handed in through `priorImpl` from an earlier run, or pushed by an
 // implementer in another container, exists only as `origin/<branch>` in the orchestrator's own
@@ -1363,10 +1409,10 @@ const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
 async function revParse(ref, label) {
   let res = null
   try {
-    res = await agent(
+    res = await runOneCommand(buildTipLookupCommand(orchestratorCwd, ref), (command) =>
     `Run exactly this one bash command and report its result:
 
-${buildTipLookupCommand(orchestratorCwd, ref)}
+${command}
 
 The path is the orchestrator's own checkout, measured absolute at Setup (issue 562) - it is baked
 into the command already, so do not cd anywhere first and do not substitute a bare \`git rev-parse\`
@@ -1378,8 +1424,7 @@ the output. Return the command's REAL exit code plus its stdout and stderr VERBA
 SPELLING= marker line stdout printed (if any) in \`spelling\` - "given" or "origin" copied exactly,
 or "" when stdout has no such line (either nothing resolved, or the ls-remote fallback answered,
 which prints no marker of its own).`,
-    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: cfg.effort }
-    )
+    { label, phase: 'Verify', schema: REV, model: cfg.deliverModel, effort: cfg.effort })
   } catch (err) {
     runHalt.note((err && err.message) || err, label)
     log(`${unusableReason(label, (err && err.message) || err)} - the verifier's worktree HEAD cannot be cross-checked.`)
@@ -1415,7 +1460,9 @@ which prints no marker of its own).`,
 // agent whose command reads HEAD and runs the tree check together - as Setup is one agent for the
 // path, HEAD and baseline. A 2-ticket wave with one attempt each now starts 1 + 2x3 + 1 = 8 of
 // them with an unpinned verifier and 6 with a pinned one (it was 4 Setup + 14 checkpoint agents,
-// more on a reread). A new entry a checkpoint finds is RESTORED and the wave continues (claude-dotfiles
+// more on a reread). Issue 1190: where the workflow runtime offers a shell, none of them is an agent
+// any more - each command runs script-side (runOneCommand, above) and a wave's agent count comes
+// down to roughly its implementers, verifiers and deliverers. A new entry a checkpoint finds is RESTORED and the wave continues (claude-dotfiles
 // issue 1020, the dirt half of issue 1006's restore-and-continue): the guard tool moves the tree's
 // copy into a quarantine inside .git, puts the path back as HEAD had it, and the run result lists
 // it under `inconsistent`. Only an entry the restore cannot put back THROWS. A throw inside a
@@ -1671,7 +1718,8 @@ function normaliseMeasuredCwd(cwd) {
 }
 let orchestratorCwd = cfg.orchestratorCwd
 const measureCwd = orchestratorCwd === '.'
-// Issue 1093: ONE Setup agent. Its command measures the path (when the default '.' asks for it),
+// Issue 1093: ONE Setup command (script-side where the runtime has a shell, issue 1190; else one
+// agent). It measures the path (when the default '.' asks for it),
 // reads HEAD (issue 807) and takes the tree-guard baseline (issue 192) in one shell, the baseline
 // last so the command's exit code is the guard's. Wrapped (aac-routines issue 270): an agent that
 // blows the StructuredOutput retry cap throws out of agent(...), and an unwrapped throw here would
@@ -1682,8 +1730,8 @@ if (measureCwd || headWatchOn || treeGuardOn) {
     ? `[ -f ${cfg.treeGuardScript} ] || exit 3; ${GUARD_CMD} baseline --cwd "$o" --state-dir ${cfg.treeGuardStateDir}`
     : null
   try {
-    setupRes = await agent(
-      checkpointAgentPrompt(checkpointCommand({ cwd: measureCwd ? null : orchestratorCwd, head: headWatchOn, guard: baselineCmd })),
+    setupRes = await runOneCommand(
+      checkpointCommand({ cwd: measureCwd ? null : orchestratorCwd, head: headWatchOn, guard: baselineCmd }), checkpointAgentPrompt,
       { label: 'isolation:setup', phase: 'Setup', schema: ISOLATION_READ, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
@@ -1757,9 +1805,9 @@ async function treeGuardCheck(label, ticketNumber) {
   // A breach already recorded elsewhere in the wave fails this chain too, before it can spend
   // another sub-session or reach Deliver.
   assertNoBreach()
-  // Issue 1093: one agent reads HEAD and the tree together. A moved HEAD is put back first and the
-  // re-read after the restore carries a fresh tree check, so the tree verdict below is never read
-  // off a checkout that was still on the wrong ref.
+  // Issue 1093: one command reads HEAD and the tree together (script-side where it can, issue
+  // 1190). A moved HEAD is put back first and the re-read after the restore carries a fresh tree
+  // check, so the tree verdict below is never read off a checkout that was still on the wrong ref.
   let snap = await isolationRead(label, ticketNumber)
   if (snap === 'halted') return
   if (headWatchOn) {
@@ -1794,8 +1842,8 @@ async function treeGuardCheck(label, ticketNumber) {
   // back as HEAD had it, and re-reads the tree; only an entry it cannot put back ends the chain.
   let restore = null, restoreError = null
   try {
-    restore = await agent(
-      guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${shellWord(guardStatePath)} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
+    restore = await runOneCommand(
+      `${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${shellWord(guardStatePath)} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`, guardAgentPrompt,
       { label: `tree-guard:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
@@ -1846,7 +1894,7 @@ async function headCheck(label, ticketNumber, now) {
   const target = describeHead(start)
   let res = null
   try {
-    res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, start)),
+    res = await runOneCommand(restoreCommand(orchestratorCwd, start), headAgentPrompt,
       { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) { res = null }
   const after = await isolationRead(`${label}-restored`, ticketNumber)
@@ -1864,8 +1912,9 @@ async function headCheck(label, ticketNumber, now) {
 }
 
 /**
- * Issue 1093: the one agent a checkpoint starts - HEAD (while the HEAD watch is on) and the tree
- * guard's `check` (while the guard is on) in a single command against the Setup-measured path.
+ * Issue 1093: the one command a checkpoint runs - HEAD (while the HEAD watch is on) and the tree
+ * guard's `check` (while the guard is on) together against the Setup-measured path; script-side in
+ * the runtime's shell when it has one, else by one agent (runOneCommand, issue 1190).
  * Returns 'halted' when the agent died on the run's quota (issue 812: logged as not audited, never
  * a verdict), else { res, agentError, head, report }: head null when unreadable, report the
  * guard's parsed JSON or null (a could-not-audit for the caller to throw on).
@@ -1880,7 +1929,7 @@ async function isolationRead(tag, ticketNumber) {
   // out of agent(...) after the StructuredOutput retry cap. That throw is a could-not-audit, and
   // could-not-audit is never a pass - the caller turns it into the named throw, carrying this text.
   try {
-    res = await agent(checkpointAgentPrompt(checkpointCommand({ cwd: orchestratorCwd, head: headWatchOn, guard: checkCmd })),
+    res = await runOneCommand(checkpointCommand({ cwd: orchestratorCwd, head: headWatchOn, guard: checkCmd }), checkpointAgentPrompt,
       { label: who, phase: 'Isolation guard', schema: ISOLATION_READ, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) {
     agentError = unusableReason(who, (err && err.message) || err)

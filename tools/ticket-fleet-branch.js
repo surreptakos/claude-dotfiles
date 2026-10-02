@@ -1006,6 +1006,29 @@ function parseCheckpointOutput(stdout) {
   return out;
 }
 
+/**
+ * Issue 1190: a tip read or an isolation checkpoint is ONE fixed shell command, and when the
+ * workflow runtime offers a shell of its own the script runs that command itself - no agent - and
+ * hands the result to the same parser the one-command agent's report goes through. Pure: whatever
+ * the runtime's shell returned in, the `{exitCode, stdout, stderr}` shape the REV, TREE_GUARD and
+ * ISOLATION_READ schemas carry out, so every caller reads one shape whichever ran the command.
+ * Accepts an object naming the exit code `exitCode`, `code` or `status`, or a bare stdout string
+ * (no exit code).
+ * An exit code it cannot read is null - never 0: the guard callers treat anything but 0 as
+ * could-not-audit, and a guessed 0 would read as a clean tree.
+ *
+ * @param {string|{exitCode?: number, code?: number, status?: number, stdout?: string, stderr?: string}|null|undefined} raw
+ * @returns {{exitCode: number|null, stdout: string, stderr: string}|null} null when nothing came back.
+ */
+function normaliseShellResult(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw === 'string') return { exitCode: null, stdout: raw, stderr: '' };
+  if (typeof raw !== 'object') return null;
+  const exitCode = [raw.exitCode, raw.code, raw.status].find((c) => Number.isInteger(c));
+  const text = (v) => (v === null || v === undefined ? '' : String(v));
+  return { exitCode: exitCode === undefined ? null : exitCode, stdout: text(raw.stdout), stderr: text(raw.stderr) };
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -1035,5 +1058,5 @@ module.exports = {
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
-  quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
+  quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput, normaliseShellResult,
 };
