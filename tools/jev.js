@@ -10,6 +10,8 @@
 // never throws: the caller's own code answers then. Jev is an addition, not a dependency.
 //
 //   askJev(state, questions, opts)      -> Promise<answers | null>
+//     opts.onStatus(code): called with Jev's HTTP status when one arrives, so a caller can tell a
+//     402 (no credits) from a refused key without a second client (issue 1194)
 //   askJevSync(state, questions, opts)  -> answers | null   (runs askJev in a child node process)
 'use strict';
 
@@ -60,6 +62,7 @@ function askJev(state, questions, opts) {
         res.setEncoding('utf8');
         res.on('data', (c) => { body += c; });
         res.on('end', () => {
+          if (typeof o.onStatus === 'function') { try { o.onStatus(res.statusCode); } catch (e) { /* the caller's */ } }
           if (res.statusCode !== 200) return finish(null);
           try {
             const parsed = JSON.parse(body);
