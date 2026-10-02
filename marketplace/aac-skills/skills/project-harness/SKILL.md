@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness — triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap. Use when the user says "harness this repo" or starts a new project, when a harness is behind ("upgrade the harness"), or after editing a harness template.
 metadata:
-  modified: '2026-10-01T21:05:48Z'
-  previous-modified: '2026-10-01T19:24:56Z'
-  revision: '50'
-  content-sha: e0580bb7fb6a
+  modified: '2026-10-01T23:03:11Z'
+  previous-modified: '2026-10-01T21:05:48Z'
+  revision: '51'
+  content-sha: a584ee7d6266
 ---
 
 # Project Harness
@@ -75,7 +75,9 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
 ## 3 — Install
 
 1. **Labels** (`gh label create`, tolerate exists): the five triage roles `needs-triage` /
-   `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`, plus `prd` (#5319e7) and `chore`
+   `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`, the sixth state
+   `ready-for-local-agent` (desktop-only work with no person in the loop; the triage, to-tickets and
+   session-check skills and the dashboard's TRIAGE list use it), plus `prd` (#5319e7) and `chore`
    (#fef2c0); reuse GitHub's defaults (`bug`, `enhancement`, `documentation`). A `prd` issue is a
    container (problem + locked decisions + sub-issue checklist) with its own reading of the five
    states and a close-with-children rule; its lifecycle table is the `triage-labels.md` seed in
@@ -140,7 +142,7 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      workflow's first step runs the installed test, so an un-substituted copy turns every run red.
      Run `node --test tools/tracker-audit-job.test.js` by hand afterwards: a repo suite that skips
      `tools/*.test.js` never runs it.
-   - **Keep the file name `tracker-audit.yml`** — `TRACKER_AUDIT_WORKFLOW` in session-check's
+   - **Keep the file name `tracker-audit.yml`** — the `TRACKER_JOBS` entry in session-check's
      `check.js` looks for exactly that.
    - The runner spawns the repo's `tools/tracker-audit.js` and propagates its exit code; both
      non-zero codes fail the run.
@@ -149,7 +151,7 @@ the shared cross-repo Projects board instead of a per-repo one (step 5).
      `tools/tracker-audit-template.test.js` pins both halves.
 9. **Harness version marker** — copy `templates/harness-version.md` to
    `docs/agents/harness-version.md` and set the date. It is a dedicated file so one `cat` reads it in
-   every harnessed repo. **Current version: 37.** `/session-start` reads this marker every session and
+   every harnessed repo. **Current version: 38.** `/session-start` reads this marker every session and
    STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
 10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
     `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
