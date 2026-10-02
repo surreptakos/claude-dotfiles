@@ -357,6 +357,23 @@ describe('review skills run the latest copy', () => {
     }
   });
 
+  test('a folder left by an interrupted run is replaced, not reused', async () => {
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'review-latest-'));
+    try {
+      const sha = require('node:child_process').execFileSync('git', ['-C', ROOT, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+      const stale = path.join(cache, sha, 'aac-skills', 'aac-review-self-check');
+      fs.mkdirSync(stale, { recursive: true });
+      fs.writeFileSync(path.join(stale, 'standards.md'), 'stale');
+      const r = await run(SELF, { AAC_REVIEW_SOURCE: ROOT, AAC_REVIEW_REF: 'HEAD', AAC_REVIEW_CACHE: cache });
+      assert.equal(r.code, 0, r.err);
+      assert.ok(fs.existsSync(path.join(cache, sha, '.complete')));
+      assert.notEqual(fs.readFileSync(path.join(r.out, 'standards.md'), 'utf8'), 'stale');
+      assert.ok(fs.existsSync(path.join(r.out, '..', 'aac-house-writing-standard', 'scripts', 'wr001-lint.js')), 'the house linter comes along');
+    } finally {
+      fs.rmSync(cache, { recursive: true, force: true });
+    }
+  });
+
   test('an unreachable repo falls back to the bundled copy with exit 3 and says so', async () => {
     const r = await run(SELF, { AAC_REVIEW_SOURCE: path.join(os.tmpdir(), 'no-such-checkout'), AAC_REVIEW_CACHE: os.tmpdir() });
     assert.equal(r.code, 3);

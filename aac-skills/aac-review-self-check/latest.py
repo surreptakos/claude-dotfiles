@@ -4,8 +4,9 @@
   python3 latest.py
 
 Prints one line: the folder of THIS skill inside a fresh copy of both review skills
-(aac-performance-review-audit and aac-review-self-check, side by side, so the audit's
-`../aac-review-self-check/standards.md` still resolves). Run every script and read every
+(aac-performance-review-audit and aac-review-self-check) and the house writing standard, side by
+side, so the audit's `../aac-review-self-check/standards.md` and `../aac-house-writing-standard/`
+still resolve. Run every script and read every
 reference file from that folder.
 
 Exit 0: the copy matches master (fetched now, or already cached for master's current commit).
@@ -37,7 +38,8 @@ import urllib.request
 
 REPO = "surreptakos/claude-dotfiles"
 BRANCH = "master"
-DIRS = ("aac-skills/aac-performance-review-audit/", "aac-skills/aac-review-self-check/")
+DIRS = ("aac-skills/aac-performance-review-audit/", "aac-skills/aac-review-self-check/",
+        "aac-skills/aac-house-writing-standard/")  # the audit lints with ../aac-house-writing-standard
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.basename(HERE)
 TIMEOUT = 15
@@ -67,7 +69,7 @@ def _from_git(src: str):
 def _get(url: str, accept: str = "application/vnd.github+json") -> bytes:
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "aac-review-skills"})
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token and "api.github.com" in url:
+    if token and urllib.parse.urlparse(url).hostname == "api.github.com":
         req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return r.read()
@@ -102,12 +104,16 @@ def fresh_copy() -> str:
                 f.write(read(p))
         with open(os.path.join(tmp, ".complete"), "w", encoding="utf-8") as f:
             f.write(sha + "\n")
-        if os.path.isdir(root):  # a partial copy from an interrupted run
+        # Never delete a complete copy: another run may be reading it. Only a folder left by an
+        # interrupted run (no .complete) is cleared, and a failed rename means another run won.
+        if os.path.isdir(root) and not os.path.isfile(os.path.join(root, ".complete")):
             shutil.rmtree(root, ignore_errors=True)
         try:
             os.replace(tmp, root)
-        except OSError:  # another run finished first; its copy is the same commit
+        except OSError:
             shutil.rmtree(tmp, ignore_errors=True)
+        if not os.path.isfile(os.path.join(root, ".complete")):
+            raise RuntimeError(f"cache folder {root} is incomplete")
     except BaseException:
         shutil.rmtree(tmp, ignore_errors=True)
         raise
