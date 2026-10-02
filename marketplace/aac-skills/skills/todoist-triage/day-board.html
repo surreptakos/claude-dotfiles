@@ -1587,8 +1587,9 @@ footer{font-size:12px;color:var(--muted)}
     return d;
   }
   // ---------- COVERAGE (Dan, 2026-09-30: "where's the review audit for Mireya? Excaltech, call dominic, docusign?") ----------
-  // The rules gate checks the shape of each line; this checks the post says what is on his plate. Every Current
-  // Work task of his that is overdue, due today, or has a deadline inside 7 days must be named by some line.
+  // The rules gate checks the shape of each line; this checks the post says what is on his plate. Every work task of his
+  // (Current Work or backlog, the projects the task panel reads; issue 1191) that is overdue, due today, or has a
+  // deadline inside 7 days must be named by some line.
   const COVER_STOP = new Set("the and for with from that this your have will into about decide review send sign call back make sure need needs task tasks today week".split(" "));
   const coverWords = s => [...new Set(hudNorm(s).toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(w => w.length >= 4 && !COVER_STOP.has(w)))];
   // A task is covered when a line shares two of its distinctive words, or all of them when it has fewer.
@@ -1742,7 +1743,7 @@ footer{font-size:12px;color:var(--muted)}
       "- Report: outcomes in his verbs (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked). Never re-report what his last post claimed. Outcomes from meeting notes his last post never claimed DO count, even from before it.",
       "- A completed task alone is NOT evidence. Use it only when a sent mail, a meeting note or a board ruling corroborates it; merge them into one line. Otherwise drop it.",
       "- BOARD RULINGS are Dan's own decisions, made on his day board: each is evidence on its own. A hand-off to a direct (to-NAME) is \"Delegated X to NAME\"; a delete or Rule out with a reason that says it is done or settled is \"Completed X\" or \"Decided X\"; his note, when present, says what he meant. A ruling that only moves a date or parks a task is not a report line. A \"replied\" row is \"Answered NAME on SUBJECT\".",
-      "- New focus lines come ONLY from the Current Work tasks or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\").",
+      "- New focus lines come ONLY from the Current Work tasks, the must-appear items or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\").",
       "",
       "THE GATE (code checks every draft; one failure rejects the whole draft and it is never shown):",
       "- Report heading is exactly \"" + (expectedHeading(ctx.last && ctx.last.at, new Date()) || HEAD_DAILY) + "\".",
@@ -1849,7 +1850,9 @@ footer{font-size:12px;color:var(--muted)}
       hudStatus("Drafting… (20–60 seconds)");
       const ask = p => sample.json(p, {signal: hudCtl.signal, cache: false});
       const todayKey = ymd(new Date()), weekOut = ymd(new Date(Date.now() + 7 * 86400000));
-      const dueNow = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK && (t.labels || []).includes("do")
+      // Every project the task panel reads, not only Current Work: an overdue backlog task can hold a vendor up
+      // too (issue 1191, the ExcalTech quote). The same blockers test below sorts both.
+      const dueNow = lastTasks.filter(t => !t.checked && PROJECTS.some(p => p.id === t.projectId) && (t.labels || []).includes("do")
         && ((t.dueDate && String(t.dueDate).slice(0, 10) <= todayKey) || (t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut))).map(t => t.content);
       const hasDeadline = new Set(lastTasks.filter(t => t.deadlineDate && String(t.deadlineDate).slice(0, 10) <= weekOut).map(t => t.content));
       const candidates = dueNow.filter(t => !isConfidential(t)), leftOutConfidential = dueNow.length - candidates.length;
