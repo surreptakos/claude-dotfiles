@@ -3,10 +3,10 @@ name: ask-matt
 description: Ask which skill or flow fits your situation. A router over the skills in this repo.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-10-02T04:49:53Z'
-  previous-modified: '2026-10-02T00:23:25Z'
-  revision: '5'
-  content-sha: 434d7deeb89f
+  modified: '2026-10-02T20:07:09Z'
+  previous-modified: '2026-10-02T04:49:53Z'
+  revision: '6'
+  content-sha: a3c3ac143e4c
 ---
 
 # Ask Matt
@@ -61,8 +61,8 @@ A starting situation that generates work, then merges onto the main flow.
 Not scheduled — run when the trigger fires.
 
 - **`/consistency-audit`** — when docs contradict code, or a doc claims a state ("X shipped", "Y not built") that reality disagrees with. Sweeps every prose surface (README, CLAUDE.md, ADRs, PRDs, runbooks, memory files, doc generators), verifies each claim against primary sources, fixes stale claims, and hunts the generator that republished the drift. Run after any big rewrite, or when a wrong claim is caught in the wild.
-- **`/anthropic-skills:consolidate-memory`** — when `memory/` grew past a glance, or two memory files describe the same person/project/preference. Merges duplicates, retires dated entries, converts relative→absolute dates, trims `MEMORY.md` under 200 lines / 25KB. Does not check truth; run **`/consistency-audit`** first if reality-drift is likely.
-- **`/maintain-repo`** — the weekly wrapper: runs `/consistency-audit` then `/anthropic-skills:consolidate-memory` in the right order. Reach for this on the cadence; reach for the two above when only one job applies.
+- **`/consolidate-memory`** — this repo's copy, not the Anthropic plugin's: it knows `docs/agents/memory/` and stops on an empty memory set. Use when the memory set grew past a glance, or two memory files describe the same person/project/preference. Merges duplicates, retires dated entries, converts relative→absolute dates, trims `MEMORY.md` under 200 lines / 25KB. Does not check truth; run **`/consistency-audit`** first if reality-drift is likely.
+- **`/maintain-repo`** — the weekly wrapper: runs `/ticket-reaper`, then `/consistency-audit`, then `/consolidate-memory`, in that order. Reach for this on the cadence; reach for one of the three alone when only one job applies.
 - **`/retro`** — after a session that went slowly or wrong. It reads that session's primary sources and proposes changes to the agent's **environment**, not the code: navigation pointers, automated checks, reviewer rules, steering-file trims, cheaper tools, ranked by severity. It writes in the `/writing-for-agents` style.
 
 ## Codebase health
