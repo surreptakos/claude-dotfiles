@@ -2,10 +2,10 @@
 name: aac-google-access
 description: AAC Google stack access (GCP project, service account, clasp token, Apps Script projects). Load before AAC Sheets, Drive, Gmail or Apps Script work, when a Google call fails on auth or scope, when clasp needs re-authenticating, and before claiming you lack Google access.
 metadata:
-  modified: "2026-10-02T15:33:44Z"
-  previous-modified: "2026-10-01T21:09:51Z"
-  revision: "67"
-  content-sha: "43ce5abd167f"
+  modified: "2026-10-02T18:54:20Z"
+  previous-modified: "2026-10-01T23:37:11Z"
+  revision: "68"
+  content-sha: "81dd5a092818"
 ---
 
 # AAC Google Cloud & Apps Script access
@@ -66,8 +66,8 @@ verify a grant with `tokeninfo` before relying on any list here.
   to the default branch = release; `node <claude-dotfiles>/gas/cli/gas.js run owner/repo <fn>
   '[args]' --wait 10` = `clasp run-function`; `gas pull <scriptId>` = `clasp pull`;
   `gas logs --project gpt-sheets-access-475817` = `clasp logs`.
-- **Other ways to run deployed code:** (1) `clasp run-function <fn>`: PUBLIC fns only (no
-  underscore), under the clasp token. (2) **`doPost` web app**: runs as the owner with the full
+- **Other ways to run deployed code:** (1) `clasp run-function <fn>`: PUBLIC fns only (a
+  name ending in `_` is private), under the clasp token. (2) **`doPost` web app**: runs as the owner with the full
   grant (incl. Drive); gate it with a secret + whitelist, `clasp deploy` a fresh version (the
   `@HEAD` deployment has no usable `/exec`), and POST via **PowerShell `Invoke-RestMethod`**
   (curl 411s on Apps Script's 302). (3) The sheet menu or a trigger.
@@ -110,7 +110,25 @@ Skip it and the next CI deploy dies on `invalid_grant` (it did on 2026-08-17).
 Which credential carries a Google call is a property of the **surface**, not of the caller. Three
 transports reach the same identity, the service account above; share the workbook Editor with
 that address and any of them can read it. One helper in claude-dotfiles picks between them:
-`python3 <claude-dotfiles>/tools/google-rest.py transport|whoami|cell|get`.
+`python3 <claude-dotfiles>/tools/google-rest.py transport|whoami|cell|get|doc-read|doc-replace`.
+
+**Revising a Google Doc in place (issue 1216).** The Drive connector's `update_file` changes only
+title and folder; asked for new text it answers `400 Unknown name "textContent"`, and the agent
+that then creates a "v2" leaves two documents for one piece of work. Revise the Doc over its own id:
+
+1. Share it Editor with the SA, through the connector, since a Doc the connector made is the
+   owner's: `share_file(fileId, "gpt-sheets-access@gpt-sheets-access-475817.iam.gserviceaccount.com", "writer")`.
+2. Write the whole new body to a `.md` file (or `.html`, `.docx`, `.txt`) and run
+   `python3 <claude-dotfiles>/tools/google-rest.py doc-replace <docId> <file>`. Drive converts it
+   into the Doc (`files.update`, `uploadType=media`), keeping the id, link, sharing and revision
+   history, and the command prints the body read back from the Doc. `doc:<otherDocId>` in place of
+   the file copies another Doc's body through `.docx` and exits 1 unless the two read-backs match.
+3. `doc-read <docId>` prints the current body as plain text; read it first, so the revision starts
+   from what is there.
+
+Verified 2026-10-01 on the service-rates research Doc: `doc-replace <v1 id> doc:<v2 id>` read back
+identical to v2, and v2 went to the trash through the connector's `trash_file` (only the owner can
+trash a My Drive file, so the SA cannot).
 
 - **Pro/Max cloud session (`CLAUDE_CODE_REMOTE=true`)**: the key is an *environment API
   credential* held by the agent proxy, which mints the access token and attaches `Authorization`

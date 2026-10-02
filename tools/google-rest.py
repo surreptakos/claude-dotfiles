@@ -28,7 +28,20 @@ Usage:
   python3 tools/google-rest.py whoami
   python3 tools/google-rest.py cell <spreadsheetId> "<Tab!A1>"
   python3 tools/google-rest.py get <url>
+  python3 tools/google-rest.py doc-read <docId>
+  python3 tools/google-rest.py doc-replace <docId> <file.md|.html|.docx|.txt | doc:<sourceDocId>>
 Exit 0 on a 2xx, 1 on anything else.
+
+doc-replace revises a Google Doc in place (issue 1216): the Drive connector's `update_file` changes
+only title and folder, so a second pass that goes through it ends as a "v2" beside v1. This uploads
+the new body over the Doc's own id (Drive `files.update`, `uploadType=media`; Drive converts
+Markdown, HTML, .docx or plain text into the Doc, keeping its id, link, sharing and revision
+history), then exports it as plain text and prints that read-back. `doc:<sourceDocId>` copies
+another Doc's whole body (through .docx, so headings, lists and tables survive) and exits 1 unless
+the two read-backs match; a .txt source must match too. The service account must be Editor on the
+target (Viewer on a source Doc): a Doc made through the Drive connector is the owner's, so share it
+with the connector's `share_file` first (a 403 `insufficientFilePermissions` means it was not).
+Trashing the stale copy is the connector's `trash_file`: only the owner can trash a My Drive file.
 """
 
 import json
@@ -107,21 +120,94 @@ def authorized_session(transport, env):
     return AuthorizedSession(creds)
 
 
-def get(url, headers=None, env=None):
-    """GET `url` on whichever transport this surface provides. Returns (status, body_text)."""
+def request(method, url, data=None, headers=None, env=None):
+    """`method` `url` on whichever transport this surface provides. Returns (status, body_bytes):
+    an export can be a binary .docx."""
     env = os.environ if env is None else env
     if is_gmail(url):
         raise GoogleAccessError(GMAIL_REFUSAL)
     transport, _reason = pick_transport(env)
     if transport == "cloud-proxy":
-        req = urllib.request.Request(url, headers=cloud_headers(headers))
+        req = urllib.request.Request(url, data=data, headers=cloud_headers(headers), method=method)
         try:
             with urllib.request.urlopen(req) as resp:
-                return resp.status, resp.read().decode("utf-8")
+                return resp.status, resp.read()
         except urllib.error.HTTPError as exc:
-            return exc.code, exc.read().decode("utf-8")
-    resp = authorized_session(transport, env).get(url, headers=cloud_headers(headers))
-    return resp.status_code, resp.text
+            return exc.code, exc.read()
+    resp = authorized_session(transport, env).request(method, url, data=data,
+                                                      headers=cloud_headers(headers))
+    return resp.status_code, resp.content
+
+
+def get(url, headers=None, env=None):
+    """GET `url` on whichever transport this surface provides. Returns (status, body_text)."""
+    status, body = request("GET", url, headers=headers, env=env)
+    return status, body.decode("utf-8")
+
+
+DRIVE = "https://www.googleapis.com/drive/v3/files/"
+DRIVE_UPLOAD = "https://www.googleapis.com/upload/drive/v3/files/"
+DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+UPLOAD_TYPES = {".html": "text/html", ".htm": "text/html", ".md": "text/markdown",
+                ".markdown": "text/markdown", ".txt": "text/plain", ".docx": DOCX}
+
+
+def upload_type(path):
+    """The MIME type Drive converts from, by the source file's extension; plain text otherwise."""
+    return UPLOAD_TYPES.get(os.path.splitext(path)[1].lower(), "text/plain")
+
+
+def doc_text(text):
+    """A Doc's text as compared after a write: no BOM, LF line ends, no trailing blanks."""
+    lines = text.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return "\n".join(line.rstrip() for line in lines).strip()
+
+
+def doc_export(doc_id, mime="text/plain", env=None):
+    """A Doc's body exported as `mime`, as bytes. Raises on anything but a 200."""
+    url = (DRIVE + urllib.parse.quote(doc_id, safe="") + "/export?supportsAllDrives=true&mimeType="
+           + urllib.parse.quote(mime, safe=""))
+    status, body = request("GET", url, env=env)
+    if status != 200:
+        raise GoogleAccessError(f"google-rest: export {doc_id} as {mime} -> {status}: "
+                                f"{body.decode('utf-8', 'replace')}")
+    return body
+
+
+def doc_read(doc_id, env=None):
+    """A Doc's body as plain text, normalized by `doc_text`."""
+    return doc_text(doc_export(doc_id, env=env).decode("utf-8"))
+
+
+def doc_replace(doc_id, source, env=None):
+    """Replace the body of Doc `doc_id` with `source` (a file path, or doc:<id> for another Doc's
+    body) and read it back. Returns (read_back_text, matched) - matched is None when the source is
+    HTML, Markdown or .docx, whose plain-text form only Drive's own conversion defines."""
+    expected = None
+    if source.startswith("doc:"):
+        # .docx, not HTML: Drive's HTML export styles lists by CSS class, and importing it drops
+        # every bullet and number (seen on the rates Doc, 2026-10-01); a .docx round trip keeps them.
+        src_id = source[4:]
+        data, mime = doc_export(src_id, DOCX, env), DOCX
+        expected = doc_read(src_id, env)
+    else:
+        with open(source, "rb") as fh:
+            data = fh.read()
+        mime = upload_type(source)
+        if mime == "text/plain":
+            expected = doc_text(data.decode("utf-8"))
+    url = (DRIVE_UPLOAD + urllib.parse.quote(doc_id, safe="")
+           + "?uploadType=media&supportsAllDrives=true&fields=id,mimeType")
+    ctype = mime if mime == DOCX else f"{mime}; charset=utf-8"
+    status, body = request("PATCH", url, data=data, headers={"Content-Type": ctype}, env=env)
+    body = body.decode("utf-8", "replace")
+    if status != 200:
+        raise GoogleAccessError(f"google-rest: update {doc_id} -> {status}: {body}")
+    kept = json.loads(body)
+    if kept.get("id") != doc_id or kept.get("mimeType") != "application/vnd.google-apps.document":
+        raise GoogleAccessError(f"google-rest: update {doc_id} did not keep a Google Doc: {body}")
+    back = doc_read(doc_id, env)
+    return back, (None if expected is None else back == expected)
 
 
 def cell_url(spreadsheet_id, a1):
@@ -170,6 +256,22 @@ def main(argv):
             status, body = get(args[0])
             print(body)
             return 0 if 200 <= status < 300 else 1
+        if cmd == "doc-read":
+            if len(args) != 1:
+                raise GoogleAccessError("google-rest: doc-read <docId>")
+            print(doc_read(args[0]))
+            return 0
+        if cmd == "doc-replace":
+            if len(args) != 2:
+                raise GoogleAccessError("google-rest: doc-replace <docId> <file|doc:<sourceDocId>>")
+            back, matched = doc_replace(args[0], args[1])
+            print(back)
+            verdict = {True: "read-back matches the source",
+                       False: "read-back DIFFERS from the source",
+                       None: "read back above; a converted source, compare by eye"}[matched]
+            print(f"google-rest: https://docs.google.com/document/d/{args[0]}/edit body replaced; "
+                  f"{verdict}", file=sys.stderr)
+            return 1 if matched is False else 0
     except GoogleAccessError as exc:
         print(exc, file=sys.stderr)
         return 1
