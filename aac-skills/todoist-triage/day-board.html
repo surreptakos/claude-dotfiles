@@ -7,11 +7,10 @@ Source of record for the artifact. Edit here, then republish to that URL with th
   {"server": "ms365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search", "read_resource"]},
   {"server": "Todoist", "tools": ["find-tasks", "fetch-object", "find-comments", "add-comments", "add-tasks", "update-tasks", "reschedule-tasks", "delete-object", "complete-tasks", "uncomplete-tasks", "find-activity"]},
   {"server": "Granola", "tools": ["query_granola_meetings"]},
-  {"server": "Google Drive", "tools": ["search_files", "read_file_content"]},
-  {"server": "Claude Code Remote", "tools": ["create_session"]}]}}
+  {"server": "Google Drive", "tools": ["search_files", "read_file_content"]}]}}
 A do date on a recurring task goes through reschedule-tasks (date only): update-tasks would replace its due string and wipe the repeat (issue 1074).
 Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
-"Launch agents" starts one Claude Code cloud session per Todoist task labelled agent (todoist-triage agent-sweep.md, Dan 2026-09-30).
+"Launch agents" counts the open Todoist tasks labelled agent and says the agent-launcher desktop routine starts each one's cloud session within 30 minutes; the page calls no session connector (Claude Code Remote rejects blocked_by_policy on this account, issue 1162; todoist-triage agent-sweep.md § Launch, issue 1202).
 The huddle draft reads the huddle channel and Sent Items from today's newest aacx-inbox export; a live Microsoft 365 read covers only the hour after that export's stamp, and before the day's first export the panel waits (issue 1039, aac-routines ADR 0010).
 Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
 Every triage answer is also logged to db ruling_log/<taskId>-<stamp> (undoneAt set on Undo); the huddle draft reads it, since the morning run deletes answered cards.
@@ -211,7 +210,7 @@ footer{font-size:12px;color:var(--muted)}
       <section class="panel triage" aria-labelledby="tri-h">
         <div class="ph"><h2 id="tri-h">Triage · questions for you</h2><div class="hud-actions"><span class="src" id="tri-src"></span><button class="refresh primary" id="agent-go" type="button">Launch agents</button></div></div>
         <div id="tri-banner" hidden></div>
-        <div class="hud-status" id="agent-status">Done answering? Launch agents starts one cloud session for every task you handed to an agent. Each works from the task and its source, then leaves its drafts as a comment on the task. Nothing is sent for you.</div>
+        <div class="hud-status" id="agent-status">Done answering? Launch agents counts the tasks you handed to an agent. The agent-launcher routine on your PC starts each one in its own cloud session within 30 minutes; it works from the task and its source, then leaves its drafts as a comment on the task. Nothing is sent for you.</div>
         <div id="tri-body"><div class="empty">Loading proposals…</div></div>
       </section>
 
@@ -1910,54 +1909,28 @@ footer{font-size:12px;color:var(--muted)}
       go.disabled = false; stop.hidden = true; hudCtl = null;
     }
   }
-  // ---------- LAUNCH AGENTS (todoist-triage agent-sweep.md § Launch) ----------
-  // One click, one pass: every open task labelled agent gets its own cloud session; the label moves to
-  // agent-running so a second click never starts the same task twice.
-  const AGENT = {env:"env_01Xfr1nCKjpSdLDytywjDAR3", repo:"https://github.com/surreptakos/aac-routines"};
-  const agentPrompt = t => "Dan approved this Todoist task for an agent from his Day Board: \"" + t.content + "\" (task id " + t.id +
-    ", https://app.todoist.com/app/task/" + t.id + "). Load the todoist-triage skill and follow agent-sweep.md, section \"Run an approved task\", for this one task. " +
-    "Never send, file, sign, approve or pay anything: drafts only.";
+  // ---------- LAUNCH AGENTS (todoist-triage agent-sweep.md § Launch, issue 1202) ----------
+  // The page starts no session: every Claude Code Remote call rejects blocked_by_policy on Dan's account
+  // (issue 1162). The agent-launcher desktop routine on the anchor PC starts one cloud session per task
+  // labelled agent every 30 minutes on weekdays and swaps the label to agent-running; the button reports
+  // how many tasks wait for it.
+  const LAUNCH_WINDOW = "within 30 minutes";
   let launching = false;
   async function launchAgents(){
     if (!mcp || launching) return;
     launching = true;
     const btn = $("agent-go"), st = $("agent-status");
     btn.disabled = true; st.className = "hud-status"; st.textContent = "Finding the tasks you handed to an agent…";
-    const ok = [], bad = [];
     try {
       const res = await call("Todoist", "find-tasks", {labels:["agent"], responsibleUserFiltering:"all", limit:100}, {cache:false});
       const tasks = objectsOf(res).flatMap(x => Array.isArray(x.tasks) ? x.tasks : []).filter(t => t && t.id && !t.checked && (t.labels || []).includes("agent"));
       if (!tasks.length){ st.textContent = "No tasks are waiting for an agent. Answer a card with “An agent does it” first."; return; }
-      for (const t of tasks){
-        st.textContent = "Starting " + (ok.length + bad.length + 1) + " of " + tasks.length + ": " + t.content;
-        try {
-          const r = await call("Claude Code Remote", "create_session", {environment_id:AGENT.env, source_url:AGENT.repo, permission_mode:"auto",
-            title:("Agent: " + t.content).slice(0, 120), prompt:agentPrompt(t)});
-          const s = objectsOf(r).map(x => x.ccr || x).find(x => x && /^session_/.test(String(x.id || "")));
-          if (!s) throw {message:"the session id did not come back"};
-          const url = "https://claude.ai/code/" + s.id;
-          const labels = (t.labels || []).filter(l => l !== "agent").concat("agent-running");
-          const stuck = {message:"session started (" + url + ") but the label did not move; remove agent by hand so it is not started twice"};
-          let u;
-          try { u = await call("Todoist", "update-tasks", {tasks:[{id:t.id, labels}]}); } catch(e){ throw stuck; }
-          const body = objectsOf(u).find(o => Array.isArray(o.failures));
-          if (body && body.failures.length) throw stuck;
-          const c = await call("Todoist", "add-comments", {comments:[{taskId:t.id, content:"Agent started: " + url, notifyUsers:["none"]}]}).catch(() => null);
-          ok.push({t, url, note: c ? "" : " (session link not added to the task; it is here)"});
-        } catch(err){ bad.push({t, code:err && err.code, msg:(err && err.code ? explain(err, "Claude Code Remote") : (err && err.message)) || "failed"}); }
-      }
-      // No claude.ai connector can start a Claude Code session on Dan's account (2026-09-30: every call came
-      // back "tool is not available on this connector or is blocked by your organization"). The tasks keep
-      // their agent label; a Claude Code session launches them instead (agent-sweep.md § Launch).
-      const noConnector = bad.length && bad.every(x => ["server_not_connected","not_in_manifest","blocked_by_policy","approval_required","server_not_found"].includes(x.code));
-      st.className = "hud-status" + (bad.length ? " err" : "");
-      st.innerHTML = esc("Started " + ok.length + " of " + tasks.length + " agents.") +
-        (noConnector ? '<div>' + esc("This page cannot start agents on your account. The tasks keep their agent label: tell a Claude Code session “launch my agent tasks”.") + '</div>' : '') +
-        ok.map(x => '<div><a href="' + esc(x.url) + '" target="_blank" rel="noopener">' + esc(x.t.content) + '</a>' + esc(x.note) + '</div>').join("") +
-        bad.map(x => '<div>' + esc(x.t.content) + ' — ' + esc(x.msg) + '</div>').join("");
-      if (ok.length) refreshTasks();
+      const n = tasks.length + (tasks.length === 1 ? " task carries" : " tasks carry");
+      st.innerHTML = esc(n + " the agent label. The agent-launcher routine on your PC starts each one in its own cloud session " + LAUNCH_WINDOW +
+        " (weekdays, 8 AM to 6 PM); the task's label then reads agent-running and a comment links its session. A task whose session did not start keeps agent and gains a comment with the error.") +
+        tasks.map(t => '<div><a href="' + esc("https://app.todoist.com/app/task/" + t.id) + '" target="_blank" rel="noopener">' + esc(t.content) + '</a></div>').join("");
     } catch(err){
-      st.className = "hud-status err"; st.textContent = "Could not start agents: " + explain(err, "Todoist");
+      st.className = "hud-status err"; st.textContent = "Could not count the agent tasks: " + explain(err, "Todoist");
     } finally { launching = false; btn.disabled = false; }
   }
   $("agent-go").addEventListener("click", launchAgents);

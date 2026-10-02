@@ -26,9 +26,9 @@ This run owns it. The forgotten-tasks routine runs on Dan's desktop without boar
 
 The board shows a row whose task is also an open question once, as the question.
 
-## Launch agents (Dan, 2026-09-30)
+## Launch agents (issue 1202)
 
-The triage panel's **Launch agents** button starts one cloud session per open task labelled `agent`, per [`agent-sweep.md`](agent-sweep.md) § Launch. It needs the `Claude Code Remote` connector (`create_session`) in the page's capabilities and on the viewer's account; without it the button reports the failure, names the fallback, and nothing changes. Dan's account has no such connector (2026-09-30), so launching falls to a Claude Code session per [`agent-sweep.md`](agent-sweep.md) § Launch. A started session cannot be undone, so this button stores no undo record: to stop one, archive the session and put `agent` back or remove it.
+The triage panel's **Launch agents** button starts nothing and writes nothing: it counts the open tasks labelled `agent`, links each, and says the `agent-launcher` routine starts them within 30 minutes, per [`agent-sweep.md`](agent-sweep.md) § Launch. The page calls no session connector: every `Claude Code Remote` `create_session` call rejected `blocked_by_policy` on Dan's account (issue 1162). To stop a started session, archive it and put `agent` back or remove it.
 
 ## The huddle draft's evidence (issue 1039)
 

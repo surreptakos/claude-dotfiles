@@ -3,10 +3,10 @@ name: ask-matt
 description: Ask which skill or flow fits your situation. A router over the skills in this repo.
 disable-model-invocation: true
 metadata:
-  modified: "2026-10-02T00:23:25Z"
-  previous-modified: "2026-09-28T21:53:59Z"
-  revision: "4"
-  content-sha: "10906bd34902"
+  modified: "2026-10-02T04:49:53Z"
+  previous-modified: "2026-10-02T00:23:25Z"
+  revision: "5"
+  content-sha: "434d7deeb89f"
 ---
 
 # Ask Matt

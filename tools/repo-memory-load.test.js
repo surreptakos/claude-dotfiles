@@ -4,9 +4,10 @@
  *
  * The SessionStart loader for this repo's committed memory notes (issue 210), and the one
  * invariant the notes themselves have to keep:
- *   - the real index injects as pointers, under the 2KB budget: one BARE NAME per note (issue
- *     589 — with the `: hook` suffixes the block sat ~96 bytes under its cap, so every new note
- *     was paid for by shortening unrelated lines)
+ *   - the real index injects as pointers, under the loader's own CAP: one BARE NAME per note
+ *     (issue 589 — with the `: hook` suffixes the block sat ~96 bytes under its cap, so every new
+ *     note was paid for by shortening unrelated lines; issue 1233 — at 49 names it hit the old
+ *     2KB budget, so a 40-character fiftieth note is the case the test now adds)
  *   - index and notes do not drift (a note with no line, a line with no note), and the two
  *     live-tree notes stay deleted
  *   - a note committed without its index line still reaches the next session
@@ -25,7 +26,7 @@ const { test } = require('node:test');
 const CLI = path.join(__dirname, 'repo-memory-load.js');
 const REPO = path.join(__dirname, '..');
 const MEMORY_DIR = path.join(REPO, 'docs', 'agents', 'memory');
-const { contextFor } = require('./repo-memory-load.js');
+const { contextFor, BUDGET, CAP } = require('./repo-memory-load.js');
 
 function noteFiles(dir) {
   return fs.readdirSync(dir).filter((n) => n.endsWith('.md') && n !== 'MEMORY.md').sort();
@@ -48,13 +49,13 @@ function fakeRepo(lines, notes) {
   return root;
 }
 
-test('the real index injects every note as a bare name, well under the 2KB budget', () => {
+test('the real index injects every note as a bare name, under the loader\'s own cap', () => {
   const context = contextFor(MEMORY_DIR);
   assert.ok(context, 'the repo index must produce a context block');
-  // The hook drops lines past BUDGET - 80 (2048 - 80 = 1968). A fixed number below that is the
-  // landmine issue 589 removed, so the bar is the hook's own: fits, and no line was dropped.
-  assert.ok(Buffer.byteLength(context) <= 1968,
-    `injected memory is ${Buffer.byteLength(context)} bytes, over the hook's 1968-byte cap`);
+  // The hook drops lines past its CAP (BUDGET - 80). A fixed number here is the landmine issues
+  // 589 and 1233 removed, so the bar is the hook's own: fits, and no line was dropped.
+  assert.ok(Buffer.byteLength(context) <= CAP,
+    `injected memory is ${Buffer.byteLength(context)} bytes, over the hook's ${CAP}-byte cap`);
   const lines = context.split('\n');
   assert.match(lines[0], /memory — \d+ committed notes, bodies in docs\/agents\/memory\/<name>\.md/);
   assert.ok(!/\(\+\d+ more/.test(context), 'the real index must fit without truncation');
@@ -77,13 +78,19 @@ test('a new note costs its own line and nothing else (issue 589)', () => {
     fs.copyFileSync(path.join(MEMORY_DIR, file), path.join(memory, file));
   }
   const hook = 'a sixty character hook line for the index, humans only!!';
-  fs.appendFileSync(path.join(memory, 'MEMORY.md'), `- zz-new-note: ${hook}\n`);
-  fs.writeFileSync(path.join(memory, 'zz-new-note.md'), 'body\n');
-  const after = contextFor(memory).split('\n');
-  assert.deepEqual(after.slice(1, -1), before.slice(1).map((l) => l),
+  // A 40-character name (issue 1233: a 31-character one overflowed the old 2KB budget at 49 notes).
+  const name = 'zz-a-new-note-with-a-forty-character-nam';
+  assert.equal(name.length, 40);
+  fs.appendFileSync(path.join(memory, 'MEMORY.md'), `- ${name}: ${hook}\n`);
+  fs.writeFileSync(path.join(memory, `${name}.md`), 'body\n');
+  const context = contextFor(memory);
+  const after = context.split('\n');
+  assert.deepEqual(after.slice(1, -1), before.slice(1),
     'adding a note changed a line it has nothing to do with');
-  assert.equal(after[after.length - 1], '- zz-new-note');
-  assert.ok(!/\(\+\d+ more/.test(after.join('\n')), 'the 37th note must still fit');
+  assert.equal(after[after.length - 1], `- ${name}`);
+  assert.ok(!/\(\+\d+ more/.test(context), 'the new note must still fit');
+  assert.ok(Buffer.byteLength(context) <= CAP,
+    `injected memory is ${Buffer.byteLength(context)} bytes, over the hook's ${CAP}-byte cap`);
 });
 
 test('the index and the note files do not drift, and the live-tree notes stay deleted', () => {
@@ -125,12 +132,12 @@ test('the auto-memory link form `- [Title](name.md) — hook` counts as indexed'
 test('an over-budget index truncates and counts what it dropped', () => {
   const lines = [];
   // Names only cost ~30 bytes each now (issue 589), so it takes more of them to reach the cap.
-  for (let i = 0; i < 80; i += 1) {
+  for (let i = 0; i < 160; i += 1) {
     lines.push(`- note-number-${i}-with-a-name-long-enough-to-cost-real-bytes: hook`);
   }
   const root = fakeRepo(lines, []);
   const context = contextFor(path.join(root, 'docs', 'agents', 'memory'));
-  assert.ok(Buffer.byteLength(context) <= 2048);
+  assert.ok(Buffer.byteLength(context) <= BUDGET);
   assert.match(context, /- \(\+\d+ more — read docs\/agents\/memory\/MEMORY\.md\)/);
 });
 
