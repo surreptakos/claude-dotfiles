@@ -49,6 +49,17 @@ test('build embeds drafts the page and the lander both read back', () => {
   assert.ok(!html.includes('/*DATA*/null/*END*/'));
 });
 
+test('a built page clears the aac-design gate error check', () => {
+  // Issue 1238: the gate refused the published page for tracked caps (D03), four accent hues (D05)
+  // and a 3px side stripe (D08), so every digest republish tripped it.
+  const page = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rulings-lint-')), 'page.html');
+  fs.writeFileSync(page, buildPage(draftsDir([ticket(3)]), TEMPLATE).html);
+  const lint = path.join(__dirname, '..', 'aac-skills', 'aac-design', 'scripts', 'designlint.py');
+  const r = require('node:child_process').spawnSync('python3', [lint, page], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /: 0 error/);
+});
+
 test('build refuses a draft without exactly one recommended option', () => {
   const bad = ticket(1); bad.options[1].recommended = true;
   assert.throws(() => buildPage(draftsDir([bad]), TEMPLATE), /2 recommended/);
