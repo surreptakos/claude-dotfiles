@@ -2,10 +2,10 @@
 name: "todoist-triage"
 description: "Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate."
 metadata:
-  modified: "2026-10-02T22:14:43Z"
-  previous-modified: "2026-10-02T22:01:49Z"
-  revision: "47"
-  content-sha: "07f43c8daa3f"
+  modified: "2026-10-02T22:22:48Z"
+  previous-modified: "2026-10-02T22:14:43Z"
+  revision: "48"
+  content-sha: "1797b453d359"
 ---
 
 # todoist-triage
@@ -159,7 +159,7 @@ Its prompt is one line naming this skill and saying it is the scheduled run; eve
 
 1. **Before step 1**, in the aac-routines checkout: `git pull --ff-only` (a failed pull ends the run, said in the status), then `python scripts/run_stamp.py check todoist-triage`; a slot already stamped ends the run with no output.
 2. **The forgotten-task capture** (Dan, 2026-10-02: it has no routine of its own). Read the aac-routines `.claude/skills/aac-forgotten-tasks/SKILL.md` in full and follow every section, through its record and report upload; its card is `routines/forgotten-tasks.md`. The tasks it creates land in this run's queue. Hold its completion line and verdict block for the end of the output. A capture that fails is a dark surface (status line 5), and the run goes on.
-3. **Steps 1 to 6**, the full pass. Step 1 reads the capture's fresh record and report, so its thread reads are reused. Its writes are the ones the capture and those steps name plus the git-ignored `state/` files: it changes no tracked repo file, and the Inbox router keeps the mode `config/task-capture.json` sets. The output ends: status, tier-2 questions, the capture's completion line and verdict block, then the board link.
+3. **Steps 1 to 6**, the full pass. Step 1 reads the capture's fresh record and report, so its thread reads are reused. Its writes are the ones the capture and those steps name plus the git-ignored `state/` files: it commits nothing, pushes nothing and changes no tracked repo file, and the Inbox router keeps the mode `config/task-capture.json` sets. The output ends: status, tier-2 questions, the capture's completion line and verdict block, then the board link.
 4. **After the status**, `python scripts/run_stamp.py mark todoist-triage`.
 
 ## Filters (in Todoist, favorited)
