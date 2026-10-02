@@ -131,7 +131,7 @@ suite('review meaning', { concurrency: true }, () => {
     assert.match(r.out, /^Passed: .*Guidance 4$/m);
   });
 
-  t('an example with two dated events fails one example; a date range is one figure and passes', async () => {
+  t('an example with two dated events fails one example; a date range, or a due date and its close date, is one and passes', async () => {
     const two = await docx({ strengths: [BOB.strengths[0], 'Bob documents every escalation. He wrote up a billing dispute on 3/4/2026 and a refund case on 5/6/2026.'] });
     let r = await meaning(AUDIT_PY, two, await stubFor(two));
     assert.equal(r.code, 1, r.out);
@@ -139,6 +139,11 @@ suite('review meaning', { concurrency: true }, () => {
     const range = await docx({ strengths: [BOB.strengths[0], 'Bob documents every escalation. He wrote up 140 billing disputes from 7/24/2025 through 7/23/2026.'] });
     r = await meaning(AUDIT_PY, range, await stubFor(range));
     assert.equal(r.code, 0, r.out);
+    // One late report stated with its due date and the date it arrived is one example (issue 1247).
+    const due = await docx({ weaknesses: ['Bob turns in his weekly call reports late. Three of the last five reports arrived after the Friday deadline. The March 6 report was due March 6, 2026 and did not arrive until March 10, 2026. His reports are often late.'] });
+    r = await meaning(AUDIT_PY, due, await stubFor(due));
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /dated events/);
   });
 
   t('comma counts are a note and never change the exit code', async () => {
@@ -162,11 +167,11 @@ suite('review meaning', { concurrency: true }, () => {
   // [question, the answer that fails it, an answer in the read band (Noul only), the fix line].
   const JEV = [
     ['S1.s1_behavior', 'trait', null, /^  - S1: sentence 1 names a trait, motive or attitude; it must name a behavior or work product\. \(Jev\)$/m],
-    ['S1.s1_pattern', 0.1, 0.4, /^  - S1: sentence 1 is a one-off event; it must state a pattern, with the event as the example\. \(Jev\)$/m],
+    ['S1.s1_pattern', 0.1, 0.3, /^  - S1: sentence 1 is a one-off event; it must state a pattern, with the event as the example\. \(Jev\)$/m],
     ['S1.s2_elaborate', 'new_theme', null, /^  - S1: sentence 2 opens a new theme; it must add detail about the behavior in sentence 1 \(Elaborate\)\. \(Jev\)$/m],
     ['S1.example_one', 0.1, 0.4, /^  - S1: sentence 3 is not one specific thing that happened; it must be one event or figure\. \(Jev\)$/m],
-    ['S2.example_demonstrates', 0.05, 0.35, /^  - S2: the example in sentence 2 is not an instance of sentence 1; the item must be about one of them\. \(Jev\)$/m],
-    ['S1.s4_restate', 0.1, 0.4, /^  - S1: sentence 4 does not restate sentence 1; it must say the same thing again with no new theme\. \(Jev\)$/m],
+    ['S2.example_demonstrates', 0.05, 0.45, /^  - S2: the example in sentence 2 is not an instance of sentence 1; the item must be about one of them\. \(Jev\)$/m],
+    ['S1.s4_restate', 0.1, 0.3, /^  - S1: sentence 4 does not restate sentence 1; it must say the same thing again with no new theme\. \(Jev\)$/m],
     ['core.ramification', 0.95, 0.6, /^  - Core Message: the Ramification lists his Weaknesses or his current work; it must name what changes for him next year\. \(Jev\)$/m],
     ['W1.weakness_guidance', 'none', null, /^  - W1: has no Guidance point; every Weakness has at least one\. \(Jev\)$/m],
     ['Guidance 2.s1.instruction', 0.1, 0.4, /^  - Guidance 2: sentence 1 is not an instruction for next year; it must tell Bob what to do\. \(Jev\)$/m],
