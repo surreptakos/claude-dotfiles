@@ -472,6 +472,17 @@ CORRECTION_CONTEXT = (
 )
 # Edits that count as a system change. A board or database write fixes the instance only.
 SYSTEM_CHANGE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+# Issue 1213: so does a fix landed through git. Session ba3aee66 (2026-10-01) committed two
+# corrections' fixes in a worktree beside the checkout and merged PRs 1206, 1208 and 1209, all from
+# the shell, and the audit still carried CORRECTION NOT CLOSED. A `git commit` (any worktree) or a
+# PR merge (`gh pr merge`, `gh api .../pulls/N/merge`, the GitHub MCP merge tool) whose call did
+# not fail closes the turn; the closure record names the commit's directory and the PR number.
+GIT_COMMIT_PATTERN = re.compile(r"^(?:\S*[/\\])?git(?:\.exe)?(?:\s+-[cC]\s+\S+)*\s+commit(?![\w-])")
+GIT_WHERE_PATTERN = re.compile(r"""(?:\bgit(?:\.exe)?\s+-C\s+|\bcd\s+)("[^"]+"|'[^']+'|[^\s;&|]+)""")
+GH_PR_MERGE_PATTERN = re.compile(r"^(?:\S*[/\\])?gh(?:\.exe)?\s+pr\s+merge\b(.*)$")
+GH_API_MERGE_PATTERN = re.compile(r"^(?:\S*[/\\])?gh(?:\.exe)?\s+api\b.*?\bpulls/(\d+)/merge\b")
+GH_PR_NUMBER_PATTERN = re.compile(r"(?:^|\s)#?(\d+)(?=\s|$)|/pull/(\d+)")
+MERGE_PR_TOOL_PATTERN = re.compile(r"(?:^|__)merge_pull_request$")
 
 
 # Issue 727: the regex fired on "what is wrong with the build?" and on a subagent's pasted hand-back
@@ -2490,7 +2501,12 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     # lint, and those are exactly the turns where skipping goes unnoticed.
     violations = _presend_audit(session_id, _read_state("claude", session_id))
     transcript_path = str(event.get("transcript_path") or "")
-    miss = _correction_audit(_read_state("claude", session_id), transcript_path)
+    miss, closed = _correction_audit(_read_state("claude", session_id), transcript_path)
+    if closed:
+        current = _read_state("claude", session_id) or {}
+        current["correction_closed"] = closed
+        _write_state("claude", session_id, current)
+        _log_governance(session_id, "correction turn closed by " + _closure_summary(closed))
     if miss:
         current = _read_state("claude", session_id) or {}
         current["pending_correction"] = miss
@@ -2557,23 +2573,107 @@ def _record_last_question(session_id: str, transcript_path: str) -> None:
     _write_state("claude", session_id, current)
 
 
-def _correction_audit(state: dict[str, Any] | None, transcript_path: str) -> str:
-    """A correction turn that edited no durable file. Returns the note to carry, or "".
+def _landing_of(name: str, tool_input: Any) -> list[dict[str, Any]]:
+    """The commits and PR merges one tool call runs (issue 1213); [] for anything else."""
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    if MERGE_PR_TOOL_PATTERN.search(name):
+        number = next(
+            (tool_input[k] for k in ("pullNumber", "pull_number", "number") if tool_input.get(k)),
+            None,
+        )
+        return [{"kind": "merge", "pr": int(number) if str(number or "").isdigit() else None}]
+    command = tool_input.get("command")
+    if not _is_shell_tool(name) or not isinstance(command, str):
+        return []
+    landed: list[dict[str, Any]] = []
+    for segment in _command_segments(command):
+        if GIT_COMMIT_PATTERN.match(segment):
+            # Only what precedes the commit names its directory, never the message after it.
+            where = GIT_WHERE_PATTERN.search(command.split(" commit", 1)[0])
+            landed.append({"kind": "commit", "dir": where.group(1).strip("\"'") if where else None})
+            continue
+        merge = GH_PR_MERGE_PATTERN.match(segment)
+        api = GH_API_MERGE_PATTERN.match(segment)
+        if merge or api:
+            number = api.group(1) if api else None
+            if merge:
+                found = GH_PR_NUMBER_PATTERN.search(merge.group(1))
+                number = (found.group(1) or found.group(2)) if found else None
+            landed.append({"kind": "merge", "pr": int(number) if number else None})
+    return landed
 
+
+def _turn_landings(transcript_path: str) -> list[dict[str, Any]] | None:
+    """Commits and PR merges the turn ran whose call did not fail, since the last real user prompt.
+    None when the transcript is unreadable."""
+    if not transcript_path:
+        return None
+    pending: dict[str, list[dict[str, Any]]] = {}
+    landed: list[dict[str, Any]] = []
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                content = (record.get("message") or {}).get("content")
+                blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+                if record.get("type") == "user":
+                    results = [b for b in blocks if b.get("type") == "tool_result"]
+                    if not results:
+                        pending, landed = {}, []  # a real user prompt starts a new turn
+                    for block in results:
+                        found = pending.pop(str(block.get("tool_use_id") or ""), None)
+                        if found and not block.get("is_error"):
+                            landed.extend(found)
+                elif record.get("type") == "assistant":
+                    for item in blocks:
+                        if item.get("type") == "tool_use":
+                            found = _landing_of(str(item.get("name") or ""), item.get("input"))
+                            if found:
+                                pending[str(item.get("id") or "")] = found
+    except Exception:
+        return None
+    return landed
+
+
+def _closure_summary(closed: dict[str, Any]) -> str:
+    parts = [f"{tool} call" for tool in closed.get("edits") or []]
+    for landing in closed.get("landings") or []:
+        if landing.get("kind") == "merge":
+            parts.append(f"merge of PR {landing['pr']}" if landing.get("pr") else "PR merge")
+        else:
+            parts.append(f"commit in {landing['dir']}" if landing.get("dir") else "commit")
+    return ", ".join(parts)
+
+
+def _correction_audit(
+    state: dict[str, Any] | None, transcript_path: str
+) -> tuple[str, dict[str, Any] | None]:
+    """A correction turn's verdict: (the note to carry when it changed nothing durable, or "";
+    the closure record when it did, or None).
+
+    A file edit closes it, and so does a commit or a PR merge the turn ran (issue 1213): a fix
+    committed in a worktree beside the checkout and merged is as durable as an Edit in it.
     Unreadable transcripts are not audited: inventing a miss from missing data would train the
     reader to ignore this note, the same reasoning as `_presend_audit`.
     """
     state = state or {}
     if not state.get("nonce") or state.get("correction_nonce") != state.get("nonce"):
-        return ""
+        return "", None
     tools = _turn_tool_names(transcript_path)
-    if tools is None or tools & SYSTEM_CHANGE_TOOLS:
-        return ""
+    if tools is None:
+        return "", None
+    edits = sorted(tools & SYSTEM_CHANGE_TOOLS)
+    landings = _turn_landings(transcript_path) or []
+    if edits or landings:
+        return "", {"nonce": state.get("nonce"), "edits": edits, "landings": landings}
     return (
-        "CORRECTION NOT CLOSED: Dan's last message corrected you and the turn changed no file. "
-        "The instance may be fixed; the class is not. Land the durable fix (skill, rule, hook, "
-        "test or schema) this turn and name it."
-    )
+        "CORRECTION NOT CLOSED: Dan's last message corrected you and the turn changed no file, "
+        "committed nothing and merged no PR. The instance may be fixed; the class is not. Land "
+        "the durable fix (skill, rule, hook, test or schema) this turn and name it."
+    ), None
 
 
 def _presend_audit(session_id: str, state: dict[str, Any] | None) -> list[str]:
