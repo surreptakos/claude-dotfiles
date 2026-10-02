@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-02T16:53:02Z'
-  previous-modified: '2026-10-02T16:45:56Z'
-  revision: '75'
-  content-sha: c664a64fb9a3
+  modified: '2026-10-02T17:46:10Z'
+  previous-modified: '2026-10-02T16:53:02Z'
+  revision: '76'
+  content-sha: 7fec0ba3b084
 ---
 
 # ticket-fleet
@@ -68,7 +68,11 @@ serves one repo and skips a ticket labelled for a local agent, or one that chang
 
    Done when the path resolves to a file whose bytes are LF only - the Workflow tool refuses a
    script holding a CR (issue 233) - the fetch has run, and, in a cloud session,
-   `git rev-parse --show-toplevel` run from the session root prints that root.
+   `basename "$(dirname "$(ls -t ~/.claude/projects/*/*.jsonl | head -1)")"` prints the repo path
+   with `/` as `-` (`-home-user-<repo>`, not `-home-user`). The transcript folder names the root
+   worktrees are cut from; a `git rev-parse` after any `cd`, or the "Primary working directory"
+   line, follows the shell instead and passed on a `/home/user` root that env-probe then aborted
+   (osh-rfp, 2026-10-02).
 
 2. **Mint the ids.** `runId` names the run and stays the same across a resume
    (`printf %x $(date +%s)`); `invocationId` is fresh on every launch, resume included, and must
