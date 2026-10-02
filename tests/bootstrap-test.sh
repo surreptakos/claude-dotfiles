@@ -148,6 +148,28 @@ for _d in "${_path_dirs[@]}"; do
   done
 done
 
+# Windows (Git Bash, issue 1220): `ln -s` there copies the file, and a python.exe copied away
+# from its DLLs, or a Python Install Manager launcher away from its `.__target__` file, does not
+# start, so the hook died on `python3`. When the shim's python3 does not run, it becomes a script
+# that execs the caller's interpreter by its real path: `sys.executable` of the first python3 or
+# python on the caller's PATH that runs, never one under WindowsApps. On Linux the symlinked
+# python3 runs and this block does nothing.
+if ! env -i PATH="$PATH_SHIM" python3 -c '' >/dev/null 2>&1; then
+  _py=""
+  while IFS= read -r _c; do
+    _real="$("$_c" -c 'import sys; assert sys.version_info[0] == 3; print(sys.executable)' 2>/dev/null | tr -d '\r')" || continue
+    [ -n "$_real" ] || continue
+    command -v cygpath >/dev/null 2>&1 && _real="$(cygpath -u "$_real")"
+    case "$_real" in */WindowsApps/*) continue ;; esac
+    [ -x "$_real" ] && { _py="$_real"; break; }
+  done < <(type -ap python3 python)
+  if [ -n "$_py" ]; then
+    rm -f "$PATH_SHIM/python3" "$PATH_SHIM/python3.exe"
+    printf '#!/bin/sh\nexec "%s" "$@"\n' "$_py" > "$PATH_SHIM/python3"
+    chmod +x "$PATH_SHIM/python3"
+  fi
+fi
+
 # The hook downloads the pinned gh tarball, so a sandbox that only reaches the network through
 # an egress proxy has to keep those variables — a cloud container has them set too. Nothing else
 # from this shell's environment travels (`env -i`): the point is an empty home, not this box.

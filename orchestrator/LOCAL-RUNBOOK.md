@@ -181,7 +181,7 @@ the flag is acceptable:
 - Workers and fleets never move a `deploy/*` ref, never run `clasp`, and never touch production data
   paths; Apps Script deploys happen on the merge, by the script itself (claude-dotfiles `gas/`).
 - Never fleet a repo outside the priority list; never touch `aac-sales-commissions`,
-  `aac-message-board`, `aac-task-management`, `aac-routines` without a new ruling.
+  `aac-message-board`, `aac-routines` without a new ruling.
 - A PR that fails the bar stays open. The master does not "fix it up" to make it pass.
 
 `master-watchdog.ps1 -NoBypass` launches without the flag for debugging; such a master can triage
