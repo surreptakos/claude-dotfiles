@@ -48,7 +48,7 @@ A decline that arrives as a note is still a "no": on the board ([`day-board.md`]
 None of them is a ball label: the ball stays where it was.
 
 - `agent` — Dan approved the task for an agent; it waits for the launch.
-- `agent-running` — the `agent-launcher` routine (or a fallback session) started its cloud session; the task comment names the session link.
+- `agent-running` — the `agent-launcher` routine (or a fallback session) started its session; the task comment names the session handle (`claude attach <id>`).
 - `agent-done` — the agent finished; its result is a comment on the task.
 - `no-agent` — Dan's "no", landed durably so the sweep never asks again.
 
@@ -62,11 +62,12 @@ The triage run never starts an agent, and neither does the Day Board. The launch
 Every 30 minutes on weekdays, 8 AM to 6 PM, it reads every open task labelled `agent` and, per
 task:
 
-1. Starts one Claude Code cloud session with `claude --cloud` (Default environment, `aac-routines`
-   checkout). The prompt only points here: it names the task with its Todoist link and says to
+1. Starts one local background session with `claude --bg --model claude-opus-5-5` from the
+   `aac-routines` checkout. `claude --cloud` refuses a non-interactive terminal ("--cloud requires
+   an interactive terminal", 2026-10-02), so no unattended routine can use it. The prompt only points here: it names the task with its Todoist link and says to
    follow "Run an approved task" below for that one task.
 2. Started: swaps `agent` for `agent-running`, keeping every other label, and comments the session
-   link on the task.
+   handle on the task.
 3. Not started: the task keeps `agent` and gains a comment with the exact error; the next run
    tries it again.
 
@@ -77,11 +78,17 @@ The board's **Launch agents** button only counts and links: [`day-board.md`](day
 § Launch agents has why it starts nothing.
 
 **Fallback, for a PC without the routine.** A Claude Code session launches the tasks when Dan asks
-("launch my agent tasks"): read every open task labelled `agent`, start one cloud session per task
-on "Run an approved task" (`claude --cloud "<prompt>"`, or a background agent where the CLI has no
-`--cloud`), and swap `agent` for `agent-running` with a comment naming the session as each starts.
+("launch my agent tasks"): read every open task labelled `agent`, start one background session per task
+on "Run an approved task" (`claude --bg --model claude-opus-5-5 --dangerously-skip-permissions
+"<prompt>"` from the `aac-routines` checkout), and swap `agent` for `agent-running` with a comment naming the session as each starts.
 A task whose session did not start keeps `agent` and gains a comment with the error. Report an
 agent as started only once the label swap is on its task.
+
+**Every launched agent runs on Opus 5.5** (Dan, 2026-10-02: "stop launching them in fable, use opus
+5.5"). Name the model on every launch command; a bare `claude --bg` or `--cloud` inherits the
+launching session's model, which on 2026-10-02 was Fable. Launch each task once: a start whose
+outcome you could not read (no handle printed) counts as started until a listing proves otherwise,
+so the same task never gets a second session.
 
 ## Links, not ids
 
@@ -96,7 +103,7 @@ from the id. Zoho Desk tickets: the ticket's `webUrl`, from the `tools/zoho-rest
 
 ## Run an approved task
 
-The session works one Todoist task, named in its prompt by its link. It is either a cloud session the launcher starts (`aac-routines` checkout, Default environment) or, under the fallback, a background agent a desktop Claude Code session starts in its own checkout (claude-dotfiles on 2026-10-01).
+The session works one Todoist task, named in its prompt by its link. It is either a background session the launcher starts from the `aac-routines` checkout (§ Launch) or a background agent a desktop Claude Code session starts in its own checkout (claude-dotfiles on 2026-10-01).
 
 **What it reaches.** Todoist through the Todoist connector or REST v1 (`https://api.todoist.com/api/v1`, bearer `TODOIST_API_KEY`, else the token in `~/.config/aac/todoist_api_token`); Zoho through `tools/zoho-rest.py` in claude-dotfiles (`ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`) or the Desk and CRM connectors; mail, Teams, calendar and SharePoint through the Microsoft 365 connector; Drive, Fathom and Granola through theirs. A connector's tool names carry a per-session id, so find them with ToolSearch. Never report a credential missing before listing the environment's variable names (names only, never values).
 
