@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -327,6 +329,36 @@ class AskMattGateTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
 
+    # Issue 1193: a route the map names is one the gate accepts, and nothing else. The map's routes
+    # are its bold code spans (**`/name`** or **`$name`**); a plugin-qualified name is a marketplace
+    # variant the map points away from, and /clear and /compact are session commands, not flows.
+    # direct-answer is the gate's own route for "no engineering flow"; the map has no step for it.
+    MAP = REPO / "aac-skills" / "ask-matt" / "SKILL.md"
+    MAP_ROUTE = re.compile(r"\*\*`[/$]([a-z][\w:-]*)`\*\*")
+
+    def _map_routes(self) -> set[str]:
+        named = set(self.MAP_ROUTE.findall(self.MAP.read_text(encoding="utf-8")))
+        return {r for r in named if ":" not in r} - {"clear", "compact"}
+
+    def _gate_flows(self) -> set[str]:
+        spec = importlib.util.spec_from_file_location("ask_matt_gate_flows", SCRIPT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return set(module.ALLOWED_FLOWS)
+
+    def test_allowed_flows_follow_the_map(self) -> None:
+        self.assertEqual(self._gate_flows() - {"direct-answer"}, self._map_routes())
+
+    def test_declare_claude_records_the_vendored_standalone_routes(self) -> None:
+        for route in ("to-questionnaire", "wizard", "wait-what", "writing-for-agents"):
+            with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:
+                state_dir = Path(folder)
+                self.run_gate("claude-prompt", {"session_id": "s-std", "prompt": "hi"}, state_dir)
+                nonce = self._state(state_dir, "s-std")["nonce"]
+                result = self.run_claude_declare("s-std", nonce, route, state_dir)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self._state(state_dir, "s-std")["flow"], route)
+
     def test_stop_continues_turn_when_route_was_not_declared(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             state_dir = Path(folder)
@@ -499,6 +531,10 @@ class AskMattGateTests(unittest.TestCase):
             "triage": dict(kind="issues"),
             "code-review": dict(kind="review"),
             "research": dict(kind="research"),
+            "to-questionnaire": dict(kind="ask-others"),
+            "wizard": dict(kind="human-steps"),
+            "wait-what": dict(kind="re-explain"),
+            "writing-for-agents": dict(kind="agent-docs"),
         }
         for route, picks in leaves.items():
             with self.subTest(route=route), tempfile.TemporaryDirectory() as folder:
