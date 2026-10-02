@@ -204,11 +204,13 @@ def format_check(argv):
                 if m:
                     fixes.append(f"{name}: contains \"{m.group(0)}\"; not allowed in a Strength or Weakness (write the behavior; an instruction belongs in Guidance).")
                     break
-    # Dan, 10/1/26: at least four items are SEER; the rest may be Sum-Ex.
+    # Dan, 10/2/26: one item in ten is SEER (rounded down), never fewer than one; the rest may be
+    # Sum-Ex. Scales with the page and passes every delivered review on file (the lowest: 1 of 12).
     seer = sum(1 for txt in S + W if len(sentences(txt)) == 4)
-    if seer < 4:
-        fixes.append(f"Strengths and Weaknesses: {seer} in SEER; at least four must be SEER (four sentences), the rest may be Sum-Ex.")
-    if seer >= 4 and not any(re.match(r"[SW]\d+:", f) for f in fixes):
+    need = max(1, (len(S) + len(W)) // 10)
+    if seer < need:
+        fixes.append(f"Strengths and Weaknesses: {seer} in SEER; at least {need} of {len(S) + len(W)} must be SEER (four sentences), one in ten rounded down and never fewer than one; the rest may be Sum-Ex.")
+    if seer >= need and not any(re.match(r"[SW]\d+:", f) for f in fixes):
         passes.append(f"Strengths and Weaknesses form ({len(S)} S, {len(W)} W, {seer} SEER)")
 
     # 4 second person anywhere
