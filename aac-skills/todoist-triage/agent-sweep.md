@@ -48,34 +48,43 @@ An answer that arrives as a note (the board's Note only, the reason typed beside
 None of them is a ball label: the ball stays where it was.
 
 - `agent` — Dan approved the task for an agent; it waits for the launch.
-- `agent-running` — the board launched its session; the task comment names the session link.
+- `agent-running` — the `agent-launcher` routine (or a fallback session) started its cloud session; the task comment names the session link.
 - `agent-done` — the agent finished; its result is a comment on the task.
 - `no-agent` — Dan's "no", landed durably so the sweep never asks again.
 
 Any of them takes the task out of the sweep. Dan removes the label to reopen the question.
 
-## Launch (Dan, 2026-09-30)
+## Launch (owner ruling 2026-10-01, issue 1202)
 
-The triage run never starts an agent. Dan does, with the Day Board's **Launch agents** button, once he has answered the day's cards. One click finds every open task labelled `agent`, starts one Claude Code cloud session per task (Default environment, `aac-routines` checkout, auto permission mode), swaps `agent` for `agent-running`, and comments the session link on the task. A task whose session did not start keeps `agent` and is named on the board. The launch prompt only points here: it names the task and this section below.
+The triage run never starts an agent, and neither does the Day Board. The launch path is the
+`agent-launcher` desktop routine on the anchor PC: its prompt lives in the aac-routines registry
+(`python scripts/desktop_routines.py show agent-launcher`) and `/setup-check` registers it there.
+Every 30 minutes on weekdays, 8 AM to 6 PM, it reads every open task labelled `agent` and, per
+task:
 
-**The button cannot start sessions on Dan's account (2026-09-30, confirmed 2026-10-01).** On
-2026-10-01 every `create_session` call rejected `blocked_by_policy` ("Your organization blocks this
-Claude Code Remote call"): the runtime contract defines that code as a tool in the manifest that
-org policy blocks for this viewer. The account's Connectors page (Customize, Yours) lists no
-`Claude Code Remote` connector and the directory has none to add; the Team organization's admin settings
-(Active Alarm, read 2026-10-01) have Cloud sessions, Remote Control, Routines and Enable artifact
-connectors all on, list no `Claude Code Remote` connector and offer none in the directory, so no
-organization toggle changes the block. It is platform policy for artifact pages calling that connector (claude-dotfiles issue
-1162 holds the reading and the decision). Claude Code's settings reference (code.claude.com,
-read 2026-10-01) has no key that reaches an artifact page's connector call: `disableRemoteControl`,
-`disableClaudeAiConnectors` and `deniedMcpServers` govern Claude Code on the device, and this PC
-sets none of them. What a session or routine on the desktop can do instead is create the cloud
-session itself: `claude --cloud "<task description>"` (optionally `--environment <id>`) or the
-claude.ai remote-trigger API. Until a launch path exists, a Claude Code session
-launches them when Dan asks ("launch my agent tasks"): read every open task labelled `agent`,
-start one background agent per task on this section's "Run an approved task" steps, and swap
-`agent` for `agent-running` with a comment naming the session as each starts. Never report an
-agent as started without that label swap on the task.
+1. Starts one Claude Code cloud session with `claude --cloud` (Default environment, `aac-routines`
+   checkout). The prompt only points here: it names the task with its Todoist link and says to
+   follow "Run an approved task" below for that one task.
+2. Started: swaps `agent` for `agent-running`, keeping every other label, and comments the session
+   link on the task.
+3. Not started: the task keeps `agent` and gains a comment with the exact error; the next run
+   tries it again.
+
+The run record names every session started and every start that failed; a run that finds no
+`agent` task writes none. The method lives in aac-routines `src/aac_routines/agent_launcher.py`.
+
+The board's **Launch agents** button starts nothing: it counts the open tasks labelled `agent` and
+says the routine starts them within 30 minutes. On 2026-10-01 every `create_session` call from the
+page rejected `blocked_by_policy` ("Your organization blocks this Claude Code Remote call"), and
+no account or organization toggle lifts it (claude-dotfiles issue 1162 holds the reading and the
+decision).
+
+**Fallback, for a PC without the routine.** A Claude Code session launches the tasks when Dan asks
+("launch my agent tasks"): read every open task labelled `agent`, start one cloud session per task
+on "Run an approved task" (`claude --cloud "<prompt>"`, or a background agent where the CLI has no
+`--cloud`), and swap `agent` for `agent-running` with a comment naming the session as each starts.
+A task whose session did not start keeps `agent` and gains a comment with the error. Never report
+an agent as started without that label swap on the task.
 
 Every record mentioned in a reply to Dan, in a launch report, in an agent's result or in a draft
 he will paste elsewhere carries its link in its own system of record, never a bare id or number
@@ -90,11 +99,36 @@ returned the whole list). Drive files: the document link.
 
 ## Run an approved task
 
-The session the board starts works one Todoist task:
+The session the launcher starts works one Todoist task:
 
 1. Run `python3 .claude/hooks/check_payload.py`. A `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on.
-2. Read the task, its comments, and its source thread to the last message.
+2. Read the task, its comments, and its source thread to the last message; a meeting, by its Fathom transcript (§ Meeting content).
 3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named.
 4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made. Never send, file, sign, approve or pay anything.
 5. Swap `agent-running` for `agent-done` on the task, keeping every other label.
 6. If the work cannot be done from what the session can reach, say why in the comment and swap `agent-running` for `no-agent`, so the task is Dan's again.
+
+## Meeting content (Fathom)
+
+A task whose input is a meeting reads the meeting, not its recap email (issue 1215). The call that
+returns a transcript, run 2026-10-01 from a desktop Claude Code session on a meeting
+`search_meetings` found:
+
+1. `search_meetings` (`{"query": "<topic words>", "recorded_by": "anyone"}`) or `list_meetings`.
+   Each hit prints `id: <n>` and `url: https://fathom.video/calls/<m>`. The `id` is the
+   recording_id; the number in the URL is a call id, a different number.
+2. `get_meeting_transcript` with the id as a JSON integer, unquoted:
+   `{"recording_id": 123456789, "url": "<the hit's url>"}`. It returns the whole transcript, each
+   turn linked to its timestamp. `get_meeting_summary` takes `{"recording_id": 123456789}`.
+
+A quoted id fails. On 2026-10-01 (session ba3aee66) three agents passed it as a string and every
+summary and transcript call was rejected with:
+
+```
+Invalid arguments: value at /recording_id is not an integer
+```
+
+Holding only a Fathom link, `get_recording_by_url` (`{"url": "<link>"}`) returns the recording_id.
+No Fathom API key is in the desktop environment, so the connector is the only path. Where it still
+rejects an integer id, the Fathom recap email in Outlook is the fallback: it carries the summary but
+not the transcript, so the result says the transcript was not read.

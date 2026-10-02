@@ -3,10 +3,10 @@ name: to-spec
 description: 'Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you''ve already discussed.'
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-27T19:31:03Z'
-  previous-modified: '2026-08-20T00:41:59Z'
-  revision: '2'
-  content-sha: 018f2cb42876
+  modified: '2026-10-01T23:30:29Z'
+  previous-modified: '2026-09-27T19:31:03Z'
+  revision: '3'
+  content-sha: ad9b181428d8
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.

@@ -2,10 +2,10 @@
 name: aac-performance-review-audit
 description: Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit, check or gate a review, or asks for its rejection or coaching email.
 metadata:
-  modified: '2026-09-29T21:14:45Z'
-  previous-modified: '2026-09-29T21:05:36Z'
-  revision: '7'
-  content-sha: 8e4af5ad3f1c
+  modified: '2026-10-01T23:21:23Z'
+  previous-modified: '2026-09-29T21:14:45Z'
+  revision: '8'
+  content-sha: b7ac3dd6a067
 ---
 
 # AAC performance review audit
@@ -14,21 +14,25 @@ Dan Gatsakos (skip-level) receives a review draft from a reviewing manager (Mark
 
 **The standard is `standards.md` in the `aac-review-self-check` skill folder (`../aac-review-self-check/standards.md` from this one). Read it in full before Gate 1.** It is the controlling copy of the rules, the format tests, the meaning checks and the substance list, and the manager's self-check reads the same file.
 
-Beside this file: `review_gate_tools.py` (the Gate 1 check and the docx builder), `Format Rejection Template.docx` (Dan's canonical formatting, md5-checked when the builder reads it), `gate2.md`, `gate3.md` and `building-the-docx.md`. Read a gate file when you reach that gate, not before. Run the script from this directory so it finds the template:
+Beside this file: `review_gate_tools.py` (the Gate 1 check, the Gate 2 `meaning` run, the record gate and the docx builder), `review_meaning.py` and `jev.py` (the meaning checks and their TypeSafe Jev client, the same copies the self-check carries), `Format Rejection Template.docx` (Dan's canonical formatting, md5-checked when the builder reads it), `gate2.md`, `gate3.md` and `building-the-docx.md`. Read a gate file when you reach that gate, not before. Run the script from this directory so it finds the template:
 
 ```
 python3 review_gate_tools.py check REVIEW.docx --end 7/23/2026 --start 7/24/2025 --direct FIRSTNAME
-python3 review_gate_tools.py build BODY.py OUT.docx
+python3 review_gate_tools.py meaning REVIEW.docx --direct FIRSTNAME
+python3 review_gate_tools.py gate REVIEW.docx
+python3 review_gate_tools.py build BODY.py OUT.docx --review REVIEW.docx
 python3 review_gate_tools.py template [OUT.docx]
 ```
 
 The "Performance Review Audits" project folder, when mounted, holds prior reviews, self-appraisals, workbooks, comp plans, earlier audits, and loose copies of the same files; use it for evidence, not for procedure. If the folder's copy of the script carries a check this one does not, the folder copy is newer: use it, and bring this one up to match.
 
+`check` and `meaning` each write `REVIEW.docx.gate.json` beside the review: the file's SHA-256, the script version, the exit code and the fix lines. `build` refuses to make a Gate 1 or Gate 2 email unless that record shows both runs on the file as it stands, and `meaning` exit 2 counts as not run. Run both on every draft before any email, whichever gate it stops at. `meaning` exit 2 means Jev could not answer (no key, 401, 402, timeout): stop and fix the access, never read it as a pass.
+
 ## Before anything
 
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the repeat check in Gate 2 cannot run without it.
 2. Compute the period start and end by the review-period rule in `standards.md` before running anything.
-3. One output file: "[Direct] [Year] - Audit of Rev [N].md". Email on top. Below a line reading "Notes for Dan (delete before sending)": file identification, period, gate reached and result, the script output, anything parked for a later gate, and the reason behind every "please confirm." Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
+3. One output file: "[Direct] [Year] - Audit of Rev [N].md". Email on top. Below a line reading "Notes for Dan (delete before sending)": file identification, period, gate reached and result, the script output, anything parked for a later gate, and the reason behind every "please confirm." The script output includes the `check` and `meaning` exit codes. Gate 1 and Gate 2 emails also go out as "[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx", built by the script.
 4. `pip install python-docx --break-system-packages` if the script cannot import it. Page count needs LibreOffice (`soffice`) and `pdfinfo`; if absent pass `--no-render` and count pages another way (say so).
 5. If the manager's draft arrives with its own unanswered "open items" or notes from a drafting tool, those are the manager's to answer. The Gate 1 opener may say so in one sentence, because they are his own document, not a preview of a later gate.
 
@@ -69,7 +73,7 @@ python3 review_format_check.py verify REVIEW.docx --end END --start START --dire
 
 That script ships with the self-check skill; the project folder has a copy. Three outcomes:
 
-- **VALID.** The manager ran the checks on the version he sent. **Gate 2 is closed**: no Gate 2 email and no fix list for anything Gate 2 would have caught. Carry every remaining finding into Gate 3 and raise it there, in Gate 3's voice, as part of one conversation. Dan's rule, 9/23/26: a manager who ran the check does not get sent back around the same loop.
+- **VALID.** The manager ran the checks on the version he sent. **Gate 2 is closed**: no Gate 2 email and no fix list for anything Gate 2 would have caught. Run `meaning` anyway, even when his stamp reads "meaning: Jev": its fix lines and read list are carried into Gate 3 and raised there, in Gate 3's voice, as part of one conversation, along with every other remaining finding. A stamp reading "meaning: read, not Jev" means his machine had no Jev, so this run is the first time Jev saw the page. Dan's rule, 9/23/26: a manager who ran the check does not get sent back around the same loop.
 - **STALE.** He edited the page after stamping. Say so and ask him to rerun the self-check on the version he wants reviewed. That is not a Gate 2 email; it is one line.
 - **NO STAMP.** He did not run it, or his copy predates stamping. Ask for the code. If he says he ran it and has no code, take him at his word, treat it as VALID, and tell Dan the stamp was claimed rather than verified.
 
@@ -77,7 +81,7 @@ When a Gate 2 finding rolls into Gate 3, it also goes to the notes as a gap in t
 
 ## Gate 2: Meaning
 
-Only when the stamp is absent or the manager did not run the self-check. **Read `gate2.md` in this skill directory before writing anything.** It holds the fix-line form and the email body.
+Only when the stamp is absent or the manager did not run the self-check. Gate 2 is the `meaning` run: its fix lines go in the email verbatim, and reader judgment covers only its read list and the reader checks it names. **Read `gate2.md` in this skill directory before writing anything.** It holds the fix-line form and the email body. A new meaning question starts from the `typesafe:typesafe-ai` skill and gets a row in the table in `review_meaning.py`.
 
 ## Gate 3: Consistency
 
@@ -87,10 +91,11 @@ Only after Gates 1 and 2 pass. **Read `gate3.md` in this skill directory before 
 
 Nothing leaves this skill until it passes this gate: every gate email, the coaching email, and any review text the audit writes or rewrites (a model item, a full rewrite, or a rebuilt review docx). A draft that has not passed it is not finished, whatever the three gates said. Dan made this mandatory on 9/24/26 after an email went out for review having been only spot-checked.
 
-1. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md` and `DRAFT-QUALITY.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards and the House Layout Standard where they conflict with WR-001 (serial comma, headings, "should," e.g./i.e., the % sign and numeric dates in review material). Every other WR-001 rule applies.
-2. Run the house linter on each text: `../aac-house-writing-standard/scripts/wr001-lint.js`, the one copy that moves with the standard (a pinned copy beside this file sat at WR-001 v0.6 while the standard reached v0.10; deleted 2026-09-29). For a docx, extract the paragraphs and table cells to a .md file first. Email: `node ../aac-house-writing-standard/scripts/wr001-lint.js EMAIL.md`. Review: `node ../aac-house-writing-standard/scripts/wr001-lint.js REVIEW.md --prose`. Exit 0 is required. Fix every error and every warning that is not a Rule 2 exception.
-3. Read for the rules the linter cannot see, and confirm Rule 166 item by item: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. Also Rule 106 (the attachment is named) and Rule 107 (an email that asks for action ends with how Dan learns it is done).
-4. Record the result under the Notes line: linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.
+1. Review text the audit writes or rebuilds (a model item, a full rewrite, a rebuilt review docx) is held to the same runs as a manager's draft: put it in a review docx and run `check` and `meaning` on it, then `python3 review_gate_tools.py gate REVIEW.docx`, which exits 0 only when both exited 0 on that exact file. Text the audit wrote gets no exemption.
+2. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md` and `DRAFT-QUALITY.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards and the House Layout Standard where they conflict with WR-001 (serial comma, headings, "should," e.g./i.e., the % sign and numeric dates in review material). Every other WR-001 rule applies.
+3. Run the house linter on each text: `../aac-house-writing-standard/scripts/wr001-lint.js`, the one copy that moves with the standard (a pinned copy beside this file sat at WR-001 v0.6 while the standard reached v0.10; deleted 2026-09-29). For a docx, extract the paragraphs and table cells to a .md file first. Email: `node ../aac-house-writing-standard/scripts/wr001-lint.js EMAIL.md`. Review: `node ../aac-house-writing-standard/scripts/wr001-lint.js REVIEW.md --prose`. Exit 0 is required. Fix every error and every warning that is not a Rule 2 exception.
+4. Read for the rules the linter cannot see, and confirm Rule 166 item by item: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. Also Rule 106 (the attachment is named) and Rule 107 (an email that asks for action ends with how Dan learns it is done).
+5. Record the result under the Notes line: the `check`, `meaning` and `gate` exit codes for any review text, the linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.
 
 If the house skill's version is newer than the pinned copy, use the house skill's and say so in the Notes.
 

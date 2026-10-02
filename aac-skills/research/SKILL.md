@@ -2,10 +2,10 @@
 name: research
 description: Investigate a question against high-trust primary sources and capture the findings as a Markdown file in the repo. Use when the user wants a topic researched, docs or API facts gathered, or reading legwork delegated to a background agent.
 metadata:
-  modified: "2026-09-25T23:57:51Z"
-  previous-modified: "2026-09-21T03:33:03Z"
-  revision: "3"
-  content-sha: "1ea15c7491f9"
+  modified: "2026-10-01T23:30:30Z"
+  previous-modified: "2026-09-25T23:57:51Z"
+  revision: "4"
+  content-sha: "7bff1f8e22ca"
 ---
 
 Spin up a **background agent** to do the research, so you keep working while it reads.

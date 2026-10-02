@@ -22,7 +22,9 @@ P("Thanks,"),
 `P` is a plain paragraph. `L(level, text, "99")` is a numbered item; pass `"99"` on every fix-list item so that list restarts at 1 separately from the standards list. `LB(bold_lead, rest)` is a top-level standard with a bold lead phrase and 12pt space before. Then:
 
 ```
-python3 review_gate_tools.py build body.py "Erich Rojek 2026 - Audit of Rev 2 (paste into Outlook).docx"
+python3 review_gate_tools.py build body.py "Erich Rojek 2026 - Audit of Rev 2 (paste into Outlook).docx" --review REVIEW.docx
 ```
+
+`--review` names the draft the email is about. The build refuses (exit 2, "NOT BUILT") when that file has no gate record, when the record is for an earlier version of it, when `check` or `meaning` has not run on it, or when `meaning` exited 2; the reason is printed. Run what it names and build again.
 
 Before building, lint the body text through the release gate in SKILL.md; the docx carries the same words. Render to PDF (`soffice --headless --convert-to pdf`) and look at it before delivering. Dan opens the docx in Word, selects all, copies, pastes into Outlook. Never build a docx from scratch; HTML and Outlook connector drafts lose the list formatting. `python3 review_gate_tools.py template` writes the embedded template to disk if Dan needs the file itself. If the script reports "embedded template corrupt," pass `--template` with "Format Rejection Template.docx" from the project folder.
