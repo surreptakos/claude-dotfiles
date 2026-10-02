@@ -1671,6 +1671,77 @@ class AskMattGateTests(unittest.TestCase):
         self.assertEqual(done.returncode, 0)
         self.assertIn("lint clean", done.stdout)
 
+    # Issue 1212: a Teams draft written to AAC-WR-001, 300 words, one sentence over the 28-word cap.
+    QUOTED_DRAFT = (
+        "Nick, the Tampa panel job is ready for your sign-off. The crew finished the rough-in on "
+        "Tuesday and passed the city inspection on Wednesday morning. We still need three items from "
+        "you before we schedule the trim-out.\n\n"
+        "First, tell me the door count. The drawings show 12 doors, but the walk found 14. Two of "
+        "them sit on the loading dock and were added after the contract. If you want them covered, I "
+        "will send a change order for both doors this week.\n\n"
+        "Second, choose the reader model for the lobby. The customer asked for a mobile credential "
+        "reader, and our stock model does not read phones. The upgrade adds about 400 dollars per "
+        "door. I can hold the order until Friday while you decide.\n\n"
+        "Third, approve the revised schedule. Trim-out moves from the tenth to the seventeenth because "
+        "the electrician needs another week on the dock circuits, and the customer agreed to the new "
+        "date on our call yesterday after I walked them through the dock work and the inspection.\n\n"
+        "Everything else is on track. The permit is posted, the panel is mounted, and the cable runs "
+        "are labeled to the drawings. Our technician photographed each closet before the ceiling went "
+        "back up, so we have a full photo record for the closeout package.\n\n"
+        "The open risk is the fire alarm tie-in. The fire contractor has not returned my calls, and we "
+        "cannot test the release without them. I will call their office again on Monday. If they do "
+        "not answer by Wednesday, I will ask the general contractor to step in.\n\n"
+        "Reply here with your answers on the doors, the reader and the schedule. I will turn each one "
+        "into a task for the crew the same day. Thank you for your help on this job and the others."
+    )
+    QUOTED_PROSE = (
+        "Draft for Nick is ready below. It covers the doors, the reader and the schedule.",
+        "Paste it into Teams as written. When he answers, I will open the three crew tasks that same "
+        "day and post all the links here.",
+    )
+
+    def _quoted_reply(self, draft: str, fenced: bool = False) -> str:
+        if fenced:
+            body = "```\n" + draft + "\n```"
+        else:
+            body = "\n".join("> " + line if line else ">" for line in draft.splitlines())
+        return self.QUOTED_PROSE[0] + "\n\n" + body + "\n\n" + self.QUOTED_PROSE[1] + "\n"
+
+    @unittest.skipUnless(shutil.which("node"), "wr001-lint.js needs node")
+    def test_lint_exempts_a_quoted_deliverable_from_the_reply_caps(self) -> None:
+        self.assertGreaterEqual(len(self.QUOTED_DRAFT.split()), 300)
+        self.assertEqual(len(" ".join(self.QUOTED_PROSE).split()), 40)
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.set_caveman(state_dir, "ultra")
+            quoted = self.run_presend_lint("", self._quoted_reply(self.QUOTED_DRAFT), state_dir)
+            self.assertEqual(quoted.returncode, 0, quoted.stdout)
+            self.assertIn("lint clean", quoted.stdout)
+            # A prose fence is exempt the same way; the no-monospace rule still sees the fence.
+            fenced = self.run_presend_lint(
+                "", self._quoted_reply(self.QUOTED_DRAFT, fenced=True), state_dir
+            )
+            self.assertNotIn("too long", fenced.stdout)
+            self.assertNotIn("sentence(s) over", fenced.stdout)
+            # The same words as the reply's own prose are capped as before.
+            unquoted = self.run_presend_lint(
+                "", self.QUOTED_PROSE[0] + "\n\n" + self.QUOTED_DRAFT, state_dir
+            )
+            self.assertEqual(unquoted.returncode, 1)
+            self.assertIn("too long", unquoted.stdout)
+            self.assertIn("sentence(s) over", unquoted.stdout)
+
+    @unittest.skipUnless(shutil.which("node"), "wr001-lint.js needs node")
+    def test_lint_fails_a_quoted_deliverable_on_a_wr001_error_naming_the_rule(self) -> None:
+        draft = self.QUOTED_DRAFT.replace("on our call yesterday", "by e-mail yesterday")
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            self.set_caveman(state_dir, "ultra")
+            for fenced in (False, True):
+                done = self.run_presend_lint("", self._quoted_reply(draft, fenced), state_dir)
+                self.assertEqual(done.returncode, 1, done.stdout)
+                self.assertIn("quoted deliverable 1 breaks AAC-WR-001 Rule 62", done.stdout)
+
     def test_lint_never_requires_the_pylons_prefix_because_it_is_a_canary(self) -> None:
         # Dan, 2026-09-25: the prefix lives only in the global CLAUDE.md so its absence shows him a
         # session has started forgetting rules. A lint that required it would hide that signal.
