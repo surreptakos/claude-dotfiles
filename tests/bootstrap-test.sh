@@ -709,7 +709,7 @@ for r in rs:
 print(', '.join(f"{r['font']} {r['pages']} page(s), {len(r['png'])} PNG" for r in rs))
 PYRENDER
 )" && [ "$render_rc" -eq 0 ]; then
-    pass "render.py converted the payload's aac-letterhead.docx to PDF and PNG: $render_summary"
+    pass "render.py converted the payload's aac-letterhead.docx to PDF and PNG: $render_summary ($(grep -m1 'render: installing' "$render_err" || echo 'nothing to install'))"
   else
     fail "render.py exited $render_rc on the payload's aac-letterhead.docx: $(tail -3 "$render_err" | tr '\n' ' ')"
   fi
