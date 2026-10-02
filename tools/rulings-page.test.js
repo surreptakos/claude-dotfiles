@@ -49,6 +49,17 @@ test('build embeds drafts the page and the lander both read back', () => {
   assert.ok(!html.includes('/*DATA*/null/*END*/'));
 });
 
+test('a built page clears the aac-design gate error check', () => {
+  // Issue 1238: the gate refused the published page for tracked caps (D03), four accent hues (D05)
+  // and a 3px side stripe (D08), so every digest republish tripped it.
+  const page = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'rulings-lint-')), 'page.html');
+  fs.writeFileSync(page, buildPage(draftsDir([ticket(3)]), TEMPLATE).html);
+  const lint = path.join(__dirname, '..', 'aac-skills', 'aac-design', 'scripts', 'designlint.py');
+  const r = require('node:child_process').spawnSync('python3', [lint, page], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /: 0 error/);
+});
+
 test('build refuses a draft without exactly one recommended option', () => {
   const bad = ticket(1); bad.options[1].recommended = true;
   assert.throws(() => buildPage(draftsDir([bad]), TEMPLATE), /2 recommended/);
@@ -146,6 +157,15 @@ test('bodies puts each ticket\'s GitHub text in its draft, cutting a very long o
   assert.ok(j.tickets[1].body.length < 12100 && j.tickets[1].body.endsWith('the rest is on GitHub)'));
   const data = readPageData(buildPage(dir, TEMPLATE).html);
   assert.equal(data.repos[0].tickets[0].body, 'Short **body**');
+});
+
+test('Submit records the batch and names the landing window, and sends no comment to Claude', () => {
+  // 2026-09-30 and 2026-10-01: the Submit comment reached a Cowork session that could not land and
+  // replied "Not landed"; the rulings-lander task is the landing path (issue 1239).
+  const submit = TEMPLATE.slice(TEMPLATE.indexOf('async function submit('), TEMPLATE.indexOf('\n}\n', TEMPLATE.indexOf('async function submit(')));
+  assert.match(submit, /db\.doc\("submissions\/" \+ id\)\.set\(/);
+  assert.match(submit, /within 30 minutes on weekdays 8 a\.m\. to 6 p\.m\. Central/);
+  assert.doesNotMatch(TEMPLATE, /sendToClaude|use\("comments"\)|watching Claude session/);
 });
 
 test('a saved pick or landing for a ticket no longer on the page does not count', () => {

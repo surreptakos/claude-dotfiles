@@ -40,7 +40,6 @@
     "surreptakos/aac-routines":           {},
     "surreptakos/aac-message-board":      {},
     "surreptakos/aac-sales-commissions":  {},
-    "surreptakos/aac-task-management":    { "status": "dead" },
     "surreptakos/aac-bill-intake":        {},
     "surreptakos/zoho-source-of-truth":   {},
     "surreptakos/aac-sales-cockpit":      {},
@@ -63,7 +62,8 @@
     "todoist-triage-local":  { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "brazil-flights-garden-local": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
     "rulings-digest": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
-    "rulings-lander": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" }
+    "rulings-lander": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" },
+    "agent-launcher": { "owner": "Dan-AAC", "org": "171309ff-cab7-4fb1-8b7c-acb95c18a675" }
   },
   "auditRepo": "surreptakos/claude-dotfiles"
 }

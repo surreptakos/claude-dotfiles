@@ -19,7 +19,8 @@
       Profile        the files pull restores match what the repo would write (compared through
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
-                     the desktop app holds its own synced copy under each desktop account's org
+                     every plugin profile/claude/settings.json enables is one `claude plugin
+                     list --json` shows at user scope (issue 1222); the desktop app holds its own synced copy under each desktop account's org
                      folders (rpm\manifest.json lists it and its folder holds the plugin, issue
                      1149); every settings.json hook entry names files that exist; the caveman proxy
                      binary is present, registered to start at logon (HKCU Run CavemanProxy,
@@ -29,19 +30,24 @@
       Credentials    the service account key and the OAuth client secret under ~/.config exist
                      and parse as JSON; the GitHub, Claude and gas logins answer a live probe;
                      TYPESAFE_API_KEY is set (user, machine or this process's environment) and
-                     Jev answers a live call with it (issue 1133).
+                     Jev answers a live call with it (issue 1133); an HTTP 402 from Jev is told
+                     apart as an account out of credits, not a bad key (issue 1194).
       Projects       every repo in the shared repo list (lib/repos.json) is cloned at its path
                      with the right origin, its commit gate on (core.hooksPath .githooks when the
                      repo has that folder) and its Claude trust record written (by
                      tools/settings-invariants.ps1 -Trust, the one writer of ~/.claude.json). The
+                     Todoist token is where the aac-routines mirror reads it
+                     (TODOIST_API_TOKEN_FILE, else ~/.config/aac/todoist_api_token; issue 1194). The
                      master watchdog task runs only on the anchor PC. Desktop routines are
                      audited, never written: missing on the anchor, or live elsewhere, is a
                      finding the /setup-check skill acts on (issue 1071).
 
     Without -Fix it only reports. With -Fix it first applies the fixes that are safe to repeat
-    (pip-install PyYAML, run pull on drift, run the desktop caveman install when the wiring is
+    (pip-install PyYAML, run pull on drift, install each plugin the profile enables that is missing
+    at user scope, run the desktop caveman install when the wiring is
     broken, the proxy port dead or its logon start missing - the install starts the proxy and
-    registers it - clone a missing repo, set a commit gate, write trust records, install the watchdog
+    registers it - clone a missing repo, set a commit gate, write trust records, copy the Todoist
+    token from ~/.config/todoist_api_token to where the mirror reads it, install the watchdog
     task on the anchor or disable it elsewhere), then reports. Whatever only the owner can do - install a
     binary, copy a secret file, log in - becomes a numbered to-do with the exact command.
 
@@ -56,11 +62,13 @@
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
     command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
-    git-identity-set (args: git key, value) writes one global git setting.
+    jev-live exits 2 when Jev answered HTTP 402 (no credits) and 1 on any other failure.
+    git-identity-set (args: git key, value) writes one global git setting; plugin-install (arg: the
+    plugin id) installs one plugin at user scope.
     Text probes print their answer instead: git-user-name and git-user-email (the global value,
     empty when unset), master-plugin-version (the aac-skills version master
-    offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
-    unset - never the value), desktop-plugin-root (the desktop app's local-agent-mode-sessions
+    offers), plugin-list (the JSON `claude plugin list --json` prints, empty when it fails), jev-key
+    (where TYPESAFE_API_KEY is set: user, machine, process, or empty when unset - never the value), desktop-plugin-root (the desktop app's local-agent-mode-sessions
     folder), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
@@ -423,7 +431,7 @@ function Test-JevKey {
                 if (-not $key) { $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Machine') }
                 [Environment]::SetEnvironmentVariable($JevKeyVar, $key, 'Process')
             }
-            $js = 'const j=require(process.argv[1]);j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000}).then(a=>process.exit(a&&a.ok?0:1))'
+            $js = 'const j=require(process.argv[1]);let st=0;j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000,onStatus:c=>{st=c}}).then(a=>process.exit(a&&a.ok?0:(st===402?2:1)))'
             Invoke-NativeExit 'node' @('-e', $js, $JevJs)
         } finally { [Environment]::SetEnvironmentVariable($JevKeyVar, $prev, 'Process') }
     }
@@ -431,6 +439,10 @@ function Test-JevKey {
         Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
     } elseif ($code -eq 0) {
         Write-Line ok 'Jev answers a live call'
+    } elseif ($code -eq 2) {
+        # HTTP 402: the key is accepted and the account has no credits, so a new key would not help.
+        Write-Line stop ('Jev answered HTTP 402 with {0}: the key is good, but the TypeSafe account has no credits' -f $JevKeyVar)
+        Add-Todo 'Top up TypeSafe: add credits to the TypeSafe account that owns TYPESAFE_API_KEY (the key itself is fine), then re-run the setup check.'
     } else {
         Write-Line stop ('Jev did not answer a live call with {0}: the key is refused or api.typesafe.ai is unreachable' -f $JevKeyVar)
         Add-Todo ('Replace the TypeSafe key: {0}' -f $JevKeyTodo) @($JevKeySet)
@@ -593,6 +605,86 @@ function Test-Plugin {
     } else {
         Write-Line warn ('aac-skills plugin {0} installed; could not compare it with master''s {1}' -f $installed, $Offered)
     }
+}
+
+# The plugin ids `claude plugin list --json` shows at user scope, as { Ids }: $null when the
+# probe is skipped, Ids $null when the list could not be read or parsed.
+function Get-UserScopePlugins {
+    $text = Invoke-ProbeText -Name 'plugin-list' -Real {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $t = & claude plugin list --json 2>$null | Out-String
+            if ($LASTEXITCODE -ne 0) { return '' }
+            return $t
+        } catch { return '' } finally { $ErrorActionPreference = $prev }
+    }
+    if ($null -eq $text) { return $null }
+    $none = [pscustomobject]@{ Ids = $null }
+    if (-not $text) { return $none }
+    $ids = New-Object System.Collections.ArrayList
+    try {
+        # foreach, not a pipeline: 5.1's ConvertFrom-Json hands a JSON array back as one object.
+        foreach ($p in (ConvertFrom-Json -InputObject $text)) {
+            if ($p -and $p.PSObject.Properties['id'] -and $p.PSObject.Properties['scope'] -and [string]$p.scope -eq 'user') {
+                [void]$ids.Add([string]$p.id)
+            }
+        }
+    } catch { return $none }
+    return [pscustomobject]@{ Ids = $ids.ToArray() }
+}
+
+# Every plugin profile/claude/settings.json enables must be installed at user scope (issue 1222):
+# the profile only enables a plugin, and nothing has been seen to install a newly listed one on a
+# PC that pulls it. -Fix runs `claude plugin install <id> --scope user` for each one missing.
+function Test-EnabledPlugins {
+    $profileSettings = Join-Path (Join-Path (Join-Path $RepoRoot 'profile') 'claude') 'settings.json'
+    $wanted = @()
+    try {
+        $json = [System.IO.File]::ReadAllText($profileSettings, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($json.PSObject.Properties['enabledPlugins'] -and $json.enabledPlugins) {
+            $wanted = @($json.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
+        }
+    } catch {
+        Write-Line warn ('enabled plugins not checked: {0} does not parse' -f $profileSettings)
+        return
+    }
+    if ($wanted.Count -eq 0) { Write-Line skip ('enabled plugins  ({0} enables none)' -f $profileSettings); return }
+    $list = Get-UserScopePlugins
+    if ($null -eq $list) { Write-Line skip ('plugins the profile enables, at user scope  ({0})' -f $SkipReason); return }
+    if ($null -eq $list.Ids) {
+        Write-Line warn 'plugins the profile enables not checked: claude plugin list --json could not be read'
+        return
+    }
+    $have = @($list.Ids)
+    $missing = @($wanted | Where-Object { $have -notcontains $_ })
+    $installed = @()
+    if ($missing.Count -gt 0 -and $Fix) {
+        foreach ($id in $missing) {
+            $code = Invoke-Probe -Name 'plugin-install' -Arguments @($id) -Real {
+                param($pluginId)
+                Invoke-NativeExit 'claude' @('plugin', 'install', $pluginId, '--scope', 'user')
+            }
+            if ($code -eq 0) { $installed += $id }
+        }
+        $after = Get-UserScopePlugins
+        if ($null -ne $after -and $null -ne $after.Ids) {
+            $now = @($after.Ids)
+            $installed = @($installed | Where-Object { $now -contains $_ })
+            $missing = @($wanted | Where-Object { $now -notcontains $_ })
+        }
+    }
+    if ($missing.Count -eq 0) {
+        $how = if ($installed.Count -gt 0) { ('; installed by -Fix: {0}' -f ($installed -join ', ')) } else { '' }
+        Write-Line ok ('all {0} plugins the profile enables are installed at user scope{1}' -f $wanted.Count, $how)
+        return
+    }
+    $note = if ($Fix) { '  (-Fix could not install it)' } else { '  (-Fix installs it)' }
+    foreach ($id in $missing) {
+        Write-Line stop ('plugin {0} is enabled in the profile but not installed at user scope{1}' -f $id, $note)
+    }
+    Add-Todo 'Install the plugins the profile enables at user scope (or re-run the setup check with -Fix), then restart the Claude app:' @(
+        $missing | ForEach-Object { 'claude plugin install {0} --scope user' -f $_ })
 }
 
 # The desktop app's own copy of aac-skills (issue 1149). Desktop sessions load the plugin from
@@ -802,6 +894,7 @@ function Test-Profile {
     Test-PullDrift
     $offered = Get-OfferedPluginVersion
     Test-Plugin (Join-Path $UserHome '.claude') $offered
+    Test-EnabledPlugins
     Test-DesktopPluginCopy
     Test-Caveman $installCommand
 
@@ -1028,10 +1121,53 @@ function Test-Routines {
     }
 }
 
+# The Todoist token the aac-routines mirror reads when no TODOIST_API_TOKEN is in its environment
+# (issue 1194): TODOIST_API_TOKEN_FILE when set, then ~/.config/aac/todoist_api_token, the order
+# todoist_port.py tries them, the first non-empty one winning. Without it the mirror's full sync
+# answers 403 and its task history 401. Some PCs hold the token one folder up, at
+# ~/.config/todoist_api_token; -Fix copies that one into place. The value is never read into the
+# output.
+$TodoistTokenPath   = Join-Path (Join-Path (Join-Path $UserHome '.config') 'aac') 'todoist_api_token'
+$TodoistLegacyToken = Join-Path (Join-Path $UserHome '.config') 'todoist_api_token'
+
+function Test-TokenFile {
+    param([string]$Path)
+    try { return [bool]([System.IO.File]::ReadAllText($Path).Trim()) } catch { return $false }
+}
+
+function Test-TodoistToken {
+    $candidates = @()
+    if ($env:TODOIST_API_TOKEN_FILE) { $candidates += [string]$env:TODOIST_API_TOKEN_FILE }
+    $candidates += $TodoistTokenPath
+    $hit = @($candidates | Where-Object { Test-TokenFile $_ } | Select-Object -First 1)
+    $note = ''
+    $legacy = Test-TokenFile $TodoistLegacyToken
+    if ($hit.Count -eq 0 -and $legacy -and $Fix) {
+        New-Item -ItemType Directory -Path (Split-Path $TodoistTokenPath -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $TodoistLegacyToken -Destination $TodoistTokenPath -Force
+        $note = ('  (copied by -Fix from {0})' -f $TodoistLegacyToken)
+        if (Test-TokenFile $TodoistTokenPath) { $hit = @($TodoistTokenPath) }
+    }
+    if ($hit.Count -gt 0) {
+        Write-Line ok ('Todoist token for the aac-routines mirror  ({0}){1}' -f $hit[0], $note)
+        return
+    }
+    $where = ($candidates -join ' or ')
+    if ($legacy) {
+        Write-Line stop ('Todoist token missing where the aac-routines mirror reads it ({0}); one is at {1}  (-Fix copies it)' -f $where, $TodoistLegacyToken)
+        Add-Todo 'Copy the Todoist token to where the aac-routines mirror reads it (or re-run the setup check with -Fix):' @(
+            ('New-Item -ItemType Directory -Force "{0}" | Out-Null; Copy-Item "{1}" "{2}"' -f (Split-Path $TodoistTokenPath -Parent), $TodoistLegacyToken, $TodoistTokenPath))
+    } else {
+        Write-Line stop ('Todoist token missing  ({0}): the aac-routines mirror''s full sync answers 403 and its task history 401 without it' -f $where)
+        Add-Todo ('Copy the Todoist API token (Todoist Settings > Integrations > Developer) into {0} over a secure channel (password manager or encrypted drive), never email and never a repo.' -f $TodoistTokenPath)
+    }
+}
+
 function Test-Projects {
     Write-Host 'Projects'
     $list = Read-RepoList -UserHome $UserHome
     Test-Clones $list
+    Test-TodoistToken
     Test-Anchor $list
 }
 
