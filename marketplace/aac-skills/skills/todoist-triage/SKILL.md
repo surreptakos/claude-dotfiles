@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-10-02T21:31:01Z'
-  previous-modified: '2026-10-02T20:29:20Z'
-  revision: '44'
-  content-sha: f1ef286b51e3
+  modified: '2026-10-02T21:42:53Z'
+  previous-modified: '2026-10-02T21:31:01Z'
+  revision: '45'
+  content-sha: d3368880ac2b
 ---
 
 # todoist-triage
@@ -110,9 +110,9 @@ Ask in plain numbered prose — it works in every session type, where a picker t
 
 **Tier 3 — tell.** Deadlines, past-due counts, the cap, coverage. They go in the status (step 6) and nowhere in the questions.
 
-**Publish to the Day Board** after tier 1 is applied and before the status: the run meta, one card per tier-2 question, and the "Waiting on you" list, in one batch per [`day-board.md`](day-board.md). The board copy is verbatim; the confidential rule covers the generated huddle notes only (issue 1192). The board is a second place to answer; the numbered questions are still asked.
+**Publish to the Day Board** after tier 1 is applied and before the status. First republish the board page from master's source, every run, per [`day-board.md`](day-board.md) § Republish the page. Then the run meta, one card per tier-2 question, and the "Waiting on you" list, in one batch per the same file. The board copy is verbatim; the confidential rule covers the generated huddle notes only (issue 1192). The board is a second place to answer; the numbered questions are still asked.
 
-Done when every ruling carries a tier, tier 1 is applied, the board batch is written (or its failure logged), and Dan has answered the tier-2 questions.
+Done when every ruling carries a tier, tier 1 is applied, the page is republished and the board batch is written (or each failure logged), and Dan has answered the tier-2 questions.
 
 ### 5. Write
 
@@ -151,7 +151,15 @@ Done when the status follows the six-line order, every tier-2 question is asked,
 
 ## Cadence
 
-On demand, plus a scheduled run weekdays at 8:30 AM America/Chicago — a desktop scheduled task since 2026-09-23, with the cloud Routine paused; exactly one of the two runs. 8:30 catches the day's first Power Automate export (08:15 CT, landing 08:16), whose 48-hour mail window carries the overnight mail. The scheduled run is the full pass, steps 1 to 6. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
+On demand, plus a scheduled run weekdays at 8:30 AM America/Chicago — a desktop scheduled task since 2026-09-23, with the cloud Routine paused; exactly one of the two runs. 8:30 catches the day's first Power Automate export (08:15 CT, landing 08:16), whose 48-hour mail window carries the overnight mail. The Friday run also asks which backlog `do` items move up for the coming week — a tier-2 question like any other.
+
+### The scheduled run
+
+Its prompt is one line naming this skill and saying it is the scheduled run; everything else is here. It runs unattended: make reasonable choices, state them in the status, and pause only where tier 2 leaves the questions waiting in the session.
+
+1. **Before step 1**, in the aac-routines checkout: `git pull --ff-only` (a failed pull ends the run, said in the status), then `python scripts/run_stamp.py check todoist-triage`; a slot already stamped ends the run with no output.
+2. **Steps 1 to 6**, the full pass. Its writes are the ones those steps name plus the git-ignored `state/` files: it changes no tracked repo file, and the Inbox router keeps the mode `config/task-capture.json` sets.
+3. **After the status**, `python scripts/run_stamp.py mark todoist-triage`.
 
 ## Filters (in Todoist, favorited)
 
