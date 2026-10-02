@@ -248,6 +248,14 @@ or an investigation you stopped short of finishing. Two workable options found i
 is evidence you stopped looking, not that nothing better exists. Exhaust the investigation, then ask
 only what remains a judgment call.
 
+**"No source" covers past sessions too (Dan, 2026-10-02).** Before reporting a value as unsourced
+or asking the owner to confirm it, search where earlier rulings live, not only repos and tickets:
+other session transcripts (`search_session_transcripts`, or grep the `~/.claude/projects/**/*.jsonl`
+files, whose AskUserQuestion answers sit in `toolUseResult.answers`) and any document the grill or
+spec started from. A subagent's "no source found" is a stand-in: check its search scope before
+relaying it. On 2026-10-02 an aac-nexus build agent sent four registry values back as unsourced;
+the grill transcript and its source document already settled two.
+
 ### Memory governance — the on-disk notes
 
 Extends "a stale note never outranks a live test" to per-project memory, project `CLAUDE.md` files,
