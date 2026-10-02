@@ -20,6 +20,12 @@
 //                      shape every adapter writes, checked by evidence.py validate DIR
 //   shot-*.png         1440, 768 and 390 px, 200% zoom, reduced motion, forced colours, offline
 //   dom.json           every element with its computed styles and box
+//   styles.json        every CSS rule with its @media / @supports conditions, the stylesheets and fonts
+//   source.json        the page's own code: each script's size and the user-text fragments it joins with +,
+//                      raw values against tokens in every stylesheet and style attribute, bytes per resource
+//   probes.json        the painted palette by hue family, hidden text hovered against tapped, and each
+//                      in-place view switch, online (transitions started) and with the network cut
+//   shot-failed-switch-N.png  the page after view switch N failed offline
 //   a11y-tree.json     the browser accessibility tree
 //   keyboard-walk.json the scripted Tab walk, one entry per stop
 //   text.txt           the page's plain text
@@ -44,7 +50,8 @@ const WIDTHS = [1440, 768, 390];
 const HEIGHT = 900;
 const CATALOG = path.join(__dirname, '..', 'catalog', 'CATALOG.json');
 const REVIEW_SET = ['shot-1440.png', 'shot-768.png', 'shot-390.png', 'shot-zoom200.png', 'shot-reduced-motion.png',
-  'shot-forced-colors.png', 'shot-offline.png', 'dom.json', 'a11y-tree.json', 'keyboard-walk.json', 'text.txt'];
+  'shot-forced-colors.png', 'shot-offline.png', 'dom.json', 'styles.json', 'source.json', 'probes.json', 'a11y-tree.json',
+  'keyboard-walk.json', 'text.txt'];
 const DETECTOR_SET = ['axe.json', 'findings.json'];
 const CONTROL_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'listbox', 'checkbox', 'radio', 'slider',
   'spinbutton', 'switch', 'button', 'link', 'menuitem', 'tab', 'option']);
@@ -145,7 +152,11 @@ async function launch(chrome) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'aac-web-audit-profile-'));
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--no-first-run',
     '--no-default-browser-check', '--disable-gpu', '--hide-scrollbars', '--mute-audio', '--disable-extensions',
-    '--force-color-profile=srgb', 'about:blank'];
+    '--force-color-profile=srgb',
+    // Headless reports no pointer and no hover, so (hover: hover) rules never apply; a desktop reader has a
+    // mouse. The phone width turns touch emulation on, which reports a coarse pointer and no hover.
+    '--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4',
+    'about:blank'];
   // Linux containers and GitHub runners refuse Chrome's user-namespace sandbox.
   if (process.platform === 'linux') args.unshift('--no-sandbox');
   const proc = spawn(chrome, args, { stdio: ['ignore', 'ignore', 'pipe'] });
@@ -223,7 +234,13 @@ const PAGE_HELPERS = `(() => {
 const DOM_PROBE = `(() => {
   const PROPS = ['display', 'visibility', 'opacity', 'color', 'background-color', 'font-family', 'font-size',
     'font-weight', 'line-height', 'outline-style', 'outline-width', 'box-shadow', 'position', 'overflow',
-    'forced-color-adjust', 'animation-name', 'transition-property'];
+    'forced-color-adjust', 'animation-name', 'transition-property',
+    // Spacing, shape and case, so a reviewer can measure a spacing scale, radii and all-caps labels (issue 1087).
+    'margin', 'padding', 'gap', 'border-width', 'border-style', 'border-color', 'border-radius', 'letter-spacing',
+    'text-transform', 'text-align', 'font-style', 'text-decoration-line', 'max-width',
+    // Timing, numerals, wrapping, touch, stacking and pointer, so motion and craft rules have a measure.
+    'transition-duration', 'transition-timing-function', 'animation-duration', 'font-variant-numeric', 'text-wrap',
+    'touch-action', 'z-index', 'cursor'];
   const parse = (c) => {
     const m = c && c.match(/rgba?\\(([^)]+)\\)/);
     if (!m) return null;
@@ -256,8 +273,9 @@ const DOM_PROBE = `(() => {
     const r = el.getBoundingClientRect();
     const style = {};
     for (const p of PROPS) style[p] = cs.getPropertyValue(p);
-    elements.push({ path: __aacPath(el), tag: el.localName, box: [r.x, r.y, r.width, r.height].map(Math.round), style });
     const own = Array.from(el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim();
+    elements.push({ path: __aacPath(el), tag: el.localName, box: [r.x, r.y, r.width, r.height].map(Math.round), style,
+      ...(own && !/^(script|style)$/.test(el.localName) ? { text: own.slice(0, 80) } : {}) });
     if (!own || cs.visibility === 'hidden' || cs.display === 'none' || r.width === 0 || r.height === 0) continue;
     const fg0 = parse(cs.color);
     const bg = background(el);
@@ -280,6 +298,194 @@ const DOM_PROBE = `(() => {
   return JSON.stringify({ elements, contrast, targets, landmarks, runningAnimations: motion,
     title: document.title, lang: document.documentElement.lang || '',
     commit: (document.querySelector('meta[name="deployed-commit"]') || {}).content || null });
+})()`;
+
+// Every CSS rule the page carries, with the @media / @supports conditions it sits under, plus the
+// stylesheets and fonts it loads. The computed styles in dom.json show one resting state; rules for
+// :active, :hover, :focus-visible, ::selection, prefers-reduced-motion and width breakpoints only show
+// here (issue 1087: the rep-board rerun could not judge press feedback or reduced motion without them).
+const STYLE_PROBE = `(() => {
+  const rules = [];
+  const sheets = [];
+  const walk = (list, cond, sheet) => {
+    for (const r of Array.from(list || [])) {
+      if (r.cssRules && !r.selectorText) {
+        walk(r.cssRules, cond.concat(r.cssText.split('{')[0].trim()), sheet); // "@media (max-width: 640px)"
+      } else {
+        rules.push({ sheet, ...(cond.length ? { cond } : {}), css: r.cssText.length > 600 ? r.cssText.slice(0, 600) + '…' : r.cssText });
+      }
+    }
+  };
+  Array.from(document.styleSheets).forEach((s, i) => {
+    const name = s.href || ('inline#' + i);
+    try { walk(s.cssRules, [], name); sheets.push({ sheet: name, rules: s.cssRules.length }); }
+    catch (e) { sheets.push({ sheet: name, unreadable: true }); }
+  });
+  const links = Array.from(document.querySelectorAll('link[href]')).map((l) => ({ rel: l.rel, href: l.href }));
+  const fonts = document.fonts ? Array.from(document.fonts).map((f) => ({ family: f.family, weight: f.weight, style: f.style, status: f.status })) : [];
+  return JSON.stringify({ sheets, links, fonts, rules, htmlBytes: document.documentElement.outerHTML.length,
+    scripts: document.scripts.length });
+})()`;
+
+// The page's own code, for rules a rendered page cannot show (issue 1087: the rep-board rerun could not
+// see strings concatenated in the board's logic, raw px one-offs or the weight of one inlined document).
+// Every script with its size and the user-text fragments it joins with +, every declaration in a
+// stylesheet or a style attribute, and the bytes each resource cost.
+const SOURCE_PROBE = `(async () => {
+  const scripts = [];
+  for (const [i, s] of Array.from(document.scripts).entries()) {
+    let text = s.src ? null : s.textContent;
+    if (s.src) { try { const r = await fetch(s.src); text = r.ok ? await r.text() : null; } catch (e) { text = null; } }
+    scripts.push({ index: i, src: s.src || null, type: s.type || '', text });
+  }
+  const inline = Array.from(document.querySelectorAll('[style]')).map((el) => el.getAttribute('style'));
+  return JSON.stringify({ htmlChars: document.documentElement.outerHTML.length, scripts, inline,
+    styleTags: Array.from(document.querySelectorAll('style')).reduce((n, s) => n + s.textContent.length, 0) });
+})()`;
+
+// A quoted fragment of words joined to an expression with +: 'Due on ' + date, n + ' deals'.
+const CONCAT = /(["'])((?:\\.|(?!\1)[^\\\n]){2,120}?)\1\s*\+\s*[\w$.([]|[\w$)\]]\s*\+\s*(["'])((?:\\.|(?!\3)[^\\\n]){2,120}?)\3/g;
+const userText = (s) => /[A-Za-z]{2,}/.test(s) && /\s/.test(s) && !/[<>{};=#]|https?:/.test(s);
+
+function sourceMeasures(src, styleRules) {
+  const scripts = src.scripts.map((s) => {
+    const text = s.text || '';
+    const found = [];
+    for (const m of text.matchAll(CONCAT)) {
+      if (userText(m[2] || m[4] || '')) found.push(m[0].slice(0, 160));
+    }
+    return { index: s.index, src: s.src, type: s.type, chars: text.length, head: text.trim().slice(0, 120),
+      uiConcatenations: found.length, examples: found.slice(0, 12) };
+  });
+  // Declarations from the stylesheets and the style attributes, split into token use and raw values.
+  const decls = [];
+  for (const r of styleRules) {
+    const body = r.css.slice(r.css.indexOf('{') + 1, r.css.lastIndexOf('}'));
+    for (const d of body.split(';')) decls.push({ from: 'stylesheet', d });
+  }
+  for (const s of src.inline) for (const d of String(s).split(';')) decls.push({ from: 'style attribute', d });
+  const groups = { spacing: /^(margin|padding|gap|row-gap|column-gap)(-|$)/, fontSize: /^font-size$/,
+    radius: /^border(-[a-z]+)*-radius$/, color: /^(color|background(-color)?|border(-[a-z]+)*-color|fill|stroke)$/ };
+  const cssValues = {};
+  for (const [g, re] of Object.entries(groups)) {
+    const v = { declarations: 0, usingTokens: 0, raw: {}, fromStyleAttributes: 0 };
+    for (const { from, d } of decls) {
+      const i = d.indexOf(':');
+      if (i < 0 || !re.test(d.slice(0, i).trim().toLowerCase())) continue;
+      const val = d.slice(i + 1).trim();
+      v.declarations++;
+      if (from === 'style attribute') v.fromStyleAttributes++;
+      if (/var\(--/.test(val)) v.usingTokens++;
+      const bare = val.replace(/var\([^)]*\)/g, '');
+      const raws = g === 'color' ? bare.match(/#[0-9a-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/gi)
+        : bare.match(/-?\d*\.?\d+(px|rem|em)\b/g);
+      for (const x of raws || []) if (!/^-?0(px|rem|em)?$/.test(x)) v.raw[x.toLowerCase()] = (v.raw[x.toLowerCase()] || 0) + 1;
+    }
+    v.distinctRaw = Object.keys(v.raw).length;
+    if (g === 'spacing') v.offFourPxScale = Object.keys(v.raw).filter((x) => /px$/.test(x) && parseFloat(x) % 4 !== 0);
+    cssValues[g] = v;
+  }
+  return { htmlChars: src.htmlChars, styleTagChars: src.styleTags,
+    scriptChars: scripts.reduce((n, s) => n + s.chars, 0), scripts, cssValues };
+}
+
+// The colours the page paints, by hue family, so a palette rule ("one accent") has a measure.
+function palette(elements) {
+  const fams = {};
+  const rgb = (c) => { const m = c && c.match(/rgba?\(([^)]+)\)/); if (!m) return null;
+    const p = m[1].split(/[ ,/]+/).filter(Boolean).map(Number); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+  const hsl = ({ r, g, b }) => { r /= 255; g /= 255; b /= 255; const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
+    const l = (mx + mn) / 2; const d = mx - mn; if (!d) return { h: 0, s: 0, l };
+    const s = d / (1 - Math.abs(2 * l - 1)); let h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    h = (h * 60 + 360) % 360; return { h, s, l }; };
+  const family = (h) => (h < 15 || h >= 345 ? 'red' : h < 50 ? 'orange-amber' : h < 70 ? 'yellow' : h < 170 ? 'green'
+    : h < 200 ? 'cyan' : h < 260 ? 'blue' : 'purple-pink');
+  for (const el of elements) {
+    if (el.style.display === 'none' || el.style.visibility === 'hidden' || !el.box[2] || !el.box[3]) continue;
+    const uses = [['text', el.text ? el.style.color : null], ['background', el.style['background-color']],
+      ['border', parseFloat(el.style['border-width']) > 0 && el.style['border-style'] !== 'none' ? el.style['border-color'] : null]];
+    for (const [use, c] of uses) {
+      const x = rgb(c);
+      if (!x || x.a < 0.1) continue;
+      const { h, s, l } = hsl(x);
+      if (s < 0.25 || l < 0.12 || l > 0.93) continue; // neutrals, near-black and near-white
+      const f = (fams[family(h)] = fams[family(h)] || { elements: 0, uses: {}, colors: {} });
+      f.elements++; f.uses[use] = (f.uses[use] || 0) + 1;
+      const hex = '#' + [x.r, x.g, x.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
+      f.colors[hex] = (f.colors[hex] || 0) + 1;
+    }
+  }
+  return { chromaticFamilies: Object.keys(fams).length, families: fams,
+    rule: 'saturation 0.25 or more and lightness 0.12 to 0.93; text colour counted only on elements with their own text' };
+}
+
+// Text that is painted invisible (opacity 0 or visibility hidden) inside a laid-out box: the usual shape of
+// a value shown only on hover. The candidates are kept on window so a later step can hover or tap them.
+const HIDDEN_TEXT_PROBE = `(() => {
+  window.__aacHidden = Array.from(document.body ? document.body.querySelectorAll('*') : []).filter((el) => {
+    const cs = getComputedStyle(el);
+    const r = el.getBoundingClientRect();
+    return (el.innerText || '').trim() && cs.display !== 'none' && r.width > 0 && r.height > 0
+      && (Number(cs.opacity) < 0.1 || cs.visibility === 'hidden')
+      && !(el.parentElement && Number(getComputedStyle(el.parentElement).opacity) < 0.1);
+  }).slice(0, 40);
+  return window.__aacHidden.length;
+})()`;
+const HIDDEN_POINT = (i, which) => `(() => {
+  const el = window.__aacHidden[${i}];
+  const t = ${JSON.stringify(which)} === 'parent' ? el.parentElement : el.previousElementSibling;
+  if (!t) return 'null';
+  t.scrollIntoView({ block: 'center' });
+  const r = t.getBoundingClientRect();
+  return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2, trigger: __aacPath(t), focusable: t.tabIndex >= 0 });
+})()`;
+const HIDDEN_SHOWN = (i) => `(() => { const cs = getComputedStyle(window.__aacHidden[${i}]);
+  return Number(cs.opacity) > 0.5 && cs.visibility !== 'hidden'; })()`;
+
+// A view switch: records the transitions and animations that start, and which elements the swap touched.
+const SWITCH_ARM = `(() => {
+  const w = window.__aacSwitch = { events: [], mutated: [], maxRunning: 0, t0: performance.now(), firstChange: null };
+  const on = (type) => (e) => w.events.push({ type, prop: e.propertyName || e.animationName || '', target: e.target,
+    ms: Math.round(performance.now() - w.t0) });
+  w.off = [['transitionrun', on('transition')], ['animationstart', on('animation')]];
+  for (const [t, f] of w.off) document.addEventListener(t, f, true);
+  w.mo = new MutationObserver((list) => { if (w.firstChange === null) w.firstChange = Math.round(performance.now() - w.t0);
+    for (const m of list) if (w.mutated.length < 300) w.mutated.push(m.target.nodeType === 1 ? m.target : m.target.parentElement); });
+  w.mo.observe(document.body, { subtree: true, childList: true, characterData: true });
+  w.poll = setInterval(() => { w.maxRunning = Math.max(w.maxRunning, document.getAnimations ? document.getAnimations().length : 0); }, 25);
+  w.before = document.body.innerText;
+  return true;
+})()`;
+const SWITCH_READ = `(() => {
+  const w = window.__aacSwitch;
+  clearInterval(w.poll); w.mo.disconnect();
+  for (const [t, f] of w.off) document.removeEventListener(t, f, true);
+  const touched = (el) => el && w.mutated.some((m) => m && (m === el || m.contains(el) || el.contains(m)));
+  const ev = w.events.map((e) => ({ type: e.type, prop: e.prop, ms: e.ms, target: __aacPath(e.target), onSwappedContent: touched(e.target) }));
+  const after = document.body.innerText;
+  const lines = new Set(w.before.split('\\n').map((s) => s.trim()));
+  const added = Array.from(new Set(after.split('\\n').map((s) => s.trim()).filter((s) => s && !lines.has(s)))).slice(0, 20);
+  const retry = Array.from(document.querySelectorAll('button, a[href], [role=button], input[type=button], input[type=submit]'))
+    .filter((el) => el.getClientRects().length && /try again|retry|reload|refresh/i.test(el.innerText || el.value || el.getAttribute('aria-label') || ''))
+    .map((el) => __aacPath(el));
+  const alerts = Array.from(document.querySelectorAll('[role=alert], [role=status], [aria-live]'))
+    .map((el) => (el.innerText || '').trim()).filter(Boolean).slice(0, 10);
+  return JSON.stringify({ textChanged: after !== w.before, firstChangeMs: w.firstChange, events: ev.slice(0, 40),
+    maxRunningAnimations: w.maxRunning, addedLines: added, retryControls: retry, liveRegions: alerts, url: location.href });
+})()`;
+// The controls that replace the page's content in place: selects with a choice to make, unselected tabs.
+const SWITCH_CONTROLS = `JSON.stringify(Array.from(document.querySelectorAll('select, [role=tab]')).filter((el) =>
+  !el.disabled && el.getClientRects().length && (el.localName !== 'select' || el.options.length > 1)
+  && (el.localName === 'select' || el.getAttribute('aria-selected') !== 'true')).slice(0, 3).map((el) => __aacPath(el)))`;
+const SWITCH_DO = (sel, restore) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)});
+  if (!el) return 'null';
+  if (el.localName !== 'select') { el.click(); return JSON.stringify({ to: (el.innerText || '').trim().slice(0, 60) }); }
+  const from = el.selectedIndex;
+  const to = ${restore === undefined ? '(from + 1) % el.options.length' : Number(restore)};
+  el.selectedIndex = to;
+  el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true }));
+  return JSON.stringify({ from, to, fromText: el.options[from].text.slice(0, 60), toText: el.options[to].text.slice(0, 60) });
 })()`;
 
 const OVERFLOW_PROBE = `JSON.stringify({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth,
@@ -390,18 +596,33 @@ async function audit(a) {
       measures['sign-in'] = { status: 'ok', steps: steps.length };
     }
 
+    // What the page load cost, resource by resource.
+    const resources = new Map();
+    const netListener = (m) => {
+      if (m.sessionId !== s) return;
+      if (m.method === 'Network.responseReceived') {
+        resources.set(m.params.requestId, { url: m.params.response.url.slice(0, 200), type: m.params.type, mime: m.params.response.mimeType });
+      } else if (m.method === 'Network.loadingFinished' && resources.has(m.params.requestId)) {
+        resources.get(m.params.requestId).bytes = m.params.encodedDataLength;
+      }
+    };
+    cdp.listeners.push(netListener);
+    const reload = async () => { await navigate(url); if (a.waitFor) await waitSelector(a.waitFor); };
     await viewport(1440);
-    await navigate(url);
-    if (a.waitFor) await waitSelector(a.waitFor);
+    await reload();
+    await settle(500);
+    cdp.listeners = cdp.listeners.filter((l) => l !== netListener);
 
     // Viewports.
     const viewports = [];
     for (const w of WIDTHS) {
+      await send('Emulation.setTouchEmulationEnabled', w <= 390 ? { enabled: true, maxTouchPoints: 5 } : { enabled: false });
       await viewport(w); await settle(150);
       const o = JSON.parse(await evaluate(OVERFLOW_PROBE));
       viewports.push({ width: w, shot: await shoot(`shot-${w}.png`), horizontalScroll: o.scrollWidth > o.innerWidth, ...o });
       if (o.scrollWidth > o.innerWidth) fault('web.zoom-200', 'horizontal-scroll', `page scrolls sideways at ${w} px`, `${o.scrollWidth} px wide`);
     }
+    await send('Emulation.setTouchEmulationEnabled', { enabled: false });
     measures['web.viewports'] = { status: 'ok', viewports };
 
     // 200% zoom: a 1440 px window at 200% lays the page out in 720 CSS px at scale 2.
@@ -416,6 +637,15 @@ async function audit(a) {
     const dom = JSON.parse(await evaluate(DOM_PROBE));
     if (subject.kind === 'url' && !subject.commit && dom.commit) subject.commit = dom.commit;
     write('dom.json', { title: dom.title, lang: dom.lang, elements: dom.elements });
+    const styles = JSON.parse(await evaluate(STYLE_PROBE));
+    write('styles.json', styles);
+    const loaded = Array.from(resources.values());
+    const source = { ...sourceMeasures(JSON.parse(await evaluate(SOURCE_PROBE, true)), styles.rules),
+      transfer: { requests: loaded.length, bytes: loaded.reduce((n, r) => n + (r.bytes || 0), 0),
+        resources: loaded.sort((x, y) => (y.bytes || 0) - (x.bytes || 0)).slice(0, 50) } };
+    write('source.json', source);
+    measures.source = { status: 'ok', htmlChars: source.htmlChars, scriptChars: source.scriptChars,
+      transferBytes: source.transfer.bytes, uiConcatenations: source.scripts.reduce((n, x) => n + x.uiConcatenations, 0) };
     measures['web.contrast'] = { status: 'ok', checked: dom.contrast.length, failing: dom.contrast.filter((c) => !c.pass).length };
     for (const c of dom.contrast.filter((x) => !x.pass)) {
       fault('web.contrast', 'low-contrast', `text contrast ${c.ratio}:1 is below ${c.required}:1 (${c.fg} on ${c.bg})`, c.path, { text: c.text, wcag: '1.4.3' });
@@ -516,6 +746,74 @@ async function audit(a) {
     measures['forced-colors'] = { status: 'ok', shot: await shoot('shot-forced-colors.png'), forcedColorAdjustNone: optedOut };
     await send('Emulation.setEmulatedMedia', { features: [] });
 
+    // Interactions a still capture cannot show (issue 1087), written to probes.json for the reviewers.
+    const probes = { palette: palette(dom.elements) };
+    // Hover against tap: hidden text is hovered with a mouse at 1440, then tapped on a 390 px touch screen.
+    const hidden = await evaluate(HIDDEN_TEXT_PROBE);
+    const reveal = [];
+    for (let i = 0; i < hidden; i++) {
+      let hit = null;
+      for (const which of ['parent', 'previous']) {
+        const pt = JSON.parse(await evaluate(HIDDEN_POINT(i, which)));
+        if (!pt) continue;
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
+        await settle(450);
+        const shown = await evaluate(HIDDEN_SHOWN(i));
+        await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 0, y: 0 });
+        await settle(100);
+        if (shown) { hit = { ...pt, which }; break; }
+      }
+      const el = JSON.parse(await evaluate(`JSON.stringify({ path: __aacPath(window.__aacHidden[${i}]), text: (window.__aacHidden[${i}].innerText || '').trim().slice(0, 60) })`));
+      reveal.push({ ...el, hover: !!hit, trigger: hit ? hit.trigger : null, triggerFocusable: hit ? hit.focusable : null, which: hit ? hit.which : null });
+    }
+    if (reveal.some((r) => r.hover)) {
+      await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      await viewport(390); await settle(300);
+      for (const [i, r] of reveal.entries()) {
+        if (!r.hover) continue;
+        const pt = JSON.parse(await evaluate(HIDDEN_POINT(i, r.which)));
+        if (!pt) { r.tap = null; continue; }
+        await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: pt.x, y: pt.y }] });
+        await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+        await settle(450);
+        r.tap = await evaluate(HIDDEN_SHOWN(i));
+        await evaluate('document.activeElement && document.activeElement.blur(); true');
+      }
+      await send('Emulation.setTouchEmulationEnabled', { enabled: false });
+      await viewport(1440); await settle(200);
+    }
+    probes.hoverReveal = { hiddenText: reveal.length, shownOnHover: reveal.filter((r) => r.hover).length,
+      shownOnTap: reveal.filter((r) => r.tap).length, items: reveal };
+    // View switches: each control that replaces content in place, once online and once with the network cut.
+    const switches = [];
+    for (const sel of JSON.parse(await evaluate(SWITCH_CONTROLS))) {
+      const run = async (offline) => {
+        if (offline) await send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+        await evaluate(SWITCH_ARM);
+        const did = JSON.parse(await evaluate(SWITCH_DO(sel)));
+        await settle(offline ? 4000 : 2500);
+        const r = did ? { ...did, ...JSON.parse(await evaluate(SWITCH_READ)) } : null;
+        if (offline) {
+          if (r) r.shot = await shoot(`shot-failed-switch-${switches.length + 1}.png`);
+          await send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+        }
+        return r;
+      };
+      const online = await run(false);
+      await reload();
+      const failed = await run(true);
+      switches.push({ control: sel, online, failed });
+      await reload();
+    }
+    probes.viewSwitch = switches;
+    probes.notes = 'hoverReveal: hidden text hovered at 1440 px, then tapped on a 390 px touch screen. viewSwitch: '
+      + '"online" changes each control and records the transitions and animations that start (onSwappedContent: on '
+      + 'the elements the swap replaced); "failed" does the same with the network cut, after 4 s, with its screenshot.';
+    write('probes.json', probes);
+    const failedShots = switches.map((x) => x.failed && x.failed.shot).filter(Boolean);
+    measures['web.probes'] = { status: 'ok', hiddenText: reveal.length, switches: switches.length,
+      chromaticFamilies: probes.palette.chromaticFamilies };
+
     // Offline: reload with the network cut and keep what the reader would see.
     await send('Network.emulateNetworkConditions', { offline: true, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
     const reloaded = cdp.waitFor('Page.loadEventFired', s, 15000);
@@ -534,10 +832,10 @@ async function audit(a) {
       subject,
       captured: new Date().toISOString(),
       browser: version.product,
-      images: REVIEW_SET.filter((f) => f.endsWith('.png')),
-      structure: ['dom.json', 'a11y-tree.json', 'keyboard-walk.json'],
+      images: [...REVIEW_SET.filter((f) => f.endsWith('.png')), ...failedShots],
+      structure: ['dom.json', 'styles.json', 'source.json', 'probes.json', 'a11y-tree.json', 'keyboard-walk.json'],
       text: 'text.txt',
-      review_set: REVIEW_SET,
+      review_set: [...REVIEW_SET, ...failedShots],
       detector_set: DETECTOR_SET,
       measures,
       fault_count: faults.length,
@@ -560,4 +858,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { findChrome, AXE };
+module.exports = { findChrome, launch, AXE };

@@ -24,6 +24,9 @@ const FIXTURE = `<!doctype html>
 body { font-family: sans-serif; color: #1a1a1a; background: #ffffff; margin: 24px; }
 .faint { color: #bbbbbb; }
 .gone { display: inline-block; width: 0; overflow: hidden; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
+.tip { opacity: 0; }
+@media (hover: hover) { .bar:hover > .tip { opacity: 1; } }
 </style></head>
 <body>
 <main>
@@ -34,7 +37,14 @@ body { font-family: sans-serif; color: #1a1a1a; background: #ffffff; margin: 24p
 <select id="plan"><option>Basic</option><option>Plus</option></select>
 <a class="gone" href="#top">Back to top</a>
 <button type="submit">Send</button>
+<div class="bar" tabindex="0">Plan price <span class="tip">12 a month</span></div>
+<p id="note"></p>
 </main>
+<script>
+document.getElementById('plan').addEventListener('change', (e) => {
+  document.getElementById('note').textContent = 'You picked ' + e.target.value;
+});
+</script>
 </body>
 </html>
 `;
@@ -97,6 +107,23 @@ test('the four-fault fixture yields an evidence bundle listing each fault', { sk
     assert.ok(bundle.review_set.includes(shot), shot);
   }
   assert.ok(!bundle.review_set.includes('findings.json') && !bundle.review_set.includes('axe.json'), 'detector output is withheld from reviewers');
+  // The stylesheet rules reach reviewers with their conditions (issue 1087): states and media
+  // queries a resting computed style cannot show.
+  const styles = JSON.parse(fs.readFileSync(path.join(bundleDir, 'styles.json'), 'utf8'));
+  assert.ok(bundle.review_set.includes('styles.json'), 'styles.json is in the review set');
+  assert.ok(styles.rules.some((r) => /button:active/.test(r.css) && (r.cond || []).some((c) => /prefers-reduced-motion/.test(c))),
+    'a rule keeps its @media condition');
+  // The page's code and behaviour reach reviewers too (issue 1087): the fragment joined with +, the raw
+  // margin, the price shown on hover but not on tap, and the select that swaps text with no transition.
+  for (const f of ['source.json', 'probes.json']) assert.ok(bundle.review_set.includes(f), `${f} is in the review set`);
+  const source = JSON.parse(fs.readFileSync(path.join(bundleDir, 'source.json'), 'utf8'));
+  assert.ok(source.scripts.some((x) => x.examples.some((e) => e.includes("'You picked '"))), 'a concatenated message');
+  assert.ok(source.cssValues.spacing.raw['24px'] >= 1, 'a raw spacing value');
+  const probes = JSON.parse(fs.readFileSync(path.join(bundleDir, 'probes.json'), 'utf8'));
+  const tip = probes.hoverReveal.items.find((x) => x.text === '12 a month');
+  assert.ok(tip && tip.hover === true && tip.tap === false, JSON.stringify(probes.hoverReveal));
+  const sw = probes.viewSwitch.find((x) => x.control.includes('#plan'));
+  assert.ok(sw && sw.online.textChanged && sw.online.events.length === 0, JSON.stringify(sw));
   // The shape every adapter writes (issue 1088): the document, deck and PDF bundles validate against it too.
   const shape = spawnSync('python3', [path.join(SKILL, 'scripts', 'evidence.py'), 'validate', bundleDir], { encoding: 'utf8' });
   assert.equal(shape.status, 0, shape.stdout + shape.stderr);
