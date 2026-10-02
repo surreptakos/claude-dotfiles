@@ -2,10 +2,10 @@
 name: aac-review-self-check
 description: Self-check an AAC One Page performance review draft before it goes to the skip-level. Use when the user is writing, revising or about to send a performance review of one of their directs.
 metadata:
-  modified: '2026-09-29T21:26:59Z'
-  previous-modified: '2026-09-29T20:32:48Z'
-  revision: '7'
-  content-sha: 57cac0a529d3
+  modified: '2026-10-01T23:21:22Z'
+  previous-modified: '2026-09-29T21:26:59Z'
+  revision: '8'
+  content-sha: 3ad611ddbde3
 ---
 
 # AAC review self-check
@@ -47,7 +47,18 @@ Done when the report reads PASS, or FAIL with each failing test named; says whic
 
 Only after Format passes: fix one class of problem at a time, because a draft that fails format is not worth reading for meaning yet.
 
-Run the item against the checks, not the checks against the item. Take one Strength or Weakness, answer every meaning check in `standards.md` for it in order, then move to the next item. Reading an item once and forming an impression skips the checks that impression did not raise; that is how a run with every rule in hand still ships a bad restate.
+`review_meaning.py` runs the meaning checks it can decide: the rules in code, and the judgments through TypeSafe Jev. The audit runs the same module, so you see the same verdict your skip-level will:
+
+```
+python3 review_format_check.py meaning REVIEW.docx --direct FIRSTNAME
+```
+
+- **Exit 0 or 1.** Its fix lines are findings, verbatim; a line tagged "(Jev)" is Jev's judgment, the rest are rules. Read every item on its Read list and settle it by the meaning checks in `standards.md`. Then read every item for the checks it names as reader checks (a repeat from the prior review, framing past the record), which no code can see. The comma counts are a note: take commas out where the sentence still reads.
+- **Exit 2.** Jev could not answer (no TypeSafe key on this machine, an auth or billing error, a timeout). That is not a pass: read every meaning check yourself, as below. The stamp then says the meaning checks were read, not run by Jev, and your skip-level's audit reruns them.
+
+Jev receives the review text: it goes to api.typesafe.ai. Any new judgment added to the module starts from the `typesafe:typesafe-ai` skill.
+
+Reading by hand, run the item against the checks, not the checks against the item. Take one Strength or Weakness, answer every meaning check in `standards.md` for it in order, then move to the next item. Reading an item once and forming an impression skips the checks that impression did not raise; that is how a run with every rule in hand still ships a bad restate.
 
 Each finding names the item and the check, and leaves the sentence to the manager: "S3: sentence 2 is a list of five accounts; it must be one event or figure."
 
@@ -55,13 +66,13 @@ Done when every Strength, every Weakness, the Core Message and every Guidance po
 
 ## 4. Stamp
 
-Stamp only a draft where Format reads PASS, Meaning reads PASS with every item accounted for, and every check ran:
+Stamp only a draft where Format reads PASS, Meaning reads PASS with every item accounted for, and every check ran. Each format and meaning run writes `REVIEW.docx.gate.json` beside the draft, and the stamp reads it: it refuses (exit 2, "NOT STAMPED") unless this exact file has a format run at exit 0 and a meaning run with no fix lines. Edit the page and both runs go again.
 
 ```
 python3 review_format_check.py stamp REVIEW.docx --end END --start START --direct FIRSTNAME
 ```
 
-It writes a line into the file and prints a code. Give the manager the code and tell him to put it in the email with the review. The code is computed from the text of the page, so it stops matching the moment the page changes. That is the point: it tells his skip-level that the checks ran, and that they ran on the version he actually sent. If the script cannot write to the file, say so and give the manager the code to send by hand.
+It writes a line into the file and prints a code. The line ends "meaning: Jev" when the meaning run exited 0, or "meaning: read, not Jev" when it exited 2 and you read the checks instead, so the audit knows what to rerun. Give the manager the code and tell him to put it in the email with the review. The code is computed from the text of the page, so it stops matching the moment the page changes. That is the point: it tells his skip-level that the checks ran, and that they ran on the version he actually sent. If the script cannot write to the file, say so and give the manager the code to send by hand.
 
 ## 5. Before you send
 

@@ -5,28 +5,20 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.13 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.14 \| ACTIVE** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.13 |
-| **Status** | Draft for Approval |
-| **Effective date** | Upon approval |
+| **Version** | 0.14 |
+| **Status** | Active |
+| **Effective date** | 2026-10-01 |
 | **Review cycle** | Annual, or upon material change |
 | **Primary reference** | The Gregg Reference Manual, 11th U.S. edition |
 
 The approved electronic master of this standard is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
-
-This draft is formatted as a controlled document, but it does not become company policy until the designated approver approves it.
-
-**Approval**
-
-| **Role** | **Name** | **Approval / Signature** | **Date** |
-|---|---|---|---|
-| General Manager | | | |
 
 **Revision history**
 
@@ -44,6 +36,7 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 | 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
+| 0.14 | 2026-10-01 | Controlled-document header without a signature table; approval by merge; effective date in the header: Appendix F. | General Manager |
 
 # How to use this standard
 
@@ -1297,6 +1290,8 @@ The General Manager, or another formally designated document-control owner, owns
 
 Each approved revision must record the version, effective date, description of change, and approver. The current approved version controls. Retain superseded versions when legal, contractual, audit, or document-history requirements justify retention.
 
+A controlled document opens with a header naming its document number, owner, approver, version, status, and effective date. It carries no signature table. Approval is the merge of the revision into the document's controlled repository, made by the owner or by an agent the owner directs. Write the effective date in the header before the merge; never infer it from the merge.
+
 Document-specific standards and templates must name their owner, scope, approval, version, and any exceptions to this standard. Keep performance-review methods and template-specific limits in their own controlled documents. Templates implement the applicable rules; they do not establish new company-wide rules by accident.
 
 ## House selections and reference treatment
@@ -1329,6 +1324,7 @@ Table F1. House decision register
 | 167 | Machine-vocabulary word list adopted across the board, not scoped to one document class. Beacon, harness, gate, and robust stay exempt when literal. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Lists compared: `petergyang/no-ai-slop` and `blader/humanizer`. Checked by the stop-slop detector, issue 620. | 0.10 |
 | 166; 168; 169; 170; G12 | Cut sentences that do nothing for the reader: restated terms, unraised disputes, and shown working (Rule 168). Formality follows stakes and relationship, not topic; no contract citations in email unless disputed or outcome-changing (Rule 169). Cut for need, never for length (Rule 170). Legalistic register in Appendix G12, checked as warnings outside formal documents. No length check. | Owner ruling, September 28, 2026, from the ForeFront closeout: the drafts were accurate but overdefensive, legalistic, and redundant. Length is the wrong target, so Rule 170 and its release-check item keep the fix from turning terse. | 0.12 |
 | 8; 104 | An AI-drafted message states only what the record shows, names the system it came from, and writes what the sender could not verify as not known (Rule 8). A request to a direct report due within a couple of weeks names the next O3 as the deadline, not a calendar date (Rule 104). | Owner ruling, October 1, 2026, on a drafted Teams message to a manager: "AI drafted messages should lean hard into hedging & stating only what we can absolutely be sure of" and "instead of putting dates/deadlines for internal team members, if the deadline is relatively soon, ask for it by their next O3." | 0.13 |
+| F | Signature table dropped from the controlled-document shape. | Owner ruling, October 1, 2026, on how the first nexus policy is approved: "wr 001 doesn't need a signature, it's overkill. It's already being used in Claude. It's an agent file." | 0.14 |
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
 | 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
 
