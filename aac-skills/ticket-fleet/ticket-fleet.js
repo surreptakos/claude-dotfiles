@@ -1446,7 +1446,8 @@ const breaches = []
 const attributed = new Set()
 // Issue 1020: one entry per restored root-tree write - { label, observedBy, who, entries, quarantine }.
 const treeRestores = []
-// A leaked path goes into a bash command as ONE word, whatever it contains.
+// A leaked path, and the guard's statePath (issue 1207: a fork's guard prints `C:\Users\...`, whose
+// backslashes an unquoted bash word eats), goes into a bash command as ONE word, whatever it holds.
 const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 let guardStatePath = null
 let guardCandidates = ''   // filled in once the wave is known, below
@@ -1794,7 +1795,7 @@ async function treeGuardCheck(label, ticketNumber) {
   let restore = null, restoreError = null
   try {
     restore = await agent(
-      guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${guardStatePath} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
+      guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${shellWord(guardStatePath)} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
       { label: `tree-guard:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
@@ -1872,7 +1873,7 @@ async function headCheck(label, ticketNumber, now) {
 async function isolationRead(tag, ticketNumber) {
   const who = `isolation:${tag}#${ticketNumber}`
   const checkCmd = treeGuardOn
-    ? `${GUARD_CMD} check --cwd "$o" --state ${guardStatePath} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
+    ? `${GUARD_CMD} check --cwd "$o" --state ${shellWord(guardStatePath)} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
     : null
   let res = null, agentError = null
   // Wrapped (aac-routines issue 270): an agent that cannot produce schema-conformant output throws
