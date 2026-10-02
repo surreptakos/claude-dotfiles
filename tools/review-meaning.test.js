@@ -24,7 +24,7 @@ if (!HAVE_DOCX && process.env.REVIEW_MEANING_REQUIRE_DOCX === '1') {
   test('python3 with python-docx is installed', () => assert.fail(`${PY} cannot import docx`));
 }
 
-// The fixture meets the SEER minimum (one in ten, never fewer than one; Dan, October 2, 2026), so Gate 1 passes it as a whole review.
+// The fixture meets the SEER minimum (30% rounded down, never fewer than one; Dan, October 2, 2026), so Gate 1 passes it as a whole review.
 const BOB = {
   direct: 'Bob', start: '7/24/2025', end: '7/23/2026',
   core: "Bob's results have met expectations since his last review. I am recommending he is ready for vertical growth in his role, in the areas of quality control and reporting.",
@@ -238,12 +238,20 @@ suite('review meaning', { concurrency: true }, () => {
     assert.match(r.out, /^GATE 1: PASS$/m);
   });
 
-  t('Gate 1 passes a five-item page with one SEER item (one in ten, never fewer than one)', async () => {
+  t('Gate 1 passes a five-item page with one SEER item (30% of five, rounded down, is one)', async () => {
     const r = await check(await docx({ strengths: [BOB.strengths[0], 'Bob documents every escalation. Recently he wrote up a billing dispute so clearly that finance closed it the same day.', 'Bob answers the phone on the first ring. Last Monday he picked up every call in the morning rush before the second ring.'],
       weaknesses: ['Bob turns in his weekly call reports late. He sent the March 6 report on the following Tuesday.',
         'Bob skips the notes field on short calls. On one short call last month he left no note and the customer had to explain the problem twice.'] }));
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /^GATE 1: PASS$/m);
+  });
+
+  t('Gate 1 fails a seven-item page with one SEER item (30% of seven, rounded down, is two)', async () => {
+    const sumex = (s) => `Bob ${s}. Last week he did it again on a customer call.`;
+    const r = await check(await docx({ strengths: [BOB.strengths[0], sumex('answers on the first ring'), sumex('logs every callback'), sumex('closes tickets the same day')],
+      weaknesses: [sumex('misses the Friday report deadline'), sumex('skips notes on short calls'), sumex('leaves voicemails unreturned overnight')] }));
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /1 in SEER; at least 2 of 7 must be SEER/);
   });
 
   t('Gate 1 fails a page with no SEER item and names the floor', async () => {
