@@ -16,7 +16,7 @@ name: Tracker audit
 # link, not in a line of a session report nobody can act on twice a day.
 #
 # THE AUDIT IS NOT WRITTEN HERE, AND NOT COPIED INTO tools/. `tools/tracker-audit.js` is the audit —
-# twelve numbered checks (nineteen finding kinds) and its own `--paginate`-free page loop (issue 171, issue 230), which is what this
+# its numbered checks (the `// ---- N.` headers there) and its own `--paginate`-free page loop (issue 171, issue 230), which is what this
 # job runs. `tools/tracker-audit-job.js` is a thin runner: token refusal, job-summary mirror,
 # exit-code propagation, all under `node --test tools/tracker-audit-job.test.js`, which the first
 # step below runs. Do not move logic into this file: YAML bash is the one thing in this repo nothing
@@ -36,8 +36,8 @@ name: Tracker audit
 # WHO READS THE RESULT. The session-check engine (aac-skills/session-check/check.js) stops
 # spawning the audit and reads this job's latest run for the current default-branch head instead —
 # `tracker audit clean`, `tracker audit: drift — <url>`, or `tracker audit: no run for this head`.
-# A container and the desktop now print the same line. Renaming this file breaks that read:
-# TRACKER_AUDIT_WORKFLOW in check.js names it.
+# A container and the desktop now print the same line. Renaming this file breaks that read: the
+# `tracker-audit.yml` entry in check.js's TRACKER_JOBS names it.
 #
 
 on:
