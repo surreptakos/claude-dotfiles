@@ -1,45 +1,39 @@
 ---
 name: claude-md-lint
 disable-model-invocation: true
-description: Audit or trim a CLAUDE.md, AGENTS.md or other always-loaded instructions file against the concision paradigm ("would removing this line cause a mistake?"). Use when asked to lint, audit, trim, shrink or review a CLAUDE.md, when a rulebook feels ignored or bloated, or before adding a new section to one. Bundles the deterministic linter; the trim pass is the model's job.
+description: Lint and trim a CLAUDE.md, AGENTS.md or other always-loaded instructions file against the concision paradigm. Use when asked to lint, audit or trim one, when a rulebook feels ignored or bloated, or before adding a section to one.
 metadata:
-  modified: "2026-09-18T04:06:51Z"
-  previous-modified: "2026-09-16T23:37:30Z"
-  revision: "5"
-  content-sha: "0ebe7efce6bd"
+  modified: "2026-10-02T15:41:12Z"
+  previous-modified: "2026-09-18T04:06:51Z"
+  revision: "6"
+  content-sha: "f86dacb998b5"
 ---
 
 # claude-md-lint — keep instruction files to what a session cannot derive
 
-Bloated instruction files make the rules that matter get ignored. This skill runs a deterministic
-linter over one, then walks the trim pass the bundled `/doctor` skill describes but does not
-apply to global or non-checked-in files.
+Bloated instruction files bury the rules that matter. This skill runs a deterministic linter over
+one, then walks the trim pass the bundled `/doctor` skill describes but does not apply to global or
+non-checked-in files.
 
 ## Run the linter
 
 ```bash
-node "~/.claude/skills/claude-md-lint/claude-md-lint.js" <file> [--against <other.md>]... [--json]
+node "<skill base directory>/claude-md-lint.js" <file> [--against <other.md>]... [--json]
 ```
 
-Exit 0 clean, 1 findings, 2 usage. One tab-separated line per finding: `file:line  rule  message`.
 Pass `--against` for every other always-loaded file the target shares a session with (the global
-file when linting a project one, and the reverse) so verbatim duplicates surface. The script reads
-package.json and formatter configs beside the file on its own.
+file when linting a project one, and the reverse) so verbatim duplicates surface. The script header
+documents every rule, budget, flag and exit code; a warn-only finding (issue 337) prints but leaves
+the exit code 0.
 
-Rules, one per row of the paradigm's exclude column: `size`, `self-evident`, `std-convention`,
-`enforced-elsewhere`, `guessable-command`, `tech-stack`, `tutorial`, `file-inventory`, `api-dump`,
-`lazy-candidate`, `volatile`, `code-derivable`, `ambiguous`, `duplicate`, `emphasis`. Budgets:
-200 non-blank lines (the docs' own target), 2500 prose words, 40,000 chars (the CLI's memory-file
-warning floor). Fenced code is never linted as prose. The script header documents every rule.
+## Findings are prompts, not verdicts
 
-## Read the findings, do not obey them
-
-Every finding is a prompt to ask the paradigm's question of that line, not a verdict. Two classes
-are always noise: a rule *about* hedging or volatility trips `ambiguous` / `volatile`, and a rule
-about a capability trips `code-derivable`. Leave those; suppress only when a line must stay and the
-finding will keep firing (`<!-- claude-md-lint-ignore -->` on the line above, or
-`<!-- claude-md-lint-disable: rule,rule -->` once per file). Comments cost context too, so prefer
-leaving noise unsuppressed over sprinkling them.
+Ask the paradigm's question ("would removing this line cause a mistake?") of each flagged line. Two
+classes are always noise: a rule *about* hedging or volatility trips `ambiguous` / `volatile`, and a
+rule about a capability trips `code-derivable`. Leave those as they are. Suppress only when a line
+must stay and the finding will keep firing (`<!-- claude-md-lint-ignore -->` on the line above, or
+`<!-- claude-md-lint-disable: rule,rule -->` once per file); comments cost context too, so
+unsuppressed noise beats a sprinkling of them.
 
 ## The trim pass
 
@@ -61,14 +55,17 @@ fresh session in this repo reconstruct this with `ls`, `cat`, the manifest or `-
 
 ## Land it
 
-1. Back up first: copy the live file beside itself with a dated `.bak-<why>` suffix, or name the
-   git recovery path out loud.
-2. Edit the live file (for a mirrored global file, never the repo mirror), re-run the linter, and
-   re-run any claims tripwire the repo keeps on that file.
+1. Back up first: copy the file beside itself with a dated `.bak-<why>` suffix, or name the git
+   recovery path out loud.
+2. Edit the source. For the owner's global rules that is claude-dotfiles
+   `profile/claude/CLAUDE.md`: `~/.claude/CLAUDE.md` is only a pointer (issue 732), and the
+   plugin's `rules/global-rules.md` is generated from the source. Re-run the linter, and any claims
+   tripwire the repo keeps on that file.
 3. Report before and after: prose words, non-blank lines, estimated tokens, findings. Name what
-   moved where. Every rule from the original must still exist somewhere the file points at.
-4. If the file is mirrored into a dotfiles repo, regenerate the mirror with its sync push; do not
-   hand-edit the mirror.
+   moved where. Done when every rule from the original still exists somewhere the file points at.
+4. A file another copy is generated from: regenerate the copy with that repo's build (in
+   claude-dotfiles, `tools/build-cloud-plugin.py` per its `CLAUDE.md`), never by hand.
 
-The canonical copy of the linter, with its test suite, lives in the claude-dotfiles repo under
-`tools/`; that suite asserts this skill's copy is byte-identical, so update both together.
+The canonical linter, with its test suite, is claude-dotfiles `tools/claude-md-lint.js`;
+`tools/claude-md-lint.test.js` fails unless this skill's copy is byte-identical, so change both
+together.

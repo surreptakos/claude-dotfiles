@@ -41,6 +41,10 @@ PARTS = [
      "AI tells, machine vocabulary, reader need, phrase register, "
      "structure register",
      ["Part XXV ", "Appendix G", "Appendix H"]),
+    ("REVIEW.md",
+     "Performance review material: the review page, audit and coaching "
+     "email mechanics, review file names, templates and the gate script",
+     ["Part XXVI "]),
     ("TERMINOLOGY.md",
      "Terminology list, quick reference, style governance and decision register",
      ["Appendix C", "Appendix D", "Appendix F", "References"]),
@@ -72,6 +76,7 @@ Then read only what the deliverable needs.
 | `DELIVERABLES.md` | The deliverable is an email, Teams message, letter, memo, report, proposal, scope of work, SOP, contract or legal text, or technical writing | {span[DELIVERABLES.md]} |
 | `LAYOUT.md` | Producing a Word document, a table, or any list; setting margins, fonts, headings or styles | {span[LAYOUT.md]} |
 | `DRAFT-QUALITY.md` | Any original prose. AI tells, machine vocabulary, plus the release check that closes the work | {span[DRAFT-QUALITY.md]} |
+| `REVIEW.md` | A performance review, its audit, or a format, meaning or coaching email about one. Rule 2 scopes it to that material | {span[REVIEW.md]} |
 | `CONTROL.md` | Naming a file, running the pre-send review, or choosing the format for a document type | {span[CONTROL.md]} |
 | `TERMINOLOGY.md` | An AAC term, acronym or product name is in question, or you need the decision register | {span[TERMINOLOGY.md]} |
 | `FRONT-MATTER.md` | Reporting which version governs | {span[FRONT-MATTER.md]} |
@@ -85,10 +90,12 @@ Then read only what the deliverable needs.
 | SOP or work instruction | `CORE.md`, `DELIVERABLES.md`, `LAYOUT.md`, `CONTROL.md` |
 | Reviewing someone else's draft | `CORE.md`, `DRAFT-QUALITY.md`, `CONTROL.md` |
 | Contract or legal text | `CORE.md`, `DELIVERABLES.md`. Rule 2 governs what AAC may restyle |
+| Performance review, its audit, or a coaching email | `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md`, `REVIEW.md`, and the review standards Rule 2 names |
 
 Rule 2 names controlled documents that outrank AAC-WR-001 within their scope,
 including the AAC performance review standards. When a deliverable falls under
-one of them, name that document and hand the work to it.
+one of them, name that document and hand the work to it. Review material also
+takes `REVIEW.md`, the layout and mechanics Rule 2 scopes to it.
 
 ## Mechanical check
 

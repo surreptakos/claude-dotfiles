@@ -1,35 +1,29 @@
 ---
 name: maintain-repo
-description: Weekly repo hygiene — fix doc-vs-reality drift, then tidy memory. Run by hand.
+description: Weekly repo hygiene — reap speculative tickets, fix doc-vs-reality drift, then tidy memory. Run by hand.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-09-30T21:51:23Z'
-  previous-modified: '2026-09-29T16:47:57Z'
-  revision: '8'
-  content-sha: 95d82a5f6013
+  modified: '2026-10-02T15:35:29Z'
+  previous-modified: '2026-09-30T21:51:23Z'
+  revision: '9'
+  content-sha: 93fba4dff705
 ---
 
 # Maintain repo
 
-One weekly pass. Three skills back-to-back, in order: ticket-reaper, consistency-audit, consolidate-memory.
+One weekly pass: three skills back-to-back, in order — ticket-reaper, consistency-audit,
+consolidate-memory. Each is a full sweep by its own rule; a report that justifies its coverage by a
+last-run date or a changed-files list fails this skill.
 
-## Always a full sweep — never a delta
-
-Every run is holistic. Never restrict scope to files changed since last sweep, git-log windows, "recently touched" surfaces, or a diff against a prior report. Sweep the complete inventory of prose surfaces and the complete set of memory files every time. Drift accumulates hardest in files nobody touched — the ones a delta sweep skips are exactly the ones that get most wrong. If a report ever justifies coverage by pointing to a last-run date, it is not a full sweep and does not satisfy this skill.
-
-## Order matters
-
-Truth first, shape second. Consolidating memory before auditing merges two wrong notes into one wrong note. Fix reality-drift, then dedupe.
+**Order:** truth first, shape second. Consolidating memory before auditing merges two wrong notes
+into one wrong note.
 
 ## Gate — no memory, no run (Dan, 2026-09-18)
 
-Before step 0, resolve the memory set the way step 2 does (`docs/agents/memory/` when the repo commits its
-notes, the auto-memory directory only when it does not) and count its files. **Zero files on a repo with
-commit history is a stop, not a finding**: the memory exists where this session cannot see it (a cloud
-container holds no copy of the desktop's auto-memory). Report the resolved path and the count, name what
-unblocks it — run on the desktop, or commit the notes into the repo as `docs/agents/memory/` + `MEMORY.md` —
-and end there. Never run steps 0–2 on a repo whose memory is unreachable; "0 files, nothing to consolidate"
-is a false report. The one exception is a repo with fewer than ten commits, and the report says so.
+Before step 0, resolve the memory set and apply the gate exactly as
+[consolidate-memory](../consolidate-memory/SKILL.md) defines them ("The memory set, and the gate").
+When the gate stops, the whole run stops there: steps 0–2 run only on a repo whose memory this
+session can reach.
 
 ## Run as a subagent: draft the tickets, the parent files them (issue 1031)
 
@@ -41,35 +35,40 @@ parent filed 15 tickets by hand. The gate stays as it is (Dan, 2026-09-30, optio
 - **The subagent** writes each ticket it would file (steps 0 and 1) as one file in
   `.scratch/maintain-repo-drafts/` at the root of the repo it audited, named
   `<NN>-<slug>.md` and laid out as `/to-tickets`'s local-ticket template, with the `ready-for-*`
-  label on its **Status** line. It never commits that folder. Its report gives the folder's
+  label on its **Status** line. It leaves that folder uncommitted. Its report gives the folder's
   absolute path and the draft count where the ticket numbers would go; that counts as done.
 - **The parent**, once every agent has reported, runs `/to-tickets` once over all the drafts
   folders. The drafts are the breakdown, so one approval covers the whole batch, and each ticket
   goes to the tracker of the repo whose folder holds it. It then deletes each folder and puts the
-  issue numbers in the report. It never files a draft by hand.
+  issue numbers in the report. Every draft goes through that one `/to-tickets` run.
 
 ## Step 0 — ticket-reaper
 
 Run `/ticket-reaper` first: it parks belt-and-suspenders tickets in the Maybe Someday milestone
 and closes the moot ones, so the two steps below do not spend effort keeping speculative work
-consistent. Its digest is on the repo's "Ticket reaper digest" issue.
+consistent. Done when its digest is posted on the repo's "Ticket reaper digest" issue.
 
 ## Step 1 — consistency-audit
 
 Invoke `/consistency-audit`.
 
-It sweeps every prose surface (README, CLAUDE.md, ADRs, PRDs, runbooks, memory files, doc generators), verifies each claim against primary sources (live measurement > code > git > tracker), fixes stale claims in place, and hunts the generator that republished drift. Owner-decision items go through `/triage` or `/to-tickets`, not inline. Full inventory every run — no "unchanged since last sweep" shortcut.
-
-**Completion criterion:** the audit's report lists every prose surface inventoried, every claim checked, every fix applied, every drift-generator named, and every owner-ruling item filed as a ticket with a number. A report ending without the ticket numbers is not done. A report scoped to changed files only is a failure regardless of counts.
+**Completion criterion:** the audit's report lists every prose surface inventoried, every claim
+checked, every fix applied, every drift-generator named, and every owner-ruling item filed as a
+ticket with a number (as a subagent: the drafts folder and count). A report ending without them
+is not done.
 
 ## Step 2 — consolidate-memory
 
-Invoke `/aac-skills:consolidate-memory`, the aac-skills plugin's copy, which wraps the anthropic-skills version with the full-sweep rule. Name it with the prefix: `/anthropic-skills:consolidate-memory` has the same bare name and lacks that rule.
+Invoke `/aac-skills:consolidate-memory`, the aac-skills plugin's copy, which wraps the
+anthropic-skills version with the full-sweep rule. Name it with the prefix:
+`/anthropic-skills:consolidate-memory` has the same bare name and lacks that rule.
 
-It walks every note plus `MEMORY.md` in the repo's memory set — `docs/agents/memory/` when the repo commits its notes (the auto-memory directory is then a pointer on the PC and empty in a cloud container), the auto-memory directory only when the repo has no `docs/agents/memory/` — merges duplicates, retires dated entries, converts relative to absolute dates, and trims the index under 200 lines / 25KB. Every file every run — never "only files added since last consolidation".
-
-**Completion criterion:** the summary names files touched and reports the resulting `MEMORY.md` line and byte count under the limits. Any line still over 150 chars or file still overlapping another is a failure. A summary listing "N new files reviewed" without confirming the full set was walked is a failure. A summary reporting zero files read is not a completion at all — it is the gate above having been skipped.
+**Completion criterion:** the summary confirms the full set was walked, names files touched, and
+reports the resulting `MEMORY.md` line and byte count under the limits. Any index line still over
+150 chars or file still overlapping another is a failure. A summary reporting zero files read
+means the gate above was skipped: not a completion.
 
 ## Report
 
-State: surfaces audited, drift fixes count, generators repaired, tickets filed with numbers, memory files merged/retired, final `MEMORY.md` line and byte count.
+State: surfaces audited, drift fixes count, generators repaired, tickets filed with numbers (or
+drafts folder and count), memory files merged/retired, final `MEMORY.md` line and byte count.

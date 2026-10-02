@@ -13,7 +13,14 @@ meet the gate.
   findings go back to Claude on stderr, so it fixes the file before moving on.
 - **stop:** before the turn can end, collects every deliverable changed this turn: the
   files named in this turn's tool calls, plus a modified-time scan of the working
-  directory and a sibling `outputs` folder. Each one must
+  directory and a sibling `outputs` folder. A git pull, checkout or merge gives a file a
+  fresh mtime without the session touching it (issue 1151), so a candidate that is
+  tracked and unmodified in its git checkout (tracked, and `git diff --quiet HEAD --
+  <path>` exits 0) is dropped unless a tool call this turn wrote it: Write, Edit,
+  MultiEdit or NotebookEdit naming it, or a Bash command naming it as a `>` or `>>`
+  redirect target. A path only mentioned in a read-only command (`ls`, `cat`,
+  `git log -- <path>`) is not a write. Untracked and modified files, and files outside a
+  git checkout, keep the mtime scan. Each remaining one must
   1. lint clean, and
   2. carry a passing critique stamp, `.design/<file name>.json`, whose sha256 matches
      the file's current bytes. `score.py --stamp FILE` writes it only when the release
@@ -27,7 +34,7 @@ consecutive blocks, and says so loudly, so a broken linter cannot wedge a sessio
 Standard library only; fails open (exit 0, message on stderr) when it cannot read its
 own input.
 """
-import hashlib, json, os, re, sys, tempfile, time
+import hashlib, json, os, re, subprocess, sys, tempfile, time
 
 try:
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -170,6 +177,39 @@ def paths_in(obj):
     return out
 
 
+WRITE_TOOLS = ('Write', 'Edit', 'MultiEdit', 'NotebookEdit')
+REDIRECT = re.compile(r'>>?\s*(?:"([^"]+)"|\'([^\']+)\'|([^\s"\'<>|;&]+))')
+
+
+def norm(p, cwd):
+    return os.path.normcase(os.path.abspath(os.path.join(cwd, p)))
+
+
+def written_paths(x, cwd):
+    """The paths one tool_use block wrote: a write tool's target, or a Bash redirect target."""
+    ti = x.get('input') if isinstance(x.get('input'), dict) else {}
+    if x.get('name') in WRITE_TOOLS:
+        p = ti.get('file_path') or ti.get('filePath') or ti.get('notebook_path') or ''
+        return {norm(p, cwd)} if p else set()
+    if x.get('name') == 'Bash':
+        return {norm(next(g for g in m.groups() if g), cwd) for m in REDIRECT.finditer(ti.get('command') or '')}
+    return set()
+
+
+def git_clean(p):
+    """True when the file is tracked in its git checkout and matches HEAD. Any git failure,
+    no checkout at all included, reads as not clean, so the file stays gated."""
+    d, f = os.path.split(os.path.abspath(p))
+    try:
+        for args in (['ls-files', '--error-unmatch', '--', f], ['diff', '--quiet', 'HEAD', '--', f]):
+            r = subprocess.run(['git', '-C', d] + args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+            if r.returncode != 0:
+                return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
 def to_epoch(ts):
     if not ts:
         return time.time() - 3 * 3600
@@ -214,17 +254,21 @@ def block_count(session, reset=False):
 def on_stop(data):
     session = data.get('session_id', '')
     entries, ts = turn_entries(data.get('transcript_path') or '')
-    named = set()
+    cwd = data.get('cwd') or os.getcwd()
+    named, written = set(), set()
     for e in entries:
         c = (e.get('message') or {}).get('content')
         if isinstance(c, list):
             for x in c:
                 if isinstance(x, dict) and x.get('type') == 'tool_use':
                     named |= paths_in(x.get('input'))
-    cwd = data.get('cwd') or os.getcwd()
+                    written |= written_paths(x, cwd)
     roots = {cwd, os.environ.get('CLAUDE_PROJECT_DIR', ''), os.path.join(os.path.dirname(cwd), 'outputs')}
     roots |= {r for r in os.environ.get('DESIGN_GATE_DIRS', '').split(os.pathsep) if r}
     candidates = {p for p in named | recent_files(roots, to_epoch(ts) - 5) if is_deliverable(p)}
+    # A tracked file that matches HEAD changed only through git (a pull, checkout or merge)
+    # unless this turn wrote it (issue 1151).
+    candidates = {p for p in candidates if norm(p, cwd) in written or not git_clean(p)}
     problems = []
     for p in sorted(candidates):
         errs = lint_errors(p)

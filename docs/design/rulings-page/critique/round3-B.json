@@ -1,0 +1,65 @@
+{
+ "session": "440bd6c2-ac46-4dce-9188-f03027b8b9ad",
+ "return": {
+  "designlint": {
+   "errors": 0,
+   "warnings": 1
+  },
+  "findings": [
+   {
+    "source": "designlint",
+    "rule": "H09",
+    "where": "radio input built in the JS template (line 226)",
+    "verdict": "false positive",
+    "reason": "The template string is a label with a for attribute wrapping the input, which has the matching id. The linter regex missed it inside the string concatenation.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "wr001",
+    "rule": "Rule 38",
+    "where": "text.txt:4:17 3 tickets (eyebrow)",
+    "verdict": "false positive",
+    "reason": "UI status copy with a data-driven count. text.txt is a UI export, not formal prose.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "wr001",
+    "rule": "Rule 38",
+    "where": "text.txt:90:6 3 tickets (status line)",
+    "verdict": "false positive",
+    "reason": "Same runtime counter, 0 of 3 tickets answered. Counters show figures.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "web_audit",
+    "rule": "web.target-size",
+    "where": "7 radios, #r-claude-dotfiles-101-a to -other and #r-claude-dotfiles-102-a to -other",
+    "verdict": "false positive",
+    "reason": "The 24x24 px is the native input. Each sits in a label.pill whose whole card is the click target. 24 px meets WCAG 2.2 AA 2.5.8; the cited 2.5.5 is AAA.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "web_audit",
+    "rule": "web.keyboard-walk",
+    "where": "5 radios: 101-b, 101-c, 101-other, 102-b, 102-other",
+    "verdict": "false positive",
+    "reason": "Radios in one group share a name. Tab enters once and arrow keys move within, as native groups work.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "axe",
+    "rule": "none",
+    "where": "whole page",
+    "verdict": "false positive",
+    "reason": "axe 4.10.2 reported no violations.",
+    "priority_if_real": "P3"
+   }
+  ],
+  "pages": {
+   "narrow": 1,
+   "wide": 1,
+   "max": 1
+  },
+  "summary": "Nothing real. designlint has 0 errors and 1 warning (H09), a regex miss on a label-wrapped radio. wr001 has 2 Rule 38 warnings on dynamic ticket counters in UI copy. web_audit target-size faults are 24 px native inputs inside full-card labels; keyboard-walk faults are normal arrow-key behaviour in native radio groups. axe found no violations. No fixes needed. I read only the .pill input CSS rule, so the card-size claim rests on the stated card-as-click-target design."
+ }
+}

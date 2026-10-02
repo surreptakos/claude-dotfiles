@@ -80,3 +80,41 @@ test('Stop inside a marked folder with no stamp exits 2; the fourth consecutive 
   assert.equal(fourth.status, 0, fourth.stderr);
   assert.match(fourth.stderr, /DESIGN GATE OVERRIDDEN after 3 blocks/);
 });
+
+// Issue 1151: a git pull gives a tracked deliverable a fresh mtime without the session touching
+// it. A tracked file that matches HEAD is gated only when a write tool call this turn names it.
+const repo = path.join(root, 'pulled');
+fs.mkdirSync(repo);
+fs.writeFileSync(path.join(repo, '.aac-design'), '');
+const pulled = write(repo, 'day-board.html', LINT_ERROR);
+for (const args of [['init', '-q'], ['config', 'core.autocrlf', 'false'], ['add', '-A'],
+  ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'pulled']]) {
+  const g = spawnSync('git', ['-C', repo, ...args], { encoding: 'utf8' });
+  assert.equal(g.status, 0, g.stderr);
+}
+
+function transcript(name, toolUses) {
+  const lines = [{ type: 'user', timestamp: new Date(Date.now() - 60000).toISOString(), message: { content: 'go' } },
+    { type: 'assistant', message: { content: toolUses.map((t) => ({ type: 'tool_use', ...t })) } }];
+  return write(state, name, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+}
+
+test('Stop over a tracked, clean deliverable with a fresh mtime and no write call exits 0', () => {
+  fs.utimesSync(pulled, new Date(), new Date());
+  const r = run('stop', { session_id: 'pulled-clean', cwd: repo, transcript_path: transcript('t1.jsonl', []) });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('a read-only Bash command naming the clean tracked deliverable does not gate it', () => {
+  const t = transcript('t2.jsonl', [{ name: 'Bash', input: { command: `ls -l "${pulled}"` } }]);
+  const r = run('stop', { session_id: 'pulled-ls', cwd: repo, transcript_path: t });
+  assert.equal(r.status, 0, r.stderr);
+});
+
+test('a Write tool call this turn gates the same file even once committed: exits 2, error and no stamp', () => {
+  const t = transcript('t3.jsonl', [{ name: 'Write', input: { file_path: pulled, content: LINT_ERROR } }]);
+  const r = run('stop', { session_id: 'pulled-write', cwd: repo, transcript_path: t });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /\[H04\]/);
+  assert.match(r.stderr, /critique: no critique stamp/);
+});
