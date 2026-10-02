@@ -19,7 +19,8 @@
       Profile        the files pull restores match what the repo would write (compared through
                      the manifest, merges included); the aac-skills plugin is installed at the
                      version master offers (session-check's plugin-version.js compares them);
-                     the desktop app holds its own synced copy under each desktop account's org
+                     every plugin profile/claude/settings.json enables is one `claude plugin
+                     list --json` shows at user scope (issue 1222); the desktop app holds its own synced copy under each desktop account's org
                      folders (rpm\manifest.json lists it and its folder holds the plugin, issue
                      1149); every settings.json hook entry names files that exist; the caveman proxy
                      binary is present, registered to start at logon (HKCU Run CavemanProxy,
@@ -39,7 +40,8 @@
                      finding the /setup-check skill acts on (issue 1071).
 
     Without -Fix it only reports. With -Fix it first applies the fixes that are safe to repeat
-    (pip-install PyYAML, run pull on drift, run the desktop caveman install when the wiring is
+    (pip-install PyYAML, run pull on drift, install each plugin the profile enables that is missing
+    at user scope, run the desktop caveman install when the wiring is
     broken, the proxy port dead or its logon start missing - the install starts the proxy and
     registers it - clone a missing repo, set a commit gate, write trust records, install the watchdog
     task on the anchor or disable it elsewhere), then reports. Whatever only the owner can do - install a
@@ -56,11 +58,12 @@
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
     command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
-    git-identity-set (args: git key, value) writes one global git setting.
+    git-identity-set (args: git key, value) writes one global git setting; plugin-install (arg: the
+    plugin id) installs one plugin at user scope.
     Text probes print their answer instead: git-user-name and git-user-email (the global value,
     empty when unset), master-plugin-version (the aac-skills version master
-    offers), jev-key (where TYPESAFE_API_KEY is set: user, machine, process, or empty when
-    unset - never the value), desktop-plugin-root (the desktop app's local-agent-mode-sessions
+    offers), plugin-list (the JSON `claude plugin list --json` prints, empty when it fails), jev-key
+    (where TYPESAFE_API_KEY is set: user, machine, process, or empty when unset - never the value), desktop-plugin-root (the desktop app's local-agent-mode-sessions
     folder), computer-name, watchdog-task (missing, enabled or disabled) and routine-registry
     (the desktop app's scheduled-task registry root).
 
@@ -595,6 +598,86 @@ function Test-Plugin {
     }
 }
 
+# The plugin ids `claude plugin list --json` shows at user scope, as { Ids }: $null when the
+# probe is skipped, Ids $null when the list could not be read or parsed.
+function Get-UserScopePlugins {
+    $text = Invoke-ProbeText -Name 'plugin-list' -Real {
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $t = & claude plugin list --json 2>$null | Out-String
+            if ($LASTEXITCODE -ne 0) { return '' }
+            return $t
+        } catch { return '' } finally { $ErrorActionPreference = $prev }
+    }
+    if ($null -eq $text) { return $null }
+    $none = [pscustomobject]@{ Ids = $null }
+    if (-not $text) { return $none }
+    $ids = New-Object System.Collections.ArrayList
+    try {
+        # foreach, not a pipeline: 5.1's ConvertFrom-Json hands a JSON array back as one object.
+        foreach ($p in (ConvertFrom-Json -InputObject $text)) {
+            if ($p -and $p.PSObject.Properties['id'] -and $p.PSObject.Properties['scope'] -and [string]$p.scope -eq 'user') {
+                [void]$ids.Add([string]$p.id)
+            }
+        }
+    } catch { return $none }
+    return [pscustomobject]@{ Ids = $ids.ToArray() }
+}
+
+# Every plugin profile/claude/settings.json enables must be installed at user scope (issue 1222):
+# the profile only enables a plugin, and nothing has been seen to install a newly listed one on a
+# PC that pulls it. -Fix runs `claude plugin install <id> --scope user` for each one missing.
+function Test-EnabledPlugins {
+    $profileSettings = Join-Path (Join-Path (Join-Path $RepoRoot 'profile') 'claude') 'settings.json'
+    $wanted = @()
+    try {
+        $json = [System.IO.File]::ReadAllText($profileSettings, [System.Text.Encoding]::UTF8) | ConvertFrom-Json
+        if ($json.PSObject.Properties['enabledPlugins'] -and $json.enabledPlugins) {
+            $wanted = @($json.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
+        }
+    } catch {
+        Write-Line warn ('enabled plugins not checked: {0} does not parse' -f $profileSettings)
+        return
+    }
+    if ($wanted.Count -eq 0) { Write-Line skip ('enabled plugins  ({0} enables none)' -f $profileSettings); return }
+    $list = Get-UserScopePlugins
+    if ($null -eq $list) { Write-Line skip ('plugins the profile enables, at user scope  ({0})' -f $SkipReason); return }
+    if ($null -eq $list.Ids) {
+        Write-Line warn 'plugins the profile enables not checked: claude plugin list --json could not be read'
+        return
+    }
+    $have = @($list.Ids)
+    $missing = @($wanted | Where-Object { $have -notcontains $_ })
+    $installed = @()
+    if ($missing.Count -gt 0 -and $Fix) {
+        foreach ($id in $missing) {
+            $code = Invoke-Probe -Name 'plugin-install' -Arguments @($id) -Real {
+                param($pluginId)
+                Invoke-NativeExit 'claude' @('plugin', 'install', $pluginId, '--scope', 'user')
+            }
+            if ($code -eq 0) { $installed += $id }
+        }
+        $after = Get-UserScopePlugins
+        if ($null -ne $after -and $null -ne $after.Ids) {
+            $now = @($after.Ids)
+            $installed = @($installed | Where-Object { $now -contains $_ })
+            $missing = @($wanted | Where-Object { $now -notcontains $_ })
+        }
+    }
+    if ($missing.Count -eq 0) {
+        $how = if ($installed.Count -gt 0) { ('; installed by -Fix: {0}' -f ($installed -join ', ')) } else { '' }
+        Write-Line ok ('all {0} plugins the profile enables are installed at user scope{1}' -f $wanted.Count, $how)
+        return
+    }
+    $note = if ($Fix) { '  (-Fix could not install it)' } else { '  (-Fix installs it)' }
+    foreach ($id in $missing) {
+        Write-Line stop ('plugin {0} is enabled in the profile but not installed at user scope{1}' -f $id, $note)
+    }
+    Add-Todo 'Install the plugins the profile enables at user scope (or re-run the setup check with -Fix), then restart the Claude app:' @(
+        $missing | ForEach-Object { 'claude plugin install {0} --scope user' -f $_ })
+}
+
 # The desktop app's own copy of aac-skills (issue 1149). Desktop sessions load the plugin from
 # %APPDATA%\Claude\local-agent-mode-sessions\<account>\<org>\rpm\<plugin id>\, not from
 # ~/.claude/plugins. The app writes that folder itself: it syncs every plugin the signed-in
@@ -802,6 +885,7 @@ function Test-Profile {
     Test-PullDrift
     $offered = Get-OfferedPluginVersion
     Test-Plugin (Join-Path $UserHome '.claude') $offered
+    Test-EnabledPlugins
     Test-DesktopPluginCopy
     Test-Caveman $installCommand
 
