@@ -6,6 +6,7 @@ key-bearing ones are proved by the seam they call, not by signing a real JWT.
 """
 
 import importlib.util
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -65,9 +66,9 @@ class KeyBearingRequest(unittest.TestCase):
         calls = []
 
         class Session:
-            def get(self, url, headers=None):
+            def request(self, method, url, data=None, headers=None):
                 calls.append(url)
-                return _Resp(200, b"signed", text="signed")
+                return _Resp(200, b"signed")
 
         with _patch(gr, "authorized_session", lambda t, e: calls.append(t) or Session()):
             status, body = gr.get("https://sheets.googleapis.com/v4/spreadsheets/x/values/A1",
@@ -93,9 +94,48 @@ class CellUrl(unittest.TestCase):
                               "/values/Script%20Errors%21A1")
 
 
+class DocReplace(unittest.TestCase):
+    """Issue 1216: a Doc is revised over its own id, never re-created beside itself."""
+
+    def run_replace(self, source, exports, patched):
+        def fake_request(method, url, data=None, headers=None, env=None):
+            if method == "PATCH":
+                patched.append((url, headers["Content-Type"], data))
+                return 200, b'{"id":"DOC1","mimeType":"application/vnd.google-apps.document"}'
+            doc, mime = url.split("/files/")[1].split("/export")[0], url.split("mimeType=")[1]
+            return 200, exports[(doc, gr.urllib.parse.unquote(mime))]
+
+        with _patch(gr, "request", fake_request):
+            return gr.doc_replace("DOC1", source)
+
+    def test_doc_source_goes_through_docx_onto_the_target_id_and_must_read_back_equal(self):
+        patched = []
+        exports = {("SRC2", gr.DOCX): b"PK-docx",
+                   ("SRC2", "text/plain"): b"\xef\xbb\xbfv2 body\r\n",
+                   ("DOC1", "text/plain"): b"v2 body\n"}
+        back, matched = self.run_replace("doc:SRC2", exports, patched)
+        url, ctype, data = patched[0]
+        self.assertTrue(url.startswith(gr.DRIVE_UPLOAD + "DOC1?uploadType=media"))
+        self.assertIn("supportsAllDrives=true", url)
+        self.assertEqual((ctype, data, back, matched), (gr.DOCX, b"PK-docx", "v2 body", True))
+
+    def test_text_source_that_reads_back_different_is_not_a_match(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as fh:
+            fh.write("new body\n")
+        try:
+            back, matched = self.run_replace(fh.name, {("DOC1", "text/plain"): b"old body"}, [])
+        finally:
+            Path(fh.name).unlink()
+        self.assertEqual((back, matched), ("old body", False))
+
+    def test_upload_type_by_extension(self):
+        self.assertEqual([gr.upload_type(f) for f in ("a.md", "b.HTML", "c.docx", "d.txt", "e")],
+                         ["text/markdown", "text/html", gr.DOCX, "text/plain", "text/plain"])
+
+
 class _Resp:
-    def __init__(self, status, body, text=None):
-        self.status, self.status_code, self._body, self.text = status, status, body, text
+    def __init__(self, status, body):
+        self.status, self.status_code, self._body, self.content = status, status, body, body
 
     def read(self):
         return self._body

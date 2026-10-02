@@ -1,10 +1,10 @@
-# AAC-WR-001 coverage: how each of the 170 rules is checked
+# AAC-WR-001 coverage: how each of the 185 rules is checked
 
 Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit (a sentence, a paragraph, a term in context, or the whole document), warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
 
 Maintenance rule (Dan, September 29, 2026): a revision that adds or changes a rule lands with its check in `wr001-lint.js`, or with its row here saying why no pattern can decide it, in the same PR. `tools/wr001-lint-coverage.test.js` fails when this table and the linter disagree, when a rule number is missing or repeated, or when the count line below is stale.
 
-Counts: Pattern 55, Pattern and Jev 3, Jev 4, Reader 86, Layout 22.
+Counts: Pattern 55, Pattern and Jev 3, Jev 4, Reader 99, Layout 24.
 
 Table 1. Rule coverage
 
@@ -180,3 +180,18 @@ Table 1. Rule coverage
 | 168 | Every sentence earns its place | Reader | whether a sentence informs, asks, or changes rights, money, scope, or dates needs the reader and what the reader already has |
 | 169 | Formality follows stakes and relationship, not topic | Pattern | the Appendix G12 legalistic phrases and a second contract-section citation, warnings in informal writing only (formal documents exempt) |
 | 170 | Cut for need, never for length | Reader | whether the reader would have to write back to ask needs the reader; no length check by design |
+| 171 | Scope of this part | Reader | scope of Part XXVI; whether a text is review material is a fact of the job, not the text |
+| 172 | Templates and tools | Layout | Word or PDF layout, not text: the template a document was cloned from, its type size (Aptos 10 pt review page, Aptos 11 pt elsewhere) and its color are checked in the rendered document; `review_gate_tools.py check` is the review's own mechanical gate |
+| 173 | The review page | Layout | Word or PDF layout, not text: the page count of the rendered review, which `review_gate_tools.py check` counts |
+| 174 | Dates in review material | Reader | the linter cannot tell review material from other prose, and Rule 43 applies everywhere else; `review_gate_tools.py check` checks the dates against the review period |
+| 175 | Review cells | Reader | the linter reads a docx flattened to text and cannot see a cell; the review gate and the self-check count sentences and flag "should" per cell |
+| 176 | Guidance points | Reader | the review gate and the self-check check each Guidance point's verb and sentence count; the linter cannot see the review section |
+| 177 | Review vocabulary | Reader | whether Strength or Rating names a review element or is an ordinary word needs the sense of the text |
+| 178 | Numbers and word treatment in review material | Reader | the % sign, e.g., i.e. and semicolons are scoped to review material, which the linter cannot tell from other prose; Rules 47 and 66 keep their checks everywhere else |
+| 179 | Audit email opening and closing | Reader | the salutation, what is good before what is wrong, and one topic per message need the email and its purpose |
+| 180 | Numbered fix lists | Reader | list numbering and group spacing live in the built docx, which `review_gate_tools.py build` sets; item form needs the sense of each item |
+| 181 | Audit email subject line and thread | Reader | the subject and thread live in the mail client, not in the text the linter reads |
+| 182 | Audit email body | Reader | an audit or coaching email is review material, which the linter cannot tell from other email |
+| 183 | Review file names and attachments | Reader | the file name is not in the text the linter reads |
+| 184 | Figures in the audit notes | Reader | whether each set of figures carries its pull date and system needs the source |
+| 185 | Proofreading review material | Reader | the two-pass review is the reader's own work |

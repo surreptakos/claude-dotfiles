@@ -29,7 +29,8 @@ const stampTitle = (source, at) => source + "__" + at.toISOString().slice(0, 16)
 const mdEscape = s => s.replace(/[\\<>&\[\]#_]/g, c => "\\" + c);
 
 // exportAgoMin: how long before NOW today's newest exports were stamped; null means none has landed yet.
-function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], waiting = [], meta = null, todoist = () => undefined}){
+// github: the GitHub connector's search results, {prs: [...], issues: [...]} in the REST search item shape.
+function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], waiting = [], meta = null, todoist = () => undefined, github = {prs: [], issues: []}, sentMail}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const prompts = [], m365 = [];
@@ -37,7 +38,7 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
   const stamp = exportAgoMin == null ? null : new Date(now - exportAgoMin * 60000);
   const exported = {
     huddle: {value: [{id: "1", from: {user: {id: DAN, displayName: "Dan"}}, createdDateTime: new Date(now - 86400000).toISOString(), body: {contentType: "html", content: lastPostHtml}}]},
-    sent: {value: [{subject: "RE: vendor setup", sentDateTime: new Date(now - 2 * 3600000).toISOString(), body: {contentType: "html", content: "<html><body><p>Sent the vendor the setup documents</p></body></html>"}}]}
+    sent: sentMail ? {value: sentMail} : {value: [{subject: "RE: vendor setup", sentDateTime: new Date(now - 2 * 3600000).toISOString(), body: {contentType: "html", content: "<html><body><p>Sent the vendor the setup documents</p></body></html>"}}]}
   };
   const calls = [];
   const mcp = {async callTool(server, tool, input){
@@ -53,10 +54,12 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
     }
     if (tool === "read_file_content") return text({fileContent: mdEscape(JSON.stringify(exported[input.fileId] || {value: []}))});
     if (tool === "teams_list_channel_messages") return text([{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: "<p>live read of an old post</p>", messageType: "message"}]);
-    if (tool === "find-tasks") return text({tasks: input.projectId === CURRENT_WORK ? tasks : [], hasMore: false});
+    if (tool === "find-tasks") return text({tasks: tasks.filter(t => t.projectId === input.projectId), hasMore: false});
     if (tool === "find-activity") return text({events: []});
     if (tool === "outlook_email_search") return text(liveMail);
     if (tool === "query_granola_meetings") return {content: [{type: "text", text: "(no meetings)"}]};
+    if (server === "GitHub" && tool === "search_pull_requests") return text({total_count: github.prs.length, incomplete_results: false, items: github.prs});
+    if (server === "GitHub" && tool === "search_issues") return text({total_count: github.issues.length, incomplete_results: false, items: github.issues});
     return text({});
   }};
   const store = {};
@@ -136,6 +139,40 @@ test("a blockers answer in the wrong shape requires every overdue item (fails to
   assert.match(must, /shared drive/);
 });
 
+// Issue 1191: the overdue scan reads every project the task panel reads, so a backlog task that holds a vendor
+// up reaches the post as a risk line, and one that holds nobody up stays out.
+test("an overdue backlog task that names a waiting party yields a risk line; one with none yields no line", async () => {
+  const BACKLOG = (script.match(/\{id:"([^"]+)", tag:"Backlog"\}/) || [])[1];
+  assert(BACKLOG && BACKLOG !== CURRENT_WORK, "the page names a backlog project");
+  const backlog = [
+    {id: "b1", content: "Approve or decline the vendor quote for the garage battery; the vendor waits on the answer", labels: ["do"], dueDate: past, projectId: BACKLOG},
+    {id: "b2", content: "Tidy the backlog notes folder", labels: ["do"], dueDate: past, projectId: BACKLOG}
+  ];
+  const page = buildPage({tasks: backlog, lastPostHtml, onPrompt(prompt){
+    if (prompt.startsWith("For each of Dan Gatsakos's overdue work tasks")){
+      const list = JSON.parse(prompt.split("TASKS:\n")[1].split("\n")[0]);
+      return {items: list.map(x => ({index: x.index, blocks: /waits on/.test(x.task), who: /waits on/.test(x.task) ? "the vendor" : ""}))};
+    }
+    if (prompt.includes("ITEMS TO ADD:")){
+      const missing = JSON.parse(prompt.split("ITEMS TO ADD:\n")[1].split("\n")[0]);
+      return {add: missing.map(t => /vendor/.test(t)
+        ? {section: "risks", text: "Garage battery vendor quote is overdue, so the vendor waits", evidence: "new: task vendor quote"}
+        : {section: "risks", text: "Backlog notes folder tidy is overdue, so the folder waits", evidence: "new: task tidy"})};
+    }
+    return passAll(prompt);
+  }});
+  await new Promise(r => setImmediate(r));
+  await page.$("hud-go").fire("click");
+  assert.match(page.$("hud-status").textContent, /^Passed every rule/, page.$("hud-status").textContent + " :: " + page.$("hud-ev-body").innerHTML);
+  const must = draftPromptOf(page).split("MUST APPEAR")[1].split("\n")[1];
+  assert.match(must, /vendor quote/, "the backlog item holding the vendor up is required");
+  assert.doesNotMatch(must, /notes folder/, "the backlog item holding nobody up is not required");
+  const saved = Object.entries(page.store).find(([k]) => k.startsWith("huddle_drafts/"))[1];
+  const risks = saved.risks.map(r => r.text);
+  assert(risks.some(r => /vendor quote/.test(r)), "risk line for the vendor quote: " + JSON.stringify(risks));
+  assert(!risks.concat(saved.focus.map(f => f.text)).some(r => /notes folder/.test(r)), "no line for the tidy task");
+});
+
 test("no prompt the page sends calls a review confidential (Dan, 2026-09-30: the Mireya review audit belongs in the post)", () => {
   const offending = script.split(/\r?\n/).filter(l => /(confidential|reveal|CONF_DETAIL|NEVER IN THE POST|no pay)/i.test(l) && /\breviews?\b/i.test(l) && !/is fine|is not confidential|not confidential/i.test(l));
   assert.deepStrictEqual(offending, []);
@@ -195,6 +232,53 @@ test("a live read stops one hour after a stale export, and the span past it is n
   assert.match(page.$("hud-status").textContent, /Could not read: .*huddle channel [^;]*past the one-hour live tail.*sent mail [^;]*past the one-hour live tail/);
 });
 
+// Issue 1199: GitHub is the fifth report source. Merged PRs and closed issues since the last post reach the drafter,
+// and a day of repository work and nothing else still drafts a report whose evidence names the PR.
+const ghRepoUrl = "https://api.github.com/repos/surreptakos/claude-dotfiles";
+const githubPrompt = page => draftPromptOf(page).split("GITHUB SINCE (pull requests merged and issues closed in his repos):\n")[1].split("\n")[0];
+
+test("a day with repository work and nothing else drafts a report line resting on the PR", async () => {
+  const merged = new Date(NOW - 4 * 3600000).toISOString(), before = new Date(NOW - 3 * 86400000).toISOString();
+  const github = {
+    prs: [{number: 1191, title: "Day Board: overdue backlog tasks reach the huddle", repository_url: ghRepoUrl, state: "closed", closed_at: merged, pull_request: {merged_at: merged}},
+          {number: 1100, title: "older work his last post already covered", repository_url: ghRepoUrl, state: "closed", closed_at: before, pull_request: {merged_at: before}}],
+    issues: [{number: 1190, title: "Overdue backlog tasks miss the huddle", repository_url: ghRepoUrl, state: "closed", state_reason: "completed", closed_at: merged}]
+  };
+  const reportLine = {text: "Fixed overdue backlog tasks missing from the huddle", evidence: "GitHub PR claude-dotfiles#1191, issue claude-dotfiles#1190"};
+  const page = buildPage({tasks: noTasks, lastPostHtml, sentMail: [], github, onPrompt(prompt){
+    if (prompt.startsWith("Draft Dan Gatsakos's daily huddle post")){
+      const rows = JSON.parse(githubPrompt({prompts: [prompt]}));
+      return {reportHeading: "Yesterday's report", report: rows.length ? [reportLine] : [],
+        focus: [{text: "Bid prep", evidence: "kept verbatim"}], risks: [{text: "Bid work is pushing every other task out, so smaller jobs slip a week", evidence: "kept verbatim"}], dropped: []};
+    }
+    return passAll(prompt);
+  }});
+  await new Promise(r => setImmediate(r));
+  await page.$("hud-go").fire("click");
+  const rows = JSON.parse(githubPrompt(page));
+  assert(rows.some(r => r.ref === "claude-dotfiles#1191" && r.kind === "PR"), JSON.stringify(rows));
+  assert(rows.some(r => r.ref === "claude-dotfiles#1190" && r.kind === "issue"), JSON.stringify(rows));
+  assert(!rows.some(r => r.ref === "claude-dotfiles#1100"), "work merged before the last post is not reported");
+  const query = page.calls.find(c => c.server === "GitHub" && c.tool === "search_pull_requests").input.query;
+  assert.match(query, /\buser:surreptakos\b.*\bis:merged\b.*\bmerged:>\d{4}-\d\d-\d\dT/);
+  assert.match(page.$("hud-status").textContent, /^Passed every rule/, page.$("hud-status").textContent + " :: " + page.$("hud-ev-body").innerHTML);
+  const saved = Object.entries(page.store).find(([k]) => k.startsWith("huddle_drafts/"))[1];
+  assert.strictEqual(JSON.stringify(saved.report), JSON.stringify([reportLine]), "a non-empty report from GitHub alone");
+  assert.match(page.$("hud-ev-body").innerHTML, /GitHub PR claude-dotfiles#1191/, "the evidence row names the PR");
+});
+
+test("a day with no repository work drafts as before, and a GitHub failure is named under Could not read", async () => {
+  const quiet = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll});
+  await new Promise(r => setImmediate(r));
+  await quiet.$("hud-go").fire("click");
+  assert.strictEqual(githubPrompt(quiet), "[]");
+  assert.match(quiet.$("hud-status").textContent, /^Passed every rule.*Every source answered/);
+  const down = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll, github: {get prs(){ throw {code: "server_not_connected"}; }, issues: []}});
+  await new Promise(r => setImmediate(r));
+  await down.$("hud-go").fire("click");
+  assert.match(down.$("hud-status").textContent, /^Passed every rule.*Could not read: GitHub: server_not_connected/);
+});
+
 // Issue 1074: update-tasks replaces the whole due string, so a do date sent that way wipes a recurring
 // task's repeat. The card reads the task first and moves a recurring one with reschedule-tasks, date only.
 async function rule(recurring, option){
@@ -233,10 +317,10 @@ test("a do-date ruling on a non-recurring task still sends the due string throug
 // Issue 1192 (Dan, 2026-10-01): the confidential rule covers the generated huddle notes only. A triage card or a
 // waiting-on-you ask with pay, health or leave words shows exactly as the triage run wrote it.
 test("a triage card and a waiting-on-you ask with pay, health or leave words render verbatim", async () => {
-  const card = {_id: "q1", runId: "r1", taskId: "t1", status: "open", title: "Approve Rob's raise to $24/hr",
+  const card = {_id: "q1", runId: "r1", taskId: "t1", status: "open", title: "Approve Sam's raise to $24/hr",
     question: "His sick leave runs out Friday; approve the extra week?", options: [{label: "Approve the $1,500 bonus"}],
-    source: {lastFrom: "Rob", lastAt: "2026-09-30T14:00:00Z", quote: "Doctor says two more weeks of medical leave"}};
-  const ask = {_id: "w1", status: "open", from: "Mark", subject: "Health insurance and pay question", receivedAt: "2026-09-29T14:00:00Z",
+    source: {lastFrom: "Sam", lastAt: "2026-09-30T14:00:00Z", quote: "Doctor says two more weeks of medical leave"}};
+  const ask = {_id: "w1", status: "open", from: "Pat", subject: "Health insurance and pay question", receivedAt: "2026-09-29T14:00:00Z",
     ask: "sign off his FMLA leave and the salary change"};
   const page = buildPage({tasks: [], lastPostHtml, onPrompt: () => ({}), triage: [card], waiting: [ask], meta: {runId: "r1", finishedAt: NOW.toISOString(), alarms: []}});
   await new Promise(r => setImmediate(r));

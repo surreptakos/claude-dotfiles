@@ -13,7 +13,8 @@ Personal instructions that apply to every project and session on this machine.
 ````
 
 A `diff` fence, so the leading `-` renders red. Emit it verbatim. Every response, every session,
-every project, before any other text.
+every project, before any other text. A line the gate requires first (`Route appeal: ...`,
+`route unchecked: Jev unavailable`) goes on the line right after this block, never above it.
 
 ## Fundamental Workflow and Governance
 
@@ -235,7 +236,10 @@ cd <agent worktree> && cat .agent-prompt.md | claude -p --model claude-opus-4-7 
 ```
 
 Without `--dangerously-skip-permissions` gated tools are denied non-interactively. Keep stderr out of
-anything parsed as JSON. Point throwaway probes at a cwd outside any AAC project (its hooks cost
+anything parsed as JSON. A headless run that starts background work (a Workflow, a background
+Bash) needs `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` in its environment: without it `claude -p` ends
+after 600 seconds and kills that work (2026-10-01, a ticket-fleet wave died before its first
+ticket). Point throwaway probes at a cwd outside any AAC project (its hooks cost
 ~40 turns). Verification history lives in the claude-dotfiles memory notes.
 
 **Do not hand a solvable question back to the user dressed up as "your call to make."** Before
