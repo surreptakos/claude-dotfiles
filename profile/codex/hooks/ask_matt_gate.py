@@ -33,6 +33,7 @@ ALLOWED_FLOWS = {
     "code-review",
     "codebase-design",
     "consistency-audit",
+    "consolidate-memory",
     "diagnosing-bugs",
     "direct-answer",
     "domain-modeling",
