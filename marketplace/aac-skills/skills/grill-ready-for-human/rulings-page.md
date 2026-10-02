@@ -25,20 +25,24 @@ the lander was off: "fix this so it never happens again". The incidents are in c
   30 minutes on weekdays 8 AM to 6 PM Central; the 5 AM `rulings-digest` lands first, then
   redrafts. The lander stays enabled, and the page promises a landing window, never "at once".
   Land may also be run by hand from any session with `gh` and a checkout.
-- **The Submit comment is a courtesy, not the landing path.** Submit records the batch in the page
-  database, then posts "Rulings submitted: batch <id> ... Land them now." as a comment sent to
-  Claude. The platform delivers that only to sessions holding a watch on the artifact; the page's
-  `canSendToClaude` reads `no_session` when none does (contract `comments.d.ts`,
-  `SendToClaudeResult`, `CanSendToClaude`). A watch comes from publishing the page or from
-  `ArtifactComments` `watch` on its URL; reading the page registers none (checked 2026-09-30). So
-  the comment reaches whichever session last took a watch, which need not be the one that built
-  or published the page and may have no GitHub write path.
-- **A session that cannot land never publishes or watches the page.** One that cannot land and
-  receives a Submit says so in the thread and leaves the batch for the digest.
-- **Name the receiver or the publisher from a record, never by inference:** the `submissions` doc
-  and `ArtifactComments` `read` give the Submit and its reply, `list_sessions` shows a cloud
-  session's published artifacts under `external_metadata.artifacts`, and the page's version stamp
-  (`Artifact` `list`, `scope: files`) gives the publish time.
+- **Submit goes to the page database, and the lander is the only path from there to GitHub.** The
+  Submit button writes `submissions/<id>` (`status: "submitted"`) and sets the status line to the
+  landing window; `rulings-lander` (and the 5 AM digest) pick the batch up from that doc. Submit
+  used to also post "Rulings submitted: batch <id> ... Land them now." as a comment sent to
+  Claude, which the platform delivers only to a session holding a watch on the artifact, whichever
+  one that is. 2026-09-30: the 19:17Z Submit (73 tickets) reached a Cowork session that had not
+  published the page; it had no `gh`, got 403 from the API, and nothing landed. 2026-10-01: the
+  21:10Z Submit (21 tickets) reached a Cowork session that replied "Not landed" in the thread. Both
+  times the owner read that reply as the page failing, so the comment is gone (issue 1239): it
+  added confusion and no landing.
+- **The page declares the `db` capability only.** Nothing on it uses `comments` any more. The
+  stored declaration still read `{"comments":{},"db":{}}` on 2026-10-01, and a publish that omits
+  `capabilities` carries that forward, so publish with `capabilities: {"db": {}}` until a read of
+  the page shows `db` alone. A session that cannot land still never publishes the page.
+- **Name the publisher from a record, never by inference:** the `submissions` doc gives the
+  Submit, `list_sessions` shows a cloud session's published artifacts under
+  `external_metadata.artifacts`, and the page's version stamp (`Artifact` `list`, `scope: files`)
+  gives the publish time.
 
 ## Land (step 1 of the digest; also runnable by hand)
 
@@ -82,8 +86,8 @@ the lander was off: "fix this so it never happens again". The incidents are in c
    71 cards drafted from ticket text alone was "lots of text out of date").
 4. `node tools/rulings-page.js bodies --drafts <dir>` (each card shows the ticket's own GitHub text
    beside the explainer), then `node tools/rulings-page.js build --drafts <dir> --out <page.html>`;
-   publish it with `url` set to the page URL. The page's database, and the owner's saved picks,
-   carry over.
+   publish it with `url` set to the page URL and `capabilities: {"db": {}}`. The page's database,
+   and the owner's saved picks, carry over.
 5. Email with the Gmail connector `send_message` to dgatsakos@activealarm.com. Subject:
    `<N> tickets need your ruling`. HTML body: count per repo, up to five tickets whose drafts carry
    money, tax, customer-data or delete decisions (one line each: repo, number, the question), and
