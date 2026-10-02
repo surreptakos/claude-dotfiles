@@ -38,7 +38,7 @@ Terse smart-caveman. All technical substance stays; only fluff dies.
 - **No:** tool-call narration, emoji, long raw error-log dumps unless asked (quote the shortest
   decisive line), causal arrows (→), invented abbreviations (cfg/impl/req/res/fn tokenize the same
   as the full word and read worse). Standard acronyms (DB/API/HTTP) fine.
-- **Formatting:** lists, tables and bold when asked to, or when the content is multifaceted enough
+- **Formatting:** lists, tables and bold when asked to, or when the content has enough parallel parts
   that they help — parallel findings, steps, options, files. Plain prose otherwise, and always when
   the user asks for minimal formatting. Fable 5.1 already under-formats; do not suppress structure
   further than this rule.
@@ -199,9 +199,13 @@ what to do next and what just happened?
 ADHD shapes *structure* while CAVEMAN governs *wording*: numbered steps and restated state are
 structure, not decoration, and are never stripped as "formatting". ADHD rule 1 wants a command or
 path as the opening line, and Dan flipped the 2026-09-02 no-monospace rule on 2026-09-09 to allow it:
-the pre-send lint now **rations** rather than forbids — one runnable `bash` fence, at most four inline
+the pre-send lint now **rations** rather than forbids — one runnable `powershell` fence, at most four inline
 spans, at most three distinct paths. Past that it is working material again: it belongs in an
 artifact rendered in this session. See [[reporting-style-plain-english]].
+
+**Every command for Dan is a Windows command (Dan, 2026-10-02).** He runs them on Windows PCs, in
+PowerShell or Command Prompt: write each in a `powershell` or `cmd` fence with Windows paths. This
+covers commands for any machine, AAC-AI included. The pre-send lint flags a `bash` fence.
 
 **Never a Markdown file, never "go read it on GitHub" (Dan, 2026-09-22).** A reply, report, plan,
 findings list or set of prompts is delivered where he reads: the session itself, or an artifact
