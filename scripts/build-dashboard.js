@@ -1,11 +1,11 @@
 // Regenerates DASHBOARD.md — the live working dashboard (issues / PRDs / ADRs / triage / pipeline health).
-// Installed by the project-harness skill. Runs in CI (.github/workflows/dashboard.yml) on every push and
-// issue change; also runnable locally (`node scripts/build-dashboard.js`) with an authenticated `gh` CLI.
-// DASHBOARD.md is generated output. Never edit it by hand; edit this script.
+// Installed by the project-harness skill. CI runs it from .github/workflows/dashboard.yml, whose `on:`
+// block is the list of events that fire it; also runnable locally (`node scripts/build-dashboard.js`)
+// with an authenticated `gh` CLI. DASHBOARD.md is generated output. Never edit it by hand; edit this script.
 //
-// Run this locally to CHECK your changes, but do not commit the regenerated DASHBOARD.md: CI regenerates
-// and commits it on every push, so a local copy in your commit collides with the bot's and every push
-// turns into a rebase conflict on a file nobody authored. Let CI own the artifact.
+// Run this locally to CHECK your changes, but do not commit the regenerated DASHBOARD.md: that workflow
+// force-pushes it to the `dashboard` branch and never to the default branch, so a copy committed to
+// your branch is one nothing refreshes and it goes stale at the next tracker change. Let CI own the artifact.
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
