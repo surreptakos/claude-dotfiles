@@ -10,7 +10,19 @@ Disclosed reference for [`SKILL.md`](SKILL.md) steps 1 and 4, and for any change
 
 **The board copy is verbatim (Dan, 2026-10-01: "I only need the huddle notes sanitized for confidential info, not my own tasks to rule on or anything else").** The confidential rule covers the generated huddle notes only, and the page's huddle gate enforces it there. Every field this run writes (`title`, `question`, `source.quote`, `options[].label`, `alarms`, and the `waiting` rows' `subject` and `ask`) carries the task title and the thread's words as they are, pay, health and leave detail included; never swap in a neutral form.
 
-After tier 1 is applied and before the status, one `ArtifactData` `batch`:
+### Republish the page (every run; Dan, 2026-10-02)
+
+Every run republishes the page before its batch, so a merged change to [`day-board.html`](day-board.html) is live by the next morning at the latest. Dan: "republish every single time".
+
+1. Fetch master's copy into the session's scratch directory: `curl -fsSL https://raw.githubusercontent.com/surreptakos/claude-dotfiles/master/aac-skills/todoist-triage/day-board.html -o <scratch>/day-board.html` (`curl.exe` in Windows PowerShell, where `curl` is a different command). Master, not this skill's own copy: a plugin one version behind would publish an older page.
+2. `Artifact` `read` the board URL; the tool refuses a publish to an artifact the session has not read.
+3. `Artifact` publish that file with `url` set to the board URL and `capabilities` set to the JSON in the file's header comment. A conflict refusal means publish the same file again: the page is code only, and its state lives in its db.
+
+Done when the publish returns a version. A failure at any step is a dark surface (status line 5), and the run goes on to the batch.
+
+### The batch
+
+After tier 1 is applied and the page is republished, before the status, one `ArtifactData` `batch`:
 
 - `triage_meta/latest` (`set`): `runId` (this record's stamp), `finishedAt` (ISO), `alarms` (the tier-3 lines, at most five plain sentences), `appliedCount` (tier-1 writes applied).
 - `triage/<taskId>` (`set`), one per tier-2 question: `runId`, `taskId`, `title`, `question` (the one-clause reason), `source` (`{lastFrom, lastAt, quote}` — the thread's newest message as read this run, not the task description; the board flags a card without it), `status: "open"`, and `options` — the same substantive rulings the numbered question offers, each `{label, labels?, projectId?, dueString?, deadlineDate?, priority?, delete?, mergeInto?, mergeComment?}`, the field names the page writes with, with `content` when the ruling retitles a stale task. The board supplies Rule out (moves to Wontfix) and the reason box itself; leave both out of `options`. An agent-sweep question is its own card or two options folded into the task's existing card, per [`agent-sweep.md`](agent-sweep.md) § Ask; Rule out still kills the task, and the agent "no" is the option that adds `no-agent`.
