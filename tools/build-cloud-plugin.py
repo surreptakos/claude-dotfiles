@@ -102,7 +102,11 @@ UPSTREAM_PLUGINS = [
             "./engineering/codebase-design",
             "./engineering/domain-modeling",
             "./engineering/improve-codebase-architecture",
+            # pr and retro joined the ask-matt map in issue 1193; implement-spec is listed there as
+            # not routed, so it is not loaded here either.
+            "./engineering/pr",
             "./engineering/prototype",
+            "./engineering/retro",
             "./engineering/tdd",
             "./engineering/wizard",
             "./productivity/grill-me",

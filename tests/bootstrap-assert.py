@@ -64,7 +64,7 @@ REQUIRED_SKILLS = ['session-check', 'project-harness', 'ticket-fleet']
 # UPSTREAM_PLUGINS; upstream-skills.sh in a container). writing-guidelines was killed outright.
 UPSTREAM_SKILLS = ['caveman', 'i-have-adhd',
                    'codebase-design', 'domain-modeling', 'grill-me',
-                   'improve-codebase-architecture', 'prototype', 'tdd', 'teach', 'to-questionnaire',
+                   'improve-codebase-architecture', 'pr', 'prototype', 'retro', 'tdd', 'teach', 'to-questionnaire',
                    'wait-what', 'wizard', 'writing-for-agents', 'writing-great-skills',
                    'vercel-composition-patterns', 'vercel-react-best-practices',
                    'vercel-react-native-skills', 'vercel-react-view-transitions',
