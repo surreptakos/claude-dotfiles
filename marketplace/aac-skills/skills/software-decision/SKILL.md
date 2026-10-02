@@ -1,91 +1,38 @@
 ---
 name: software-decision
-description: Decide whether to adopt a new paid software tool, with the analysis scaled to the size of the decision. Use when someone proposes buying or subscribing to software ("should we get [tool]"), wants a tool evaluated, or is comparing tools — from a low-cost utility to a multi-year platform.
+description: AAC software adoption decision, whether to buy, expand or replace a paid tool, with the analysis scaled to the size of the decision. Use when someone proposes a tool ("should we get [tool]"), wants one evaluated, or is comparing tools.
 metadata:
   argument-hint: <tool name, or the problem a tool would solve>
-  modified: '2026-09-16T04:45:28Z'
-  previous-modified: '2026-08-31T21:20:12Z'
-  revision: '2'
-  content-sha: 8fcd7f2fc514
+  modified: '2026-10-02T15:37:18Z'
+  previous-modified: '2026-09-16T04:45:28Z'
+  revision: '3'
+  content-sha: 0ce3e45977fc
 ---
 
 # Software Decision
 
-Runs AAC's software adoption decision with the user — the active form of the procedure in `reference/decision-guide.md`, which holds the full criteria, tier thresholds, scorecard and worksheet. `reference/decision-analysis-prompt.md` is the engine the Major tier opens. Both are read by relative path from this folder.
+Runs AAC's software adoption decision with the user. `reference/decision-guide.md` is the procedure (gates, tier table and examples, thresholds, the evaluation per tier, scorecard, worksheet): **read it in full before step 2.** The steps below follow its Steps 1 to 6 and add only what running it in conversation needs. `reference/decision-analysis-prompt.md` is the engine the Major tier opens. Both are read by relative path from this folder.
 
-**Operating principles.**
-1. Scale the analysis to the size of the decision: a low-cost, cancel-anytime tool is decided in minutes, a multi-year platform takes weeks. The tier in step 3 is that judgement, and getting it right matters in both directions — over-processing a small tool and under-processing a major one are equally wrong.
-2. Tool selection is one part of the decision; rollout and adoption are the other. Every "yes" records an owner, a go-live date and an adoption measure — an adopted tool missing those is the common failure mode.
+Two principles carry every step:
 
-## When to use
-- Any decision to pay for new software, expand a paid tool, or replace one.
-- Free single-use utilities with no data access, and configuration of an already-approved tool, sit outside it.
+1. **Scale the analysis to the decision.** A low-cost, cancel-anytime tool is decided in minutes; a multi-year platform takes weeks. The tier is that judgement, and it matters in both directions: over-processing a small tool and under-processing a major one are equally wrong.
+2. **Selection is half the decision; rollout and adoption are the other half.** Every "yes" records an owner, a go-live date and an adoption measure. An adopted tool missing those is the common failure mode.
+
+Scope: any decision to pay for new software, expand a paid tool, or replace one. Free single-use utilities with no data access, and configuration of an already-approved tool, sit outside it.
 
 ## Workflow
 
-Ask the most relevant question first, one at a time, and fill gaps as the conversation proceeds. Pull from connected tools before asking the user for information the tools already hold.
+Ask the most relevant question first, one at a time, and fill gaps as the conversation proceeds. Pull from connected tools before asking the user for anything they already hold.
 
-### 1. Pull context (if tools are connected)
-- **Zoho CRM / Google Drive / Microsoft 365:** locate the current tool or process this would replace, any existing contract, and current spend. Use this to ground the analysis and the integration test.
-- If nothing is connected, work from user input and carry on.
-
-### 2. The three gates (every tool — a "no" on any one stops the process)
-Confirm a specific answer to each:
-1. **Problem and current cost.** Obtain a number — dollars or hours per month. If no number can be stated, stop.
-2. **Replacement and integration.** Identify what it replaces, and confirm it connects to the systems of record (Zoho CRM, QuickBooks Desktop, Alarmbiller). If it replaces nothing and connects to nothing, it adds overhead; stop. Before approving a new tool, confirm Zoho One or Microsoft 365 (already licensed) does not already cover the need. For any "QuickBooks integration," confirm it works with QuickBooks Desktop, not Online.
-3. **Owner.** One named person for setup, training, and support. If the owner is the proposer, account for that time as a cost.
-
-If all three pass, continue. If any fails, recommend no / not yet and state which gate failed.
-
-### 3. Assign a tier
-Assign by the highest factor that applies; one factor is sufficient.
-
-| Factor | Small | Standard | Major |
-|---|---|---|---|
-| All-in yearly cost | < ~$2,500 | ~$2,500–$15,000 | > ~$15,000 |
-| Reversibility | cancel anytime | annual; some switching cost | multi-year lock; painful exit |
-| People affected | one / one task | one department | multi-department, or replaces a core system |
-| Money / data | none | indirect | billing, recurring revenue, monitoring, or customer site/access data |
-
-State the tier and the reason. Basis: apply heavier analysis only when a wrong choice is both costly and difficult to reverse.
-
-### 4. Set the threshold
-- **Revenue tool** (sales / win rate / recurring revenue / customer experience): estimate the conservative annual upside; require at least 2–3× the annual cost. Record the estimate and its assumptions.
-- **Internal / cost tool:** estimate annual hours saved × loaded rate, plus any subscription replaced, minus the owner's time to run it; the result must exceed the annual cost. Count only quantifiable dollars or hours.
-
-### 5. Run the tier
-
-**Small** — confirm cancel-anytime, decide, and set a check ~60 days after adoption to confirm use; cancel if it is idle. The scorecard and stakeholder review start at Standard.
-
-**Standard**
-1. List 2–3 options, including "continue current process."
-2. Run a free trial targeting the factors most likely to cause failure: integration with Zoho / QuickBooks Desktop, and adoption by the intended users (have 2–3 of them use it).
-3. Consult the intended users and the budget holder before deciding.
-4. Total the real annual cost (subscription + setup + training time + likely per-user increases + cost to leave). Buy only the modules to be used.
-5. Contract check (self-serve): cancellation terms, auto-renewal, price-increase clause, data-export rights. Attorney review starts at Major.
-6. Decide against the threshold from step 4.
-
-**Major** — run the full structured analysis. Open and follow `reference/decision-analysis-prompt.md` (the engine), then:
-1. Define success in numbers, with a review date.
-2. List all options, including doing nothing and one deliberately different approach.
-3. Score every option on the scorecard in the guide (0/3/5 × weight); score "do nothing" as well.
-4. Check the leading option: does it exceed the others on every factor that matters, and would reversal within a year be costly?
-5. Pilot the top one or two with real use before signing.
-6. Security / data review (required if it holds customer, billing, or building-access data): SOC 2, data location, breach history. AAC sells security; apply a higher standard to vendor data handling.
-7. Attorney review of the contract (required): lock-in length, early-cancel penalty, data-export rights.
-8. Write the one-page recommendation (Situation, Options, Comparison, Recommendation, Request) for the approver.
-
-During the Major path, identify the assumption most likely to invalidate the decision and the lowest-cost way to test it before committing.
-
-### 6. Capacity check before committing (any tier)
-Determine whether other tool or system rollouts are in progress. Organizational capacity for change is limited; if other rollouts are active, queue this one and record its start date.
-
-### 7. Output
-Produce:
-- The completed worksheet from the guide (the record of the decision).
-- The rollout plan: owner, go-live date, the adoption measure, the review date, and the defined failure conditions and response.
-- For Major decisions: the one-page recommendation.
+1. **Pull context.** With Zoho CRM, Google Drive or Microsoft 365 connected, find the current tool or process this would replace, any existing contract, and current spend, to ground the analysis and the integration test. With nothing connected, work from user input.
+2. **The three gates** (guide Step 1). Done when each has a specific answer: the problem's current cost as a number, what it replaces and how it connects to the systems of record, and one named owner. A "no" on any gate stops the process: recommend no or not yet and name the gate that failed.
+3. **Assign the tier** (guide Step 2). State the tier and the factor that set it.
+4. **Set the threshold** (guide Step 3). Record the estimate and its assumptions.
+5. **Run the tier** (guide Step 4). For Major, open and follow the engine first, then the guide's Major list, and name the assumption most likely to invalidate the decision with the lowest-cost way to test it before committing.
+6. **Capacity check** (guide Step 5), at every tier, before committing.
+7. **Output.** The completed worksheet from the guide (the record of the decision); the rollout plan (guide Step 6: owner, go-live date, adoption measure, review date, failure conditions and response); and for Major, the one-page recommendation. Done when every worksheet line the tier reaches is filled.
 
 ## Notes
-- Treat outside resources as references, not requirements.
-- Do not include the company's ownership, sale, or exit plans in any internally shared output.
+
+- Outside resources, such as the Manager Tools guidance the guide cites, are references, not requirements.
+- Keep the company's ownership, sale and exit plans out of every internally shared output.

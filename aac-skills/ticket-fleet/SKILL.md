@@ -1,13 +1,13 @@
 ---
 name: ticket-fleet
 description: >
-  Run a ticket-fleet wave over the ready-for-agent queue. Use when the user asks to run the
-  ticket fleet or clear a wave of tickets, or an orchestrator worker cycle launches the fleet.
+  Run a ticket-fleet wave over the ready-for-agent queue. Use when asked to run the fleet or
+  clear the queue, or when an orchestrator worker cycle launches it.
 metadata:
-  modified: "2026-10-02T04:39:00Z"
-  previous-modified: "2026-10-02T00:15:18Z"
-  revision: "73"
-  content-sha: "8e57f8941bb8"
+  modified: "2026-10-02T16:11:43Z"
+  previous-modified: "2026-10-02T15:37:07Z"
+  revision: "75"
+  content-sha: "ed758ea2d268"
 ---
 
 # ticket-fleet
@@ -23,15 +23,17 @@ another in the same repo.
 
 **A desktop session runs the `ready-for-local-agent` tickets itself (Dan, 2026-09-30).** The wave
 serves one repo and skips a ticket labelled for a local agent, or one that changes another repo.
-When this session is on the desktop that ticket names, it is that local agent: start each one
-as a background agent in the right clone, in parallel with the wave, and never leave it out
-because the fleet cannot take it. Run 6abd47d1 left #1069 out this way while its dependant #1072
-waited on it. A local agent inherits this session's environment, API keys and tokens included:
-read `env | grep -i -E 'key|token|secret'` before writing its brief, and never tell it a
-credential may be missing without that check (Dan, 2026-09-30; the names are in the
-`session-env-carries-zoho-and-gas-tokens` memory note). What no variable supplies is a claude.ai
-web sign-in: a page that runs `window.claude.*` calls needs a browser signed in to the owning
-account.
+
+- When this session is on the desktop that ticket names, it is that local agent: start each such
+  ticket as a background agent in the right clone, in parallel with the wave. A ticket the fleet
+  skips is still this session's work: run 6abd47d1 dropped #1069 while its dependant #1072 waited
+  on it.
+- A local agent inherits this session's environment, API keys and tokens included: read
+  `env | grep -i -E 'key|token|secret'` before writing its brief, and state credentials in it only
+  as that check found them (Dan, 2026-09-30; the names are in the
+  `session-env-carries-zoho-and-gas-tokens` memory note).
+- What no variable supplies is a claude.ai web sign-in: a page that runs `window.claude.*` calls
+  needs a browser signed in to the owning account.
 
 ## Launch a wave
 
@@ -54,20 +56,19 @@ account.
      Each wave refreshes that copy itself ([INTERNALS.md](INTERNALS.md), "A copied script
      refreshes itself").
 
-   From a cloud session, the session root must be the repo checkout. A resumed session can come
-   back rooted at `/home/user`, beside the clones; every worktree agent then fails with `Cannot
-   create agent worktree: not in a git repository`, and a `cd` does not help. The `env-probe`
-   agent runs in a worktree of its own and stops the run before the scout with that cause; start
-   a new session on the repo (issues 892, 1093).
-
-   Done when the path resolves to a file whose bytes are LF only - the Workflow tool refuses a
-   script holding a CR (issue 233) - and, in a cloud session, `git rev-parse --show-toplevel`
-   run from the session root prints that root.
+   In a cloud session the session root must be the repo checkout. A resumed session can come
+   back rooted at `/home/user`, beside the clones, where every worktree agent fails with `Cannot
+   create agent worktree: not in a git repository` and a `cd` does not help; `env-probe` stops
+   the run before the scout with that cause. Start a new session on the repo (issues 892, 1093).
 
    Then run `git fetch origin` in the launching checkout. Implementer worktrees start from its
    local `origin/<defaultBranch>`, which a merge done through `gh` never moves: run 6abd47d1's
    #1068 branched from master as of 11:59 on 2026-09-30, missed a 12:33 merge, and its delivery
    stopped on a conflict that the fetch would have avoided.
+
+   Done when the path resolves to a file whose bytes are LF only - the Workflow tool refuses a
+   script holding a CR (issue 233) - the fetch has run, and, in a cloud session,
+   `git rev-parse --show-toplevel` run from the session root prints that root.
 
 2. **Mint the ids.** `runId` names the run and stays the same across a resume
    (`printf %x $(date +%s)`); `invocationId` is fresh on every launch, resume included, and must
@@ -79,28 +80,25 @@ account.
      cannot measure its environment stops rather than guess (issue 322).
    - `deliver: false` on a repo's first wave, to read the scout, lane and verifier output before
      the fleet pushes anything.
-   - `testCommand` when the repo's documented gate cannot run where the wave runs. In
-     `claude-dotfiles` from a Linux container (the PowerShell restore test has no shell there):
-
-     ```
-     testCommand: "node --test tools/*.test.js tests/*.test.js && python3 tools/skill-stamps.test.py && python3 tests/build-cloud-plugin.test.py && python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"
-     ```
-
-   - The stamps check in `claude-dotfiles`: `regenCheckCommands` defaults to `[]` (issue 814), so
-     every launch here adds it, or a Deliver stage that regenerates a skill's stamp pushes it
-     unchecked:
+   - `testCommand` when the repo's documented gate cannot run where the wave runs.
+   - **In `claude-dotfiles`, the stamp tooling on every launch.** `regenCheckCommands` defaults to
+     `[]` (issue 814), so without it a Deliver stage that regenerates a skill's stamp pushes it
+     unchecked. `regenCommands` defaults to `null`, and then the implementer and verifier pick a
+     `--home` themselves (PR 1169 went red that way, issue 1195); set, the implementer, verifier
+     and Deliver prompts carry it verbatim:
 
      ```
      regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"]
      ```
 
-   - The stamp and payload commands in `claude-dotfiles`, beside the check: `regenCommands`
-     defaults to `null`, and then the implementer and verifier pick a `--home` themselves (PR 1169
-     went red that way, issue 1195). Every launch here passes both; the implementer, verifier and
-     Deliver prompts then carry them verbatim:
-
      ```
      regenCommands: ["python3 tools/skill-stamps.py stamp aac-skills --home 'C:\\Users\\Dan'", "python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'"]
+     ```
+
+     From a Linux container add this `testCommand` (the PowerShell restore test has no shell there):
+
+     ```
+     testCommand: "node --test tools/*.test.js tests/*.test.js && python3 tools/skill-stamps.test.py && python3 tests/build-cloud-plugin.test.py && python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"
      ```
 
    ```
@@ -156,21 +154,22 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
   a cloud session cannot load custom agent types (issue 339). `''` forces unpinned.
 - `followupsFile` (default `FOLLOW-UPS.md`): where discoveries are appended.
 - `generatedPaths`, `regenCommands`, `regenCheckCommands`: what the pre-push merge may resolve by
-  regeneration, and how. `regenCheckCommands` defaults to `[]` and `regenCommands` to `null`;
-  step 3 has `claude-dotfiles`' values (issues 814, 1195). A set `regenCommands` also reaches the
-  implementer and verifier prompts.
+  regeneration, and how. Defaults and `claude-dotfiles`' values: step 3.
 - `priorImpl` / `priorProbe`, `finishRunId`: recovery - see [RECOVERY.md](RECOVERY.md).
 - `treeGuard`, `treeGuardScript`, `treeGuardStateDir`, `orchestratorCwd`, `editableGuard`,
   `editableGuardScript`: isolation guards, on by default where the repo ships them.
 
 ## What a wave does
 
-**Selection.** No cap: every runnable candidate enters the wave. Blocker state is read from
-the tracker, not believed from the ticket body: only a plain `closed` clears an edge. A ticket whose every open blocker is a code ticket in the same wave
-joins it, chained on its blocker's lane: it starts after the blocker's PR merges, from
-`origin/<defaultBranch>` (issue 854). Dropped before selection: tickets with an open
-`agent/issue-<N>-` PR, and, in a label-driven wave, tickets in the Maybe Someday milestone.
-A ticket whose latest comment is an unanswered fleet handoff is parked.
+**Selection.** No cap: every runnable candidate enters the wave.
+- Blocker state is read from the tracker, not believed from the ticket body: only a plain
+  `closed` clears an edge.
+- A ticket whose every open blocker is a code ticket in the same wave joins it, chained on its
+  blocker's lane: it starts after the blocker's PR merges, from `origin/<defaultBranch>`
+  (issue 854).
+- Dropped before selection: tickets with an open `agent/issue-<N>-` PR, and, in a label-driven
+  wave, tickets in the Maybe Someday milestone.
+- A ticket whose latest comment is an unanswered fleet handoff is parked.
 
 **Lanes.** The scout gives each ticket a kind:
 - **code** - implementer (pushes its branch on commit), blind refuting verifier per attempt, then
@@ -185,8 +184,8 @@ A ticket whose latest comment is an unanswered fleet handoff is parked.
 Discovery-triage chores share one lane so two cannot file the same finding.
 
 **Delivery stops** on a merge conflict outside the four resolvable classes (generated files,
-`SKILL.md` stamp blocks, harness upgrade rows, append-append hunks), a failing gate after the merge, red CI, or a
-changes-requested review. A `git merge` the classifier refuses twice still delivers, with the
+`SKILL.md` stamp blocks, harness upgrade rows, append-append hunks), a failing gate after the
+merge, red CI, or a changes-requested review. A `git merge` the classifier refuses twice still delivers, with the
 refusal noted on the PR.
 
 **Discoveries** land on their own branch and PR, `agent/fleet-discoveries-wf_<runId>`, never on

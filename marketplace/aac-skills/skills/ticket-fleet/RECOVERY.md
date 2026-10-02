@@ -44,11 +44,10 @@ treated as a failed attempt 1: attempt 2 runs the stage normally.
 
 ## Finishing a run whose Deliver step died
 
-The other half of the same problem (issue 405). A verified branch used to exist nowhere but the
-container that made it: the Deliver step was the first thing to push it, so a container restart
-mid-Deliver, a deliverer that reported the branch "does not exist" without ever pushing, or an
-interrupt during Verify each ended with committed, verified work nobody could reach. Two things
-close that:
+The other half of the same problem (issue 405): when Deliver was the first step to push, a
+container restart mid-Deliver, a deliverer that reported the branch "does not exist" without
+pushing, or an interrupt during Verify each stranded verified work in a dead container. Two
+things close that:
 
 - **The branch is pushed at implement time.** The implementer runs `git push -u origin <branch>`
   as soon as the commit lands and reports `pushed`; when it did not (or could not), the run
@@ -82,13 +81,11 @@ one journal read plus one deliverer per undelivered branch.
 
 ## A deliverer whose shell command was refused
 
-Run `6abd62b5` (`wf_9506b505-ac3`, issue 1139) verified and pushed the branches for #177 and
-#17, then both deliverers stopped on `blocked by safety classifier: [Auto-Mode Bypass]` with no
-PR, and the result listed each under `failed` as `did not deliver: pushed=null prUrl=(none) -
-branch ... is verified but has no PR`. A refused `git merge` already had its route (A8); a
-refusal in a step with no route of its own - the fetch, the worktree, a `cd`, the marker scan -
-ended the delivery. It now goes to the deliver prompt's A9: the deliverer runs no further shell
-command, confirms the branch on origin with the GitHub connector, opens the PR with
+Run `6abd62b5` (`wf_9506b505-ac3`, issue 1139) lost two verified, pushed branches (#177, #17)
+when both deliverers stopped on `blocked by safety classifier: [Auto-Mode Bypass]` in a step with
+no refusal route of its own (the fetch, the worktree, a `cd`, the marker scan; a refused
+`git merge` already had A8). Such a refusal now goes to the deliver prompt's A9: the deliverer
+stops using the shell, confirms the branch on origin with the GitHub connector, opens the PR with
 `mcp__github__create_pull_request` from the branch as origin holds it (the refused command and
 its refusal text quoted under "Not merged with `<defaultBranch>`: classifier refusal"), posts
 the ticket comment with `mcp__github__add_issue_comment`, and returns
@@ -96,7 +93,8 @@ the ticket comment with `mcp__github__add_issue_comment`, and returns
 records it as delivered, with a `mergeNote` carrying the refusal, and STEP D leaves the PR open
 for the orchestrator to merge the default branch into it, as it does after A8.
 
-A result that still reads `pushed=null prUrl=(none)` over a verified branch means the deliverer
-returned nothing at all. The branch is on origin: open its PR with the connector (head the
-branch, base the default branch, the verifier's evidence from the journal in the body), or
-relaunch with `finishRunId` as above - never re-implement the ticket.
+A result that still reads `did not deliver: pushed=null prUrl=(none)` over a verified branch
+means the deliverer returned nothing at all. The branch is on origin: open its PR with the
+connector (head the branch, base the default branch, the verifier's evidence from the journal in
+the body), or relaunch with `finishRunId` as above. The verified work stands; the ticket needs
+delivery only, never a re-implement.

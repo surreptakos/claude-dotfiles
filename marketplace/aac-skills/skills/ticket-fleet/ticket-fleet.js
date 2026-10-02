@@ -1142,7 +1142,17 @@ function trackerRules(mode) {
 // below - the first thing the run does - so every prompt built after that point sees them.
 
 // Explicit selection wins over the label: a named ticket is fetched whatever its labels or state.
+// [FLEET-EXPLICIT-TICKETS-START]
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
+// Args arrive verbatim: a `tickets` that is not an array (`tickets: 1069`), or entries that are not
+// issue numbers, used to fall through to the label listing - the whole queue - with nothing said.
+// Logged here so the run says what it dropped and what it lists instead.
+if (cfg.tickets !== null && cfg.tickets !== undefined) {
+  const unusableTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : [cfg.tickets]).filter(n => !(parseInt(n, 10) > 0))
+  if (!Array.isArray(cfg.tickets)) log(`args.tickets is ${JSON.stringify(cfg.tickets)}, not an array of issue numbers - ignored, so this run lists the "${cfg.label}" label instead. Pass tickets: [N, ...] to run named tickets.`)
+  else if (unusableTickets.length) log(`args.tickets: ${unusableTickets.length} entr${unusableTickets.length === 1 ? 'y is' : 'ies are'} not an issue number and ${unusableTickets.length === 1 ? 'was' : 'were'} dropped - ${JSON.stringify(unusableTickets)}.${explicitTickets.length ? '' : ` No number is left, so this run lists the "${cfg.label}" label instead.`}`)
+}
+// [FLEET-EXPLICIT-TICKETS-END]
 
 // ---- resume-stable prompt inputs (issue 271) ----
 // A resume replays every agent() call whose cache key is unchanged, and that key covers the
@@ -2376,6 +2386,11 @@ async function scoreDifficulty(tickets) {
   if (!code.length) return {}
   if (cfg.difficulty === false) { log('Difficulty score OFF (args.difficulty:false) - every implementer runs on implModel.'); return {} }
   const request = JSON.stringify(difficultyRequest(code, scout.repoMap))
+  // difficultyRequest cuts each text at DIFFICULTY_TEXT_CAP; say what it cut, so the bound on what
+  // Jev reads is not silent. The implementer still gets the criteria whole.
+  const cutTickets = code.filter(t => String(t.criteria || '').length > DIFFICULTY_TEXT_CAP).map(t => '#' + t.number)
+  if (cutTickets.length) log(`difficulty: the criteria of ${cutTickets.join(', ')} were cut to their first ${DIFFICULTY_TEXT_CAP} characters for the Jev request; the implementer still reads them whole.`)
+  if (String(scout.repoMap || '').length > DIFFICULTY_TEXT_CAP) log(`difficulty: the scout's repoMap was cut to its first ${DIFFICULTY_TEXT_CAP} characters for the Jev request.`)
   let res = null
   try {
     res = await agent(
@@ -2423,6 +2438,9 @@ guardCandidates = wave
 // or grossly inefficient - and then the session must say so in its summary.
 
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
+// Bounded by the FLEET-PROBE-LANE markers so tools/ticket-fleet-null-results.test.js can drive it with a
+// mocked `agent`.
+// [FLEET-PROBE-LANE-START]
 const runProbeLane = async (t, workerIndex) => {
   let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null, haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
@@ -2462,10 +2480,12 @@ Return structured output only.`,
       probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
       probe = null
     }
-    if (!probe || !probe.items.length) {
+    // `items` is schema-checked on an agent result but not on a priorProbe entry, which arrives
+    // verbatim from args: an entry without an array there is no probe output, not a TypeError.
+    if (!probe || !Array.isArray(probe.items) || !probe.items.length) {
       lastVerdict = probeError
         ? unusableVerdict(probeError, `probe:#${t.number}.${attempt}`)
-        : { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }
+        : { pass: false, evidence: 'prober returned null or no items', failures: [reuse ? 'args.priorProbe entry for this ticket holds no items array - no probe output produced' : 'no probe output produced'] }
       if (probeError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
       continue
     }
@@ -2533,7 +2553,7 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
   }
 
   if (haltedAt) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([runHalt.failure()]) }
-  const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
+  const done = !!(probe && Array.isArray(probe.items) && probe.items.length && lastVerdict && lastVerdict.pass)
   let delivery = null
   if (done && cfg.deliver && runHalt.halted()) deliveryFailure = `deliver:#${t.number} not started - ${runHalt.failure()}; the evidence is verified, re-run this probe after the reset`
   else if (done && cfg.deliver) {
@@ -2563,9 +2583,17 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       delivery = null
       log(deliveryFailure)
     }
+    // A deliverer that returned null (skipped, or dead after its retries) or no comment URL posted
+    // nothing: without this the ticket is done with no commentUrl and no deliveryFailure, so the
+    // run result lists it under neither `delivered` nor `failed` (aac-routines issue 191).
+    if (!deliveryFailure && !(delivery && delivery.commentUrl)) {
+      deliveryFailure = `deliver:#${t.number} posted no resolution comment: ${delivery ? `commented=${String(delivery.commented)} commentUrl=(none)` : 'the deliverer returned no result'} - the evidence is verified but is not on the ticket`
+      log(deliveryFailure)
+    }
   }
   return { ticket: t.number, done, kind: 'probe', deliveryFailure, branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
 }
+// [FLEET-PROBE-LANE-END]
 
 // Human lane: a desktop session or a person performs the steps. The agent verifies only what
 // a container can, then hands the rest back in one comment under a "Remaining for a local
@@ -2635,6 +2663,12 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
+      log(deliveryFailure)
+    }
+    // A deliverer that returned null or no comment URL posted no handoff: name it, or the ticket
+    // is listed under neither `delivered` nor `failed` (aac-routines issue 191).
+    if (!deliveryFailure && !(delivery && delivery.commentUrl)) {
+      deliveryFailure = `deliver:#${t.number} posted no handoff comment: ${delivery ? `commented=${String(delivery.commented)} commentUrl=(none)` : 'the deliverer returned no result'} - the ticket was not handed back`
       log(deliveryFailure)
     }
   }
@@ -2836,6 +2870,12 @@ async function runFinish(journal) {
       deliveryFailure = `deliver:#${number}: ${outcome.message}`
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
+    }
+    // A blocked pre-push merge carries no message of its own from the checks above: name it, as the
+    // code lane's mergeFailure does, or the ticket lands in `failed` with a null reason (issue 191).
+    if (!deliveryFailure && delivery && !delivery.prUrl && delivery.mergeStatus === 'blocked') {
+      const paths = Array.isArray(delivery.conflictPaths) ? delivery.conflictPaths : []
+      deliveryFailure = `deliver:#${number}: pre-push merge of origin/${defaultBranch} blocked: ${paths.join(', ') || 'conflicting paths not reported'}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}; no PR opened`
     }
     log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${gateRetryNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused a command of the Deliver stage (issues 544, 1139), so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544); the deliverer left it open, awaiting the orchestrator's merge of ${defaultBranch} (issue 1132)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
@@ -3140,7 +3180,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     merged: !!(delivery && delivery.merged === true), mergeSha: (delivery && delivery.mergeSha) || null,
     prState: (delivery && delivery.prState) || null, ticketState: (delivery && delivery.ticketState) || null,
     mergeNote: delivery && delivery.mergeStatus === 'unmerged-by-classifier'
-      ? `opened without the pre-push merge - the classifier refused a command of the Deliver stage:${delivery.blockedReason || 'refusal text not reported'}`
+      ? `opened without the pre-push merge - the classifier refused a command of the Deliver stage: ${delivery.blockedReason || 'refusal text not reported'}`
       : null,
     conflictPaths, discoveries: (impl && impl.discoveries) || [],
     // Issue 654: non-null when the run recorded this branch pushed and verified but the deliverer
@@ -3331,6 +3371,13 @@ Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, d
   } catch (err) {
     runHalt.note((err && err.message) || err, 'followups-writer')
     return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', (err && err.message) || err) }
+  }
+  // A writer that returned null (skipped, or dead after its retries), or no commit sha (step 4 or 5
+  // stopped it), committed nothing. Without an error here the run logs the bullets as committed
+  // and leaves them out of discoveryList, so they would exist nowhere but the journal.
+  if (!written || !written.sha) {
+    const why = !written ? 'the writer returned no result' : `the writer reported no commit sha${written.error ? ` (${String(written.error).trim()})` : ''}`
+    return { branch: (written && written.branch) || branch, sha: null, prUrl: (written && written.prUrl) || null, bullets: discoveries.length, error: `followups-writer committed nothing: ${why}` }
   }
   return {
     branch: (written && written.branch) || branch,
