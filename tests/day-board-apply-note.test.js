@@ -104,7 +104,7 @@ test("Launch agents counts the agent tasks, says the routine starts them within 
   await page.$("agent-go").fire("click");
   await settle();
   const status = page.$("agent-status").innerHTML;
-  assert.match(status, /^2 tasks carry the agent label\. The agent-launcher routine on your PC starts each one in its own cloud session within 30 minutes/, status);
+  assert.match(status, /^2 tasks carry the agent label\. The agent-launcher routine on your PC starts each one in its own Opus 5.5 session within 30 minutes/, status);
   assert.match(status, /https:\/\/app\.todoist\.com\/app\/task\/a1/);
   assert.doesNotMatch(status, /Already running/);
   assert.deepStrictEqual(page.calls.map(c => c.server + " " + c.tool), ["Todoist find-tasks"]);
