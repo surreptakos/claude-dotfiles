@@ -7,28 +7,20 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.13 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.15 \| ACTIVE** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.13 |
-| **Status** | Draft for Approval |
-| **Effective date** | Upon approval |
+| **Version** | 0.15 |
+| **Status** | Active |
+| **Effective date** | 2026-10-02 |
 | **Review cycle** | Annual, or upon material change |
 | **Primary reference** | The Gregg Reference Manual, 11th U.S. edition |
 
 The approved electronic master of this standard is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
-
-This draft is formatted as a controlled document, but it does not become company policy until the designated approver approves it.
-
-**Approval**
-
-| **Role** | **Name** | **Approval / Signature** | **Date** |
-|---|---|---|---|
-| General Manager | | | |
 
 **Revision history**
 
@@ -46,3 +38,5 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 | 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
+| 0.14 | 2026-10-01 | Controlled-document header without a signature table; approval by merge; effective date in the header: Appendix F. | General Manager |
+| 0.15 | 2026-10-02 | Performance review layout and mechanics folded in from the retired layout draft: Rule 2; Part XXVI, Rules 171–185; Appendix F; References. | General Manager |

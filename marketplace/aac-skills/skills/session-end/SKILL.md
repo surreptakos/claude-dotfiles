@@ -1,11 +1,11 @@
 ---
 name: session-end
-description: Land the session — commit, push, merge, file what was promised, re-run the end check — and end on the archive line. The checks already run as a hook when a turn reads as wrapping up; this is the sequence that clears them.
+description: Land the session — commit, push, merge, file what was promised, clear the end check — and end on the archive line. Use to wrap up or end a session, or to clear what the end-check hook flagged.
 metadata:
-  modified: '2026-09-30T23:23:36Z'
-  previous-modified: '2026-09-23T15:56:18Z'
-  revision: '20'
-  content-sha: 6e4ab10a0ec1
+  modified: '2026-10-02T15:39:17Z'
+  previous-modified: '2026-09-30T23:23:36Z'
+  revision: '21'
+  content-sha: f4fe7e99750a
 ---
 
 # Finish a session
@@ -17,18 +17,23 @@ metadata:
 Four steps. Typing `/session-end` is the standing OK for every one of them; passive wrap-up
 wording ("wrap up", "handing off") asks before each shared-state action instead.
 
-1. **Commit and push.** One commit that says what changed and why; never `--no-verify` (fix the
-   hook failure and commit again). `git push -u origin <branch>` if there is no upstream.
-2. **Open, wait, merge, pull.** `gh pr create --base <default> --head <branch>` with a `Closes #N`
-   line per issue the commits resolve. Wait for the checks: `gh pr checks <n> --watch --fail-fast`
-   blocks until every check has a verdict (the Windows restore test takes about eight minutes;
-   rerun the command when the tool timeout cuts it off). Pending checks are a wait, never a stop
-   (Dan, 2026-09-30, after a session ended on "10 of 12 checks green, merge waits on CI"). Every
-   check green: `gh pr merge <n> --squash`, then on the anchor PC `git -C <main checkout> pull
-   --ff-only` so the scheduled task and the desktop routines run the merged code. Complete when
-   the PR reads MERGED and the main checkout's HEAD is the merge commit. Only a failing check,
-   branch protection or a refused merge ends the session short of the archive line, named in one
-   line.
+1. **Commit and push.** One commit that says what changed and why. A hook failure gets fixed and
+   the commit made again; never `--no-verify`. `git push -u origin <branch>` if there is no
+   upstream.
+2. **Open, wait, merge, pull.** Complete when the PR reads MERGED and the main checkout's HEAD is
+   the merge commit. Only a failing check, branch protection or a refused merge ends the session
+   short of the archive line, named in one line.
+   - `gh pr create --base <default> --head <branch>` with a `Closes #N` line per issue the
+     commits resolve.
+   - Wait for the checks: `gh pr checks <n> --watch --fail-fast` blocks until every check has a
+     verdict (the Windows restore test takes about eight minutes; rerun the command when the tool
+     timeout cuts it off). Pending checks are a wait, never a stop (Dan, 2026-09-30, after a
+     session ended on "10 of 12 checks green, merge waits on CI").
+   - Every check green: `gh pr merge <n> --squash`, then on the anchor PC `git -C <main checkout>
+     pull --ff-only` so the scheduled task and the desktop routines run the merged code.
+   - The session deletes only its own branch: `git push origin --delete <branch>` if
+     `delete_branch_on_merge` did not, and `git branch -d` (never `-D`). If the classifier
+     refuses, say in one line that the stale-ref sweep takes it on its next run, and file nothing.
 3. **File what was promised.** Read the conversation once for anything that will die with it: a
    thing the user deferred ("later", "after X"), a thing you offered and never did, a known limit
    you named, a question that got no answer, a step only the owner can take. Each is either
@@ -39,12 +44,12 @@ wording ("wrap up", "handing off") asks before each shared-state action instead.
    ticket you have not filed yet.
 4. **Re-run the end check and clear it** — `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end
    --refresh` (or `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end` where the hook file is
-   absent). It reads the tree, the pushed state and the last run of every tracker job (closure
-   guard, board sweep, metadata audit, stale-ref sweep, tracker audit). Resolve every `STOP` and
-   every `!!`, advisories included, whichever session or job raised them (Dan, 2026-09-23): assign
-   the milestone, reword the stale citation, rebuild or stamp the plugin, then re-run the job or
-   the check until the line is gone. The only lines left standing are the ones no action in this
-   session can change (the worktree `STOP`), and each is named in one line.
+   absent). It reads the tree, the pushed state and the last run of every tracker job (below).
+   Resolve every `STOP` and every `!!`, advisories included, whichever session or job raised them
+   (Dan, 2026-09-23): assign the milestone, reword the stale citation, rebuild or stamp the plugin,
+   then re-run the job or the check until the line is gone. What a job flags and leaves red is
+   cleared here, never handed off as a `ready-for-local-agent` ticket. The only lines left standing
+   are the ones no action in this session can change (the worktree `STOP`), each named in one line.
 
 The reply ends with:
 
@@ -56,30 +61,21 @@ Next: archive this session
 
 `Next: archive this session` is the last line, verbatim, and only when steps 1–4 are clear.
 
-## The tracker jobs and this skill
+## The tracker jobs
 
-The tracker jobs do the routine housekeeping on their own: reopening a ticket that a merge closed
-with boxes unticked, moving closed cards to Done, assigning the single open milestone, deleting
-landed `agent/*` and `claude/*` refs, auditing the tracker. Whatever they flag and leave red is
-this skill's to clear in step 4, not a `ready-for-local-agent` ticket.
-
-A session deletes only its own branch after the merge (`git push origin --delete <branch>` if
-`delete_branch_on_merge` did not; `git branch -d`, never `-D`). If the classifier refuses, the
-stale-ref sweep takes it on its next run — say so in one line and file nothing.
-
-`sweep-closed-to-done.js` in this directory is the board-sweep script the Actions job runs; it is
-not a step here.
+Closure guard, board sweep, metadata audit, stale-ref sweep and tracker audit run on their own:
+they reopen a ticket a merge closed with boxes unticked, move closed cards to Done, assign the
+single open milestone, delete landed `agent/*` and `claude/*` refs, and audit the tracker.
+`sweep-closed-to-done.js` in this directory is the board-sweep job's script, not a step here.
 
 ## In a cloud container
 
 Same four steps. `gh pr` and `gh issue` are GraphQL and the proxy refuses them: step 2 uses the
 GitHub MCP `create_pull_request` and `merge_pull_request`, step 3's tickets go through the same
 `/to-tickets` batch with MCP `issue_write`, and `gh api repos/<owner>/<repo>/...` (REST) works
-for everything else. Step 4 runs `node ${CLAUDE_PLUGIN_ROOT}/skills/session-check/check.js --end` when the
-hook file is absent. If the classifier refuses a bash `gh api --method POST|PATCH`, retry once,
+for everything else. If the classifier refuses a bash `gh api --method POST|PATCH`, retry once,
 then use the MCP tool for the same write.
 
 ## Related
 
-- `/session-start`
-- A project may have its own `docs/runbooks/session.md`
+`/session-start`; a project's own `docs/runbooks/session.md`, if it has one.

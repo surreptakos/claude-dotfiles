@@ -1,0 +1,73 @@
+{
+ "session": "c1a1dbd9-797a-4765-8ae1-8a389664f190",
+ "return": {
+  "designlint": {
+   "errors": 0,
+   "warnings": 1
+  },
+  "findings": [
+   {
+    "source": "designlint",
+    "rule": "H09",
+    "where": "html:222",
+    "verdict": "false positive",
+    "reason": "Radio is inside a label. Linter reads JS, not DOM.",
+    "priority_if_real": "P2"
+   },
+   {
+    "source": "wr001",
+    "rule": "57",
+    "where": "text.txt:12, HTML 118 and 292",
+    "verdict": "real",
+    "reason": "Rule 57 has no informal flag. Write a.m. and p.m.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "wr001",
+    "rule": "57",
+    "where": "text.txt:78, 81",
+    "verdict": "real",
+    "reason": "Same ungated rule. Fix the sample DATA.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "wr001",
+    "rule": "38",
+    "where": "text.txt:4, 87",
+    "verdict": "false positive",
+    "reason": "Live JS counters. A counter is a figure.",
+    "priority_if_real": "P3"
+   },
+   {
+    "source": "web_audit",
+    "rule": "web.target-size",
+    "where": "option radios",
+    "verdict": "false positive",
+    "reason": "Probe measures the 24x24 radio. The label.pill card is the target.",
+    "priority_if_real": "P2"
+   },
+   {
+    "source": "web_audit",
+    "rule": "web.keyboard-walk",
+    "where": "later radios",
+    "verdict": "false positive",
+    "reason": "Radios share one name. Tab enters once. Arrows move.",
+    "priority_if_real": "P1"
+   },
+   {
+    "source": "axe",
+    "rule": "none",
+    "where": "all",
+    "verdict": "false positive",
+    "reason": "No violations. None.",
+    "priority_if_real": "P3"
+   }
+  ],
+  "pages": {
+   "narrow": 1,
+   "wide": 1,
+   "max": 1
+  },
+  "summary": "Axe clean. Designlint 0 errors, 1 false-positive warning. Both web_audit faults are false positives. Real: five Rule 57 meridiems. Rule 38 counters stand as figures."
+ }
+}

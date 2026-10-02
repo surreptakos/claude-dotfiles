@@ -8,10 +8,18 @@
   --direct optional: the direct's first name, so his own name does not count as an example
   --no-render  skip the page count when LibreOffice is not installed
 
+  python3 review_format_check.py meaning REVIEW.docx --direct FIRSTNAME
+      The meaning checks: rules, Jev judgments, and a read list (review_meaning.py, shared with
+      the audit). Exit 0 clean, 1 fixes, 2 could not check (read the meaning checks instead).
+  python3 review_format_check.py stamp REVIEW.docx --end END [--start START] [--direct FIRSTNAME]
+      Needs a format run at exit 0 and a meaning run with no fixes recorded for this exact file.
+
+Every format and meaning run writes REVIEW.docx.gate.json beside the review.
 Requires python-docx (pip install python-docx). The page count needs LibreOffice (soffice) and pdfinfo.
 """
 import re, sys, argparse, subprocess, tempfile, os, datetime, shutil, hashlib
 from docx import Document
+import review_meaning
 
 RATINGS = ["exceeded expectations", "met expectations", "not met expectations", "did not meet expectations"]
 RESULTS = ["promotion", "vertical growth", "horizontal growth", "no change", "current role and responsibilities"]
@@ -22,9 +30,6 @@ ABBR = ["Mr", "Ms", "Mrs", "Dr", "Inc", "Corp", "Co", "Mfg", "St", "Ave", "Blvd"
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec"
 DATE_NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b")
 DATE_TXT = re.compile(r"\b(%s)\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})\b" % MONTHS)
-STOP = set("""I He She His Her Him It They Them Their The A An This That These Those In On At For To From With By As Of And But Or
-Both Two Three Four Five Six Seven Eight Nine Ten Net New Last Next Q1 Q2 Q3 Q4 RMR GP GPM CCTV AAC CRM Guidance Point Strength
-Weakness Core Message""".split())
 
 
 def sentences(text):
@@ -87,21 +92,6 @@ def short_ranges(text, pstart, pend):
         if RANGE_SEP.match(text[e1:s2]) and d1 == pstart and d2 < pend:
             out.append((t1, t2))
     return out
-
-
-def has_anchor(text, direct):
-    if DATE_NUM.search(text) or DATE_TXT.search(text): return True
-    if re.search(r"\$\d", text) or re.search(r"\d+(\.\d+)?%", text): return True
-    words = re.findall(r"\b[A-Z][A-Za-z&]+\b", text)
-    for i, w in enumerate(words):
-        if w in STOP or w == direct or w.rstrip("’'s") == direct: continue
-        # sentence-initial words are ambiguous; require the word not to follow a period
-        idx = text.find(w)
-        before = text[:idx].rstrip()
-        if before and before[-1] in ".!?": continue
-        if idx == 0: continue
-        return True
-    return False
 
 
 def load(path):
@@ -287,7 +277,9 @@ def format_check(argv):
     for f in fixes: print("  -", f)
     print("Passed:", "; ".join(passes))
     for n in notes: print("Note:", n)
-    return 0 if not fixes else 1
+    code = 0 if not fixes else 1
+    review_meaning.write_record(a.docx, "check", __file__, code, fixes)
+    return code
 
 
 # ---------------------------------------------------------------- stamping
@@ -301,14 +293,41 @@ def review_fingerprint(path, start, end, direct):
     return "SC-" + hashlib.sha256(key).hexdigest()[:6].upper()
 
 
+def meaning_path(docx):
+    """Which route ran the meaning checks on this exact file, from its gate record: "Jev" when the
+    meaning run exited 0, "read, not Jev" when Jev could not answer (exit 2) and the checks were
+    read instead. Plus every reason the file cannot be stamped yet."""
+    rec = review_meaning.read_record(docx)
+    if rec is None or rec.get("sha256") != review_meaning.sha256(docx):
+        return None, ["no format and meaning runs are recorded for this version of the file; run both on it"]
+    runs, problems = rec.get("runs") or {}, []
+    chk, mean = runs.get("check"), runs.get("meaning")
+    if not chk:
+        problems.append("no format run is recorded for this version of the file")
+    elif chk.get("exit") != 0:
+        problems.append(f"the format run exited {chk.get('exit')}; fix its lines and rerun it")
+    if not mean:
+        problems.append("no meaning run is recorded for this version of the file")
+    elif mean.get("fixes"):
+        problems.append(f"the meaning run has {len(mean['fixes'])} fix line(s); fix them and rerun it")
+    if problems:
+        return None, problems
+    return ("Jev" if mean.get("exit") == 0 else "read, not Jev"), []
+
+
 def stamp(argv):
     ap = argparse.ArgumentParser(prog="stamp")
     ap.add_argument("docx"); ap.add_argument("--end", required=True)
     ap.add_argument("--start"); ap.add_argument("--direct", default="")
     a = ap.parse_args(argv)
+    path, problems = meaning_path(a.docx)
+    if problems:
+        print("NOT STAMPED.")
+        for p in problems: print("  -", p)
+        return 2
     code = review_fingerprint(a.docx, a.start, a.end, a.direct)
     today = mdy(datetime.date.today())
-    line = f"aac-review-self-check PASS {today} {code}"
+    line = f"aac-review-self-check PASS {today} {code} meaning: {path}"
     d = Document(a.docx)
     d.core_properties.comments = line
     d.save(a.docx)
@@ -350,6 +369,8 @@ def main():
     argv = sys.argv[1:]
     if argv and argv[0] == "stamp":
         return stamp(argv[1:])
+    if argv and argv[0] == "meaning":
+        return review_meaning.cli(sys.modules[__name__], argv[1:])
     if argv and argv[0] == "verify":
         return verify(argv[1:])
     return format_check(argv)

@@ -1,31 +1,28 @@
 ---
 name: aac-house-writing-standard
-description: 'AAC-WR-001, the controlled copy of AAC''s house writing and document standard. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document, or table. Also load for a performance review or its audit.'
+description: 'AAC house writing standard, AAC-WR-001. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document or table; also a performance review or its audit.'
 metadata:
-  standard-version: '0.13'
-  modified: '2026-10-01T16:33:31Z'
-  previous-modified: '2026-10-01T04:10:22Z'
-  revision: '21'
-  content-sha: 78455d4ad5da
+  standard-version: '0.15'
+  modified: '2026-10-02T18:10:11Z'
+  previous-modified: '2026-10-01T23:09:42Z'
+  revision: '23'
+  content-sha: 0f151516c09a
 ---
 
 # AAC house writing standard
 
-AAC-WR-001 travels in this skill. The controlled copy is in `references/`; the
-mechanical check is in `scripts/`.
+`references/` holds the controlled copy of AAC-WR-001; `scripts/` holds its
+mechanical check.
 
 ## The rule that shapes this skill
 
-**`references/` holds the controlled copy. Never restate a rule — not in this
-file, not in a job folder, not from memory. Read the file and cite the rule by
-number.**
+**Read each rule in `references/` and cite it by number. Restate no rule, not
+in this file, not in a job folder, not from memory:** a condensation of v0.2
+with no rule numbers rode here while the standard moved to v0.4, and nothing it
+claimed could be checked.
 
-A condensation of v0.2 rode in this skill for months while the standard moved to
-v0.4. It carried no rule numbers, so nothing it claimed could be checked against
-the text it came from.
-
-If a summary anywhere disagrees with the controlled copy, the controlled copy
-wins. Say so rather than picking.
+When any summary disagrees with the controlled copy, the controlled copy wins;
+name the disagreement.
 
 ## How it works
 
@@ -37,13 +34,14 @@ wins. Say so rather than picking.
 4. When the deliverable answers someone, list every question they asked before
    drafting. Each one gets an answer at the depth they asked: asked how a number
    was reached, show the arithmetic with its inputs labeled. A request to shorten
-   cuts framing and repetition, never an answer. A fact you inferred, such as why
-   a record changed, is written as inference, with who can confirm it (Rule 8).
-   The terse style of your own session replies never carries into the deliverable.
+   cuts framing and repetition and keeps every answer. A fact you inferred, such
+   as why a record changed, is written as inference, with who can confirm it
+   (Rule 8). Write the deliverable in full house prose, whatever the terse style
+   of your own session replies.
 5. Draft or review against the rules you read, citing each by number: "Rule 23
    prohibits em dashes in company writing."
-6. Confirm the result against Rule 166, item by item. Every condition it names
-   is answered before release, and so is every question listed in step 4.
+6. Confirm the result against Rule 166, item by item. Done when every condition
+   it names and every question listed in step 4 is answered.
 
 ## What stays human
 
@@ -55,23 +53,22 @@ would settle it.
 
 ## Regenerating after a revision of the standard
 
-The master is `docs/standards/AAC-WR-001.md` at the repo root. Edit it, never
-the files under `references/`, then from this directory:
+The master is `docs/standards/AAC-WR-001.md` at the repo root. Edit the
+master, never `references/`, then regenerate from this directory:
 
 ```
 python3 scripts/build_references.py ../../docs/standards/AAC-WR-001.md references/
 ```
 
 The script exits non-zero if any section of the source lands in no file, so a
-new Part cannot go missing. It writes `references/00-INDEX.md` too: the rule
-range and each file's span from the master, the pattern and Jev counts from
-`scripts/wr001-coverage.md`. Its prose lives in the script's `INDEX` template, so
-update the coverage table first, then run the build; never edit the index.
-When a revision adds or changes a rule, the same PR adds its check to `scripts/wr001-lint.js`
-or its row to `scripts/wr001-coverage.md` saying why no pattern can decide it;
-`tools/wr001-lint-coverage.test.js` fails when the two disagree (Dan, September 29, 2026,
-after Rule 37 sat as an owner ruling for six days with no check).
- Then set `standard-version` in this file's
-`metadata` and `STANDARD_VERSION` in `scripts/wr001-lint.js` to the new
-version. The other four metadata keys belong to `tools/skill-stamps.py`; the
-repo's stamp-and-build commands rotate them.
+new Part cannot go missing. It also writes `references/00-INDEX.md`: its prose is
+edited in the script's `INDEX` template, its counts come from
+`scripts/wr001-coverage.md`, so update the coverage table first, then build.
+
+When a revision adds or changes a rule, the same PR adds its check to
+`scripts/wr001-lint.js` or its row to `scripts/wr001-coverage.md` saying why no
+pattern can decide it; `tools/wr001-lint-coverage.test.js` fails when the two
+disagree (Dan, September 29, 2026, after Rule 37 sat as an owner ruling for six
+days with no check). Then set `standard-version` in this file's `metadata` and
+`STANDARD_VERSION` in `scripts/wr001-lint.js` to the new version. The other four
+metadata keys belong to `tools/skill-stamps.py`.

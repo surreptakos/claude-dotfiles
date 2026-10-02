@@ -3,18 +3,29 @@
 
   python3 review_gate_tools.py check REVIEW.docx --end 7/23/2026 [--start 7/24/2025] [--direct Erich] [--no-render]
       Gate 1 mechanical format check. Prints fix lines for the Gate 1 email and what passed.
-  python3 review_gate_tools.py build BODY.py OUT.docx [--template PATH.docx]
-      Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (embedded
-      below as base64; --template overrides). BODY.py sets `body = [...]` using
+  python3 review_gate_tools.py meaning REVIEW.docx --direct Erich
+      Gate 2 meaning checks: rules, Jev judgments tagged "(Jev)", and a read list for the reader
+      (review_meaning.py, shared with the self-check). Exit 0 clean, 1 fixes, 2 could not check (a stop).
+  python3 review_gate_tools.py gate REVIEW.docx
+      The release gate for review text the audit writes: exit 0 only when check and meaning both
+      exited 0 on this exact file.
+  python3 review_gate_tools.py build BODY.py OUT.docx --review REVIEW.docx [--template PATH.docx]
+      Refuses unless check and meaning both ran on REVIEW.docx as it stands (meaning exit 2 is not a run).
+      Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (the
+      .docx next to this script, md5-checked; --template overrides). BODY.py sets `body = [...]` using
       P("paragraph"), L(level, "text", "99" for the fix list), LB("Bold lead.", " rest").
   python3 review_gate_tools.py template [OUT.docx]
-      Write the embedded template to disk.
+      Write a copy of the md5-checked template to disk.
+
+check and meaning each write REVIEW.docx.gate.json beside the review: its SHA-256, the script
+version, the exit code and the fix lines.
 
 Requires python-docx. Page count needs LibreOffice (soffice) and pdfinfo; otherwise pass --no-render.
 Template md5 0bac36e6466ed3a61da6a774a561132b (Dan's canonical formatting, saved 9/9/26; placeholder "[Direct]" in place of a sample name, 9/29/26).
 """
 import re, sys, argparse, subprocess, tempfile, os, datetime, shutil
 from docx import Document
+import review_meaning
 
 RATINGS = ["exceeded expectations", "met expectations", "not met expectations", "did not meet expectations"]
 RESULTS = ["promotion", "vertical growth", "horizontal growth", "no change", "current role and responsibilities"]
@@ -25,9 +36,6 @@ ABBR = ["Mr", "Ms", "Mrs", "Dr", "Inc", "Corp", "Co", "Mfg", "St", "Ave", "Blvd"
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec"
 DATE_NUM = re.compile(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b")
 DATE_TXT = re.compile(r"\b(%s)\.? (\d{1,2})(?:st|nd|rd|th)?,? (\d{4})\b" % MONTHS)
-STOP = set("""I He She His Her Him It They Them Their The A An This That These Those In On At For To From With By As Of And But Or
-Both Two Three Four Five Six Seven Eight Nine Ten Net New Last Next Q1 Q2 Q3 Q4 RMR GP GPM CCTV AAC CRM Guidance Point Strength
-Weakness Core Message Erich""".split())
 
 
 def sentences(text):
@@ -90,21 +98,6 @@ def short_ranges(text, pstart, pend):
         if RANGE_SEP.match(text[e1:s2]) and d1 == pstart and d2 < pend:
             out.append((t1, t2))
     return out
-
-
-def has_anchor(text, direct):
-    if DATE_NUM.search(text) or DATE_TXT.search(text): return True
-    if re.search(r"\$\d", text) or re.search(r"\d+(\.\d+)?%", text): return True
-    words = re.findall(r"\b[A-Z][A-Za-z&]+\b", text)
-    for i, w in enumerate(words):
-        if w in STOP or w == direct or w.rstrip("’'s") == direct: continue
-        # sentence-initial words are ambiguous; require the word not to follow a period
-        idx = text.find(w)
-        before = text[:idx].rstrip()
-        if before and before[-1] in ".!?": continue
-        if idx == 0: continue
-        return True
-    return False
 
 
 def load(path):
@@ -290,7 +283,9 @@ def gate1_main(argv):
     for f in fixes: print("  -", f)
     print("Passed:", "; ".join(passes))
     for n in notes: print("Note:", n)
-    return 0 if not fixes else 1
+    code = 0 if not fixes else 1
+    review_meaning.write_record(a.docx, "check", __file__, code, fixes)
+    return code
 
 
 TEMPLATE_NAME = "Format Rejection Template.docx"
@@ -362,13 +357,29 @@ def build_docx(body_path, out_path, template_path=None):
 
 
 def main():
-    if len(sys.argv) < 2 or sys.argv[1] not in ("check", "build", "template"):
+    if len(sys.argv) < 2 or sys.argv[1] not in ("check", "meaning", "gate", "build", "template"):
         print(__doc__); return 2
     cmd, rest = sys.argv[1], sys.argv[2:]
     if cmd == "check": return gate1_main(rest)
+    if cmd == "meaning": return review_meaning.cli(sys.modules[__name__], rest)
+    if cmd == "gate":
+        ap = argparse.ArgumentParser(prog="gate"); ap.add_argument("docx")
+        a = ap.parse_args(rest)
+        problems = review_meaning.record_problems(a.docx, clean=True)
+        print("GATE RECORD:", "PASS (check and meaning exit 0 on this file)" if not problems else "REFUSED")
+        for p in problems: print("  -", p)
+        return 0 if not problems else 2
     if cmd == "build":
-        ap = argparse.ArgumentParser(); ap.add_argument("body"); ap.add_argument("out"); ap.add_argument("--template")
-        a = ap.parse_args(rest); build_docx(a.body, a.out, a.template); return 0
+        ap = argparse.ArgumentParser(prog="build"); ap.add_argument("body"); ap.add_argument("out")
+        ap.add_argument("--review", required=True, help="the review docx this email is about")
+        ap.add_argument("--template")
+        a = ap.parse_args(rest)
+        problems = review_meaning.record_problems(a.review)
+        if problems:
+            print("NOT BUILT. The audit cannot send an email about this review yet:")
+            for p in problems: print("  -", p)
+            return 2
+        build_docx(a.body, a.out, a.template); return 0
     if cmd == "template":
         out = rest[0] if rest else "Format Rejection Template.docx"
         open(out, "wb").write(template_bytes()); print("wrote", out); return 0

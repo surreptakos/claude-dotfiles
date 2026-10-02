@@ -5,28 +5,20 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.13 \| DRAFT FOR APPROVAL** |
+| **VERSION 0.15 \| ACTIVE** |
 |---|
 
 | **Document number** | AAC-WR-001 |
 |---|---|
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.13 |
-| **Status** | Draft for Approval |
-| **Effective date** | Upon approval |
+| **Version** | 0.15 |
+| **Status** | Active |
+| **Effective date** | 2026-10-02 |
 | **Review cycle** | Annual, or upon material change |
 | **Primary reference** | The Gregg Reference Manual, 11th U.S. edition |
 
 The approved electronic master of this standard is the controlled copy. Printed or locally saved copies are uncontrolled unless specifically marked and maintained as controlled copies.
-
-This draft is formatted as a controlled document, but it does not become company policy until the designated approver approves it.
-
-**Approval**
-
-| **Role** | **Name** | **Approval / Signature** | **Date** |
-|---|---|---|---|
-| General Manager | | | |
 
 **Revision history**
 
@@ -44,6 +36,8 @@ This draft is formatted as a controlled document, but it does not become company
 | 0.11 | 2026-09-30 | Fill-in forms: Rules 43, 77, 85, 98, 99; Appendix F. | Pending |
 | 0.12 | 2026-09-30 | Overdefensive, legalistic, and redundant writing cut without going terse: Rules 166, 168, 169, and 170; Appendices F and G12. | Pending |
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
+| 0.14 | 2026-10-01 | Controlled-document header without a signature table; approval by merge; effective date in the header: Appendix F. | General Manager |
+| 0.15 | 2026-10-02 | Performance review layout and mechanics folded in from the retired layout draft: Rule 2; Part XXVI, Rules 171–185; Appendix F; References. | General Manager |
 
 # How to use this standard
 
@@ -53,7 +47,7 @@ The rules apply to company-authored business communication. They do not override
 
 For an issue not addressed here, follow the order of authority in Section 2. Recurring editorial decisions should be added to the standard through the controlled revision process.
 
-Use a document-specific standard or template only within its approved scope. Performance-review methods, coaching-email forms, and review-cell constraints do not become company-wide rules through this standard. See Rule 2 for the performance-review exception.
+Use a document-specific standard or template only within its approved scope. Performance-review methods, coaching-email forms, and review-cell constraints do not become company-wide rules through this standard. See Rule 2 for the performance-review exception; Part XXVI holds the review-material rules it scopes.
 
 # Part I - Governing rules
 
@@ -87,9 +81,9 @@ Do not change contract language, statutory language, quotations, manufacturer te
 
 A document-specific standard or template may override a house rule only through an explicit, approved exception that identifies its scope. Its owner must record the exception in the decision log. Other provisions of this standard continue to apply; a template does not authorize changes to legal obligations or technical requirements.
 
-As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and “AAC House Layout Standard (Gregg-based).” Where these documents conflict with WR-001, they control for that material. If the two specialized standards conflict, the AAC performance review standards control.
+As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (standards.md in the aac-review-self-check skill: SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and Part XXVI of this standard, which carries their layout and mechanics. Where the review standards conflict with WR-001, they control for that material, and Part XXVI controls over the rest of WR-001 for that material. If the review standards and Part XXVI conflict, the AAC performance review standards control.
 
-This exception includes Rule 16 (serial comma), Rule 37 (headings and titles), Rule 3’s treatment of “should,” and Rule 66 (e.g. and i.e.), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other WR-001 requirements remain in force. The higher authorities listed above still control.
+This exception includes Rule 16 (serial comma; see Rule 175), Rule 37 (headings and titles; see Rule 182), Rule 3’s treatment of “should” (see Rule 175), Rule 66 (e.g. and i.e.; see Rule 178), Rule 43 (numeric dates; see Rule 174), and Rule 47 (percentages; see Rule 178), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other WR-001 requirements remain in force. The higher authorities listed above still control.
 
 ## 3. Mandatory terms used in this standard
 
@@ -1144,6 +1138,94 @@ The ForeFront closeout of September 28, 2026 applied Rules 168 through 170 to on
 - Five lines of contract-sum arithmetic became "your $55,700 balance less the 10% retainage of $13,895." The reader needed the result, not the working (Rule 168).
 - The closeout list carried section citations and serial-number detail. All five items stayed, each as a plain one-line request: the detail was cut, not the needs (Rule 170).
 
+# Part XXVI - Performance review material
+
+## 171. Scope of this part
+
+This part applies only to the material Rule 2 names: performance review documents, the audits of them, and the format, meaning, and coaching emails a skip-level sends about them. It does not extend to any other AAC document.
+
+The AAC performance review standards (standards.md in the aac-review-self-check skill) govern what a review says: SEER, Sum-Ex, the Core Message form, third person, one example per item, the review period, and the meaning checks. This part governs the layout and mechanics of review material. Where the two conflict, the review standards control. Where this part conflicts with another rule of this standard, this part controls for review material, and every other rule continues to apply.
+
+## 172. Templates and tools
+
+Clone every generated review-material Word document from one of the two canonical templates in the aac-performance-review-audit skill: "DIRECT NAME - Annual Performance Review - YEAR (template, 2026-09-23).docx" for the review and "Format Rejection Template.docx" for an audit email sent as a document. Do not build one from a blank document.
+
+The template sets type, spacing, and margins. Rules 77 and 80 and Appendix E apply only where it is silent. The review page is Aptos 10 pt, as the approved review template carries it. Every other piece of review material, including the audit emails and the rejection document, is Aptos 11 pt under Rule 77. Text is black, with no colored headings, shading, or decorative rules, whatever Rule 78 permits elsewhere.
+
+Run the mechanical format gate with **review_gate_tools.py check** and use its fix lines verbatim. Build an audit email document with **review_gate_tools.py build**, which applies the list treatment in Rule 180. When the builder lacks a treatment, extend the builder rather than hand-editing spacing in its output. Before release, render every generated document to PDF, inspect pages 1 and 2, and run the docx skill's validator.
+
+## 173. The review page
+
+The review is one page, and the template fixes its layout. Managers do not change it. When a draft runs long, trim in this order: a duplicate Strength, the lowest-value Weakness, the lowest-value Guidance point, then SEER to Sum-Ex on the weakest item. Signature lines stay as templated.
+
+## 174. Dates in review material
+
+Use numeric dates throughout the review document, in one form (7/24/25), including the header dates and the examples inside review cells. This overrides Rule 43 for review material. The Dates covered field runs the 12 months the review standards set, and the Date field is the delivery date. Audit emails may use the same numeric form. Write a range with **through** in prose: 7/24/25 through 7/23/26.
+
+## 175. Review cells
+
+A Strength or Weakness cell holds plain paragraphs. Do not put bullets, bold, or headings inside a cell, and never bold a number. Each cell carries one SEER or Sum-Ex with one example.
+
+Inside a cell, drop the serial comma unless the sentence cannot be read without it. This overrides Rule 16 for review cells only. Audit and coaching emails may keep it. **Should** inside a Strength or Weakness cell is a prescription and fails the behavior-only test, whatever Rule 3 allows elsewhere. The instruction belongs in Guidance.
+
+The Summarize and Restate sentences usually take the present tense (he closes large multi-site projects) and the Example the past (on 2/4/26 he closed). A repeat flag such as "which was also noted in his last review" is nonrestrictive and keeps its comma.
+
+## 176. Guidance points
+
+Guidance points are the template's plain bullets under "Guidance for the next year." Each opens with an action verb and runs one to three sentences. An older draft that labels each point "Guidance Point N:" is accepted.
+
+## 177. Review vocabulary
+
+Capitalize Rating, Result, Ramification, Strength, Weakness, Guidance, and Core Message when they name a section or element of the review. Lowercase them as ordinary words: a weakness in the process. Write the Rating and Result terms exactly as the review standards list them.
+
+Capitalize a job title used as the formal designation in a review, such as Account Executive (Mid-Level). Spell out SEER and Sum-Ex once per document. Refer to a numbered element as Guidance Point 2 and to a revision as Rev 2, never Rev II.
+
+## 178. Numbers and word treatment in review material
+
+Use the % sign with no space in review material, one form per document. The figures come from workbooks that use it, so this overrides the spelled-out **percent** of Rule 47. A large amount may be written $1.44M in an audit email or a table. Write a part of a whole as **17 of 79**, not 17/79, in prose.
+
+Do not use e.g. or i.e. in documents to managers. Write **for example** or recast. This overrides Rule 66 for review material. Do not use semicolons in documents to managers. Split the sentence instead.
+
+Keep **multi-site** hyphenated, as AAC's existing reviews and the compensation plan write it.
+
+## 179. Audit email opening and closing
+
+Open with **Hey [First name],** on its own line. The first paragraph says what the message is about and what is good before what is wrong. Keep one topic per message. A second topic gets its own email and subject so it can be found later.
+
+Close with **Thanks,** on its own line and type nothing after it. Outlook adds the signature block.
+
+A coaching email runs about 55 words per Strength, Weakness, and Guidance point. A format or meaning rejection is the fix list plus the standards it cites, and nothing more.
+
+## 180. Numbered fix lists
+
+Number every list in a format or meaning rejection, because the manager replies by item number. Each list restarts at 1 (Rule 91). Introduce a list with a complete sentence ending in a colon: "There are five fixes needed before I review the content:" Write every item as a full sentence ending with a period.
+
+Bold the lead phrase of a top-level item only when sub-items sit under it. Nothing else in a list is bold. Set a quoted rewrite in quotation marks, not italics.
+
+In a generated document, a top-level item that opens a new group takes 12 pt before and 0 pt after, with contextual spacing turned off on those items only, so the group reads as a block. This overrides the item spacing in Rule 93.
+
+## 181. Audit email subject line and thread
+
+The subject states the topic and the ask and is never blank. A new thread's subject is "[Direct] Annual Review - [Year]" with the direct's name and the review year filled in. A reply keeps the original subject so the thread stays whole. The mail client adds RE:, so do not type it. Reply in the thread unless the topic has changed, and quote only what you answer.
+
+## 182. Audit email body
+
+Do not put tables, all capitals, colored text, backgrounds, emoji, or signature images in the body of an audit or coaching email. A table belongs in the audit file's notes, a workbook, or a longer document. A heading in one of these emails is the section word alone, in sentence case: Core message, Strengths.
+
+## 183. Review file names and attachments
+
+Name a review file **[Direct] [Year] - [Document] Rev [N]**. An audit is **[Direct] [Year] - Audit of Rev [N].md**, and its email document is **[Direct] [Year] - Audit of Rev [N] (paste into Outlook).docx**. The Rev number, not a date, is the sequence key, so this pattern replaces Rule 145 for review material.
+
+Say in the email body what is attached and why (Rule 106). Do not send a draft with tracked changes showing unless the tracked changes are the point.
+
+## 184. Figures in the audit notes
+
+Every set of figures in the audit file's notes carries the date it was pulled and the system it came from: "Zoho CRM, pulled 9/9/26" or "2026 sales workbook, through 7/23/26." A figure without a pull date cannot be reconciled against the manager's.
+
+## 185. Proofreading review material
+
+Read review material in the two passes of Rule 148. The first pass checks each figure against the source in hand, each date against the review period, each name against its spelling in the CRM, and each quoted passage word for word. A figure the manager states is taken as stated unless a source contradicts it. Do not ask the manager to verify it again. The second pass adds the review's own mechanics: sentence counts per cell, items per list, numbering restarts, spacing, headings, and page count.
+
 # Appendix A - Writing and release checklist
 
 ## Pass 1 - content and logic
@@ -1297,7 +1379,9 @@ The General Manager, or another formally designated document-control owner, owns
 
 Each approved revision must record the version, effective date, description of change, and approver. The current approved version controls. Retain superseded versions when legal, contractual, audit, or document-history requirements justify retention.
 
-Document-specific standards and templates must name their owner, scope, approval, version, and any exceptions to this standard. Keep performance-review methods and template-specific limits in their own controlled documents. Templates implement the applicable rules; they do not establish new company-wide rules by accident.
+A controlled document opens with a header naming its document number, owner, approver, version, status, and effective date. It carries no signature table. Approval is the merge of the revision into the document's controlled repository, made by the owner or by an agent the owner directs. Write the effective date in the header before the merge; never infer it from the merge.
+
+Document-specific standards and templates must name their owner, scope, approval, version, and any exceptions to this standard. Keep performance-review methods and template-specific limits in their own controlled documents. Review-material layout and mechanics are Part XXVI, within the scope Rule 2 gives them. Templates implement the applicable rules; they do not establish new company-wide rules by accident.
 
 ## House selections and reference treatment
 
@@ -1329,8 +1413,10 @@ Table F1. House decision register
 | 167 | Machine-vocabulary word list adopted across the board, not scoped to one document class. Beacon, harness, gate, and robust stay exempt when literal. | Owner ruling, September 22, 2026 (issue 626), affirming the September 21, 2026 grill session. Lists compared: `petergyang/no-ai-slop` and `blader/humanizer`. Checked by the stop-slop detector, issue 620. | 0.10 |
 | 166; 168; 169; 170; G12 | Cut sentences that do nothing for the reader: restated terms, unraised disputes, and shown working (Rule 168). Formality follows stakes and relationship, not topic; no contract citations in email unless disputed or outcome-changing (Rule 169). Cut for need, never for length (Rule 170). Legalistic register in Appendix G12, checked as warnings outside formal documents. No length check. | Owner ruling, September 28, 2026, from the ForeFront closeout: the drafts were accurate but overdefensive, legalistic, and redundant. Length is the wrong target, so Rule 170 and its release-check item keep the fix from turning terse. | 0.12 |
 | 8; 104 | An AI-drafted message states only what the record shows, names the system it came from, and writes what the sender could not verify as not known (Rule 8). A request to a direct report due within a couple of weeks names the next O3 as the deadline, not a calendar date (Rule 104). | Owner ruling, October 1, 2026, on a drafted Teams message to a manager: "AI drafted messages should lean hard into hedging & stating only what we can absolutely be sure of" and "instead of putting dates/deadlines for internal team members, if the deadline is relatively soon, ask for it by their next O3." | 0.13 |
+| F | Signature table dropped from the controlled-document shape. | Owner ruling, October 1, 2026, on how the first nexus policy is approved: "wr 001 doesn't need a signature, it's overkill. It's already being used in Claude. It's an agent file." | 0.14 |
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
 | 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
+| 2; 171–185 | Performance review layout and mechanics are Part XXVI of this standard: the review page, review cells, Guidance points, dates, audit email mechanics, file names, and the canonical templates and gate script. Rule 2 names the AAC performance review standards and Part XXVI, not a separate layout document. The review page takes Aptos 10 pt from the approved review template; other review material stays Aptos 11 pt under Rule 77. | Owner ruling, October 1, 2026 (issue 1235): "AAC House Layout Standard (Gregg-based)" was to be folded into this standard and never was, and it lived only in the review project folder, so a session that never opened the folder never saw it. Its review-material house rules became Rules 171 through 185. Its restatements of Gregg mechanics that this standard does not state stay with Gregg under Rule 152; where it differed from this standard outside review material, this standard already controlled. The draft's Aptos 11 pt for everything conflicts with the approved review template (2026-09-23) at Aptos 10 pt; the template is proposed to win on the review page, pending owner confirmation. A figure the manager states is taken as stated unless a source contradicts it (owner ruling, October 1, 2026). | 0.15 |
 
 # Appendix G - Phrase register
 
@@ -1697,6 +1783,6 @@ Merriam-Webster. Secondary authority for U.S. spelling and word treatment when t
 
 Approved Active Alarm Company templates, controlled procedures, executed contracts, manufacturer documentation, applicable codes, and customer-mandated forms, as applicable under Section 2.
 
-AAC House Layout Standard (Gregg-based). The September 9, 2026 layout draft supplied as Pasted markdown(3).md informed selected v0.2 house rules. Rule 2 designates this layout standard and the AAC performance review standards as controlling for performance reviews, their audits, and related coaching emails, within their stated scope. The AAC performance review standards take precedence over the layout standard. Neither document is an authority for unverified claims about Gregg or for extending review-only rules company-wide.
+AAC House Layout Standard (Gregg-based). The September 9, 2026 layout draft supplied as Pasted markdown(3).md informed selected v0.2 house rules. Its performance-review layout and mechanics were folded into Part XXVI in v0.14, and the draft is retired; Rule 2 no longer names it. It is not an authority for unverified claims about Gregg or for extending review-only rules company-wide.
 
 Concurrent WR-001 draft dated September 10, 2026, supplied as AAC-WR-001_House_Writing_and_Document_Standard_v0.2(1).docx. Source for the v0.4 typography, ordinal-number, and telephone-format house selections recorded in Appendix F.

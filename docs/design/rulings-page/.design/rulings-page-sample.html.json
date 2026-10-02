@@ -1,0 +1,25 @@
+{
+  "file": "rulings-page-sample.html",
+  "sha256": "b2c78fbc5561efefb68d2a94379337625050038f6c2b3b005f26ba5ae6fee6eb",
+  "passes": true,
+  "method": "dual-agent (A: claude -p a4b19348-ba21-4d75-b96c-bd3c16d87342 \u00b7 B: claude -p 440bd6c2-ac46-4dce-9188-f03027b8b9ad)",
+  "heuristics": {
+    "total": 30,
+    "max": 40,
+    "pct": 75.0,
+    "band": "Good",
+    "na": []
+  },
+  "audit": {
+    "total": 16,
+    "max": 20,
+    "band": "Good"
+  },
+  "issues": {
+    "P0": 0,
+    "P1": 0,
+    "P2": 4,
+    "P3": 1
+  },
+  "stamped": "2026-10-02T00:47:46"
+}
