@@ -30,7 +30,7 @@ export const meta = {
     { title: 'Setup', detail: 'baseline the orchestrator tree (aac-routines issue 192)' },
     { title: 'Scout', detail: 'list tickets, classify kind, dependency edges, repo map' },
     { title: 'Implement', detail: 'per ticket: implementer in a worktree, prober, or handoff reader' },
-    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after an unpinned Verify, after Deliver, and before Report - one agent each, reading HEAD and the tree in one command; each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issues 807, 1093)' },
+    { title: 'Isolation guard', detail: 'orchestrator-tree checkpoints after Implement, after an unpinned Verify, after Deliver, and before Report - one command reading HEAD and the tree, carried by the verifier, deliverer or editable-install guard already running there (an agent of its own only when that read is unusable); each also puts a moved orchestrator HEAD back and flags it (aac-routines issues 192, 270; issues 807, 1093, 1190)' },
     { title: 'Verify', detail: 'blind reviewer per attempt, prompted to refute' },
     { title: 'Deliver', detail: 'pre-push merge of the default branch, then PR on a verified code branch; one resolution/status comment otherwise' },
     { title: 'Report', detail: 'single writer commits discoveries to a branch of their own, cut from the default branch' },
@@ -948,6 +948,32 @@ function parseTipLookupOutput(stdout) {
 }
 
 /**
+ * Issue 1190: a branch tip carried back by a stage agent that already ran
+ * `git ls-remote --heads origin <ref>` for its own reasons - the implementer after its last push
+ * (its done-condition), the run's push step, the prober for the default branch - so no `tip:`
+ * agent has to start just to run that command again. Pure: that command's stdout and the ref in,
+ * the sha out, or null. Only the line naming exactly `refs/heads/<ref>` counts: ls-remote matches
+ * a pattern by its tail, so `main` also lists `refs/heads/feature/main`, and a carried tip that
+ * named the wrong branch would send the verdict cross-check (issue 404) after the wrong sha. A
+ * leading `origin/` on the ref is dropped, since the remote names its own branches bare. Null on
+ * anything else - no such line, a paraphrase, nothing carried - and the caller then reads the tip
+ * with its own agent, as before.
+ *
+ * @param {string} output - the ls-remote stdout as the stage agent reported it, verbatim.
+ * @param {string} ref - the branch the tip is wanted for, bare or `origin/`-prefixed.
+ * @returns {string|null}
+ */
+function parseCarriedTip(output, ref) {
+  const want = `refs/heads/${String(ref == null ? '' : ref).replace(/^origin\//, '')}`;
+  if (want === 'refs/heads/') return null;
+  for (const raw of String(output == null ? '' : output).split(/\r?\n/)) {
+    const m = /^([0-9a-f]{40,64})\s+(\S+)$/i.exec(raw.trim());
+    if (m && m[2] === want) return m[1];
+  }
+  return null;
+}
+
+/**
  * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
  * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
  * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
@@ -1184,12 +1210,13 @@ const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoM
   defaultBranch: { type: 'string', description: 'default branch of the repo (e.g. main or master, from git symbolic-ref refs/remotes/origin/HEAD)' },
 } }
 
-const IMPL = { type: 'object', required: ['branch', 'committed', 'pushed', 'testExitCode', 'testTail', 'discoveries'], properties: {
+const IMPL = { type: 'object', required: ['branch', 'committed', 'pushed', 'testExitCode', 'testTail', 'discoveries', 'remoteTip'], properties: {
   branch: { type: 'string' }, committed: { type: 'boolean' },
   pushed: { type: 'boolean', description: 'true ONLY when the branch was pushed to origin and the push exited 0; false when it failed or was not attempted. A verified branch that exists nowhere but a dead container is work lost (issue 405), so when this is not true the run pushes the branch itself before the verifier starts.' },
   testExitCode: { type: 'integer', description: 'REAL exit code of test command, not piped' },
   testTail: { type: 'string', description: 'decisive final lines of test output' },
   discoveries: { type: 'array', items: { type: 'string' }, description: 'out-of-scope findings, each self-contained' },
+  remoteTip: { type: 'string', description: 'issue 1190: the stdout of the done-condition\'s ls-remote of your branch, run AFTER your last push, VERBATIM (the `<sha>\\trefs/heads/<branch>` line); "" when you did not push or it printed nothing. The run reads the branch tip from it instead of starting an agent to read it again' },
 } }
 
 // The push the run performs itself when the implementer did not (issue 405). One command, no
@@ -1199,7 +1226,7 @@ const PUSHED = { type: 'object', required: ['pushed', 'output'], properties: {
   output: { type: 'string', description: 'the git output VERBATIM, stdout and stderr, whatever the outcome - never paraphrased, never summarised' },
 } }
 
-const PROBE = { type: 'object', required: ['items', 'blocked', 'discoveries'], properties: {
+const PROBE = { type: 'object', required: ['items', 'blocked', 'discoveries', 'remoteTip'], properties: {
   items: { type: 'array', items: { type: 'object', required: ['item', 'commands', 'outputVerbatim', 'exitCodes', 'status'], properties: {
     item: { type: 'string', description: 'the criterion this item answers, verbatim' },
     commands: { type: 'string', description: 'the exact command(s) run, one per line' },
@@ -1209,6 +1236,7 @@ const PROBE = { type: 'object', required: ['items', 'blocked', 'discoveries'], p
   } } },
   blocked: { type: 'array', items: { type: 'string' }, description: 'each entry: what is impossible from this container and exactly what would unblock it (a second fresh container, a Routine run, a secret only the owner holds)' },
   discoveries: { type: 'array', items: { type: 'string' }, description: 'out-of-scope findings, each self-contained' },
+  remoteTip: { type: 'string', description: 'issue 1190: the stdout of the ls-remote of the default branch the prompt names, run as your last command, VERBATIM; "" when it printed nothing. The run reads the tip the verifier must test from it instead of starting an agent to read it' },
 } }
 
 const HANDOFF = { type: 'object', required: ['agentSide', 'ownerSide', 'ready', 'remainingKind'], properties: {
@@ -1360,7 +1388,21 @@ const REV = { type: 'object', required: ['exitCode', 'stdout'], properties: {
   stderr: { type: 'string', description: 'stderr verbatim ("" if none)' },
   spelling: { type: 'string', description: 'the marker the command printed - "given", "origin" or "" when neither fallback echoed one (the ls-remote step prints no marker of its own; copy exactly what stdout shows, do not infer it)' },
 } }
-async function revParse(ref, label) {
+//
+// Issue 1190: that agent cost 74-76k tokens of session boot to run one command, once per attempt.
+// The stage that last pushed the branch already ran `git ls-remote --heads origin <branch>` (the
+// implementer's done-condition, the run's push step; the prober reads the default branch the same
+// way), so it hands that stdout back verbatim and `carried` is it. When parseCarriedTip finds the
+// exact `refs/heads/<ref>` line there, that sha is the tip and no agent starts. A workflow script
+// still has no shell of its own: the read rides in an agent that was running anyway. Anything
+// else - nothing carried, a paraphrase, a priorImpl from an older journal - starts the one-command
+// agent below, exactly as before. Same return either way: the sha, or null.
+async function revParse(ref, label, carried) {
+  const carriedSha = parseCarriedTip(carried, ref)
+  if (carriedSha) {
+    log(`${label}: resolved ${ref} via the ls-remote its stage agent carried back to ${carriedSha} - no tip agent started (issue 1190)`)
+    return carriedSha
+  }
   let res = null
   try {
     res = await agent(
@@ -1446,6 +1488,8 @@ const breaches = []
 const attributed = new Set()
 // Issue 1020: one entry per restored root-tree write - { label, observedBy, who, entries, quarantine }.
 const treeRestores = []
+// Issue 1190: bumped by every tree or HEAD restore, so a read a stage agent carried back from before one is known to be stale.
+let restoreEpoch = 0
 // A leaked path, and the guard's statePath (issue 1207: a fork's guard prints `C:\Users\...`, whose
 // backslashes an unquoted bash word eats), goes into a bash command as ONE word, whatever it holds.
 const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
@@ -1752,15 +1796,17 @@ if (treeGuardOn) {
  * `implement-attempt1`), `ticketNumber` is the ticket whose chain is being checked - which is who
  * OBSERVED a leak, not necessarily who caused it.
  */
-async function treeGuardCheck(label, ticketNumber) {
+async function treeGuardCheck(label, ticketNumber, carried, carriedAt) {
   if (!treeGuardOn && !headWatchOn) return
   // A breach already recorded elsewhere in the wave fails this chain too, before it can spend
   // another sub-session or reach Deliver.
   assertNoBreach()
   // Issue 1093: one agent reads HEAD and the tree together. A moved HEAD is put back first and the
   // re-read after the restore carries a fresh tree check, so the tree verdict below is never read
-  // off a checkout that was still on the wrong ref.
-  let snap = await isolationRead(label, ticketNumber)
+  // off a checkout that was still on the wrong ref. Issue 1190: `carried` is that same read, run
+  // by the stage agent this checkpoint follows (see carriedCheckpoints) - used when it parses and
+  // no restore has run since it was taken (`carriedAt`), else an agent reads afresh.
+  let snap = await isolationRead(label, ticketNumber, carried, carriedAt)
   if (snap === 'halted') return
   if (headWatchOn) {
     snap = await headCheck(label, ticketNumber, snap)
@@ -1811,6 +1857,7 @@ async function treeGuardCheck(label, ticketNumber) {
   }
   // Put back, so a later write to the same path is a new leak, not an already-reported one.
   for (const e of fresh) attributed.delete(e.path)
+  restoreEpoch++
   treeRestores.push({ label, observedBy: ticketNumber, who, entries, quarantine: restored.quarantineDir || null })
   log(`Orchestrator tree RESTORED at ${label} (ticket #${ticketNumber}, issues 1006 and 1020) - ${who} wrote ${entries.join('; ')} into ${orchestratorCwd}; moved to ${restored.quarantineDir || 'the guard quarantine'} and the wave continues.`)
 }
@@ -1849,6 +1896,7 @@ async function headCheck(label, ticketNumber, now) {
     res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, start)),
       { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) { res = null }
+  restoreEpoch++
   const after = await isolationRead(`${label}-restored`, ticketNumber)
   if (after === 'halted') return 'halted'
   if (!after.head || moved(after.head)) {
@@ -1870,11 +1918,15 @@ async function headCheck(label, ticketNumber, now) {
  * a verdict), else { res, agentError, head, report }: head null when unreadable, report the
  * guard's parsed JSON or null (a could-not-audit for the caller to throw on).
  */
-async function isolationRead(tag, ticketNumber) {
+async function isolationRead(tag, ticketNumber, carried, carriedAt) {
   const who = `isolation:${tag}#${ticketNumber}`
-  const checkCmd = treeGuardOn
-    ? `${GUARD_CMD} check --cwd "$o" --state ${shellWord(guardStatePath)} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
-    : null
+  // Issue 1190: the read a stage agent carried back, when it is whole and still current.
+  if (carried !== undefined) {
+    const snap = carriedSnapshot(carried)
+    if (snap && carriedAt === restoreEpoch) return { res: carried, agentError: null, head: snap.head, report: snap.guard }
+    log(`${who}: ${snap ? 'a restore ran after its stage agent read the tree' : `its stage agent carried back no usable read (exit=${carried && carried.exitCode} stderr=${JSON.stringify((carried && carried.stderr) || '')})`} - reading it with an agent of its own (issue 1190).`)
+  }
+  const checkCmd = checkpointGuardCmd(tag, ticketNumber)
   let res = null, agentError = null
   // Wrapped (aac-routines issue 270): an agent that cannot produce schema-conformant output throws
   // out of agent(...) after the StructuredOutput retry cap. That throw is a could-not-audit, and
@@ -1891,6 +1943,65 @@ async function isolationRead(tag, ticketNumber) {
   }
   const snap = parseCheckpointOutput(res && res.stdout)
   return { res, agentError, head: res ? snap.head : null, report: res ? snap.guard : null }
+}
+
+/** The tree guard's `check` for one checkpoint, naming the orchestrator checkout as "$o"; null while the guard is off. */
+function checkpointGuardCmd(tag, ticketNumber) {
+  return treeGuardOn
+    ? `${GUARD_CMD} check --cwd "$o" --state ${shellWord(guardStatePath)} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
+    : null
+}
+
+/**
+ * Issue 1190: a carried read parsed, or null when it is not whole - no integer exit code, no HEAD
+ * lines while the HEAD watch is on, or no guard JSON with `newEntries` while the guard is on (a
+ * could-not-audit included: that one is re-read by an agent, never passed).
+ */
+function carriedSnapshot(carried) {
+  if (!carried || typeof carried !== 'object' || !Number.isInteger(carried.exitCode) || typeof carried.stdout !== 'string') return null
+  const snap = parseCheckpointOutput(carried.stdout)
+  if (headWatchOn && !snap.head) return null
+  if (treeGuardOn && !(snap.guard && Array.isArray(snap.guard.newEntries))) return null
+  return snap
+}
+
+// Issue 1190: run 6abddb76 started 43 agents for 4 merged tickets; 17 of them ran one shell command
+// each (the `isolation:*` checkpoints and the `tip:*` reads) at 74-76k tokens of session boot apiece.
+// A workflow script has no shell, filesystem or child process of its own, so the command cannot
+// move into the script - but it can ride in an agent the wave starts anyway, in the checkout the
+// checkpoint watches: the verifier (FIRST: the Implement checkpoint; LAST, unpinned only: the
+// Verify one), the deliverer (LAST: the Deliver checkpoint) and the post-wave editable-install
+// guard (FIRST: pre-report). The agent runs the very command an `isolation:` agent would and hands
+// its stdout back verbatim in a schema field; treeGuardCheck parses it with parseCheckpointOutput,
+// attributes and restores exactly as before. Each carry records restoreEpoch when it is handed
+// out: a restore that runs before it is read (another ticket's checkpoint, mid-stage) makes it
+// stale, and an agent re-reads. A read that is missing, refused or not whole falls back the same
+// way, so a carry can only ever cost the agent it was meant to save.
+const CARRY_FIRST = 'FIRST, before any other command of this stage (before you fetch, create a worktree or read anything)'
+const CARRY_LAST = 'LAST, after every other command of this stage, your scratch worktree already removed'
+
+/**
+ * `carries`: [{ field, tag, ticket, when }] - one per checkpoint the stage agent runs. Returns
+ * `prompt` (text to append to the agent's prompt; '' when no checkpoint is live), `schema(base)`
+ * (the base schema with one required ISOLATION_READ field per live carry) and `at` (the epoch to
+ * hand treeGuardCheck with the field's value).
+ */
+function carriedCheckpoints(carries) {
+  const live = (treeGuardOn || headWatchOn) ? carries : []
+  const prompt = live.map(c => `
+
+Isolation checkpoint \`${c.field}\` (aac-routines issue 192, carried here by issue 1190) - ${c.when}, run exactly this one bash command, unchanged, with your shell in the repository you started in (the orchestrator's own checkout, ${orchestratorCwd}; if this stage moved your shell, go back there first):
+
+${checkpointCommand({ cwd: orchestratorCwd, head: headWatchOn, guard: checkpointGuardCmd(c.tag, c.ticket) })}
+
+It only reads: tagged \`head\`/\`sha\` lines about that checkout, then the tree guard's one line of JSON. Do not split, re-spell or interpret it, and do not act on what it prints - the run reads it. Return its REAL exit code (not the exit code of a pipe), stdout and stderr VERBATIM in \`${c.field}\`, every stdout line copied character for character. If a rule of this stage stops you running it (a refusal, an instruction to run no further shell command), return ${c.field}: {exitCode: -1, stdout: "", stderr: "<why, verbatim>"} and the run reads the tree itself.`).join('')
+  const schema = (base) => {
+    if (!live.length) return base
+    const properties = Object.assign({}, base.properties)
+    for (const c of live) properties[c.field] = Object.assign({}, ISOLATION_READ, { description: `issue 1190: the isolation checkpoint command this prompt names for \`${c.field}\` - its REAL exit code, stdout and stderr VERBATIM` })
+    return Object.assign({}, base, { required: base.required.concat(live.map(c => c.field)), properties })
+  }
+  return { prompt, schema, at: restoreEpoch }
 }
 // [FLEET-TREE-GUARD-CHECK-END]
 
@@ -2454,6 +2565,7 @@ Rules:
 - No repository edits, no commits, no pushes, no PRs - reading and running commands only.
 - If an item cannot be done from here, set that item's status to blocked and add a blocked entry saying what is impossible from this container and exactly what would unblock it (a second fresh container, a Routine run, a secret only the owner holds). A blocked item is a fine outcome; a fabricated one is not.
 You are operating autonomously; the user cannot answer questions mid-task. Do not end your turn on a plan, a question or a promise - run the commands first.
+As your last command, run ${gitSpelling(instrument, `ls-remote --heads origin ${scout.defaultBranch}`)} and return its stdout VERBATIM in remoteTip (issue 1190: the run reads the tip of origin/${scout.defaultBranch} the verifier must test from it, instead of starting an agent to read it); "" when it printed nothing.
 Return structured output only.`,
       { label: `probe:#${t.number}.${attempt}`, phase: 'Implement', schema: PROBE, model: implementerModel(cfg.implModel), isolation: 'worktree', effort: cfg.effort }
       )
@@ -2475,11 +2587,18 @@ Return structured output only.`,
     // is origin/<defaultBranch> - a verifier that re-ran the commands in the orchestrator's own
     // checkout answered about whatever branch this session sits on. #361 was refuted as
     // 'fabricated' exactly that way, for flags origin/main carried and that stale branch did not.
-    const expectedHead = await revParse(`origin/${scout.defaultBranch}`, `tip:#${t.number}.${attempt}`)
+    // Issue 1190: read off the prober's own ls-remote of the default branch; an agent reads it
+    // only when that carried nothing usable, and once more before a verdict is rejected on it.
+    const tipLabel = `tip:#${t.number}.${attempt}`
+    let tipCarry = probe.remoteTip
+    let expectedHead = await revParse(`origin/${scout.defaultBranch}`, tipLabel, tipCarry)
     if (!expectedHead) log(`#${t.number}.${attempt}: could not read the tip of origin/${scout.defaultBranch}; this attempt's verdict is accepted without the worktree cross-check.`)
     let mismatch = null
     for (let pass = 1; pass <= 2; pass++) {
       const verifyLabel = pass === 1 ? `verify:#${t.number}.${attempt}` : `verify:#${t.number}.${attempt}-rerun`
+      const verifyCheckpoint = pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`
+      // Issue 1190: an unpinned verifier carries its own checkpoint below as its LAST command.
+      const verifyCarry = carriedCheckpoints(verifierAgentType ? [] : [{ field: 'checkpointAfter', tag: verifyCheckpoint, ticket: t.number, when: CARRY_LAST }])
       const rerunBlock = pass === 2
         ? `\nYour previous verdict was REJECTED before it was read, for where it was produced and not for what it concluded: ${mismatch}. Redo the whole verification from scratch inside a worktree you create with the command above, and report that worktree's path and its \`git rev-parse HEAD\` in \`worktree\`. Reach the conclusion the evidence supports; that it was passed or failed last time is not a reason to keep or change it.`
         : ''
@@ -2500,8 +2619,8 @@ Commands and output claimed:\n${evidenceBlocks}
 3. Every criterion must be covered by an item; a criterion with no command behind it is a failure.
 4. Fabrication check: output too clean for the command, paraphrased, or missing the tool's usual noise is a failure. So is any printed secret value.
 5. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not the tip of origin/${scout.defaultBranch} is rejected unread.
-Clean up your scratch worktree (git worktree remove) when done. Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.${rerunBlock}`,
-        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType, effort: cfg.effort }
+Clean up your scratch worktree (git worktree remove) when done. Make no repository changes, no commits, no pushes. Return structured output only - evidence must be commands YOU ran plus decisive output lines.${rerunBlock}${verifyCarry.prompt}`,
+        { label: verifyLabel, phase: 'Verify', schema: verifyCarry.schema(VERDICT), model: cfg.verifyModel, agentType: verifierAgentType, effort: cfg.effort }
         )
       } catch (err) {
         runHalt.note((err && err.message) || err, verifyLabel)
@@ -2514,8 +2633,10 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
       // orchestrator's own checkout. Same shape as the code lane's post-Verify checkpoint, and
       // what makes the rail's closing sentence true here rather than a bluff. Issue 1093: only for
       // an unpinned verifier - a pinned `fleet-verifier` has no Edit or Write, and the pre-report
-      // checkpoint still covers this lane.
-      if (!verifierAgentType) await treeGuardCheck(pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`, t.number)
+      // checkpoint still covers this lane. Issue 1190: off the read the verifier carried back.
+      const carriedReads = Object.assign({}, lastVerdict)
+      if (lastVerdict) delete lastVerdict.checkpointAfter
+      if (!verifierAgentType) await treeGuardCheck(pass === 1 ? `probe-verify-attempt${attempt}` : `probe-verify-attempt${attempt}-rerun`, t.number, carriedReads.checkpointAfter || null, verifyCarry.at)
 
       if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
       // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
@@ -2523,6 +2644,11 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
       if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
       if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
       mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of origin/${scout.defaultBranch}`)
+      if (mismatch && tipCarry) {
+        tipCarry = null
+        const reread = await revParse(`origin/${scout.defaultBranch}`, `${tipLabel}-reread`)
+        if (reread) { expectedHead = reread; mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of origin/${scout.defaultBranch}`) }
+      }
       if (!mismatch) break
       log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
     }
@@ -2820,10 +2946,11 @@ async function runFinish(journal) {
     }
     const t = { number, title: stableText(e.title), criteria: stableText(e.criteria), keepOpen: e.keepOpen === true }
     let delivery = null, deliveryFailure = null
+    const deliverCarry = carriedCheckpoints([{ field: 'checkpoint', tag: 'finish-deliver', ticket: number, when: CARRY_LAST }])
     try {
       delivery = await agent(
-      deliverPrompt({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch, testCommand: finishTestCommand, resumed: true }),
-      { label: `deliver:#${number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel, effort: cfg.effort }
+      deliverPrompt({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch, testCommand: finishTestCommand, resumed: true }) + deliverCarry.prompt,
+      { label: `deliver:#${number}`, phase: 'Deliver', schema: deliverCarry.schema(DELIVERED), model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
       deliveryFailure = unusableReason(`deliver:#${number}`, (err && err.message) || err)
@@ -2842,8 +2969,8 @@ async function runFinish(journal) {
     else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
     // Same checkpoint the code lane takes after Deliver (aac-routines issue 270): this stage runs
-    // unisolated in the orchestrator's own checkout.
-    await treeGuardCheck('finish-deliver', number)
+    // unisolated in the orchestrator's own checkout. Issue 1190: carried by the deliverer, as there.
+    await treeGuardCheck('finish-deliver', number, (delivery && delivery.checkpoint) || null, deliverCarry.at)
   }
   const discoveryReport = await runReport(stableList(journal && journal.discoveries), defaultBranch)
   return { delivered, skippedDelivered, skippedUnverified, failed, inconsistent, discoveryReport }
@@ -2925,7 +3052,7 @@ Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
 You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to...?' or 'Shall I...?' will block the work. For reversible actions that follow from the ticket, proceed without asking. Stop only for the hard rails below or a genuine scope change the ticket does not cover - record that as a discovery string and return. Before ending your turn, check your last paragraph: if it is a plan, an analysis, a question, or a promise about work you have not done ('I'll...', 'next I would...'), do that work now with tool calls, including retrying after errors and gathering missing information yourself. End your turn only when the done-condition holds or a rail blocks you.
 Rules: one branch named ${branch}; commit your work, then push that branch and nothing else: run ${gitSpelling(instrument, `push -u origin ${branch}`)} as soon as the commit lands, and return pushed: true only when it exits 0 (a pushed branch survives a dead container, a killed Deliver step and an interrupt - issue 405). If the push fails, return pushed: false and quote the git output verbatim at the end of testTail, after the test tail; the run then pushes the branch for you. NEVER open a PR, NEVER merge, NEVER push any branch but ${branch}, NEVER deploy or touch production paths; reference the issue in commits as "issue ${t.number}" (no # - closing-keyword risk). Acceptance criteria that describe delivery-stage steps - opening a PR, merging, or presence on the default branch - are out of scope for you; the deliver stage handles those. Do not attempt them and do not treat their absence as a failure.
 Live-tree hard rail: ~/.claude, ~/.codex, ~/.agents and any path outside this worktree are read-only production paths - never write to them, never leave .bak files there; a change that would need a live-tree edit to land is committed to the branch only and named as a discovery.
-Done-condition (machine-checkable, all required): branch exists with your commits and is on origin (${gitSpelling(instrument, `ls-remote --heads origin ${branch}`)} prints a ref); \`${testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above).
+Done-condition (machine-checkable, all required): branch exists with your commits and is on origin (${gitSpelling(instrument, `ls-remote --heads origin ${branch}`)} prints a ref); \`${testCommand}\` exits 0 (check the REAL exit code, not piped output); acceptance criteria each demonstrably met (delivery-stage criteria excluded, per above). Run that ls-remote after your LAST push and return its stdout VERBATIM in remoteTip (issue 1190: the run reads the branch tip the verifier must test from it, instead of starting an agent to run it again); "" when you did not push.
 Scope: if, while working or testing, you find a pre-existing bug, a performance concern, or behavior the ticket doesn't mention, don't fix, optimize or extend it in this change unless the requested behavior cannot work without it; report it as a self-contained discovery string instead. Where the ticket is ambiguous, implement the reading its wording and the surrounding code most directly support, state that assumption in a discovery string, and don't build for the other readings as well. Verify your work however you like; scratch scripts and quick checks need not be kept. Commit tests only where the ticket asks for them or this repository already keeps tests for this kind of change, sized like the neighboring test files - roughly one focused test per stated behavior - and don't turn scratch checks into additional permanent test files. This is about extras only: implement every behavior the ticket asks for, completely.
 Edits: the number of tokens used to edit files is best minimized, all else being equal, so when it will not affect the end result, surgically edit a file rather than rewrite the entire thing.
 Return structured output only.`,
@@ -2938,11 +3065,15 @@ Return structured output only.`,
     }
 
     // Checkpoint 1 of 4 (aac-routines issue 192): the orchestrator's own tree, right after this
-    // ticket's implementer returned. A throw here drops the ticket out of the pipeline, so its
-    // Verify and Deliver stages never run.
-    await treeGuardCheck(`implement-attempt${attempt}`, t.number)
+    // ticket's implementer returned. Issue 1190: the verifier below runs this read as its FIRST
+    // command - it starts in the orchestrator's checkout anyway - and the script checks it the
+    // moment the verdict is back, so the checkpoint costs no agent of its own. A path that starts
+    // no verifier (nothing committed, a halted run) still checks here, with an agent. A throw drops
+    // the ticket out of the pipeline, so its Deliver stage never runs.
+    const implCheckpoint = `implement-attempt${attempt}`
 
     if (!impl || !impl.committed) {
+      await treeGuardCheck(implCheckpoint, t.number)
       lastVerdict = implError
         ? unusableVerdict(implError, `impl:#${t.number}.${attempt}`)
         : { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }
@@ -2956,7 +3087,7 @@ Return structured output only.`,
     branchPushed = impl.pushed === true
     // Issue 812: this implementer settled after the run halted - no push, verifier or retry starts
     // for it. Its branch (pushed or not) is named in the result so the next run can pick it up.
-    if (runHalt.halted()) { haltedAt = attempt; lastVerdict = null; break }
+    if (runHalt.halted()) { await treeGuardCheck(implCheckpoint, t.number); haltedAt = attempt; lastVerdict = null; break }
     if (impl.branch && impl.branch !== branch) log(`#${t.number}.${attempt}: implementer reported branch ${impl.branch}, not the instructed ${branch}; verifying and delivering the instructed branch.`)
 
     // Push the branch NOW, before the verifier, not at Deliver (issue 405). Three losses on
@@ -2967,6 +3098,8 @@ Return structured output only.`,
     // `pushed`; when it did not (a self-report of false, a failed push, a priorImpl entry lifted
     // from a journal written before this existed), the run pushes the branch itself. A push that
     // fails here is logged, not fatal: Deliver pushes again and says so loudly if it cannot.
+    // Issue 1190: the implementer's own ls-remote after its last push - or the push step's, below.
+    let tipCarry = impl.remoteTip
     if (impl.pushed !== true) {
       let pushBack = null
       try {
@@ -2987,6 +3120,7 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
         pushBack = null
       }
       if (pushBack && pushBack.pushed) branchPushed = true
+      tipCarry = pushBack && pushBack.pushed ? pushBack.output : null
       if (pushBack && pushBack.pushed) log(`#${t.number}.${attempt}: ${branch} is on origin before verification (issue 405) - the implementer did not push it, the run did.`)
       else log(`#${t.number}.${attempt}: ${branch} could NOT be pushed to origin - ${stableText(pushBack && pushBack.output) || 'no git output reported'}. The branch is local only until Deliver pushes it; a container death before then loses it.`)
     }
@@ -2999,14 +3133,23 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
     // restraint there is the container sandbox plus the detached scratch worktree.
     //
     // Issue 404: where the verifier ran is checked, not assumed. The tip of the branch under
-    // review is read first by its own one-command agent; the verdict's self-reported worktree HEAD
-    // must be that tip, or the verdict is rejected and the verifier re-run ONCE with the mismatch
-    // named. A `null` tip (the rev-parse agent could not answer) leaves the verdict standing.
-    const expectedHead = await revParse(branch, `tip:#${t.number}.${attempt}`)
+    // review is read first - issue 1190: off the ls-remote the implementer (or the push step) ran
+    // after the last push, and by its own one-command agent only when that carried nothing usable;
+    // the verdict's self-reported worktree HEAD must be that tip, or the verdict is rejected and
+    // the verifier re-run ONCE with the mismatch named. A `null` tip (nothing could answer) leaves
+    // the verdict standing.
+    const tipLabel = `tip:#${t.number}.${attempt}`
+    let expectedHead = await revParse(branch, tipLabel, tipCarry)
     if (!expectedHead) log(`#${t.number}.${attempt}: could not read the tip of ${branch}; this attempt's verdict is accepted without the worktree cross-check.`)
     let mismatch = null
     for (let pass = 1; pass <= 2; pass++) {
       const verifyLabel = pass === 1 ? `verify:#${t.number}.${attempt}` : `verify:#${t.number}.${attempt}-rerun`
+      const verifyCheckpoint = pass === 1 ? `verify-attempt${attempt}` : `verify-attempt${attempt}-rerun`
+      // Issue 1190: the verifier starts in the orchestrator's checkout, so it carries the
+      // Implement checkpoint (pass 1, FIRST) and, unpinned, its own Verify checkpoint (LAST).
+      const verifyCarry = carriedCheckpoints([].concat(
+        pass === 1 ? [{ field: 'checkpoint', tag: implCheckpoint, ticket: t.number, when: CARRY_FIRST }] : [],
+        verifierAgentType ? [] : [{ field: 'checkpointAfter', tag: verifyCheckpoint, ticket: t.number, when: CARRY_LAST }]))
       // Pass 2 only. The rejection is about WHERE the verdict was produced, never about what it
       // concluded - saying so is what stops the re-run reading as pressure to change its answer.
       const rerunBlock = pass === 2
@@ -3028,8 +3171,8 @@ Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute 
 4. Live-tree hard rail: the implementer must not have written to ~/.claude, ~/.codex, ~/.agents or any path outside the worktree. The attempt's first commit time is \`git log --reverse --format=%cI origin/${scout.defaultBranch}..${branch} | head -1\`; from that timestamp, run \`${liveTreeFindCommand('<that time>')}\`. ${liveTreeExclusionNote()} Everything else still counts: a write to ~/.claude/skills (outside skills/synced), ~/.claude/hooks, ~/.claude/settings.json, ~/.claude/CLAUDE.md, or anything under ~/.codex or ~/.agents is a hard-rail failure - mark pass=false and quote the file list in evidence.
 5. Ripple check: same bug pattern elsewhere, callers affected, null/empty/large edge cases.
 6. Report \`worktree\`: the scratch worktree's absolute path, and the \`git rev-parse HEAD\` it prints from inside that worktree, verbatim. A verdict whose HEAD is not this branch's tip is rejected unread.
-Clean up your scratch worktree (git worktree remove) when done. If this repo is a Python package, check afterwards that the container's editable install still names the MAIN checkout (\`python -m pip show -f <dist> | grep -i 'editable project location'\`): when it names a scratch path, quote that line in evidence and leave it alone - do NOT repair it by installing from the orchestrator's checkout, because pip writes .egg-info into the very tree the isolation checkpoint is watching. This run's editable-install guard repairs it once the wave has drained. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}`,
-        { label: verifyLabel, phase: 'Verify', schema: VERDICT, model: cfg.verifyModel, agentType: verifierAgentType, effort: cfg.effort }
+Clean up your scratch worktree (git worktree remove) when done. If this repo is a Python package, check afterwards that the container's editable install still names the MAIN checkout (\`python -m pip show -f <dist> | grep -i 'editable project location'\`): when it names a scratch path, quote that line in evidence and leave it alone - do NOT repair it by installing from the orchestrator's checkout, because pip writes .egg-info into the very tree the isolation checkpoint is watching. This run's editable-install guard repairs it once the wave has drained. Return structured output only - evidence must be commands you ran plus decisive output lines.${rerunBlock}${verifyCarry.prompt}`,
+        { label: verifyLabel, phase: 'Verify', schema: verifyCarry.schema(VERDICT), model: cfg.verifyModel, agentType: verifierAgentType, effort: cfg.effort }
         )
       } catch (err) {
         runHalt.note((err && err.message) || err, verifyLabel)
@@ -3042,7 +3185,12 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       // verifier. A pinned one runs as `fleet-verifier`, whose tool set has no Edit or Write, so
       // this checkpoint cost an agent per verdict to watch a read-only stage; the Deliver
       // checkpoint (or pre-report, for a ticket that never delivers) still sees its tree.
-      if (!verifierAgentType) await treeGuardCheck(pass === 1 ? `verify-attempt${attempt}` : `verify-attempt${attempt}-rerun`, t.number)
+      // Issue 1190: both reads come back inside the verdict; checkpoint 1 is checked first, so a
+      // write is still named at the stage it was seen after.
+      const carriedReads = Object.assign({}, lastVerdict)
+      if (lastVerdict) { delete lastVerdict.checkpoint; delete lastVerdict.checkpointAfter }
+      if (pass === 1) await treeGuardCheck(implCheckpoint, t.number, carriedReads.checkpoint || null, verifyCarry.at)
+      if (!verifierAgentType) await treeGuardCheck(verifyCheckpoint, t.number, carriedReads.checkpointAfter || null, verifyCarry.at)
 
       if (!lastVerdict) lastVerdict = unusableVerdict('verifier returned no structured output', verifyLabel)
       // A pass may arrive with no `failures` key at all (issue 265) - fill it in here so every
@@ -3050,6 +3198,13 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
       if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
       mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of ${branch}`)
+      // Issue 1190: a carried tip is the stage agent's word; before a verdict is rejected on it,
+      // the tip is read once more by an agent of its own, and that read decides.
+      if (mismatch && tipCarry) {
+        tipCarry = null
+        const reread = await revParse(branch, `${tipLabel}-reread`)
+        if (reread) { expectedHead = reread; mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of ${branch}`) }
+      }
       if (!mismatch) break
       log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
     }
@@ -3080,10 +3235,13 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // cap used to throw out of this stage, nulling a ticket whose branch had already passed
     // verification - quite possibly after the push and the PR had already happened. The ticket now
     // carries a named deliveryFailure into the run report instead of disappearing from it.
+    // Issue 1190: the deliverer runs in the orchestrator's checkout, so it carries checkpoint 3
+    // below as its LAST command.
+    const deliverCarry = carriedCheckpoints([{ field: 'checkpoint', tag: 'deliver', ticket: t.number, when: CARRY_LAST }])
     try {
       delivery = await agent(
-      deliverPrompt({ t, branch, evidence: lastVerdict.evidence, unmetCriteria: unmetCriteriaOf(lastVerdict), defaultBranch: scout.defaultBranch, testCommand }),
-      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel, effort: cfg.effort }
+      deliverPrompt({ t, branch, evidence: lastVerdict.evidence, unmetCriteria: unmetCriteriaOf(lastVerdict), defaultBranch: scout.defaultBranch, testCommand }) + deliverCarry.prompt,
+      { label: `deliver:#${t.number}`, phase: 'Deliver', schema: deliverCarry.schema(DELIVERED), model: cfg.deliverModel, effort: cfg.effort }
       )
     } catch (err) {
       runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
@@ -3115,7 +3273,8 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     // tree itself. Before issue 270 the only checkpoint that could see that was `pre-report`,
     // which runs after every ticket association has been dropped, so the breach was attributed to
     // ticket #0. Checking here, while this ticket is still the one being delivered, names it.
-    await treeGuardCheck('deliver', t.number)
+    // Issue 1190: off the read the deliverer carried back; an agent reads only when it is unusable.
+    await treeGuardCheck('deliver', t.number, (delivery && delivery.checkpoint) || null, deliverCarry.at)
   }
   // A blocked pre-push merge is a delivery failure, not a silent no-op: the ticket lands in the
   // run result's `failed` list with the conflicting paths, and no PR exists to review.
@@ -3230,7 +3389,36 @@ const results = (grouped || []).flat()
 // CONTENT or not at all; that is why the Deliver checkpoint above exists rather than leaving
 // Deliver-phase dirt to this one (aac-routines issue 270). It throws before Report, so a breached
 // run never finishes quietly.
-await treeGuardCheck('pre-report', 0)
+//
+// Issue 1190: the post-wave editable-install guard below is one more one-command agent in the
+// orchestrator's checkout, and it runs anyway - so it runs this checkpoint's read as its FIRST
+// command, before its own, and the checkpoint starts no agent of its own. It only rewrites a
+// pointer in site-packages, never this tree, so running it before the verdict below is read
+// changes nothing the checkpoint watches. With the editable guard off or the run halted, an agent
+// reads the tree here, as before.
+const editableRuns = !runHalt.halted() && cfg.editableGuard !== false
+const guardPaths = editableGuardPaths(cfg.editableGuardScript)
+const editableCmd = editableGuardCommand(guardPaths, orchestratorCwd)
+const preReportCarry = carriedCheckpoints([{ field: 'checkpoint', tag: 'pre-report', ticket: 0, when: CARRY_FIRST }])
+let editableRes = null, editableError = null
+if (editableRuns) {
+  const prompt = preReportCarry.prompt
+    ? `Run two bash commands, in this order, and report both: first the isolation checkpoint, then the editable-install guard.${preReportCarry.prompt}
+
+Second, run exactly this one bash command, from the repository root, and report its result in exitCode, stdout and stderr:
+
+${editableCmd}
+
+Do not cd anywhere first. Run nothing but these two commands. Do not read, write, stage or delete any file. Do not interpret the output. Return this command's REAL exit code (0, 1, 2 or 3 - not the exit code of a pipe) plus its stdout and stderr VERBATIM. When the guard ran at all its stdout is a single line of JSON: copy it character for character; do not reformat it, summarise it, or invent fields.`
+    : guardAgentPrompt(editableCmd)
+  try {
+    editableRes = await agent(prompt,
+      { label: 'editable-guard:post-wave', phase: 'Report', schema: preReportCarry.schema(TREE_GUARD), model: cfg.reportModel, effort: cfg.effort })
+  } catch (err) {
+    editableError = unusableReason('editable-guard:post-wave', (err && err.message) || err)
+  }
+}
+await treeGuardCheck('pre-report', 0, editableRuns ? ((editableRes && editableRes.checkpoint) || null) : undefined, preReportCarry.at)
 assertNoBreach()
 
 
@@ -3255,15 +3443,8 @@ if (runHalt.halted()) {
   // repo that has no copy is the case issue 435 is about: tools/editable-install-guard.test.js
   // extracts this block verbatim, builds the command from it and runs it for real in a repo
   // that has no guard anywhere, then in the same repo once the named path exists.
-  const guardPaths = editableGuardPaths(cfg.editableGuardScript)
-  const editableCmd = editableGuardCommand(guardPaths, orchestratorCwd)
-  let res = null, resError = null
-  try {
-    res = await agent(guardAgentPrompt(editableCmd),
-      { label: 'editable-guard:post-wave', phase: 'Report', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
-  } catch (err) {
-    resError = unusableReason('editable-guard:post-wave', (err && err.message) || err)
-  }
+  // The agent itself ran above, before checkpoint 4 (issue 1190).
+  const res = editableRes, resError = editableError
   let parsed = null
   try { parsed = JSON.parse(String((res && res.stdout) || '')) } catch (e) { parsed = null }
   const hard = cfg.editableGuard === true

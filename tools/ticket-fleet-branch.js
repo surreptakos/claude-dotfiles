@@ -878,6 +878,32 @@ function parseTipLookupOutput(stdout) {
 }
 
 /**
+ * Issue 1190: a branch tip carried back by a stage agent that already ran
+ * `git ls-remote --heads origin <ref>` for its own reasons - the implementer after its last push
+ * (its done-condition), the run's push step, the prober for the default branch - so no `tip:`
+ * agent has to start just to run that command again. Pure: that command's stdout and the ref in,
+ * the sha out, or null. Only the line naming exactly `refs/heads/<ref>` counts: ls-remote matches
+ * a pattern by its tail, so `main` also lists `refs/heads/feature/main`, and a carried tip that
+ * named the wrong branch would send the verdict cross-check (issue 404) after the wrong sha. A
+ * leading `origin/` on the ref is dropped, since the remote names its own branches bare. Null on
+ * anything else - no such line, a paraphrase, nothing carried - and the caller then reads the tip
+ * with its own agent, as before.
+ *
+ * @param {string} output - the ls-remote stdout as the stage agent reported it, verbatim.
+ * @param {string} ref - the branch the tip is wanted for, bare or `origin/`-prefixed.
+ * @returns {string|null}
+ */
+function parseCarriedTip(output, ref) {
+  const want = `refs/heads/${String(ref == null ? '' : ref).replace(/^origin\//, '')}`;
+  if (want === 'refs/heads/') return null;
+  for (const raw of String(output == null ? '' : output).split(/\r?\n/)) {
+    const m = /^([0-9a-f]{40,64})\s+(\S+)$/i.exec(raw.trim());
+    if (m && m[2] === want) return m[1];
+  }
+  return null;
+}
+
+/**
  * How a worker prompt spells a git command the worktree-isolation guard may refuse (issue 755).
  * In a cloud container a hook wraps a bare `git ...` in caveman, and the guard then refuses it
  * with "runs caveman with a git command among its operands"; the absolute path /usr/bin/git is
@@ -1034,6 +1060,6 @@ module.exports = {
   DIFFICULTY_LEVELS, DIFFICULTY_CONFIDENCE_FLOOR, IMPL_FALLBACK_MODEL, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, implementerModel, difficultyEvalSet,
   classifyBranchLookup, classifyDelivery, BRANCH_NOT_FOUND_RE, gitSpelling, GIT_ABSOLUTE_PATH,
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
-  buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
+  buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput, parseCarriedTip,
   quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
 };

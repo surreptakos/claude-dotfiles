@@ -63,7 +63,10 @@ The two forks carry the isolation guard too, and a fleet-refresh never touches t
 a guard change reaches them the same way: re-copy. Issue 1093 changed its shape without a contract
 bump - one Setup agent, one agent per checkpoint, no Verify checkpoint for a pinned verifier, the
 canary in `env-probe` - and until a fork is re-copied it still starts the old two agents per
-checkpoint.
+checkpoint. Issue 1190 did the same again, also without a bump: the tip read and the Implement,
+Verify, Deliver and pre-report checkpoints ride in the implementer, prober, verifier, deliverer and
+editable-install guard (`remoteTip`, `checkpoint`, `checkpointAfter`), and a fork that is not
+re-copied still starts one `tip:` and one `isolation:` agent each.
 
 Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
 `tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
@@ -181,8 +184,12 @@ whatever branch the session is on - on 2026-09-16 that tree predated the code un
 #361 probe was refuted as "fabricated" for flags `origin/main` carried and that branch did not. So
 the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
 `head` against the tip it expects: the branch under review in the code lane,
-`origin/<defaultBranch>` in the probe lane, each read by its own one-command tip agent so no agent
-certifies itself. That command is a `||` fallback chain, not a bare `rev-parse`: the ref as given,
+`origin/<defaultBranch>` in the probe lane, each read outside the verifier so no agent certifies
+itself. Since issue 1190 the read comes off the `git ls-remote --heads origin <ref>` the
+implementer (or the run's push step) already ran after its last push, or the prober as its last
+command, carried back in `remoteTip`; only the line naming exactly `refs/heads/<ref>` counts
+(`parseCarriedTip`). When nothing usable came back, a one-command tip agent reads it, and before a
+verdict is rejected on a carried tip, that agent re-reads it once. Its command is a `||` fallback chain, not a bare `rev-parse`: the ref as given,
 then `origin/<ref>`, then `git ls-remote --heads origin <ref>` - a branch handed in from an earlier
 run's `priorImpl`, or pushed by an implementer in another container, exists only as `origin/<ref>`
 in the orchestrator's own checkout, and a bare `rev-parse` there used to exit 128 and skip the
@@ -209,7 +216,7 @@ triggers the measurement. The `pwd` spelling depends on the shell the measuring 
 drive-letter answer (`C:\...` or `C:/...`) is normalised to `/c/...`; any other answer not starting
 with `/` still aborts the run before Scout (issue 1007).
 
-## One agent per isolation checkpoint
+## Isolation checkpoints ride in the stage agents
 
 Every guard agent loads the whole session context before its one command, so the agent is the
 cost, not the command: run `6abd47d1` (2026-09-30) spent about 1.2M tokens on 16 checkpoint agents,
@@ -228,9 +235,36 @@ each 74-76k tokens to run one line of shell (issue 1093). So one agent now does 
   After Verify only for an unpinned verifier: a pinned one runs as `fleet-verifier`, whose tool set
   has no Edit or Write, and the next checkpoint still sees its tree.
 
-A 2-ticket wave with one attempt each starts 8 of these agents with an unpinned verifier (a cloud
-session) and 6 with a pinned one, where it started 20 (4 Setup, 16 checkpoint); the budget test in
-`tools/ticket-fleet-branch.test.js` counts them.
+Issue 1190 took the per-checkpoint agent out as well: run `6abddb76` (2026-10-01) still started 43
+agents for 4 merges, 17 of them one-command `isolation:*` and `tip:*` agents. A workflow script has
+no shell, filesystem or child process of its own, so the command cannot run in the script; it runs
+in an agent the wave starts anyway, in the checkout the checkpoint watches, and the script reads
+what it printed. The stage agent runs the very `checkpointCommand` an `isolation:` agent would and
+returns its exit code, stdout and stderr verbatim in a required schema field
+(`carriedCheckpoints`); `treeGuardCheck` parses that with `parseCheckpointOutput` and attributes,
+restores and flags exactly as before, so a write is still named at the checkpoint that saw it:
+
+| Checkpoint | Carried by | When |
+| --- | --- | --- |
+| after Implement | the verifier (`checkpoint`) | its FIRST command, before its scratch worktree |
+| after Verify (unpinned only) | the verifier (`checkpointAfter`) | its LAST command |
+| after Deliver, and finish mode's | the deliverer (`checkpoint`) | its LAST command |
+| before Report | the editable-install guard (`checkpoint`) | its FIRST command, before its own |
+
+A read that is missing, refused (a deliverer told to run no further shell command returns exit -1),
+or not whole - no HEAD lines, or no guard JSON with `newEntries`, a could-not-audit included - is
+re-read by an `isolation:` agent; so is one taken before any tree or HEAD restore that ran since
+(`restoreEpoch`), because a restore made it stale. An Implement attempt that starts no verifier
+(nothing committed, a halted run) checks with an agent as before. The pre-report checkpoint still
+throws before the report writer runs. The cost of a carry is that the Implement verdict lands after
+the verifier has run rather than before it starts, and that the observed stage reports its own
+read; the pre-report read and the content attribution stand behind both.
+
+A 4-ticket wave with one attempt each now starts 20 agents, pinned verifier or not: Setup and Scout
+(`fleet-refresh-repo`, `isolation:setup`, `env-probe`, `scout`, `open-pr-scan`, `difficulty`), three
+per ticket (`impl`, `verify`, `deliver`), the editable-install guard and the report writer. With
+nothing carried back it is the old 33. The budget test in `tools/ticket-fleet-branch.test.js` runs
+the whole script with a mocked `agent` and counts them.
 
 ## The scratchpad is one per run, not one per worker
 
