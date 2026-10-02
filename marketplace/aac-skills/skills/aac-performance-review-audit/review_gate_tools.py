@@ -299,7 +299,7 @@ def template_bytes():
     import hashlib
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), TEMPLATE_NAME)
     if not os.path.exists(path):
-        raise SystemExit(f"{TEMPLATE_NAME} not found next to {os.path.basename(__file__)}. Run latest.py again (it replaces an interrupted fetch) and run this script from the folder it prints.")
+        raise SystemExit(f"{TEMPLATE_NAME} not found next to {os.path.basename(__file__)}. Pass --template with the file from the project folder.")
     raw = open(path, "rb").read()
     got = hashlib.md5(raw).hexdigest()
     if got != TEMPLATE_MD5:
