@@ -36,6 +36,17 @@ The huddle draft reads the huddle channel (`huddle__global__…`) and Sent Items
 
 GitHub is the fifth source (issue 1199): the GitHub connector's `search_pull_requests` and `search_issues` return the pull requests merged and issues closed in `surreptakos` repos since Dan's last post, live. Each row is report evidence on its own, like a board ruling, so a day of repository work and nothing else still drafts a report; a report line from it carries evidence starting `GitHub` that names each PR or issue as `repo#number`, shown under "What each line rests on". A connector failure is named under "Could not read".
 
+## The huddle drafter learns from Dan's edits (issue 848, Dan 2026-10-01)
+
+"Wherever my huddle notes differed, that's a lesson for you." The loop is aac-bill-intake's (its ADRs 0006 to 0008), and every step is page code:
+
+1. **Detect.** Each draft first compares Dan's last post with the draft he worked from: the newest passing `huddle_drafts` row from his post's day saved before he posted. Code diffs it line by line per section (cut, added, edited). A confidential line is never compared.
+2. **Propose.** Claude proposes at most five general lessons, each citing the changes it comes from. Code refuses a lesson with the wrong fields, more than 200 characters, a confidential detail, no cited change, or the same text as any lesson Dan already has, kept or dropped. Each one that passes is `huddle_lessons/<post stamp>-<n>` with `status: "proposed"`. `huddle_feedback/<post stamp>` logs the compare, refusals included, so each post is compared once.
+3. **Confirm.** A proposal is inert. The panel's "Lessons from your edits" list offers Keep and Drop, and Dan's Keep is the only write that sets `status: "confirmed"`. Neither a model nor a session confirms one.
+4. **Feed.** Every draft, line repair and coverage prompt carries the kept lessons, oldest first, inside his rules and the gate. A proposed or dropped lesson never reaches a prompt.
+
+The first lessons come from Dan's 2026-09-30 post against the 11:31 draft that day; his post matched the 12:37 redraft word for word. They are in [`huddle-lessons-seed.json`](huddle-lessons-seed.json): once the page is republished, a session passes its `writes` to one `ArtifactData` `batch`, and they wait for his Keep like any other proposal.
+
 ## Changing the board page (Dan, 2026-09-24)
 
 The page source of record is [`day-board.html`](day-board.html). A button that writes is not done until a test drives its click through the page script and asserts the write (`tests/day-board-*.test.js`); a button that calls a connector is not done until one real call from the published page has succeeded or its failure copy names the fallback (Dan, 2026-09-30: "Apply my note" wrote nothing and "Launch agents" called a connector the account does not have). Edit that file and republish it to the board URL with the `capabilities` its header comment lists; build every change from that file, never from memory or the live page. Every button on it:
