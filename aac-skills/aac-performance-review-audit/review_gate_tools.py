@@ -211,7 +211,7 @@ def gate1_main(argv):
                     fixes.append(f"{name}: contains \"{m.group(0)}\"; not allowed in a Strength or Weakness (write the behavior; an instruction belongs in Guidance).")
                     break
     # Dan, 10/2/26: one item in ten is SEER (rounded down), never fewer than one; the rest may be
-    # Sum-Ex. Scales with the page and passes every delivered review on file (the lowest: 1 of 12).
+    # Sum-Ex. Scales with the page; set so the three reference reviews pass (lowest: 1 of 10).
     seer = sum(1 for txt in S + W if len(sentences(txt)) == 4)
     need = max(1, (len(S) + len(W)) // 10)
     if seer < need:

@@ -18,7 +18,7 @@ The one copy of the standard a One Page performance review is written to and che
 
   "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
 - Sum-Ex is two sentences, no more: Summarize, then Example, each as defined above. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
-- One example per item, always. At least one item in ten is SEER, rounded down and never fewer than one: one SEER for up to 19 items, two for 20 to 29. The rest may be Sum-Ex (Dan, October 2, 2026, replacing the October 1 floor of four, which failed delivered reviews; every delivered review on file passes this one, the lowest at 1 of 12). SEER for the points that matter most.
+- One example per item, always. At least one item in ten is SEER, rounded down and never fewer than one: one SEER for up to 19 items, two for 20 to 29. The rest may be Sum-Ex (Dan, October 2, 2026, replacing the October 1 floor of four, which failed a delivered review. The floor is set so the three most recent reviews, kept in the private review-audits repo, all pass; the lowest of them has 1 SEER of 10 items, so any floor above one in ten would fail it). SEER for the points that matter most.
 - In both techniques, avoid commas where possible: the fewer commas in a review, the less likely others will misunderstand it.
 - A Weakness that also appeared in the prior review says so in the body: "which was also noted in his last review."
 - "Opportunities for Improvement" means Weaknesses.
