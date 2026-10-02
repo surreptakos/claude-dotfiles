@@ -1,0 +1,109 @@
+{
+ "session": "807cb574-dd31-45d8-885e-ca405db73e37",
+ "return": {
+  "specificity": "Authored for this AAC process: company header band, named repositories (claude-dotfiles, aac-routines), the lander on AAC-AI, Central-time landing window, ready-for-agent and close-as labels in the consequence lines, ticket numbers and blocking chips. Not reusable unchanged by another company.",
+  "heuristics": {
+   "1": 3,
+   "2": 3,
+   "3": 3,
+   "4": 3,
+   "5": 3,
+   "6": 3,
+   "7": 3,
+   "8": 3,
+   "9": 3,
+   "10": 3
+  },
+  "heuristic_notes": {
+   "1": "Footer progress line, tab counts, save-state line and the Landed line cover the process; no answered-state is visible on a card in these renders, so per-card status is unproven.",
+   "2": "Plain language throughout; 'the lander run on AAC-AI' is the one insider term a reader must already know.",
+   "3": "Skip, change-your-mind, Other and an in-page confirmation exist; a native radio cannot be un-picked, so skipping after a mis-click has no path.",
+   "4": "One accent, one font, identical cards; the 'blocked by' chip is bolder than the other chips and 'Open queue on GitHub' changes position at 768.",
+   "5": "Submit disabled until a pick, Other-without-note hint; GitHub task-list items render as native checkboxes inside the issue panel and invite a click.",
+   "6": "Everything is on the page; 'What I checked before drafting' is styled as a link with no disclosure marker, so its behaviour must be guessed.",
+   "7": "Bulk 'pick every recommended option' and tabs serve the repeat user; keyboard path and focus ring not visible in the captures.",
+   "8": "Clean hierarchy; the how-to paragraph plus three facts delay the first card, and the open issue text on phones doubles card length.",
+   "9": "Change until Landed is stated; what to do after 'Landing failed' is not shown in any render.",
+   "10": "How-to, landing window and queue link present; help sits in the intro rather than beside the field it governs."
+  },
+  "audit": {
+   "legibility": 3,
+   "print": 3,
+   "fillability": 3,
+   "system": 4,
+   "integrity": 3
+  },
+  "cognitive_load_failures": [
+   "progressive_disclosure"
+  ],
+  "personas": [
+   {
+    "name": "Jordan",
+    "red_flags": [
+     "'lander run on AAC-AI' undefined on the page",
+     "'What I checked before drafting' reads as a link, not a disclosure",
+     "task-list checkboxes in the issue panel look like fields to tick"
+    ]
+   },
+   {
+    "name": "Sam",
+    "red_flags": [
+     "14 px grey 'Then:' consequence lines and the grey save-state caption are the smallest text at 390 and at 200%",
+     "forced colours drop the tinted question band, leaving bold text alone to mark the question",
+     "the disabled Submit renders in a colour the forced-colours simulator shows as red"
+    ]
+   },
+   {
+    "name": "Riley",
+    "red_flags": [
+     "a mis-clicked radio cannot be cleared, so 'skip by leaving unpicked' no longer holds",
+     "note field is two lines tall for a ruling that replaces the whole answer",
+     "long titles wrap cleanly at 390"
+    ]
+   }
+  ],
+  "strengths": [
+   "Plain-English explainer beside the raw issue text, with the question in a tinted band and each option carrying its consequence ('Then: ...'), so a ruling can be made without opening GitHub.",
+   "State carried by words and weight: Recommended pill, disabled Submit reading 'Nothing to submit yet', progress line; survives forced colours and reduced motion with nothing lost.",
+   "No horizontal scroll at 390, tabs become a select, explainer reflows to one column at 200%."
+  ],
+  "issues": [
+   {
+    "p": "P2",
+    "what": "Issue text on GitHub is open at 390 px, where the plan says it is collapsed.",
+    "why": "Each phone card doubles in length and the question sits a full screen below the title.",
+    "fix": "Wrap the issue panel in details/summary below 600 px, summary 'Issue text on GitHub'."
+   },
+   {
+    "p": "P2",
+    "what": "GitHub task-list items render as native unchecked checkboxes inside the read-only issue panel.",
+    "why": "They look like fields to fill, next to the real radio cards.",
+    "fix": "Render task items as a glyph or text with aria-hidden on the control; never a form element inside quoted issue text."
+   },
+   {
+    "p": "P2",
+    "what": "'What I checked before drafting' is link-styled with no disclosure marker.",
+    "why": "A first-time reader cannot tell whether it navigates away or expands.",
+    "fix": "Use details/summary with the default marker or a 'Show' prefix, keep the accent colour."
+   },
+   {
+    "p": "P2",
+    "what": "A picked radio cannot be cleared.",
+    "why": "'Skip a card by leaving it unpicked' fails after any mis-click; the only escape is picking Other.",
+    "fix": "Add a 'Clear pick' text button on an answered card that deletes the saved pick."
+   },
+   {
+    "p": "P3",
+    "what": "At 768 'Open queue on GitHub' drops to its own line under the bulk button row.",
+    "why": "Reads as a stray link rather than part of the repository toolbar.",
+    "fix": "Flex-wrap the toolbar with a gap, or move the link beside the repository heading."
+   }
+  ],
+  "minor": [
+   "Offline render shows raw markdown ('## What to build', '- [ ]') in the issue panel: the renderer loads from a CDN. Pre-render issue HTML at build or inline the renderer.",
+   "The '#101' ticket number is not visible on the first card at 390; the stitched footer sits over that line, so confirm in a live viewport.",
+   "'blocked by #101' chip is heavier than 'holding up #102' and 'needs you'; if intentional, say what the weight means.",
+   "The 'Storage unavailable in this view' caption is the only grey text under 16 px in the footer; keep it at the 14 px floor."
+  ]
+ }
+}
