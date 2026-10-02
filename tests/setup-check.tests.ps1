@@ -209,6 +209,25 @@ if (-not (Test-Path (Join-Path $PSScriptRoot 'caveman-proxy.exits'))) {
 }
 exit 0
 '@
+    # Plugins the profile enables (issue 1222): plugin-list prints `claude plugin list --json` with
+    # each line of user-plugins at user scope and each line of project-plugins at project scope;
+    # plugin-install adds its id to user-plugins, as the real install would, unless
+    # plugin-install.fails exists. Every enabled plugin starts installed at user scope.
+    $profileJson = [System.IO.File]::ReadAllText((Join-Path (Join-Path (Join-Path $RepoRoot 'profile') 'claude') 'settings.json')) | ConvertFrom-Json
+    $enabled = @($profileJson.enabledPlugins.PSObject.Properties | Where-Object { $_.Value -eq $true } | ForEach-Object { $_.Name })
+    Write-Utf8NoBom (Join-Path $stubs 'user-plugins') (($enabled -join "`n") + "`n")
+    Write-Utf8NoBom (Join-Path $stubs 'plugin-list.ps1') @'
+# [string]: a 5.1 Get-Content line carries PSPath and friends, which ConvertTo-Json would write out.
+$rows = @(Get-Content (Join-Path $PSScriptRoot 'user-plugins') | Where-Object { $_ } | ForEach-Object { [ordered]@{ id = [string]$_; scope = 'user'; enabled = $true } })
+$p = Join-Path $PSScriptRoot 'project-plugins'
+if (Test-Path $p) { $rows += @(Get-Content $p | Where-Object { $_ } | ForEach-Object { [ordered]@{ id = [string]$_; scope = 'project'; enabled = $true } }) }
+ConvertTo-Json -InputObject $rows -Depth 3
+'@
+    Write-Utf8NoBom (Join-Path $stubs 'plugin-install.ps1') @'
+if (Test-Path (Join-Path $PSScriptRoot 'plugin-install.fails')) { exit 1 }
+Add-Content -Path (Join-Path $PSScriptRoot 'user-plugins') -Value $args[0]
+exit 0
+'@
     # Projects probes. The PC is not the anchor unless computer-name says so; watchdog-state holds
     # the task's state; install/disable change it and leave a marker; the routine registry is an
     # empty directory a case can seed; clone copies the local bare repo and points origin home.
@@ -494,6 +513,28 @@ try {
     Assert 'a missing plugin is a STOP with an install to-do' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  aac-skills plugin not installed') -and (Test-Todo $r.Out 'claude plugin install aac-skills@claude-dotfiles')) $r.Out
 
+    Write-Host 'Profile: plugins the profile enables (issue 1222)'
+    $f = New-Fixture
+    $r = Invoke-Check $f
+    Assert 'all enabled plugins at user scope print one ok line and no STOP for them' `
+        ((@([regex]::Matches($r.Out, '(?m)^  ok    all \d+ plugins the profile enables are installed at user scope\r?$')).Count -eq 1) -and
+         ($r.Out -notmatch 'enabled in the profile but not installed')) $r.Out
+    $userPlugins = Join-Path $f.Stubs 'user-plugins'
+    $missingId = 'mattpocock-skills@claude-dotfiles'
+    Write-Utf8NoBom $userPlugins ((@(Get-Content $userPlugins | Where-Object { $_ -and $_ -ne $missingId }) -join "`n") + "`n")
+    # Installed for one project only: user scope is what the check asks for.
+    Write-Utf8NoBom (Join-Path $f.Stubs 'project-plugins') ($missingId + "`n")
+    $r = Invoke-Check $f
+    Assert 'a plugin missing at user scope exits 1' ($r.Exit -eq 1) $r.Out
+    Assert 'it is one STOP naming the plugin, and the to-do installs it at user scope' `
+        ((@([regex]::Matches($r.Out, 'STOP  plugin \S+ is enabled in the profile but not installed at user scope')).Count -eq 1) -and
+         ($r.Out -match ('STOP  plugin {0} is enabled in the profile' -f [regex]::Escape($missingId))) -and
+         (Test-Todo $r.Out ('claude plugin install {0} --scope user' -f [regex]::Escape($missingId)))) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix installs it and exits 0' `
+        (($r.Exit -eq 0) -and ($r.Out -match ('ok    all \d+ plugins the profile enables are installed at user scope; installed by -Fix: {0}' -f [regex]::Escape($missingId)))) $r.Out
+    Assert '-Fix ran the install for that plugin' (@(Get-Content $userPlugins) -contains $missingId)
+
     Write-Host 'Profile: the desktop app''s aac-skills copy (issue 1149)'
     $f = New-Fixture
     $r = Invoke-Check $f
@@ -724,7 +765,7 @@ try {
     $r = Invoke-Check $f -NoStubs
     Assert 'a fake home with no stubs exits 0' ($r.Exit -eq 0) $r.Out
     $skipped = @([regex]::Matches($r.Out, '(?m)^  --    .*machine probe skipped')).Count
-    Assert 'every machine probe is reported skipped (5 tools, git identity, PyYAML, master plugin version, desktop plugin copy, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 17) ("skipped lines: $skipped`n" + $r.Out)
+    Assert 'every machine probe is reported skipped (5 tools, git identity, PyYAML, master plugin version, enabled plugins, desktop plugin copy, claude -p, proxy logon start, 3 logins, TypeSafe key, Jev, anchor)' ($skipped -eq 18) ("skipped lines: $skipped`n" + $r.Out)
     Assert 'the secret files are still checked in a fake home' ($r.Out -match 'ok    service account key') $r.Out
 
     Write-Host 'Could not run'
