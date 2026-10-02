@@ -48,7 +48,7 @@ A decline that arrives as a note is still a "no": on the board ([`day-board.md`]
 None of them is a ball label: the ball stays where it was.
 
 - `agent` — Dan approved the task for an agent; it waits for the launch.
-- `agent-running` — the `agent-launcher` routine (or a fallback session) started its session; the task comment names the session handle (`claude attach <id>`).
+- `agent-running` — the `agent-launcher` routine (or a fallback session) started its session; the task comment names that session.
 - `agent-done` — the agent finished; its result is a comment on the task.
 - `no-agent` — Dan's "no", landed durably so the sweep never asks again.
 
@@ -62,12 +62,15 @@ The triage run never starts an agent, and neither does the Day Board. The launch
 Every 30 minutes on weekdays, 8 AM to 6 PM, it reads every open task labelled `agent` and, per
 task:
 
-1. Starts one local background session with `claude --bg --model claude-opus-5-5` from the
-   `aac-routines` checkout. `claude --cloud` refuses a non-interactive terminal ("--cloud requires
-   an interactive terminal", 2026-10-02), so no unattended routine can use it. The prompt only points here: it names the task with its Todoist link and says to
-   follow "Run an approved task" below for that one task.
-2. Started: swaps `agent` for `agent-running`, keeping every other label, and comments the session
-   handle on the task.
+1. Creates one one-time scheduled task `agent-<task id>` (`create_scheduled_task`, `fireAt` three
+   minutes ahead, title `Agent: <task title>`). It opens as a titled session in the Claude app's
+   sidebar, where Dan can watch it and type into it (Dan, 2026-10-02: "I'd rather do a session I
+   can see running"). The app dispatches it up to about ten minutes after `fireAt`; a probe that
+   day opened seven minutes late on `claude-opus-5-5`. The prompt only points here: it names the
+   task with its Todoist link and says to follow "Run an approved task" below for that one task.
+   Never delete an `agent-*` scheduled task: deleting one archives its session out of the sidebar.
+2. Started: swaps `agent` for `agent-running`, keeping every other label, and comments the
+   session's sidebar title on the task.
 3. Not started: the task keeps `agent` and gains a comment with the exact error; the next run
    tries it again.
 
@@ -78,17 +81,20 @@ The board's **Launch agents** button only counts and links: [`day-board.md`](day
 § Launch agents has why it starts nothing.
 
 **Fallback, for a PC without the routine.** A Claude Code session launches the tasks when Dan asks
-("launch my agent tasks"): read every open task labelled `agent`, start one background session per task
-on "Run an approved task" (`claude --bg --model claude-opus-5-5 --dangerously-skip-permissions
-"<prompt>"` from the `aac-routines` checkout), and swap `agent` for `agent-running` with a comment naming the session as each starts.
-A task whose session did not start keeps `agent` and gains a comment with the error. Report an
-agent as started only once the label swap is on its task.
+("launch my agent tasks") the same way: one `agent-<task id>` one-time scheduled task per open task
+labelled `agent`, then the label swap and comment. A session that is itself a scheduled run cannot
+press Run now (`run_scheduled_task` is refused in unattended sessions), so `fireAt` is the start in
+both. A task whose session did not start keeps `agent` and gains a comment with the error. Report
+an agent as started only once the label swap is on its task.
+
+**Never a hidden agent.** No `claude --bg` job, no `claude --cloud` session, no background
+sub-agent for a Todoist task: those never reach Dan's sidebar (2026-10-02, six task agents ran as
+`--bg` jobs he could not see, and a stray cloud session duplicated one).
 
 **Every launched agent runs on Opus 5.5** (Dan, 2026-10-02: "stop launching them in fable, use opus
-5.5"). Name the model on every launch command; a bare `claude --bg` or `--cloud` inherits the
-launching session's model, which on 2026-10-02 was Fable. Launch each task once: a start whose
-outcome you could not read (no handle printed) counts as started until a listing proves otherwise,
-so the same task never gets a second session.
+5.5"). A scheduled task takes the app's default model, which is Opus 5.5 on the anchor PC; "Run an
+approved task" step 0 stops a session that opened on any other model. Launch each task once: an
+existing `agent-<task id>` scheduled task means it was started.
 
 ## Links, not ids
 
@@ -103,10 +109,11 @@ from the id. Zoho Desk tickets: the ticket's `webUrl`, from the `tools/zoho-rest
 
 ## Run an approved task
 
-The session works one Todoist task, named in its prompt by its link. It is either a background session the launcher starts from the `aac-routines` checkout (§ Launch) or a background agent a desktop Claude Code session starts in its own checkout (claude-dotfiles on 2026-10-01).
+The session works one Todoist task, named in its prompt by its link. It is a sidebar session the launcher opens from a one-time scheduled task (§ Launch).
 
 **What it reaches.** Todoist through the Todoist connector or REST v1 (`https://api.todoist.com/api/v1`, bearer `TODOIST_API_KEY`, else the token in `~/.config/aac/todoist_api_token`); Zoho through `tools/zoho-rest.py` in claude-dotfiles (`ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`) or the Desk and CRM connectors; mail, Teams, calendar and SharePoint through the Microsoft 365 connector; Drive, Fathom and Granola through theirs. A connector's tool names carry a per-session id, so find them with ToolSearch. Never report a credential missing before listing the environment's variable names (names only, never values).
 
+0. **Check the model.** Call `get_session` with `self`. A `model` other than `claude-opus-5-5` stops the run: comment the model it found on the task, swap `agent-running` back to `agent`, and end. Dan wants every task agent on Opus 5.5 (2026-10-02).
 1. **Check the payload — in the `aac-routines` checkout only.** Run `python3 .claude/hooks/check_payload.py`; a `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on. The script exists only there: in claude-dotfiles on 2026-10-01 it failed `can't open file ... .claude/hooks/check_payload.py: No such file`. A desktop agent in any other checkout skips it, and instead lists the environment's variable names and confirms the keys above that the task needs.
 2. Read the task, every comment on it, and its source thread to the last message before writing anything (REST: `GET /tasks/<id>`, `GET /comments?task_id=<id>`); a meeting, by its Fathom transcript (§ Meeting content).
 3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named. Confidential material (pay figures, health, leave, discipline, customer identifiers) goes in the draft only where the task asks for it (a comp memo carries pay bands), and stays in the task comment or Drive file: never in a chat reply, a report or a repository.

@@ -14,5 +14,6 @@ session ran unseen for the same task.
 
 **How to apply:** start task agents where Dan sees them (a desktop-app session in the sidebar, or a
 terminal tab he can watch), named after the task, pinned to Opus 5.5 per
-[[launched-agents-run-on-opus]]. Use `claude --bg` only when he asks for it. The agent-launcher
-routine's `claude --bg` path is a stopgap until the visible path is built.
+[[launched-agents-run-on-opus]]. Built 2026-10-02: the agent-launcher routine opens each task as a
+one-time scheduled task `agent-<task id>`, a titled sidebar session (todoist-triage agent-sweep.md
+§ Launch). Use `claude --bg` only when he asks for it.
