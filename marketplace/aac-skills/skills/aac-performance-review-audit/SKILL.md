@@ -2,10 +2,10 @@
 name: aac-performance-review-audit
 description: Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit or gate a review, or asks for its rejection or coaching email.
 metadata:
-  modified: '2026-10-02T21:31:25Z'
-  previous-modified: '2026-10-02T21:27:28Z'
-  revision: '18'
-  content-sha: c2f69e9f93f7
+  modified: '2026-10-02T21:39:18Z'
+  previous-modified: '2026-10-02T21:31:25Z'
+  revision: '19'
+  content-sha: 91f9389288e9
 ---
 
 # AAC performance review audit
@@ -65,7 +65,7 @@ Drop any numbered standard whose check passed and renumber.
 
 ## The self-check stamp (check this before Gate 2)
 
-Reviewing managers run `aac-review-self-check` themselves; when it passes both its checks it writes a line into the docx and gives the manager a code. Before Gate 2, run the verifier that ships with the self-check (the project folder has a copy):
+Reviewing managers run `aac-review-self-check` themselves; when it passes both its checks it writes a line into the docx and gives the manager a code. Before Gate 2, run the verifier that ships with the self-check, from the printed folder:
 
 ```
 python3 ../aac-review-self-check/review_format_check.py verify REVIEW.docx --end END --start START --direct FIRSTNAME
@@ -90,7 +90,7 @@ Only after Gates 1 and 2 pass. **Read `gate3.md` before writing anything.** It h
 Every gate email, the coaching email, and any review text the audit writes or rewrites (a model item, a full rewrite, a rebuilt review docx) passes this gate before it leaves; until then it is unfinished, whatever the three gates said. Dan made it mandatory on 9/24/26 after an email went out having been only spot-checked.
 
 1. Review text the audit writes or rebuilds is held to the same runs as a manager's draft: put it in a review docx, run `check` and `meaning`, then `python3 review_gate_tools.py gate REVIEW.docx`, which exits 0 only when both exited 0 on that exact file.
-2. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md` and `REVIEW.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards (`standards.md`) and to WR-001's own review part, Rules 171 to 185 in `REVIEW.md`, where they conflict with the rest of WR-001: the serial comma and "should" in review cells (Rule 175), numeric dates (Rule 174), e.g./i.e. and the % sign (Rule 178), email headings (Rule 182). The same part carries the review page, the audit email's salutation, numbered fix lists, subject line and attachments, and the templates and gate script. Every other WR-001 rule applies.
+2. Read the house writing standard from the fetched copy, not the installed skill: `../aac-house-writing-standard/references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md` and `REVIEW.md` in that `references/` folder. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards (`standards.md`) and to WR-001's own review part, Rules 171 to 185 in `REVIEW.md`, where they conflict with the rest of WR-001: the serial comma and "should" in review cells (Rule 175), numeric dates (Rule 174), e.g./i.e. and the % sign (Rule 178), email headings (Rule 182). The same part carries the review page, the audit email's salutation, numbered fix lists, subject line and attachments, and the templates and gate script. Every other WR-001 rule applies.
 3. Lint each text with the house skill's own linter, `../aac-house-writing-standard/scripts/wr001-lint.js` (fetched with the review skills by `latest.py`; a pinned copy in this skill sat at WR-001 v0.6 while the standard reached v0.10, and was deleted 2026-09-29). For a docx, extract the paragraphs and table cells to a .md file first. Email: `node ../aac-house-writing-standard/scripts/wr001-lint.js EMAIL.md`. Review: `node ../aac-house-writing-standard/scripts/wr001-lint.js REVIEW.md --prose`. Exit 0 is required: fix every error and every warning that is not a Rule 2 exception.
 4. Read for what the linter cannot see, and confirm Rule 166 item by item: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. Also Rule 106 (the attachment is named) and Rule 107 (an email that asks for action ends with how Dan learns it is done).
 5. Record under the Notes line: the `check`, `meaning` and `gate` exit codes for any review text, the linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.

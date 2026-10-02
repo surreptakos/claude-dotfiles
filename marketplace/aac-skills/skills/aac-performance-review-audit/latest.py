@@ -66,12 +66,28 @@ def _from_git(src: str):
 
 
 # ---- GitHub source ----------------------------------------------------------------------------
+API_HOST = "api.github.com"
+
+
+class _KeepTokenOnApiHost(urllib.request.HTTPRedirectHandler):
+    """urllib carries headers across redirects; drop the token when a redirect leaves the API host."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        new = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if new is not None and urllib.parse.urlparse(newurl).hostname != API_HOST:
+            new.remove_header("Authorization")
+        return new
+
+
+_OPENER = urllib.request.build_opener(_KeepTokenOnApiHost)
+
+
 def _get(url: str, accept: str = "application/vnd.github+json") -> bytes:
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "aac-review-skills"})
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token and urllib.parse.urlparse(url).hostname == "api.github.com":
+    if token and urllib.parse.urlparse(url).hostname == API_HOST:
         req.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with _OPENER.open(req, timeout=TIMEOUT) as r:
         return r.read()
 
 
