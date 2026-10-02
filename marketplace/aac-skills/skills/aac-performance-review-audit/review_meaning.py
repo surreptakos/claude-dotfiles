@@ -10,8 +10,9 @@ Every meaning check in standards.md is one of three kinds, decided once in CHECK
 a rule (code decides), a Jev typed question (code owns the threshold), or a reader check
 (neither can decide). A Jev check turns its answer into a probability that the item fails:
 at or above `high` it prints a fix line tagged "(Jev)", from `low` up to `high` the item goes
-on the read list for Claude, and below `low` it passes. The marks are provisional until the
-eval over real reviews (kept in the private review-audits repo) sets them.
+on the read list for Claude, and below `low` it passes. The marks come from a live eval over
+real reviews against their audit files (issue 1247; the reviews stay in the private
+review-audits repo, and only per-check numbers were published).
 
 Exit codes: 0 clean, 1 fixes, 2 could not check (Jev gave no answer: no key, 401, 402,
 timeout, or TYPESAFE_JEV_STUB=off). 2 is never a pass. Every run writes a gate record beside
@@ -40,23 +41,24 @@ JEV_TIMEOUT = 60.0
 
 # One row per meaning check in standards.md. kind: rule, jev, rule+jev (the rule decides first and
 # Jev judges what the rule did not fail), or reader. high/low are marks on the probability that the
-# item fails the check. Provisional marks: 0.8 is the house linter's Jev floor; weakness_guidance
-# sits at 0.7 because live jev-latest gave a synthetic Weakness with no matching point 0.76 on
-# "none" (2026-10-01). The eval over real reviews replaces them.
+# item fails the check. Marks set by the eval (issue 1247, jev-latest, 2026-10-02): each high sits
+# between the lowest score an audited defect got and the highest score an item the audit passed
+# got; each low keeps the synthetic Bob fixture's passing items off the read list.
 CHECKS = {
-    "s1_behavior":          {"check": "Sentence 1 is behavior", "kind": "jev", "high": 0.8, "low": 0.5,
+    "s1_behavior":          {"check": "Sentence 1 is behavior", "kind": "jev", "high": 0.6, "low": 0.5,
                              "form": "Choice: behavior or work product; trait, motive or attitude; circumstance"},
-    "s1_pattern":           {"check": "Sentence 1 is a pattern", "kind": "jev", "high": 0.8, "low": 0.5,
+    "s1_pattern":           {"check": "Sentence 1 is a pattern", "kind": "jev", "high": 0.8, "low": 0.6,
                              "form": "Noul"},
-    "s2_elaborate":         {"check": "SEER sentence 2 is Elaborate", "kind": "jev", "high": 0.8, "low": 0.5,
+    "s2_elaborate":         {"check": "SEER sentence 2 is Elaborate", "kind": "jev", "high": 0.75, "low": 0.6,
                              "form": "Choice: detail about the same behavior; why it matters; a new theme; an example; an instruction"},
-    "example_one":          {"check": "The example is one specific example", "kind": "rule+jev", "high": 0.8, "low": 0.5,
-                             "form": "Rule fails two or more dates; Noul when no date, figure or ticket number is present"},
+    "example_one":          {"check": "The example is one specific example", "kind": "rule+jev", "high": 0.7, "low": 0.5,
+                             "form": "Rule fails two or more dated events (a range, or a due date and its close date, is one); "
+                                     "Noul when no date, figure or ticket number is present"},
     "named_accounts":       {"check": "Names a specific account", "kind": "rule+jev", "high": 0.8, "low": 0.5,
                              "form": "Code finds capitalized candidates; a Noul per candidate selects accounts; three or more is a list"},
-    "example_demonstrates": {"check": "The example demonstrates the pattern", "kind": "jev", "high": 0.8, "low": 0.5,
+    "example_demonstrates": {"check": "The example demonstrates the pattern", "kind": "jev", "high": 0.6, "low": 0.5,
                              "form": "Noul over sentence 1 and the example"},
-    "s4_restate":           {"check": "SEER sentence 4 restates sentence 1", "kind": "rule+jev", "high": 0.8, "low": 0.5,
+    "s4_restate":           {"check": "SEER sentence 4 restates sentence 1", "kind": "rule+jev", "high": 0.8, "low": 0.6,
                              "form": "Banned-modal rule; Noul for same claim, no new theme"},
     "observation_only":     {"check": "Observation only", "kind": "rule+reader", "high": None, "low": None,
                              "form": "Gate 1 bans the modals; a \"rather than\" or \"instead of\" clause goes on the read list"},
@@ -64,7 +66,7 @@ CHECKS = {
                              "form": "Needs the prior review, which is not on the page"},
     "framing":              {"check": "No framing past the record", "kind": "reader", "high": None, "low": None,
                              "form": "Needs the reviewer's own record, which is not on the page"},
-    "ramification":         {"check": "Ramification lists Weaknesses or current work", "kind": "jev", "high": 0.8, "low": 0.5,
+    "ramification":         {"check": "Ramification lists Weaknesses or current work", "kind": "jev", "high": 0.7, "low": 0.55,
                              "form": "Noul over the Core Message and the Weakness texts; not asked for No Change"},
     "weakness_guidance":    {"check": "Each Weakness has Guidance", "kind": "rule+jev", "high": 0.7, "low": 0.5,
                              "form": "Rule fails every Weakness when there is no Guidance; Choice per Weakness over the points plus none"},
@@ -109,7 +111,7 @@ GUIDANCE = ("Every Guidance point is a bullet under \"Guidance for the next year
 S2_OPTIONS = {
     "detail": "Adds details or explains further about the same behavior sentence 1 names, with the direct still the subject",
     "why_it_matters": "Says why the behavior matters: its value, impact or importance to the business, the team or the customer",
-    "new_theme": "Introduces a different behavior or theme from the one sentence 1 names",
+    "new_theme": "Introduces a different behavior or theme from the one sentence 1 names, such as a second account, relationship or accomplishment beside the one sentence 1 is about",
     "example": "Gives one specific example: an event or a figure",
     "instruction": "Tells the direct what to do",
 }
@@ -121,8 +123,8 @@ S2_FIX = {
 }
 S1_OPTIONS = {
     "behavior": "A behavior or work product the reviewer can see or hear, or a trait word the item's other sentences show the behavior behind",
-    "trait": "A trait, motive, attitude, intent or idea, with no behavior behind it in the other sentences",
-    "circumstance": "A circumstance: something about his situation, not something he does",
+    "trait": "A trait, motive, attitude, intent or idea, or the lack of one (\"a lack of focus\"), with no behavior behind it in the other sentences",
+    "circumstance": "A circumstance: something about his situation, not something he does, such as an assignment, role or responsibility he holds (\"he owns the reporting\", \"he is in charge of X\")",
 }
 S1_FIX = {"trait": "names a trait, motive or attitude", "circumstance": "names a circumstance"}
 
@@ -143,6 +145,11 @@ OPENERS = ("he", "she", "they")
 PROMISES = re.compile(r"^I\s+(?:will|want)\b|^I['’]ll\b", re.I)
 CONTRAST = re.compile(r"\b(?:rather than|instead of)\b", re.I)
 DIGIT = re.compile(r"\d")
+# A due or start date and the date it closed are one event, not two (issue 1247): the first date
+# follows a due or start word, and the words between the two dates say it closed.
+DUE_BEFORE = re.compile(r"\b(?:due|deadline|opened|received|submitted|requested|assigned)\b[^.;]{0,12}$", re.I)
+CLOSED_BETWEEN = re.compile(r"^[^.;\d]{0,40}\b(?:until|closed?|completed?|finished|resolved|delivered|arrived|sent|"
+                            r"submitted|signed|paid|done)\b[^.;\d]{0,12}$", re.I)
 
 
 def noul(instructions, yes, no):
@@ -151,6 +158,12 @@ def noul(instructions, yes, no):
 
 def choice(instructions, options):
     return {"type": "choice", "instructions": instructions, "criteria": dict(options)}
+
+
+def quoted(sents, *ns):
+    """The sentences a question is about, quoted into the question. Jev reads a quoted sentence far
+    more reliably than a pointer into the state (eval, issue 1247)."""
+    return "\n\n" + "\n".join(f"Sentence {n}: \"{sents[n - 1]}\"" for n in ns)
 
 
 def sha256(path):
@@ -243,11 +256,16 @@ def date_spans(host, text):
 
 
 def separate_dates(host, text):
-    """Dates in a sentence, a range ("7/24/2025 through 7/23/2026") counted as one."""
+    """Dates in a sentence that stand for separate events. A range ("from DATE through DATE") counts as
+    one, and so does a due or start date followed by its close date ("was due DATE and did not close
+    until DATE"): one example stating when it was due and when it closed is one event."""
     spans, out = date_spans(host, text), []
     for i, (s, e, t) in enumerate(spans):
-        if i and host.RANGE_SEP.match(text[spans[i - 1][1]:s]):
-            continue
+        if i:
+            ps, pe, _ = spans[i - 1]
+            between = text[pe:s]
+            if host.RANGE_SEP.match(between) or (DUE_BEFORE.search(text[:ps]) and CLOSED_BETWEEN.match(between)):
+                continue
         out.append(t)
     return out
 
@@ -354,14 +372,17 @@ class Run:
         ref = f"`items.{lbl}.sentences`"
         self.ask(f"{lbl}.s1_behavior",
                  choice(f"{BEHAVIOR}\n\nWhat does sentence 1 of review item {lbl} (`items.{lbl}.sentences[0]`) name? "
-                        f"Read the whole item ({ref}) for the behavior a trait word is read from.", S1_OPTIONS),
+                        f"Read the whole item ({ref}) for the behavior a trait word is read from."
+                        + quoted(self.sents[lbl], *range(1, len(self.sents[lbl]) + 1)), S1_OPTIONS),
                  "s1_behavior", lbl,
                  lambda a: f"sentence 1 {S1_FIX.get(self.worst(a, 'behavior'), 'names no behavior')}; it must name a behavior or work product.",
                  "behavior", lambda a: 1.0 - a["probabilities"].get("behavior", 0.0))
         self.ask(f"{lbl}.s1_pattern",
-                 noul(f"{PATTERN}\n\nDoes sentence 1 of review item {lbl} (`items.{lbl}.sentences[0]`) state a pattern?",
-                      "A pattern: what he does repeatedly or how he performs over the period",
-                      "A one-off: a single event"),
+                 noul(f"{PATTERN}\n\nDoes sentence 1 of review item {lbl} (`items.{lbl}.sentences[0]`) state a pattern?"
+                      + quoted(self.sents[lbl], 1),
+                      "A pattern: what he does repeatedly, or how he performed, grew or what he built up over "
+                      "the period as a whole (learning a new job, earning a certification during the year)",
+                      "A one-off: a single event on one day, such as one deal, one call or one ticket"),
                  "s1_pattern", lbl,
                  lambda a: "sentence 1 is a one-off event; it must state a pattern, with the event as the example.",
                  1.0, lambda p: 1.0 - p)
@@ -374,14 +395,17 @@ class Run:
         elif not dates and not DIGIT.search(sent):
             self.ask(f"{lbl}.example_one",
                      noul(f"{EXAMPLE}\n\nIs sentence {n} of review item {lbl} (`items.{lbl}.sentences[{n - 1}]`) one "
-                          "specific thing that happened?",
-                          "One specific thing that happened", "A generic descriptor, a habit, or several things"),
+                          "specific thing that happened?" + quoted(s, n),
+                          "One specific thing that happened",
+                          "A generic descriptor, a habit, a list, or two or more separate things he did (two actions "
+                          "joined by \"and\" on different accounts or projects are two examples)"),
                      "example_one", lbl,
                      lambda a, n=n: f"sentence {n} is not one specific thing that happened; it must be one event or figure.",
                      1.0, lambda p: 1.0 - p, n=n)
         self.ask(f"{lbl}.example_demonstrates",
                  noul(f"{DEMONSTRATES}\n\nIs the example in sentence {n} of review item {lbl} "
-                      f"(`items.{lbl}.sentences[{n - 1}]`) an instance of what sentence 1 (`items.{lbl}.sentences[0]`) names?",
+                      f"(`items.{lbl}.sentences[{n - 1}]`) an instance of what sentence 1 (`items.{lbl}.sentences[0]`) names?"
+                      + quoted(s, 1, n),
                       "Yes: the example shows the pattern sentence 1 names",
                       "No: the example shows something else, a second strength or weakness"),
                  "example_demonstrates", lbl,
@@ -399,7 +423,7 @@ class Run:
         self.sentence1(lbl)
         self.ask(f"{lbl}.s2_elaborate",
                  choice(f"{SEER}\n\nWhat does sentence 2 of review item {lbl} (`items.{lbl}.sentences[1]`) do, "
-                        f"read against sentence 1 (`items.{lbl}.sentences[0]`)?", S2_OPTIONS),
+                        f"read against sentence 1 (`items.{lbl}.sentences[0]`)?" + quoted(s, 1, 2), S2_OPTIONS),
                  "s2_elaborate", lbl,
                  lambda a: f"sentence 2 {S2_FIX.get(self.worst(a, 'detail'), 'is not Elaborate')}; it must add detail about the behavior in sentence 1 (Elaborate).",
                  "detail", lambda a: 1.0 - a["probabilities"].get("detail", 0.0))
@@ -410,9 +434,13 @@ class Run:
         else:
             self.ask(f"{lbl}.s4_restate",
                      noul(f"{SEER}\n\nDoes sentence 4 of review item {lbl} (`items.{lbl}.sentences[3]`) restate sentence 1 "
-                          f"(`items.{lbl}.sentences[0]`): the same claim in a new way, with no new theme and no instruction?",
-                          "Yes: the same claim again, no new theme, no instruction",
-                          "No: a new theme, a new claim, or an instruction"),
+                          f"(`items.{lbl}.sentences[0]`): the same claim in a new way, with no new theme and no instruction?"
+                          + quoted(s, 1, 4),
+                          "Yes: the same point about him again in other words, even when it is looser or broader "
+                          "than sentence 1 (\"He's an example we ought to put on training videos\" restates \"Bob is "
+                          "my best customer service rep\")",
+                          "No: a new theme, a different claim (such as what the behavior shows, causes or risks), or "
+                          "an instruction"),
                      "s4_restate", lbl,
                      lambda a: "sentence 4 does not restate sentence 1; it must say the same thing again with no new theme.",
                      1.0, lambda p: 1.0 - p)
@@ -465,10 +493,15 @@ class Run:
                                   f"it must be an instruction to {self.direct or 'the direct'} for next year.")
                 else:
                     self.ask(f"{lbl}.s{n}.instruction",
-                             noul(f"{GUIDANCE}\n\nIs sentence {n} of {lbl} (`guidance['{lbl}'][{n - 1}]`) an instruction "
-                                  "to the direct for next year?",
-                                  "Yes: it tells the direct what to do next year",
-                                  "No: a description of him, a comment on the present, or a promise from the reviewer"),
+                             noul(f"{GUIDANCE}\n\nRead sentence {n} of {lbl} (`guidance['{lbl}'][{n - 1}]`) on its own, "
+                                  "apart from the sentences around it. Is it an instruction: does it tell the direct what "
+                                  f"to do next year?\n\nThe sentence: \"{sent}\"",
+                                  "Yes: an instruction that tells the direct what to do next year, usually opening on an "
+                                  "action verb",
+                                  "No: a statement about him or his situation in the third person, including what stays "
+                                  "open or available to him (it may open on a noun, as in \"Weekend coverage remains open "
+                                  "to him\"), a comment on how things are now, a note on how the point will be measured, "
+                                  "or something the reviewer will do"),
                              "guidance_instruction", lbl,
                              lambda a, n=n: f"sentence {n} is not an instruction for next year; it must tell "
                                             f"{self.direct or 'the direct'} what to do.",

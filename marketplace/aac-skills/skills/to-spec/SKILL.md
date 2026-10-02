@@ -3,10 +3,10 @@ name: to-spec
 description: 'Turn the current conversation into a spec and publish it to the project issue tracker: no interview, just synthesis of what you''ve already discussed.'
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-09-27T19:31:03Z'
-  previous-modified: '2026-08-20T00:41:59Z'
-  revision: '2'
-  content-sha: 018f2cb42876
+  modified: '2026-10-02T07:18:14Z'
+  previous-modified: '2026-10-01T23:30:29Z'
+  revision: '4'
+  content-sha: 68153745831f
 ---
 
 This skill takes the current conversation context and codebase understanding and produces a spec. Do NOT interview the user; just synthesize what you already know.
@@ -21,7 +21,10 @@ The issue tracker and triage label vocabulary should have been provided to you. 
 
 Check with the user that these seams match their expectations.
 
-3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Write the spec using the template below, then publish it to the project issue tracker. Apply the `prd` label, never `ready-for-agent`: the spec is a container, and its tickets carry
+`ready-for-agent`. A spec labelled `ready-for-agent` is built whole by the ticket fleet beside its own
+children (2026-10-02: the fleet merged one spec as a single PR while its first child's PR duplicated
+it). When no tickets will follow, say so and let `/triage` label it.
 
 <spec-template>
 

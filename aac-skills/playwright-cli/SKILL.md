@@ -3,10 +3,10 @@ name: playwright-cli
 description: Automate browser interactions, test web pages and work with Playwright tests.
 allowed-tools: Bash(playwright-cli:*) Bash(npx:*) Bash(npm:*)
 metadata:
-  modified: "2026-09-25T23:57:47Z"
-  previous-modified: "2026-08-25T14:57:11Z"
-  revision: "2"
-  content-sha: "2ee8f75a50ef"
+  modified: "2026-10-01T23:30:31Z"
+  previous-modified: "2026-09-25T23:57:47Z"
+  revision: "3"
+  content-sha: "1d606a2e54c5"
 ---
 
 # Browser Automation with playwright-cli

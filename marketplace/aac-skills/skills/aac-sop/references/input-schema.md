@@ -109,7 +109,19 @@ restarts step numbering), `step` (numbered), `bullet` (optionally with a bold `l
 
 `scripts/build_sop.js` reads the JSON and writes a US-Letter, Arial, navy-headed `.docx`. It renders
 the Procedure layout by default and the Work Instruction layout when `mode` is `"work_instruction"`.
-It omits any optional section or appendix whose array is empty; renders Troubleshooting as an
+
+- **Procedure layout.** Header block: Title, Department, Version, Effective Date, Next Review,
+  Prepared by, Approved by. Required body, in order: Objective → Scope → Responsibilities → Trigger
+  → Procedure → Done when → Revision Log. Optional body, rendered only when populated: Exceptions &
+  Escalation; Troubleshooting (diagnostic/field SOPs); Success Metrics; References.
+- **Work Instruction layout.** Lean header: Title, Department, Version, Owner, Last updated
+  (Approved by optional). Body, in order: Before you start (tools/access) → Steps → Done when →
+  Watch out for (optional) → reference Sections (optional) → appendices (optional). Revision Log
+  closes the document.
+
+Step numbering restarts at each `phase` header; without phases, steps number continuously.
+
+The generator omits any optional section or appendix whose array is empty; renders Troubleshooting as an
 "N/A (reason)" line when `troubleshooting_na` is set and `troubleshooting` is empty; renders
 `banner`, `*_flag`, `responsibilities_note`, and `metrics_note` in red; and defaults the Revision Log
 to a single "Created" row when none is supplied. It requires only the `docx` npm package.

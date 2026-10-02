@@ -47,8 +47,8 @@ The four claim types, each for the facts that fail sweeps most:
   is a config file (`.claude/session.json`, a workflow YAML, a package.json script). Bindings are
   explicit doc positions, so dated history files stay exempt by not being bound.
 
-The first consumer is `aac-bill-intake` (issue 326); its seed claims are the fixtures this engine
-was designed against.
+Worked example: `aac-bill-intake` (issue 326), the first consumer, whose seed claims are the
+fixtures the engine was designed against.
 
 ## 2. Add a wrapper test
 
@@ -88,7 +88,7 @@ test('docs/claims.json verifies clean', () => {
   const engine = tried.find((p) => fs.existsSync(p));
   assert.ok(engine,
     'claims-audit.js not found; tried:\n  ' + tried.join('\n  ') +
-    '\nInstall or update the aac-skills plugin (claude plugin update aac-skills), or in a ' +
+    '\nOn a desktop the aac-skills plugin installs and auto-updates at session start; in a ' +
     'container run the dotfiles bootstrap.');
   execFileSync(process.execPath, [engine], {
     cwd: path.join(__dirname, '..'),
@@ -103,15 +103,9 @@ shell out to the engine from that runner — the exit code is the whole contract
 ## 3. Wire the wrapper into pre-commit and CI
 
 A test that runs only on demand is a report, not a tripwire. Surface all three exit codes to the
-caller, so a runner can tell "the tripwire fired" from "you pointed me at nothing":
-
-- **0** — every claim verified clean.
-- **1** — one or more findings; one tab-separated line per finding on stdout
-  (`<claimId>\t<docPath>:<lineNo>\t<message>`). Broken claims land here too — an unknown `type`,
-  a missing `doc`, a missing `source`, or a malformed field — so one broken claim never masks the
-  rest of the audit.
-- **2** — audit-level configuration error: the claims file itself is missing, is not valid JSON,
-  or is not the expected shape. Anything scoped to a single claim stays at exit 1.
+caller, so a runner can tell "the tripwire fired" (1: one tab-separated line per finding, broken
+claims included) from "you pointed me at nothing" (2: the claims file itself is missing, invalid
+JSON or the wrong shape); 0 is clean. The full contract is the header of `claims-audit.js`.
 
 ## 4. Extend claims.json as the world changes
 

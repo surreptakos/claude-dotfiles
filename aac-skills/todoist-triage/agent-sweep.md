@@ -22,11 +22,11 @@ A task is agent-doable when all three hold. Read the source thread to its last m
 
 A task that is part judgment, part legwork qualifies for the legwork only: the question names that half, and the ball holder keeps the rest.
 
-Not sure it passes? Leave it out. Every wrong candidate costs Dan a click.
+Ask only about a task that clearly passes: every wrong candidate costs Dan a click.
 
 ## Ask — always tier 2
 
-Never applied without asking. One card per task, never two: two cards would each replace the task's labels from a stale copy.
+One card per task: two cards would each replace the task's labels from a stale copy.
 
 The question names what the agent would produce, from which inputs, and the skill it would use where one fits (`aac-contract-package`, `aac-sop`, `research`, `aac-house-writing-standard` for anything another person reads). One clause each.
 
@@ -41,41 +41,49 @@ The agent does the legwork whoever holds the ball.
 
 On the Day Board this is an ordinary `triage/<taskId>` card per [`day-board.md`](day-board.md) § Publish the run. The board's own **Rule out** button still moves the task to Wontfix — it kills the task, it is not the agent "no" — so the question text names **I'll do it** (or **Me: …**) as the way to keep the task and decline the agent.
 
-An answer that arrives as a note (the board's Note only, the reason typed beside any option, or prose in the session) and declines the agent is still a "no": the run writes `no-agent` on the task itself, then acts on the rest of the note.
+A decline that arrives as a note is still a "no": on the board ([`day-board.md`](day-board.md) § Read the answers) or as prose in the session, the run writes `no-agent` on the task itself, then acts on the rest of the note.
 
 ## What the labels mean
 
 None of them is a ball label: the ball stays where it was.
 
 - `agent` — Dan approved the task for an agent; it waits for the launch.
-- `agent-running` — the board launched its session; the task comment names the session link.
+- `agent-running` — the `agent-launcher` routine (or a fallback session) started its cloud session; the task comment names the session link.
 - `agent-done` — the agent finished; its result is a comment on the task.
 - `no-agent` — Dan's "no", landed durably so the sweep never asks again.
 
 Any of them takes the task out of the sweep. Dan removes the label to reopen the question.
 
-## Launch (Dan, 2026-09-30)
+## Launch (owner ruling 2026-10-01, issue 1202)
 
-The triage run never starts an agent. Dan does, with the Day Board's **Launch agents** button, once he has answered the day's cards. One click finds every open task labelled `agent`, starts one Claude Code cloud session per task (Default environment, `aac-routines` checkout, auto permission mode), swaps `agent` for `agent-running`, and comments the session link on the task. A task whose session did not start keeps `agent` and is named on the board. The launch prompt only points here: it names the task and this section below.
+The triage run never starts an agent, and neither does the Day Board. The launch path is the
+`agent-launcher` desktop routine on the anchor PC: its prompt lives in the aac-routines registry
+(`python scripts/desktop_routines.py show agent-launcher`) and `/setup-check` registers it there.
+Every 30 minutes on weekdays, 8 AM to 6 PM, it reads every open task labelled `agent` and, per
+task:
 
-**The button cannot start sessions on Dan's account (2026-09-30, confirmed 2026-10-01).** On
-2026-10-01 every `create_session` call rejected `blocked_by_policy` ("Your organization blocks this
-Claude Code Remote call"): the runtime contract defines that code as a tool in the manifest that
-org policy blocks for this viewer. The account's Connectors page (Customize, Yours) lists no
-`Claude Code Remote` connector and the directory has none to add; the Team organization's admin settings
-(Active Alarm, read 2026-10-01) have Cloud sessions, Remote Control, Routines and Enable artifact
-connectors all on, list no `Claude Code Remote` connector and offer none in the directory, so no
-organization toggle changes the block. It is platform policy for artifact pages calling that connector (claude-dotfiles issue
-1162 holds the reading and the decision). Claude Code's settings reference (code.claude.com,
-read 2026-10-01) has no key that reaches an artifact page's connector call: `disableRemoteControl`,
-`disableClaudeAiConnectors` and `deniedMcpServers` govern Claude Code on the device, and this PC
-sets none of them. What a session or routine on the desktop can do instead is create the cloud
-session itself: `claude --cloud "<task description>"` (optionally `--environment <id>`) or the
-claude.ai remote-trigger API. Until a launch path exists, a Claude Code session
-launches them when Dan asks ("launch my agent tasks"): read every open task labelled `agent`,
-start one background agent per task on this section's "Run an approved task" steps, and swap
-`agent` for `agent-running` with a comment naming the session as each starts. Never report an
-agent as started without that label swap on the task.
+1. Starts one Claude Code cloud session with `claude --cloud` (Default environment, `aac-routines`
+   checkout). The prompt only points here: it names the task with its Todoist link and says to
+   follow "Run an approved task" below for that one task.
+2. Started: swaps `agent` for `agent-running`, keeping every other label, and comments the session
+   link on the task.
+3. Not started: the task keeps `agent` and gains a comment with the exact error; the next run
+   tries it again.
+
+The run record names every session started and every start that failed; a run that finds no
+`agent` task writes none. The method lives in aac-routines `src/aac_routines/agent_launcher.py`.
+
+The board's **Launch agents** button only counts and links: [`day-board.md`](day-board.md)
+§ Launch agents has why it starts nothing.
+
+**Fallback, for a PC without the routine.** A Claude Code session launches the tasks when Dan asks
+("launch my agent tasks"): read every open task labelled `agent`, start one cloud session per task
+on "Run an approved task" (`claude --cloud "<prompt>"`, or a background agent where the CLI has no
+`--cloud`), and swap `agent` for `agent-running` with a comment naming the session as each starts.
+A task whose session did not start keeps `agent` and gains a comment with the error. Report an
+agent as started only once the label swap is on its task.
+
+## Links, not ids
 
 Every record mentioned in a reply to Dan, in a launch report, in an agent's result or in a draft
 he will paste elsewhere carries its link in its own system of record, never a bare id or number
@@ -88,17 +96,42 @@ from the id. Zoho Desk tickets: the ticket's `webUrl`, from the `tools/zoho-rest
 
 ## Run an approved task
 
-The session works one Todoist task, named in its prompt by its link. It is either a cloud session the board starts (`aac-routines` checkout, Default environment) or, while the button is blocked, a background agent a desktop Claude Code session starts in its own checkout (claude-dotfiles on 2026-10-01).
+The session works one Todoist task, named in its prompt by its link. It is either a cloud session the launcher starts (`aac-routines` checkout, Default environment) or, under the fallback, a background agent a desktop Claude Code session starts in its own checkout (claude-dotfiles on 2026-10-01).
 
 **What it reaches.** Todoist through the Todoist connector or REST v1 (`https://api.todoist.com/api/v1`, bearer `TODOIST_API_KEY`, else the token in `~/.config/aac/todoist_api_token`); Zoho through `tools/zoho-rest.py` in claude-dotfiles (`ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`) or the Desk and CRM connectors; mail, Teams, calendar and SharePoint through the Microsoft 365 connector; Drive, Fathom and Granola through theirs. A connector's tool names carry a per-session id, so find them with ToolSearch. Never report a credential missing before listing the environment's variable names (names only, never values).
 
 1. **Check the payload — in the `aac-routines` checkout only.** Run `python3 .claude/hooks/check_payload.py`; a `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on. The script exists only there: in claude-dotfiles on 2026-10-01 it failed `can't open file ... .claude/hooks/check_payload.py: No such file`. A desktop agent in any other checkout skips it, and instead lists the environment's variable names and confirms the keys above that the task needs.
-2. Read the task, every comment on it, and its source thread to the last message before writing anything (REST: `GET /tasks/<id>`, `GET /comments?task_id=<id>`).
+2. Read the task, every comment on it, and its source thread to the last message before writing anything (REST: `GET /tasks/<id>`, `GET /comments?task_id=<id>`); a meeting, by its Fathom transcript (§ Meeting content).
 3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named. Confidential material (pay figures, health, leave, discipline, customer identifiers) goes in the draft only where the task asks for it (a comp memo carries pay bands), and stays in the task comment or Drive file: never in a chat reply, a report or a repository.
-4. Leave the result where the ball holder works: **one** comment on the task with the draft inline in Markdown or, when the draft is long, a link to a Drive file the session made (`create_file`). Post it with `add-comments` or `POST /comments` `{"task_id": "<id>", "content": "<text>"}`. Never send, file, sign, approve or pay anything; never create an Outlook draft under Dan's name; never change any other Todoist task.
+4. Leave the result where the ball holder works: **one** comment on the task with the draft inline in Markdown or, when the draft is long, a link to a Drive file the session made (`create_file`), every record in it linked (§ Links, not ids). Post it with `add-comments` or `POST /comments` `{"task_id": "<id>", "content": "<text>"}`. Never send, file, sign, approve or pay anything; never create an Outlook draft under Dan's name; never change any other Todoist task.
 5. Swap `agent-running` for `agent-done`, keeping every other label. Labels are a full replacement: read the task's current labels, drop `agent-running`, add `agent-done`, and write the whole list back (`update-tasks` `labels`, or `POST /tasks/<id>` `{"labels": [...]}`).
 6. If the work cannot be done from what the session can reach, say exactly why in the comment (the error line, the missing source) and swap `agent-running` for `no-agent` the same way, so the task is Dan's again.
 7. Report to whoever started the session: the task link, what was posted (the comment, or the Drive file's link), which swap ran, and anything not done with its exact error.
+
+## Meeting content (Fathom)
+
+A task whose input is a meeting reads the meeting, not its recap email (issue 1215). The call that
+returns a transcript, run 2026-10-01 from a desktop Claude Code session on a meeting
+`search_meetings` found:
+
+1. `search_meetings` (`{"query": "<topic words>", "recorded_by": "anyone"}`) or `list_meetings`.
+   Each hit prints `id: <n>` and `url: https://fathom.video/calls/<m>`. The `id` is the
+   recording_id; the number in the URL is a call id, a different number.
+2. `get_meeting_transcript` with the id as a JSON integer, unquoted:
+   `{"recording_id": 123456789, "url": "<the hit's url>"}`. It returns the whole transcript, each
+   turn linked to its timestamp. `get_meeting_summary` takes `{"recording_id": 123456789}`.
+
+A quoted id fails. On 2026-10-01 (session ba3aee66) three agents passed it as a string and every
+summary and transcript call was rejected with:
+
+```
+Invalid arguments: value at /recording_id is not an integer
+```
+
+Holding only a Fathom link, `get_recording_by_url` (`{"url": "<link>"}`) returns the recording_id.
+No Fathom API key is in the desktop environment, so the connector is the only path. Where it still
+rejects an integer id, the Fathom recap email in Outlook is the fallback: it carries the summary but
+not the transcript, so the result says the transcript was not read.
 
 ## Connector quirks (2026-10-01)
 
