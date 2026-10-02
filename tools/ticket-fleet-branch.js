@@ -971,14 +971,19 @@ function haltReport(halt, results) {
  * the tree-guard invocation (or null), which names the checkout as `"$o"` and runs last, so the
  * command's exit code is the guard's. Each read prints one tagged line - `cwd <path>`,
  * `head <branch|DETACHED>`, `sha <sha|UNREADABLE>` - and the guard prints its own JSON line.
+ *
+ * Issue 1190: `tip` is a ref (or null) whose tip is read in the same shell - buildTipLookupCommand's
+ * fallback chain against "$o", its output folded onto one `tip ...` line - so the sha a lane
+ * cross-checks its verifier against (issue 404) costs no agent of its own.
  */
-function checkpointCommand({ cwd, head, guard }) {
+function checkpointCommand({ cwd, head, guard, tip }) {
   const parts = [cwd ? `o='${String(cwd).replace(/'/g, `'\\''`)}'` : 'o="$(pwd)"'];
   if (!cwd) parts.push(`printf 'cwd %s\\n' "$o"`);
   if (head) {
     parts.push(`printf 'head %s\\n' "$(git -C "$o" symbolic-ref --quiet --short HEAD || echo DETACHED)"`);
     parts.push(`printf 'sha %s\\n' "$(git -C "$o" rev-parse HEAD || echo UNREADABLE)"`);
   }
+  if (tip) parts.push(`printf 'tip %s\\n' "$({ ${buildTipLookupCommand('"$o"', tip)}; } | tr '\\n' ' ')"`);
   if (guard) parts.push(guard);
   return parts.join('; ');
 }
@@ -988,9 +993,11 @@ function checkpointCommand({ cwd, head, guard }) {
  * { cwd, head, guard } out - cwd the measured path or null; head { branch (null when detached),
  * sha } or null when either line is missing or the sha is not an object name; guard the parsed
  * JSON line or null (absent, or not JSON: a paraphrase is could-not-audit, never a pass).
+ * Issue 1190: tip is null when the command read no tip, else parseTipLookupOutput's
+ * { sha, spelling } - both null when the ref resolved by none of the three routes.
  */
 function parseCheckpointOutput(stdout) {
-  const out = { cwd: null, head: null, guard: null };
+  const out = { cwd: null, head: null, guard: null, tip: null };
   let branch = null, sha = null;
   for (const raw of String(stdout == null ? '' : stdout).split(/\r?\n/)) {
     const line = raw.trim();
@@ -998,6 +1005,7 @@ function parseCheckpointOutput(stdout) {
     if ((m = /^cwd (.+)$/.exec(line))) out.cwd = m[1];
     else if ((m = /^head (\S+)$/.exec(line))) branch = m[1];
     else if ((m = /^sha (\S+)$/.exec(line))) sha = m[1];
+    else if ((m = /^tip(?: (.*))?$/.exec(line))) out.tip = parseTipLookupOutput(String(m[1] || '').split(' ').join('\n')) || { sha: null, spelling: null };
     else if (line.startsWith('{')) {
       try { out.guard = JSON.parse(line); } catch (e) { out.guard = null; }
     }

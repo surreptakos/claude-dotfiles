@@ -63,7 +63,11 @@ The two forks carry the isolation guard too, and a fleet-refresh never touches t
 a guard change reaches them the same way: re-copy. Issue 1093 changed its shape without a contract
 bump - one Setup agent, one agent per checkpoint, no Verify checkpoint for a pinned verifier, the
 canary in `env-probe` - and until a fork is re-copied it still starts the old two agents per
-checkpoint.
+checkpoint. Issue 1190 did the same again, also without a bump: the tip read rides in the implement
+checkpoint (code lane) and the prober's report (probe lane), and the Verify and Deliver checkpoints
+ride in the verifier's and deliverer's own agent (`checkpoint` in `VERDICT` and `DELIVERED`,
+`tip` in `PROBE`); a fork not yet re-copied still starts a `tip:` agent per attempt and an
+`isolation:` agent after every Verify and Deliver.
 
 Changing the arg list or the SCOUT schema means, in one commit: bump `CONTRACT_VERSION` in
 `tools/ticket-fleet-contract.js` and the marker in the script, update this table and the args list
@@ -181,8 +185,12 @@ whatever branch the session is on - on 2026-09-16 that tree predated the code un
 #361 probe was refuted as "fabricated" for flags `origin/main` carried and that branch did not. So
 the `VERDICT` schema requires `worktree: {path, head}`, and the lane cross-checks the reported
 `head` against the tip it expects: the branch under review in the code lane,
-`origin/<defaultBranch>` in the probe lane, each read by its own one-command tip agent so no agent
-certifies itself. That command is a `||` fallback chain, not a bare `rev-parse`: the ref as given,
+`origin/<defaultBranch>` in the probe lane, read by an agent other than the verifier so no agent
+certifies itself. Since issue 1190 the code lane's read rides in the implement checkpoint's command
+(a `tip ...` line beside `head`/`sha`) and the probe lane's in the prober's own report (`tip`, read
+in its worktree after a fetch; refs are shared with the orchestrator's checkout); the one-command
+`tip:` agent (`revParse`) starts only when neither read happened or came back usable - the guard
+and HEAD watch both off, a halted run, a `priorProbe` reuse. That command is a `||` fallback chain, not a bare `rev-parse`: the ref as given,
 then `origin/<ref>`, then `git ls-remote --heads origin <ref>` - a branch handed in from an earlier
 run's `priorImpl`, or pushed by an implementer in another container, exists only as `origin/<ref>`
 in the orchestrator's own checkout, and a bare `rev-parse` there used to exit 128 and skip the
@@ -228,9 +236,29 @@ each 74-76k tokens to run one line of shell (issue 1093). So one agent now does 
   After Verify only for an unpinned verifier: a pinned one runs as `fleet-verifier`, whose tool set
   has no Edit or Write, and the next checkpoint still sees its tree.
 
-A 2-ticket wave with one attempt each starts 8 of these agents with an unpinned verifier (a cloud
-session) and 6 with a pinned one, where it started 20 (4 Setup, 16 checkpoint); the budget test in
-`tools/ticket-fleet-branch.test.js` counts them.
+Issue 1190 (run `6abddb76`: 43 agents for 5 tickets, 17 of them `tip:` and `isolation:` agents
+running one command each, about 3M of 3.9M tokens in agent boot) went further:
+
+- **The workflow runtime has no shell.** Its script context holds `agent`, `parallel`, `pipeline`,
+  `workflow`, `log`, `phase`, `budget`, `args` and timers, and nothing that runs a command or
+  spawns a process, so a read cannot run "in the script". What the script can do is hand the
+  command to an agent that is running at that point anyway and parse the output itself.
+- **After Verify and Deliver** the checkpoint rides in that stage's own agent:
+  `carriedCheckpointStep` appends the checkpoint command to the verifier's (unpinned only) and the
+  deliverer's prompt as their last command, and they copy the result back in `checkpoint`.
+  `isolationRead` uses it when it parses - the guard's JSON line while the guard is on, else the
+  HEAD lines - and otherwise starts the checkpoint agent as before, so a missing or paraphrased
+  read is never a pass. The `--ticket` in that command and the `ticketNumber` the lane passes still
+  name the observing ticket, so a planted write is attributed exactly as before.
+- **After Implement** the checkpoint is still its own agent - the implementer is worktree-isolated
+  and may not touch the orchestrator's checkout - and its command now also reads the branch tip.
+
+A 4-ticket wave with one attempt each now starts 6 of these agents (Setup, 4 implement
+checkpoints, pre-report) with either verifier, and at most 20 agents in all with the
+implementers, verifiers, deliverers and report writer; it started 18 of these alone before (4 x 4
++ 2 unpinned, `tip:` agents included). The budget test in `tools/ticket-fleet-branch.test.js`
+counts them. Scout-phase agents (env probe, open-PR scan, difficulty, blocker state) and the
+post-wave editable guard are outside that count.
 
 ## The scratchpad is one per run, not one per worker
 

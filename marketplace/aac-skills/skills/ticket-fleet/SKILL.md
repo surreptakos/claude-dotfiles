@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when t
 
   '
 metadata:
-  modified: '2026-10-01T21:09:52Z'
-  previous-modified: '2026-10-01T01:39:08Z'
-  revision: '71'
-  content-sha: b23da8e603c1
+  modified: '2026-10-02T00:43:00Z'
+  previous-modified: '2026-10-01T21:09:52Z'
+  revision: '72'
+  content-sha: 50966818dda2
 ---
 
 # ticket-fleet
