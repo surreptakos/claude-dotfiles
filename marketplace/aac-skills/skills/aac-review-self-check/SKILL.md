@@ -2,15 +2,17 @@
 name: aac-review-self-check
 description: Self-check an AAC One Page performance review draft before it goes to the skip-level. Use when the user is writing, revising or about to send a performance review of one of their directs.
 metadata:
-  modified: '2026-10-02T21:14:00Z'
-  previous-modified: '2026-10-02T20:39:14Z'
-  revision: '13'
-  content-sha: 43d65ae092a6
+  modified: '2026-10-02T21:27:28Z'
+  previous-modified: '2026-10-02T21:14:00Z'
+  revision: '14'
+  content-sha: 0b9074943ead
 ---
 
 # AAC review self-check
 
 The user is a reviewing manager writing a One Page performance review of one of his directs. This checks the draft before it goes to his skip-level: he uploads it, the checks run here, and he reads what comes back.
+
+**Run the latest copy first.** Run `python3 latest.py` beside this file. It prints a folder holding the current copy of this skill from the AAC repo; read `standards.md` and run `review_format_check.py` from that folder, not this one, because this copy can be out of date. Exit 3 means the repo could not be reached: it prints this folder instead, and the report you give says the bundled copy ran.
 
 **Read [`standards.md`](standards.md) in full before checking anything.** It holds the rules, format tests, meaning checks and substance list, and the skip-level's audit checks against the same file.
 

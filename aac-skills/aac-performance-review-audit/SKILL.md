@@ -2,21 +2,23 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-10-02T21:14:40Z"
-  previous-modified: "2026-10-02T20:39:08Z"
-  revision: "16"
-  content-sha: "b350be32b340"
+  modified: "2026-10-02T21:27:28Z"
+  previous-modified: "2026-10-02T21:14:40Z"
+  revision: "17"
+  content-sha: "0fee23e190a0"
 ---
 
 # AAC performance review audit
 
 Dan Gatsakos (skip-level) receives a review draft from a reviewing manager (Mark Kurland, Nick Remblake, others) about a direct. The audit produces the email Dan sends back. Three gates, in order. Stop at the first gate that fails and produce only that gate's email: one class of problem per round, and nothing from a later gate. Every fix line names the item (S3, W4, Core Message, Guidance Point 2) and the check it failed.
 
+**Run the latest copy, every time.** The first command of every audit is `python3 latest.py`, run in this folder. It prints a folder that holds both review skills as they stand on claude-dotfiles master. Work from that folder for the rest of the audit: run every script there and read `standards.md`, `gate2.md`, `gate3.md` and `building-the-docx.md` there, not here. This installed copy can be weeks behind (Dan, October 2, 2026: the skills point to the repo). Exit 3 means the repo could not be reached; it prints this folder instead, and the Notes say "ran the bundled copy" with this file's revision.
+
 **The standard is `standards.md` in the self-check skill: [`../aac-review-self-check/standards.md`](../aac-review-self-check/standards.md). Read it in full before Gate 1.** It is the controlling copy of the rules, format tests, meaning checks and substance list, and the manager's self-check reads the same file.
 
 `review_gate_tools.py` beside this file runs the checks and builds the email docx (its header lists the commands). Run every command in this skill from this directory: the `../` paths resolve from here. `review_meaning.py` and `jev.py` are the same copies the self-check carries. Read `gate2.md`, `gate3.md` and `building-the-docx.md` when you reach that step, not before.
 
-The "Performance Review Audits" project folder, when mounted, holds prior reviews, self-appraisals, workbooks, comp plans and earlier audits: use it for evidence, not procedure. If the folder's copy of a script carries a check this one lacks, the folder copy is newer: use it, and bring this one up to match.
+The "Performance Review Audits" project folder, when mounted, holds prior reviews, self-appraisals, workbooks, comp plans and earlier audits: use it for evidence, not procedure. Never run a script copy from that folder; the copy `latest.py` prints is the current one.
 
 ## Before anything
 

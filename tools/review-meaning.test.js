@@ -229,6 +229,7 @@ suite('review meaning', { concurrency: true }, () => {
     const hooks = read(ROOT, 'profile', 'codex', 'hooks', 'jev.py');
     assert.ok(read(SELF, 'jev.py').equals(hooks), 'self-check jev.py differs from profile/codex/hooks/jev.py');
     assert.ok(read(AUDIT, 'jev.py').equals(hooks), 'audit jev.py differs from profile/codex/hooks/jev.py');
+    assert.ok(read(SELF, 'latest.py').equals(read(AUDIT, 'latest.py')), 'latest.py copies differ');
   });
 
   t('the hard-coded capital-word list is gone and Gate 1 still passes the Bob fixture', async () => {
@@ -325,5 +326,41 @@ suite('review meaning', { concurrency: true }, () => {
     r = await py(SELF_PY, stampArgs(file));
     assert.equal(r.code, 0, r.out);
     assert.match(r.out, /^aac-review-self-check PASS \S+ SC-[0-9A-F]{6} meaning: read, not Jev$/m);
+  });
+});
+
+// latest.py runs each review skill from the newest claude-dotfiles commit (Dan, 2026-10-02: the
+// skills point to the repo). The git source stands in for GitHub here, so no test needs the network.
+describe('review skills run the latest copy', () => {
+  const run = (skill, env) => new Promise((resolve) => {
+    execFile(PY, [path.join(skill, 'latest.py')], { encoding: 'utf8', env: { ...process.env, ...env } },
+      (err, stdout, stderr) => resolve({ code: err ? err.code : 0, out: stdout.trim(), err: stderr }));
+  });
+
+  test('both skills materialize side by side from the repo and reuse the cached commit', async () => {
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'review-latest-'));
+    try {
+      const env = { AAC_REVIEW_SOURCE: ROOT, AAC_REVIEW_REF: 'HEAD', AAC_REVIEW_CACHE: cache };
+      const a = await run(AUDIT, env);
+      assert.equal(a.code, 0, a.err);
+      assert.equal(path.basename(a.out), 'aac-performance-review-audit');
+      assert.ok(fs.existsSync(path.join(a.out, 'review_gate_tools.py')));
+      assert.ok(fs.existsSync(path.join(a.out, '..', 'aac-review-self-check', 'standards.md')), 'the audit reads ../aac-review-self-check/standards.md');
+      const s = await run(SELF, env);
+      assert.equal(s.code, 0, s.err);
+      assert.equal(path.dirname(s.out), path.dirname(a.out), 'one commit folder holds both skills');
+      const again = await run(AUDIT, env);
+      assert.equal(again.out, a.out);
+      assert.equal(fs.readdirSync(cache).length, 1, 'a second run reuses the cached commit');
+    } finally {
+      fs.rmSync(cache, { recursive: true, force: true });
+    }
+  });
+
+  test('an unreachable repo falls back to the bundled copy with exit 3 and says so', async () => {
+    const r = await run(SELF, { AAC_REVIEW_SOURCE: path.join(os.tmpdir(), 'no-such-checkout'), AAC_REVIEW_CACHE: os.tmpdir() });
+    assert.equal(r.code, 3);
+    assert.equal(path.resolve(r.out), path.resolve(SELF));
+    assert.match(r.err, /using the bundled copy/);
   });
 });
