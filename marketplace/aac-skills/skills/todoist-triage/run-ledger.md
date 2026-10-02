@@ -25,11 +25,11 @@ Note each record's timestamp and filename; those lines go into status line 6 ver
 
 ## Build the queue (step 3)
 
-Dump the surfaced items — each with `topic_key`, `title`, `observed_at` when the evidence carries a date, `todoist_id` when the item already is a task — and a Todoist snapshot carrying the `Wontfix` project's tasks, then:
+Dump the surfaced items — each with `topic_key`, `title`, `observed_at` when the evidence carries a date, `todoist_id` when the item already is a task — then run the queue against the Todoist mirror step 1 synced (it carries the `Wontfix` project's tasks; aac-routines issue 609):
 
 ```
 python -m aac_routines.run_ledger queue --routine todoist-triage \
-    --surfaced <surfaced.json> --snapshot <todoist-snapshot.json> \
+    --surfaced <surfaced.json> --mirror state/todoist-mirror.json \
     --config config/task-capture.json
 ```
 
@@ -38,7 +38,7 @@ It filters through the forgotten-tasks dismissals file, the Wontfix project and 
 - `queue` — what to propose from.
 - `dismissed` — Dan already ruled: report it as already ruled, naming the ruling, and leave it out of the proposals and questions.
 - `stale_ledger_entries` — **Todoist wins**: a ledger ruling never suppresses an item Todoist still shows live, so that item stays queued and the stale ruling goes in the report.
-- Without `--snapshot` the Wontfix check did not run: state that Todoist was not read and Dan's Wontfix rulings went unapplied, as an unreachable surface.
+- Without `--mirror` the Wontfix check did not run: state that Todoist was not read and Dan's Wontfix rulings went unapplied, as an unreachable surface.
 
 ## Append this run's record (step 6, after the report)
 
