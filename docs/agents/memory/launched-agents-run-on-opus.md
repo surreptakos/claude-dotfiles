@@ -12,7 +12,8 @@ never Fable. Dan, 2026-10-02: "stop launching them in fable, use opus 5.5".
 session that launched six task agents on 2026-10-02 was Fable, and Fable usage is rationed
 ([[fable-usage-is-rationed]]).
 
-**How to apply:** name the model on every `claude --bg` or `--cloud` launch. `claude --cloud`
-also refuses a non-interactive terminal, so unattended launches use `claude --bg`
-(aac-routines `agent_launcher.py`). Launch each task once: an unread start outcome counts as
-started until a listing proves otherwise.
+**How to apply:** task agents open as sidebar sessions from one-time scheduled tasks, which take the
+app's default model (Opus 5.5 on the anchor PC); the agent's first step checks its own model and
+stops on any other ([[agent-sessions-visible]]). Any command-line launch names `--model` explicitly
+(`claude --model claude-opus-5-5 ...`). Launch each task once: an existing `agent-<task id>`
+scheduled task means it was started.
