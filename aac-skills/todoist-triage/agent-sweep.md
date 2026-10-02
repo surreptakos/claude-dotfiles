@@ -98,21 +98,22 @@ he will paste elsewhere carries its link in its own system of record, never a ba
 draft that said `#43850`: "your message to Nick links to github instead of linking to zoho desk",
 because the Claude app renders `#<number>` as a GitHub issue link). Todoist tasks:
 `https://app.todoist.com/app/task/<id>`; the v1 REST task object carries no `url` field, so build it
-from the id. Zoho Desk tickets: the ticket's `webUrl`, from
-`tools/zoho-rest.py get "https://desk.zoho.com/api/v1/tickets/search?ticketNumber=<n>&orgId=874367220"`
-in claude-dotfiles (the Desk connector's `searchTickets` ignored `ticketNumber` on 2026-10-01 and
-returned the whole list). Drive files: the document link.
+from the id. Zoho Desk tickets: the ticket's `webUrl`, from the `tools/zoho-rest.py` call under
+[Connector quirks](#connector-quirks-2026-10-01). Drive files: the document link.
 
 ## Run an approved task
 
-The session the launcher starts works one Todoist task:
+The session works one Todoist task, named in its prompt by its link. It is either a background session the launcher starts from the `aac-routines` checkout (§ Launch) or a background agent a desktop Claude Code session starts in its own checkout (claude-dotfiles on 2026-10-01).
 
-1. Run `python3 .claude/hooks/check_payload.py`. A `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on.
-2. Read the task, its comments, and its source thread to the last message; a meeting, by its Fathom transcript (§ Meeting content).
-3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named.
-4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made, every record in it linked (§ Links, not ids). Never send, file, sign, approve or pay anything.
-5. Swap `agent-running` for `agent-done` on the task, keeping every other label.
-6. If the work cannot be done from what the session can reach, say why in the comment and swap `agent-running` for `no-agent`, so the task is Dan's again.
+**What it reaches.** Todoist through the Todoist connector or REST v1 (`https://api.todoist.com/api/v1`, bearer `TODOIST_API_KEY`, else the token in `~/.config/aac/todoist_api_token`); Zoho through `tools/zoho-rest.py` in claude-dotfiles (`ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`) or the Desk and CRM connectors; mail, Teams, calendar and SharePoint through the Microsoft 365 connector; Drive, Fathom and Granola through theirs. A connector's tool names carry a per-session id, so find them with ToolSearch. Never report a credential missing before listing the environment's variable names (names only, never values).
+
+1. **Check the payload — in the `aac-routines` checkout only.** Run `python3 .claude/hooks/check_payload.py`; a `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on. The script exists only there: in claude-dotfiles on 2026-10-01 it failed `can't open file ... .claude/hooks/check_payload.py: No such file`. A desktop agent in any other checkout skips it, and instead lists the environment's variable names and confirms the keys above that the task needs.
+2. Read the task, every comment on it, and its source thread to the last message before writing anything (REST: `GET /tasks/<id>`, `GET /comments?task_id=<id>`); a meeting, by its Fathom transcript (§ Meeting content).
+3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named. Confidential material (pay figures, health, leave, discipline, customer identifiers) goes in the draft only where the task asks for it (a comp memo carries pay bands), and stays in the task comment or Drive file: never in a chat reply, a report or a repository.
+4. Leave the result where the ball holder works: **one** comment on the task with the draft inline in Markdown or, when the draft is long, a link to a Drive file the session made (`create_file`), every record in it linked (§ Links, not ids). Post it with `add-comments` or `POST /comments` `{"task_id": "<id>", "content": "<text>"}`. Never send, file, sign, approve or pay anything; never create an Outlook draft under Dan's name; never change any other Todoist task.
+5. Swap `agent-running` for `agent-done`, keeping every other label. Labels are a full replacement: read the task's current labels, drop `agent-running`, add `agent-done`, and write the whole list back (`update-tasks` `labels`, or `POST /tasks/<id>` `{"labels": [...]}`).
+6. If the work cannot be done from what the session can reach, say exactly why in the comment (the error line, the missing source) and swap `agent-running` for `no-agent` the same way, so the task is Dan's again.
+7. Report to whoever started the session: the task link, what was posted (the comment, or the Drive file's link), which swap ran, and anything not done with its exact error.
 
 ## Meeting content (Fathom)
 
@@ -138,3 +139,13 @@ Holding only a Fathom link, `get_recording_by_url` (`{"url": "<link>"}`) returns
 No Fathom API key is in the desktop environment, so the connector is the only path. Where it still
 rejects an integer id, the Fathom recap email in Outlook is the fallback: it carries the summary but
 not the transcript, so the result says the transcript was not read.
+
+## Connector quirks (2026-10-01)
+
+Hit by the nine background agents of session ba3aee66. Each names the exact error and the call that worked.
+
+- **Zoho Desk connector `searchTickets`** ignored `ticketNumber` and returned the whole ticket list, with no error. Working: `tools/zoho-rest.py get "https://desk.zoho.com/api/v1/tickets/search?ticketNumber=<n>&orgId=874367220"` in claude-dotfiles returns the one ticket with its `webUrl`.
+- **Todoist REST v1 completed tasks** since 2025-01-01 in one call: `HTTP Error 400: Bad Request`. Working: 90-day windows (`since` and `until` at most 90 days apart), joined; 2,481 tasks that day.
+- **Microsoft 365 `outlook_email_search` and `chat_message_search`** reject `maxResults` (`Unrecognized key(s) in object: 'maxResults'`) and a string `offset` (`Expected number, received string`). Working: `limit` (25 at most) and a numeric `offset`, `0` first and then the response's `nextOffset`.
+- **Gmail `search_threads`** rejects `maxResults` too: `Invalid JSON payload received. Unknown name "maxResults": Cannot find field.` Working: `pageSize` (50 at most) and `pageToken`.
+- **Drive `update_file`** cannot change a Google Doc's text: `Unknown name "contentMimeType"`, `Unknown name "textContent"`; it takes only `title` and `parentId`. Working: a new file through `create_file`, linked per step 4. Editing a Doc in place waits on claude-dotfiles issue 1216.
