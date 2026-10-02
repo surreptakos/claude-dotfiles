@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Partition AAC-WR-001 into references/.
+"""Partition AAC-STD-001 into references/.
 
-    python3 scripts/build_references.py <AAC-WR-001.md> references/
+    python3 scripts/build_references.py <AAC-STD-001.md> references/
 
 Prints the content-sha. Exits non-zero if any section of the source lands in no
 file. Writes 00-INDEX.md too: the rule range, each file's rule span, and the
@@ -53,7 +53,7 @@ PARTS = [
 
 # 00-INDEX.md, filled in by write_index(). Its prose is edited here; the numbers
 # in braces come from the master and the coverage table.
-INDEX = """# AAC-WR-001 index
+INDEX = """# AAC-STD-001 index
 
 The controlled copy of AAC's house writing and document standard, partitioned
 for reading. Rules are numbered 1 through {total} and each number lives in exactly
@@ -92,7 +92,7 @@ Then read only what the deliverable needs.
 | Contract or legal text | `CORE.md`, `DELIVERABLES.md`. Rule 2 governs what AAC may restyle |
 | Performance review, its audit, or a coaching email | `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md`, `REVIEW.md`, and the review standards Rule 2 names |
 
-Rule 2 names controlled documents that outrank AAC-WR-001 within their scope,
+Rule 2 names controlled documents that outrank AAC-STD-001 within their scope,
 including the AAC performance review standards. When a deliverable falls under
 one of them, name that document and hand the work to it. Review material also
 takes `REVIEW.md`, the layout and mechanics Rule 2 scopes to it.
@@ -176,14 +176,14 @@ def main(src, outdir):
         all_rules += rules
         if rules:
             desc = f"Rules {spans[fname]}. {desc}"
-        content = f"# AAC-WR-001 - {desc}\n\n" + "\n".join(body).strip() + "\n"
+        content = f"# AAC-STD-001 - {desc}\n\n" + "\n".join(body).strip() + "\n"
         # newline="\n": on Windows the default turns every line into CRLF and
         # the committed LF copies show as rewritten end to end.
         (out / fname).write_text(content, encoding="utf-8", newline="\n")
         written.append((fname, len(content.split())))
 
     (out / "FRONT-MATTER.md").write_text(
-        "# AAC-WR-001 - control block\n\n" + front + "\n", encoding="utf-8",
+        "# AAC-STD-001 - control block\n\n" + front + "\n", encoding="utf-8",
         newline="\n")
 
     orphans = [blocks[i][0] for i in range(len(blocks))
@@ -202,5 +202,5 @@ def main(src, outdir):
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
-        sys.exit("usage: build_references.py <AAC-WR-001.md> <references/>")
+        sys.exit("usage: build_references.py <AAC-STD-001.md> <references/>")
     main(sys.argv[1], sys.argv[2])

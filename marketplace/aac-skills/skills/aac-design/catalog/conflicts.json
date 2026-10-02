@@ -2,11 +2,11 @@
   "note": "Hand-edited. Each entry names two catalog rows that cannot both hold on one deliverable. The generator decides the winner from the precedence field and writes it, with the reason, into CATALOG.json and TELLS.md (issue 1085). Two rows in the same tier are not decided by precedence: such an entry needs a ruling { winner, by, reason } from Dan, or the build fails.",
   "conflicts": [
     { "id": "CONFLICT-001", "rows": ["TASTE-035", "AAC-WR-077"],
-      "topic": "Body typeface: taste-skill steers the default sans away from the house family toward Geist, Outfit and similar; AAC-WR-001 names the family and one family per document." },
+      "topic": "Body typeface: taste-skill steers the default sans away from the house family toward Geist, Outfit and similar; AAC-STD-001 names the family and one family per document." },
     { "id": "CONFLICT-002", "rows": ["IMP-0276", "AAC-WR-077"],
-      "topic": "Platform sans: impeccable's craft floor refuses the platform sans as a page's display voice; AAC-WR-001 sets the house family, a platform sans, for titles and headings too." },
+      "topic": "Platform sans: impeccable's craft floor refuses the platform sans as a page's display voice; AAC-STD-001 sets the house family, a platform sans, for titles and headings too." },
     { "id": "CONFLICT-003", "rows": ["FD-011", "AAC-WR-079"],
-      "topic": "Justified text: frontend-design leaves justified alignment open as a layout choice; AAC-WR-001 rules body text left-aligned and never fully justified." },
+      "topic": "Justified text: frontend-design leaves justified alignment open as a layout choice; AAC-STD-001 rules body text left-aligned and never fully justified." },
     { "id": "CONFLICT-004", "rows": ["FD-009", "AAC-TOK-COLOR-ACCENT"],
       "topic": "Palette: frontend-design has each design invent a 4 to 6 color base palette; the AAC tokens fix the palette and its one accent." }
   ]

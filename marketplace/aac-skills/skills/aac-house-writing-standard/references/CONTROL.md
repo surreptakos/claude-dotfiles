@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 145-152. File names, document review, format matrix, editorial decision rule, release checklists
+# AAC-STD-001 - Rules 145-152. File names, document review, format matrix, editorial decision rule, release checklists
 
 # Part XXI - File names and version control
 

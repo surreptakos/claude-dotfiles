@@ -14,7 +14,7 @@ const { spawnSync } = require("child_process");
 const SCRIPTS = path.join(__dirname, "..", "aac-skills", "aac-house-writing-standard", "scripts");
 const js = fs.readFileSync(path.join(SCRIPTS, "wr001-lint.js"), "utf8");
 const md = fs.readFileSync(path.join(SCRIPTS, "wr001-coverage.md"), "utf8");
-const MASTER = path.join(__dirname, "..", "docs", "standards", "AAC-WR-001.md");
+const MASTER = path.join(__dirname, "..", "docs", "standards", "AAC-STD-001.md");
 const RULES = [...fs.readFileSync(MASTER, "utf8").matchAll(/^## (\d+)\. /gm)].length;
 
 function linterRules() {

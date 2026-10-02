@@ -44,10 +44,10 @@ test("all six sources are vendored at their pins, each with provenance", () => {
   }
 });
 
-test("AAC-WR-001 Rules 75 to 102 and every token are rows that cite, never restate", () => {
+test("AAC-STD-001 Rules 75 to 102 and every token are rows that cite, never restate", () => {
   const rows = committed().rows;
   for (let n = 75; n <= 102; n++) {
-    const r = rows.filter((x) => x.skill === "AAC-WR-001" && x.cites === `Rule ${n}`);
+    const r = rows.filter((x) => x.skill === "AAC-STD-001" && x.cites === `Rule ${n}`);
     assert.strictEqual(r.length, 1, `Rule ${n}`);
     assert.ok(!("words" in r[0]));
   }
@@ -95,19 +95,19 @@ test("mutation: a same-tier conflict with no ruling fails the build", () => {
   assert.throws(() => cat.build(inputs), /CONFLICT-900: .* share a precedence tier; the entry needs a ruling/);
 });
 
-test("mutation: an AAC-WR-001 rule with no row fails", () => {
+test("mutation: an AAC-STD-001 rule with no row fails", () => {
   const inputs = cat.readInputs();
   inputs.house.wr001 = inputs.house.wr001.filter((e) => e.rule !== 80);
-  assert.throws(() => cat.build(inputs), /AAC-WR-001 Rule 80 has no entry in catalog\/aac\.checks\.json/);
+  assert.throws(() => cat.build(inputs), /AAC-STD-001 Rule 80 has no entry in catalog\/aac\.checks\.json/);
   const c = committed();
   c.rows = c.rows.filter((r) => r.id !== "AAC-WR-080");
-  assert.ok(flags(cat.check(c, cat.readInputs()), /^AAC-WR-001 Rule 80 has 0 rows, not 1$/));
+  assert.ok(flags(cat.check(c, cat.readInputs()), /^AAC-STD-001 Rule 80 has 0 rows, not 1$/));
 });
 
 test("the precedence order is a catalog field: house, design skills, brief", () => {
   const p = committed().precedence;
   assert.deepStrictEqual(p.map((t) => [t.rank, t.tier]), [[1, "house"], [2, "design-skills"], [3, "brief"]]);
-  assert.deepStrictEqual(p[0].sources, ["AAC tokens (assets/aac-tokens.css, DESIGN-SYSTEM.md)", "AAC-WR-001"]);
+  assert.deepStrictEqual(p[0].sources, ["AAC tokens (assets/aac-tokens.css, DESIGN-SYSTEM.md)", "AAC-STD-001"]);
 });
 
 test("mutation: a vendored rule with no row fails", () => {

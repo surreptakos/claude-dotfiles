@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 1-74. Governing rules, house style, punctuation, capitalization, numbers, abbreviations, spelling, grammar
+# AAC-STD-001 - Rules 1-74. Governing rules, house style, punctuation, capitalization, numbers, abbreviations, spelling, grammar
 
 # How to use this standard
 

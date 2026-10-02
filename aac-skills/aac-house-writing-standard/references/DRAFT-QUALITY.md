@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 153-170. AI tells, machine vocabulary, reader need, phrase register, structure register
+# AAC-STD-001 - Rules 153-170. AI tells, machine vocabulary, reader need, phrase register, structure register
 
 # Part XXV - Draft quality and AI tells
 

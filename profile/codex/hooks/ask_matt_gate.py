@@ -1625,7 +1625,7 @@ def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
 
 # Issue 1212: a quoted deliverable (a blockquoted draft Dan pastes into Teams or mail, or a prose
 # fence) is his text, not the agent's prose. The reply caps were trimming a 230-word Teams draft
-# that already passed AAC-WR-001, so the caps skip it and the house linter checks it instead. A
+# that already passed AAC-STD-001, so the caps skip it and the house linter checks it instead. A
 # fence tagged as code is code, not a deliverable; an untagged or prose-tagged one is.
 FENCE_OPEN_PATTERN = re.compile(r"^ {0,3}```[ \t]*([\w+.-]*)")
 FENCE_CLOSE_PATTERN = re.compile(r"^ {0,3}```[ \t]*$")
@@ -1695,7 +1695,7 @@ def _wr001_linter() -> Path | None:
 
 
 def _wr001_lint(blocks: list[str]) -> list[str] | None:
-    """AAC-WR-001 errors in the quoted deliverables, one violation per finding naming the rule;
+    """AAC-STD-001 errors in the quoted deliverables, one violation per finding naming the rule;
     None when the linter cannot run, and then the deliverables get no exemption from the caps.
     Regex rules only: the Jev rules are warnings and never decide the linter's exit."""
     linter = _wr001_linter()
@@ -1725,7 +1725,7 @@ def _wr001_lint(blocks: list[str]) -> list[str] | None:
                 continue
             snippet = f' "{finding["text"][:40]}"' if finding.get("text") else ""
             violations.append(
-                f"quoted deliverable {index} breaks AAC-WR-001 Rule {finding.get('rule')} "
+                f"quoted deliverable {index} breaks AAC-STD-001 Rule {finding.get('rule')} "
                 f"(line {finding.get('line')}): {finding.get('msg')}{snippet}"
             )
     return violations

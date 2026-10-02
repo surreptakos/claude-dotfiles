@@ -1,4 +1,4 @@
-# AAC-WR-001 coverage: how each of the 185 rules is checked
+# AAC-STD-001 coverage: how each of the 185 rules is checked
 
 Companion to `wr001-lint.js`. Every rule has one row. **Pattern** means the linter decides it by regex, per line or per document; **Jev** means a TypeSafe Jev judgment call on one unit (a sentence, a paragraph, a term in context, or the whole document), warning only; **Reader** means the rule needs the evidence, the audience, the facts or the sense of the text, so the release check (Rule 166) decides it; **Layout** means it lives in the rendered Word or PDF document, not in the text the linter reads.
 

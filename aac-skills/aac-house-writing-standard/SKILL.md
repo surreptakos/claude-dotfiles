@@ -1,17 +1,17 @@
 ---
 name: aac-house-writing-standard
-description: "AAC house writing standard, AAC-WR-001. Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document or table; also a performance review or its audit."
+description: "AAC house writing standard, AAC-STD-001 (formerly AAC-WR-001). Load before drafting, formatting or reviewing any AAC deliverable: email, Teams message, memo, letter, report, SOP, proposal, scope, Word document or table; also a performance review or its audit."
 metadata:
-  standard-version: '0.15'
-  modified: "2026-10-02T18:10:11Z"
-  previous-modified: "2026-10-01T23:09:42Z"
-  revision: "23"
-  content-sha: "0f151516c09a"
+  standard-version: '0.16'
+  modified: "2026-10-02T23:09:18Z"
+  previous-modified: "2026-10-02T18:10:11Z"
+  revision: "24"
+  content-sha: "cf86ef3de2ac"
 ---
 
 # AAC house writing standard
 
-`references/` holds the controlled copy of AAC-WR-001; `scripts/` holds its
+`references/` holds the controlled copy of AAC-STD-001; `scripts/` holds its
 mechanical check.
 
 ## The rule that shapes this skill
@@ -53,11 +53,11 @@ would settle it.
 
 ## Regenerating after a revision of the standard
 
-The master is `docs/standards/AAC-WR-001.md` at the repo root. Edit the
+The master is `docs/standards/AAC-STD-001.md` at the repo root. Edit the
 master, never `references/`, then regenerate from this directory:
 
 ```
-python3 scripts/build_references.py ../../docs/standards/AAC-WR-001.md references/
+python3 scripts/build_references.py ../../docs/standards/AAC-STD-001.md references/
 ```
 
 The script exits non-zero if any section of the source lands in no file, so a

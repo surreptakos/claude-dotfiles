@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * wr001-lint - deterministic checks for AAC-WR-001.
+ * wr001-lint - deterministic checks for AAC-STD-001.
  *
  * Covers every rule a pattern can decide (see wr001-coverage.md beside this
  * file for all 185 rules: pattern, Jev, reader, or layout). Seven judgment
@@ -41,7 +41,7 @@ const fs = require("fs");
 const path = require("path");
 const { createJev } = require("./jev");
 
-const STANDARD_VERSION = "0.15";
+const STANDARD_VERSION = "0.16";
 
 const FORMAL_HINTS =
   /\b(contract|agreement|master service|policy|demand letter|certification|legal notice|scope of work|proposal|terms and conditions)\b/i;
@@ -643,7 +643,7 @@ async function run(argv, io = {}) {
         const e = r.findings.filter((f) => f.sev === "error").length;
         const w = r.findings.length - e;
         log(
-          `${r.file}: ${e} error, ${w} warn  [${r.formal ? "formal" : "narrative"}, WR-001 v${STANDARD_VERSION}]`
+          `${r.file}: ${e} error, ${w} warn  [${r.formal ? "formal" : "narrative"}, AAC-STD-001 v${STANDARD_VERSION}]`
         );
       }
     }

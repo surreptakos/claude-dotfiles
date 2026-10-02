@@ -1,4 +1,4 @@
-# AAC-WR-001 index
+# AAC-STD-001 index
 
 The controlled copy of AAC's house writing and document standard, partitioned
 for reading. Rules are numbered 1 through 185 and each number lives in exactly
@@ -37,7 +37,7 @@ Then read only what the deliverable needs.
 | Contract or legal text | `CORE.md`, `DELIVERABLES.md`. Rule 2 governs what AAC may restyle |
 | Performance review, its audit, or a coaching email | `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md`, `REVIEW.md`, and the review standards Rule 2 names |
 
-Rule 2 names controlled documents that outrank AAC-WR-001 within their scope,
+Rule 2 names controlled documents that outrank AAC-STD-001 within their scope,
 including the AAC performance review standards. When a deliverable falls under
 one of them, name that document and hand the work to it. Review material also
 takes `REVIEW.md`, the layout and mechanics Rule 2 scopes to it.

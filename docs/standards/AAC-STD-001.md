@@ -5,14 +5,15 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.15 \| ACTIVE** |
+| **VERSION 0.16 \| ACTIVE** |
 |---|
 
-| **Document number** | AAC-WR-001 |
+| **Document number** | AAC-STD-001 |
 |---|---|
+| **Former number** | AAC-WR-001, versions 0.1 through 0.15 |
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.15 |
+| **Version** | 0.16 |
 | **Status** | Active |
 | **Effective date** | 2026-10-02 |
 | **Review cycle** | Annual, or upon material change |
@@ -28,6 +29,7 @@ The approved electronic master of this standard is the controlled copy. Printed 
 | 0.2 | 2026-09-09 | Editorial and layout refinements; see Appendix F. | Pending |
 | 0.3 | 2026-09-09 | Performance-review exception in Part I; decision register updated. | Pending |
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
+| 0.5 | 2026-09-11 | Em dash limited to one rare narrative exception: Rule 23. Draft-quality and AI-tell rules: Rules 153–166; Appendices G and H. Row restored in 0.16 from Table F1, since the 0.5 copy carried none; the date is the day the skill first cited 0.5. | Pending |
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
@@ -38,6 +40,7 @@ The approved electronic master of this standard is the controlled copy. Printed 
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
 | 0.14 | 2026-10-01 | Controlled-document header without a signature table; approval by merge; effective date in the header: Appendix F. | General Manager |
 | 0.15 | 2026-10-02 | Performance review layout and mechanics folded in from the retired layout draft: Rule 2; Part XXVI, Rules 171–185; Appendix F; References. | General Manager |
+| 0.16 | 2026-10-02 | Renumbered AAC-STD-001 from AAC-WR-001 under the AAC-<type>-<nnn> scheme; the former number still identifies this standard. Missing 0.5 row restored. Header; Appendix F. | General Manager |
 
 # How to use this standard
 
@@ -1417,6 +1420,7 @@ Table F1. House decision register
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
 | 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
 | 2; 171–185 | Performance review layout and mechanics are Part XXVI of this standard: the review page, review cells, Guidance points, dates, audit email mechanics, file names, and the canonical templates and gate script. Rule 2 names the AAC performance review standards and Part XXVI, not a separate layout document. The review page takes Aptos 10 pt from the approved review template; other review material stays Aptos 11 pt under Rule 77. | Owner ruling, October 1, 2026 (issue 1235): "AAC House Layout Standard (Gregg-based)" was to be folded into this standard and never was, and it lived only in the review project folder, so a session that never opened the folder never saw it. Its review-material house rules became Rules 171 through 185. Its restatements of Gregg mechanics that this standard does not state stay with Gregg under Rule 152; where it differed from this standard outside review material, this standard already controlled. The draft's Aptos 11 pt for everything conflicts with the approved review template (2026-09-23) at Aptos 10 pt; the template is proposed to win on the review page, pending owner confirmation. A figure the manager states is taken as stated unless a source contradicts it (owner ruling, October 1, 2026). | 0.15 |
+| Header; F | Document number AAC-STD-001. AAC-WR-001 is its former number and still identifies this standard; no AAC-WR-002 is issued. | Owner ruling, October 2, 2026, in the grill session: "you can change AAC-WR to something else." Recorded in aac-nexus ADR 0005, which numbers controlled documents AAC-<type>-<nnn> with one counter per type; STD is the internal-standard type. | 0.16 |
 
 # Appendix G - Phrase register
 

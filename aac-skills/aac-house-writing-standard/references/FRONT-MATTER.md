@@ -1,4 +1,4 @@
-# AAC-WR-001 - control block
+# AAC-STD-001 - control block
 
 **ACTIVE ALARM COMPANY, INC.**
 
@@ -7,14 +7,15 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.15 \| ACTIVE** |
+| **VERSION 0.16 \| ACTIVE** |
 |---|
 
-| **Document number** | AAC-WR-001 |
+| **Document number** | AAC-STD-001 |
 |---|---|
+| **Former number** | AAC-WR-001, versions 0.1 through 0.15 |
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.15 |
+| **Version** | 0.16 |
 | **Status** | Active |
 | **Effective date** | 2026-10-02 |
 | **Review cycle** | Annual, or upon material change |
@@ -30,6 +31,7 @@ The approved electronic master of this standard is the controlled copy. Printed 
 | 0.2 | 2026-09-09 | Editorial and layout refinements; see Appendix F. | Pending |
 | 0.3 | 2026-09-09 | Performance-review exception in Part I; decision register updated. | Pending |
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
+| 0.5 | 2026-09-11 | Em dash limited to one rare narrative exception: Rule 23. Draft-quality and AI-tell rules: Rules 153–166; Appendices G and H. Row restored in 0.16 from Table F1, since the 0.5 copy carried none; the date is the day the skill first cited 0.5. | Pending |
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
@@ -40,3 +42,4 @@ The approved electronic master of this standard is the controlled copy. Printed 
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
 | 0.14 | 2026-10-01 | Controlled-document header without a signature table; approval by merge; effective date in the header: Appendix F. | General Manager |
 | 0.15 | 2026-10-02 | Performance review layout and mechanics folded in from the retired layout draft: Rule 2; Part XXVI, Rules 171–185; Appendix F; References. | General Manager |
+| 0.16 | 2026-10-02 | Renumbered AAC-STD-001 from AAC-WR-001 under the AAC-<type>-<nnn> scheme; the former number still identifies this standard. Missing 0.5 row restored. Header; Appendix F. | General Manager |
