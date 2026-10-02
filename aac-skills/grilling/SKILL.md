@@ -2,10 +2,10 @@
 name: grilling
 description: Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.
 metadata:
-  modified: "2026-10-01T16:39:50Z"
-  previous-modified: "2026-09-27T19:31:03Z"
-  revision: "3"
-  content-sha: "b75deb71a5f3"
+  modified: "2026-10-01T23:30:30Z"
+  previous-modified: "2026-10-01T16:39:50Z"
+  revision: "4"
+  content-sha: "dc446de97196"
 ---
 
 Interview the user relentlessly until you reach a shared understanding. Map this as a **design tree**: every decision branches into the decisions that hang off it.
