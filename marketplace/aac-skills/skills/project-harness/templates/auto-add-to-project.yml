@@ -1,0 +1,50 @@
+name: Auto-add to project
+
+# INSTALLED BY project-harness on a NEW repo only (claude-dotfiles issue 1333, harness v39; PRD
+# issue 1309, decision 2). Send a fix upstream to claude-dotfiles rather than editing this copy.
+#
+# Puts every newly opened issue and pull request on this repo's Projects board, so a new repo needs
+# no "Auto-add to project" toggle. That toggle is owner-only, and no API can enable it or read its
+# repo filter (verified 2026-10-02), so a script cannot set it on a new repo; this workflow can.
+#
+# EXISTING REPOS NEVER GET THIS FILE (decision 3). They keep the native toggle and carry neither the
+# workflow nor its secret; the step-7 sweep moves their marker through v39 and copies nothing. Adding
+# an item the board already holds is a no-op, so a copy beside the toggle would do no harm, but it
+# would carry a secret those repos do not need.
+#
+# THE TOKEN. `PROJECT_AUTOMATION_TOKEN` is a per-repo secret (a User account has no organization
+# secrets): a classic token with the `project` and `repo` scopes, which the action README requires
+# for a private repo. The job's GITHUB_TOKEN cannot write to a user-owned Projects board.
+#
+# NO SECRET IS NOT A FAILURE. When the secret is empty (not set yet, or a fork's or Dependabot's PR,
+# which get no secrets) the job logs a `::notice::` and exits green instead of failing every issue
+# event. A missed card still shows: the tracker audit reports it as `not-on-board`.
+#
+# Test: `tools/auto-add-template.test.js` in claude-dotfiles pins this file by text.
+
+on:
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+
+# The action writes to the board with the secret's token, never with GITHUB_TOKEN.
+permissions: {}
+
+jobs:
+  add-to-project:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_AUTOMATION_TOKEN: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}
+    steps:
+      - name: Skip when PROJECT_AUTOMATION_TOKEN is empty
+        if: env.PROJECT_AUTOMATION_TOKEN == ''
+        run: echo "::notice::PROJECT_AUTOMATION_TOKEN is empty - not adding this item to the board. Set the repo secret to a classic token with the project and repo scopes."
+      - name: Add the item to the board
+        if: env.PROJECT_AUTOMATION_TOKEN != ''
+        uses: actions/add-to-project@v2.0.0
+        with:
+          # SUBSTITUTE: this repo's board URL, filled in by the new-repo command, e.g.
+          # https://github.com/users/<owner>/projects/<number>. Left as is, the action fails.
+          project-url: PROJECT_URL
+          github-token: ${{ secrets.PROJECT_AUTOMATION_TOKEN }}

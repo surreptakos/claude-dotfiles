@@ -2,10 +2,10 @@
 name: project-harness
 description: Install or upgrade the project harness (triage labels, issue forms, generated DASHBOARD.md, test gate, tracker audit, cloud bootstrap). Use when the user says "harness this repo" or starts a new project, asks to upgrade a harness, or has edited a harness template.
 metadata:
-  modified: "2026-10-02T15:39:25Z"
-  previous-modified: "2026-10-01T23:03:11Z"
-  revision: "52"
-  content-sha: "f355c402d8ad"
+  modified: "2026-10-02T23:06:40Z"
+  previous-modified: "2026-10-02T15:39:25Z"
+  revision: "53"
+  content-sha: "d084b457c411"
 ---
 
 # Project Harness
@@ -139,7 +139,7 @@ Projects board instead of a per-repo one (step 5). Otherwise proceed without que
    - The runner spawns the repo's `tools/tracker-audit.js` and propagates its exit code; both
      non-zero codes fail the run.
 9. **Harness version marker** — copy `templates/harness-version.md` to
-   `docs/agents/harness-version.md` and set the date. **Current version: 38.** `/session-start` reads this marker every session and
+   `docs/agents/harness-version.md` and set the date. **Current version: 39.** `/session-start` reads this marker every session and
    STOPs when the repo is behind (issue 139): upgrade an out-of-date harness before writing code.
 10. **Deploy-safety check** — if a packaging/deploy step sweeps files (clasp, gas, docker COPY, npm
     `files`), exclude `scripts/`, `.githooks/`, `tools/`, `.github/` and `.caveman.json` from it.
@@ -286,7 +286,10 @@ version 1.
 
 **3. Install only what that version lacks**, then bump the marker's number and date. The rows are in
 [`UPGRADES.md`](UPGRADES.md), one per version with the step that installs it: re-run only the steps
-of rows above the repo's number. A row can mean "re-copy a file you already have". **Before
+of rows above the repo's number. A row can mean "re-copy a file you already have". A row marked
+**fresh installs only** installs nothing on an existing repo: bump past it and copy nothing. Row 39's
+`templates/auto-add-to-project.yml` is one; never copy it or set its `PROJECT_AUTOMATION_TOKEN`
+secret on an existing repo, which keeps the native auto-add toggle (issue 1309, decision 3). **Before
 re-copying any template a repo already carries, read [`MERGING-TEMPLATES.md`](MERGING-TEMPLATES.md)**
 — most repos extend template bodies, and an extended copy takes a three-way merge.
 
