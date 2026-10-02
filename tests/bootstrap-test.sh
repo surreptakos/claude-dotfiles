@@ -27,6 +27,9 @@
 #      (issue 614: checks 3 and 5 passed for three harness versions while every merged command
 #      carried a literal ${CLAUDE_PLUGIN_ROOT} that Claude Code refuses in settings.json — a gate
 #      that only reads the entries cannot see that; this one executes them)
+#   8  aac-design's render.py — the copy the bootstrap installed — converts the payload's
+#      aac-letterhead.docx to PDF and PNG under both stand-in fonts (issue 1310), installing the
+#      LibreOffice pieces the host lacks on first use
 #
 # WHY THE EXPECTATION IN CHECK 3 IS HARD-CODED HERE and not read out of the payload's
 # hooks.json: a gate that compares the merged settings against the manifest they were merged
@@ -678,6 +681,38 @@ if [ "$ran" -eq 0 ]; then
   fail "no merged SessionStart/UserPromptSubmit command found to execute"
 elif [ "$broke" -eq 0 ]; then
   pass "all $ran merged SessionStart/UserPromptSubmit hooks executed from the clean home"
+fi
+
+# ------------------------------------------- 8. render.py converts a known-good .docx -----------
+# Issue 1310: in a cloud container aac-design's render.py failed on every .docx with LibreOffice's
+# generic "source file could not be loaded". The installed copy renders the payload's own
+# letterhead template under both stand-in fonts, installing what the host lacks (LibreOffice's
+# Writer, poppler, the fonts) on first use, so a fresh runner with no LibreOffice crosses the same
+# path a fresh container does. The real PATH, not the gh-less shim: apt-get lands soffice in
+# /usr/bin after the shim was built. Run on the gate alone; a fault run would only repeat it.
+if [ -z "$FAULT" ]; then
+  render_py="$CLEAN_HOME/.claude/skills/aac-design/scripts/render.py"
+  letterhead="$CLEAN_HOME/.claude/skills/aac-design/assets/aac-letterhead.docx"
+  render_out="$SCRATCH/render.json"
+  render_err="$SCRATCH/render-stderr.txt"
+  env -i PATH="$CLEAN_HOME/.local/bin:$PATH" HOME="$CLEAN_HOME" ${passthrough[@]+"${passthrough[@]}"} \
+    timeout 900 python3 "$render_py" "$letterhead" --out "$SCRATCH/render" >"$render_out" 2>"$render_err"
+  render_rc=$?
+  if render_summary="$(python3 - "$render_out" <<'PYRENDER'
+import json, os, sys
+doc = json.load(open(sys.argv[1]))
+rs = doc['renders']
+assert sorted(r['font'] for r in rs) == ['Carlito', 'Liberation Sans'], rs
+for r in rs:
+    assert r['pages'] >= 1 and os.path.getsize(r['pdf']) > 0 and r['png'], r
+    assert all(os.path.getsize(p) > 0 for p in r['png']), r
+print(', '.join(f"{r['font']} {r['pages']} page(s), {len(r['png'])} PNG" for r in rs))
+PYRENDER
+)" && [ "$render_rc" -eq 0 ]; then
+    pass "render.py converted the payload's aac-letterhead.docx to PDF and PNG: $render_summary"
+  else
+    fail "render.py exited $render_rc on the payload's aac-letterhead.docx: $(tail -3 "$render_err" | tr '\n' ' ')"
+  fi
 fi
 
 # ------------------------------------------------------------------- verdict --------------------

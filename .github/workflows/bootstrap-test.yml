@@ -24,8 +24,9 @@ name: bootstrap gate
 #     bootstrap gate: FAIL (1 check(s))        # exit 1
 #
 # Linux only, and that is the point: the bootstrap hook is bash and only ever runs in a
-# container. `timeout-minutes: 3` holds the runtime criterion; the gate itself takes seconds,
-# the rest is the checkout and the pinned gh download.
+# container. `timeout-minutes: 8` holds the runtime criterion; the gate itself takes seconds,
+# the rest is the checkout, the pinned gh download, and check 8's first-use install of
+# LibreOffice, poppler and the stand-in fonts (issue 1310), which the runner image lacks.
 
 on:
   pull_request:
@@ -40,7 +41,7 @@ jobs:
   bootstrap:
     name: bootstrap from a clean home
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
