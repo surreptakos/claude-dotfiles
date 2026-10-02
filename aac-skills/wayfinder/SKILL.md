@@ -3,10 +3,10 @@ name: wayfinder
 description: Plan a huge chunk of work (more than one agent session can hold) as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-28T21:53:59Z"
-  previous-modified: "2026-08-25T14:57:11Z"
-  revision: "2"
-  content-sha: "e5ff518f4486"
+  modified: "2026-10-01T23:30:30Z"
+  previous-modified: "2026-09-28T21:53:59Z"
+  revision: "3"
+  content-sha: "5de2eee4d26a"
 ---
 
 A loose idea has arrived, too big for one agent session, and wrapped in fog: the way from here to the **destination** isn't visible yet. Wayfinding is about finding that way, not charging at the destination. This skill charts the way as a **shared map** on the repo's issue tracker, then works its **decision tickets** (questions whose resolution is a decision, not slices of a build to execute) one at a time until the route is clear.
