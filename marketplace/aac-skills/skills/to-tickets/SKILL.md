@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-10-02T21:53:39Z'
-  previous-modified: '2026-10-02T21:09:54Z'
-  revision: '13'
-  content-sha: c260f9de5181
+  modified: '2026-10-02T22:12:07Z'
+  previous-modified: '2026-10-02T21:53:39Z'
+  revision: '14'
+  content-sha: 64284bf992e8
 ---
 
 # To Tickets
@@ -141,7 +141,7 @@ The rule covers the tickets this run publishes. Existing open tickets the audit 
 
 ### In aac-routines: publish through `publish_ticket`
 
-aac-routines makes the line mechanical (issues 106, 237). Publish every ticket through `src/aac_routines/publish_ticket.py` (`publish_ticket(...)`, or the CLI shim `scripts/publish_ticket.py`), which runs the fields through `render_ticket_body` in `src/aac_routines/to_tickets.py`; there is no body override. Pass `closed_issue_refs=(N, ...)`, the closed numbers the ticket's discovery cites, and the acknowledgment lands at the top of the body. It is pure by default: `dry_run=True` returns the body without touching GitHub, and `dry_run=False` posts it with `gh issue create --body-file -`. With `closed_issue_refs=()` the body renders exactly as the issue template above. `aac_routines.publish_ticket.lint_ticket_body(body, cited_closed_issue_refs)` flags a body that cites a closed issue without the wording, so fleet tooling can fail a run whose bodies drifted. The renderer queries nothing; the closed check in a container there reads:
+aac-routines makes the line mechanical (issues 106, 237). Publish every ticket through `src/aac_routines/publish_ticket.py` (`publish_ticket(...)`, or the CLI shim `scripts/publish_ticket.py`), which runs the fields through `render_ticket_body` in `src/aac_routines/to_tickets.py`; there is no body override. Pass `closed_issue_refs=(N, ...)`, the closed numbers the ticket's discovery cites, and the acknowledgment lands at the top of the body. It is pure by default: `dry_run=True` returns the body without touching GitHub, and `dry_run=False` posts it with `gh issue create --body-file -`. With `closed_issue_refs=()` the body renders exactly as the issue template above. `aac_routines.publish_ticket.lint_ticket_body(body, cited_closed_issue_refs)` flags a body that cites a closed issue without the wording, so fleet tooling can fail a run whose bodies drifted. `render_ticket_body(...)` and its `Discovery` dataclass stay importable for direct callers, but prefer `publish_ticket`, so a future audit can flag ad-hoc bodies. The renderer queries nothing; the closed check in a container there reads:
 
 ```bash
 gh api repos/surreptakos/aac-routines/issues/<n> --jq .state   # container (REST)
