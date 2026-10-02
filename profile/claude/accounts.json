@@ -40,7 +40,6 @@
     "surreptakos/aac-routines":           {},
     "surreptakos/aac-message-board":      {},
     "surreptakos/aac-sales-commissions":  {},
-    "surreptakos/aac-task-management":    { "status": "dead" },
     "surreptakos/aac-bill-intake":        {},
     "surreptakos/zoho-source-of-truth":   {},
     "surreptakos/aac-sales-cockpit":      {},
