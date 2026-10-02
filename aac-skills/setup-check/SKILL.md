@@ -1,11 +1,11 @@
 ---
 name: setup-check
-description: Run the setup check on this Windows desktop - audit and fix its local build, register or stand down the desktop routines, list what only the owner can do. Use when the user asks to check or set up a PC, or the setup check's to-do says to run /setup-check.
+description: Setup check for this Windows desktop - audit and fix its local build, register or stand down the desktop routines, list the owner's to-do. Use when asked to check or set up a PC, or when the setup check's to-do says to run /setup-check.
 metadata:
-  modified: "2026-09-30T21:08:10Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "c21803f4762e"
+  modified: "2026-10-02T15:35:59Z"
+  previous-modified: "2026-09-30T21:08:10Z"
+  revision: "2"
+  content-sha: "7ef9b68f9b10"
 ---
 
 # Setup check
@@ -14,8 +14,8 @@ The engine is `setup-check.ps1` in the claude-dotfiles clone; this skill runs it
 thing it cannot: change desktop routines, which only a Claude session's scheduled-tasks tools can
 reach. Terms (local build, setup check, anchor PC) are in that repo's `CONTEXT.md`.
 
-Paths come from `$env:USERPROFILE`, never a literal home: the plugin is built on one PC and runs on
-all of them. Quote every path. Commands below are for the PowerShell tool.
+Build every path from `$env:USERPROFILE` and quote it: the plugin is built on one PC and runs on
+all of them. Commands below are for the PowerShell tool.
 
 ## 1. Find the clone
 
@@ -50,12 +50,11 @@ desktop-routines line. The routine ids are the comma-separated list after its co
 routine line, a `not audited` line or a `--` line means nothing to act on; report it and skip to
 step 4.
 
-The tools write to the signed-in account, and the audit counts a routine only under its owner
-(`~/.claude/accounts.json`). Run this from a session signed in to that owner.
+Run this from a session signed in to the routines' owner: the tools write to the signed-in
+account, and the audit counts a routine only under its owner (`~/.claude/accounts.json`).
 
-Only two tool calls change routines: `create_scheduled_task` and `update_scheduled_task`. A
-routine is never deleted and no registry file is edited, even when a routine looks wrong: that is
-an owner to-do.
+Routines change through `create_scheduled_task` and `update_scheduled_task` alone. A routine that
+looks wrong becomes an owner to-do: never delete a routine or edit a registry file.
 
 **Anchor PC** - `N of M desktop routines not registered here: <ids>`. Call `list_scheduled_tasks`
 once, then for each id:

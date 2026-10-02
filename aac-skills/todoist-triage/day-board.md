@@ -28,7 +28,7 @@ The board shows a row whose task is also an open question once, as the question.
 
 ## Launch agents (issue 1202)
 
-The triage panel's **Launch agents** button starts nothing and writes nothing: it counts the open tasks labelled `agent`, links each, and says the `agent-launcher` routine starts them within 30 minutes, per [`agent-sweep.md`](agent-sweep.md) § Launch. The page calls no session connector: every `Claude Code Remote` `create_session` call rejected `blocked_by_policy` on Dan's account (issue 1162). To stop a started session, archive it and put `agent` back or remove it.
+The triage panel's **Launch agents** button starts nothing and writes nothing: it counts the open tasks labelled `agent`, links each, and says the `agent-launcher` routine starts them within 30 minutes, per [`agent-sweep.md`](agent-sweep.md) § Launch. The page calls no session connector: on 2026-10-01 every `Claude Code Remote` `create_session` call from the page rejected `blocked_by_policy` ("Your organization blocks this Claude Code Remote call"), and no account or organization toggle lifts it (issue 1162 holds the reading and the decision). To stop a started session, archive it and put `agent` back or remove it.
 
 ## The huddle draft's evidence (issue 1039)
 

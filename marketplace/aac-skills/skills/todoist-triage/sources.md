@@ -27,7 +27,7 @@ Fill exactly the window "newest export stamp → now", from:
 - Meeting notes — Granola
 - Todoist history — `find-activity`
 
-The window starts at the export stamp. Log every connector that fails or returns no access.
+Log every connector that fails or returns no access.
 
 ## Systems of record (Dan, 2026-09-18, issue 204)
 
