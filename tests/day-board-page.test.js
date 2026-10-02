@@ -29,7 +29,8 @@ const stampTitle = (source, at) => source + "__" + at.toISOString().slice(0, 16)
 const mdEscape = s => s.replace(/[\\<>&\[\]#_]/g, c => "\\" + c);
 
 // exportAgoMin: how long before NOW today's newest exports were stamped; null means none has landed yet.
-function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], todoist = () => undefined}){
+// github: the GitHub connector's search results, {prs: [...], issues: [...]} in the REST search item shape.
+function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], todoist = () => undefined, github = {prs: [], issues: []}, sentMail}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const prompts = [], m365 = [];
@@ -37,7 +38,7 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
   const stamp = exportAgoMin == null ? null : new Date(now - exportAgoMin * 60000);
   const exported = {
     huddle: {value: [{id: "1", from: {user: {id: DAN, displayName: "Dan"}}, createdDateTime: new Date(now - 86400000).toISOString(), body: {contentType: "html", content: lastPostHtml}}]},
-    sent: {value: [{subject: "RE: vendor setup", sentDateTime: new Date(now - 2 * 3600000).toISOString(), body: {contentType: "html", content: "<html><body><p>Sent the vendor the setup documents</p></body></html>"}}]}
+    sent: sentMail ? {value: sentMail} : {value: [{subject: "RE: vendor setup", sentDateTime: new Date(now - 2 * 3600000).toISOString(), body: {contentType: "html", content: "<html><body><p>Sent the vendor the setup documents</p></body></html>"}}]}
   };
   const calls = [];
   const mcp = {async callTool(server, tool, input){
@@ -57,6 +58,8 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
     if (tool === "find-activity") return text({events: []});
     if (tool === "outlook_email_search") return text(liveMail);
     if (tool === "query_granola_meetings") return {content: [{type: "text", text: "(no meetings)"}]};
+    if (server === "GitHub" && tool === "search_pull_requests") return text({total_count: github.prs.length, incomplete_results: false, items: github.prs});
+    if (server === "GitHub" && tool === "search_issues") return text({total_count: github.issues.length, incomplete_results: false, items: github.issues});
     return text({});
   }};
   const store = {};
@@ -227,6 +230,53 @@ test("a live read stops one hour after a stale export, and the span past it is n
   assert.match(sent, /inside the tail/);
   assert.doesNotMatch(sent, /past the tail/);
   assert.match(page.$("hud-status").textContent, /Could not read: .*huddle channel [^;]*past the one-hour live tail.*sent mail [^;]*past the one-hour live tail/);
+});
+
+// Issue 1199: GitHub is the fifth report source. Merged PRs and closed issues since the last post reach the drafter,
+// and a day of repository work and nothing else still drafts a report whose evidence names the PR.
+const ghRepoUrl = "https://api.github.com/repos/surreptakos/claude-dotfiles";
+const githubPrompt = page => draftPromptOf(page).split("GITHUB SINCE (pull requests merged and issues closed in his repos):\n")[1].split("\n")[0];
+
+test("a day with repository work and nothing else drafts a report line resting on the PR", async () => {
+  const merged = new Date(NOW - 4 * 3600000).toISOString(), before = new Date(NOW - 3 * 86400000).toISOString();
+  const github = {
+    prs: [{number: 1191, title: "Day Board: overdue backlog tasks reach the huddle", repository_url: ghRepoUrl, state: "closed", closed_at: merged, pull_request: {merged_at: merged}},
+          {number: 1100, title: "older work his last post already covered", repository_url: ghRepoUrl, state: "closed", closed_at: before, pull_request: {merged_at: before}}],
+    issues: [{number: 1190, title: "Overdue backlog tasks miss the huddle", repository_url: ghRepoUrl, state: "closed", state_reason: "completed", closed_at: merged}]
+  };
+  const reportLine = {text: "Fixed overdue backlog tasks missing from the huddle", evidence: "GitHub PR claude-dotfiles#1191, issue claude-dotfiles#1190"};
+  const page = buildPage({tasks: noTasks, lastPostHtml, sentMail: [], github, onPrompt(prompt){
+    if (prompt.startsWith("Draft Dan Gatsakos's daily huddle post")){
+      const rows = JSON.parse(githubPrompt({prompts: [prompt]}));
+      return {reportHeading: "Yesterday's report", report: rows.length ? [reportLine] : [],
+        focus: [{text: "Bid prep", evidence: "kept verbatim"}], risks: [{text: "Bid work is pushing every other task out, so smaller jobs slip a week", evidence: "kept verbatim"}], dropped: []};
+    }
+    return passAll(prompt);
+  }});
+  await new Promise(r => setImmediate(r));
+  await page.$("hud-go").fire("click");
+  const rows = JSON.parse(githubPrompt(page));
+  assert(rows.some(r => r.ref === "claude-dotfiles#1191" && r.kind === "PR"), JSON.stringify(rows));
+  assert(rows.some(r => r.ref === "claude-dotfiles#1190" && r.kind === "issue"), JSON.stringify(rows));
+  assert(!rows.some(r => r.ref === "claude-dotfiles#1100"), "work merged before the last post is not reported");
+  const query = page.calls.find(c => c.server === "GitHub" && c.tool === "search_pull_requests").input.query;
+  assert.match(query, /\buser:surreptakos\b.*\bis:merged\b.*\bmerged:>\d{4}-\d\d-\d\dT/);
+  assert.match(page.$("hud-status").textContent, /^Passed every rule/, page.$("hud-status").textContent + " :: " + page.$("hud-ev-body").innerHTML);
+  const saved = Object.entries(page.store).find(([k]) => k.startsWith("huddle_drafts/"))[1];
+  assert.strictEqual(JSON.stringify(saved.report), JSON.stringify([reportLine]), "a non-empty report from GitHub alone");
+  assert.match(page.$("hud-ev-body").innerHTML, /GitHub PR claude-dotfiles#1191/, "the evidence row names the PR");
+});
+
+test("a day with no repository work drafts as before, and a GitHub failure is named under Could not read", async () => {
+  const quiet = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll});
+  await new Promise(r => setImmediate(r));
+  await quiet.$("hud-go").fire("click");
+  assert.strictEqual(githubPrompt(quiet), "[]");
+  assert.match(quiet.$("hud-status").textContent, /^Passed every rule.*Every source answered/);
+  const down = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll, github: {get prs(){ throw {code: "server_not_connected"}; }, issues: []}});
+  await new Promise(r => setImmediate(r));
+  await down.$("hud-go").fire("click");
+  assert.match(down.$("hud-status").textContent, /^Passed every rule.*Could not read: GitHub: server_not_connected/);
 });
 
 // Issue 1074: update-tasks replaces the whole due string, so a do date sent that way wipes a recurring
