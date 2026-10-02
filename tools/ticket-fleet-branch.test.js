@@ -1945,11 +1945,11 @@ test('a passing verdict that marks criteria unmet delivers Refs #N, no closing k
     pass: true, evidence: 'doc-only change; suite exit 0', failures: [],
     unmetCriteria: ['- [ ] remove the fallback once the owner rules', '  ', '- [ ] migrate the 5 work orders'],
   });
-  assert.match(prompt, /"Refs #42"/, 'an unmet criterion must turn the PR reference into Refs #N');
-  assert.doesNotMatch(prompt, /"Closes #42"/, 'no closing keyword may be offered while a criterion is unmet');
-  assert.match(prompt, /never write Closes, Fixes or Resolves/);
+  assert.match(prompt, /ISSUE BLOCK START -----\nRefs #42\n/, 'an unmet criterion must turn the PR reference into Refs #N');
+  assert.doesNotMatch(prompt, /Closes #42/, 'no closing keyword may be offered while a criterion is unmet');
+  assert.match(prompt, /write any other Closes, Fixes, Resolves or Refs line/);
   assert.match(prompt, /Acceptance criteria not met by this PR/, 'the PR body must carry a section for the unmet criteria');
-  assert.match(prompt, /- - \[ \] remove the fallback once the owner rules\n\s+- - \[ \] migrate the 5 work orders/,
+  assert.match(prompt, /- remove the fallback once the owner rules\n- migrate the 5 work orders\n/,
     'each unmet criterion must be listed by its text, blank entries dropped');
 });
 
@@ -1959,8 +1959,8 @@ test('a passing verdict with every criterion met still delivers Closes #N (issue
     { pass: true, evidence: 'suite exit 0' },
   ]) {
     const prompt = await deliverPromptFor(verdict);
-    assert.match(prompt, /"Closes #42"/, 'a verdict naming no unmet criterion must close the ticket');
-    assert.doesNotMatch(prompt, /"Refs #42"/);
+    assert.match(prompt, /ISSUE BLOCK START -----\nCloses #42\n/, 'a verdict naming no unmet criterion must close the ticket');
+    assert.doesNotMatch(prompt, /Refs #42/);
     assert.doesNotMatch(prompt, /Acceptance criteria not met by this PR/);
   }
 });

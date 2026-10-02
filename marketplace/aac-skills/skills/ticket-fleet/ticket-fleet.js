@@ -2729,19 +2729,53 @@ function gateRetryNote(delivery) {
   return ` - test gate re-run once after a null-exit spawn failure (first run exit ${g.firstExitCode}): re-run ${verdict} (exit ${g.retryExitCode})`
 }
 
+// The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
+// ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
+// commit messages say.
+function ticketKeepsOpen(t) {
+  return t.keepOpen === true || /\b(?:leave|keep|stay|remain)s?\s+(?:this\s+|the\s+|it\s+)?(?:ticket\s+|issue\s+)?open\b/i.test(t.criteria || '')
+}
+
+/**
+ * The PR body's issue block, built here rather than described to the deliverer (issue 1316).
+ *
+ * `Closes #N` when the ticket is done; `Refs #N`, a sentence saying the ticket stays open on
+ * purpose, and the unmet criteria when the verdict names any (issue 699: Closes on a short branch
+ * closed aac-bill-intake#682 with three boxes unticked) or the ticket says to stay open.
+ *
+ * Run 6abee17d left #1241, #1239, #1235, #1222, #1203 and #848 open. All six verdicts named unmet
+ * criteria, so every one took the Refs branch: PRs #1253, #1254, #1267, #1265 and #1276 carried
+ * `Refs #N` and the unmet list as built, but none said in the PR that the ticket stays open on
+ * purpose (that sentence went only to the ticket comment), so the merges read as closures that
+ * failed. PR #1251 (#1239) opened with an empty body and no step read it back. The block now
+ * carries the sentence, and B2 reads the body back and restores the block when it is missing.
+ */
+function prIssueBlock(t, unmetCriteria) {
+  if (ticketKeepsOpen(t)) {
+    return `Refs #${t.number}\n\nTicket left open on purpose: its own instruction says to keep it open, so this PR does not close it.`
+  }
+  const unmet = stableList(unmetCriteria).map(c => c.replace(/^\s*(?:[-*+]\s+)?(?:\[[ xX]\]\s+)?/, ''))
+  if (!unmet.length) return `Closes #${t.number}`
+  const count = `${unmet.length} acceptance criteri${unmet.length === 1 ? 'on' : 'a'}`
+  return [`Refs #${t.number}`, '',
+    `Ticket left open on purpose: the verifier marked ${count} unmet, so this PR does not close it.`, '',
+    '## Acceptance criteria not met by this PR', '',
+    ...unmet.map(c => `- ${c}`)].join('\n')
+}
+
 function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
-  // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
-  // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
-  // commit messages say.
-  const keepOpen = t.keepOpen === true || /\b(?:leave|keep|stay|remain)s?\s+(?:this\s+|the\s+|it\s+)?(?:ticket\s+|issue\s+)?open\b/i.test(t.criteria || '')
+  const keepOpen = ticketKeepsOpen(t)
   // So does the verdict (issue 699): a pass that names any criterion unmet is a branch that stops
-  // short of the ticket, and Closes on it closed aac-bill-intake#682 with three boxes unticked.
+  // short of the ticket.
   const unmet = stableList(unmetCriteria)
-  const issueRef = keepOpen
-    ? `"Refs #${t.number}" (this ticket stays OPEN by its own instruction; never write Closes, Fixes or Resolves)`
-    : unmet.length
-      ? `"Refs #${t.number}" (the verifier marked acceptance criteria unmet, so this PR must not close the ticket; never write Closes, Fixes or Resolves), and a section headed "Acceptance criteria not met by this PR" listing each of these verbatim, one bullet each:\n${unmet.map(c => '   - ' + c).join('\n')}\n  `
-      : `"Closes #${t.number}"`
+  const issueBlock = prIssueBlock(t, unmet)
+  const issueLine = issueBlock.split('\n')[0]
+  const bodyRead = instrument === 'mcp'
+    ? 'mcp__github__pull_request_read (method "get") and take its "body" field'
+    : '`gh api repos/{owner}/{repo}/pulls/<PR number> --jq .body`'
+  const bodyWrite = instrument === 'mcp'
+    ? 'mcp__github__update_pull_request with that PR number and the full body you wrote'
+    : `\`gh api --method PATCH repos/{owner}/{repo}/pulls/<PR number> -F body=@${scratchFile(`pr-${t.number}-body.md`)}\``
   const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."'
     : unmet.length ? ` and the sentence "Ticket left open: the verifier marked ${unmet.length} acceptance criteri${unmet.length === 1 ? 'on' : 'a'} unmet, listed in the PR."` : ''
   const prToolNote = instrument === 'mcp'
@@ -2794,7 +2828,12 @@ A9. DELIVER THROUGH THE CONNECTOR (issue 1139) - for a refused command that no s
 
 STEP B - push and open the PR (only when STEP A ended clean, resolved, or unmerged-by-classifier):
 B1. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run AL's lookups and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed" when no lookup printed the ref ("blocked" when one did - the push itself failed), conflictPaths:[], branchLookup:[every run], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the permission layer REFUSES is not a failed push (A0): read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. When origin holds the tip the verifier passed and lacks only STEP A's merge commit, go to A9. Only when the remote tip is missing or behind the verified tip does a refused push come back as {pushed:false, ...}.
-B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused (A0), open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
+B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and, as the LAST lines of the body, the lines between these two markers copied exactly (issue 1316: the run built them from the verdict, so do not reword them, put them under a heading or in a code fence, or write any other Closes, Fixes, Resolves or Refs line in the title or body):
+----- ISSUE BLOCK START -----
+${issueBlock}
+----- ISSUE BLOCK END -----
+Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused (A0), open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
+B2a. READ THE BODY BACK (issue 1316): run 6abee17d opened PR #1251 with an empty body, so nothing in it referenced its ticket. Once the PR is open, read its body with ${bodyRead}. If it has no line reading exactly \`${issueLine}\`, replace the body with the one you wrote (${bodyWrite}) and read it once more. A body still missing that line goes into blockedReason verbatim; the PR stays open either way.
 B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean", "resolved", or "unmerged-by-classifier" with blockedReason holding the refusal text).
 

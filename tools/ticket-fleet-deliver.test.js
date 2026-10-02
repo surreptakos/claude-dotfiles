@@ -55,7 +55,7 @@ async function loadFleet(agentMock, logs, instrument) {
       return prop in globalThis ? globalThis[prop] : INERT;
     },
   });
-  const wrapper = new AsyncFunction('scope', `with (scope) {\n${block('FLEET-DELIVER-PROMPT')}\n${block('FLEET-CODE-LANE')}\nreturn { deliverPrompt, runCodeLane };\n}`);
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${block('FLEET-DELIVER-PROMPT')}\n${block('FLEET-CODE-LANE')}\nreturn { deliverPrompt, runCodeLane, prIssueBlock };\n}`);
   return wrapper(scope);
 }
 
@@ -111,3 +111,31 @@ test('runCodeLane records a delivery opened by A9 after a refused command as del
   assert.ok(logs.some((m) => m.includes('https://github.com/x/y/pull/1139') && /WITHOUT the pre-push merge: the classifier refused a command of the Deliver stage/.test(m)),
     'the deliver log line names the PR and says it still owes the default-branch merge');
 });
+
+// Issue 1316: run 6abee17d's six PRs all took the unmet-criteria branch; none said in the PR that
+// the ticket stays open on purpose, and #1251 opened with an empty body nobody read back.
+test('the PR-body builder gives a verified ticket Closes #N and a ticket with unmet criteria Refs #N (issue 1316)', async () => {
+  const { prIssueBlock } = await loadFleet(async () => null, [], 'gh');
+  const t = { number: 1316, title: 't', criteria: '' };
+  assert.equal(prIssueBlock(t, []), 'Closes #1316', 'a verified ticket with nothing unmet is closed by its PR');
+  assert.equal(prIssueBlock(t, ['  ', null]), 'Closes #1316', 'blank entries are not unmet criteria');
+  const refs = prIssueBlock(t, ['- [ ] republish the live page', 'run a fresh session']);
+  assert.match(refs, /^Refs #1316\n/, 'unmet criteria turn the line into Refs #N');
+  assert.doesNotMatch(refs, /\b(?:Closes|Fixes|Resolves)\b/i, 'no closing keyword while a criterion is unmet');
+  assert.match(refs, /Ticket left open on purpose: the verifier marked 2 acceptance criteria unmet/, 'the PR says the ticket stays open on purpose');
+  assert.match(refs, /## Acceptance criteria not met by this PR\n\n- republish the live page\n- run a fresh session$/, 'each unmet criterion listed once, bullet and box stripped');
+  assert.match(prIssueBlock(Object.assign({}, t, { keepOpen: true }), []), /^Refs #1316\n\nTicket left open on purpose: its own instruction/);
+});
+
+for (const instrument of ['gh', 'mcp']) {
+  test(`deliver prompt (${instrument}) carries the built issue block and reads the PR body back (issue 1316)`, async () => {
+    const { deliverPrompt } = await loadFleet(async () => null, [], instrument);
+    const closes = deliverPrompt({ t: TICKET, branch: BRANCH, evidence: 'exit 0', unmetCriteria: [], defaultBranch: 'main', testCommand: 'echo ok' });
+    assert.match(closes, /----- ISSUE BLOCK START -----\nCloses #1139\n----- ISSUE BLOCK END -----/);
+    assert.match(closes, /B2a\. READ THE BODY BACK[^\n]*no line reading exactly `Closes #1139`/, 'an empty or edited body is caught and restored');
+    const refs = deliverPrompt({ t: TICKET, branch: BRANCH, evidence: 'exit 0', unmetCriteria: ['needs the desktop'], defaultBranch: 'main', testCommand: 'echo ok' });
+    assert.match(refs, /ISSUE BLOCK START -----\nRefs #1139\n\nTicket left open on purpose[^\n]*\n\n## Acceptance criteria not met by this PR\n\n- needs the desktop\n-----/);
+    assert.doesNotMatch(refs, /Closes #1139/);
+    assert.match(refs, instrument === 'mcp' ? /mcp__github__update_pull_request/ : /--method PATCH repos\/\{owner\}\/\{repo\}\/pulls\/<PR number>/);
+  });
+}
