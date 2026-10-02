@@ -968,7 +968,7 @@ footer{font-size:12px;color:var(--muted)}
     const row = b.closest(".prop"); if (row) answer(row, b.dataset.opt);
   });
 
-  // ---------- WAITING ON YOU (written by the forgotten-tasks routine) ----------
+  // ---------- WAITING ON YOU (written by the triage run) ----------
   let waitDocs = [];
   function watchWaiting(){
     if (!db){ $("wait-body").innerHTML = '<div class="empty">Board storage is not available in this view.</div>'; return; }
@@ -986,7 +986,7 @@ footer{font-size:12px;color:var(--muted)}
       const days = w.receivedAt ? Math.max(0, Math.floor((Date.now() - new Date(w.receivedAt)) / 86400000)) : null;
       const subj = w.link ? '<a href="' + esc(w.link) + '" target="_blank" rel="noopener">' + esc(w.subject) + '</a>' : esc(w.subject);
       return '<div class="wait" data-id="' + esc(w._id) + '"><div><div class="ttl">' + subj + '</div><div class="meta"><span>' + esc(w.from || "") + '</span>' + (days !== null ? '<span class="age">' + days + (days === 1 ? " day" : " days") + '</span>' : '') + '</div>' + (w.ask ? '<div class="why">' + esc(w.ask) + '</div>' : '') + '</div><button type="button" data-act="done">' + (w.todoistId ? "Replied — close task" : "Handled") + '</button></div>';
-    }).join("") : '<div class="empty">Nothing unanswered on record. The forgotten-tasks run fills this.</div>';
+    }).join("") : '<div class="empty">Nothing unanswered on record. The morning triage run fills this.</div>';
     if (recent.length) $("wait-body").innerHTML += '<div class="dayhead" style="margin-top:8px"><span>Closed in the last day</span><span class="n">' + recent.length + '</span></div>' +
       recent.map(w => '<div class="wait" data-id="' + esc(w._id) + '"><div><div class="ttl">' + esc(w.subject) + '</div><div class="meta"><span>' + esc(w.from || "") + '</span></div></div><button type="button" data-act="undo">Undo</button></div>').join("");
   }
