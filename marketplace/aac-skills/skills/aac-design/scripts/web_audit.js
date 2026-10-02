@@ -223,7 +223,10 @@ const PAGE_HELPERS = `(() => {
 const DOM_PROBE = `(() => {
   const PROPS = ['display', 'visibility', 'opacity', 'color', 'background-color', 'font-family', 'font-size',
     'font-weight', 'line-height', 'outline-style', 'outline-width', 'box-shadow', 'position', 'overflow',
-    'forced-color-adjust', 'animation-name', 'transition-property'];
+    'forced-color-adjust', 'animation-name', 'transition-property',
+    // Spacing, shape and case, so a reviewer can measure a spacing scale, radii and all-caps labels (issue 1087).
+    'margin', 'padding', 'gap', 'border-width', 'border-style', 'border-color', 'border-radius', 'letter-spacing',
+    'text-transform', 'text-align', 'font-style', 'text-decoration-line', 'max-width'];
   const parse = (c) => {
     const m = c && c.match(/rgba?\\(([^)]+)\\)/);
     if (!m) return null;
@@ -256,8 +259,9 @@ const DOM_PROBE = `(() => {
     const r = el.getBoundingClientRect();
     const style = {};
     for (const p of PROPS) style[p] = cs.getPropertyValue(p);
-    elements.push({ path: __aacPath(el), tag: el.localName, box: [r.x, r.y, r.width, r.height].map(Math.round), style });
     const own = Array.from(el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join('').trim();
+    elements.push({ path: __aacPath(el), tag: el.localName, box: [r.x, r.y, r.width, r.height].map(Math.round), style,
+      ...(own && !/^(script|style)$/.test(el.localName) ? { text: own.slice(0, 80) } : {}) });
     if (!own || cs.visibility === 'hidden' || cs.display === 'none' || r.width === 0 || r.height === 0) continue;
     const fg0 = parse(cs.color);
     const bg = background(el);
