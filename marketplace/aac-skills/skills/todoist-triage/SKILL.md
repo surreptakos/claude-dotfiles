@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-10-02T15:47:54Z'
-  previous-modified: '2026-10-02T15:37:26Z'
-  revision: '43'
-  content-sha: 257a64200165
+  modified: '2026-10-02T16:23:13Z'
+  previous-modified: '2026-10-02T15:47:54Z'
+  revision: '44'
+  content-sha: 655a153208df
 ---
 
 # todoist-triage
@@ -54,7 +54,7 @@ In this order:
 1. **Prior run records** — pull the store, then read the newest `aac-forgotten-tasks` record and the previous `todoist-triage` record, per [`run-ledger.md`](run-ledger.md) § Pull the store and § Read the prior records.
 2. **Exports** — the newest file per source from the `aacx-inbox` folder, per [`sources.md`](sources.md) § Exports. Record the newest stamp.
 3. **Leave Dates** — `pending` before any leave item is ruled on ([`sources.md`](sources.md) § Systems of record).
-4. **Live tail** — the window from the newest export stamp to now, per [`sources.md`](sources.md) § Live tail.
+4. **Live tail** — the window from the newest export stamp to now, at most one hour, per [`sources.md`](sources.md) § Live tail.
 5. **Todoist** — `find-tasks` on Current Work, the backlog and the Inbox, `responsibleUserFiltering: "all"`, `limit: 100`, following `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for every task whose title is a bare link.
 6. **Board answers** — per [`day-board.md`](day-board.md) § Read the answers.
 
