@@ -113,4 +113,4 @@ beside the gate script it ships with.
 The model's one written objection to Jev's route in a turn. It names the route it wants and why,
 and it appears in the reply. Mechanism (Dan, 2026-09-25): the appeal is a gate command that logs
 the wanted route and the reason; the pre-send lint then refuses the reply until its first line
-reads `Route appeal: <wanted> instead of <Jev's>, because <reason>`.
+after the PYLONS prefix reads `Route appeal: <wanted> instead of <Jev's>, because <reason>`.

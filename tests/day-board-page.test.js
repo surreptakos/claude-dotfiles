@@ -30,7 +30,7 @@ const mdEscape = s => s.replace(/[\\<>&\[\]#_]/g, c => "\\" + c);
 
 // exportAgoMin: how long before NOW today's newest exports were stamped; null means none has landed yet.
 // github: the GitHub connector's search results, {prs: [...], issues: [...]} in the REST search item shape.
-function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], todoist = () => undefined, github = {prs: [], issues: []}, sentMail}){
+function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], waiting = [], meta = null, todoist = () => undefined, github = {prs: [], issues: []}, sentMail, collections = {}}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const prompts = [], m365 = [];
@@ -64,8 +64,9 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
   }};
   const store = {};
   const db = {
-    doc(p){ return {set: async v => { store[p] = v; }, update: async v => { store[p] = Object.assign(store[p] || {}, v); }, onSnapshot(fn){ fn({exists: false, data: () => null}); }}; },
-    collection(name){ return {onSnapshot(fn){ fn({docs: name === "triage" ? triage.map(t => ({id: t._id, data: () => t})) : []}); }}; }
+    doc(p){ return {set: async v => { store[p] = v; }, update: async v => { store[p] = Object.assign(store[p] || {}, v); }, onSnapshot(fn){ const v = p === "triage_meta/latest" ? meta : null; fn({exists: !!v, data: () => v}); }}; },
+    collection(name){ const rows = name === "triage" ? triage : name === "waiting" ? waiting : collections[name] || [];
+      return {onSnapshot(fn){ fn({docs: rows.map(t => ({id: t._id, data: () => t}))}); }}; }
   };
   const sample = {async json(prompt){ prompts.push(prompt); return onPrompt(prompt); }};
   const ctx = {
@@ -308,8 +309,78 @@ test("a do date the board cannot read as a date changes nothing on a recurring t
   assert.match(card.error, /repeats/);
 });
 
+// Issue 848: the drafter learns from Dan's edits. Pressing Draft compares his last post with the draft he worked
+// from, stores Claude's lessons as proposals, and sends the draft only the lessons he kept; Keep is his click.
+const local = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+const postAt = new Date(NOW - 86400000), workedFrom = new Date(postAt - 3600000);
+const savedDraft = {_id: "d1", day: local(workedFrom), draftedAt: workedFrom.toISOString(),
+  text: "Yesterday's report\n• Sent the vendor the supplier documents for setup\n\nToday's focus\n• Bid prep\n• Portal uploads\n\nRisks/Blockers\n• Bid work is pushing every other task out, so smaller jobs slip a week"};
+const lessonRows = [{_id: "k1", text: "Kept: open report lines with his verbs.", status: "confirmed", confirmedAt: "2026-09-01T00:00:00Z"},
+  {_id: "p1", text: "Proposed: not yet his.", status: "proposed"}, {_id: "x1", text: "Dropped: never again.", status: "dropped"}];
+
+test("Draft compares his last post with the draft he worked from, proposes lessons, and feeds only kept ones", async () => {
+  const page = buildPage({tasks: noTasks, lastPostHtml, collections: {huddle_drafts: [savedDraft], huddle_lessons: lessonRows}, onPrompt(prompt){
+    if (prompt.startsWith("Dan Gatsakos edited the huddle post")){
+      return {lessons: [{text: "Keep his focus lines until they are done.", changes: [0]}, {text: "Confirm me.", changes: [0], status: "confirmed"}]};
+    }
+    return passAll(prompt);
+  }});
+  await new Promise(r => setImmediate(r));
+  await page.$("hud-go").fire("click");
+  const asked = page.prompts.find(p => p.startsWith("Dan Gatsakos edited the huddle post"));
+  assert(asked, "the compare ran: " + page.$("hud-status").textContent);
+  assert.match(asked, /"change":"cut","text":"Portal uploads"/);
+  const stamp = local(postAt) + "T" + String(postAt.getHours()).padStart(2, "0") + String(postAt.getMinutes()).padStart(2, "0") + String(postAt.getSeconds()).padStart(2, "0");
+  const row = page.store["huddle_lessons/" + stamp + "-1"];
+  assert.strictEqual(row.text, "Keep his focus lines until they are done.");
+  assert.strictEqual(row.status, "proposed", "a model's lesson is never confirmed");
+  assert.strictEqual(Object.keys(page.store).filter(k => k.startsWith("huddle_lessons/")).length, 1);
+  const log = page.store["huddle_feedback/" + stamp];
+  assert.strictEqual(JSON.stringify([log.draftId, log.changes, log.proposed, log.refused.map(x => x.why)]), JSON.stringify(["d1", 1, 1, ["wrong fields"]]));
+  const draft = draftPromptOf(page);
+  assert.match(draft, /- Kept: open report lines with his verbs\./);
+  assert.doesNotMatch(draft, /Proposed: not yet his|Dropped: never again|Keep his focus lines/);
+  assert.match(page.$("hud-status").textContent, /1 lesson proposed from your edits/);
+});
+
+test("Keep and Drop on the lessons list write the lesson's status, and Keep is the only confirm", async () => {
+  const page = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll, collections: {huddle_lessons: lessonRows}});
+  await new Promise(r => setImmediate(r));
+  assert.strictEqual(page.$("hud-lessons").hidden, false);
+  assert.match(page.$("hud-lessons-body").innerHTML, /data-lesson="p1" data-act="keep"/);
+  const press = (lesson, act) => { const b = {dataset: {lesson, act}, disabled: false}; return {target: {closest: s => s === "button[data-lesson]" ? b : null}}; };
+  await page.$("hud-lessons-body").fire("click", press("p1", "keep"));
+  assert.strictEqual(page.store["huddle_lessons/p1"].status, "confirmed");
+  assert.ok(page.store["huddle_lessons/p1"].confirmedAt);
+  await page.$("hud-lessons-body").fire("click", press("k1", "drop"));
+  assert.strictEqual(page.store["huddle_lessons/k1"].status, "dropped");
+});
+
 test("a do-date ruling on a non-recurring task still sends the due string through update-tasks", async () => {
   const {writes, card} = await rule(false, {label: "Look again Oct 7", dueString: "Oct 7"});
   assert.strictEqual(card.status, "answered", card.error);
   assert.deepStrictEqual(writes.map(c => [c.tool, c.input.tasks[0].dueString]), [["update-tasks", "Oct 7"]]);
+});
+
+// Issue 1192 (Dan, 2026-10-01): the confidential rule covers the generated huddle notes only. A triage card or a
+// waiting-on-you ask with pay, health or leave words shows exactly as the triage run wrote it.
+test("a triage card and a waiting-on-you ask with pay, health or leave words render verbatim", async () => {
+  const card = {_id: "q1", runId: "r1", taskId: "t1", status: "open", title: "Approve Sam's raise to $24/hr",
+    question: "His sick leave runs out Friday; approve the extra week?", options: [{label: "Approve the $1,500 bonus"}],
+    source: {lastFrom: "Sam", lastAt: "2026-09-30T14:00:00Z", quote: "Doctor says two more weeks of medical leave"}};
+  const ask = {_id: "w1", status: "open", from: "Pat", subject: "Health insurance and pay question", receivedAt: "2026-09-29T14:00:00Z",
+    ask: "sign off his FMLA leave and the salary change"};
+  const page = buildPage({tasks: [], lastPostHtml, onPrompt: () => ({}), triage: [card], waiting: [ask], meta: {runId: "r1", finishedAt: NOW.toISOString(), alarms: []}});
+  await new Promise(r => setImmediate(r));
+  const esc = s => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const tri = page.$("tri-body").innerHTML, wait = page.$("wait-body").innerHTML;
+  [card.title, card.question, card.source.quote, card.options[0].label].forEach(t => assert(tri.includes(esc(t)), "not verbatim: " + t + " :: " + tri));
+  [ask.subject, ask.ask].forEach(t => assert(wait.includes(esc(t)), "not verbatim: " + t + " :: " + wait));
+});
+
+test("the triage run's board contract keeps the board copy verbatim, with no neutral rewrite", () => {
+  const dir = path.join(__dirname, "..", "aac-skills", "todoist-triage");
+  const contract = ["day-board.md", "SKILL.md"].map(f => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
+  assert.doesNotMatch(contract, /Nothing confidential on the board|takes a neutral `title`|personal message, not shown|no pay, review, health or leave detail/);
+  assert.match(contract, /board copy is verbatim/);
 });

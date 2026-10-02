@@ -24,17 +24,20 @@ if (!HAVE_DOCX && process.env.REVIEW_MEANING_REQUIRE_DOCX === '1') {
   test('python3 with python-docx is installed', () => assert.fail(`${PY} cannot import docx`));
 }
 
+// At least four items are SEER (Dan, October 1, 2026), so Gate 1 passes the fixture as a whole review.
 const BOB = {
   direct: 'Bob', start: '7/24/2025', end: '7/23/2026',
   core: "Bob's results have met expectations since his last review. I am recommending he is ready for vertical growth in his role, in the areas of quality control and reporting.",
   strengths: [
     'Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He is the rep the rest of the team learns from on hard calls.',
     'Bob documents every escalation. Recently he wrote up a billing dispute so clearly that finance closed it the same day.',
+    'Bob keeps the call queue moving at the end of a shift. He takes the last open calls himself before he logs off. During a storm this spring he cleared eleven waiting calls after his shift ended. He leaves the queue empty for the next shift.',
   ],
   weaknesses: [
     'Bob turns in his weekly call reports late. Three of the last five reports arrived after the Friday deadline. He sent the March 6 report on the following Tuesday. His reports are often late.',
+    'Bob skips the notes field on short calls. Most calls under two minutes close with the notes field blank. On one short call last month he left no note and the customer had to explain the problem twice. His short calls often close with no notes.',
   ],
-  guidance: ['Submit each weekly call report by noon on Friday.', 'Lead two training sessions on difficult calls for the team.'],
+  guidance: ['Submit each weekly call report by noon on Friday.', 'Write a note on every call before closing it.', 'Lead two training sessions on difficult calls for the team.'],
 };
 
 // Python starts slowly on Windows, so every case runs at once (each in its own directory: a run
@@ -110,7 +113,7 @@ suite('review meaning', { concurrency: true }, () => {
     assert.equal(s.code, 0, s.out);
     assert.equal(a.out, s.out);
     assert.match(a.out, /^MEANING CHECK: PASS$/m);
-    assert.match(a.out, /^Passed: S1, S2, W1, Core Message, Guidance 1, Guidance 2$/m);
+    assert.match(a.out, /^Passed: S1, S2, S3, W1, W2, Core Message, Guidance 1, Guidance 2, Guidance 3$/m);
     assert.match(a.out, /^Jev: ran/m);
   });
 
@@ -150,7 +153,7 @@ suite('review meaning', { concurrency: true }, () => {
     const file = await docx({ strengths: ['Bob, my best rep, is calm on hard calls. He listens, waits, and then answers. He recently saved a difficult call after three other reps had failed. He stays calm when a call turns hard.', BOB.strengths[1]] });
     const r = await meaning(AUDIT_PY, file, await stubFor(file));
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /^Note: Commas per item \(fewer is better\): S1 4, S2 0, W1 0\.$/m);
+    assert.match(r.out, /^Note: Commas per item \(fewer is better\): S1 4, S2 0, W1 0, W2 0\.$/m);
     assert.doesNotMatch(r.out, /^  - .*comma/im);
   });
 
