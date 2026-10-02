@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Audits LIVE issue-tracker state for drift. Run: node tools/tracker-audit.js
 //
-// Companion to tools/tracker.test.js, which checks conventions in the FILES. This checks the state
-// on GitHub, which no unit test can reach — so it is a command, not a test (it needs the network and
-// an authenticated `gh`).
+// This checks the state on GitHub, which no unit test can reach — so it is a command, not a test (it
+// needs the network and an authenticated `gh`). `.github/workflows/tracker-audit.yml` runs it through
+// `tools/tracker-audit-job.js`.
 //
 // Why it exists: on 2026-07-29 the owner said "I don't understand why I keep having to double check
 // your admin work." The honest answer was that the code path had a pre-commit gate, 300+ tests and
