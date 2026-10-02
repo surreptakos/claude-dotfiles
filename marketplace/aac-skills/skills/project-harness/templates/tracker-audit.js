@@ -132,6 +132,65 @@ function maskCodeRegions(text) {
   return out.join('');
 }
 
+/** The repo a `#N` reference names when it is qualified, read from the run of `[\w./-]` directly
+ *  before its `#`: `surreptakos/osh-rfp#137` is { owner: 'surreptakos', name: 'osh-rfp' } and
+ *  `osh-rfp#137` is { owner: null, name: 'osh-rfp' }. null for a bare `#N`, and for a word that
+ *  names a number on this tracker rather than a repo (`PR#12`, `issue#12`). Pure. */
+function qualifiedRefAt(text, hash) {
+  let s = hash;
+  while (s > 0 && /[\w./-]/.test(text[s - 1])) s--;
+  const parts = text.slice(s, hash).split('/').filter((p) => /\w/.test(p));
+  if (!parts.length) return null;
+  const name = parts[parts.length - 1];
+  const owner = parts.length > 1 ? parts[parts.length - 2] : null;
+  if (!owner && /^(?:prs?|issues?|pulls?|tickets?|gh)$/i.test(name)) return null;
+  return { owner, name };
+}
+
+/** Does a qualified reference name THIS repo (`repo` is its `owner/name` slug)? With no slug every
+ *  qualified reference is another repo's. */
+function namesThisRepo(ref, repo) {
+  if (!repo) return false;
+  const [owner, name] = String(repo).toLowerCase().split('/');
+  return ref.name.toLowerCase() === name && (!ref.owner || ref.owner.toLowerCase() === owner);
+}
+
+/** [start, end) of the sentence holding offset `at`: it ends at `.`, `!` or `?` before whitespace
+ *  (an ellipsis is not an end), at a blank line, and at a line that opens a list item, a heading or a
+ *  quote. A single newline inside a paragraph is a wrap, not an end. */
+function sentenceAround(text, at) {
+  const rx = /(?<!\.\.)[.!?](?=\s)|\n[ \t]*(?=\n|[-*+>#]|\d+[.)]\s)/g;
+  let start = 0, end = text.length, m;
+  while ((m = rx.exec(text))) {
+    if (m.index + m[0].length <= at) start = m.index + m[0].length;
+    else if (m.index >= at) { end = m.index; break; }
+  }
+  return [start, end];
+}
+
+/** Is the `#` at offset `hash` a citation of THIS repo's #N (issue 1346)?
+ *
+ *  Orchestrator state and fleet discovery bullets cite other repos all the time. On 2026-10-02 the
+ *  audit failed on "surreptakos/osh-rfp#138 (..., blocked by #137)": every check that collected
+ *  numbers with a bare `#(\d+)` read osh-rfp's #137 as this repo's PR 137. So a reference qualified
+ *  by `owner/repo` or `repo` is local only when it names this repo, and a bare `#N` whose sentence's
+ *  nearest qualified reference names another repo is ambiguous and skipped rather than guessed. A
+ *  bare `#N` in a sentence with no qualified reference, or whose nearest one names this repo, is
+ *  local. `repo` is this repo's `owner/name` slug. Pure. */
+function isLocalCitation(text, hash, repo) {
+  const own = qualifiedRefAt(text, hash);
+  if (own) return namesThisRepo(own, repo);
+  const [start, end] = sentenceAround(text, hash);
+  const rx = /#\d+(?!\w)/g;
+  rx.lastIndex = start;
+  let nearest = null, distance = Infinity, m;
+  while ((m = rx.exec(text)) && m.index < end) {
+    const ref = m.index === hash ? null : qualifiedRefAt(text, m.index);
+    if (ref && Math.abs(m.index - hash) < distance) { nearest = ref; distance = Math.abs(m.index - hash); }
+  }
+  return !nearest || namesThisRepo(nearest, repo);
+}
+
 /** Same-repo issue citations in a body: `#N` as its own token, in prose. Returns a Map of issue
  *  number to the offset of its FIRST such citation, so a caller can look at the wording around it.
  *
@@ -144,8 +203,10 @@ function maskCodeRegions(text) {
  *  directly after the digits. The fourth is context, not shape: a `#N` inside inline code or a fenced
  *  block is quoted material — a journal line, a log, a command — and quoting is not asserting, so
  *  code is masked out before the scan (issue 274, where a bug report quoting a fleet journal could
- *  not be written without tripping the check). Exported for the test suite. */
-function citedIssueNumbers(body) {
+ *  not be written without tripping the check). A bare `#N` next to another repo's qualified reference
+ *  is skipped too (isLocalCitation, issue 1346); `repo` is this repo's `owner/name` slug. Exported
+ *  for the test suite. */
+function citedIssueNumbers(body, repo) {
   const text = String(body || '');
   const prose = maskCodeRegions(text);
   const rx = /(?<![\w/])(?<!\w:)#(\d+)(?![\w])/g;
@@ -153,7 +214,7 @@ function citedIssueNumbers(body) {
   let m;
   while ((m = rx.exec(prose))) {
     const n = Number(m[1]);
-    if (!first.has(n)) first.set(n, m.index);
+    if (!first.has(n) && isLocalCitation(prose, m.index, repo)) first.set(n, m.index);
   }
   return first;
 }
@@ -416,6 +477,9 @@ function duplicateTitleFindings(openIssues) {
 if (require.main !== module) {
   module.exports = {
     citedIssueNumbers,
+    isLocalCitation,
+    danglingReferences,
+    blockerMayBeAnsweredFindings,
     isFollowUpAcknowledgment,
     isNotPlanned,
     NOT_PLANNED_PATTERNS,
@@ -825,8 +889,11 @@ function nativeBlockers(n) {
  *  Within the claim a list wins over stray lines: once any line is a list item, only list items and
  *  their indented continuations are read, so a footer glued to the last bullet with no blank line
  *  between them still cannot add a blocker. The `None` short-circuit is judged on the claim alone,
- *  so a footer can neither add a blocker nor zero a real one. */
-function proseBlockers(body) {
+ *  so a footer can neither add a blocker nor zero a real one.
+ *
+ *  Another repo's reference (`owner/repo#N`) is not a blocker here, and nor is a bare `#N` on a line
+ *  whose nearest qualified reference names another repo (isLocalCitation, issue 1346). */
+function proseBlockers(body, repo) {
   const text = String(body || '').replace(/\r\n/g, '\n');
   const m = /^##+\s*Blocked by\s*$([\s\S]*?)(?=^##+\s|$(?![\s\S]))/im.exec(text);
   if (!m) return [];
@@ -857,7 +924,8 @@ function proseBlockers(body) {
   const NON_GATING = /\bmerge\s+after\b/i;
   const nums = section.split('\n')
     .filter((line) => !NON_GATING.test(line))
-    .reduce((acc, line) => acc.concat((line.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))), []);
+    .reduce((acc, line) => acc.concat(Array.from(line.matchAll(/#(\d+)/g))
+      .filter((m) => isLocalCitation(line, m.index, repo)).map((m) => Number(m[1]))), []);
   return Array.from(new Set(nums));
 }
 
@@ -1225,7 +1293,7 @@ function stalePremiseFindings(allIssues, byNumber, opts) {
     if (ignored.all) return;
     // Own-repo citations only: `owner/repo#N` and hex colours are not this repo's issues (see
     // citedIssueNumbers). The map also gives the first citation's offset for the wording check below.
-    const cited = citedIssueNumbers(body);
+    const cited = citedIssueNumbers(body, (opts || {}).repo);
     const citedNums = Array.from(cited.keys());
     const citedClosed = citedNums.filter((n) => {
       const o = byNumber.get(n);
@@ -1276,6 +1344,56 @@ function stalePremiseFindings(allIssues, byNumber, opts) {
   return out;
 }
 
+/** The numbers an issue body cites that are neither this repo's issue nor its PR: the
+ *  dangling-reference check. `knownNumber(n)` answers "is #n an issue or PR here". A reference to
+ *  another repo, or a bare `#N` beside one, is not a pointer into this tracker (isLocalCitation,
+ *  issue 1346). Pure; exported for the test suite. */
+function danglingReferences(issue, knownNumber, repo) {
+  const body = String(issue.body || '');
+  const cited = new Set();
+  for (const m of body.matchAll(/(?:^|[\s(])#(\d+)\b/g)) {
+    if (isLocalCitation(body, m.index + m[0].length - m[1].length - 1, repo)) cited.add(Number(m[1]));
+  }
+  return Array.from(cited).filter((n) => n !== issue.number && !knownNumber(n));
+}
+
+/** OPEN issues that say they are blocked on a PR whose thread has comments newer than the issue's
+ *  `blocker-verified` marker: the blocker-may-be-answered check (section 7 below says why). Only this
+ *  repo's PRs count: `owner/repo#N`, or a bare `#N` beside it, names another repo's number
+ *  (isLocalCitation, issue 1346). Pure; exported for the test suite. */
+function blockerMayBeAnsweredFindings(openIssues, prByNumber, repo) {
+  const BLOCK_NEAR = /\b(blocked|blocker|waits? on|waiting on|gated on|depends on|until)\b/i;
+  const out = [];
+  (openIssues || []).forEach((i) => {
+    const body = String(i.body || '').replace(/\r\n/g, '\n');
+    const prose = new Set(proseBlockers(body, repo));
+    // First local citation of each number, so the wording window sits on THIS repo's reference.
+    const first = new Map();
+    for (const m of body.matchAll(/#(\d+)/g)) {
+      const n = Number(m[1]);
+      if (!first.has(n) && isLocalCitation(body, m.index, repo)) first.set(n, m.index);
+    }
+    first.forEach((idx, n) => {
+      const pr = prByNumber.get(n);
+      if (!pr || !pr.commentCount) return;
+      if (!(prose.has(n) || BLOCK_NEAR.test(body.slice(Math.max(0, idx - 200), idx + 200)))) return;
+      const marker = new RegExp('blocker-verified:\\s*#' + n + '\\s*@\\s*(\\d{4}-\\d{2}-\\d{2})', 'i')
+        .exec(body);
+      const last = pr.lastComment ? pr.lastComment.slice(0, 10) : null;
+      if (marker && last && marker[1] >= last) return;
+      out.push({ kind: 'blocker-may-be-answered', issue: i, detail:
+        'says it is blocked on PR #' + n + ' (' + pr.title.slice(0, 50) + '), which carries ' +
+        pr.commentCount + ' comment' + (pr.commentCount === 1 ? '' : 's') +
+        (last ? ', the last dated ' + last : '') +
+        (marker ? ', newer than this issue\'s blocker-verified marker (' + marker[1] + ')' : '') +
+        '. A PR thread is where measurements land — the blocker may already be answered there. Read ' +
+        'it (`gh pr view ' + n + ' --comments`), then restate or drop the claim and stamp ' +
+        '`<!-- blocker-verified: #' + n + ' @' + (last || 'YYYY-MM-DD') + ' -->`.' });
+    });
+  });
+  return out;
+}
+
 const findings = [];
 function report(kind, issue, detail) {
   findings.push({ kind, number: issue.number, title: issue.title, url: issue.url, detail });
@@ -1293,7 +1411,7 @@ let edgesUnavailable = false;
 
 // ---- 1. A prose blocker with no native edge is an ungated dependency -----------------------------
 open.forEach((i) => {
-  const prose = proseBlockers(i.body);
+  const prose = proseBlockers(i.body, REPO);
   if (!prose.length) return;
   const native = nativeBlockers(i.number);
   if (native === null) { edgesUnavailable = true; return; }
@@ -1342,9 +1460,7 @@ issues.filter((i) => i.state === 'CLOSED').forEach((i) => {
 
 // ---- 3. A reference to an issue that does not exist ---------------------------------------------
 open.forEach((i) => {
-  const cited = Array.from(new Set((String(i.body || '').match(/(?:^|[\s(])#(\d+)\b/g) || [])
-    .map((s) => Number(s.replace(/\D/g, '')))));
-  const dangling = cited.filter((n) => n !== i.number && !knownNumber(n));
+  const dangling = danglingReferences(i, knownNumber, REPO);
   if (dangling.length) {
     report(prsUnavailable ? 'dangling-reference?' : 'dangling-reference', i,
       'cites ' + dangling.map((n) => '#' + n).join(', ') + ', which is ' + (prsUnavailable
@@ -1371,7 +1487,7 @@ open.forEach((i) => {
 // repo's copy of this file may not carry it, and then the proximity rule answers as before.
 let askJevSync = null;
 try { askJevSync = require('./jev.js').askJevSync; } catch (e) { askJevSync = null; }
-stalePremiseFindings(issues, byNumber, { classify: jevCitationClassifier(askJevSync) })
+stalePremiseFindings(issues, byNumber, { classify: jevCitationClassifier(askJevSync), repo: REPO })
   .forEach((f) => report(f.kind, f.issue, f.detail));
 
 // ---- 6. The Projects board is a THIRD record of state, and it drifts ---------------------------
@@ -1443,30 +1559,7 @@ if (boardUnavailable) {
 //     <!-- blocker-verified: #34 @2026-07-30 -->
 //
 // A later comment on that PR invalidates the marker and the finding returns, because the date moved.
-const BLOCK_NEAR = /\b(blocked|blocker|waits? on|waiting on|gated on|depends on|until)\b/i;
-open.forEach((i) => {
-  const body = String(i.body || '').replace(/\r\n/g, '\n');
-  const prose = new Set(proseBlockers(body));
-  const cited = Array.from(new Set((body.match(/#(\d+)/g) || []).map((s) => Number(s.slice(1)))));
-  cited.forEach((n) => {
-    const pr = prByNumber.get(n);
-    if (!pr || !pr.commentCount) return;
-    const idx = body.indexOf('#' + n);
-    if (!(prose.has(n) || BLOCK_NEAR.test(body.slice(Math.max(0, idx - 200), idx + 200)))) return;
-    const marker = new RegExp('blocker-verified:\\s*#' + n + '\\s*@\\s*(\\d{4}-\\d{2}-\\d{2})', 'i')
-      .exec(body);
-    const last = pr.lastComment ? pr.lastComment.slice(0, 10) : null;
-    if (marker && last && marker[1] >= last) return;
-    report('blocker-may-be-answered', i,
-      'says it is blocked on PR #' + n + ' (' + pr.title.slice(0, 50) + '), which carries ' +
-      pr.commentCount + ' comment' + (pr.commentCount === 1 ? '' : 's') +
-      (last ? ', the last dated ' + last : '') +
-      (marker ? ', newer than this issue\'s blocker-verified marker (' + marker[1] + ')' : '') +
-      '. A PR thread is where measurements land — the blocker may already be answered there. Read ' +
-      'it (`gh pr view ' + n + ' --comments`), then restate or drop the claim and stamp ' +
-      '`<!-- blocker-verified: #' + n + ' @' + (last || 'YYYY-MM-DD') + ' -->`.');
-  });
-});
+blockerMayBeAnsweredFindings(open, prByNumber, REPO).forEach((f) => report(f.kind, f.issue, f.detail));
 
 // ---- 8. Milestones: once a repo sequences work, an unsequenced issue is invisible to planning ---
 // Same infer-from-data posture as the board check: milestones are opt-in, and a repo that has never

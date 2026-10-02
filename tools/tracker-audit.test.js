@@ -33,6 +33,8 @@ const {
   parseGithubSlug,
   isFollowUpAcknowledgment,
   citedIssueNumbers,
+  danglingReferences,
+  blockerMayBeAnsweredFindings,
   proseBlockers,
   paginate,
   parseLinkHeader,
@@ -748,4 +750,49 @@ test('usesMilestones: a real milestone in use still turns unmilestoned on, parke
   const mk = (n, m) => normalizeIssue({ number: n, state: 'open', labels: [], milestone: m ? { title: m } : null });
   assert.equal(usesMilestones([mk(1, 'v2'), mk(2, null)]), true);
   assert.equal(usesMilestones([mk(1, 'Maybe Someday'), mk(2, 'v2'), mk(3, null)]), true);
+});
+
+// ---- issue 1346: a cross-repo reference is another repo's number, not this repo's #N ------
+// Run 37069606487 failed on orchestrator state reading "surreptakos/osh-rfp#138 (..., blocked by
+// #137)" as blocked on this repo's PR 137. Each check below gets the qualified reference, a bare
+// #N beside it, and a bare local #137 that must still report.
+
+const THIS_REPO = 'surreptakos/claude-dotfiles';
+const CROSS_REPO_BODIES = {
+  qualified: 'Waiting: surreptakos/osh-rfp#137 is blocked until its review lands.',
+  beside: 'Heartbeat 22: surreptakos/osh-rfp#138 (..., blocked by #137).',
+  local: 'This is blocked by #137 until its review lands.',
+};
+const openIssue = (number, body) => ({ number, state: 'OPEN', labels: [], title: 'issue ' + number,
+  url: 'https://github.com/o/r/issues/' + number, body, closedByPullRequestsReferences: [] });
+
+test('blocker-may-be-answered: another repo\'s #137 is not local PR 137; a bare local #137 is', () => {
+  const prs = new Map([[137, { number: 137, title: 'fix: claude-md-lint gates the checked-in instructions',
+    commentCount: 2, lastComment: '2026-09-12T10:00:00Z' }]]);
+  const flagged = (body) => blockerMayBeAnsweredFindings([openIssue(1141, body)], prs, THIS_REPO).length;
+  assert.strictEqual(flagged(CROSS_REPO_BODIES.qualified), 0);
+  assert.strictEqual(flagged(CROSS_REPO_BODIES.beside), 0);
+  assert.strictEqual(flagged(CROSS_REPO_BODIES.local), 1);
+  assert.strictEqual(flagged('Blocked by surreptakos/claude-dotfiles#137 until it lands.'), 1);
+});
+
+test('dangling-reference: another repo\'s #137 is not a pointer into this tracker; a bare local #137 is', () => {
+  const dangling = (body) => danglingReferences(openIssue(900, body), () => false, THIS_REPO);
+  assert.deepStrictEqual(dangling(CROSS_REPO_BODIES.qualified), []);
+  assert.deepStrictEqual(dangling(CROSS_REPO_BODIES.beside), []);
+  assert.deepStrictEqual(dangling(CROSS_REPO_BODIES.local), [137]);
+  // The next sentence carries no qualified reference, so its bare #137 is local again.
+  assert.deepStrictEqual(dangling(CROSS_REPO_BODIES.beside + ' Separately, #137 here is ours.'), [137]);
+});
+
+test('stale-premise?: another repo\'s #137 is not closed local #137; a bare local #137 is', () => {
+  const closed = { number: 137, state: 'CLOSED', labels: [], title: 'the hook wrote twice',
+    url: 'https://github.com/o/r/issues/137', closedByPullRequestsReferences: [] };
+  const raised = (body) => {
+    const all = [openIssue(901, body), closed];
+    return stalePremiseFindings(all, byNumberOf(all), { repo: THIS_REPO }).length;
+  };
+  assert.strictEqual(raised('The hook writes twice, which surreptakos/osh-rfp#137 changed.'), 0);
+  assert.strictEqual(raised('The hook writes twice in surreptakos/osh-rfp#138, which #137 changed.'), 0);
+  assert.strictEqual(raised('The hook writes twice, which #137 changed.'), 1);
 });

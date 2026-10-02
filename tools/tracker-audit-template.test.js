@@ -32,7 +32,7 @@ test('the template is the generated copy of tools/tracker-audit.js, byte for byt
 
 test('the template carries the citedIssueNumbers citation narrowing', () => {
   const body = [
-    'Ported from surreptakos/aac-contract-builder#157 and blocked by #42.',
+    'Ported from surreptakos/aac-contract-builder#157. Blocked by #42.',
     'The swatch is #9a690f, not a ticket.',
   ].join('\n');
   const cited = template.citedIssueNumbers(body);
