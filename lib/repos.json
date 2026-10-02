@@ -19,8 +19,8 @@
   "repos": [
     { "repo": "surreptakos/aac-bill-intake",         "path": "Claude/Projects/Financial/aac-bill-intake",           "served": false, "master": "bill-intake",      "stateIssue": 74 },
     { "repo": "surreptakos/aac-performance-reviews", "path": "Claude/Projects/HR/performance-reviews",              "served": false },
-    { "repo": "surreptakos/aac-routines",            "path": "Claude/Projects/Meta/aac-routines",                   "served": true, "master": "routines",         "stateIssue": 1100, "priority": 2 },
-    { "repo": "surreptakos/claude-dotfiles",         "path": "Claude/Projects/Meta/claude-dotfiles",                "served": true, "master": "dotfiles",         "stateIssue": 959,  "priority": 1 },
+    { "repo": "surreptakos/aac-routines",            "path": "Claude/Projects/Meta/aac-routines",                   "served": true, "master": "routines",         "stateIssue": 1100, "priority": 3 },
+    { "repo": "surreptakos/claude-dotfiles",         "path": "Claude/Projects/Meta/claude-dotfiles",                "served": true, "master": "dotfiles",         "stateIssue": 959,  "priority": 2 },
     { "repo": "surreptakos/aac-message-board",       "path": "Claude/Projects/Meta/message-board",                  "served": false },
     { "repo": "surreptakos/zoho-source-of-truth",    "path": "Claude/Projects/Operations/zoho-source-of-truth",     "served": false, "master": "zoho",             "stateIssue": 77 },
     { "repo": "surreptakos/aac-nexus",               "path": "Claude/Projects/Operations/aac-nexus",                "served": false },
@@ -28,6 +28,6 @@
     { "repo": "surreptakos/aac-sales-cockpit",       "path": "Claude/Projects/Sales Data KPIs/aac-cockpit",         "served": true, "master": "sales-cockpit",    "stateIssue": 76,   "priority": 4 },
     { "repo": "surreptakos/aac-sales-commissions",   "path": "Claude/Projects/Sales Data KPIs/commissions",         "served": false },
     { "repo": "surreptakos/aac-contract-builder",    "path": "Claude/Projects/Sales Data KPIs/contract-builder",    "served": false, "master": "contract-builder", "stateIssue": 75 },
-    { "repo": "surreptakos/osh-rfp",                 "path": "Claude/Projects/Sales Data KPIs/osh-rfp",             "served": true, "master": "osh-rfp",          "stateIssue": 1141, "priority": 3 }
+    { "repo": "surreptakos/osh-rfp",                 "path": "Claude/Projects/Sales Data KPIs/osh-rfp",             "served": true, "master": "osh-rfp",          "stateIssue": 1141, "priority": 1 }
   ]
 }
