@@ -205,11 +205,11 @@ test('the SCOUT ticket schema has a body field, and the implementer prompt inter
   const render = new Function(
     't', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand',
     'PYTHON_RAIL', 'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling',
-    'attempt', 'workerIndex',
+    'attempt', 'workerIndex', 'REGEN_RAIL',
     `return \`${promptSrc}\`;`
   );
   const rendered = render(t, branch, scout, chainStart, priorFindings, instrument, testCommand,
-    PYTHON_RAIL, scratchRail, HARNESS_RELAY_RAIL, powershellRail, scratchFile, dedupeBrief, gitSpelling, attempt, workerIndex);
+    PYTHON_RAIL, scratchRail, HARNESS_RELAY_RAIL, powershellRail, scratchFile, dedupeBrief, gitSpelling, attempt, workerIndex, '');
 
   assert.ok(rendered.includes(fixtureBody),
     "the rendered implementer prompt must contain the fixture ticket's body text verbatim");
@@ -276,14 +276,14 @@ test('two attempts of one ticket render disjoint scratch paths in the implemente
   const powershellRail = new Function('dir', `return \`${railSrc('const powershellRail = (dir) => `')}\`;`);
   const scratchFile = (name) => `${scratchRoot}/${name}`;
   const names = ['t', 'branch', 'scout', 'chainStart', 'priorFindings', 'instrument', 'testCommand', 'PYTHON_RAIL',
-    'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling', 'attempt', 'workerIndex'];
+    'scratchRail', 'HARNESS_RELAY_RAIL', 'powershellRail', 'scratchFile', 'dedupeBrief', 'gitSpelling', 'attempt', 'workerIndex', 'REGEN_RAIL'];
   // eslint-disable-next-line no-new-func
   const render = new Function(...names, `return \`${promptSrc}\`;`);
   const t = { number: 919, title: 'Fixture', criteria: 'c', body: 'b' };
   const paths = (attempt, workerIndex) => {
     const out = render(t, `agent/issue-919-attempt${attempt}-wf_fixture-w${workerIndex}`, { repoMap: 'm', defaultBranch: 'main' },
       '', '', 'gh', 'npm test', '', scratchRail, '', powershellRail, scratchFile, () => '', (_i, c) => `git ${c}`,
-      attempt, workerIndex);
+      attempt, workerIndex, '');
     return new Set(out.match(/\/tmp\/fleet-fixture\/[^\s`'")]+/g) || []);
   };
   const first = paths(1, 3);
@@ -293,5 +293,50 @@ test('two attempts of one ticket render disjoint scratch paths in the implemente
   for (const p of first) {
     assert.ok(p.includes('919-attempt1-w3'), `${p} must carry the ticket, attempt and worker`);
     assert.ok(!second.has(p), `${p} is named by both attempt 1 and attempt 2`);
+  }
+});
+
+test('the implementer and verifier prompts carry the configured regenCommands verbatim (issue 1195)', () => {
+  // PR 1169: a verifier ran the stamp and payload commands with its own --home and the payload went
+  // stale. Render both real prompt templates with the rail built from claude-dotfiles' own launch
+  // value (SKILL.md step 3) and check every command arrives byte for byte - and nothing when unset.
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.ok(src.includes('const REGEN_RAIL = regenRail(cfg.regenCommands)'), 'the rail must be built from cfg.regenCommands');
+  // eslint-disable-next-line no-new-func
+  const regenRail = new Function(`${sliceBetween(src, 'const regenRail = ', '\nconst REGEN_RAIL', 'the regenerate rail')}\nreturn regenRail;`)();
+  const skillDoc = fs.readFileSync(path.join(REPO_ROOT, 'aac-skills', 'ticket-fleet', 'SKILL.md'), 'utf8');
+  const launchLine = skillDoc.match(/^\s*regenCommands: (\[.*\])\s*$/m);
+  assert.ok(launchLine, "SKILL.md step 3 must give claude-dotfiles' regenCommands launch value");
+  const commands = JSON.parse(launchLine[1]);
+  assert.deepEqual(commands, [
+    "python3 tools/skill-stamps.py stamp aac-skills --home 'C:\\Users\\Dan'",
+    "python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'",
+  ], "the launch value must be the two CLAUDE.md commands with the owner's home");
+
+  const templates = {
+    implementer: sliceBetween(src, 'Implement GitHub issue #${t.number}: ${t.title}',
+      "Return structured output only.`,\n      { label: `impl:#", 'the implementer prompt template'),
+    verifier: sliceBetween(src, 'You are an independent verifier. Your job is to REFUTE',
+      '`,\n        { label: verifyLabel', 'the code-lane verifier prompt template'),
+  };
+  // Every other name a template reads gets an inert stub; only REGEN_RAIL and t matter here.
+  const stub = Object.assign(() => '', { toString: () => '' });
+  const render = (tmpl, rail) => {
+    const known = { REGEN_RAIL: rail, t: { number: 1195, title: 'f', criteria: 'c', body: 'b' } };
+    const scope = new Proxy(known, {
+      has: () => true,
+      get: (o, k) => (k in o ? o[k] : (k === Symbol.unscopables ? undefined : stub)),
+    });
+    // eslint-disable-next-line no-new-func
+    return new Function('scope', `with (scope) { return \`${tmpl}\`; }`)(scope);
+  };
+  for (const [name, tmpl] of Object.entries(templates)) {
+    const withRail = render(tmpl, regenRail(commands));
+    for (const c of commands) {
+      assert.ok(withRail.includes(`$ ${c}`), `the ${name} prompt must name ${c} exactly as configured`);
+    }
+    assert.match(withRail, /Regenerate rail \(issue 1195\)/, `the ${name} prompt must carry the regenerate rail`);
+    const without = render(tmpl, regenRail(null));
+    assert.doesNotMatch(without, /Regenerate rail/, `the ${name} prompt must carry no rail when regenCommands is unset`);
   }
 });

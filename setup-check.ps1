@@ -30,11 +30,14 @@
       Credentials    the service account key and the OAuth client secret under ~/.config exist
                      and parse as JSON; the GitHub, Claude and gas logins answer a live probe;
                      TYPESAFE_API_KEY is set (user, machine or this process's environment) and
-                     Jev answers a live call with it (issue 1133).
+                     Jev answers a live call with it (issue 1133); an HTTP 402 from Jev is told
+                     apart as an account out of credits, not a bad key (issue 1194).
       Projects       every repo in the shared repo list (lib/repos.json) is cloned at its path
                      with the right origin, its commit gate on (core.hooksPath .githooks when the
                      repo has that folder) and its Claude trust record written (by
                      tools/settings-invariants.ps1 -Trust, the one writer of ~/.claude.json). The
+                     Todoist token is where the aac-routines mirror reads it
+                     (TODOIST_API_TOKEN_FILE, else ~/.config/aac/todoist_api_token; issue 1194). The
                      master watchdog task runs only on the anchor PC. Desktop routines are
                      audited, never written: missing on the anchor, or live elsewhere, is a
                      finding the /setup-check skill acts on (issue 1071).
@@ -43,7 +46,8 @@
     (pip-install PyYAML, run pull on drift, install each plugin the profile enables that is missing
     at user scope, run the desktop caveman install when the wiring is
     broken, the proxy port dead or its logon start missing - the install starts the proxy and
-    registers it - clone a missing repo, set a commit gate, write trust records, install the watchdog
+    registers it - clone a missing repo, set a commit gate, write trust records, copy the Todoist
+    token from ~/.config/todoist_api_token to where the mirror reads it, install the watchdog
     task on the anchor or disable it elsewhere), then reports. Whatever only the owner can do - install a
     binary, copy a secret file, log in - becomes a numbered to-do with the exact command.
 
@@ -58,6 +62,7 @@
     each of which replaces that probe and answers with its exit code (0 = pass). Probe names:
     command (arg: the tool name), pyyaml, pyyaml-install, gh-auth, claude-auth, gas-auth, jev-live,
     caveman-live, caveman-enable, caveman-logon, clone (args: slug, path), watchdog-install, watchdog-disable.
+    jev-live exits 2 when Jev answered HTTP 402 (no credits) and 1 on any other failure.
     git-identity-set (args: git key, value) writes one global git setting; plugin-install (arg: the
     plugin id) installs one plugin at user scope.
     Text probes print their answer instead: git-user-name and git-user-email (the global value,
@@ -426,7 +431,7 @@ function Test-JevKey {
                 if (-not $key) { $key = [Environment]::GetEnvironmentVariable($JevKeyVar, 'Machine') }
                 [Environment]::SetEnvironmentVariable($JevKeyVar, $key, 'Process')
             }
-            $js = 'const j=require(process.argv[1]);j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000}).then(a=>process.exit(a&&a.ok?0:1))'
+            $js = 'const j=require(process.argv[1]);let st=0;j.askJev({reply:''ok''},{ok:{type:''noul'',instructions:''Is reply the word ok?''}},{timeoutMs:10000,onStatus:c=>{st=c}}).then(a=>process.exit(a&&a.ok?0:(st===402?2:1)))'
             Invoke-NativeExit 'node' @('-e', $js, $JevJs)
         } finally { [Environment]::SetEnvironmentVariable($JevKeyVar, $prev, 'Process') }
     }
@@ -434,6 +439,10 @@ function Test-JevKey {
         Write-Line skip ('Jev live call  ({0})' -f $SkipReason)
     } elseif ($code -eq 0) {
         Write-Line ok 'Jev answers a live call'
+    } elseif ($code -eq 2) {
+        # HTTP 402: the key is accepted and the account has no credits, so a new key would not help.
+        Write-Line stop ('Jev answered HTTP 402 with {0}: the key is good, but the TypeSafe account has no credits' -f $JevKeyVar)
+        Add-Todo 'Top up TypeSafe: add credits to the TypeSafe account that owns TYPESAFE_API_KEY (the key itself is fine), then re-run the setup check.'
     } else {
         Write-Line stop ('Jev did not answer a live call with {0}: the key is refused or api.typesafe.ai is unreachable' -f $JevKeyVar)
         Add-Todo ('Replace the TypeSafe key: {0}' -f $JevKeyTodo) @($JevKeySet)
@@ -1112,10 +1121,53 @@ function Test-Routines {
     }
 }
 
+# The Todoist token the aac-routines mirror reads when no TODOIST_API_TOKEN is in its environment
+# (issue 1194): TODOIST_API_TOKEN_FILE when set, then ~/.config/aac/todoist_api_token, the order
+# todoist_port.py tries them, the first non-empty one winning. Without it the mirror's full sync
+# answers 403 and its task history 401. Some PCs hold the token one folder up, at
+# ~/.config/todoist_api_token; -Fix copies that one into place. The value is never read into the
+# output.
+$TodoistTokenPath   = Join-Path (Join-Path (Join-Path $UserHome '.config') 'aac') 'todoist_api_token'
+$TodoistLegacyToken = Join-Path (Join-Path $UserHome '.config') 'todoist_api_token'
+
+function Test-TokenFile {
+    param([string]$Path)
+    try { return [bool]([System.IO.File]::ReadAllText($Path).Trim()) } catch { return $false }
+}
+
+function Test-TodoistToken {
+    $candidates = @()
+    if ($env:TODOIST_API_TOKEN_FILE) { $candidates += [string]$env:TODOIST_API_TOKEN_FILE }
+    $candidates += $TodoistTokenPath
+    $hit = @($candidates | Where-Object { Test-TokenFile $_ } | Select-Object -First 1)
+    $note = ''
+    $legacy = Test-TokenFile $TodoistLegacyToken
+    if ($hit.Count -eq 0 -and $legacy -and $Fix) {
+        New-Item -ItemType Directory -Path (Split-Path $TodoistTokenPath -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $TodoistLegacyToken -Destination $TodoistTokenPath -Force
+        $note = ('  (copied by -Fix from {0})' -f $TodoistLegacyToken)
+        if (Test-TokenFile $TodoistTokenPath) { $hit = @($TodoistTokenPath) }
+    }
+    if ($hit.Count -gt 0) {
+        Write-Line ok ('Todoist token for the aac-routines mirror  ({0}){1}' -f $hit[0], $note)
+        return
+    }
+    $where = ($candidates -join ' or ')
+    if ($legacy) {
+        Write-Line stop ('Todoist token missing where the aac-routines mirror reads it ({0}); one is at {1}  (-Fix copies it)' -f $where, $TodoistLegacyToken)
+        Add-Todo 'Copy the Todoist token to where the aac-routines mirror reads it (or re-run the setup check with -Fix):' @(
+            ('New-Item -ItemType Directory -Force "{0}" | Out-Null; Copy-Item "{1}" "{2}"' -f (Split-Path $TodoistTokenPath -Parent), $TodoistLegacyToken, $TodoistTokenPath))
+    } else {
+        Write-Line stop ('Todoist token missing  ({0}): the aac-routines mirror''s full sync answers 403 and its task history 401 without it' -f $where)
+        Add-Todo ('Copy the Todoist API token (Todoist Settings > Integrations > Developer) into {0} over a secure channel (password manager or encrypted drive), never email and never a repo.' -f $TodoistTokenPath)
+    }
+}
+
 function Test-Projects {
     Write-Host 'Projects'
     $list = Read-RepoList -UserHome $UserHome
     Test-Clones $list
+    Test-TodoistToken
     Test-Anchor $list
 }
 
