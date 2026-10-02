@@ -31,14 +31,14 @@ The report is the newest forgotten-tasks report: `python -m aac_routines.run_led
 
 ## Live tail
 
-Fill exactly the window "newest export stamp → now", from:
+Fill exactly the window "newest export stamp → now", at most one hour (aac-routines ADR 0010, point 3; the Day Board's huddle draft reads the same window). Wide live sweeps drew Microsoft Graph 429s, and the hourly exports put every run within an hour of one. A longer tail, an unexported source or a truncation hole is a coverage gap named in the status, never a live sweep. Read the window from:
 
 - Gmail — `mcp__Gmail__search_threads`
 - Teams — `mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`
 - Meeting notes — Granola
 - Todoist history — `python -m aac_routines.completed_task_events --date-from <tail start> --date-to <now>` from the aac-routines checkout, never the Todoist connector's activity read (aac-routines issue 639). ISO datetimes, `Z` or an offset; `--day yesterday` reads a whole local day. Exit 1 makes Todoist history unreachable
 
-The window starts at the export stamp. Log every connector that fails or returns no access.
+Log every connector that fails or returns no access.
 
 ## Systems of record (Dan, 2026-09-18, issue 204)
 

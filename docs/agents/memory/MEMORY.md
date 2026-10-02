@@ -34,6 +34,8 @@ and give the note a name that says what it is — adding one costs its own line 
 - plugin-auto-updates-never-tell-dan: desktop marketplace autoUpdate true; never tell Dan to run claude plugin update
 - environment-verification-log: log
 - fable-usage-is-rationed: weekly cap; workers stay pinned, orchestrator runs Fable high
+- launched-agents-run-on-opus: Todoist task agents launch with --model claude-opus-5-5, never Fable; one launch per task
+- agent-sessions-visible: Dan wants task agents in a session he can see, not a hidden --bg job
 - gate-declare-bare-command: nothing appended
 - hook-exit-126-is-the-mode-bit: diag log; seat PLUGIN_ROOT
 - leave-dates-token-rides-the-proxy: proxy-held

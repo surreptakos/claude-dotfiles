@@ -41,7 +41,9 @@
          least -StallIdleMinutes (default 30) is stopped and the next repo is launched. Both
          conditions must hold: age alone is not enough (an interactive session mid-work is
          Dan's to keep), and idleness alone is not enough (a fresh master with only one
-         Heartbeat has an idle transcript by definition). The pass-complete close path keeps
+         Heartbeat has an idle transcript by definition). A master with no transcript at all
+         (it never reached its first prompt) is idle since its process start (issue 1205), and
+         every alive line names its first transcript write or "none yet". The pass-complete close path keeps
          its own -IdleMinutes (default 5). If only the marker is stale but the transcript has
          been touched inside -StallIdleMinutes, log "possibly stalled; not killed" and leave
          it alone.
@@ -553,16 +555,24 @@ foreach ($p in $rcProcs) {
     if ($markers) { $hb = $markers.HeartbeatTrusted }   # issue 711: a clamped future stamp never reopens a pass
     $transcripts = Get-MasterTranscripts -R $row -StartedUtc $started
     $script:MasterSessionIds += @($transcripts | ForEach-Object { $_.BaseName })
-    $lastWrite = $null
-    if ($transcripts.Count -gt 0) { $lastWrite = $transcripts[0].LastWriteTimeUtc }
-    $idleMin = -1
-    if ($lastWrite) { $idleMin = [int](([datetime]::UtcNow - $lastWrite).TotalMinutes) }
+    # Issue 1205: a master that never reached its first prompt has no transcript at all. That
+    # reads as idle since the process start, not as -1 minutes: -1 never met the stall rule's
+    # 30 minutes, and master-routines held the only slot for 13h45m on 2026-10-01 that way.
+    # The first transcript write (the oldest one's creation time, or "none yet") goes on every
+    # alive line, so the next launch that sits on a dialog shows as never having written.
+    $idleFrom = $started
+    $firstWrite = 'none yet'
+    if ($transcripts.Count -gt 0) {
+        $idleFrom = $transcripts[0].LastWriteTimeUtc
+        $firstWrite = (@($transcripts | Sort-Object CreationTimeUtc)[0].CreationTimeUtc).ToString('u')
+    }
+    $idleMin = [int](([datetime]::UtcNow - $idleFrom).TotalMinutes)
 
     $markerFresh = ($pc -and $pc -gt $started)
     $notReopened = ($pc -and (-not $hb -or $pc -ge $hb))
-    $idle = ($idleMin -ge $IdleMinutes)   # -1 (no transcript found) never counts as idle
+    $idle = ($idleMin -ge $IdleMinutes)
     if ($markerFresh -and $notReopened -and $idle -and -not $Force) {
-        Write-Info "$tag PASS COMPLETE at $($pc.ToString('u')) (master started $($started.ToString('u')), transcript idle ${idleMin}m) - closing pid=$($p.ProcessId)"
+        Write-Info "$tag PASS COMPLETE at $($pc.ToString('u')) (master started $($started.ToString('u')), transcript idle ${idleMin}m, first transcript write $firstWrite) - closing pid=$($p.ProcessId)"
         if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
         else {
             Stop-MasterWindow -Proc $p -Tag $tag
@@ -574,9 +584,9 @@ foreach ($p in $rcProcs) {
         continue
     }
     if ($markerFresh -and -not $notReopened) {
-        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId): Pass complete $($pc.ToString('u')) superseded by Heartbeat $($hb.ToString('u')) - pass reopened, working"
+        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId): Pass complete $($pc.ToString('u')) superseded by Heartbeat $($hb.ToString('u')) - pass reopened, working (first transcript write $firstWrite)"
     } elseif ($markerFresh -and -not $idle) {
-        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId): Pass complete $($pc.ToString('u')) but transcript written ${idleMin}m ago (< ${IdleMinutes}m) - still in use, not closed"
+        Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId): Pass complete $($pc.ToString('u')) but transcript written ${idleMin}m ago (< ${IdleMinutes}m) - still in use, not closed (first transcript write $firstWrite)"
     } else {
         $latest = Get-LatestMarkerUtc -Markers $markers
         if ($latest) {
@@ -584,9 +594,9 @@ foreach ($p in $rcProcs) {
             if ($ageMin -ge $MaxHeartbeatAgeMinutes) {
                 # Stall recycle path (issue 89, Dan's ruling 2026-09-10): stop only when the
                 # transcript is also idle at least -StallIdleMinutes. Both conditions must
-                # hold, and a missing transcript ($idleMin -eq -1) never counts as idle.
+                # hold; a missing transcript is idle since the process start (issue 1205).
                 if ($idleMin -ge $StallIdleMinutes -and -not $Force) {
-                    Write-Info "$tag STALLED at $($latest.ToString('u')) (${ageMin}m old, transcript idle ${idleMin}m >= ${StallIdleMinutes}m) - recycling pid=$($p.ProcessId)"
+                    Write-Info "$tag STALLED at $($latest.ToString('u')) (${ageMin}m old, transcript idle ${idleMin}m >= ${StallIdleMinutes}m, first transcript write $firstWrite) - recycling pid=$($p.ProcessId)"
                     if ($WhatIf) { Write-Info "$tag -WhatIf: not stopped" ; $stillWorking++ }
                     else {
                         Stop-MasterWindow -Proc $p -Tag $tag
@@ -598,12 +608,12 @@ foreach ($p in $rcProcs) {
                     }
                     continue
                 }
-                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old, transcript idle ${idleMin}m (< ${StallIdleMinutes}m) - possibly stalled; not killed"
+                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId) but latest marker is ${ageMin}m old, transcript idle ${idleMin}m (< ${StallIdleMinutes}m), first transcript write $firstWrite - possibly stalled; not killed"
             } else {
-                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), working (latest marker ${ageMin}m ago, transcript idle ${idleMin}m)"
+                Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), working (latest marker ${ageMin}m ago, transcript idle ${idleMin}m, first transcript write $firstWrite)"
             }
         } else {
-            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), no marker yet (booting)"
+            Write-Info "$tag MASTER ALIVE pid=$($p.ProcessId), no marker yet (booting; first transcript write $firstWrite)"
         }
     }
     $stillWorking++
