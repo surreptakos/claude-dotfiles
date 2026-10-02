@@ -2,10 +2,10 @@
 name: resolving-merge-conflicts
 description: "Use when you need to resolve an in-progress git merge/rebase conflict."
 metadata:
-  modified: "2026-09-27T19:31:03Z"
-  previous-modified: "2026-08-20T00:41:59Z"
-  revision: "2"
-  content-sha: "abe6d8f0e71b"
+  modified: "2026-10-01T23:30:31Z"
+  previous-modified: "2026-09-27T19:31:03Z"
+  revision: "3"
+  content-sha: "8dff05ba65eb"
 ---
 
 1. **See the current state** of the merge/rebase. Check git history, and the conflicting files.

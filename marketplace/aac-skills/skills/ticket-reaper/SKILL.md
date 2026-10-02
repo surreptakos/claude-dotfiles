@@ -1,29 +1,32 @@
 ---
 name: ticket-reaper
-description: Sweep every open ticket in the current repo against the speed-over-robustness rule — park belt-and-suspenders work in the Maybe Someday milestone, close only what is moot, post one digest. Runs as step 0 of the weekly /maintain-repo (no standalone Routine, owner ruling on issue 664).
+description: Reap the current repo's open tickets against the speed-over-robustness rule — park belt-and-suspenders work in Maybe Someday, close what is moot, post one digest. Use when asked to reap or sweep the tracker, and as step 0 of /maintain-repo.
 metadata:
-  modified: '2026-09-25T17:16:14Z'
-  previous-modified: '2026-09-23T22:38:28Z'
-  revision: '7'
-  content-sha: 973e509b2c96
+  modified: '2026-10-02T15:33:22Z'
+  previous-modified: '2026-09-25T17:16:14Z'
+  revision: '8'
+  content-sha: d484c12f75fb
 ---
 
 # Ticket reaper
 
 Dan, 2026-09-18: "We are being way too careful for internal tools that I will only ever share
 with a small scrappy team. I need speed over robustness. We shouldn't be building solutions to
-problems that don't exist yet. Defensive coding is bad." This skill applies that rule to the
-tracker so it never re-fills with the tickets the 2026-09-18 sweep removed (77 closed).
+problems that don't exist yet. Defensive coding is bad." The reaper holds the tracker to that rule,
+so it stays clear of the cautious tickets the 2026-09-18 sweep closed (77 of them). It runs as step
+0 of the weekly `/maintain-repo`, with no standalone Routine (owner ruling, issue 664).
 
 ## Setup
 
-- Repo: `git remote get-url origin`. Read every open issue, all pages:
+- Repo: `git remote get-url origin`. Read every open issue, one page at a time:
   `gh api "repos/<owner>/<repo>/issues?state=open&per_page=100&page=N"` until a short page.
   Skip pull requests (`pull_request` key) and anything already in the **Maybe Someday**
   milestone.
 - The digest lands on the open issue titled **Ticket reaper digest** (label `orchestrator`).
   If it is missing, create it with that title and label and say so in the digest.
 - The parking milestone is **Maybe Someday**. If it is missing, create it.
+
+Done when every open issue is listed, and the digest issue and the milestone both exist.
 
 ## Classify each ticket — read the body, not just the title
 
@@ -50,22 +53,23 @@ that works:
 **Leave alone** — a real problem that bit, or work on a live route:
 - a bug with a date and an observed failure in its body
 - work a live route depends on today: a cut-over step, a PRD child whose body names the failure
-  it removes. Being a PRD child, carrying a milestone, or having a ruling on it is not by itself
-  a reason to leave it: judge the body. Assume nothing about the quality of an existing ticket
-  from where it sits.
+  it removes. Judge the body: being a PRD child, carrying a milestone or having a ruling on it
+  earns nothing by itself.
 - anything labelled `ready-for-human`, `orchestrator` or `wayfinder:map` (rulings and state
   containers are never the reaper's)
-- anything Dan pulled back out of Maybe Someday (an issue event shows the milestone change)
-- Windows-only or PC-only work: the desktop is the live venue for the master orchestrators
-  again (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`), so PC work is
-  judged like any other ticket
+- anything Dan pulled back out of Maybe Someday, for ever after: check the issue's events for a
+  `demilestoned` on Maybe Someday before parking.
+
+Windows-only or PC-only work is judged like any other ticket: the desktop is the live venue for
+the master orchestrators again (ADR 0001, `docs/adr/0001-orchestrator-masters-run-on-the-desktop.md`).
+
+Done when every ticket read has exactly one outcome.
 
 ## Land it
 
 - Park: `gh api --method PATCH repos/<owner>/<repo>/issues/<n> -f milestone=<number>` (MCP
-  `issue_write` in a container), labels untouched. A ticket already in another milestone moves
-  the same way; the digest names the milestone it left. No comment on the ticket; the digest is the
-  record.
+  `issue_write` in a container). A ticket already in another milestone moves the same way; the
+  digest names the milestone it left. The digest is the record, so the ticket gets no comment.
 - Close: one comment naming the reason class and the evidence (the open duplicate's number, the
   commit or line that delivered it). Then **nullify every unticked box** in the body — append
   ` — not planned: <reason class>, ticket reaper <date>` to each `- [ ]` line, leaving the box
@@ -76,18 +80,18 @@ that works:
   reason where the call was close), counts at the top. A run that changes nothing still posts a
   one-line digest, so a silent week reads differently from a week the sweep did not run.
 
+Done when every park and close has landed and the digest comment is posted.
+
 ## Rails
 
 - Never close a ticket that is parked, labelled `ready-for-human`, or younger than 48 hours.
-- Never edit a ticket body except the box annotation on a close. Never touch labels except the
-  state swap on a close.
+- Edit a ticket body only for the box annotation on a close, and its labels only for the state
+  swap on a close.
 - One run touches at most 40 tickets; list the rest under "not reached" in the digest so the next
   run starts there.
-- A ticket Dan pulled back is left alone forever after: check the issue's events for a
-  `demilestoned` on Maybe Someday before parking.
 
 ## In a cloud container
 
 Same steps. `gh api` REST works through the proxy; `gh issue` (GraphQL) does not — use MCP
 `list_issues`, `issue_write`, `add_issue_comment` for the same calls. Page explicitly
-(`&page=N`), never `--paginate`.
+(`&page=N`) rather than `--paginate`.

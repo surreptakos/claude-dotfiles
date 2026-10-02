@@ -3,10 +3,10 @@ name: setup-matt-pocock-skills
 description: "Configure this repo for the engineering skills: set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills."
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-28T21:53:59Z"
-  previous-modified: "2026-08-20T00:41:59Z"
-  revision: "2"
-  content-sha: "aa3a3fa6af91"
+  modified: "2026-10-02T03:44:50Z"
+  previous-modified: "2026-09-28T21:53:59Z"
+  revision: "3"
+  content-sha: "76dff3971d12"
 ---
 
 # Setup Matt Pocock's Skills
@@ -59,7 +59,7 @@ If it is installed, ask exactly one question:
 
 > Do you want to keep the default triage labels? (recommended: **yes**)
 
-The defaults are the five canonical roles, each label string equal to its name: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. On **yes**, write them as-is. Only if the user says no, usually because their tracker already uses other names (e.g. `bug:triage` for `needs-triage`), collect the overrides so `triage` applies existing labels instead of creating duplicates.
+The defaults are the five canonical roles, each label string equal to its name: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`, plus the local sixth state `ready-for-local-agent` (work only a desktop session can do, no person needed). On **yes**, write them as-is. Only if the user says no, usually because their tracker already uses other names (e.g. `bug:triage` for `needs-triage`), collect the overrides so `triage` applies existing labels instead of creating duplicates.
 
 **Section C: Domain docs.** Default to **single-context** (one `CONTEXT.md` + `docs/adr/` at the repo root). This fits almost every repo; write it without asking.
 
