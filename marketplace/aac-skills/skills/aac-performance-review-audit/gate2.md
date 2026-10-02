@@ -1,6 +1,8 @@
 # Gate 2: Meaning (reading, yes or no per item)
 
-Only after Gate 1 passes. Run every meaning check in `standards.md` (`../aac-review-self-check/standards.md`) against each item in turn: one Strength or Weakness, every check in order, then the next item; then the Core Message and Guidance checks.
+Only after Gate 1 passes. Gate 2 is the `meaning` run: `python3 review_gate_tools.py meaning REVIEW.docx --direct FIRSTNAME`. Its fix lines go into the email verbatim, Jev's still tagged "(Jev)" so Dan sees which are judgments. Exit 2 is a stop, not a pass: Jev did not answer, so fix the access and rerun before writing anything.
+
+Reader judgment covers only what the run hands to a reader: each item on its Read list, and the reader checks it names (a repeat from the prior review, framing past the record), run by `standards.md` (`../aac-review-self-check/standards.md`) against each item in turn. A Read item that fails gets a fix line in the same form. Its comma counts are a note under the Notes line, never a fix.
 
 Fix line form: "S3: sentence 2 is a list of five accounts; it must be one event or figure." "Core Message: the three areas named are W1 and W2; the Ramification must name the work of mine he takes on." No rewrites. The Bob examples carry the standard.
 

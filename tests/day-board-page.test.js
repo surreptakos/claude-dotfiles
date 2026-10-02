@@ -53,7 +53,7 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
     }
     if (tool === "read_file_content") return text({fileContent: mdEscape(JSON.stringify(exported[input.fileId] || {value: []}))});
     if (tool === "teams_list_channel_messages") return text([{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: "<p>live read of an old post</p>", messageType: "message"}]);
-    if (tool === "find-tasks") return text({tasks: input.projectId === CURRENT_WORK ? tasks : [], hasMore: false});
+    if (tool === "find-tasks") return text({tasks: tasks.filter(t => t.projectId === input.projectId), hasMore: false});
     if (tool === "find-activity") return text({events: []});
     if (tool === "outlook_email_search") return text(liveMail);
     if (tool === "query_granola_meetings") return {content: [{type: "text", text: "(no meetings)"}]};
@@ -134,6 +134,40 @@ test("a blockers answer in the wrong shape requires every overdue item (fails to
   const must = draftPrompt.split("MUST APPEAR")[1].split("\n")[1];
   assert.match(must, /annual review/);
   assert.match(must, /shared drive/);
+});
+
+// Issue 1191: the overdue scan reads every project the task panel reads, so a backlog task that holds a vendor
+// up reaches the post as a risk line, and one that holds nobody up stays out.
+test("an overdue backlog task that names a waiting party yields a risk line; one with none yields no line", async () => {
+  const BACKLOG = (script.match(/\{id:"([^"]+)", tag:"Backlog"\}/) || [])[1];
+  assert(BACKLOG && BACKLOG !== CURRENT_WORK, "the page names a backlog project");
+  const backlog = [
+    {id: "b1", content: "Approve or decline the vendor quote for the garage battery; the vendor waits on the answer", labels: ["do"], dueDate: past, projectId: BACKLOG},
+    {id: "b2", content: "Tidy the backlog notes folder", labels: ["do"], dueDate: past, projectId: BACKLOG}
+  ];
+  const page = buildPage({tasks: backlog, lastPostHtml, onPrompt(prompt){
+    if (prompt.startsWith("For each of Dan Gatsakos's overdue work tasks")){
+      const list = JSON.parse(prompt.split("TASKS:\n")[1].split("\n")[0]);
+      return {items: list.map(x => ({index: x.index, blocks: /waits on/.test(x.task), who: /waits on/.test(x.task) ? "the vendor" : ""}))};
+    }
+    if (prompt.includes("ITEMS TO ADD:")){
+      const missing = JSON.parse(prompt.split("ITEMS TO ADD:\n")[1].split("\n")[0]);
+      return {add: missing.map(t => /vendor/.test(t)
+        ? {section: "risks", text: "Garage battery vendor quote is overdue, so the vendor waits", evidence: "new: task vendor quote"}
+        : {section: "risks", text: "Backlog notes folder tidy is overdue, so the folder waits", evidence: "new: task tidy"})};
+    }
+    return passAll(prompt);
+  }});
+  await new Promise(r => setImmediate(r));
+  await page.$("hud-go").fire("click");
+  assert.match(page.$("hud-status").textContent, /^Passed every rule/, page.$("hud-status").textContent + " :: " + page.$("hud-ev-body").innerHTML);
+  const must = draftPromptOf(page).split("MUST APPEAR")[1].split("\n")[1];
+  assert.match(must, /vendor quote/, "the backlog item holding the vendor up is required");
+  assert.doesNotMatch(must, /notes folder/, "the backlog item holding nobody up is not required");
+  const saved = Object.entries(page.store).find(([k]) => k.startsWith("huddle_drafts/"))[1];
+  const risks = saved.risks.map(r => r.text);
+  assert(risks.some(r => /vendor quote/.test(r)), "risk line for the vendor quote: " + JSON.stringify(risks));
+  assert(!risks.concat(saved.focus.map(f => f.text)).some(r => /notes folder/.test(r)), "no line for the tidy task");
 });
 
 test("no prompt the page sends calls a review confidential (Dan, 2026-09-30: the Mireya review audit belongs in the post)", () => {
