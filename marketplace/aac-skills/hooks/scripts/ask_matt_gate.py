@@ -1580,6 +1580,114 @@ def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
     ]
 
 
+# Issue 1212: a quoted deliverable (a blockquoted draft Dan pastes into Teams or mail, or a prose
+# fence) is his text, not the agent's prose. The reply caps were trimming a 230-word Teams draft
+# that already passed AAC-WR-001, so the caps skip it and the house linter checks it instead. A
+# fence tagged as code is code, not a deliverable; an untagged or prose-tagged one is.
+FENCE_OPEN_PATTERN = re.compile(r"^ {0,3}```[ \t]*([\w+.-]*)")
+FENCE_CLOSE_PATTERN = re.compile(r"^ {0,3}```[ \t]*$")
+BLOCKQUOTE_PATTERN = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+DELIVERABLE_FENCE_TAGS = frozenset(("", "text", "txt", "plain", "plaintext", "markdown", "md"))
+WR001_RUNNER = (
+    "const [lint, ...files] = process.argv.slice(1);"
+    "require(lint).run([...files, '--json'], { ask: null })"
+    ".then((code) => { process.exitCode = code; });"
+)
+
+
+def _quoted_deliverables(text: str) -> tuple[list[str], str]:
+    """The reply's quoted deliverables, and the reply with its blockquote lines blanked. Fences stay
+    in the returned text: _strip_code already keeps them out of every cap."""
+    blocks: list[str] = []
+    kept: list[str] = []
+    quote: list[str] = []
+    fence: str | None = None
+    fence_lines: list[str] = []
+
+    def flush() -> None:
+        if "\n".join(quote).strip():
+            blocks.append("\n".join(quote))
+        quote.clear()
+
+    for line in text.splitlines():
+        if fence is not None:
+            if FENCE_CLOSE_PATTERN.match(line):
+                if fence in DELIVERABLE_FENCE_TAGS and "\n".join(fence_lines).strip():
+                    blocks.append("\n".join(fence_lines))
+                fence = None
+            else:
+                fence_lines.append(line)
+            kept.append(line)
+            continue
+        opened = FENCE_OPEN_PATTERN.match(line)
+        if opened:
+            flush()
+            fence, fence_lines = opened.group(1).lower(), []
+            kept.append(line)
+            continue
+        quoted = BLOCKQUOTE_PATTERN.match(line)
+        if quoted:
+            quote.append(quoted.group(1))
+            kept.append("")
+            continue
+        flush()
+        kept.append(line)
+    flush()
+    return blocks, "\n".join(kept)
+
+
+def _wr001_linter() -> Path | None:
+    """wr001-lint.js from the plugin payload (hooks/scripts -> skills/) or the repo source."""
+    tail = Path("aac-house-writing-standard") / "scripts" / "wr001-lint.js"
+    roots = [os.environ.get("CLAUDE_PLUGIN_ROOT", "")]
+    candidates = [Path(root) / "skills" / tail for root in roots if root]
+    for depth, prefix in ((2, "skills"), (3, "aac-skills")):
+        if len(SCRIPT.parents) > depth:
+            candidates.append(SCRIPT.parents[depth] / prefix / tail)
+    candidates.append(
+        CLAUDE_HOME / "plugins" / "marketplaces" / "claude-dotfiles" / "marketplace" / "aac-skills"
+        / "skills" / tail
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _wr001_lint(blocks: list[str]) -> list[str] | None:
+    """AAC-WR-001 errors in the quoted deliverables, one violation per finding naming the rule;
+    None when the linter cannot run, and then the deliverables get no exemption from the caps.
+    Regex rules only: the Jev rules are warnings and never decide the linter's exit."""
+    linter = _wr001_linter()
+    node = shutil.which("node")
+    if linter is None or node is None:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            files = []
+            for index, block in enumerate(blocks, 1):
+                path = Path(folder) / f"quoted-{index}.txt"
+                path.write_text(block + "\n", encoding="utf-8")
+                files.append(str(path))
+            done = subprocess.run(
+                [node, "-e", WR001_RUNNER, str(linter), *files],
+                capture_output=True, text=True, encoding="utf-8", timeout=60, check=False,
+            )
+        results = json.loads(done.stdout)["results"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+    if done.returncode not in (0, 1) or any(r.get("unreadable") for r in results):
+        return None
+    violations = []
+    for index, result in enumerate(results, 1):
+        for finding in result.get("findings", []):
+            if finding.get("sev") != "error":
+                continue
+            snippet = f' "{finding["text"][:40]}"' if finding.get("text") else ""
+            violations.append(
+                f"quoted deliverable {index} breaks AAC-WR-001 Rule {finding.get('rule')} "
+                f"(line {finding.get('line')}): {finding.get('msg')}{snippet}"
+            )
+    return violations
+
+
 def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list[str]:
     profile = LINT_PROFILES.get(mode)
     if profile is None:
@@ -1592,7 +1700,13 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
     # ignores that one block, at the top only, and still counts every other fence.
     text = PYLONS_PREFIX_PATTERN.sub("", text, count=1)
     prose = _strip_code(text)
-    words = prose.split()
+    # Issue 1212: the word, sentence and article caps measure the reply's own prose; a quoted
+    # deliverable is checked by wr001-lint instead, and keeps counting when that cannot run.
+    deliverables, unquoted = _quoted_deliverables(text)
+    house = _wr001_lint(deliverables) if deliverables else None
+    cap_text = text if house is None else unquoted
+    cap_prose = _strip_code(cap_text)
+    words = cap_prose.split()
     violations: list[str] = []
     # A ```bash block is a command the user can click Run on, so it is the
     # deliverable when they ask how to do something — not working material
@@ -1622,15 +1736,15 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
     if len(words) > word_cap:
         violations.append(f"too long: {len(words)} words (cap {word_cap})")
     if articles_cap is not None and len(words) >= 50:
-        density = 100.0 * len(ARTICLE_PATTERN.findall(prose)) / len(words)
+        density = 100.0 * len(ARTICLE_PATTERN.findall(cap_prose)) / len(words)
         if density > articles_cap:
             violations.append(
                 f"article density {density:.1f}/100 words (cap {articles_cap:g}) — drop a/an/the"
             )
     # Issue 1059: the route-appeal line is text the gate itself mandates, word for word, so the
     # sentence cap never judges it: capping it left no reply that passed both rules.
-    sentence_prose = prose
-    lines = text.lstrip().splitlines()
+    sentence_prose = cap_prose
+    lines = cap_text.lstrip().splitlines()
     if appeal_line and lines and lines[0].strip() == appeal_line:
         sentence_prose = _strip_code("\n".join(lines[1:]))
     sentences = [s.strip() for s in SENTENCE_SPLIT.split(sentence_prose) if s.strip()]
@@ -1641,7 +1755,7 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
             f"{len(long_sentences)} sentence(s) over {sentence_cap} words"
             f" (longest {len(worst.split())}) — split them"
         )
-    return violations
+    return violations + (house or [])
 
 
 # ---------------------------------------------------------------------------- ADHD lint
