@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
 disable-model-invocation: false
 metadata:
-  modified: "2026-10-02T21:09:54Z"
-  previous-modified: "2026-10-02T20:04:51Z"
-  revision: "12"
-  content-sha: "151576966739"
+  modified: "2026-10-02T21:53:39Z"
+  previous-modified: "2026-10-02T21:09:54Z"
+  revision: "13"
+  content-sha: "c260f9de5181"
 ---
 
 # To Tickets
@@ -120,6 +120,34 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 </issue-template>
 
 In either form, avoid specific file paths or code snippets: they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it and note briefly that it came from a prototype. Trim to the decision-rich parts, not a working demo, just the important bits.
+
+## A ticket that follows a closed issue
+
+The harness's `tools/tracker-audit.js` fires `[stale-premise?]` on an open issue whose prose cites a closed issue and reads as asserting it is still true. A ticket filed downstream of a shipped fix, a completed spec or an older closed ticket is a follow-up, not a stale premise, so its body says so in one of the two forms the audit's `isFollowUpAcknowledgment` accepts (the repo's AGENTS.md, "Follow-up ticket wording", where it has one):
+
+- **`Follow-up to closed #N.`**, one line per closed issue cited. `Follow-up from #N`, `Follow-up: #N` and `Follows #N` match too.
+- **`Discovered from PR #M`** (or a bare `#M`), where `#M` is the PR that closed `#N`. The audit resolves closer PRs at check time.
+
+Put the line above the section headings (`## Parent`, `## What to build`), so it is the first thing a reader sees and the body scan does not depend on section order. A ticket citing no closed issue carries no such line.
+
+Decide which cited numbers are closed by reading each one; never infer it. `gh issue view` is a GraphQL call that a cloud container's proxy refuses with HTTP 403, so in a container use the REST spelling (issue 360). Both answer `open` or `closed`:
+
+```bash
+gh issue view <n> --json state --jq .state                     # desktop (GraphQL)
+gh api repos/<owner>/<repo>/issues/<n> --jq .state             # container (REST)
+```
+
+The rule covers the tickets this run publishes. Existing open tickets the audit already flagged are out of scope: do not edit their bodies from a `/to-tickets` run.
+
+### In aac-routines: publish through `publish_ticket`
+
+aac-routines makes the line mechanical (issues 106, 237). Publish every ticket through `src/aac_routines/publish_ticket.py` (`publish_ticket(...)`, or the CLI shim `scripts/publish_ticket.py`), which runs the fields through `render_ticket_body` in `src/aac_routines/to_tickets.py`; there is no body override. Pass `closed_issue_refs=(N, ...)`, the closed numbers the ticket's discovery cites, and the acknowledgment lands at the top of the body. It is pure by default: `dry_run=True` returns the body without touching GitHub, and `dry_run=False` posts it with `gh issue create --body-file -`. With `closed_issue_refs=()` the body renders exactly as the issue template above. `aac_routines.publish_ticket.lint_ticket_body(body, cited_closed_issue_refs)` flags a body that cites a closed issue without the wording, so fleet tooling can fail a run whose bodies drifted. The renderer queries nothing; the closed check in a container there reads:
+
+```bash
+gh api repos/surreptakos/aac-routines/issues/<n> --jq .state   # container (REST)
+```
+
+`tests/test_to_tickets.py` and `tests/test_publish_ticket.py` in aac-routines pin this section: the canonical phrase, the renderer and the publisher by name.
 
 ## In a cloud container: same duties, different instruments
 
