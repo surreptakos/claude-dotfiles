@@ -706,7 +706,7 @@ function endGateChecks() {
 /** The tracker jobs are JOBS, not something this checker spawns (issue 473), and there are five of
  *  them (issue 583): `/session-end` promises the last run of every one, so a red job shows up here
  *  as a line. Each runs on issue events, pushes to the default branch or a cron, and this reads the
- *  newest run on the default branch over REST (`runs?per_page=1`) — gh when it is there, curl
+ *  newest run on the default branch over REST (`runs?per_page=5`, see `pickLatestRun`) — gh when it is there, curl
  *  through a container's egress proxy when it is not. A container and the desktop print the same
  *  lines. The start of a session reads only the tracker audit, as it always has; `--end` reads all
  *  five.
@@ -748,9 +748,24 @@ function defaultBranchName() {
   return sym ? sym.replace(/^origin\//, '') : null;
 }
 
-/** One workflow's newest run: `{ run }` (null when it has none) or `{ error }`. */
+/** Pure: the newest run that actually ran, out of a runs listing in the API's order (issue 1304).
+ *  Two runs created in the same second can list either way round, so a run that concurrency
+ *  cancelled is skipped when a run that was not cancelled, created at the same time or later, is
+ *  in the list. A cancelled run with no such successor is still the answer. Exported for the tests. */
+function pickLatestRun(runs) {
+  const at = (r) => Date.parse(r && r.created_at);
+  for (const r of runs || []) {
+    const superseded = r.conclusion === 'cancelled'
+      && runs.some((o) => o !== r && o.conclusion !== 'cancelled' && at(o) >= at(r));
+    if (!superseded) return r;
+  }
+  return null;
+}
+
+/** One workflow's newest run: `{ run }` (null when it has none) or `{ error }`. A few runs, not
+ *  one, so `pickLatestRun` can see past a cancelled run that ties with its successor. */
 function fetchLatestRun(slug, file, branch) {
-  const q = branch ? `branch=${encodeURIComponent(branch)}&per_page=1` : 'per_page=1';
+  const q = branch ? `branch=${encodeURIComponent(branch)}&per_page=5` : 'per_page=5';
   const rest = `repos/${slug.owner}/${slug.repo}/actions/workflows/${file}/runs?${q}`;
   let raw;
   if (tryRun('gh', ['--version'], { timeout: 10000 }) !== null) {
@@ -770,7 +785,7 @@ function fetchLatestRun(slug, file, branch) {
   let body;
   try { body = JSON.parse(raw); } catch (e) { return { error: `GitHub returned unparseable JSON for ${file}` }; }
   if (!body || !Array.isArray(body.workflow_runs)) return { error: `${file} has no runs listing` };
-  return { run: body.workflow_runs[0] || null };
+  return { run: pickLatestRun(body.workflow_runs) };
 }
 
 /** Pure: the one line for one job, out of its label, its newest run and whatever stopped the
@@ -1327,5 +1342,5 @@ if (require.main === module) {
   });
 } else {
   // Required by a test: hand out the pure helpers and run nothing.
-  module.exports = { curlTicketRows, paginateTicketPages, parseGithubSlug, trackerJobReport };
+  module.exports = { curlTicketRows, paginateTicketPages, parseGithubSlug, pickLatestRun, trackerJobReport };
 }
