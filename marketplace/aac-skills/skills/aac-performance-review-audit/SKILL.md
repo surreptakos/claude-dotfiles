@@ -2,10 +2,10 @@
 name: aac-performance-review-audit
 description: Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit or gate a review, or asks for its rejection or coaching email.
 metadata:
-  modified: '2026-10-02T21:39:18Z'
-  previous-modified: '2026-10-02T21:31:25Z'
-  revision: '19'
-  content-sha: 91f9389288e9
+  modified: '2026-10-02T21:45:40Z'
+  previous-modified: '2026-10-02T21:39:18Z'
+  revision: '20'
+  content-sha: 0fed8c3e6642
 ---
 
 # AAC performance review audit
@@ -22,7 +22,7 @@ The "Performance Review Audits" project folder, when mounted, holds prior review
 
 ## Before anything
 
-0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). The House Layout Standard is now WR-001 Part XXVI, read through `aac-house-writing-standard`, so the project's layout file is no longer on this list. standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked a manager to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
+0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). The House Layout Standard is now WR-001 Part XXVI, read from `../aac-house-writing-standard/references/` in the printed folder, so the project's layout file is no longer on this list. standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked a manager to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the Gate 2 repeat check cannot run without it.
 2. Compute the period start and end by the review-period rule in `standards.md`.
 3. Run both checks on the draft, whatever gate it stops at:

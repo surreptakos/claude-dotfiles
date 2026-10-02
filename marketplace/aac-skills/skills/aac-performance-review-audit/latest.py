@@ -33,6 +33,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -67,6 +68,7 @@ def _from_git(src: str):
 
 # ---- GitHub source ----------------------------------------------------------------------------
 API_HOST = "api.github.com"
+API_SCHEME = "https"
 
 
 class _KeepTokenOnApiHost(urllib.request.HTTPRedirectHandler):
@@ -74,7 +76,7 @@ class _KeepTokenOnApiHost(urllib.request.HTTPRedirectHandler):
 
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         new = super().redirect_request(req, fp, code, msg, headers, newurl)
-        if new is not None and urllib.parse.urlparse(newurl).hostname != API_HOST:
+        if new is not None and not _is_api(newurl):
             new.remove_header("Authorization")
         return new
 
@@ -82,13 +84,25 @@ class _KeepTokenOnApiHost(urllib.request.HTTPRedirectHandler):
 _OPENER = urllib.request.build_opener(_KeepTokenOnApiHost)
 
 
+def _is_api(url: str) -> bool:
+    u = urllib.parse.urlparse(url)
+    return u.scheme == API_SCHEME and u.netloc == API_HOST
+
+
 def _get(url: str, accept: str = "application/vnd.github+json") -> bytes:
     req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "aac-review-skills"})
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token and urllib.parse.urlparse(url).hostname == API_HOST:
+    if token and _is_api(url):
         req.add_header("Authorization", f"Bearer {token}")
-    with _OPENER.open(req, timeout=TIMEOUT) as r:
-        return r.read()
+    try:
+        with _OPENER.open(req, timeout=TIMEOUT) as r:
+            return r.read()
+    except urllib.error.HTTPError as e:
+        if e.code != 401 or not req.has_header("Authorization"):
+            raise
+        req.remove_header("Authorization")  # a stale token; the repo is public, so ask without it
+        with _OPENER.open(req, timeout=TIMEOUT) as r:
+            return r.read()
 
 
 def _from_github():
