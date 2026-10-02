@@ -1,0 +1,76 @@
+{
+ "method": "dual-agent (A: claude -p a4b19348-ba21-4d75-b96c-bd3c16d87342 · B: claude -p 440bd6c2-ac46-4dce-9188-f03027b8b9ad)",
+ "heuristics": {
+  "1": 3,
+  "2": 3,
+  "3": 3,
+  "4": 3,
+  "5": 3,
+  "6": 3,
+  "7": 3,
+  "8": 3,
+  "9": 3,
+  "10": 3
+ },
+ "heuristic_notes": {
+  "1": "The footer progress line (answered, open, landed) and the save state are clear. In the screenshots the no-storage alert is the only status, and the footer says 'picks will not save' in small gray text.",
+  "2": "Plain labels (Skip a card, Change your mind, When it lands) and 'Then: label it ready-for-agent' state outcomes in the owner's terms. 'Lander' and 'relabels' are insider terms, though the owner knows them.",
+  "3": "Picks can be changed until Landed, and an unpicked card is skipped; the intro says so. There is no per-card clear control, so changing a mind means picking another option.",
+  "4": "Cards, options, chips and the bulk button are consistent with one accent hue. The Issue text panel is open on the 390 px phone, although the plan says it is collapsed on phones.",
+  "5": "Recommended is marked in words, Other requires a note, and Submit is disabled when empty. The bulk 'Pick every recommended option' can answer 10 to 40 cards in one click with no preview.",
+  "6": "Each card carries its own explainer, evidence, question and consequences, so no other document is needed. Chips such as 'holding up #102' name a ticket number without a title or link.",
+  "7": "The bulk pick, tab counts, fixed footer Submit and save-as-you-click serve the repeat user. There is no jump to the next open card, so at 10 to 40 cards the owner scrolls.",
+  "8": "The cut stat tiles and uppercase labels leave a clean hierarchy. The intro (a paragraph plus 3 long bullets) is heavy before the first card, and on desktop the two-column explainer competes with the question band.",
+  "9": "The Landing failed state exists in the design but is not visible in any screenshot. 'Open the page on claude.ai to rule' names a recovery for the no-storage state. Submit has no retract.",
+  "10": "The intro explains the process and timing, 'Open queue on GitHub' links to the source, and the note field says when it is required. Nothing extra clutters the cards."
+ },
+ "audit": {
+  "legibility": 3,
+  "print": 3,
+  "fillability": 3,
+  "system": 4,
+  "integrity": 3
+ },
+ "cognitive_load_failures": [
+  "chunking",
+  "working_memory"
+ ],
+ "issues": [
+  {
+   "p": "P2",
+   "what": "The 'Pick every recommended option here' bulk button fills every unpicked card in one click, and the only warning is a small caption beside it.",
+   "why": "At 10 to 40 cards a stray click answers the whole queue with drafts the owner never read.",
+   "fix": "Show a count in the label ('Pick recommended for 12 cards') and add an undo or confirm step."
+  },
+  {
+   "p": "P2",
+   "what": "The Issue text on GitHub panel is open on the 390 px phone, while the plan says it is collapsed on phones. The page runs about 3,300 px for two cards.",
+   "why": "On a phone the owner scrolls past the explainer and issue text before reaching the options.",
+   "fix": "Collapse Issue text by default at phone widths and keep it open on desktop."
+  },
+  {
+   "p": "P2",
+   "what": "Relationship chips ('holding up #102', 'blocked by #101') name a ticket number only, with no title or link.",
+   "why": "The owner has to remember or scroll to see what the other ticket is, which adds working-memory load when ordering rulings.",
+   "fix": "Make each chip a link that jumps to the card, with the title in its accessible name."
+  },
+  {
+   "p": "P2",
+   "what": "The intro is a paragraph plus three bullets above the first card, and 'When it lands' runs 4 lines.",
+   "why": "It pushes the first card down by about 400 px on desktop and more on phones for a repeat visitor.",
+   "fix": "Shorten 'When it lands' to one line and put the three facts behind a 'How this works' disclosure."
+  },
+  {
+   "p": "P3",
+   "what": "Tab buttons are about 42 px tall on desktop and the 'Open queue on GitHub' link is a small text link, both under 44 px.",
+   "why": "They are small click and touch targets for Sam and on phones.",
+   "fix": "Set tab min-height to 44 px and pad the link to a 44 px target."
+  }
+ ],
+ "detector_errors": 0,
+ "pages": {
+  "narrow": 1,
+  "wide": 1,
+  "max": 1
+ }
+}

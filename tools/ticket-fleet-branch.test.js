@@ -2883,6 +2883,38 @@ test('orchestrator-cwd: a pwd that is neither /-absolute nor a drive-letter path
   }
 });
 
+// Issue 1207: a guard that prints statePath in the Windows backslash spelling (the forks' copy does,
+// through path.resolve) must reach `check` and `restore` intact. Unquoted, bash ate every backslash
+// and the guard read `C:Users...`, a drive-relative path: every checkpoint exited 2 on a desktop.
+test('tree guard: a Windows backslash statePath reaches check and restore intact through bash (issue 1207)', async (t) => {
+  if (BASH.skip) { t.skip(BASH.skip); return; }
+  const statePath = 'C:\\Users\\Dan\\Claude\\Projects\\Meta\\aac-routines\\.git\\orchestrator-tree-guard\\run-23068-las57cqro.json';
+  // Stands in for the guard tool: bash parses the exact words the fleet built; this prints the --state word.
+  const probe = `probe() { while [ $# -gt 0 ]; do [ "$1" = --state ] && printf 'STATE=%s\\n' "$2"; shift; done; return 0; }; `;
+  const received = [];
+  const agentMock = async (prompt, opts) => {
+    if (opts.label === 'isolation:setup') {
+      return { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: { statePath, baselineCount: 0 } }), stderr: '' };
+    }
+    const line = prompt.split('\n')[2];
+    assert.ok(line.includes('node tools/orchestrator-tree-guard.js '), line);
+    const r = BASH.run(['-c', probe + line.replace('node tools/orchestrator-tree-guard.js ', 'probe ')], { cwd: REPO_ROOT, encoding: 'utf8' });
+    const m = /^STATE=(.*)$/m.exec(r.stdout);
+    received.push({ label: opts.label, state: m && m[1] });
+    if (opts.label.startsWith('isolation:')) {
+      return { exitCode: 1, stdout: isolationStdout({ head: MAIN_HEAD, guard: { newEntries: [{ status: '??', path: 'leak.txt' }] } }), stderr: '' };
+    }
+    return { exitCode: 0, stdout: JSON.stringify({ ok: true, command: 'restore', quarantineDir: 'q' }), stderr: '' };
+  };
+  const { treeGuardCheck, treeRestores } = await driveTreeGuard(agentMock, { orchestratorCwd: '/measured/cwd' });
+  await treeGuardCheck('implement-attempt1', 661);
+  assert.deepEqual(received, [
+    { label: 'isolation:implement-attempt1#661', state: statePath },
+    { label: 'tree-guard:restore:implement-attempt1#661', state: statePath },
+  ], 'the check and the restore must each hand the guard the statePath Setup printed, backslashes and all');
+  assert.equal(treeRestores.length, 1);
+});
+
 // Issue 811: in a served repo with no copy of tools/orchestrator-tree-guard.js (a cloud container
 // running claude-dotfiles against itself - the guard tool ships in aac-routines only, see the
 // portability note above FLEET-TREE-GUARD-DEFS), `[ -f <script> ] || exit 3` reproduces exactly

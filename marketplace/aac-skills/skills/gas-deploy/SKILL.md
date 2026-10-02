@@ -1,18 +1,19 @@
 ---
 name: gas-deploy
-description: AAC Apps Script deploys with gas instead of clasp. Use when a repo's clasp credential died or it should move off clasp (adopt gas), to deploy the script, promote PROD or run a function on it, or when a gas/deploy or gas/promote status is red.
+description: gas, the AAC Apps Script self-deploy that replaces clasp. Use to adopt it in a repo still on clasp or whose clasp credential died, to run a function on the script or promote PROD, or when a gas/deploy or gas/promote status is red.
 metadata:
-  modified: '2026-09-25T23:18:11Z'
-  previous-modified: '2026-09-16T04:44:25Z'
-  revision: '3'
-  content-sha: 61b34ed0c34e
+  modified: '2026-10-02T15:36:20Z'
+  previous-modified: '2026-09-25T23:18:11Z'
+  revision: '4'
+  content-sha: 46294a3f5209
 ---
 
 # gas-deploy
 
 The package lives in `claude-dotfiles/gas/`: a vendored `SelfDeploy.js`, `deploy/*` refs on
-GitHub, one time trigger. `gas/README.md` is the reference; read it once. Every command below is
-`node <claude-dotfiles>/gas/cli/gas.js …`, written `gas …` here.
+GitHub, one time trigger. `gas/README.md` is the reference; read it once. `gas --help` lists every
+command and flag. Every command below is `node <claude-dotfiles>/gas/cli/gas.js …`,
+written `gas …` here.
 
 ## Which job is this? Decide first
 

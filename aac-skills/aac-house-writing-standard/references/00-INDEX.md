@@ -1,7 +1,7 @@
 # AAC-WR-001 index
 
 The controlled copy of AAC's house writing and document standard, partitioned
-for reading. Rules are numbered 1 through 170 and each number lives in exactly
+for reading. Rules are numbered 1 through 185 and each number lives in exactly
 one file.
 
 Generated, never hand-edited. `SKILL.md` carries the regeneration procedure.
@@ -21,6 +21,7 @@ Then read only what the deliverable needs.
 | `DELIVERABLES.md` | The deliverable is an email, Teams message, letter, memo, report, proposal, scope of work, SOP, contract or legal text, or technical writing | 100-144 |
 | `LAYOUT.md` | Producing a Word document, a table, or any list; setting margins, fonts, headings or styles | 75-99 |
 | `DRAFT-QUALITY.md` | Any original prose. AI tells, machine vocabulary, plus the release check that closes the work | 153-170 |
+| `REVIEW.md` | A performance review, its audit, or a format, meaning or coaching email about one. Rule 2 scopes it to that material | 171-185 |
 | `CONTROL.md` | Naming a file, running the pre-send review, or choosing the format for a document type | 145-152 |
 | `TERMINOLOGY.md` | An AAC term, acronym or product name is in question, or you need the decision register | — |
 | `FRONT-MATTER.md` | Reporting which version governs | — |
@@ -34,14 +35,16 @@ Then read only what the deliverable needs.
 | SOP or work instruction | `CORE.md`, `DELIVERABLES.md`, `LAYOUT.md`, `CONTROL.md` |
 | Reviewing someone else's draft | `CORE.md`, `DRAFT-QUALITY.md`, `CONTROL.md` |
 | Contract or legal text | `CORE.md`, `DELIVERABLES.md`. Rule 2 governs what AAC may restyle |
+| Performance review, its audit, or a coaching email | `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md`, `REVIEW.md`, and the review standards Rule 2 names |
 
 Rule 2 names controlled documents that outrank AAC-WR-001 within their scope,
 including the AAC performance review standards. When a deliverable falls under
-one of them, name that document and hand the work to it.
+one of them, name that document and hand the work to it. Review material also
+takes `REVIEW.md`, the layout and mechanics Rule 2 scopes to it.
 
 ## Mechanical check
 
-`scripts/wr001-lint.js` decides 58 of the 170 rules by pattern and 7 by Jev
+`scripts/wr001-lint.js` decides 58 of the 185 rules by pattern and 7 by Jev
 (judgment, warning only); `scripts/wr001-coverage.md` says how every rule is
 checked, or why a reader decides it. Run the linter before reading, and read
 for the rest.

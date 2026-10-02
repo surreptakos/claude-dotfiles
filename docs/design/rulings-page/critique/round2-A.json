@@ -1,0 +1,109 @@
+{
+ "session": "81af9d62-4953-4bcb-9ced-29074d923c41",
+ "return": {
+  "specificity": "Reads as authored for AAC: ready-for-human queue, lander run on AAC-AI, Central-time landing windows, Recommended option with a Then: consequence. No generic tells. Sample data is synthetic, so the footer reads Storage unavailable.",
+  "heuristics": {
+   "1": 3,
+   "2": 3,
+   "3": 3,
+   "4": 3,
+   "5": 3,
+   "6": 3,
+   "7": 3,
+   "8": 3,
+   "9": 2,
+   "10": 3
+  },
+  "heuristic_notes": {
+   "1": "Footer progress and Landed lines show status. Queue position after Submit is not visible. The offline notice is a plain gray sentence.",
+   "2": "Plain labels with consequences. The chips blocked by and holding up do not say what they mean for the pick.",
+   "3": "Skip, change your mind and Other are stated. No clear or undo control is visible for a pick.",
+   "4": "Consistent cards, chips and one accent. The Recommended pill and the chips share an outline shape.",
+   "5": "Submit is disabled with words. The bulk pick button has a caveat but no count or confirmation.",
+   "6": "Everything needed is on the card. #101 and #102 refer to each other across cards.",
+   "7": "Bulk pick, tabs, phone select and sticky footer. No jump to the next unanswered card.",
+   "8": "Clean, stat tiles gone. The two-column pair leaves empty space on desktop and stacks long on phones.",
+   "9": "Change-your-mind is stated. No error, failed-landing or undo state is visible in any screenshot.",
+   "10": "Intro, GitHub queue link and lander timing give destination. The timing sentence is dense."
+  },
+  "audit": {
+   "legibility": 3,
+   "print": 3,
+   "fillability": 3,
+   "system": 4,
+   "integrity": 3
+  },
+  "cognitive_load_failures": [
+   "single_focus",
+   "working_memory",
+   "progressive_disclosure"
+  ],
+  "personas": [
+   {
+    "name": "Jordan",
+    "red_flags": [
+     "Intro paragraph, three bullets and a timing sentence come before the first card.",
+     "The chips blocked by #101 and needs you are not explained, and #102 gives no hint to answer #101 first.",
+     "The bulk button does not name its count or scope."
+    ]
+   },
+   {
+    "name": "Sam",
+    "red_flags": [
+     "At 200% zoom the layout reflows to one column and stays readable.",
+     "The Then: consequence line is the lightest text in the card.",
+     "In forced colors the question band loses its tint, but meaning stays in words."
+    ]
+   },
+   {
+    "name": "Riley",
+    "red_flags": [
+     "The Note box has room for a long Other note.",
+     "At 390 px the page is 3196 px tall for two cards and the footer wraps Submit under the progress line.",
+     "The offline Submit looks the same as the online disabled one, so a failed save is easy to miss."
+    ]
+   }
+  ],
+  "strengths": [
+   "One accent hue, native radios, and state carried by words and weight. Holds in forced-colors and reduced-motion.",
+   "Each option states its consequence and Recommended is marked clearly.",
+   "No horizontal scroll at 390, tabs become a select, 200% zoom reflows."
+  ],
+  "issues": [
+   {
+    "p": "P1",
+    "what": "The storage-unavailable state is one small gray caption under the progress line, and Submit looks like its normal disabled state.",
+    "why": "A person can pick on several cards believing it saves. The failure is silent apart from caption text.",
+    "fix": "Add a bordered top-of-page banner with bold words and keep the footer line."
+   },
+   {
+    "p": "P2",
+    "what": "Intro, three facts and timing sentence sit before the first card.",
+    "why": "A repeat visitor scrolls past them every time, and at 390 px they fill much of the first screen.",
+    "fix": "Collapse the facts into a How this works disclosure and shorten the timing sentence."
+   },
+   {
+    "p": "P2",
+    "what": "Pick every recommended option here has no count and no undo.",
+    "why": "One click can set many rulings and finding which moved is slow.",
+    "fix": "Show the count on the button and an undo line after the click."
+   },
+   {
+    "p": "P2",
+    "what": "On phones the explainer, issue text and wrapped footer push the first question far down.",
+    "why": "Scrolling loses context and multiplies over 40 cards.",
+    "fix": "Collapse explainer detail on phones, put Submit on the progress row, show the question first."
+   },
+   {
+    "p": "P3",
+    "what": "Relationship chips are unlinked outlines and look like the Recommended pill.",
+    "why": "The owner cannot jump to the related card.",
+    "fix": "Make chips anchor links and give Recommended a different shape."
+   }
+  ],
+  "minor": [
+   "The Then: line is the lightest text and carries the consequence.",
+   "The stitched footer and tab bar in full-page captures are a capture artifact and not scored."
+  ]
+ }
+}

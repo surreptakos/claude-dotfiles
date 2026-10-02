@@ -1,11 +1,11 @@
 ---
 name: aac-contract-package
-description: Create, review, or audit an Active Alarm Company (AAC) customer contract package — the Schedule of Equipment and Services, the master agreement, and the Rider for Additional Locations. Use whenever a rep or Sales Admin asks to create, draft, build, or "put together" a contract, schedule, or paperwork for a named job or customer; when a "please create contract" request is forwarded; when a job folder path is given and the ask is paperwork; when a package needs rebuilding after a fact changes (price, purchase vs. financed, designation, scope); or when an existing package needs reviewing, verifying, or sweeping for defects across the jobs drive. Also use for questions about AAC clarifications, exclusions, RMR names and prices, SOW wording, the $5,000 deposit rule, permit responsibility, or the Schedule-to-Master mapping. Prefer this over generic document generation or contract review for anything touching an AAC package, even if the words "schedule" or "package" are not used.
+description: Create, review or audit an Active Alarm Company (AAC) customer contract package (Schedule of Equipment and Services, master agreement, Rider for Additional Locations). Use when a rep or Sales Admin asks for a contract, schedule or paperwork for a named job, customer or job folder (including a forwarded "please create contract"); when a package needs rebuilding after a fact changes (price, purchase vs. financed, designation, scope); when a package needs reviewing, or the jobs drive sweeping for defects; or for questions on AAC clarifications, exclusions, RMR names and prices, SOW wording, the $5,000 deposit rule, permit responsibility or the Schedule-to-Master mapping. Prefer it over generic document generation or contract review for anything touching an AAC package.
 metadata:
-  modified: "2026-09-26T03:38:45Z"
-  previous-modified: "2026-09-25T23:21:07Z"
-  revision: "1"
-  content-sha: "495357942740"
+  modified: "2026-10-02T15:37:28Z"
+  previous-modified: "2026-09-26T03:38:45Z"
+  revision: "2"
+  content-sha: "f60911bfac4e"
 ---
 
 # AAC Contract Package
@@ -14,9 +14,7 @@ Everything needed to create and review AAC contract packages travels in this ski
 
 ## The rule that shapes this skill
 
-**`references/` is the only copy of every standard. Never restate one — in this file, in a job folder, in a script, or from memory. Read the file.**
-
-A sweep on 2026-08-11 found 91 copies of one baselines document across the jobs drive in three divergent versions. Two told reps that permit procurement was optional, contradicting the verified master agreement, and had done so for months. Same day, a second copy of the reviewer standard turned out to be two revisions behind.
+**`references/` is the only copy of every standard. Read the file every time rather than working from memory, and keep restatements out of this file, job folders and scripts.** A 2026-08-11 sweep found 91 copies of one baselines document on the jobs drive in three divergent versions, two of them telling reps for months that permit procurement was optional, against the verified master agreement (`00-INDEX.md` has the full account).
 
 If a summary anywhere disagrees with the file it cites, the file wins. Say so rather than picking.
 
@@ -35,35 +33,29 @@ Read `00-INDEX.md` first; it lists every document with its status. Then read onl
 | `MAPPING-APPENDIX.md` | RMR names, price tiers, master agreement mapping, §3a pricing formulas |
 | `DRAFTER-PRESEND-CHECKLIST.md` | Before anything goes out |
 | `SCHEDULE-EDIT-PROCEDURE.md` | Touching a workbook by any route other than the scripts |
-| `clarifications.json` | The bullet wording itself. `build_package.py` reads this; edits go here, never in Python |
+| `clarifications.json` | The bullet wording itself. `build_package.py` reads it; wording edits go here, never in Python |
 | `SOP-LEAF-Financed-Installations.docx` | The deal is financed through a lender |
 | `CONTEXT.md` | Who people are, prior decisions, failure modes already corrected |
-| `OPEN-DECISIONS.md` | Something seems unsettled — it probably is, and is probably listed |
+| `OPEN-DECISIONS.md` | Something seems unsettled: it probably is, and is probably listed |
 | `PORTFOLIO-SWEEP.md` | Known defects across existing packages as of 2026-08-11 |
 
 ## Creating a package
 
-Full procedure in `references/SCHEDULE-GENERATION-PROCEDURE.md`. The shape:
+The procedure is `references/SCHEDULE-GENERATION-PROCEDURE.md`; § numbers below are its sections. The shape:
 
 1. **`ACCOUNT-RULES.md` first.** Where an exception covers an item for this customer, it wins and you never raise it.
-2. **Inventory the job folder.** List the whole tree once. Note what is missing as well as present. Then run `python scripts/extract_package.py "<job folder>"` and read from `_extract/` — the digest lists hidden tabs, hashes, and anything that would not open.
-3. **Read the package end to end** — work-up (visible tabs), issued proposal, supplier and sub quotes, sales checklist, FSI worksheet, drawings. Never infer scope from a filename, title, or RE: line. If a file will not open, stop and say which one.
+2. **Inventory the job folder.** List the whole tree once, noting what is missing as well as present. Then run `python scripts/extract_package.py "<job folder>"` and read from `_extract/`: the digest lists hidden tabs, hashes, and anything that would not open.
+3. **Read the package end to end**: work-up (visible tabs), issued proposal, supplier and sub quotes, sales checklist, FSI worksheet, drawings. Take scope from the documents' contents, never from a filename, title or RE: line. If a file will not open, stop and say which one.
 4. **Apply source precedence** (§1). The issued proposal outranks the work-up and the FSI on anything the customer was quoted. Newest work-up wins. A prevailing wage checkbox is not evidence; the labor rate is.
-5. **Write `_facts.json`** in the job folder:
-   ```
-   python scripts/build_package.py "<job folder>" --facts
-   ```
-6. **Build**, which also verifies:
-   ```
-   python scripts/build_package.py "<job folder>"
-   ```
-7. **Fix every FAIL, judge every WARN.** Rebuild after any fact change; never hand-edit one of the three documents.
-8. **Run the export pass** per §11a: stop-slop the schedule text, hide unused rows, size the clarifications cell, PDF, test the render totals, visual pass, fix the footer page count, trim hidden-tab pages, then delete every interim file the pass created. The deliverable is the PDF; §11a explains why cell checks cannot stand in for a render.
-9. **Hand off** per §12 — questions for the rep, then what is still the drafter's, then conditionals with both branches. Run `write-like-dan`, then `stop-slop`, then cut. Show the stop-slop score.
+5. **Write `_facts.json`** in the job folder: `python scripts/build_package.py "<job folder>" --facts`.
+6. **Build**, which also verifies: `python scripts/build_package.py "<job folder>"`.
+7. **Fix every FAIL, judge every WARN.** Change a fact in `_facts.json` and rebuild; the three documents are only ever written by the builder.
+8. **Run the export pass** (§11a), every step in order, ending with every interim file deleted. The deliverable is the PDF: cell checks cannot stand in for a render.
+9. **Hand off** per §12, showing the stop-slop score.
 
 ## Reviewing a package
 
-Follow `references/PROMPT.md`. It governs a package someone else drafted: read the standards, read the package, fix what a governing source answers, ask the rep only what only the rep knows, edit the schedule surgically, send one short email.
+Follow `references/PROMPT.md`: read the standards, read the package, fix what a governing source answers, ask the rep only what only the rep knows, edit the schedule surgically, send one short email.
 
 Extract first, then let the machines do the mechanical half before you read anything:
 
@@ -74,22 +66,23 @@ python scripts/verify_workup.py "<job folder>"
 python scripts/verify_package.py --sweep "<jobs root>"
 ```
 
-Then read from `_extract/`, not from the binaries. The fan-out rules — what a cheap subagent may read for you and what you must read yourself — are in PROMPT.md, File Reading Rules.
+Then read from `_extract/`, not from the binaries. What a cheap subagent may read for you and what you must read yourself is in PROMPT.md, File Reading Rules.
 
 ## Scripts
 
-| Script | Does |
-|---|---|
-| `aac_paths.py` | Resolves paths. Standards from `references/`; the jobs drive derived from the job folder you name, so nothing is hardcoded to a drive letter. Run it with a job folder to see what resolved |
-| `build_package.py` | Copies the pristine template into the job folder (a second pristine copy lands in `_to_delete\`), builds schedule, master and rider from `_facts.json`, then verifies (`--no-verify` skips) |
-| `prebuild_gate.py` | The pre-build gate over `_facts.json`: refuses a record the standards would reject, warns on missing provenance. `build_package.py` runs it first and stops on a refusal; run it alone with `"<job folder>"`. Read-only. Exit 0 no refusal, 1 refused, 2 bad input |
-| `verify_package.py` | The machine-checkable half of DRAFTER-PRESEND. Read-only. Exit 0 clean, 1 failures, 2 bad input, 3 no drafted schedule |
-| `extract_package.py` | One read-only pass over the job folder: plain-text extracts in `_extract/` plus `_digest.json` (hashes, hidden tabs, quick facts, unreadables). Run it before reading anything; read the extracts, not the binaries. Re-runs skip unchanged files. `--clean` removes the folder |
-| `verify_workup.py` | The mechanical workup arithmetic: overwritten extension formulas, typed costs on blank quantities, costs outside a total's range, stranded lower-section costs. Read-only, tab/cell/amount findings. Run before reading a single workup cell |
-| `zoho_crosscheck.py` | Called by `verify_package.py`: five advisory Zoho cross-checks (WARN or PASS, never FAIL; SKIP without `ZOHO_CLIENT_ID` / `ZOHO_CLIENT_SECRET` / `ZOHO_REFRESH_TOKEN` or network). Read-only; never writes a Zoho value anywhere |
-| `xlsx_surgical.py` | The **only** sanctioned way to write a schedule workbook |
+Each script's header carries its usage and exit codes. Which to reach for:
 
-**Never save a schedule through openpyxl, pandas, or any spreadsheet library.** They rebuild the file from their own object model and silently destroy printer settings, rich text, embedded images and the calc chain, while every cell still reads back correct. Reading with openpyxl is fine.
+| Script | When |
+|---|---|
+| `extract_package.py` | Before reading anything in a job folder |
+| `verify_workup.py` | Before reading a single work-up cell |
+| `build_package.py` | Writing `_facts.json` (`--facts`), then building and verifying the package. It also lands a second pristine template copy in `_to_delete\` |
+| `prebuild_gate.py` | Run by the builder first; alone, to test a `_facts.json` record |
+| `verify_package.py` | The machine-checkable half of DRAFTER-PRESEND; calls `zoho_crosscheck.py` (advisory, SKIP without Zoho credentials) |
+| `aac_paths.py` | To see which template, jobs root and backup folder resolved for a job folder |
+| `xlsx_surgical.py` | Every write to a schedule workbook |
+
+**Write a schedule workbook only through `xlsx_surgical.py`; read it with openpyxl freely.** openpyxl, pandas and every other spreadsheet library rebuild the file from their own object model on save, silently destroying printer settings, rich text, embedded images and the calc chain while every cell still reads back correct.
 
 Needs `openpyxl`, `pypdf`, `python-docx`, and poppler for `pdftotext`.
 
@@ -101,11 +94,11 @@ A clean run means nothing mechanically checkable is wrong, not that the package 
 
 ## What stays human
 
-What does not reduce to a rule: designation choices, SOW coverage sentence phrasing, judgment on which conditional clarifications the job earns, job-specific clarifications, BASELINES §0 merges, and the print layout. The §11a visual pass covers what a render can show; the final print check in Excel is still the drafter’s. The builder fills fields; it does not decide what the system protects or which boundaries the job needs.
+Designation choices, SOW coverage sentence phrasing, which conditional clarifications the job earns, job-specific clarifications, BASELINES §0 merges, and the print layout: none reduce to a rule. The builder fills fields; what the system protects and which boundaries the job needs stay the drafter's call. The §11a visual pass covers what a render can show; the final print check in Excel is still the drafter’s.
 
-The line-by-line coverage of the mechanical layer lives in `docs/verifier-coverage.md`; anything currently un-automated but ticketed to automate lives in the GitHub tracker. Do not restate that coverage split here (Dan's rule 2026-08-25).
+The line-by-line coverage of the mechanical layer lives in `docs/verifier-coverage.md`, and anything ticketed for automation in the GitHub tracker; point there rather than restating the coverage split (Dan's rule 2026-08-25).
 
-**No placeholder edits.** If an answer is pending, the line waits unwritten and goes in `held`. No write-then-strike, no TBD outside the two date fields the master permits.
+**No placeholder edits.** A line whose answer is pending waits unwritten and goes in `held`. No write-then-strike, and TBD only in the two date fields the master permits.
 
 ## Hard stops
 
@@ -113,4 +106,4 @@ Stop and escalate rather than guessing when the customer or site does not match 
 
 ## Known limits
 
-The builder refuses out-of-scope work rather than silently truncating. Which agreement types are field-mapped today, the current row caps, and which multi-site/multi-system shapes are handled are tracked in `docs/GAP-REPORT.md` and the open tickets in the GitHub tracker. Do not restate specific caps or the mapped/unmapped list here (Dan's rule 2026-08-25).
+The builder refuses out-of-scope work rather than silently truncating. Which agreement types are field-mapped, the current row caps, and which multi-site/multi-system shapes are handled live in `docs/GAP-REPORT.md` and the open tickets in the GitHub tracker; read them there rather than restating caps or the mapped list here (Dan's rule 2026-08-25).
