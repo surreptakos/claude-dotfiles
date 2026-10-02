@@ -18,7 +18,7 @@ The one copy of the standard a One Page performance review is written to and che
 
   "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos."
 - Sum-Ex is two sentences, no more: Summarize, then Example, each as defined above. "Bob is my best customer service rep. Recently he saved a difficult call despite 3 other reps not being able to."
-- One example per item, always. At least four items on the page are SEER; the rest may be Sum-Ex (Dan, October 1, 2026, after a review of six two-sentence items read as thin next to one built mostly in SEER). SEER for the points that matter most.
+- One example per item, always. At least one item in ten is SEER, rounded down and never fewer than one: one SEER for up to 19 items, two for 20 to 29. The rest may be Sum-Ex (Dan, October 2, 2026, replacing the October 1 floor of four, which failed delivered reviews; every delivered review on file passes this one, the lowest at 1 of 12). SEER for the points that matter most.
 - In both techniques, avoid commas where possible: the fewer commas in a review, the less likely others will misunderstand it.
 - A Weakness that also appeared in the prior review says so in the body: "which was also noted in his last review."
 - "Opportunities for Improvement" means Weaknesses.
@@ -44,7 +44,7 @@ Mechanical: each is a yes or no on the text, with no judgment in it. `review_for
 
 1. Header: dates covered start and end on the period's start and end.
 2. Nothing anywhere on the page is dated after the period end, and no figure that runs from the period start stops before the period end. "From 7/24/25 through 6/30/26" against a 7/23/26 header fails. "As of 6/30/26" on a status is a data date and passes.
-3. Every Strength and Weakness is exactly two sentences or exactly four, and at least four of them are four. Count them.
+3. Every Strength and Weakness is exactly two sentences or exactly four, and at least one in ten of them, rounded down and never fewer than one, is four. Count them.
 4. No Strength or Weakness contains "should," "must," "needs to," "would benefit from," "ought to," "is expected to," or "shall." The behavior goes in the item; an instruction belongs in Guidance.
 5. Core Message is three sentences or fewer and names one Rating and one Result.
 6. No "you" or "your" anywhere on the page, and no "his manager," "her manager," or "their manager" where the reviewer is meant.
