@@ -1704,6 +1704,22 @@ if (Test-Path $setupCheckTests) {
     Check 'setup-check.tests.ps1 shipped' $false @('tests/setup-check.tests.ps1 missing from clone')
 }
 
+# The master watchdog's stall recycle for a master with no transcript (issue 1205): -WhatIf runs
+# against stubbed process and state-issue fixtures. Runs against the CLONE, like the suites above.
+$watchdogTests = Join-Path $Clone 'tests\master-watchdog.tests.ps1'
+if (Test-Path $watchdogTests) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Engine -NoProfile -ExecutionPolicy Bypass -File $watchdogTests 2>&1 | Out-String
+        $exit = $LASTEXITCODE
+    } finally { $ErrorActionPreference = $prev }
+    Check 'master-watchdog.tests.ps1 passes (no transcript is idle since the process start)' `
+        ($exit -eq 0) @(($out -split "`r?`n") | Select-Object -Last 20)
+} else {
+    Check 'master-watchdog.tests.ps1 shipped' $false @('tests/master-watchdog.tests.ps1 missing from clone')
+}
+
 # ------------------------------------------------------------------ 9c. GIT_* env leak guard (issue 28)
 
 # Prove that sync.ps1, tools/tracker-audit.js and restore-test.ps1 itself do not honour a
