@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-10-02T20:04:51Z'
-  previous-modified: '2026-10-02T16:24:28Z'
-  revision: '11'
-  content-sha: 2af15c5cfef8
+  modified: '2026-10-02T21:09:54Z'
+  previous-modified: '2026-10-02T20:04:51Z'
+  revision: '12'
+  content-sha: '151576966739'
 ---
 
 # To Tickets
@@ -42,7 +42,7 @@ Break the work into **tracer bullet** tickets.
 
 Give each ticket its **blocking edges**: the other tickets that must complete before it can start. A ticket with no blockers can start immediately.
 
-**A ruling ticket reads what already rules first.** Before filing a `ready-for-human` question, open the ADRs, owner-ruling comments and routine cards the question turns on, in every repo involved (attach a repo to read it). A question an accepted ADR already answers is an agent ticket that applies the ADR, not a ruling. Issue 1294 asked Dan to choose a live-tail cap that aac-routines ADR 0010 had settled three days earlier, and recommended against the ADR from a paraphrase of it (2026-10-02).
+**A ruling ticket reads what already rules first.** Before filing a `ready-for-human` question, open the ADRs, owner-ruling comments and routine cards the question turns on, in every repo involved (attach a repo to read it). A question an accepted ADR already answers is an agent ticket that applies the ADR, not a ruling. Issue 1294 asked Dan to choose a live-tail cap that aac-routines ADR 0010 had settled three days earlier, and recommended against the ADR from a paraphrase of it (2026-10-02). An ADR the draft itself names is the first to open, and a document you wrote this session is a stand-in for the ADR it summarises: grep the ADR directory and the spec for the question's nouns before filing. aac-sales-cockpit 812 asked Dan to choose a hiring plan and "record the choice in ADR-0031", drafted from that session's own audit, and ADR-0031 had already put both plans on the VP's written boxes two months earlier (2026-10-02).
 
 **Human-only halves get their own ticket, and "human" means a person is the only instrument.** Before labelling a step `ready-for-human`, ask whether a desktop session can do it: `gh` on the owner's PC reaches API paths the cloud proxy refuses (repo visibility, Actions access, cross-repo code search), and `agent-browser` on the owner's logged-in browser can work a settings dialog (a cloud environment's variables and setup script, a token page). Those steps are `ready-for-local-agent`, with the one tap only a person can give (a 2FA code, a sudo-mode password, a judgment call) named in the body. Dan, 2026-09-29, on four owner tickets a desktop agent could have done: "I don't understand why I have to do anything if you have the ability to use my computer and run commands and click around." When a slice contains a step only a person can perform (a decision or sign-off, a 2FA or password prompt, a judgment call), split that step into its own ticket labeled `ready-for-human` (or the tracker's equivalent), with the dependent agent ticket declaring it as a blocker — never a bullet inside an agent ticket's body, a PR-comment note, or a handoff-doc line. The owner works from a label query; a human step not carrying the label is invisible to the person who has to perform it (measured 2026-08-24: a PR-gating UI rename sat unseen in PR comments until the owner asked).
 
