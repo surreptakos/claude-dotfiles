@@ -240,7 +240,11 @@ slot does this:
    on the same slot. Both conditions must hold — age alone would kill a live interactive
    session mid-work, idleness alone would kill a fresh master that has only written one
    Heartbeat. If only the marker is stale but the transcript has been touched inside M, the
-   watchdog logs "possibly stalled; not killed" and moves on.
+   watchdog logs "possibly stalled; not killed" and moves on. A master with no transcript at all
+   (it never reached its first prompt, e.g. a launch sitting on a dialog) counts as idle since its
+   process start, so it is recycled like any other stall (issue 1205: `master-routines` held the
+   slot 13h45m on 2026-10-01 when "no transcript" read as idle -1m). Every alive line names the
+   first transcript write, or `none yet` for a launch that never wrote one.
 3. **Launch the next repo — drain order (Dan, 2026-09-30).** With nothing alive, walk the served
    rows of `lib/repos.json` in priority order (dotfiles, routines, osh-rfp, sales-cockpit) and
    take the FIRST that still has work, read from its state issue's JSON block:
