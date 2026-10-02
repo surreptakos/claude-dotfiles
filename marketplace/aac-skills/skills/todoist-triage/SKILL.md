@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-10-02T17:36:00Z'
-  previous-modified: '2026-10-02T17:25:11Z'
+  modified: '2026-10-02T18:45:04Z'
+  previous-modified: '2026-10-02T03:38:29Z'
   revision: '42'
-  content-sha: a52442098901
+  content-sha: b181ba27506f
 ---
 
 # todoist-triage
@@ -41,7 +41,7 @@ Every open task carries exactly one ball label, or it is in the triage queue.
 
 **Wontfix is where a task-shaped ruling sticks.** It is the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`). This skill's queue and the `aac-forgotten-tasks` guard read it through the same matcher with the same evidence bound, so a ruled-out item stays suppressed on both sides until evidence newer than the ruling arrives, then resurfaces (ADR 0009 in the routine repository).
 
-- File one in the same turn Dan rules an item done, dead, not his, or not to be raised again: title, the ruling and its date, the `aac-topic` key, and the regenerating source to suppress. Then delete the live task.
+- File one in the same turn Dan rules an item done, dead, not his, or not to be raised again: title, the ruling and its date, the `aac-topic` key, and the regenerating source to suppress. Then delete the live task. Both are one `wontfix` entry in step 5's plan.
 - Dan's word is the only trigger. An item that merely looks stale to you stays in the queue.
 - A task already in Wontfix is Dan's to take out: leave it unmoved, uncompleted, undeleted.
 
@@ -52,13 +52,13 @@ Every open task carries exactly one ball label, or it is in the triage queue.
 In this order:
 
 1. **Prior run records** — pull the store, then read the newest `aac-forgotten-tasks` record and the previous `todoist-triage` record, per [`run-ledger.md`](run-ledger.md) § Pull the store and § Read the prior records.
-2. **Exports** — the newest file per source from the `aacx-inbox` folder, per [`sources.md`](sources.md) § Exports. Record the newest stamp.
+2. **Exports** — the newest file per source from the `aacx-inbox` folder, per [`sources.md`](sources.md) § Exports. Record the newest stamp. Then plan which threads to re-open, per [`sources.md`](sources.md) § Thread reuse.
 3. **Leave Dates** — `pending` before any leave item is ruled on ([`sources.md`](sources.md) § Systems of record).
-4. **Live tail** — the window from the newest export stamp to now, at most one hour, per [`sources.md`](sources.md) § Live tail.
-5. **Todoist** — `find-tasks` on Current Work, the backlog and the Inbox, `responsibleUserFiltering: "all"`, `limit: 100`, following `cursor` until `hasMore` is false. Read the four shared projects for context. Open the source email or chat for every task whose title is a bare link.
+4. **Live tail** — the window from the newest export stamp to now, at most one hour, per [`sources.md`](sources.md) § Live tail. The connectors fill the tail; the exports stay the primary reader.
+5. **Todoist** — from the Todoist mirror, never a Todoist connector read (aac-routines issue 609): `python -m aac_routines.todoist_mirror sync` once from the aac-routines checkout, then `python -m aac_routines.todoist_mirror tasks --project-id <id>` for Current Work, the backlog and the Inbox (`current_work_project_id`, `backlog_project_id`, `inbox_project_id` in `config/task-capture.json`), each task with its comments. The mirror holds every collaborator's tasks, so there is no paging or filtering to set. Read the four shared projects the same way, for context. A failed sync or an unreadable mirror makes Todoist unreachable, never an empty board. Open the source email or chat for every task whose title is a bare link.
 6. **Board answers** — per [`day-board.md`](day-board.md) § Read the answers.
 
-Done when both run records are located or their gap recorded in the right words, the newest export per source is read, the tail window is fetched from every reachable connector with every failure logged, all three projects are exhausted, every link-only title has its source read, and every answered board card is consumed.
+Done when both run records are located or their gap recorded in the right words, the newest export per source is read, the tail window is fetched from every reachable connector with every failure logged, the mirror is synced and all three projects are read from it, every link-only title has its source read, and every answered board card is consumed.
 
 ### 2. Queue and alarms
 
@@ -118,9 +118,14 @@ Done when every ruling carries a tier, tier 1 is applied, the board batch is wri
 
 Tier 1 is written without asking; tier 2 after Dan answers, his edits literal and final. Every write lands in Todoist's history, visible and reversible — that is what makes tier 1 safe.
 
-- `update-tasks` in batches of 25, touching only: `labels` (full replacement — keep `claude` and other non-ball labels), `projectId` (Inbox moves belong to the router), `dueString` for the do date on non-recurring tasks (`reschedule-tasks` for recurring), `deadlineDate` when the source names one, `priority` when approved.
-- **Merge:** `add-comments` on the survivor carrying the duplicate's unique text and its `aac-source`/`aac-topic` markers copied verbatim (both routines match a marker as a plain substring, so a paraphrase breaks dedupe), then `delete-object` on the duplicate — every merge, routine-created duplicates included.
-- **Keep tasks flat** (Dan, 2026-09-21): no `parentId` in `add-tasks` or `update-tasks`, for a merge or a breakdown. A breakdown Dan dictates that needs tracking becomes its own Todoist project (`add-projects`, then `add-tasks` into it); anything smaller stays one task.
+Every write goes through the aac-routines guard, as one plan file (aac-routines issue 609): `python -m aac_routines.todoist_guard triage --plan <plan.json> --mirror state/todoist-mirror.json` from the aac-routines checkout. Never a write through the Todoist connector, of any kind: an update, a reschedule, a comment, a delete, a new project or a new task. The plan is a JSON list of rulings; its shape is in aac-routines' `src/aac_routines/triage_writer.py`.
+
+- **`update`** touches only: `labels` (full replacement — keep `claude` and other non-ball labels), `project_id` (Inbox moves belong to the router), `do_date`, `deadline` when the source names one, `priority` when approved. A `do_date` on a recurring task is refused and the rest of the update still goes: the task keeps its recurrence, and the status names it for Dan to move in Todoist.
+- **`delete`** — a task whose delete the source proves.
+- **`wontfix`** — Dan's in-session ruling on a live task (Wontfix, above): the entry's `title`, and a `ruling` carrying the ruling, its date and the task's `aac-source`/`aac-topic` markers verbatim. The guard files it in the Wontfix project, then deletes the live task only after the entry landed.
+- **`merge`** — the survivor, the duplicate, and a comment carrying the duplicate's unique text and its `aac-source`/`aac-topic` markers copied verbatim (both routines match a marker as a plain substring, so a paraphrase breaks dedupe). The guard refuses a comment that drops a marker, and deletes the duplicate only after the comment landed — every merge, routine-created duplicates included.
+- **Keep tasks flat** (Dan, 2026-09-21): the guard refuses a `parent_id`, for a merge or a breakdown. A breakdown Dan dictates that needs tracking is a **`breakdown`**: its own Todoist project and the tasks in it; anything smaller stays one task.
+- The guard refuses any write to a task already in Wontfix. Exit 1 lists each refusal and failure: name them in the status. Exit 2 means the plan or the mirror could not be read and nothing was written.
 - Titles and descriptions stay as written. The dedupe markers live in a task comment; a task created before that ruling carries them in its description.
 
 Done when every tier-1 and approved tier-2 line is applied and each failure is named.

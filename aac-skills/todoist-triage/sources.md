@@ -16,7 +16,18 @@ Both the exports and the run-record store live in Google Drive, read with the sa
 
 Rule from the message and thread bodies Power Automate exports to Drive; live-connector snippets fill the tail only. The folder is `folder_name` in aac-routines' `config/m365-exports.json` — today **`aacx-inbox`**. Each file is named for its **source**: `<source>__<key>__<YYYY-MM-DDTHHMM>.json` — `outlook_inbox__inbox__2026-09-17T2016.json`, `outlook_sent__sent__...`, `teams__nick__...`, `calendar__global__...`. Search by source name; a search for the routine's name finds nothing and proves nothing about the exports.
 
-Read the newest file per source. The newest stamp is the tail-window start.
+Sync them first, from the aac-routines checkout: `python scripts/sync_m365_exports.py --profile todoist-triage --lookback-days 7 --output <run-dir>/snapshot.json`, with `<run-dir>` outside the repository (aac-routines issue 605). `todoist-triage` is triage's own profile in `config/m365-exports.json` and the only one it syncs (aac-routines issue 609). Read the newest file per source. The newest stamp is the tail-window start.
+
+## Thread reuse
+
+Last evening's forgotten-tasks run read its shortlisted threads in full; its report's `Threads read` section names each with the time of its last message (aac-routines issue 606). Build this run's threads from the snapshot, then plan, from the aac-routines checkout:
+
+```
+python scripts/capture_prefilter.py build --snapshot <run-dir>/snapshot.json --out-dir <run-dir>
+python -m aac_routines.thread_reuse plan --report <forgotten-tasks-report.md> --threads <run-dir>/threads.jsonl [--thread <id> ...]
+```
+
+The report is the newest forgotten-tasks report: `python -m aac_routines.run_ledger report-latest` prints it, and exit 1 means fetch it from the `aac-run-ledger` Drive folder. Each thread comes back `reused` (no newer message: the report's blocks stand, do not open it), `reopen` (a newer message: read it in full) or `read` (never read last evening: read it). `extract` lists the threads to pass to `capture_prefilter extract`. With no report from the previous evening, omit `--report`: every thread is read, and the plan carries the gap. Paste the plan's `lines` into the status, its first line into the record's `sources_read` and its gap into `coverage_gaps`.
 
 ## Live tail
 
@@ -25,7 +36,7 @@ Fill exactly the window "newest export stamp → now", at most one hour (aac-rou
 - Gmail — `mcp__Gmail__search_threads`
 - Teams — `mcp__ms365__chat_message_search`, `mcp__ms365__teams_list_channel_messages`
 - Meeting notes — Granola
-- Todoist history — `find-activity`
+- Todoist history — `python -m aac_routines.completed_task_events --date-from <tail start> --date-to <now>` from the aac-routines checkout, never the Todoist connector's activity read (aac-routines issue 639). ISO datetimes, `Z` or an offset; `--day yesterday` reads a whole local day. Exit 1 makes Todoist history unreachable
 
 Log every connector that fails or returns no access.
 
