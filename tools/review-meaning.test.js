@@ -203,6 +203,26 @@ suite('review meaning', { concurrency: true }, () => {
     assert.match(r.out, /^  - S1: sentence 2 says why the behavior matters; it must add detail about the behavior in sentence 1 \(Elaborate\)\. \(Jev\)$/m);
   });
 
+  // Issue 1348: two shapes the #1247 eval missed. The stubbed answers are the ones the live run gave.
+  t('a trait word argued for by "the clearest documented case" fails sentence 1 with a (Jev) fix line', async () => {
+    const file = await docx({ weaknesses: ['Bob lacks decisiveness. He hesitates when a call needs a judgment from him. The clearest documented case is a refund request he left open for a week last month while he waited for someone else to decide. He is not decisive on hard calls.', BOB.weaknesses[1]] });
+    const r = await meaning(AUDIT_PY, file, await stubFor(file, { 'W1.s1_behavior': 'trait_case' }));
+    assert.equal(r.code, 1, r.out);
+    assert.match(r.out, /^  - W1: sentence 1 names a trait and offers the example as evidence for it; it must name a behavior or work product\. \(Jev\)$/m);
+  });
+
+  t('an example joining two projects fails one example with a (Jev) fix line, with or without a date and figure', async () => {
+    const plain = 'Bob improves the team\'s written procedures. He rewrites a process document whenever he finds a gap in it. He rebuilt the escalation checklist for the billing team and wrote the new onboarding guide for the support desk. His procedures are the ones the team relies on.';
+    const figures = plain.replace('He rebuilt the escalation checklist for the billing team and wrote the new onboarding guide for the support desk.',
+      'In March he rebuilt the 12-step escalation checklist for the billing team and wrote the onboarding guide for the 4 new support hires.');
+    for (const item of [plain, figures]) {
+      const file = await docx({ strengths: [BOB.strengths[0], BOB.strengths[1], item] });
+      const r = await meaning(AUDIT_PY, file, await stubFor(file, { 'S3.example_one': 0.2 }));
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /^  - S3: sentence 3 is not one specific thing that happened; it must be one event or figure\. \(Jev\)$/m);
+    }
+  });
+
   t('a list of accounts in the example: three named accounts fail, a doubtful third is read, none passes', async () => {
     const file = await docx({ strengths: [BOB.strengths[0], 'Bob keeps his largest accounts current. He visited Acme Foods, Corex Health and Delta Storage in one week.'] });
     const accounts = (a, b, c) => ({ 'S2.account.0': a, 'S2.account.1': b, 'S2.account.2': c });

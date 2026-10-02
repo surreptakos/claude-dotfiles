@@ -43,17 +43,20 @@ JEV_TIMEOUT = 60.0
 # Jev judges what the rule did not fail), or reader. high/low are marks on the probability that the
 # item fails the check. Marks set by the eval (issue 1247, jev-latest, 2026-10-02): each high sits
 # between the lowest score an audited defect got and the highest score an item the audit passed
-# got; each low keeps the synthetic Bob fixture's passing items off the read list.
+# got; each low keeps the synthetic Bob fixture's passing items off the read list. Issue 1348: no
+# mark separated a trait word argued for by "the clearest documented case" from Bob's sentence 1,
+# so s1_behavior gained the trait_case option; and example_one now asks about an example that
+# carries a date or figure too, since two projects in one sentence can each carry one.
 CHECKS = {
     "s1_behavior":          {"check": "Sentence 1 is behavior", "kind": "jev", "high": 0.6, "low": 0.5,
-                             "form": "Choice: behavior or work product; trait, motive or attitude; circumstance"},
+                             "form": "Choice: behavior or work product; trait, motive or attitude; a trait the item offers its example as a case of; circumstance"},
     "s1_pattern":           {"check": "Sentence 1 is a pattern", "kind": "jev", "high": 0.8, "low": 0.6,
                              "form": "Noul"},
     "s2_elaborate":         {"check": "SEER sentence 2 is Elaborate", "kind": "jev", "high": 0.75, "low": 0.6,
                              "form": "Choice: detail about the same behavior; why it matters; a new theme; an example; an instruction"},
     "example_one":          {"check": "The example is one specific example", "kind": "rule+jev", "high": 0.7, "low": 0.5,
                              "form": "Rule fails two or more dated events (a range, or a due date and its close date, is one); "
-                                     "Noul when no date, figure or ticket number is present"},
+                                     "Noul over every example the rule did not fail, a date or figure included"},
     "named_accounts":       {"check": "Names a specific account", "kind": "rule+jev", "high": 0.8, "low": 0.5,
                              "form": "Code finds capitalized candidates; a Noul per candidate selects accounts; three or more is a list"},
     "example_demonstrates": {"check": "The example demonstrates the pattern", "kind": "jev", "high": 0.6, "low": 0.5,
@@ -90,7 +93,8 @@ BEHAVIOR = ("Sentence 1 names something the direct does that the reviewer can se
             "\"He is not committed to the team\" is an inference; \"he missed three of the last five team "
             "meetings\" is behavior. \"He owns a complex account book\" is a circumstance: what does he do with "
             "it? An attitude or trait word may stand in sentence 1 only when the item's other sentences give the "
-            "behavior it is read from.")
+            "behavior it is read from: \"shows good judgment\" followed by what he did passes, and \"lacks "
+            "decisiveness\" followed by \"the clearest documented case\" fails.")
 PATTERN = ("Sentence 1 says what he does repeatedly or how he performs over the period, even though only one "
            "example follows. \"He closed the largest deal of the year\" is a one-off. \"He closes large multi-site "
            "projects\" is a pattern, and the largest deal is the example under it.")
@@ -122,11 +126,13 @@ S2_FIX = {
     "instruction": "is an instruction",
 }
 S1_OPTIONS = {
-    "behavior": "A behavior or work product the reviewer can see or hear, or a trait word the item's other sentences show the behavior behind",
+    "behavior": "A behavior or work product the reviewer can see or hear, a summary of how he performs (\"Bob is my best customer service rep\"), or a trait word whose behavior the item's other sentences state as what he does (\"shows good judgment\" followed by what he did)",
     "trait": "A trait, motive, attitude, intent or idea, or the lack of one (\"a lack of focus\"), with no behavior behind it in the other sentences",
+    "trait_case": "A trait word, or the lack of one (\"lacks decisiveness\"), that the item's own words then argue for by calling its example a case or evidence of it (\"the clearest documented case\", \"a good example of this\"); only when those words are on the page",
     "circumstance": "A circumstance: something about his situation, not something he does, such as an assignment, role or responsibility he holds (\"he owns the reporting\", \"he is in charge of X\")",
 }
-S1_FIX = {"trait": "names a trait, motive or attitude", "circumstance": "names a circumstance"}
+S1_FIX = {"trait": "names a trait, motive or attitude", "trait_case": "names a trait and offers the example as evidence for it",
+          "circumstance": "names a circumstance"}
 
 READ_TEXT = {
     "s1_behavior": "sentence 1: behavior or work product, not a trait, motive or circumstance?",
@@ -144,7 +150,6 @@ READ_TEXT = {
 OPENERS = ("he", "she", "they")
 PROMISES = re.compile(r"^I\s+(?:will|want)\b|^I['’]ll\b", re.I)
 CONTRAST = re.compile(r"\b(?:rather than|instead of)\b", re.I)
-DIGIT = re.compile(r"\d")
 # A due or start date and the date it closed are one event, not two (issue 1247): the first date
 # follows a due or start word, and the words between the two dates say it closed.
 DUE_BEFORE = re.compile(r"\b(?:due|deadline|opened|received|submitted|requested|assigned)\b[^.;]{0,12}$", re.I)
@@ -392,13 +397,14 @@ class Run:
         dates = separate_dates(self.host, sent)
         if len(dates) >= 2:
             self.fix(lbl, f"sentence {n} holds {len(dates)} dated events ({', '.join(dates)}); it must be one example.")
-        elif not dates and not DIGIT.search(sent):
+        else:
             self.ask(f"{lbl}.example_one",
                      noul(f"{EXAMPLE}\n\nIs sentence {n} of review item {lbl} (`items.{lbl}.sentences[{n - 1}]`) one "
                           "specific thing that happened?" + quoted(s, n),
-                          "One specific thing that happened",
+                          "One specific thing that happened, or one figure for the period (a count or a total)",
                           "A generic descriptor, a habit, a list, or two or more separate things he did (two actions "
-                          "joined by \"and\" on different accounts or projects are two examples)"),
+                          "joined by \"and\" on different accounts or projects are two examples, even when each one "
+                          "carries its own date or figure)"),
                      "example_one", lbl,
                      lambda a, n=n: f"sentence {n} is not one specific thing that happened; it must be one event or figure.",
                      1.0, lambda p: 1.0 - p, n=n)
