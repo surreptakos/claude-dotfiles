@@ -526,7 +526,7 @@ test('host: desktop runs as usual on the desktop', () => {
  * failed run, `!!` for no verdict or a workflow file the repo lacks.
  */
 
-const { trackerJobReport } = require('./check.js');
+const { pickLatestRun, trackerJobReport } = require('./check.js');
 
 const jobRun = (over) => Object.assign({
   status: 'completed', conclusion: 'success',
@@ -554,6 +554,25 @@ test('tracker jobs: no run, one in flight, a cancelled one or an unreadable job 
   const blind = trackerJobReport('tracker audit', undefined, 'GitHub did not answer for tracker-audit.yml');
   assert.equal(blind.level, 'warn');
   assert.match(blind.text, /could not read the job — that is not a pass/);
+});
+
+// Issue 1304: two runs created in the same second, the cancelled one listed first.
+test('tracker jobs: a cancelled run that ties on timestamp with a passing successor reads ok', () => {
+  const at = '2026-10-02T17:06:30Z';
+  const runs = [
+    jobRun({ conclusion: 'cancelled', created_at: at, html_url: 'https://github.com/o/r/actions/runs/37038467445' }),
+    jobRun({ conclusion: 'success', created_at: at, html_url: 'https://github.com/o/r/actions/runs/37038467511' }),
+  ];
+  const r = trackerJobReport('tracker audit', pickLatestRun(runs), null);
+  assert.equal(r.level, 'ok');
+  assert.equal(r.text, 'tracker audit: success — https://github.com/o/r/actions/runs/37038467511');
+});
+
+test('tracker jobs: a cancelled run with no successor still reads cancelled', () => {
+  const r = trackerJobReport('tracker audit',
+    pickLatestRun([jobRun({ conclusion: 'cancelled', created_at: '2026-10-02T17:06:30Z' })]), null);
+  assert.equal(r.level, 'warn');
+  assert.match(r.text, /^tracker audit: cancelled — /);
 });
 
 // The criteria end to end: check.js --end spawned in a real clone whose GitHub remote answers from
