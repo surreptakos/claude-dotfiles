@@ -2,10 +2,10 @@
 name: aac-review-self-check
 description: Self-check an AAC One Page performance review draft before it goes to the skip-level. Use when the user is writing, revising or about to send a performance review of one of their directs.
 metadata:
-  modified: '2026-10-02T19:34:43Z'
-  previous-modified: '2026-10-01T22:11:33Z'
-  revision: '10'
-  content-sha: 73c05ac37e03
+  modified: '2026-10-02T20:39:14Z'
+  previous-modified: '2026-10-02T20:31:18Z'
+  revision: '12'
+  content-sha: 697b985c55fb
 ---
 
 # AAC review self-check
