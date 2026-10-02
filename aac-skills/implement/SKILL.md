@@ -3,10 +3,10 @@ name: implement
 description: "Implement a piece of work based on a spec or set of tickets."
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-30T21:48:11Z"
-  previous-modified: "2026-09-30T16:21:27Z"
-  revision: "4"
-  content-sha: "6ac0431c58bc"
+  modified: "2026-10-01T23:30:29Z"
+  previous-modified: "2026-09-30T21:48:11Z"
+  revision: "5"
+  content-sha: "37a2b5f26571"
 ---
 
 Implement the work described by the user in the spec or tickets.

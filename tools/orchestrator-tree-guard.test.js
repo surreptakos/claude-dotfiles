@@ -83,6 +83,21 @@ test('check with no baseline is could-not-audit (exit 2), never a pass', (t) => 
   assert.match(check.stderr, /no run baseline/);
 });
 
+// Issue 1207: on Windows the state path is resolved in the backslash spelling. The printed
+// statePath must come out with forward slashes (a bash word keeps them), and `check` must take the
+// printed spelling and the native one alike - the fleet now quotes whichever it was handed.
+test('Windows: statePath prints with forward slashes, and check takes it or the native spelling', (t) => {
+  const { dir, state } = scratchRepo(t);
+  const base = guard('baseline', '--cwd', dir, '--state', state);
+  assert.equal(base.code, 0, base.stderr);
+  assert.ok(!base.json.statePath.includes('\\') && !base.json.cwd.includes('\\'), base.json.statePath);
+  assert.equal(path.resolve(base.json.statePath), path.resolve(state));
+  for (const spelling of [base.json.statePath, path.resolve(state)]) {
+    const check = guard('check', '--cwd', dir, '--state', spelling, '--label', 'x', '--ticket', '1');
+    assert.equal(check.code, 0, `${spelling}: ${check.stderr}`);
+  }
+});
+
 // Issue 1041: the desktop scheduled task runs the fleet from `.claude/worktrees/<name>`, where `.git`
 // is a FILE; the fleet's default `--state-dir .git/orchestrator-tree-guard` hit ENOTDIR on mkdir and
 // the wave aborted before Scout. The relative `.git/...` now names the worktree's real git dir.

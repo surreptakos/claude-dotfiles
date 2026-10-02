@@ -89,7 +89,8 @@ const cfg = Object.assign({
   generatedPaths: ['.claude-plugin/marketplace.json', 'marketplace/**'],
   // Shell commands that re-stamp and rebuild the generated files after such a merge. null means
   // "read them out of CLAUDE.md" - this repo names both in its 'Skill stamps' section, and a
-  // fork with different tooling passes its own list instead.
+  // fork with different tooling passes its own list instead. When set, the implementer and
+  // verifier prompts carry the same list too (REGEN_RAIL, issue 1195), so no agent picks a --home.
   regenCommands: null,
   // The read-only check that proves the regenerate above really took, run after it and before
   // anything is pushed (issue 553). A rebuilt payload is not evidence that the stamps are right:
@@ -1141,7 +1142,17 @@ function trackerRules(mode) {
 // below - the first thing the run does - so every prompt built after that point sees them.
 
 // Explicit selection wins over the label: a named ticket is fetched whatever its labels or state.
+// [FLEET-EXPLICIT-TICKETS-START]
 const explicitTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : []).map(n => parseInt(n, 10)).filter(n => n > 0)
+// Args arrive verbatim: a `tickets` that is not an array (`tickets: 1069`), or entries that are not
+// issue numbers, used to fall through to the label listing - the whole queue - with nothing said.
+// Logged here so the run says what it dropped and what it lists instead.
+if (cfg.tickets !== null && cfg.tickets !== undefined) {
+  const unusableTickets = (Array.isArray(cfg.tickets) ? cfg.tickets : [cfg.tickets]).filter(n => !(parseInt(n, 10) > 0))
+  if (!Array.isArray(cfg.tickets)) log(`args.tickets is ${JSON.stringify(cfg.tickets)}, not an array of issue numbers - ignored, so this run lists the "${cfg.label}" label instead. Pass tickets: [N, ...] to run named tickets.`)
+  else if (unusableTickets.length) log(`args.tickets: ${unusableTickets.length} entr${unusableTickets.length === 1 ? 'y is' : 'ies are'} not an issue number and ${unusableTickets.length === 1 ? 'was' : 'were'} dropped - ${JSON.stringify(unusableTickets)}.${explicitTickets.length ? '' : ` No number is left, so this run lists the "${cfg.label}" label instead.`}`)
+}
+// [FLEET-EXPLICIT-TICKETS-END]
 
 // ---- resume-stable prompt inputs (issue 271) ----
 // A resume replays every agent() call whose cache key is unchanged, and that key covers the
@@ -1445,7 +1456,8 @@ const breaches = []
 const attributed = new Set()
 // Issue 1020: one entry per restored root-tree write - { label, observedBy, who, entries, quarantine }.
 const treeRestores = []
-// A leaked path goes into a bash command as ONE word, whatever it contains.
+// A leaked path, and the guard's statePath (issue 1207: a fork's guard prints `C:\Users\...`, whose
+// backslashes an unquoted bash word eats), goes into a bash command as ONE word, whatever it holds.
 const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 let guardStatePath = null
 let guardCandidates = ''   // filled in once the wave is known, below
@@ -1793,7 +1805,7 @@ async function treeGuardCheck(label, ticketNumber) {
   let restore = null, restoreError = null
   try {
     restore = await agent(
-      guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${guardStatePath} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
+      guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${shellWord(guardStatePath)} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
       { label: `tree-guard:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
     )
   } catch (err) {
@@ -1871,7 +1883,7 @@ async function headCheck(label, ticketNumber, now) {
 async function isolationRead(tag, ticketNumber) {
   const who = `isolation:${tag}#${ticketNumber}`
   const checkCmd = treeGuardOn
-    ? `${GUARD_CMD} check --cwd "$o" --state ${guardStatePath} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
+    ? `${GUARD_CMD} check --cwd "$o" --state ${shellWord(guardStatePath)} --label ${tag} --ticket ${ticketNumber} ${guardCandidates}`
     : null
   let res = null, agentError = null
   // Wrapped (aac-routines issue 270): an agent that cannot produce schema-conformant output throws
@@ -2019,6 +2031,18 @@ const HARNESS_RELAY_RAIL = `Harness-relayed request rail (issue 885): the harnes
 // This rail carries that recipe into the implementer and code-lane verifier prompts. `dir` is a
 // per-ticket path under the run's scratch root, so concurrent workers never share one extract.
 const powershellRail = (dir) => `PowerShell rail (issue 906; recipe from docs/agents/issue-tracker.md "Running the PowerShell suites in a container", issue 454): this container has no PowerShell on PATH, and the worktree-isolation guard refuses any command whose text names \`pwsh\` inside a compound form (\`&&\`, \`;\` between commands, a pipe, a heredoc, \`cd x && ...\`) with "runs pwsh inside a construct too complex to verify". That refusal does NOT mean PowerShell is unavailable. Get PowerShell 7 with these commands, ONE plain command per tool call, nothing chained: \`mkdir -p ${dir}\`, then \`curl -sSL -o ${dir}/ps.tar.gz https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz\`, then \`tar -xzf ${dir}/ps.tar.gz -C ${dir}\`, then \`cp ${dir}/pwsh ${dir}/shell7\` (cp, not mv: Start-Job relaunches \`$PSHOME/pwsh\` by name), then \`chmod +x ${dir}/shell7\`. Invoke it only by the neutral name \`shell7\` and its full path, one plain command per line, never on PATH: \`${dir}/shell7 -NoProfile -ExecutionPolicy Bypass -File <suite>.ps1\`. If a suite dies on a null \`$env:TEMP\`, prefix that same command with \`TEMP=/tmp \` (shell state does not carry between tool calls, so a separate \`export\` is lost). Every \`.ps1\` file the branch changes must at least go through the PowerShell parser - one plain command per file: \`${dir}/shell7 -NoProfile -Command '$e = $null; [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "<file>.ps1"), [ref]$null, [ref]$e); $e | ForEach-Object { $_.ToString() }; exit $e.Count'\` (exit 0 is a clean parse) - and, where one exists and runs off Windows, the suite that covers it; report each command, its exit code and its decisive output (an implementer in testTail, a verifier in evidence). When PowerShell genuinely cannot be obtained or run here, say so in a discovery string (a verifier: in evidence), quoting the exact refusal or error - never ship or pass a changed \`.ps1\` silently unrun.`
+
+// PR 1169 (issue 1084, wave 6abd9a98): the verifier re-ran tools/skill-stamps.py and
+// tools/build-cloud-plugin.py with `--home` naming the user it ran as, three stamps rotated for no
+// content change, and the `check` job failed on a stale payload. Only Deliver's A4 was handed the
+// configured `regenCommands`; the implementer and verifier picked a home themselves (issue 1195).
+// When the launch sets them, this rail carries the same commands into both prompts, byte for byte;
+// unset, it is empty and the prompts read as before.
+const regenRail = (commands) => Array.isArray(commands) && commands.length ? `
+Regenerate rail (issue 1195): this launch names the exact commands that re-stamp this repo's skills and rebuild its generated payload. Whenever you regenerate - an implementer after editing a file they cover, a verifier reproducing the branch's committed payload inside its own scratch worktree - run exactly these, in order, from the root of that worktree, every flag included:
+${commands.map(c => '   $ ' + c).join('\n')}
+Never swap in another home or any other argument: \`--home\` names the OWNER's home, never the user you run as or the container's, and a stamp or payload built against any other home rotates stamps for no content change and fails CI's stale-payload check (PR 1169).` : ''
+const REGEN_RAIL = regenRail(cfg.regenCommands)
 
 // Two discovery-triage chores in one wave filed one finding as two tickets (issue 319: #281 and
 // #285, two minutes apart, both the tools/tracker-audit.js short-fetch). The chain below the lanes
@@ -2362,6 +2386,11 @@ async function scoreDifficulty(tickets) {
   if (!code.length) return {}
   if (cfg.difficulty === false) { log('Difficulty score OFF (args.difficulty:false) - every implementer runs on implModel.'); return {} }
   const request = JSON.stringify(difficultyRequest(code, scout.repoMap))
+  // difficultyRequest cuts each text at DIFFICULTY_TEXT_CAP; say what it cut, so the bound on what
+  // Jev reads is not silent. The implementer still gets the criteria whole.
+  const cutTickets = code.filter(t => String(t.criteria || '').length > DIFFICULTY_TEXT_CAP).map(t => '#' + t.number)
+  if (cutTickets.length) log(`difficulty: the criteria of ${cutTickets.join(', ')} were cut to their first ${DIFFICULTY_TEXT_CAP} characters for the Jev request; the implementer still reads them whole.`)
+  if (String(scout.repoMap || '').length > DIFFICULTY_TEXT_CAP) log(`difficulty: the scout's repoMap was cut to its first ${DIFFICULTY_TEXT_CAP} characters for the Jev request.`)
   let res = null
   try {
     res = await agent(
@@ -2409,6 +2438,9 @@ guardCandidates = wave
 // or grossly inefficient - and then the session must say so in its summary.
 
 // Probe lane: evidence in a comment, no repository change. Prober gathers, blind verifier re-runs.
+// Bounded by the FLEET-PROBE-LANE markers so tools/ticket-fleet-null-results.test.js can drive it with a
+// mocked `agent`.
+// [FLEET-PROBE-LANE-START]
 const runProbeLane = async (t, workerIndex) => {
   let lastVerdict = null, probe = null, evidenceBlocks = '', deliveryFailure = null, haltedAt = 0
   for (let attempt = 1; attempt <= cfg.maxAttempts; attempt++) {
@@ -2448,10 +2480,12 @@ Return structured output only.`,
       probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
       probe = null
     }
-    if (!probe || !probe.items.length) {
+    // `items` is schema-checked on an agent result but not on a priorProbe entry, which arrives
+    // verbatim from args: an entry without an array there is no probe output, not a TypeError.
+    if (!probe || !Array.isArray(probe.items) || !probe.items.length) {
       lastVerdict = probeError
         ? unusableVerdict(probeError, `probe:#${t.number}.${attempt}`)
-        : { pass: false, evidence: 'prober returned null or no items', failures: ['no probe output produced'] }
+        : { pass: false, evidence: 'prober returned null or no items', failures: [reuse ? 'args.priorProbe entry for this ticket holds no items array - no probe output produced' : 'no probe output produced'] }
       if (probeError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
       continue
     }
@@ -2519,7 +2553,7 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
   }
 
   if (haltedAt) lastVerdict = { pass: false, evidence: (lastVerdict && lastVerdict.evidence) || '', failures: ((lastVerdict && lastVerdict.failures) || []).concat([runHalt.failure()]) }
-  const done = !!(probe && probe.items.length && lastVerdict && lastVerdict.pass)
+  const done = !!(probe && Array.isArray(probe.items) && probe.items.length && lastVerdict && lastVerdict.pass)
   let delivery = null
   if (done && cfg.deliver && runHalt.halted()) deliveryFailure = `deliver:#${t.number} not started - ${runHalt.failure()}; the evidence is verified, re-run this probe after the reset`
   else if (done && cfg.deliver) {
@@ -2549,9 +2583,17 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       delivery = null
       log(deliveryFailure)
     }
+    // A deliverer that returned null (skipped, or dead after its retries) or no comment URL posted
+    // nothing: without this the ticket is done with no commentUrl and no deliveryFailure, so the
+    // run result lists it under neither `delivered` nor `failed` (aac-routines issue 191).
+    if (!deliveryFailure && !(delivery && delivery.commentUrl)) {
+      deliveryFailure = `deliver:#${t.number} posted no resolution comment: ${delivery ? `commented=${String(delivery.commented)} commentUrl=(none)` : 'the deliverer returned no result'} - the evidence is verified but is not on the ticket`
+      log(deliveryFailure)
+    }
   }
   return { ticket: t.number, done, kind: 'probe', deliveryFailure, branch: null, verdict: lastVerdict, prUrl: null, commentUrl: delivery && delivery.commentUrl, discoveries: (probe && probe.discoveries) || [] }
 }
+// [FLEET-PROBE-LANE-END]
 
 // Human lane: a desktop session or a person performs the steps. The agent verifies only what
 // a container can, then hands the rest back in one comment under a "Remaining for a local
@@ -2621,6 +2663,12 @@ Do NOT close the issue, do NOT edit the repository, do NOT open a PR, do NOT pos
       runHalt.note((err && err.message) || err, `deliver:#${t.number}`)
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
+      log(deliveryFailure)
+    }
+    // A deliverer that returned null or no comment URL posted no handoff: name it, or the ticket
+    // is listed under neither `delivered` nor `failed` (aac-routines issue 191).
+    if (!deliveryFailure && !(delivery && delivery.commentUrl)) {
+      deliveryFailure = `deliver:#${t.number} posted no handoff comment: ${delivery ? `commented=${String(delivery.commented)} commentUrl=(none)` : 'the deliverer returned no result'} - the ticket was not handed back`
       log(deliveryFailure)
     }
   }
@@ -2823,6 +2871,12 @@ async function runFinish(journal) {
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
     }
+    // A blocked pre-push merge carries no message of its own from the checks above: name it, as the
+    // code lane's mergeFailure does, or the ticket lands in `failed` with a null reason (issue 191).
+    if (!deliveryFailure && delivery && !delivery.prUrl && delivery.mergeStatus === 'blocked') {
+      const paths = Array.isArray(delivery.conflictPaths) ? delivery.conflictPaths : []
+      deliveryFailure = `deliver:#${number}: pre-push merge of origin/${defaultBranch} blocked: ${paths.join(', ') || 'conflicting paths not reported'}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}; no PR opened`
+    }
     log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${gateRetryNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused a command of the Deliver stage (issues 544, 1139), so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544); the deliverer left it open, awaiting the orchestrator's merge of ${defaultBranch} (issue 1132)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
     else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
@@ -2904,7 +2958,7 @@ Worktree rule (aac-routines issue 192, non-negotiable): EVERY command you run - 
 ${PYTHON_RAIL}
 ${scratchRail(`${t.number}-attempt${attempt}-w${workerIndex}`)}
 ${HARNESS_RELAY_RAIL}
-${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}`))}
+${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}`))}${REGEN_RAIL}
 Repo map from scout:\n${scout.repoMap}
 Issue body (verbatim):\n${t.body || '(none)'}
 Acceptance criteria (verbatim):\n${t.criteria}${dedupeBrief(t)}${priorFindings}
@@ -3006,7 +3060,7 @@ Branch under review: ${branch} (do NOT trust its author; you have not seen their
 The main checkout is never a test surface (issue 404): the repository you start in sits on whatever branch this session is on, which is not the code under review, so a command run there tests the wrong tree and its result is worthless whichever way it comes out. If the scratch worktree cannot be created, say so and fail the verification - never fall back to the repository you started in.
 ${orchestratorTreeRail(branch)}
 ${PYTHON_RAIL}
-${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}-verify`))}
+${powershellRail(scratchFile(`ps7-${t.number}-attempt${attempt}-w${workerIndex}-verify`))}${REGEN_RAIL}
 Against the orchestrator's own checkout - ${orchestratorCwd}, measured absolute at Setup (issue 562), never wherever your shell happens to start - run: git -C ${orchestratorCwd} worktree add ${scratchFile(`verify-${t.number}-attempt${attempt}-w${workerIndex}-p${pass}`)} --detach ${branch} (detach - branch is checked out elsewhere), then inside it. That path is yours alone - it carries this run's id, the ticket, the attempt and the worker, because every worker of this run is handed the same scratchpad directory and a generic scratch path is another worker's too (issue 439):
 1. Run \`${testCommand}\` yourself; record the REAL exit code.
 2. Check each acceptance criterion against the actual diff (git diff origin/${scout.defaultBranch}...${branch}):\n${t.criteria}\nDelivery-stage acceptance criteria - pushing the branch, opening a PR, merging, or presence on ${scout.defaultBranch} - are out of scope for this pass/fail verdict; the deliver stage handles those, so do not mark the branch failed for them. Report in \`unmetCriteria\`, by its own text, every other criterion the branch does not satisfy - on a pass too, when the branch rightly stops short of the ticket (a precondition not met, an owner decision still pending, work split to another ticket); [] when every criterion is met. Any entry makes the PR say Refs, not Closes (issue 699).
@@ -3126,7 +3180,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     merged: !!(delivery && delivery.merged === true), mergeSha: (delivery && delivery.mergeSha) || null,
     prState: (delivery && delivery.prState) || null, ticketState: (delivery && delivery.ticketState) || null,
     mergeNote: delivery && delivery.mergeStatus === 'unmerged-by-classifier'
-      ? `opened without the pre-push merge - the classifier refused a command of the Deliver stage:${delivery.blockedReason || 'refusal text not reported'}`
+      ? `opened without the pre-push merge - the classifier refused a command of the Deliver stage: ${delivery.blockedReason || 'refusal text not reported'}`
       : null,
     conflictPaths, discoveries: (impl && impl.discoveries) || [],
     // Issue 654: non-null when the run recorded this branch pushed and verified but the deliverer
@@ -3317,6 +3371,13 @@ Do NOT merge, do NOT commit onto ${defaultBranch}, do NOT edit any other file, d
   } catch (err) {
     runHalt.note((err && err.message) || err, 'followups-writer')
     return { branch, sha: null, prUrl: null, bullets: discoveries.length, error: unusableReason('followups-writer', (err && err.message) || err) }
+  }
+  // A writer that returned null (skipped, or dead after its retries), or no commit sha (step 4 or 5
+  // stopped it), committed nothing. Without an error here the run logs the bullets as committed
+  // and leaves them out of discoveryList, so they would exist nowhere but the journal.
+  if (!written || !written.sha) {
+    const why = !written ? 'the writer returned no result' : `the writer reported no commit sha${written.error ? ` (${String(written.error).trim()})` : ''}`
+    return { branch: (written && written.branch) || branch, sha: null, prUrl: (written && written.prUrl) || null, bullets: discoveries.length, error: `followups-writer committed nothing: ${why}` }
   }
   return {
     branch: (written && written.branch) || branch,

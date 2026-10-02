@@ -12,7 +12,7 @@ whole publish — there is no live `~/.claude` copy to keep in step (issue 210),
 `node --test tools/repo-memory-load.test.js` fails when a note and this index drift apart.
 
 The hook after the colon is for whoever reads this file: the SessionStart injection carries the
-note NAME alone, about 35 bytes against a 1968-byte cap (issue 589). So write the hook for a human
+note NAME alone, about 35 bytes against the loader's 4016-byte cap (issues 589, 1233). So write the hook for a human
 and give the note a name that says what it is — adding one costs its own line and nothing else.
 
 - account-enforcement-is-a-warning: warns only
@@ -34,6 +34,7 @@ and give the note a name that says what it is — adding one costs its own line 
 - plugin-auto-updates-never-tell-dan: desktop marketplace autoUpdate true; never tell Dan to run claude plugin update
 - environment-verification-log: log
 - fable-usage-is-rationed: weekly cap; workers stay pinned, orchestrator runs Fable high
+- launched-agents-run-on-opus: Todoist task agents launch with --model claude-opus-5-5, never Fable; one launch per task
 - gate-declare-bare-command: nothing appended
 - hook-exit-126-is-the-mode-bit: diag log; seat PLUGIN_ROOT
 - leave-dates-token-rides-the-proxy: proxy-held
