@@ -423,7 +423,8 @@ issue-write tool") in every boot prompt, dispatch brief and skill this runbook w
   tool), never by a product-name prefix. Prefixes rename between sessions and a hard-coded one
   will break a skill.
 - Never fleet a repo not served by its own Routine; never touch `aac-sales-commissions`,
-  `aac-message-board`, `aac-routines` without a new ruling from Dan.
+  `aac-message-board` without a new ruling from Dan (`aac-routines` is served by his 2026-09-30
+  ruling recorded on #44).
 - Apps Script deploys stay on their existing path: every AAC script deploys itself from GitHub on
   a merge to its default branch (claude-dotfiles `gas/`). Never move a `deploy/*` ref, never run
   clasp, never touch production data paths.
