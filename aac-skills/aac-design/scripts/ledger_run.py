@@ -176,7 +176,9 @@ Subject: {subject_text(bundle)} (surface {a.surface}).
 Your working folder holds:
 - evidence/: the only files you may cite: {review}. The screenshots are full pages at 1440, 768 and
   390 px wide, at 200% zoom, under reduced motion, forced colours and offline. dom.json is every
-  element with its computed styles and box (large: search it with Grep); a11y-tree.json is the
+  element with its computed styles and box (large: search it with Grep); styles.json is every CSS
+  rule with the @media / @supports it sits under, the stylesheets and fonts loaded (Grep it for
+  :active, :hover, :focus-visible, prefers-reduced-motion, breakpoints); a11y-tree.json is the
   browser accessibility tree; keyboard-walk.json is a scripted Tab walk; text.txt is the page's text.
 - source/: {skill}'s own rule text in full. Each row cites its file and line there. Read the rule's
   own words at that line before you judge it, never a summary of it.

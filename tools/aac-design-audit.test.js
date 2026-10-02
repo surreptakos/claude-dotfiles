@@ -24,6 +24,7 @@ const FIXTURE = `<!doctype html>
 body { font-family: sans-serif; color: #1a1a1a; background: #ffffff; margin: 24px; }
 .faint { color: #bbbbbb; }
 .gone { display: inline-block; width: 0; overflow: hidden; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { button:active { transform: none; } }
 </style></head>
 <body>
 <main>
@@ -97,6 +98,12 @@ test('the four-fault fixture yields an evidence bundle listing each fault', { sk
     assert.ok(bundle.review_set.includes(shot), shot);
   }
   assert.ok(!bundle.review_set.includes('findings.json') && !bundle.review_set.includes('axe.json'), 'detector output is withheld from reviewers');
+  // The stylesheet rules reach reviewers with their conditions (issue 1087): states and media
+  // queries a resting computed style cannot show.
+  const styles = JSON.parse(fs.readFileSync(path.join(bundleDir, 'styles.json'), 'utf8'));
+  assert.ok(bundle.review_set.includes('styles.json'), 'styles.json is in the review set');
+  assert.ok(styles.rules.some((r) => /button:active/.test(r.css) && (r.cond || []).some((c) => /prefers-reduced-motion/.test(c))),
+    'a rule keeps its @media condition');
   // The shape every adapter writes (issue 1088): the document, deck and PDF bundles validate against it too.
   const shape = spawnSync('python3', [path.join(SKILL, 'scripts', 'evidence.py'), 'validate', bundleDir], { encoding: 'utf8' });
   assert.equal(shape.status, 0, shape.stdout + shape.stderr);

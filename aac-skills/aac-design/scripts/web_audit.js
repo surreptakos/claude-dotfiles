@@ -20,6 +20,7 @@
 //                      shape every adapter writes, checked by evidence.py validate DIR
 //   shot-*.png         1440, 768 and 390 px, 200% zoom, reduced motion, forced colours, offline
 //   dom.json           every element with its computed styles and box
+//   styles.json        every CSS rule with its @media / @supports conditions, the stylesheets and fonts
 //   a11y-tree.json     the browser accessibility tree
 //   keyboard-walk.json the scripted Tab walk, one entry per stop
 //   text.txt           the page's plain text
@@ -44,7 +45,7 @@ const WIDTHS = [1440, 768, 390];
 const HEIGHT = 900;
 const CATALOG = path.join(__dirname, '..', 'catalog', 'CATALOG.json');
 const REVIEW_SET = ['shot-1440.png', 'shot-768.png', 'shot-390.png', 'shot-zoom200.png', 'shot-reduced-motion.png',
-  'shot-forced-colors.png', 'shot-offline.png', 'dom.json', 'a11y-tree.json', 'keyboard-walk.json', 'text.txt'];
+  'shot-forced-colors.png', 'shot-offline.png', 'dom.json', 'styles.json', 'a11y-tree.json', 'keyboard-walk.json', 'text.txt'];
 const DETECTOR_SET = ['axe.json', 'findings.json'];
 const CONTROL_ROLES = new Set(['textbox', 'searchbox', 'combobox', 'listbox', 'checkbox', 'radio', 'slider',
   'spinbutton', 'switch', 'button', 'link', 'menuitem', 'tab', 'option']);
@@ -226,7 +227,10 @@ const DOM_PROBE = `(() => {
     'forced-color-adjust', 'animation-name', 'transition-property',
     // Spacing, shape and case, so a reviewer can measure a spacing scale, radii and all-caps labels (issue 1087).
     'margin', 'padding', 'gap', 'border-width', 'border-style', 'border-color', 'border-radius', 'letter-spacing',
-    'text-transform', 'text-align', 'font-style', 'text-decoration-line', 'max-width'];
+    'text-transform', 'text-align', 'font-style', 'text-decoration-line', 'max-width',
+    // Timing, numerals, wrapping, touch, stacking and pointer, so motion and craft rules have a measure.
+    'transition-duration', 'transition-timing-function', 'animation-duration', 'font-variant-numeric', 'text-wrap',
+    'touch-action', 'z-index', 'cursor'];
   const parse = (c) => {
     const m = c && c.match(/rgba?\\(([^)]+)\\)/);
     if (!m) return null;
@@ -284,6 +288,33 @@ const DOM_PROBE = `(() => {
   return JSON.stringify({ elements, contrast, targets, landmarks, runningAnimations: motion,
     title: document.title, lang: document.documentElement.lang || '',
     commit: (document.querySelector('meta[name="deployed-commit"]') || {}).content || null });
+})()`;
+
+// Every CSS rule the page carries, with the @media / @supports conditions it sits under, plus the
+// stylesheets and fonts it loads. The computed styles in dom.json show one resting state; rules for
+// :active, :hover, :focus-visible, ::selection, prefers-reduced-motion and width breakpoints only show
+// here (issue 1087: the rep-board rerun could not judge press feedback or reduced motion without them).
+const STYLE_PROBE = `(() => {
+  const rules = [];
+  const sheets = [];
+  const walk = (list, cond, sheet) => {
+    for (const r of Array.from(list || [])) {
+      if (r.cssRules && !r.selectorText) {
+        walk(r.cssRules, cond.concat(r.cssText.split('{')[0].trim()), sheet); // "@media (max-width: 640px)"
+      } else {
+        rules.push({ sheet, ...(cond.length ? { cond } : {}), css: r.cssText.length > 600 ? r.cssText.slice(0, 600) + '…' : r.cssText });
+      }
+    }
+  };
+  Array.from(document.styleSheets).forEach((s, i) => {
+    const name = s.href || ('inline#' + i);
+    try { walk(s.cssRules, [], name); sheets.push({ sheet: name, rules: s.cssRules.length }); }
+    catch (e) { sheets.push({ sheet: name, unreadable: true }); }
+  });
+  const links = Array.from(document.querySelectorAll('link[href]')).map((l) => ({ rel: l.rel, href: l.href }));
+  const fonts = document.fonts ? Array.from(document.fonts).map((f) => ({ family: f.family, weight: f.weight, style: f.style, status: f.status })) : [];
+  return JSON.stringify({ sheets, links, fonts, rules, htmlBytes: document.documentElement.outerHTML.length,
+    scripts: document.scripts.length });
 })()`;
 
 const OVERFLOW_PROBE = `JSON.stringify({ scrollWidth: document.documentElement.scrollWidth, innerWidth: window.innerWidth,
@@ -420,6 +451,7 @@ async function audit(a) {
     const dom = JSON.parse(await evaluate(DOM_PROBE));
     if (subject.kind === 'url' && !subject.commit && dom.commit) subject.commit = dom.commit;
     write('dom.json', { title: dom.title, lang: dom.lang, elements: dom.elements });
+    write('styles.json', JSON.parse(await evaluate(STYLE_PROBE)));
     measures['web.contrast'] = { status: 'ok', checked: dom.contrast.length, failing: dom.contrast.filter((c) => !c.pass).length };
     for (const c of dom.contrast.filter((x) => !x.pass)) {
       fault('web.contrast', 'low-contrast', `text contrast ${c.ratio}:1 is below ${c.required}:1 (${c.fg} on ${c.bg})`, c.path, { text: c.text, wcag: '1.4.3' });
@@ -539,7 +571,7 @@ async function audit(a) {
       captured: new Date().toISOString(),
       browser: version.product,
       images: REVIEW_SET.filter((f) => f.endsWith('.png')),
-      structure: ['dom.json', 'a11y-tree.json', 'keyboard-walk.json'],
+      structure: ['dom.json', 'styles.json', 'a11y-tree.json', 'keyboard-walk.json'],
       text: 'text.txt',
       review_set: REVIEW_SET,
       detector_set: DETECTOR_SET,
