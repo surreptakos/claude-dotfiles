@@ -20,14 +20,14 @@ Sync them first, from the aac-routines checkout: `python scripts/sync_m365_expor
 
 ## Thread reuse
 
-Last evening's forgotten-tasks run read its shortlisted threads in full; its report's `Threads read` section names each with the time of its last message (aac-routines issue 606). Build this run's threads from the snapshot, then plan, from the aac-routines checkout:
+The forgotten-task capture read its shortlisted threads in full (in a scheduled run, minutes earlier: SKILL.md § The scheduled run); its report's `Threads read` section names each with the time of its last message (aac-routines issue 606). Build this run's threads from the snapshot, then plan, from the aac-routines checkout:
 
 ```
 python scripts/capture_prefilter.py build --snapshot <run-dir>/snapshot.json --out-dir <run-dir>
 python -m aac_routines.thread_reuse plan --report <forgotten-tasks-report.md> --threads <run-dir>/threads.jsonl [--thread <id> ...]
 ```
 
-The report is the newest forgotten-tasks report: `python -m aac_routines.run_ledger report-latest` prints it, and exit 1 means fetch it from the `aac-run-ledger` Drive folder. Each thread comes back `reused` (no newer message: the report's blocks stand, do not open it), `reopen` (a newer message: read it in full) or `read` (never read last evening: read it). `extract` lists the threads to pass to `capture_prefilter extract`. With no report from the previous evening, omit `--report`: every thread is read, and the plan carries the gap. Paste the plan's `lines` into the status, its first line into the record's `sources_read` and its gap into `coverage_gaps`.
+The report is the newest forgotten-tasks report: `python -m aac_routines.run_ledger report-latest` prints it, and exit 1 means fetch it from the `aac-run-ledger` Drive folder. Each thread comes back `reused` (no newer message: the report's blocks stand, do not open it), `reopen` (a newer message: read it in full) or `read` (the capture never read it: read it). `extract` lists the threads to pass to `capture_prefilter extract`. With no capture report since the previous weekday began, omit `--report`: every thread is read, and the plan carries the gap. Paste the plan's `lines` into the status, its first line into the record's `sources_read` and its gap into `coverage_gaps`.
 
 ## Live tail
 
