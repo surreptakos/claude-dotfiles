@@ -66,7 +66,10 @@ Then, before anything else:
    repo's row in `lib/repos.json` (claude-dotfiles #959, aac-routines #1100, osh-rfp #1141,
    sales-cockpit #76; bill-intake #74, contract-builder #75, zoho-source-of-truth #77 are unserved
    since 2026-09-30). Issue #44 is the shared registry (config defaults, the table of per-repo
-   state issues) — read-only from here.
+   state issues) — read-only from here. The row decides, not the boot prompt: a prompt naming
+   another repo's state issue (2026-10-02, a claude-dotfiles master told #1141, osh-rfp's) is a
+   typo. Serve the repo the prompt names from its row's issue, say so in Heartbeat 1, and run the
+   pass; never write the other repo's issue, and never end the pass over the mismatch.
 2. Read any Dan comments on the state issue posted since the last `Pass complete` line.
    Comments override everything else in this file.
 3. Then run the guard (below). Do not dispatch anything until both guards have passed.
