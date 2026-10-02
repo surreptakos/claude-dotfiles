@@ -164,10 +164,15 @@ In this order:
    (`/home/user/<repo>/.claude/workflows/ticket-fleet.js`, never the bare relative form) — copy it
    there first with `mkdir -p
    .claude/workflows && cp "${CLAUDE_PLUGIN_ROOT}/skills/ticket-fleet/ticket-fleet.js"
-   .claude/workflows/ticket-fleet.js`. **Confirm the served repo is the cwd immediately before the
-   `Workflow` call** (`cd <repo> && git rev-parse --is-inside-work-tree` → `true`) — the harness's
-   "Primary working directory" environment line updates asynchronously and can still read an
-   earlier value when `Workflow` fires. A relative `scriptPath` launched from the wrong cwd fails
+   .claude/workflows/ticket-fleet.js`. **Confirm the session ROOT is the served repo immediately
+   before the `Workflow` call:** `basename "$(dirname "$(ls -t ~/.claude/projects/*/*.jsonl | head
+   -1)")"` must print the clone path with `/` as `-` (`-home-user-<repo>`). The transcript folder
+   is named for the root worktrees are cut from; `-home-user` means a session started beside the
+   clones, and no `cd` fixes it: end the pass and leave the wave to a session started on the repo.
+   Never use `cd <repo> && git rev-parse` as the check — the `cd` makes it pass from any root
+   (osh-rfp pass of 2026-10-02 17:43: check `true`, wave aborted at env-probe). The harness's
+   "Primary working directory" environment line is no better: it follows the shell's `cd`, not
+   the root. A relative `scriptPath` launched from the wrong cwd fails
    every implementer identically with `Cannot create agent worktree: not in a git repository`, 0
    delivered, no branches created (measured 2026-09-23, `surreptakos/claude-dotfiles` memory note
    `workflow-runtime-quirks`). — and `args` from the
