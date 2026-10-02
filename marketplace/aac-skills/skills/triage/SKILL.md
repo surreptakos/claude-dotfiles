@@ -3,10 +3,10 @@ name: triage
 description: Move issues and external PRs through a state machine of triage roles, categorise, verify, grill if needed, and write agent-ready briefs.
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-10-01T23:30:28Z'
-  previous-modified: '2026-09-29T01:39:47Z'
-  revision: '9'
-  content-sha: 7105ed5fa32b
+  modified: '2026-10-02T20:04:51Z'
+  previous-modified: '2026-10-01T23:30:28Z'
+  revision: '10'
+  content-sha: 3e52a360ef45
 ---
 
 # Triage
@@ -149,10 +149,10 @@ A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SES
 | `gh repo view --json nameWithOwner` | derive `<owner>/<repo>` from `git remote get-url origin` |
 | `gh issue list --label <role> --state open --json ...` | MCP `list_issues` (label + state) |
 | `gh issue view N --comments` | MCP `issue_read` for the body, its comments method for the thread |
-| `gh issue create --title ... --body ... --label ...` | MCP `create_issue` (title, body, labels) |
+| `gh issue create --title ... --body ... --label ...` | MCP `issue_write` method `create` (title, body, labels) |
 | `gh issue comment N --body-file <path>` | MCP `add_issue_comment` (read the file into `body`) |
-| `gh issue edit N --add-label ... --remove-label ...` | MCP `update_issue` (labels) |
-| `gh issue close N --reason completed` / `--reason "not planned"` | MCP `update_issue` (state closed, state_reason completed / not_planned) |
+| `gh issue edit N --add-label ... --remove-label ...` | MCP `issue_write` method `update` (labels: the full new set — `update` replaces every label, so read them first with `issue_read` method `get_labels`, then pass the existing labels minus the removed plus the added) |
+| `gh issue close N --reason completed` / `--reason "not planned"` | MCP `issue_write` method `update` (state: closed, state_reason: completed / not_planned) |
 | `gh issue view N --json labels,state` | MCP `issue_read` (verify labels + state) |
 | `gh pr view N --json ...` / `gh pr diff N` | MCP `pull_request_read` / `get_pull_request_diff` |
 | `gh pr create --title ... --body ...` | MCP `create_pull_request` (only when a triage step actually creates a PR — triage rarely does) |

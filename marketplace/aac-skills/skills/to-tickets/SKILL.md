@@ -3,10 +3,10 @@ name: to-tickets
 description: Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker (edges as text in one file per ticket locally, or native blocking links on a real tracker).
 metadata:
   disable-model-invocation: 'false'
-  modified: '2026-10-02T16:24:28Z'
-  previous-modified: '2026-10-01T23:30:29Z'
-  revision: '10'
-  content-sha: c6c021df2f7b
+  modified: '2026-10-02T20:04:51Z'
+  previous-modified: '2026-10-02T16:24:28Z'
+  revision: '11'
+  content-sha: 2af15c5cfef8
 ---
 
 # To Tickets
@@ -128,13 +128,13 @@ A cloud session (claude.ai/code, Cowork) has no `gh` — `CLAUDE_CODE_REMOTE_SES
 | The step says | In a container use |
 | --- | --- |
 | `gh repo view --json nameWithOwner` | derive `<owner>/<repo>` from `git remote get-url origin` |
-| `gh issue create --title ... --body ... --label ready-for-agent` | MCP `create_issue` (title, body, labels: `["ready-for-agent"]`) |
-| `gh issue edit N --add-label ready-for-agent` | MCP `update_issue` (labels: existing + `["ready-for-agent"]`) |
+| `gh issue create --title ... --body ... --label ready-for-agent` | MCP `issue_write` method `create` (title, body, labels: `["ready-for-agent"]`) |
+| `gh issue edit N --add-label ready-for-agent` | MCP `issue_write` method `update` (labels: existing + `["ready-for-agent"]` — `update` replaces the whole label set, so read the existing labels first with `issue_read` method `get_labels` and pass them all) |
 | `gh issue view N --json number,title,labels` | MCP `issue_read` (verify the new ticket landed with the right label) |
-| a sub-issue / blocking edge on GitHub | MCP `add_sub_issue` (or `update_issue` with a "Blocked by" body line if the tracker has no native edge) |
+| a sub-issue / blocking edge on GitHub | MCP `sub_issue_write` method `add` (parent's `issue_number`, the child's `sub_issue_id` — its ID from `issue_read`, not its number), or `issue_write` method `update` with a "Blocked by" body line if the tracker has no native edge |
 | `gh issue comment N --body-file <path>` | MCP `add_issue_comment` (read the file into `body`) |
 
-Publish the tickets in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers — the same rule the local-vs-remote step above uses. When the tracker has native blocking / sub-issue relationships, prefer the MCP tool that carries them (`add_sub_issue`); otherwise fall back to a plain "Blocked by" line in the body pointing at the blocker's number.
+Publish the tickets in dependency order (blockers first) so each ticket's blocking edges can reference real identifiers — the same rule the local-vs-remote step above uses. When the tracker has native blocking / sub-issue relationships, prefer the MCP tool that carries them (`sub_issue_write`); otherwise fall back to a plain "Blocked by" line in the body pointing at the blocker's number.
 
 Local-files mode (`.scratch/<feature-slug>/issues/`) is unchanged in a container — it is just file writes, no `gh` and no MCP needed. Read-only reference lookups can also go straight to REST — `curl https://api.github.com/repos/<owner>/<repo>/issues/<n>` — the session's egress proxy authenticates api.github.com, private repos included.
 
