@@ -46,8 +46,9 @@
  * each `--candidate`, so the ticket that CAUSED a leak is named even when another ticket's
  * checkpoint observed it first.
  *
- * Every path this prints uses forward slashes: the fleet hands `statePath` back to a bash command
- * unquoted, and on Windows Git Bash a `C:\Users\...` spelling loses its backslashes there.
+ * Every path this prints uses forward slashes: the fleet hands `statePath` back to a bash command,
+ * and on Windows Git Bash an unquoted `C:\Users\...` spelling loses its backslashes there. The
+ * fleet quotes it as well (issue 1207), so a guard printing the backslash spelling still works.
  */
 'use strict';
 
