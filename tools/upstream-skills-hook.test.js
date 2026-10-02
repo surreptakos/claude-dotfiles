@@ -200,7 +200,7 @@ test('the committed marketplace.json names an upstream subset for every skill th
       for (const s of p.skills) served.add(path.posix.basename(s));
     }
   }
-  for (const name of ['tdd', 'grill-me', 'teach', 'prototype', 'wizard', 'wait-what',
+  for (const name of ['tdd', 'grill-me', 'teach', 'prototype', 'pr', 'retro', 'wizard', 'wait-what',
     'to-questionnaire', 'writing-for-agents', 'codebase-design', 'domain-modeling', 'improve-codebase-architecture',
     'composition-patterns', 'react-best-practices', 'react-native-skills', 'react-view-transitions',
     'web-design-guidelines', 'agent-browser', 'find-skills']) {

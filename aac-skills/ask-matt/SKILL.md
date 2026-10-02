@@ -3,10 +3,10 @@ name: ask-matt
 description: Ask which skill or flow fits your situation. A router over the skills in this repo.
 disable-model-invocation: true
 metadata:
-  modified: "2026-09-28T21:53:59Z"
-  previous-modified: "2026-09-21T03:42:11Z"
-  revision: "3"
-  content-sha: "bdcaf40f07e0"
+  modified: "2026-10-02T00:23:25Z"
+  previous-modified: "2026-09-28T21:53:59Z"
+  revision: "4"
+  content-sha: "10906bd34902"
 ---
 
 # Ask Matt
@@ -63,6 +63,7 @@ Not scheduled — run when the trigger fires.
 - **`/consistency-audit`** — when docs contradict code, or a doc claims a state ("X shipped", "Y not built") that reality disagrees with. Sweeps every prose surface (README, CLAUDE.md, ADRs, PRDs, runbooks, memory files, doc generators), verifies each claim against primary sources, fixes stale claims, and hunts the generator that republished the drift. Run after any big rewrite, or when a wrong claim is caught in the wild.
 - **`/anthropic-skills:consolidate-memory`** — when `memory/` grew past a glance, or two memory files describe the same person/project/preference. Merges duplicates, retires dated entries, converts relative→absolute dates, trims `MEMORY.md` under 200 lines / 25KB. Does not check truth; run **`/consistency-audit`** first if reality-drift is likely.
 - **`/maintain-repo`** — the weekly wrapper: runs `/consistency-audit` then `/anthropic-skills:consolidate-memory` in the right order. Reach for this on the cadence; reach for the two above when only one job applies.
+- **`/retro`** — after a session that went slowly or wrong. It reads that session's primary sources and proposes changes to the agent's **environment**, not the code: navigation pointers, automated checks, reviewer rules, steering-file trims, cheaper tools, ranked by severity. It writes in the `/writing-for-agents` style.
 
 ## Codebase health
 
@@ -113,6 +114,13 @@ Off the main flow entirely.
 - **`/wait-what`** is the corrective for a message that didn't land. Use it mid-conversation, inside any other skill, and the agent re-pitches what it just said with the context you were missing, in plain English, using the `CONTEXT.md` vocabulary. It works after the fact; `/grill-with-docs` is the upfront cure, because a shared language agreed early is what stops the jargon arriving at all.
 - **`/teach`**: learn a concept over multiple sessions, using the current directory as a stateful workspace.
 - **`/writing-for-agents`** is the reference for writing documents agents consume: skills, AGENTS.md, pointed-at docs.
+- **`/pr`** writes a PR body to one template: a **Summary** shown as the smallest view that makes the point (pseudocode, call tree, file tree, diff sketch), **Evidence** before and after, and **Merge Danger** (one-way or two-way door, blast radius). Model-invoked, so it comes in whenever a PR body is due.
+
+## Not routed
+
+Upstream skills this map deliberately leaves out, so nothing routes to them.
+
+- `implement-spec` (mattpocock/skills, engineering) builds a whole spec's ticket graph on one integration branch with parallel implementer subagents. Here that job already has an owner: `ticket-fleet` runs the ready tickets in parallel worktrees with a blind verifier and its own deliver stage, and `/implement` builds one ticket. A second route for the same step would split it.
 
 ## Precondition
 
