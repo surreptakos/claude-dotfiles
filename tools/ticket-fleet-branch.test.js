@@ -2758,11 +2758,23 @@ test('checkpointCommand/parseCheckpointOutput: one command reads the path, HEAD 
 
   const sha = 'a'.repeat(40);
   assert.deepEqual(parseCheckpointOutput(`cwd /x y\nhead main\nsha ${sha}\n{"newEntries":[]}\n`),
-    { cwd: '/x y', head: { branch: 'main', sha }, guard: { newEntries: [] } });
+    { cwd: '/x y', head: { branch: 'main', sha }, guard: { newEntries: [] }, tip: null });
   assert.deepEqual(parseCheckpointOutput(`head DETACHED\r\nsha ${sha}`).head, { branch: null, sha });
   assert.equal(parseCheckpointOutput('head DETACHED\nsha UNREADABLE\n{"newEntries":[]}').head, null, 'an unreadable HEAD is null, never a sha');
   assert.equal(parseCheckpointOutput(`head main\nsha ${sha}\n{not json`).guard, null, 'a paraphrased guard line is could-not-audit, not a pass');
-  assert.deepEqual(parseCheckpointOutput(undefined), { cwd: null, head: null, guard: null });
+  assert.deepEqual(parseCheckpointOutput(undefined), { cwd: null, head: null, guard: null, tip: null });
+});
+
+// Issue 1190: the tip read rides in the same command as one `tip ...` line, so no `tip:` agent.
+test('checkpointCommand/parseCheckpointOutput: a tip ref is read by the same command, on one line, before the guard (issue 1190)', () => {
+  const cmd = checkpointCommand({ cwd: '/m', head: true, guard: 'node g check --cwd "$o"', tip: 'agent/issue-7-attempt1' });
+  assert.ok(cmd.includes(`printf 'tip %s\\n' "$({ ${buildTipLookupCommand('"$o"', 'agent/issue-7-attempt1')}; } | tr '\\n' ' ')"`), cmd);
+  assert.ok(cmd.endsWith('node g check --cwd "$o"'), 'the guard still runs last, so the exit code stays the guard\'s');
+  const sha = 'b'.repeat(40);
+  assert.deepEqual(parseCheckpointOutput(`head main\nsha ${'a'.repeat(40)}\ntip ${sha} SPELLING=origin \n{"newEntries":[]}`).tip, { sha, spelling: 'origin' });
+  assert.deepEqual(parseCheckpointOutput(`tip ${sha}\trefs/heads/agent/issue-7-attempt1 `).tip, { sha, spelling: 'ls-remote' });
+  assert.deepEqual(parseCheckpointOutput('tip \n').tip, { sha: null, spelling: null }, 'a ref nothing resolved is an answer, not a missing read');
+  assert.equal(parseCheckpointOutput(`head main\nsha ${sha}`).tip, null, 'no tip line: nothing read it');
 });
 
 // What one isolation agent's command prints (issue 1093): tagged lines, then the guard's JSON line.
@@ -2787,7 +2799,7 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
   const logs = [];
-  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable };\n}`);
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, carriedReadStep, epoch: () => restoreEpoch };\n}`);
   const inner = await wrapper(laneScope({
     agent: agentMock,
     log: (m) => logs.push(m),
@@ -3011,17 +3023,27 @@ test('tree guard present in this repo: default args baseline it active, and a ro
       const r = BASH.run(['-c', prompt.split('\n')[2]], { cwd: REPO_ROOT, encoding: 'utf8' });
       return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
     };
-    const { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, logs } = await driveTreeGuard(bashAgent, {
+    const { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, logs, carriedReadStep, epoch } = await driveTreeGuard(bashAgent, {
       orchestratorCwd: orchPosix, treeGuardStateDir: `${orchPosix}/.git/orchestrator-tree-guard`,
     });
     assert.equal(treeGuardUnusable, null, 'the baseline must not report the guard unusable');
     assert.ok(logs.some((l) => /^tree-guard: active - orchestrator-tree baseline taken .*1 pre-existing entry/.test(l)), JSON.stringify(logs));
     assert.ok(logs.some((l) => /^Orchestrator HEAD at Setup: \S+ \([0-9a-f]{12}\)/.test(l)), 'the same Setup command read HEAD for real');
 
-    await treeGuardCheck('implement-attempt1', 7); // clean: the operator's dirt is in the baseline
+    // Issue 1190: the per-ticket checkpoints ride in the verifier and the deliverer. Each step's
+    // command is run in bash here, as that agent would run it, and handed back as its carried read.
+    const runStep = (step) => {
+      const r = BASH.run(['-c', step.trim().split('\n').pop()], { cwd: REPO_ROOT, encoding: 'utf8' });
+      return { exitCode: r.status, stdout: r.stdout.trim(), stderr: r.stderr.trim() };
+    };
+    const since = epoch();
+    const pre = runStep(carriedReadStep({ field: 'preCheckpoint', when: 'first', tag: 'implement-attempt1', ticketNumber: 7, tipRef: 'HEAD' }));
+    assert.match(pre.stdout, /^tip [0-9a-f]{40} SPELLING=given ?$/m, 'the tip is read in the same command');
+    await treeGuardCheck('implement-attempt1', 7, { carried: pre, since }); // clean: the operator's dirt is in the baseline
     // The run 6abbcc6e shape: the report writer's scratch file landed in the orchestrator root.
     fs.writeFileSync(path.join(orch, 'discoveries-bullets.json'), '[]\n');
-    await treeGuardCheck('deliver', 7);
+    const deliverRead = runStep(carriedReadStep({ field: 'checkpoint', when: 'last', tag: 'deliver', ticketNumber: 7 }));
+    await treeGuardCheck('deliver', 7, { carried: deliverRead, since: epoch() });
 
     assert.equal(breaches.length, 0, 'a restored write must not end the wave');
     assert.equal(treeRestores.length, 1);
@@ -3035,10 +3057,13 @@ test('tree guard present in this repo: default args baseline it active, and a ro
     const quarantine = fs.readdirSync(stateDir).filter((n) => n.endsWith('.quarantine'));
     assert.equal(quarantine.length, 1);
     assert.ok(fs.existsSync(path.join(stateDir, quarantine[0], 'discoveries-bullets.json')), 'nothing is deleted: the write is moved aside inside .git');
+    // A carried read taken before that restore still shows the write: it is dropped as stale and the
+    // tree is read afresh, so the restored write is not reported twice (issue 1190).
+    await treeGuardCheck('verify-attempt1', 7, { carried: deliverRead, since });
     await treeGuardCheck('pre-report', 0); // the next checkpoint sees a clean tree again
     assert.equal(treeRestores.length, 1);
-    assert.deepEqual(labels, ['isolation:setup', 'isolation:implement-attempt1#7', 'isolation:deliver#7', 'tree-guard:restore:deliver#7', 'isolation:pre-report#0'],
-      'one agent per checkpoint; a second only to restore a write (issue 1093)');
+    assert.deepEqual(labels, ['isolation:setup', 'tree-guard:restore:deliver#7', 'isolation:verify-attempt1#7', 'isolation:pre-report#0'],
+      'the carried implement and deliver reads start no agent; one starts only to restore a write or to replace a stale read (issues 1093, 1190)');
 
     // The run result lists it under `inconsistent`, next to the HEAD restores.
     assert.match(src, /\.concat\(treeRestores\.map\(t => \(\{ ticket: t\.observedBy, kind: 'tree-guard'/,
@@ -3185,28 +3210,46 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const helpers = loadStableHelpers(FLEET_SCRIPT);
   const calls = [], restores = [];
+  // What an isolation read prints for `label` - asked of a checkpoint agent, or carried back by the
+  // verifier or the deliverer that ran the same command (issue 1190).
+  const isolationAnswer = (l) => (hooks.isolation && hooks.isolation(l))
+    || { exitCode: 0, stdout: isolationStdout({ head: { branch: 'main', sha: head() }, guard: CLEAN }), stderr: '' };
+  const tipSha = (n) => String(n).padStart(4, '0').repeat(10);
+  // `hooks.carried(label)` stands in for what a verifier or deliverer copied back, when a test needs it to differ.
+  const carriedAnswer = (l) => (hooks.carried && hooks.carried(l)) || isolationAnswer(l);
   const agentMock = async (prompt, opts) => {
     const l = opts.label;
     calls.push(l);
     if (l === 'isolation:setup') return { exitCode: 0, stdout: isolationStdout({ cwd: '/m', head: { branch: 'main', sha: head() }, guard: { statePath: '/m/s.json', baselineCount: 0 } }), stderr: '' };
-    if (l.startsWith('isolation:')) {
-      const answer = hooks.isolation && hooks.isolation(l);
-      return answer || { exitCode: 0, stdout: isolationStdout({ head: { branch: 'main', sha: head() }, guard: CLEAN }), stderr: '' };
-    }
+    if (l.startsWith('isolation:')) return isolationAnswer(l);
     if (l.startsWith('orchestrator-head:restore:')) { restores.push(prompt.split('\n')[2]); if (hooks.restore) hooks.restore(); return { exitCode: 0, stdout: '', stderr: '' }; }
     const n = parseInt(l.replace(/^[^#]*#/, ''), 10);
     if (l.startsWith('impl:')) {
       return { branch: prompt.match(/agent\/issue-\d+-attempt\d+-wf_testrun-w\d+/)[0], committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [`${n} found a thing`] };
     }
-    if (l.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (l.startsWith('verify:')) {
+      // The verifier runs the implement read (and the branch tip) first and, unpinned, its own
+      // checkpoint last - each only when its prompt asks for it.
+      const pre = hooks.carried ? hooks.carried(l) : { ...isolationAnswer(`isolation:implement-attempt1#${n}`) };
+      if (!hooks.carried) pre.stdout = `${pre.stdout}\ntip ${tipSha(n)} SPELLING=given`;
+      return {
+        pass: true, evidence: 'ran the gate; exit 0', failures: [], worktree: { path: `/s/${n}`, head: tipSha(n) },
+        ...(/`preCheckpoint`/.test(prompt) ? { preCheckpoint: pre } : {}),
+        ...(/in `checkpoint`/.test(prompt) ? { checkpoint: carriedAnswer(`isolation:verify-attempt1#${n}`) } : {}),
+      };
+    }
+    if (l.startsWith('tip:')) return { exitCode: 0, stdout: `${tipSha(n)}\nSPELLING=given`, stderr: '', spelling: 'given' };
     if (l.startsWith('deliver:')) {
       if (hooks.deliver) hooks.deliver(n);
-      return { pushed: true, prUrl: `https://github.com/x/y/pull/${n}`, mergeStatus: 'clean', conflictPaths: [] };
+      return { pushed: true, prUrl: `https://github.com/x/y/pull/${n}`, mergeStatus: 'clean', conflictPaths: [],
+        ...(/in `checkpoint`/.test(prompt) ? { checkpoint: carriedAnswer(`isolation:deliver#${n}`) } : {}) };
     }
     if (l === 'followups-writer') return { branch: 'b', sha: 's', prUrl: '', appended: 3 };
     throw new Error(`unexpected agent label: ${l}`);
   };
-  const body = [treeGuardSetupBody(src), extractMarked(src, 'FLEET-DELIVER-PROMPT'), extractCodeLane(src),
+  // The real revParse too (issue 1190): a tip the verifier did not carry back shows up as a `tip:` agent.
+  const body = [generatedBlock(FLEET_SCRIPT), treeGuardSetupBody(src), extractMarked(src, 'FLEET-TIP-REVPARSE'),
+    extractMarked(src, 'FLEET-DELIVER-PROMPT'), extractCodeLane(src),
     extractMarked(src, 'FLEET-LANES'), extractMarked(src, 'FLEET-REPORT')].join('\n');
   // What the script runs after the wave: the pre-report checkpoint, then the report writer.
   const tail = "await treeGuardCheck('pre-report', 0)\nassertNoBreach()\n"
@@ -3223,7 +3266,7 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     },
     runId: 'testrun', invocationId: 'inv1', scout: { defaultBranch: 'main', repoMap: '', testCommand: 'echo ok' },
     instrument: 'gh', rules: new Proxy({}, { get: () => () => '' }), verifierAgentType,
-    dedupeBrief: () => '', testCommand: 'echo ok', revParse: async () => null, classifyDelivery, worktreeMismatch,
+    dedupeBrief: () => '', testCommand: 'echo ok', classifyDelivery, worktreeMismatch,
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     runHalt: createRunHalt(() => {}),
     stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
@@ -3244,13 +3287,13 @@ test('a wave whose deliverer merges and resets the orchestrator checkout still d
     hooks: {
       // #934's deliverer: `git merge origin/master` then `git reset --hard 74abb51f` in /m.
       deliver: (n) => { if (n === 934) { head = 'c'.repeat(40); unreadableOnce = true; } },
-      // The observed failure: the first read after the move came back unreadable.
+      // The observed failure: the reads after the move came back unreadable - the deliverer's
+      // carried one and the checkpoint agent that replaces it (issue 1190) - until the restore.
       isolation: () => {
         if (!unreadableOnce) return null;
-        unreadableOnce = false;
         return { exitCode: 0, stdout: `head DETACHED\nsha UNREADABLE\n${JSON.stringify(CLEAN)}`, stderr: 'fatal' };
       },
-      restore: () => { head = start; },
+      restore: () => { head = start; unreadableOnce = false; },
     },
   });
 
@@ -3268,28 +3311,42 @@ test('a wave whose deliverer merges and resets the orchestrator checkout still d
 });
 
 // Issue 1093 acceptance: run 6abd47d1 started 4 Setup agents and two agents per checkpoint - 20
-// guard or probe agents for a 2-ticket, 1-attempt wave. The budget is 8: one Setup agent and one
-// agent per checkpoint, with the Verify checkpoint only for an unpinned verifier.
-test('a 2-ticket wave with one attempt each starts at most 8 guard or probe agents (issue 1093)', async () => {
-  const guardish = (l) => /^(isolation:|tree-guard:|orchestrator-head:|orchestrator-cwd|worktree-canary|editable-guard)/.test(l);
-  const unpinned = await driveGuardedWave([11, 12], { verifierAgentType: null });
-  assert.deepEqual(unpinned.calls.filter(guardish), [
-    'isolation:setup',
-    'isolation:implement-attempt1#11', 'isolation:verify-attempt1#11', 'isolation:deliver#11',
-    'isolation:implement-attempt1#12', 'isolation:verify-attempt1#12', 'isolation:deliver#12',
-    'isolation:pre-report#0',
-  ]);
-  const pinned = await driveGuardedWave([11, 12], { verifierAgentType: 'fleet-verifier' });
-  assert.deepEqual(pinned.calls.filter(guardish), [
-    'isolation:setup', 'isolation:implement-attempt1#11', 'isolation:deliver#11',
-    'isolation:implement-attempt1#12', 'isolation:deliver#12', 'isolation:pre-report#0',
-  ], 'a pinned fleet-verifier (no Edit or Write) gets no Verify checkpoint');
-  for (const run of [unpinned, pinned]) {
-    assert.ok(run.calls.filter(guardish).length <= 8);
-    assert.deepEqual(run.out.results.map((r) => r && r.prUrl), [11, 12].map((n) => `https://github.com/x/y/pull/${n}`));
+// guard or probe agents for a 2-ticket, 1-attempt wave; 1093 brought that to one agent per
+// checkpoint. Issue 1190 acceptance: run 6abddb76 still started 43 agents for 5 tickets, 17 of them
+// `tip:` and `isolation:` agents running one command each. The per-ticket checkpoints and the tip
+// now ride in the verifier and the deliverer, so a 4-ticket, 1-attempt wave starts at most 20
+// agents: Setup, then implement, verify and deliver per ticket, then pre-report and the writer.
+test('a 4-ticket wave with one attempt each starts at most 20 agents, no tip: or per-ticket isolation: agent among them (issue 1190)', async () => {
+  const wave = [11, 12, 13, 14];
+  const perTicket = (n) => [`impl:#${n}.1`, `verify:#${n}.1`, `deliver:#${n}`];
+  const expected = ['isolation:setup', ...wave.flatMap(perTicket), 'isolation:pre-report#0', 'followups-writer'];
+  for (const verifierAgentType of [null, 'fleet-verifier']) {
+    const run = await driveGuardedWave(wave, { verifierAgentType });
+    assert.deepEqual(run.calls, expected, `verifier ${verifierAgentType || 'unpinned'}: ${JSON.stringify(run.calls)}`);
+    assert.ok(run.calls.length <= 20, `${run.calls.length} agents for a 4-ticket wave (budget 20, issue 1190)`);
+    assert.deepEqual(run.out.results.map((r) => r && r.prUrl), wave.map((n) => `https://github.com/x/y/pull/${n}`));
+    // The tip each verdict was cross-checked against came from the verifier's carried read.
+    for (const n of wave) assert.ok(run.logs.some((m) => m.startsWith(`tip:#${n}.1: resolved agent/issue-${n}-attempt1-`) && /no tip agent - issue 1190/.test(m)), `tip of #${n}`);
   }
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  // The probe lane (not harnessed here) reads its origin/<default> tip the same way.
+  assert.ok(src.includes("carriedReadStep({ field: 'preCheckpoint', when: 'after-fetch', tipRef: `origin/${scout.defaultBranch}` })")
+    && src.includes('revParse(`origin/${scout.defaultBranch}`, `tip:#${t.number}.${attempt}`, lastVerdict.preCheckpoint)'),
+  'the probe lane takes its tip from its verifier\'s carried read');
   // The worktree canary rides in the env probe (Scout) now: no Setup agent of its own.
-  assert.ok(!unpinned.src.includes("label: 'worktree-canary'"), 'the worktree canary is not a separate agent any more');
+  assert.ok(!src.includes("label: 'worktree-canary'"), 'the worktree canary is not a separate agent any more');
+});
+
+test('a carried read that does not parse starts the checkpoint and tip agents instead, never a silent pass (issue 1190)', async () => {
+  const garbled = { exitCode: 0, stdout: 'the tree looks clean to me', stderr: '' };
+  const run = await driveGuardedWave([21], {
+    verifierAgentType: null,
+    hooks: { carried: () => garbled },
+  });
+  assert.deepEqual(run.calls, ['isolation:setup', 'impl:#21.1', 'verify:#21.1', 'isolation:implement-attempt1#21', 'tip:#21.1',
+    'isolation:verify-attempt1#21', 'deliver:#21', 'isolation:deliver#21', 'isolation:pre-report#0', 'followups-writer']);
+  assert.ok(run.logs.some((m) => /isolation:implement-attempt1#21: the checkpoint read .* did not parse/.test(m)));
+  assert.ok(run.logs.some((m) => /tip:#21\.1: the tip read the verifier carried back did not parse/.test(m)));
 });
 
 test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
@@ -3443,6 +3500,20 @@ test('revParse: an agent() throw is still caught and reported through unusableRe
   assert.equal(logs.length, 1);
   assert.match(logs[0], /output unusable.*StructuredOutput retry cap exceeded/);
   assert.match(logs[0], /worktree HEAD cannot be cross-checked/);
+});
+
+test('revParse: a tip the verifier carried back answers without an agent, in the same shape - a sha, or null for an absent ref (issue 1190)', async () => {
+  const sha = 'c'.repeat(40);
+  const calls = [];
+  const agentMock = async (prompt, opts) => { calls.push(opts.label); return { exitCode: 0, stdout: `${sha}\nSPELLING=given`, stderr: '', spelling: 'given' }; };
+  const logs = [];
+  const revParse = await driveRevParse(agentMock, logs);
+  assert.equal(await revParse('agent/issue-9-attempt1', 'tip:#9.1', { exitCode: 0, stdout: `head main\nsha ${'a'.repeat(40)}\ntip ${sha} SPELLING=origin \n{"newEntries":[]}`, stderr: '' }), sha);
+  assert.equal(await revParse('agent/issue-9-attempt1', 'tip:#9.1', { exitCode: 0, stdout: 'tip ', stderr: '' }), null, 'nothing resolved: null, as the agent would say');
+  assert.deepEqual(calls, [], 'no tip agent starts for a carried read that parsed');
+  assert.ok(logs.some((l) => /^tip:#9\.1: resolved agent\/issue-9-attempt1 via origin to c{40}/.test(l)));
+  assert.equal(await revParse('agent/issue-9-attempt1', 'tip:#9.1', { exitCode: 0, stdout: 'I read the tip, it is fine', stderr: '' }), sha);
+  assert.deepEqual(calls, ['tip:#9.1'], 'a carried read with no tip line falls back to the one-command agent');
 });
 
 test(`${FLEET_SCRIPT_REL}: the REV schema the tip agent reports against carries a spelling field (issue 561)`, () => {
