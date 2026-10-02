@@ -29,7 +29,7 @@ const stampTitle = (source, at) => source + "__" + at.toISOString().slice(0, 16)
 const mdEscape = s => s.replace(/[\\<>&\[\]#_]/g, c => "\\" + c);
 
 // exportAgoMin: how long before NOW today's newest exports were stamped; null means none has landed yet.
-function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], todoist = () => undefined}){
+function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], waiting = [], meta = null, todoist = () => undefined}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const prompts = [], m365 = [];
@@ -61,8 +61,8 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
   }};
   const store = {};
   const db = {
-    doc(p){ return {set: async v => { store[p] = v; }, update: async v => { store[p] = Object.assign(store[p] || {}, v); }, onSnapshot(fn){ fn({exists: false, data: () => null}); }}; },
-    collection(name){ return {onSnapshot(fn){ fn({docs: name === "triage" ? triage.map(t => ({id: t._id, data: () => t})) : []}); }}; }
+    doc(p){ return {set: async v => { store[p] = v; }, update: async v => { store[p] = Object.assign(store[p] || {}, v); }, onSnapshot(fn){ const v = p === "triage_meta/latest" ? meta : null; fn({exists: !!v, data: () => v}); }}; },
+    collection(name){ return {onSnapshot(fn){ fn({docs: (name === "triage" ? triage : name === "waiting" ? waiting : []).map(t => ({id: t._id, data: () => t}))}); }}; }
   };
   const sample = {async json(prompt){ prompts.push(prompt); return onPrompt(prompt); }};
   const ctx = {
@@ -228,4 +228,27 @@ test("a do-date ruling on a non-recurring task still sends the due string throug
   const {writes, card} = await rule(false, {label: "Look again Oct 7", dueString: "Oct 7"});
   assert.strictEqual(card.status, "answered", card.error);
   assert.deepStrictEqual(writes.map(c => [c.tool, c.input.tasks[0].dueString]), [["update-tasks", "Oct 7"]]);
+});
+
+// Issue 1192 (Dan, 2026-10-01): the confidential rule covers the generated huddle notes only. A triage card or a
+// waiting-on-you ask with pay, health or leave words shows exactly as the triage run wrote it.
+test("a triage card and a waiting-on-you ask with pay, health or leave words render verbatim", async () => {
+  const card = {_id: "q1", runId: "r1", taskId: "t1", status: "open", title: "Approve Rob's raise to $24/hr",
+    question: "His sick leave runs out Friday; approve the extra week?", options: [{label: "Approve the $1,500 bonus"}],
+    source: {lastFrom: "Rob", lastAt: "2026-09-30T14:00:00Z", quote: "Doctor says two more weeks of medical leave"}};
+  const ask = {_id: "w1", status: "open", from: "Mark", subject: "Health insurance and pay question", receivedAt: "2026-09-29T14:00:00Z",
+    ask: "sign off his FMLA leave and the salary change"};
+  const page = buildPage({tasks: [], lastPostHtml, onPrompt: () => ({}), triage: [card], waiting: [ask], meta: {runId: "r1", finishedAt: NOW.toISOString(), alarms: []}});
+  await new Promise(r => setImmediate(r));
+  const esc = s => s.replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+  const tri = page.$("tri-body").innerHTML, wait = page.$("wait-body").innerHTML;
+  [card.title, card.question, card.source.quote, card.options[0].label].forEach(t => assert(tri.includes(esc(t)), "not verbatim: " + t + " :: " + tri));
+  [ask.subject, ask.ask].forEach(t => assert(wait.includes(esc(t)), "not verbatim: " + t + " :: " + wait));
+});
+
+test("the triage run's board contract keeps the board copy verbatim, with no neutral rewrite", () => {
+  const dir = path.join(__dirname, "..", "aac-skills", "todoist-triage");
+  const contract = ["day-board.md", "SKILL.md"].map(f => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
+  assert.doesNotMatch(contract, /Nothing confidential on the board|takes a neutral `title`|personal message, not shown|no pay, review, health or leave detail/);
+  assert.match(contract, /board copy is verbatim/);
 });
