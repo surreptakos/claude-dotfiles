@@ -13,7 +13,7 @@ Adapted for paper forms from pbakaus/impeccable (`reference/critique.md`, `refer
 
 ## Assessment A: design review
 
-Give the sub-agent: the PNG paths (both stand-ins), the spec JSON, the purpose of the form, who fills it in, and this file. Do not give it detector output. It returns, in this order:
+Give the sub-agent only these: the PNG paths (both stand-ins), the spec JSON, the purpose of the form, who fills it in, and this file. It returns, in this order:
 
 1. **Specificity verdict.** Does the form read as authored for this AAC process, or could any company use it unchanged? Check it against `TELLS.md`.
 2. **Heuristic scores**, ten of them, each 0–4 or `n/a: <reason>`, using the tables below.
@@ -34,7 +34,7 @@ B returns page counts under both stand-ins, every detector finding, and which fi
 
 ## Heuristic scoring (Nielsen's ten, for paper)
 
-Score honestly: a 4 means genuinely excellent. Most real forms land at 20–32 of 40. Heuristic 7 may be `n/a` on a single-use form that nobody fills in more than once a year; say why in the cell.
+A 4 means genuinely excellent. Most real forms land at 20–32 of 40. Heuristic 7 may be `n/a` on a single-use form that nobody fills in more than once a year; say why in the cell.
 
 ### 1. Visibility of status
 *Can each person tell where the form is in its process, and whose move it is?* Check: numbered steps on the signature cards, completed signatures visible, an office-use section that shows processing.

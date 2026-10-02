@@ -200,7 +200,7 @@ test('the committed marketplace.json names an upstream subset for every skill th
       for (const s of p.skills) served.add(path.posix.basename(s));
     }
   }
-  for (const name of ['tdd', 'grill-me', 'teach', 'prototype', 'wizard', 'wait-what',
+  for (const name of ['tdd', 'grill-me', 'teach', 'prototype', 'pr', 'retro', 'wizard', 'wait-what',
     'to-questionnaire', 'writing-for-agents', 'codebase-design', 'domain-modeling', 'improve-codebase-architecture',
     'composition-patterns', 'react-best-practices', 'react-native-skills', 'react-view-transitions',
     'web-design-guidelines', 'agent-browser', 'find-skills']) {
@@ -218,6 +218,27 @@ test('the committed marketplace.json names an upstream subset for every skill th
   for (const flow of ['to-spec', 'to-tickets']) {
     const text = fs.readFileSync(path.resolve(__dirname, '..', 'aac-skills', flow, 'SKILL.md'), 'utf8');
     assert.match(text, /^disable-model-invocation: false\r?$/m, `${flow} keeps disable-model-invocation: false`);
+  }
+});
+
+// Issue 1219: a vendored copy ships its upstream licence, in the source tree and in the payload.
+// The list is the provenance note's "Vendored directories:" line, so a new copy named there
+// cannot land without its LICENSE.
+test('every vendored directory named in the provenance note carries its upstream licence', () => {
+  const repo = path.resolve(__dirname, '..');
+  const note = fs.readFileSync(path.join(repo, 'docs', 'agents', 'memory',
+    'vendored-copy-provenance-needs-upstream-history.md'), 'utf8');
+  const line = note.split(/\r?\n/).find((l) => l.startsWith('Vendored directories:'));
+  assert.ok(line, 'the provenance note has a "Vendored directories:" line');
+  const names = [...line.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.ok(names.length > 0, 'the line names at least one directory');
+  for (const name of names) {
+    const dir = path.join(repo, 'aac-skills', name);
+    assert.ok(fs.existsSync(path.join(dir, 'SKILL.md')), `${name} is a skill under aac-skills/`);
+    const licence = fs.readdirSync(dir).find((f) => /^LICEN[CS]E(\.(txt|md))?$/i.test(f));
+    assert.ok(licence, `aac-skills/${name} carries its upstream licence file`);
+    assert.ok(fs.existsSync(path.join(repo, 'marketplace', 'aac-skills', 'skills', name, licence)),
+      `the payload ships ${name}/${licence}`);
   }
 });
 

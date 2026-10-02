@@ -35,28 +35,42 @@ STATE_DIR = Path(
 CLAUDE_HOME = Path(
     os.environ.get("GOVERNANCE_CLAUDE_HOME") or Path.home() / ".claude"
 )
+# Issue 1193: every route the ask-matt map (aac-skills/ask-matt/SKILL.md) names, plus direct-answer,
+# the gate's own "no engineering flow" route. test_allowed_flows_follow_the_map reads both files, so
+# a route added to the map and not here, or the reverse, fails the suite.
 ALLOWED_FLOWS = {
     "code-review",
     "codebase-design",
+    "consistency-audit",
     "diagnosing-bugs",
     "direct-answer",
     "domain-modeling",
     "grill-me",
     "grill-with-docs",
+    "grilling",
     "handoff",
     "implement",
     "improve-codebase-architecture",
+    "maintain-repo",
+    "pr",
     "project-harness",
     "prototype",
     "research",
+    "resolving-merge-conflicts",
+    "retro",
     "session-end",
+    "session-start",
     "setup-matt-pocock-skills",
+    "simplify",
     "tdd",
     "teach",
+    "to-questionnaire",
     "to-spec",
     "to-tickets",
     "triage",
+    "wait-what",
     "wayfinder",
+    "wizard",
     # mattpocock/skills renamed writing-great-skills to writing-for-agents (1fc6573); the vendored
     # copy of the old name left aac-skills on 2026-10-01 and the skill now loads from the
     # mattpocock-skills marketplace entry under the new name.
@@ -458,6 +472,17 @@ CORRECTION_CONTEXT = (
 )
 # Edits that count as a system change. A board or database write fixes the instance only.
 SYSTEM_CHANGE_TOOLS = {"Edit", "Write", "MultiEdit", "NotebookEdit"}
+# Issue 1213: so does a fix landed through git. Session ba3aee66 (2026-10-01) committed two
+# corrections' fixes in a worktree beside the checkout and merged PRs 1206, 1208 and 1209, all from
+# the shell, and the audit still carried CORRECTION NOT CLOSED. A `git commit` (any worktree) or a
+# PR merge (`gh pr merge`, `gh api .../pulls/N/merge`, the GitHub MCP merge tool) whose call did
+# not fail closes the turn; the closure record names the commit's directory and the PR number.
+GIT_COMMIT_PATTERN = re.compile(r"^(?:\S*[/\\])?git(?:\.exe)?(?:\s+-[cC]\s+\S+)*\s+commit(?![\w-])")
+GIT_WHERE_PATTERN = re.compile(r"""(?:\bgit(?:\.exe)?\s+-C\s+|\bcd\s+)("[^"]+"|'[^']+'|[^\s;&|]+)""")
+GH_PR_MERGE_PATTERN = re.compile(r"^(?:\S*[/\\])?gh(?:\.exe)?\s+pr\s+merge\b(.*)$")
+GH_API_MERGE_PATTERN = re.compile(r"^(?:\S*[/\\])?gh(?:\.exe)?\s+api\b.*?\bpulls/(\d+)/merge\b")
+GH_PR_NUMBER_PATTERN = re.compile(r"(?:^|\s)#?(\d+)(?=\s|$)|/pull/(\d+)")
+MERGE_PR_TOOL_PATTERN = re.compile(r"(?:^|__)merge_pull_request$")
 
 
 # Issue 727: the regex fired on "what is wrong with the build?" and on a subagent's pasted hand-back
@@ -521,6 +546,19 @@ ROUTE_TREE: dict[str, dict[str, Any]] = {
                        "route": "code-review"},
             "research": {"means": "Investigating a topic against outside sources and writing it up.",
                          "route": "research"},
+            # Issue 1193: the four standalone routes the map names, so Jev can pick them too.
+            "ask-others": {"means": "A questionnaire for someone else to fill in: what is needed is"
+                           " in another person's head, not the user's or the code.",
+                           "route": "to-questionnaire"},
+            "human-steps": {"means": "Steps only a human can take: provisioning infrastructure,"
+                            " setting up credentials or secrets, clicking through a third-party"
+                            " dashboard, a one-off cutover.", "route": "wizard"},
+            "re-explain": {"means": "The user did not follow the assistant's last message and wants"
+                           " it said again in plain words (\"wait, what?\", \"I'm lost\").",
+                           "route": "wait-what"},
+            "agent-docs": {"means": "How to write a document agents read (a skill, AGENTS.md,"
+                           " CLAUDE.md, a pointed-at doc), where the wording itself is the work.",
+                           "route": "writing-for-agents"},
         },
     },
     "settled": {
@@ -672,7 +710,8 @@ def _route_gate_setting(name: str) -> Any:
 
 
 def _appeal_line(appeal: dict[str, Any]) -> str:
-    """The reply's first line on an appealed turn, as the lint demands it and Dan reads it."""
+    """The reply's first line after the PYLONS prefix on an appealed turn (issue 1221), as the
+    lint demands it and Dan reads it."""
     return (
         f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, "
         f"because {appeal['reason']}"
@@ -891,8 +930,8 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
             context += (
                 "Jev wrong? Appeal ONCE this turn: `"
                 f'{_runner_spelling()} "{SCRIPT}" appeal-claude "{session_id}" "{nonce}" <route> "<reason>"'
-                "`; the reply's first line must then read `Route appeal: <route> instead of "
-                f"{jev_route}, because <reason>`. "
+                "`; the reply's first line after the PYLONS prefix must then read `Route appeal: "
+                f"<route> instead of {jev_route}, because <reason>`. "
             )
         else:
             context += "Appeals are off: Jev's pick is final. "
@@ -1393,7 +1432,7 @@ def _appeal_log_path() -> Path:
 def _claude_appeal(session_id: str, nonce: str, wanted: str, reason: str) -> int:
     """Issue 841: the model's one appeal of Jev's route this turn (ADR 0002). Switches the turn's
     route, logs both routes and the reason, and arms the pre-send lint to refuse the reply until
-    its first line states the appeal, so Dan always sees it."""
+    its first line after the PYLONS prefix states the appeal, so Dan always sees it."""
     reason = " ".join(reason.split())
     if not _route_gate_setting("appeals"):
         print(
@@ -1437,24 +1476,32 @@ def _claude_appeal(session_id: str, nonce: str, wanted: str, reason: str) -> int
     )
     print(
         f"Route appeal recorded: {wanted} instead of {jev_route}. Open and follow {wanted}. "
-        f"The reply's first line must read: {_appeal_line(appeal)}"
+        f"The reply's first line after the PYLONS prefix must read: {_appeal_line(appeal)}"
     )
     return 0
 
 
 def _appeal_lint(text: str, appeal: dict[str, Any] | None) -> tuple[list[str], str]:
     """(violations, text left for the ADHD shape). On an appealed turn the first line after the
-    PYLONS canary must state the appeal; the ADHD opener rule then applies to the line after it."""
+    PYLONS canary must state the appeal; the ADHD opener rule then applies to the line after it.
+    Issue 1221: canary then appeal line is the one documented shape. The canary stays optional,
+    but a canary below the appeal line is refused here, at every caveman level."""
     if not appeal:
         return [], text
     lines = PYLONS_PREFIX_PATTERN.sub("", text, count=1).lstrip().splitlines()
     first = lines[0].strip() if lines else ""
     prefix = f"Route appeal: {appeal['wanted']} instead of {appeal['jev_route']}, because "
     if first.startswith(prefix) and first[len(prefix):].strip():
-        return [], "\n".join(lines[1:])
+        rest = "\n".join(lines[1:])
+        if PYLONS_PREFIX_PATTERN.match(rest):
+            return [
+                "route appeal above the PYLONS prefix: the prefix opens the reply, so move it "
+                "above the route appeal line"
+            ], text
+        return [], rest
     return [
-        "route appeal not shown: this turn appealed Jev's route, so the reply's first line must "
-        f'read "{_appeal_line(appeal)}"'
+        "route appeal not shown: this turn appealed Jev's route, so the reply's first line after "
+        f'the PYLONS prefix must read "{_appeal_line(appeal)}"'
     ], text
 
 
@@ -1580,6 +1627,114 @@ def _route_unchecked_lint(text: str, route_unchecked: bool) -> list[str]:
     ]
 
 
+# Issue 1212: a quoted deliverable (a blockquoted draft Dan pastes into Teams or mail, or a prose
+# fence) is his text, not the agent's prose. The reply caps were trimming a 230-word Teams draft
+# that already passed AAC-WR-001, so the caps skip it and the house linter checks it instead. A
+# fence tagged as code is code, not a deliverable; an untagged or prose-tagged one is.
+FENCE_OPEN_PATTERN = re.compile(r"^ {0,3}```[ \t]*([\w+.-]*)")
+FENCE_CLOSE_PATTERN = re.compile(r"^ {0,3}```[ \t]*$")
+BLOCKQUOTE_PATTERN = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+DELIVERABLE_FENCE_TAGS = frozenset(("", "text", "txt", "plain", "plaintext", "markdown", "md"))
+WR001_RUNNER = (
+    "const [lint, ...files] = process.argv.slice(1);"
+    "require(lint).run([...files, '--json'], { ask: null })"
+    ".then((code) => { process.exitCode = code; });"
+)
+
+
+def _quoted_deliverables(text: str) -> tuple[list[str], str]:
+    """The reply's quoted deliverables, and the reply with its blockquote lines blanked. Fences stay
+    in the returned text: _strip_code already keeps them out of every cap."""
+    blocks: list[str] = []
+    kept: list[str] = []
+    quote: list[str] = []
+    fence: str | None = None
+    fence_lines: list[str] = []
+
+    def flush() -> None:
+        if "\n".join(quote).strip():
+            blocks.append("\n".join(quote))
+        quote.clear()
+
+    for line in text.splitlines():
+        if fence is not None:
+            if FENCE_CLOSE_PATTERN.match(line):
+                if fence in DELIVERABLE_FENCE_TAGS and "\n".join(fence_lines).strip():
+                    blocks.append("\n".join(fence_lines))
+                fence = None
+            else:
+                fence_lines.append(line)
+            kept.append(line)
+            continue
+        opened = FENCE_OPEN_PATTERN.match(line)
+        if opened:
+            flush()
+            fence, fence_lines = opened.group(1).lower(), []
+            kept.append(line)
+            continue
+        quoted = BLOCKQUOTE_PATTERN.match(line)
+        if quoted:
+            quote.append(quoted.group(1))
+            kept.append("")
+            continue
+        flush()
+        kept.append(line)
+    flush()
+    return blocks, "\n".join(kept)
+
+
+def _wr001_linter() -> Path | None:
+    """wr001-lint.js from the plugin payload (hooks/scripts -> skills/) or the repo source."""
+    tail = Path("aac-house-writing-standard") / "scripts" / "wr001-lint.js"
+    roots = [os.environ.get("CLAUDE_PLUGIN_ROOT", "")]
+    candidates = [Path(root) / "skills" / tail for root in roots if root]
+    for depth, prefix in ((2, "skills"), (3, "aac-skills")):
+        if len(SCRIPT.parents) > depth:
+            candidates.append(SCRIPT.parents[depth] / prefix / tail)
+    candidates.append(
+        CLAUDE_HOME / "plugins" / "marketplaces" / "claude-dotfiles" / "marketplace" / "aac-skills"
+        / "skills" / tail
+    )
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _wr001_lint(blocks: list[str]) -> list[str] | None:
+    """AAC-WR-001 errors in the quoted deliverables, one violation per finding naming the rule;
+    None when the linter cannot run, and then the deliverables get no exemption from the caps.
+    Regex rules only: the Jev rules are warnings and never decide the linter's exit."""
+    linter = _wr001_linter()
+    node = shutil.which("node")
+    if linter is None or node is None:
+        return None
+    try:
+        with tempfile.TemporaryDirectory() as folder:
+            files = []
+            for index, block in enumerate(blocks, 1):
+                path = Path(folder) / f"quoted-{index}.txt"
+                path.write_text(block + "\n", encoding="utf-8")
+                files.append(str(path))
+            done = subprocess.run(
+                [node, "-e", WR001_RUNNER, str(linter), *files],
+                capture_output=True, text=True, encoding="utf-8", timeout=60, check=False,
+            )
+        results = json.loads(done.stdout)["results"]
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
+    if done.returncode not in (0, 1) or any(r.get("unreadable") for r in results):
+        return None
+    violations = []
+    for index, result in enumerate(results, 1):
+        for finding in result.get("findings", []):
+            if finding.get("sev") != "error":
+                continue
+            snippet = f' "{finding["text"][:40]}"' if finding.get("text") else ""
+            violations.append(
+                f"quoted deliverable {index} breaks AAC-WR-001 Rule {finding.get('rule')} "
+                f"(line {finding.get('line')}): {finding.get('msg')}{snippet}"
+            )
+    return violations
+
+
 def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list[str]:
     profile = LINT_PROFILES.get(mode)
     if profile is None:
@@ -1592,7 +1747,13 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
     # ignores that one block, at the top only, and still counts every other fence.
     text = PYLONS_PREFIX_PATTERN.sub("", text, count=1)
     prose = _strip_code(text)
-    words = prose.split()
+    # Issue 1212: the word, sentence and article caps measure the reply's own prose; a quoted
+    # deliverable is checked by wr001-lint instead, and keeps counting when that cannot run.
+    deliverables, unquoted = _quoted_deliverables(text)
+    house = _wr001_lint(deliverables) if deliverables else None
+    cap_text = text if house is None else unquoted
+    cap_prose = _strip_code(cap_text)
+    words = cap_prose.split()
     violations: list[str] = []
     # A ```bash block is a command the user can click Run on, so it is the
     # deliverable when they ask how to do something — not working material
@@ -1622,15 +1783,15 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
     if len(words) > word_cap:
         violations.append(f"too long: {len(words)} words (cap {word_cap})")
     if articles_cap is not None and len(words) >= 50:
-        density = 100.0 * len(ARTICLE_PATTERN.findall(prose)) / len(words)
+        density = 100.0 * len(ARTICLE_PATTERN.findall(cap_prose)) / len(words)
         if density > articles_cap:
             violations.append(
                 f"article density {density:.1f}/100 words (cap {articles_cap:g}) — drop a/an/the"
             )
     # Issue 1059: the route-appeal line is text the gate itself mandates, word for word, so the
     # sentence cap never judges it: capping it left no reply that passed both rules.
-    sentence_prose = prose
-    lines = text.lstrip().splitlines()
+    sentence_prose = cap_prose
+    lines = cap_text.lstrip().splitlines()
     if appeal_line and lines and lines[0].strip() == appeal_line:
         sentence_prose = _strip_code("\n".join(lines[1:]))
     sentences = [s.strip() for s in SENTENCE_SPLIT.split(sentence_prose) if s.strip()]
@@ -1641,7 +1802,7 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
             f"{len(long_sentences)} sentence(s) over {sentence_cap} words"
             f" (longest {len(worst.split())}) — split them"
         )
-    return violations
+    return violations + (house or [])
 
 
 # ---------------------------------------------------------------------------- ADHD lint
@@ -2349,7 +2510,12 @@ def _claude_stop(event: dict[str, Any]) -> dict[str, Any]:
     # lint, and those are exactly the turns where skipping goes unnoticed.
     violations = _presend_audit(session_id, _read_state("claude", session_id))
     transcript_path = str(event.get("transcript_path") or "")
-    miss = _correction_audit(_read_state("claude", session_id), transcript_path)
+    miss, closed = _correction_audit(_read_state("claude", session_id), transcript_path)
+    if closed:
+        current = _read_state("claude", session_id) or {}
+        current["correction_closed"] = closed
+        _write_state("claude", session_id, current)
+        _log_governance(session_id, "correction turn closed by " + _closure_summary(closed))
     if miss:
         current = _read_state("claude", session_id) or {}
         current["pending_correction"] = miss
@@ -2416,23 +2582,107 @@ def _record_last_question(session_id: str, transcript_path: str) -> None:
     _write_state("claude", session_id, current)
 
 
-def _correction_audit(state: dict[str, Any] | None, transcript_path: str) -> str:
-    """A correction turn that edited no durable file. Returns the note to carry, or "".
+def _landing_of(name: str, tool_input: Any) -> list[dict[str, Any]]:
+    """The commits and PR merges one tool call runs (issue 1213); [] for anything else."""
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    if MERGE_PR_TOOL_PATTERN.search(name):
+        number = next(
+            (tool_input[k] for k in ("pullNumber", "pull_number", "number") if tool_input.get(k)),
+            None,
+        )
+        return [{"kind": "merge", "pr": int(number) if str(number or "").isdigit() else None}]
+    command = tool_input.get("command")
+    if not _is_shell_tool(name) or not isinstance(command, str):
+        return []
+    landed: list[dict[str, Any]] = []
+    for segment in _command_segments(command):
+        if GIT_COMMIT_PATTERN.match(segment):
+            # Only what precedes the commit names its directory, never the message after it.
+            where = GIT_WHERE_PATTERN.search(command.split(" commit", 1)[0])
+            landed.append({"kind": "commit", "dir": where.group(1).strip("\"'") if where else None})
+            continue
+        merge = GH_PR_MERGE_PATTERN.match(segment)
+        api = GH_API_MERGE_PATTERN.match(segment)
+        if merge or api:
+            number = api.group(1) if api else None
+            if merge:
+                found = GH_PR_NUMBER_PATTERN.search(merge.group(1))
+                number = (found.group(1) or found.group(2)) if found else None
+            landed.append({"kind": "merge", "pr": int(number) if number else None})
+    return landed
 
+
+def _turn_landings(transcript_path: str) -> list[dict[str, Any]] | None:
+    """Commits and PR merges the turn ran whose call did not fail, since the last real user prompt.
+    None when the transcript is unreadable."""
+    if not transcript_path:
+        return None
+    pending: dict[str, list[dict[str, Any]]] = {}
+    landed: list[dict[str, Any]] = []
+    try:
+        with open(transcript_path, encoding="utf-8") as handle:
+            for line in handle:
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                content = (record.get("message") or {}).get("content")
+                blocks = [b for b in content if isinstance(b, dict)] if isinstance(content, list) else []
+                if record.get("type") == "user":
+                    results = [b for b in blocks if b.get("type") == "tool_result"]
+                    if not results:
+                        pending, landed = {}, []  # a real user prompt starts a new turn
+                    for block in results:
+                        found = pending.pop(str(block.get("tool_use_id") or ""), None)
+                        if found and not block.get("is_error"):
+                            landed.extend(found)
+                elif record.get("type") == "assistant":
+                    for item in blocks:
+                        if item.get("type") == "tool_use":
+                            found = _landing_of(str(item.get("name") or ""), item.get("input"))
+                            if found:
+                                pending[str(item.get("id") or "")] = found
+    except Exception:
+        return None
+    return landed
+
+
+def _closure_summary(closed: dict[str, Any]) -> str:
+    parts = [f"{tool} call" for tool in closed.get("edits") or []]
+    for landing in closed.get("landings") or []:
+        if landing.get("kind") == "merge":
+            parts.append(f"merge of PR {landing['pr']}" if landing.get("pr") else "PR merge")
+        else:
+            parts.append(f"commit in {landing['dir']}" if landing.get("dir") else "commit")
+    return ", ".join(parts)
+
+
+def _correction_audit(
+    state: dict[str, Any] | None, transcript_path: str
+) -> tuple[str, dict[str, Any] | None]:
+    """A correction turn's verdict: (the note to carry when it changed nothing durable, or "";
+    the closure record when it did, or None).
+
+    A file edit closes it, and so does a commit or a PR merge the turn ran (issue 1213): a fix
+    committed in a worktree beside the checkout and merged is as durable as an Edit in it.
     Unreadable transcripts are not audited: inventing a miss from missing data would train the
     reader to ignore this note, the same reasoning as `_presend_audit`.
     """
     state = state or {}
     if not state.get("nonce") or state.get("correction_nonce") != state.get("nonce"):
-        return ""
+        return "", None
     tools = _turn_tool_names(transcript_path)
-    if tools is None or tools & SYSTEM_CHANGE_TOOLS:
-        return ""
+    if tools is None:
+        return "", None
+    edits = sorted(tools & SYSTEM_CHANGE_TOOLS)
+    landings = _turn_landings(transcript_path) or []
+    if edits or landings:
+        return "", {"nonce": state.get("nonce"), "edits": edits, "landings": landings}
     return (
-        "CORRECTION NOT CLOSED: Dan's last message corrected you and the turn changed no file. "
-        "The instance may be fixed; the class is not. Land the durable fix (skill, rule, hook, "
-        "test or schema) this turn and name it."
-    )
+        "CORRECTION NOT CLOSED: Dan's last message corrected you and the turn changed no file, "
+        "committed nothing and merged no PR. The instance may be fixed; the class is not. Land "
+        "the durable fix (skill, rule, hook, test or schema) this turn and name it."
+    ), None
 
 
 def _presend_audit(session_id: str, state: dict[str, Any] | None) -> list[str]:

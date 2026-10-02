@@ -69,6 +69,17 @@ gate's route became writing-for-agents (Dan, 2026-10-01: "yes, writing-great-ski
 dropped"). `tests/bootstrap-assert.py` fails the payload if any dropped name comes back;
 `tools/upstream-skills-hook.test.js` pins the hook's subset copy and the marketplace entries.
 
+## Every vendored copy carries its upstream licence
+
+Each vendored directory holds its upstream `LICENSE` byte for byte (blob SHA equal to upstream's),
+plus `NOTICE` where an Apache-2.0 upstream has one (microsoft/playwright-cli has none), and the
+packager ships it in the payload (issue 1219). mattpocock/skills is MIT (one LICENSE revision,
+2817544); playwright-cli is Apache-2.0 (one revision, 2db417f). `tools/upstream-skills-hook.test.js`
+reads the line below and fails on any directory without a licence file, so add a new vendored copy
+to it with its licence in the same commit.
+
+Vendored directories: `ask-matt`, `code-review`, `triage`, `to-tickets`, `to-spec`, `implement`, `grill-with-docs`, `grilling`, `handoff`, `research`, `wayfinder`, `diagnosing-bugs`, `setup-matt-pocock-skills`, `resolving-merge-conflicts`, `playwright-cli`.
+
 **How to apply:** to add an upstream skill, add its directory to the right `UPSTREAM_PLUGINS`
 entry and rebuild; never copy it into `aac-skills/`. To take a local edit on one, move it the
 other way: vendor it (full-history diff first, above) and remove it from the entry in the same
