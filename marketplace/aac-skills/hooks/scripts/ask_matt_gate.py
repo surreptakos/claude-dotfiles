@@ -1579,7 +1579,11 @@ def _strip_code(text: str) -> str:
 
 
 FENCE_PATTERN = re.compile(r"```")
-RUNNABLE_FENCE_PATTERN = re.compile(r"```bash\n.*?```", re.DOTALL)
+# Dan runs every command on Windows, in PowerShell or Command Prompt (Dan, 2026-10-02): a
+# powershell, ps1, cmd or bat fence is the runnable one. A bash or sh fence is a command he
+# cannot paste, so it is flagged on its own.
+RUNNABLE_FENCE_PATTERN = re.compile(r"```(?:powershell|pwsh|ps1|cmd|bat)\n.*?```", re.DOTALL)
+POSIX_FENCE_PATTERN = re.compile(r"```(?:bash|sh|shell|zsh)\n", re.IGNORECASE)
 # The mandated reply prefix from ~/.claude/CLAUDE.md ("Standing directive — response prefix").
 # Leading whitespace only; anything else before it means it is not the prefix.
 # The PYLONS prefix is a CANARY, not a rule the gate enforces (Dan, 2026-09-25). It lives only in
@@ -1755,9 +1759,14 @@ def _caveman_lint(text: str, mode: str = "ultra", appeal_line: str = "") -> list
     cap_prose = _strip_code(cap_text)
     words = cap_prose.split()
     violations: list[str] = []
-    # A ```bash block is a command the user can click Run on, so it is the
+    # A ```powershell block is a command the user can click Run on, so it is the
     # deliverable when they ask how to do something — not working material
     # leaking into a status report. Every other fence still counts.
+    if POSIX_FENCE_PATTERN.search(text):
+        violations.append(
+            "bash fence in a reply: Dan runs Windows only; give the command in a"
+            " ```powershell or ```cmd fence"
+        )
     runnable = len(RUNNABLE_FENCE_PATTERN.findall(text))
     fences = max(0, len(FENCE_PATTERN.findall(text)) // 2 - runnable)
     spans = len(INLINE_CODE_PATTERN.findall(text))

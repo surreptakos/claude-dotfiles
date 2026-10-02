@@ -1708,12 +1708,12 @@ class AskMattGateTests(unittest.TestCase):
         self.assertIn("REWRITE BEFORE SENDING", done.stderr)
 
     def test_lint_subcommand_passes_a_clean_draft_and_counts_prose_only(self) -> None:
-        # A runnable bash fence full of articles must not count: _strip_code removes it before
-        # measuring, and a bash fence is the one block the no-monospace rule permits.
+        # A runnable powershell fence full of articles must not count: _strip_code removes it
+        # before measuring, and a powershell fence is the one block the no-monospace rule permits.
         clean = os.linesep.join([
             "Relay refused. BILL owns routing through policy Order Invoices. Approve in BILL.",
             "",
-            "```bash",
+            "```powershell",
             "echo the the the the the the the the the the the the the the the the the the",
             "```",
             "",
@@ -1724,6 +1724,25 @@ class AskMattGateTests(unittest.TestCase):
         )
         self.assertEqual(done.returncode, 0)
         self.assertIn("lint clean", done.stdout)
+
+    def test_lint_flags_a_bash_fence_because_dan_runs_windows_only(self) -> None:
+        # Dan, 2026-10-02: every command he is given runs in PowerShell or Command Prompt.
+        draft = os.linesep.join([
+            "Pull on AAC-AI. Watchdog reads its own checkout.",
+            "",
+            "```bash",
+            "git pull --ff-only",
+            "```",
+            "",
+            "Next: run that pull.",
+            "",
+        ])
+        done = subprocess.run(
+            [sys.executable, str(SCRIPT), "lint", "-"],
+            input=draft, text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("bash fence in a reply: Dan runs Windows only", done.stdout)
 
     # Issue 1212: a Teams draft written to AAC-WR-001, 300 words, one sentence over the 28-word cap.
     QUOTED_DRAFT = (
