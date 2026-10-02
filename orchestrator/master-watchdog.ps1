@@ -75,7 +75,8 @@
 
     Every decision is also appended to -LogFile (default
     ~/.claude/hook-state/master-watchdog/watchdog.log), because a scheduled task's stdout goes
-    nowhere and the 22:30 kill above had to be reconstructed from process tables.
+    nowhere and the 22:30 kill above had to be reconstructed from process tables. A terminating
+    error ends the tick with a `tick FAILED at line N` line and exit 1 (issue 1156).
 
     -WhatIf does every check, prints every decision, stops and launches nothing. It is a plain
     switch, not SupportsShouldProcess: under ShouldProcess the WhatIf preference leaks into the
@@ -151,6 +152,26 @@ function Write-Info {
     if ($LogFile) {
         try { Add-Content -Path $LogFile -Value "$script:RunStamp $line" -Encoding UTF8 } catch { }
     }
+}
+
+# Issue 1156: a terminating error anywhere in the tick ends it with a logged line, not silently.
+# The scheduled task's stderr goes nowhere, so on AAC-AI ticks stopped after the account guard
+# with nothing to say why. A script-scope trap covers every statement below and every function
+# it calls (a try/catch would mean re-indenting the whole tick); the inner try/catch blocks still
+# handle their own errors first. Non-terminating errors - git and gh stderr under 'Continue' -
+# never reach it. Line is where the failing command sits; the stack names the calls above it.
+trap {
+    $err = $_
+    $at = 'unknown line'
+    $ii = $err.InvocationInfo
+    if ($ii -and $ii.ScriptName) { $at = "$(Split-Path -Leaf $ii.ScriptName):$($ii.ScriptLineNumber): $($ii.Line.Trim())" }
+    Write-Info "tick FAILED at $at - $($err.Exception.GetType().Name): $($err.Exception.Message)"
+    if ($err.ScriptStackTrace) {
+        $frames = @($err.ScriptStackTrace -split "`r?`n" | ForEach-Object { $_ -replace '(?<=, )[^,]*\\(?=[^\\]+: line)', '' })
+        Write-Info "tick FAILED stack: $($frames -join ' <- ')"
+    }
+    Write-Info 'exit 1, no launch'
+    exit 1
 }
 
 # The repos this watchdog knows: every row of the shared repo list (lib/repos.json in this

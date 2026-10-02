@@ -15,6 +15,8 @@
       1. no transcript, started 45m ago, marker 180m old: takes the recycle path.
       2. no transcript, started 10m ago, marker 180m old: not killed.
       3. a transcript written 2m ago: not killed, and the line names its first write.
+      4. the process-table read throws: the tick logs `tick FAILED` with the line and message,
+         exits 1 and launches nothing (issue 1156).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File tests\master-watchdog.tests.ps1
@@ -52,6 +54,7 @@ $row = @((Read-RepoList -UserHome 'C:\home').Repos | Where-Object { $_.Served } 
 # stub called from the watchdog names the watchdog's script scope, not this one.
 function Get-CimInstance {
     [CmdletBinding()] param([Parameter(Position = 0)]$ClassName, $Filter)
+    if ($global:WatchdogTestThrow) { throw $global:WatchdogTestThrow }
     if ($Filter -like '*claude.exe*') { return $global:WatchdogTestProc }
 }
 function gh {
@@ -86,10 +89,11 @@ function Invoke-Case {
     try {
         $env:USERPROFILE = $home_
         & $Watchdog -WhatIf -LogFile $log -DotfilesRoot $RepoRoot *> $null
+        $exit = $LASTEXITCODE
     } finally { $env:USERPROFILE = $prevHome }
     $text = ''
     if (Test-Path $log) { $text = [System.IO.File]::ReadAllText($log) }
-    return @{ Log = $text; Created = $created }
+    return @{ Log = $text; Created = $created; Exit = $exit }
 }
 
 try {
@@ -109,7 +113,14 @@ try {
     $first = [regex]::Escape($r.Created.ToString('u'))
     Assert 'transcript written 2m ago: not killed, alive line names the first transcript write' `
         (($r.Log -match "transcript idle [23]m \(< 30m\), first transcript write $first - possibly stalled; not killed") -and
-         ($r.Log -cnotmatch 'STALLED at')) $r.Log
+         ($r.Log -cnotmatch 'STALLED at') -and ($r.Log -notmatch 'tick FAILED') -and ($r.Exit -eq 0)) $r.Log
+
+    $global:WatchdogTestThrow = 'stub: WMI provider unavailable'
+    try { $r = Invoke-Case -Name 'tick-throws' -StartedMinutesAgo 45 } finally { $global:WatchdogTestThrow = $null }
+    Assert 'a terminating error mid-tick: tick FAILED with line and message, exit 1, no launch' `
+        (($r.Log -match 'tick FAILED at master-watchdog\.tests\.ps1:\d+: .*throw .* - RuntimeException: stub: WMI provider unavailable') -and
+         ($r.Log -match 'tick FAILED stack: at Get-CimInstance, .* <- at Get-RemoteControlProcesses, master-watchdog\.ps1: line \d+ <- ') -and ($r.Log -match 'exit 1, no launch') -and
+         ($r.Log -notmatch 'NEXT - would launch') -and ($r.Exit -eq 1)) $r.Log
 } finally {
     if (Test-Path $sandbox) { try { Remove-Item -Path $sandbox -Recurse -Force -ErrorAction Stop } catch {} }
 }
