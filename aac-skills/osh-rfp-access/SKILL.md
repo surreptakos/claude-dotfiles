@@ -2,10 +2,10 @@
 name: osh-rfp-access
 description: What an agent working in the osh-rfp repo (AAC's CVS Oak Street Health RFP record) can reach and when to read it - the keyed database and its recipes, sources/ and the scenario data/ folders, Outlook and SharePoint, Google Drive, Zoho Desk, the GitHub tracker and the Apps Script runner. Load at the start of any osh-rfp session, and before asking Dan whether a file, export or fact is on hand ("do you have the parts export?").
 metadata:
-  modified: "2026-10-01T23:03:48Z"
-  previous-modified: "none"
-  revision: "1"
-  content-sha: "1c83069cfae6"
+  modified: "2026-10-02T22:49:42Z"
+  previous-modified: "2026-10-01T23:03:48Z"
+  revision: "2"
+  content-sha: "485fc6feb882"
 ---
 
 # osh-rfp access
@@ -22,8 +22,9 @@ skill (`aac-skills/osh-rfp-access/` in claude-dotfiles).
 
 ## Order of reading
 
-1. **The keyed database**, if this clone has it, then the files in `sources/`, `record/*/data/`,
-   `billpack/` and `record/desk/`. The files are what the repo already holds.
+1. **The keyed database** (`db/osh-rfp.sqlite`; a clone without it rebuilds it with
+   `python3 tools/build-db.py`, about 30 seconds), then the files in `sources/`, `record/*/data/`,
+   `billpack/` and `record/desk/` that it does not load. The files are what the repo already holds.
 2. **Live state in its own system** (Desk, Outlook, Drive, the tracker, the runner) before any
    item goes to Dan. If the system shows an item done, record it as done; do not ask about it.
 3. **Dan last**, only for a ruling or a fact none of the above holds (a subcontractor's headcount,
@@ -39,7 +40,7 @@ an account or routing number, a password or a key into any file.
 
 | Source | Instrument | Answers | Read before asking Dan |
 | --- | --- | --- | --- |
-| Keyed database (osh-rfp #110) | Built by the script named in #110 (planned `python3 tools/build-db.py`), queried with `sqlite3` or Python `sqlite3`; the recipe queries are in the recipe file the script's header names | Joins across exports: which sites bill what, name-only invoices, the Desk tickets for a site, the bills for a work order. Keys: site code and street address, invoice number, Desk ticket number, work order number, BILL.com bill id. Every row names its source file and row | Rebuild after a source file lands; never edit the database by hand. If this clone has no database yet, read the files below directly with the same keys |
+| Keyed database `db/osh-rfp.sqlite` (osh-rfp #110) | Built by `python3 tools/build-db.py` (`--check` rebuilds twice, runs the scrub check and every recipe); queried with `sqlite3` or Python `sqlite3`. The named recipes are in `tools/db-recipes.sql`, one per `-- name:` line. `docs/db.md` lists every table, key and source file; inside the database, `_tables` gives row counts and `_source_files` the sha256 of each file loaded | Joins across exports: which sites bill what (`rmr_by_service_line`, `site_rmr`), invoices by type, name-only invoices, the Desk tickets for a site (`desk_tickets_for_site`), one ticket's trail (`ticket_trail`), the bills for a work order (`bills_for_work_order`). Keys: site code and street address, invoice number, Desk ticket number, work order number, BILL.com bill id. Every row carries `source_file` and `source_row` | `db/` is ignored, so a fresh clone has no database: run the build first. Rebuild after a source file lands; never edit the database by hand. It does not load the part catalog, the item price list, the Info Sheet tabs or the contact, account and comment columns (`docs/db.md`, "What is not loaded"): read those files directly |
 | `sources/` exports | `openpyxl` / `pandas` for `.xlsx` and `.xls`, the `csv` module for `.csv` | AlarmBiller S4 and S6 exports: sites, systems, customers, active and cancelled RMR, invoices with paid dates, closed and open work orders, technician time, credits, open appointments, the **item price list (`OSH-S6-Items.xlsx`) and the part catalog (`OSH-S6-Parts.xlsx`)**. Also the CVS RFP files, the four OSH contracts, BILL memo and note exports, Info Sheet tab copies (`sources/infosheet/`) and saved Outlook threads (`sources/outlook/`) | `record/OSH-RFP-S6-Findings-2026-09-28.md` says what each S6 export holds; the join-key table is in `docs/agents/memory/info-sheet-answers-before-people.md` |
 | Scenario `data/` folders | the `csv` module (DictReader in, DictWriter out) | `record/OSH-Loss-Scenario/data/`, `record/OSH-Win-Scenario/data/`, `record/Books-Reconciliation/`: model inputs, open items (`open_items.csv`), assumptions, Desk staged-parts evidence, and `sources.csv`, the S-tag register giving every source's location and as-of date | Figures change only through the scenario scripts; `python3 tools/verify-all.py` must pass |
 | BILL.com pack and Desk pull | `billpack/*.csv`, `record/desk/*.csv`; `tools/desk_pull.py` re-pulls Desk read-only | Oak Street vendor bills (`osh-bills-matched.csv`, the owner-ruled exceptions), the Desk ticket-to-site map | `billpack/osh-bills-unclaimed.csv` is the org-wide remainder and is **not** Oak Street |
@@ -80,9 +81,10 @@ an account or routing number, a password or a key into any file.
 Answer from this page and the database. Do not ask Dan:
 
 > Yes. `sources/OSH-S6-Parts.xlsx` is the AlarmBiller part catalog, with cost and rate per Part Code;
-> `sources/OSH-S6-Items.xlsx` is the item price list, by Item Code. In the keyed database the part
-> catalog is the table keyed on Part Code (the recipe file has the query). For parts used on a
-> particular work order, I also check the BILL.com bills, the AlarmBiller parts lines and the Desk
-> staged-parts comments (`record/OSH-Loss-Scenario/data/desk_staged_parts_2026-09-30.csv`).
+> `sources/OSH-S6-Items.xlsx` is the item price list, by Item Code. The keyed database does not load
+> either file, so I read them with `openpyxl`. The database holds the parts dollars on each invoice
+> (`invoices.parts_amount`) and, through the `bills_for_work_order` recipe, the BILL.com bills that name
+> a work order. For parts used on a particular work order, I also check the AlarmBiller parts lines and
+> the Desk staged-parts comments (`record/OSH-Loss-Scenario/data/desk_staged_parts_2026-09-30.csv`).
 
 Then open the file and confirm the row count and columns before quoting either.
