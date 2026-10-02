@@ -2,10 +2,10 @@
 name: code-review
 description: Two-axis code review (Standards, Spec) of the diff since a fixed point. Use when the user wants a branch, a PR or work-in-progress changes reviewed, or asks to "review since X", or when another skill needs a Standards + Spec review.
 metadata:
-  modified: '2026-09-28T21:53:59Z'
-  previous-modified: '2026-09-26T00:09:47Z'
-  revision: '4'
-  content-sha: abc6d0f7c0c3
+  modified: '2026-10-01T23:30:28Z'
+  previous-modified: '2026-09-28T21:53:59Z'
+  revision: '5'
+  content-sha: 5f51e84fd864
 ---
 
 Two-axis review of the diff between `HEAD` and a fixed point the user supplies:
