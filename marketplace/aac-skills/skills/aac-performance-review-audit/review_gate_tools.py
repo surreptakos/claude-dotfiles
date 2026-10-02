@@ -11,11 +11,11 @@
       exited 0 on this exact file.
   python3 review_gate_tools.py build BODY.py OUT.docx --review REVIEW.docx [--template PATH.docx]
       Refuses unless check and meaning both ran on REVIEW.docx as it stands (meaning exit 2 is not a run).
-      Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (embedded
-      below as base64; --template overrides). BODY.py sets `body = [...]` using
+      Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (the
+      .docx next to this script, md5-checked; --template overrides). BODY.py sets `body = [...]` using
       P("paragraph"), L(level, "text", "99" for the fix list), LB("Bold lead.", " rest").
   python3 review_gate_tools.py template [OUT.docx]
-      Write the embedded template to disk.
+      Write a copy of the md5-checked template to disk.
 
 check and meaning each write REVIEW.docx.gate.json beside the review: its SHA-256, the script
 version, the exit code and the fix lines.
