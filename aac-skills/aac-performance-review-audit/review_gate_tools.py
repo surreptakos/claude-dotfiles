@@ -11,11 +11,11 @@
       exited 0 on this exact file.
   python3 review_gate_tools.py build BODY.py OUT.docx --review REVIEW.docx [--template PATH.docx]
       Refuses unless check and meaning both ran on REVIEW.docx as it stands (meaning exit 2 is not a run).
-      Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (embedded
-      below as base64; --template overrides). BODY.py sets `body = [...]` using
+      Build a Gate 1 or Gate 2 email docx from Dan's canonical Format Rejection Template (the
+      .docx next to this script, md5-checked; --template overrides). BODY.py sets `body = [...]` using
       P("paragraph"), L(level, "text", "99" for the fix list), LB("Bold lead.", " rest").
   python3 review_gate_tools.py template [OUT.docx]
-      Write the embedded template to disk.
+      Write a copy of the md5-checked template to disk.
 
 check and meaning each write REVIEW.docx.gate.json beside the review: its SHA-256, the script
 version, the exit code and the fix lines.
@@ -210,8 +210,12 @@ def gate1_main(argv):
                 if m:
                     fixes.append(f"{name}: contains \"{m.group(0)}\"; not allowed in a Strength or Weakness (write the behavior; an instruction belongs in Guidance).")
                     break
-    if not any(re.match(r"[SW]\d+:", f) for f in fixes):
-        passes.append(f"Strengths and Weaknesses form ({len(S)} S, {len(W)} W)")
+    # Dan, 10/1/26: at least four items are SEER; the rest may be Sum-Ex.
+    seer = sum(1 for txt in S + W if len(sentences(txt)) == 4)
+    if seer < 4:
+        fixes.append(f"Strengths and Weaknesses: {seer} in SEER; at least four must be SEER (four sentences), the rest may be Sum-Ex.")
+    if seer >= 4 and not any(re.match(r"[SW]\d+:", f) for f in fixes):
+        passes.append(f"Strengths and Weaknesses form ({len(S)} S, {len(W)} W, {seer} SEER)")
 
     # 4 second person anywhere
     yous = re.findall(r"\b[Yy]ou(r|rs|rself)?\b", alltext)

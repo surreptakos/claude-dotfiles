@@ -1,18 +1,17 @@
 ---
 name: consistency-audit
-description: Prose-vs-reality audit of a repo's documents against code, git, the tracker and live state. Use when docs contradict each other or misstate what is built or shipped ("X is already implemented" when it isn't, or the reverse), or to wire a repo's docs/claims.json tripwire.
+description: Prose-vs-reality drift audit — verify every claim in a repo's docs against code, git, the tracker and live state, and fix the drift. Use when docs contradict each other or misstate what is built or shipped, or to wire or extend a repo's docs/claims.json tripwire.
 metadata:
-  modified: '2026-09-28T21:58:49Z'
-  previous-modified: '2026-09-25T23:18:11Z'
-  revision: '3'
-  content-sha: 655726dd67b1
+  modified: '2026-10-02T15:34:27Z'
+  previous-modified: '2026-09-28T21:58:49Z'
+  revision: '4'
+  content-sha: 5cb4b294eb98
 ---
 
 # Consistency audit — make every document agree with reality
 
-Check every factual claim in the repo's prose against its primary source, fix what is stale, and
-kill the scripts that generate drift. Drift has three known root causes; the report names which
-it saw:
+Check every factual claim in the repo's prose against its primary source, fix the drift, and kill
+the scripts that generate it. Drift has three known root causes; the report names which it saw:
 
 1. Nothing sweeps prose when state changes — rulings, issue closes and deploys update code and
    tickets, not sentences.
@@ -35,8 +34,8 @@ it saw:
    next generation of drift.
 3. **Protected facts stay protected.** A project CLAUDE.md block marked "measured live, do not
    re-derive" outranks contradicting prose — fix the prose. If the world may have changed since
-   the measurement, re-measure, then update both, date-stamped. A measured fact is never softened
-   to match a doc.
+   the measurement, re-measure, then update both, date-stamped. A measured fact moves only on a
+   new measurement.
 4. **Dated history is not stale.** A handoff or report section describing what was true on its
    date stays as written: append a dated update line, or head the doc "historical record — kept
    for X" when it no longer describes the present (obsolete procedure docs included). Anything
@@ -46,13 +45,13 @@ it saw:
    commit or doc — prose about the hazard included. Write "issue 88" with no `#`, or put the
    number before the keyword.
 6. **Live facts are measured, not documented.** Which environment is live, which triggers are
-   installed, which flags are set: run the project's diagnostic (`ping`, `listInstalledTriggers`,
-   whatever its CLAUDE.md names), and replace a stated value with a pointer to that diagnostic.
+   installed, which flags are set: replace a stated value with a pointer to the project's
+   read-only diagnostic (`ping`, `listInstalledTriggers`, whatever its CLAUDE.md names).
    Tracker-derivable facts (counts, status, enumerations GitHub Issues carries) likewise become a
    pointer. One source of truth per fact.
 7. **Owner decisions become tickets.** Anything needing a human ruling (a threshold, a judgment
-   call, a manual UI step) goes through the project's flow (`/triage` or `/to-tickets`) — not an
-   ad-hoc fix, not a note buried in the report.
+   call, a manual UI step) goes through the project's flow (`/triage` or `/to-tickets`), never as
+   an ad-hoc fix or a note buried in the report.
 
 ## Phase 1 — inventory every prose surface
 
@@ -63,9 +62,12 @@ List the surfaces before reading any, fresh from today's tree (rule 0):
 - Decision records: `docs/adr/*.md` (or the project's equivalent).
 - Specs and PRDs: `.scratch/*/PRD.md`, `docs/specs/`, wherever the project keeps them.
 - Runbooks and guides: `docs/runbooks/`, `docs/guides/`, `docs/agents/`.
-- Agent memory: `~/.claude/projects/<project-slug>/memory/*.md` — memory drifts like any doc.
-- Global config naming this repo: sections of `~/.claude/CLAUDE.md` that state facts about this
-  project.
+- Agent memory: the memory set as [consolidate-memory](../consolidate-memory/SKILL.md) resolves it
+  (`docs/agents/memory/` when the repo commits its notes, else
+  `~/.claude/projects/<project-slug>/memory/*.md`) — memory drifts like any doc.
+- Global rules naming this repo: sections of the global rules text that state facts about this
+  project. Its source is claude-dotfiles `profile/claude/CLAUDE.md` (the plugin injects it;
+  `~/.claude/CLAUDE.md` is only a pointer, issue 732), so a fix there lands in that repo.
 - **Generated docs AND their generators**: any doc a script builds (dashboards, indexes). The doc
   is never hand-edited; the generator is audited like prose, because a hardcoded claim inside it
   republishes drift on every CI run.
@@ -85,15 +87,17 @@ Read every inventoried surface for claims a tool can verify. The recurring kinds
 - **Counts and enumerations**: "five triggers", "three departments", "20 test files".
 - **Status headers**: PRD/ADR "Status:" lines, acceptance checkboxes.
 - **Cross-doc duplicates**: the same fact spelled in CLAUDE.md AND a trace doc AND an ADR — every
-  spelling is a claim; note the siblings now so Phase 4 fixes them together.
+  spelling is a claim; group the siblings now so Phase 4 fixes them together.
+
+Done when every inventoried surface has been read and its claims listed, siblings grouped.
 
 ## Phase 3 — verify each claim against its primary source
 
 - Code claims: `Grep`/`Read` the actual code. Re-derive file:line from the code.
 - Ticket claims: `gh issue view N --json state,title` (batch with `gh issue list --json`).
 - History claims: `git log`, `git branch -a`, ancestry checks (`git merge-base --is-ancestor`).
-- Live-state claims: the project's own read-only diagnostics, per its CLAUDE.md — an audit leaves
-  the system it audits untouched.
+- Live-state claims: the project's read-only diagnostics (rule 6) — an audit leaves the system it
+  audits untouched.
 - Count claims: recount (`node --test` output, `ls | wc -l`, the config file itself).
 
 Fan out freely: parallel read-only agents per surface group, each returning
@@ -109,11 +113,14 @@ Done when every extracted claim carries a verdict and its evidence.
 - **Sibling sweep — the step partial fixes skip**: after each fix, grep the fact's key terms
   across the whole inventory and fix every other spelling in the same pass.
 
+Done when every claim with a stale verdict is fixed and each fact's sibling grep comes back clean.
+
 ## Phase 5 — kill drift generators
 
 For every generated doc, read the generator for hardcoded claims (commands, counts, lists) and
 point them at the single source of truth (a config file, a constant the code also uses). One
-killed generator prevents more drift than ten fixed sentences.
+killed generator prevents more drift than ten fixed sentences. Done when every generator in the
+inventory has been read and none still hardcodes a claim.
 
 ## Phase 6 — prove and land
 

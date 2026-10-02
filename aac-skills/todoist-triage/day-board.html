@@ -7,12 +7,15 @@ Source of record for the artifact. Edit here, then republish to that URL with th
   {"server": "ms365", "tools": ["outlook_calendar_search", "sharepoint_search", "teams_list_channel_messages", "outlook_email_search", "read_resource"]},
   {"server": "Todoist", "tools": ["find-tasks", "fetch-object", "find-comments", "add-comments", "add-tasks", "update-tasks", "reschedule-tasks", "delete-object", "complete-tasks", "uncomplete-tasks", "find-activity"]},
   {"server": "Granola", "tools": ["query_granola_meetings"]},
-  {"server": "Google Drive", "tools": ["search_files", "read_file_content"]}]}}
+  {"server": "Google Drive", "tools": ["search_files", "read_file_content"]},
+  {"server": "GitHub", "tools": ["search_pull_requests", "search_issues"]}]}}
 A do date on a recurring task goes through reschedule-tasks (date only): update-tasks would replace its due string and wipe the repeat (issue 1074).
 Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
-"Launch agents" counts the open Todoist tasks labelled agent and says the agent-launcher desktop routine starts each one's cloud session within 30 minutes; the page calls no session connector (Claude Code Remote rejects blocked_by_policy on this account, issue 1162; todoist-triage agent-sweep.md § Launch, issue 1202).
+"Launch agents" counts the open Todoist tasks labelled agent and says the agent-launcher desktop routine starts each one's Opus 5.5 background session within 30 minutes; the page calls no session connector (Claude Code Remote rejects blocked_by_policy on this account, issue 1162; todoist-triage agent-sweep.md § Launch, issue 1202).
 The huddle draft reads the huddle channel and Sent Items from today's newest aacx-inbox export; a live Microsoft 365 read covers only the hour after that export's stamp, and before the day's first export the panel waits (issue 1039, aac-routines ADR 0010).
+The huddle draft also asks the GitHub connector for the pull requests merged and issues closed in surreptakos repos since Dan's last post; each is report evidence on its own, named by repo#number (issue 1199).
 Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
+The drafter learns from Dan's edits (issue 848): each draft first compares his last post with the draft he worked from, Claude proposes lessons to db huddle_lessons (status proposed), only his Keep click confirms one, and every draft is sent the kept lessons; huddle_feedback/<post stamp> logs each compare.
 Every triage answer is also logged to db ruling_log/<taskId>-<stamp> (undoneAt set on Undo); the huddle draft reads it, since the morning run deletes answered cards.
 "Apply my note" asks Claude (sample) to read the note as one update-tasks ruling, records it on the card as `proposal`, and applies it in the same click (Undo reverses it); a note with no Todoist change writes nothing.
 -->
@@ -190,9 +193,10 @@ footer{font-size:12px;color:var(--muted)}
                 <button class="refresh" id="hud-copy" type="button" hidden>Copy post</button>
               </div>
             </div>
-            <div class="hud-status" id="hud-status">Reads your last huddle post and the mail you sent since from the hourly exports (live only for the hour after the newest), what you finished, and your meeting notes — then drafts the three sections. You post it; this page never does.</div>
+            <div class="hud-status" id="hud-status">Reads your last huddle post and the mail you sent since from the hourly exports (live only for the hour after the newest), what you finished, your meeting notes, and the pull requests merged and issues closed in your repos — then drafts the three sections. You post it; this page never does.</div>
             <div class="hud-post" id="hud-post" hidden></div>
             <details class="hud-ev" id="hud-ev" hidden><summary>What each line rests on</summary><div id="hud-ev-body"></div></details>
+            <details class="hud-ev" id="hud-lessons" hidden><summary id="hud-lessons-sum">Lessons from your edits</summary><div id="hud-lessons-body"></div></details>
           </section>
 
           <section class="panel later" aria-labelledby="tmr-h">
@@ -210,7 +214,7 @@ footer{font-size:12px;color:var(--muted)}
       <section class="panel triage" aria-labelledby="tri-h">
         <div class="ph"><h2 id="tri-h">Triage · questions for you</h2><div class="hud-actions"><span class="src" id="tri-src"></span><button class="refresh primary" id="agent-go" type="button">Launch agents</button></div></div>
         <div id="tri-banner" hidden></div>
-        <div class="hud-status" id="agent-status">Done answering? Launch agents counts the tasks you handed to an agent. The agent-launcher routine on your PC starts each one in its own cloud session within 30 minutes; it works from the task and its source, then leaves its drafts as a comment on the task. Nothing is sent for you.</div>
+        <div class="hud-status" id="agent-status">Done answering? Launch agents counts the tasks you handed to an agent. The agent-launcher routine on your PC starts each one in its own Opus 5.5 session within 30 minutes; it works from the task and its source, then leaves its drafts as a comment on the task. Nothing is sent for you.</div>
         <div id="tri-body"><div class="empty">Loading proposals…</div></div>
       </section>
 
@@ -586,7 +590,7 @@ footer{font-size:12px;color:var(--muted)}
       return;
     }
     try { db = window.claude.use ? await window.claude.use("db") : null; } catch(e){ db = null; }
-    watchTriage(); watchWaiting(); watchRulingLog();
+    watchTriage(); watchWaiting(); watchRulingLog(); watchLessons();
     await refreshAll();
     setInterval(refreshAll, REFRESH_MS);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshAll(); });
@@ -1142,6 +1146,71 @@ footer{font-size:12px;color:var(--muted)}
     if (!db) return;
     db.collection("ruling_log").onSnapshot(q => { logDocs = q.docs.map(d => Object.assign({_id: d.id}, d.data())); }, () => {});
   }
+  // ---------- HUDDLE LESSONS: storage, the compare step, and the Keep/Drop list (issue 848) ----------
+  // huddle_lessons/<id>: {text, status: "proposed" | "confirmed" | "dropped", proposedAt, proposedBy, source}.
+  // huddle_feedback/<post stamp>: one record per post compared, with what was proposed and what was refused,
+  // so a post is compared once and a refusal is never silent. The first lessons (2026-09-30) are seeded with
+  // ArtifactData from huddle-lessons-seed.json, proposed like any other.
+  let lessonDocs = [], draftDocs = [], feedbackIds = new Set();
+  const docsOf = q => q.docs.map(d => Object.assign({_id: d.id}, d.data()));
+  function watchLessons(){
+    if (!db) return;
+    db.collection("huddle_lessons").onSnapshot(q => { lessonDocs = docsOf(q); renderLessons(); }, () => {});
+    db.collection("huddle_drafts").onSnapshot(q => { draftDocs = docsOf(q); }, () => {});
+    db.collection("huddle_feedback").onSnapshot(q => { feedbackIds = new Set(q.docs.map(d => d.id)); }, () => {});
+  }
+  const postStamp = at => { const t = new Date(at); return ymd(t) + "T" + pad(t.getHours()) + pad(t.getMinutes()) + pad(t.getSeconds()); };
+  // Compares his last post with the draft he worked from, once per post. Returns a status note, or "".
+  async function learnFromPost(last, ask){
+    if (!db || !last) return "";
+    const postId = postStamp(last.at);
+    if (feedbackIds.has(postId)) return "";
+    const draft = draftBefore(draftDocs, last);
+    if (!draft) return "";
+    const diff = postDiff(draft.text, last.text);
+    let vet = {ok: [], refused: []};
+    if (diff.length){
+      hudStatus("Comparing your last post with the draft it came from…");
+      let res = null;
+      try { res = await ask(lessonPrompt(diff, lessonDocs)); } catch(e){ if (e && e.code === "cancelled") throw e; }
+      vet = vetLessons(res, diff, lessonDocs);
+    }
+    const now = new Date().toISOString();
+    try {
+      for (let i = 0; i < vet.ok.length; i++){
+        await db.doc("huddle_lessons/" + postId + "-" + (i + 1)).set({text: vet.ok[i].text, status: "proposed", proposedAt: now,
+          proposedBy: "claude (board draft)", source: {postAt: last.at.toISOString(), draftId: draft._id, changes: vet.ok[i].changes}});
+      }
+      await db.doc("huddle_feedback/" + postId).set({postAt: last.at.toISOString(), draftId: draft._id, comparedAt: now,
+        changes: diff.length, proposed: vet.ok.length, refused: vet.refused});
+      feedbackIds.add(postId);
+    } catch(e){ return " Lessons from your last post not saved (" + ((e && e.code) || "failed") + ")."; }
+    const n = vet.ok.length;
+    return !diff.length ? " You posted the last draft unchanged." : n ? " " + n + " lesson" + (n === 1 ? "" : "s") + " proposed from your edits: keep or drop them under Lessons." : "";
+  }
+  function renderLessons(){
+    const box = $("hud-lessons"), body = $("hud-lessons-body");
+    const live = lessonDocs.filter(x => x && typeof x.text === "string" && ["proposed", "confirmed", "dropped"].includes(x.status));
+    box.hidden = !live.length;
+    if (!live.length){ body.innerHTML = ""; return; }
+    const proposed = live.filter(x => x.status === "proposed").length;
+    $("hud-lessons-sum").textContent = "Lessons from your edits · " + live.filter(x => x.status === "confirmed").length + " kept" + (proposed ? " · " + proposed + " to review" : "");
+    if (proposed) box.open = true;
+    const order = {proposed: 0, confirmed: 1, dropped: 2}, label = {proposed: "proposed", confirmed: "kept", dropped: "dropped"};
+    body.innerHTML = live.sort((a, b) => order[a.status] - order[b.status] || String(a._id).localeCompare(String(b._id))).map(x =>
+      '<div class="prop' + (x.status === "dropped" ? " done" : "") + '"><div><span class="bucket' + (x.status === "dropped" ? " delete" : "") + '">' + label[x.status] + '</span> ' + esc(x.text) + '</div>' +
+      '<div class="acts">' + (x.status !== "confirmed" ? '<button type="button" data-lesson="' + esc(x._id) + '" data-act="keep">Keep</button>' : '') +
+      (x.status !== "dropped" ? '<button type="button" class="no" data-lesson="' + esc(x._id) + '" data-act="drop">Drop</button>' : '') + '</div></div>').join("");
+  }
+  // Dan's click is the only write that confirms a lesson.
+  async function lessonClick(ev){
+    const b = ev && ev.target && ev.target.closest ? ev.target.closest("button[data-lesson]") : null;
+    if (!b || !db) return;
+    b.disabled = true;
+    const at = new Date().toISOString();
+    try { await db.doc("huddle_lessons/" + b.dataset.lesson).update(b.dataset.act === "keep" ? {status: "confirmed", confirmedAt: at} : {status: "dropped", droppedAt: at}); }
+    catch(e){ b.disabled = false; hudStatus("Could not save that lesson: " + ((e && e.code) || "failed") + ". Try again.", true); }
+  }
   // Dan's own clicks on this board since his last post: triage rulings (with his reason) and asks he marked replied.
   // Rulings come from the log, which outlives the cards the morning triage run deletes.
   function boardRulingsSince(log, wait, since){
@@ -1175,6 +1244,27 @@ footer{font-size:12px;color:var(--muted)}
     return clip(blocks.join("\n") || (typeof (res && res.payload) === "string" ? res.payload : ""), 6000);
   }
 
+  // GitHub (issue 1199): repository work reaches neither Todoist, mail nor meetings. On 2026-09-30 an afternoon of
+  // 22 merged pull requests drafted as three rulings and one mail ("makes my work yesterday seem light").
+  // Merged pull requests and closed issues in Dan's repos since his last post, each named by its repo#number.
+  const GH = {server:"GitHub", owner:"surreptakos"};
+  const ghItems = res => { const o = objectsOf(res), box = o.find(x => Array.isArray(x.items)); return box ? box.items : o.filter(x => x && x.number !== undefined && x.title !== undefined); };
+  const ghRepo = o => { const m = String(o.repository_url || o.html_url || "").match(/(?:api\.github\.com\/repos|github\.com)\/[^\/]+\/([^\/]+)/); return m ? m[1] : ""; };
+  async function githubSince(since){
+    const at = since.toISOString().replace(/\.\d+Z$/, "Z");
+    const search = (tool, q) => call(GH.server, tool, {query: q, perPage: 100});
+    const [prs, issues] = await Promise.all([
+      search("search_pull_requests", "user:" + GH.owner + " is:pr is:merged merged:>" + at),
+      search("search_issues", "user:" + GH.owner + " is:issue is:closed closed:>" + at)
+    ]);
+    const row = (kind, o, when) => ({kind, ref: ghRepo(o) + "#" + o.number, title: String(o.title || ""), at: when, reason: o.state_reason || ""});
+    const after = t => t && new Date(t) > since;
+    return ghItems(prs).filter(o => o.pull_request ? after(o.pull_request.merged_at) : after(o.merged_at || o.closed_at))
+      .map(o => row("PR", o, (o.pull_request && o.pull_request.merged_at) || o.merged_at || o.closed_at))
+      .concat(ghItems(issues).filter(o => !o.pull_request && after(o.closed_at)).map(o => row("issue", o, o.closed_at)))
+      .sort((a,b) => new Date(a.at) - new Date(b.at));
+  }
+
   // ---------- HUDDLE GATE (Dan, 2026-09-30: "extremely brutal", 100% compliance, zero paraphrasing) ----------
   // Works like a stop hook: every draft passes through huddleGate and the independent judge before anything
   // is shown, copied or saved. Any violation rejects the draft; the drafter gets the violations and tries
@@ -1200,11 +1290,11 @@ footer{font-size:12px;color:var(--muted)}
   const GENERIC_RX = /\b(interruption|traffic|emergenc|meetings? (getting |got |being )?cancel)/i;
   // Confidential for a team post: money amounts, pay, health and leave detail, discipline, identity numbers.
   // Not confidential (Dan, 2026-09-30, "where's the review audit for Mireya? ExcalTech?"): that a review or an
-  // audit is on someone's plate, and ticket, quote, invoice or order numbers. Those are the work itself.
+  // audit is on someone's plate, and ticket, quote, invoice, order, PR or issue numbers. Those are the work itself.
   const CONFIDENTIAL_RX = [
     // money: currency signs and codes, "1.5k", "15,000", "45/hr", "5%", bare 4+ digit amounts that are not a
     // year and not a numbered document (quote #013157, invoice RE355989, PO 4411, ticket 12345)
-    /[$€£]\s?\d|\b(usd|eur|gbp)\s?\d|\b\d[\d,]*(\.\d+)?\s?(k|m|dollars?|usd|eur|gbp|bucks|grand)\b|\b\d{1,3}(,\d{3})+(\.\d+)?\b|(?<!(#|\b(quote|invoice|inv|po|ticket|order|job|wo|case|number|no\.?|ref|rev|id)\s?#?\s?)\s*)\b(?!(19|20)\d\d\b)\d{4,}\b(?![-\/]\d)|\b\d+\.\d\d\b|\d\s?%|\d\s?\/\s?(hr|hour|h)\b|\bper hour\b|\b(hundred|thousand|million|grand)\b/i,
+    /[$€£]\s?\d|\b(usd|eur|gbp)\s?\d|\b\d[\d,]*(\.\d+)?\s?(k|m|dollars?|usd|eur|gbp|bucks|grand)\b|\b\d{1,3}(,\d{3})+(\.\d+)?\b|(?<!(#|\b(quote|invoice|inv|po|ticket|order|job|wo|case|number|no\.?|ref|rev|id|pr|issue)\s?#?\s?)\s*)\b(?!(19|20)\d\d\b)\d{4,}\b(?![-\/]\d)|\b\d+\.\d\d\b|\d\s?%|\d\s?\/\s?(hr|hour|h)\b|\bper hour\b|\b(hundred|thousand|million|grand)\b/i,
     // pay
     /\b(bonus(es)?|salar(y|ies|ied)|raises?|raised (his|her|their)|wages?|payroll|paychecks?|paycheques?|hourly rate|compensation|comp plan|stipends?|severance|commission rate|promotion|demot\w*|pay (rate|band|increase|raise|cut|grade)s?|payout|cost of living|COLA|percent)\b/i,
     // discipline and departures
@@ -1316,7 +1406,7 @@ footer{font-size:12px;color:var(--muted)}
       if (last.report.some(l => hudNorm(l) === t || hudJaccard(l, t) >= 0.5)) add("rereport", "report", i, t, "your last post already claimed this");
       const doneFR = new Set(d.dropped.filter(x => x && /^done:/i.test(hudNorm(x.why))).map(x => hudNorm(x.text)));
       last.focus.concat(last.risks).forEach(l => { if (hudJaccard(l, t) >= 0.4 && !doneFR.has(hudNorm(l))) add("paraphrase", "report", i, t, "restates one of your lines; report it only when that line is dropped as done"); });
-      if (!/\b(mail|meeting|granola|board|replied|ruling|post|teams|note)\b/i.test(String(it.evidence || ""))) add("evidence", "report", i, t, "a ticked task alone is not evidence; name the mail, meeting note or board ruling");
+      if (!/\b(mail|meeting|granola|board|replied|ruling|post|teams|note|github|pr)\b/i.test(String(it.evidence || ""))) add("evidence", "report", i, t, "a ticked task alone is not evidence; name the mail, meeting note, board ruling or GitHub PR or issue");
       tooLong(t, "report", i);
     });
     // Focus and risks: carried word for word, edited in one narrow span, or new; nothing paraphrased.
@@ -1558,8 +1648,9 @@ footer{font-size:12px;color:var(--muted)}
       "",
       "DAN'S RULES, WORD FOR WORD:",
       DAN_RULES.join("\n"),
+      ...lessonLines(ctx.lessons),
       "",
-      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note or board ruling; a new risk says what slips or what cannot move; no pay, money, discipline, health, leave or identity detail anywhere (naming a review, an audit or a document number is fine). Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
+      "LIMITS: plain text only; each line no longer than " + ctx.maxLen + " characters; report lines open with an outcome verb (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked) and their evidence names the mail, meeting note, board ruling or GitHub PR or issue; a new risk says what slips or what cannot move; no pay, money, discipline, health, leave or identity detail anywhere (naming a review, an audit or a document number is fine). Keep the evidence field's tag (\"new: ...\" or \"edited: ...\") when you rewrite a focus or risk line.",
       "Change as little as the problem needs. If a line cannot be fixed from the evidence, drop it.",
       "",
       "LINES TO FIX:",
@@ -1608,6 +1699,7 @@ footer{font-size:12px;color:var(--muted)}
       "",
       "DAN'S RULES, WORD FOR WORD:",
       DAN_RULES.join("\n"),
+      ...lessonLines(ctx.lessons),
       "",
       "HOW: an item Dan does today goes to focus while focus has fewer than 3 lines (focus now has " + d.focus.length + "); every other item is a risk that names who is waiting or what slips (rule 3).",
       "Plain text, no longer than " + ctx.maxLen + " characters, and no pay, money amount, health, leave, discipline or identity detail. Naming a review or an audit, a quote, invoice or ticket number is fine.",
@@ -1721,6 +1813,80 @@ footer{font-size:12px;color:var(--muted)}
     return {d, passed: !v.length, violations: v, rounds, removed, missing: uncovered(d, ctx.mustCover)};
   }
 
+  // ---------- HUDDLE LESSONS (issue 848, Dan 2026-10-01: "Wherever my huddle notes differed, that's a lesson for you") ----------
+  // Modelled on aac-bill-intake's loop (its ADRs 0006-0008). Dan's correction is the difference between the
+  // draft this board saved and the post he put in the channel. Code finds the difference; Claude may PROPOSE a
+  // lesson from it; a proposal is inert until Dan presses Keep, and nothing else ever confirms one. Every draft
+  // is sent the kept lessons and only those. Each step is code, and the loop is bounded and logged.
+  const LESSON_MAX = 200, LESSONS_PER_POST = 5;
+  // The draft he worked from: the newest passing draft saved on his post's day, before he posted.
+  function draftBefore(drafts, post){
+    if (!post || !post.at) return null;
+    const day = ymd(post.at), at = new Date(post.at).getTime();
+    return (drafts || []).filter(x => x && !x.blocked && x.day === day && typeof x.text === "string" && new Date(x.draftedAt).getTime() <= at)
+      .sort((a, b) => String(b.draftedAt).localeCompare(String(a.draftedAt)))[0] || null;
+  }
+  // Line by line, per section: what he cut, what he added, and what he edited (a cut line most like an added
+  // one). A confidential line is never compared, so it never reaches the proposer or board storage.
+  function postDiff(draftText, postText){
+    const a = parseLastPost(draftText), b = parseLastPost(postText), out = [];
+    LINE_SECTIONS.forEach(k => {
+      const A = a[k].map(hudNorm), B = b[k].map(hudNorm);
+      const cut = A.filter(l => !B.includes(l) && !isConfidential(l)), added = B.filter(l => !A.includes(l) && !isConfidential(l));
+      cut.forEach(l => {
+        const best = added.map(x => ({x, j: hudJaccard(l, x)})).sort((p, q) => q.j - p.j)[0];
+        if (best && best.j >= 0.5){ added.splice(added.indexOf(best.x), 1); out.push({section: k, change: "edited", from: l, text: best.x}); }
+        else out.push({section: k, change: "cut", text: l});
+      });
+      added.forEach(l => out.push({section: k, change: "added", text: l}));
+    });
+    return out;
+  }
+  const lessonKey = s => hudNorm(s).toLowerCase().replace(/[^a-z0-9 ]/g, "");
+  function lessonPrompt(diff, existing){
+    return [
+      "Dan Gatsakos edited the huddle post this board drafted for him before he posted it. Each change below is a correction to how the drafter writes.",
+      "For each correction, propose one lesson: a general rule for future drafts, one sentence, in the imperative. A lesson says how to write, so it names no person, customer, vendor, project, amount or date. Several changes that teach the same thing are one lesson. A change that teaches nothing general (a fact that only changed that day) gets no lesson.",
+      "",
+      "DAN'S RULES, WORD FOR WORD (a lesson never contradicts them):",
+      DAN_RULES.join("\n"),
+      "",
+      "LESSONS HE ALREADY HAS (do not repeat one):",
+      JSON.stringify((existing || []).map(x => x.text)),
+      "",
+      "CHANGES (index, section, change, and the lines; \"from\" is the draft's line, \"text\" is his):",
+      JSON.stringify(diff.map((x, i) => Object.assign({index: i}, x))),
+      "",
+      'Reply with only JSON: {"lessons": [{"text": string, "changes": [index, ...]}]}. Each lesson names the change indices it comes from.'
+    ].join("\n");
+  }
+  // The closed gate on a proposal: exactly {text, changes}; plain, short, not confidential; cites a change that
+  // exists (a lesson that comes from no correction is refused outright); not a repeat of any lesson he has,
+  // kept or dropped. Refusals are returned, never silently lost. At most LESSONS_PER_POST from one post.
+  function vetLessons(res, diff, existing){
+    const ok = [], refused = [];
+    const seen = new Set((existing || []).map(x => lessonKey(x.text)));
+    const list = res && Array.isArray(res.lessons) ? res.lessons : null;
+    if (!list) return {ok, refused: [{text: "", why: "proposer answered in the wrong shape"}]};
+    list.forEach(l => {
+      const text = l && typeof l.text === "string" ? hudNorm(l.text) : "";
+      const why = !l || typeof l !== "object" || Object.keys(l).sort().join() !== "changes,text" ? "wrong fields"
+        : !text ? "empty" : text.length > LESSON_MAX ? "longer than " + LESSON_MAX + " characters" : !plainOk(l.text) ? "not plain text"
+        : isConfidential(text) ? "confidential detail"
+        : !Array.isArray(l.changes) || !l.changes.length || !l.changes.every(i => Number.isInteger(i) && i >= 0 && i < diff.length) ? "cites no change it came from"
+        : seen.has(lessonKey(text)) ? "repeats a lesson he has"
+        : ok.length >= LESSONS_PER_POST ? "over " + LESSONS_PER_POST + " lessons from one post" : "";
+      if (why){ refused.push({text: why === "confidential detail" ? "(withheld)" : clip(text, LESSON_MAX), why}); return; }
+      seen.add(lessonKey(text));
+      ok.push({text, changes: [...new Set(l.changes)].map(i => diff[i])});
+    });
+    return {ok, refused};
+  }
+  // Kept lessons only, oldest first. A proposed or dropped lesson never reaches a prompt.
+  const keptLessons = docs => (docs || []).filter(x => x && x.status === "confirmed" && typeof x.text === "string")
+    .sort((a, b) => String(a.confirmedAt).localeCompare(String(b.confirmedAt))).map(x => x.text);
+  const lessonLines = lessons => (lessons && lessons.length) ? ["", "LESSONS FROM DAN'S OWN EDITS TO PAST DRAFTS (he kept each one; follow every one, inside his rules and the gate):", lessons.map(t => "- " + t).join("\n")] : [];
+
   function hudPrompt(ctx){
     const todayKey = ymd(new Date());
     const cw = lastTasks.filter(t => !t.checked && t.projectId === CURRENT_WORK)
@@ -1734,20 +1900,22 @@ footer{font-size:12px;color:var(--muted)}
       "",
       "DAN'S RULES, WORD FOR WORD FROM HIS \"Huddle Review\" POST TO THE TEAM. They are the definition of a huddle post:",
       DAN_RULES.join("\n"),
+      ...lessonLines(ctx.lessons),
       "",
       "HOW TO BUILD THE DRAFT:",
       "- Three sections only, no name/date header: report, focus, risks.",
       "- START FROM HIS LAST POST, not a fresh write (Dan, 2026-09-23). Copy its focus and risk lines, then change only what the evidence changed. Still true: copy the line character for character. Moved: change one span of at most four words (\"due tomorrow\" becomes \"due today\"). Done: drop it and report the outcome. Cleared risk: drop it.",
       "- NEVER PARAPHRASE HIS LINES. A line of his is either carried character for character, edited in one span of at most four words, or listed under dropped. A reworded version of his line is rejected.",
       "- Report: outcomes in his verbs (Decided, Sent, Completed, Found, Fixed, Moved, Customer approved, Followed up, Delegated, Booked). Never re-report what his last post claimed. Outcomes from meeting notes his last post never claimed DO count, even from before it.",
-      "- A completed task alone is NOT evidence. Use it only when a sent mail, a meeting note or a board ruling corroborates it; merge them into one line. Otherwise drop it.",
+      "- A completed task alone is NOT evidence. Use it only when a sent mail, a meeting note, a board ruling or a GitHub row corroborates it; merge them into one line. Otherwise drop it.",
       "- BOARD RULINGS are Dan's own decisions, made on his day board: each is evidence on its own. A hand-off to a direct (to-NAME) is \"Delegated X to NAME\"; a delete or Rule out with a reason that says it is done or settled is \"Completed X\" or \"Decided X\"; his note, when present, says what he meant. A ruling that only moves a date or parks a task is not a report line. A \"replied\" row is \"Answered NAME on SUBJECT\".",
+      "- GITHUB rows are Dan's repository work: each merged pull request (PR) or closed issue is evidence on its own. Report what it changed, in his verbs: \"Fixed X in REPO\", \"Released X\", \"Completed X\"; an issue closed as not_planned is \"Decided not to X\" only when its title says what X is, otherwise leave it out. Several rows toward one outcome are ONE line, so a busy afternoon stays within the report limit; that line's evidence starts \"GitHub\" and names each PR or issue by its ref, as \"GitHub PR claude-dotfiles#1191, #1193\" or \"GitHub issue aac-routines#204\".",
       "- New focus lines come ONLY from the Current Work tasks, the must-appear items or today's meetings listed below. Several tasks on one topic are ONE line. Meetings by kind, no times (e.g. \"O3s\").",
       "",
       "THE GATE (code checks every draft; one failure rejects the whole draft and it is never shown):",
       "- Report heading is exactly \"" + (expectedHeading(ctx.last && ctx.last.at, new Date()) || HEAD_DAILY) + "\".",
       "- Today's focus has 1 to 3 lines. Extra lines of his go under dropped with why \"trimmed: <reason>\".",
-      "- Every focus and risk line's evidence starts with \"kept verbatim\", \"edited: <what moved>\" or \"new\". Every report line's evidence names the mail, meeting note or board ruling.",
+      "- Every focus and risk line's evidence starts with \"kept verbatim\", \"edited: <what moved>\" or \"new\". Every report line's evidence names the mail, meeting note, board ruling or GitHub PR or issue.",
       "- Every line of his last focus and risks is carried verbatim, edited in one span, or listed under dropped with its text copied exactly and why starting \"done:\", \"cleared:\", \"trimmed:\" or \"withheld:\" (withheld = his line names a confidential detail, so it cannot be carried; write exactly \"withheld: confidential detail\"). Dropped lists only his lines.",
       "- No line longer than the longest line in his last post.",
       "- Every new risk says what slips or what cannot move. No generic risks. No real risk: the single line \"None today.\"",
@@ -1769,6 +1937,9 @@ footer{font-size:12px;color:var(--muted)}
       "BOARD RULINGS SINCE (triage answers with his reason, and asks he marked replied):",
       JSON.stringify(ctx.board || {rulings:[], replied:[]}).slice(0, 8000),
       "",
+      "GITHUB SINCE (pull requests merged and issues closed in his repos):",
+      JSON.stringify(ctx.github || []).slice(0, 8000),
+      "",
       "MUST APPEAR (deadline within 7 days, or overdue and holding someone up; each one named by a focus line, a risk line that says who is waiting, or a report line if done). Other overdue tasks appear only if they are among the top 3 focus items:",
       JSON.stringify(ctx.mustCover || []),
       "",
@@ -1781,7 +1952,7 @@ footer{font-size:12px;color:var(--muted)}
       "SURFACES THAT FAILED THIS RUN: " + (ctx.gaps.length ? ctx.gaps.join("; ") : "none"),
       "",
       'Reply with only JSON: {"reportHeading": string, "report": [{"text": string, "evidence": string}], "focus": [{"text": string, "evidence": string}], "risks": [{"text": string, "evidence": string}], "dropped": [{"text": string, "why": string}]}',
-      'Each "evidence" names the source: mail subject and date, meeting note, task name, or post line.'
+      'Each "evidence" names the source: mail subject and date, meeting note, task name, post line, or GitHub PR or issue ref.'
     ].join("\n");
   }
 
@@ -1836,11 +2007,12 @@ footer{font-size:12px;color:var(--muted)}
       }
       const since = last ? last.at : new Date(Date.now() - 3*86400000);
       hudStatus("Reading what you finished, sent and decided since " + since.toLocaleDateString([], {weekday:"short", month:"short", day:"numeric"}) + "…");
-      const [done, sent, notes] = await Promise.all([
+      const [done, sent, notes, github] = await Promise.all([
         completionsSince(since).catch(e => { gaps.push("Todoist completions: " + (e.code || "failed")); return []; }),
         !ex.sent ? (gaps.push("sent mail: " + noExport("sent")), Promise.resolve([]))
           : sentSince(since, ex.sent, now0, gaps).catch(e => { gaps.push("sent mail: " + ((e && e.code) || "failed")); return []; }),
-        notesSince(since).catch(e => { gaps.push("meeting notes: " + (e.code || "failed")); return ""; })
+        notesSince(since).catch(e => { gaps.push("meeting notes: " + (e.code || "failed")); return ""; }),
+        githubSince(since).catch(e => { gaps.push("GitHub: " + ((e && e.code) || "failed")); return []; })
       ]);
       if (!db) gaps.push("board rulings: storage unavailable");
       const board = boardRulingsSince(logDocs, waitDocs, since);
@@ -1848,6 +2020,9 @@ footer{font-size:12px;color:var(--muted)}
       // code checks and the independent judge both pass every line that is left.
       hudStatus("Drafting… (20–60 seconds)");
       const ask = p => sample.json(p, {signal: hudCtl.signal, cache: false});
+      // His last post against the draft he worked from: new lessons are proposed now and wait for his Keep;
+      // this draft is sent only the lessons he has already kept (issue 848).
+      const learned = await learnFromPost(last, ask), lessons = keptLessons(lessonDocs);
       const todayKey = ymd(new Date()), weekOut = ymd(new Date(Date.now() + 7 * 86400000));
       // Every project the task panel reads, not only Current Work: an overdue backlog task can hold a vendor up
       // too (issue 1191, the ExcalTech quote). The same blockers test below sorts both.
@@ -1863,10 +2038,10 @@ footer{font-size:12px;color:var(--muted)}
       if (overdueOnly.length){ try { blockRes = await ask(blockersPrompt(overdueOnly)); } catch(e){ if (e && e.code === "cancelled") throw e; } }
       const mustCover = candidates.filter(t => hasDeadline.has(t)).concat(blockingTasks(overdueOnly, blockRes));
       hudStatus("Drafting… (20–60 seconds)");
-      const first = await ask(hudPrompt({last, done, sent, notes, board, gaps, mustCover}));
+      const first = await ask(hudPrompt({last, done, sent, notes, board, github, gaps, mustCover, lessons}));
       const lastLines = (() => { const x = parseLastPost(last ? last.text : ""); return x.report.concat(x.focus, x.risks); })();
-      const repairCtx = {mustCover, maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
-        evidence: JSON.stringify({completed: done, sent, meetingNotes: notes, boardRulings: board})};
+      const repairCtx = {mustCover, lessons, maxLen: lastLines.length ? Math.max(...lastLines.map(l => hudNorm(l).length)) : 120,
+        evidence: JSON.stringify({completed: done, sent, meetingNotes: notes, boardRulings: board, github})};
       const result = await gateLoop(first, last, new Date(), ask, repairCtx, hudStatus);
       let d = result.d, violations = result.violations;
       const passed = result.passed, attempt = result.rounds + 1;
@@ -1878,7 +2053,7 @@ footer{font-size:12px;color:var(--muted)}
         $("hud-ev-body").innerHTML = '<div class="evsec">Why it was blocked</div>' + violations.map(x => '<div class="evrow"><b>' + esc(x.rule) + '</b><span>' + esc(violationView(x)) + '</span></div>').join("");
         $("hud-ev").hidden = false; $("hud-ev").open = true;
         try { if (db) await db.doc("huddle_drafts/" + id).set({draftedAt: now.toISOString(), day: ymd(now), blocked: true, attempts: attempt, violations: violations.map(x => ({rule: x.rule, section: x.section, index: x.index})), gaps}); } catch(e){}
-        hudStatus("Blocked: " + violations.length + " rule failure" + (violations.length === 1 ? "" : "s") + " left after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") + ". Nothing to copy. Draft again, or write it yourself.", true);
+        hudStatus("Blocked: " + violations.length + " rule failure" + (violations.length === 1 ? "" : "s") + " left after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") + ". Nothing to copy. Draft again, or write it yourself." + learned, true);
         return;
       }
       d.reportHeading = [HEAD_DAILY, HEAD_GAP].find(h => h === hudNorm(d.reportHeading));
@@ -1904,7 +2079,7 @@ footer{font-size:12px;color:var(--muted)}
         saved = " Saved for review.";
       } catch(e){ saved = " Not saved for review (" + ((e && e.code) || "failed") + ")."; saveFailed = true; }
       const notes2 = (result.missing.length ? " Still missing: " + result.missing.join("; ") + "." : "") + (leftOutConfidential ? " " + leftOutConfidential + " confidential task" + (leftOutConfidential === 1 ? "" : "s") + " left out." : "");
-      hudStatus("Passed every rule" + (result.rounds ? " after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") : "") + (result.removed ? "; " + result.removed + " line" + (result.removed === 1 ? "" : "s") + " removed that could not pass" : "") + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + notes2 + saved, gaps.length > 0 || saveFailed || result.missing.length > 0);
+      hudStatus("Passed every rule" + (result.rounds ? " after " + result.rounds + " repair round" + (result.rounds === 1 ? "" : "s") : "") + (result.removed ? "; " + result.removed + " line" + (result.removed === 1 ? "" : "s") + " removed that could not pass" : "") + "." + (gaps.length ? " Could not read: " + gaps.join("; ") + "." : " Every source answered.") + notes2 + learned + saved, gaps.length > 0 || saveFailed || result.missing.length > 0);
     } catch(e){
       if (e && e.code === "cancelled"){ hudStatus("Stopped."); }
       else hudStatus(SAMPLE_COPY[e && e.code] || ("Draft failed: " + ((e && (e.code || e.message)) || "unknown") + ". Try again."), true);
@@ -1914,7 +2089,7 @@ footer{font-size:12px;color:var(--muted)}
   }
   // ---------- LAUNCH AGENTS (todoist-triage agent-sweep.md § Launch, issue 1202) ----------
   // The page starts no session: every Claude Code Remote call rejects blocked_by_policy on Dan's account
-  // (issue 1162). The agent-launcher desktop routine on the anchor PC starts one cloud session per task
+  // (issue 1162). The agent-launcher desktop routine on the anchor PC starts one Opus 5.5 background session per task
   // labelled agent every 30 minutes on weekdays and swaps the label to agent-running; the button reports
   // how many tasks wait for it.
   const LAUNCH_WINDOW = "within 30 minutes";
@@ -1929,7 +2104,7 @@ footer{font-size:12px;color:var(--muted)}
       const tasks = objectsOf(res).flatMap(x => Array.isArray(x.tasks) ? x.tasks : []).filter(t => t && t.id && !t.checked && (t.labels || []).includes("agent"));
       if (!tasks.length){ st.textContent = "No tasks are waiting for an agent. Answer a card with “An agent does it” first."; return; }
       const n = tasks.length + (tasks.length === 1 ? " task carries" : " tasks carry");
-      st.innerHTML = esc(n + " the agent label. The agent-launcher routine on your PC starts each one in its own cloud session " + LAUNCH_WINDOW +
+      st.innerHTML = esc(n + " the agent label. The agent-launcher routine on your PC starts each one in its own Opus 5.5 session " + LAUNCH_WINDOW +
         " (weekdays, 8 AM to 6 PM); the task's label then reads agent-running and a comment links its session. A task whose session did not start keeps agent and gains a comment with the error.") +
         tasks.map(t => '<div><a href="' + esc("https://app.todoist.com/app/task/" + t.id) + '" target="_blank" rel="noopener">' + esc(t.content) + '</a></div>').join("");
     } catch(err){
@@ -1938,6 +2113,7 @@ footer{font-size:12px;color:var(--muted)}
   }
   $("agent-go").addEventListener("click", launchAgents);
   $("hud-go").addEventListener("click", draftHuddle);
+  $("hud-lessons-body").addEventListener("click", lessonClick);
   $("hud-stop").addEventListener("click", () => { if (hudCtl) hudCtl.abort(); });
   $("hud-copy").addEventListener("click", async () => {
     // Rich copy keeps bold headings and bullets when pasted into Teams; plain text is the fallback.

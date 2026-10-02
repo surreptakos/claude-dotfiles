@@ -24,17 +24,20 @@ if (!HAVE_DOCX && process.env.REVIEW_MEANING_REQUIRE_DOCX === '1') {
   test('python3 with python-docx is installed', () => assert.fail(`${PY} cannot import docx`));
 }
 
+// At least four items are SEER (Dan, October 1, 2026), so Gate 1 passes the fixture as a whole review.
 const BOB = {
   direct: 'Bob', start: '7/24/2025', end: '7/23/2026',
   core: "Bob's results have met expectations since his last review. I am recommending he is ready for vertical growth in his role, in the areas of quality control and reporting.",
   strengths: [
     'Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He is the rep the rest of the team learns from on hard calls.',
     'Bob documents every escalation. Recently he wrote up a billing dispute so clearly that finance closed it the same day.',
+    'Bob keeps the call queue moving at the end of a shift. He takes the last open calls himself before he logs off. During a storm this spring he cleared eleven waiting calls after his shift ended. He leaves the queue empty for the next shift.',
   ],
   weaknesses: [
     'Bob turns in his weekly call reports late. Three of the last five reports arrived after the Friday deadline. He sent the March 6 report on the following Tuesday. His reports are often late.',
+    'Bob skips the notes field on short calls. Most calls under two minutes close with the notes field blank. On one short call last month he left no note and the customer had to explain the problem twice. His short calls often close with no notes.',
   ],
-  guidance: ['Submit each weekly call report by noon on Friday.', 'Lead two training sessions on difficult calls for the team.'],
+  guidance: ['Submit each weekly call report by noon on Friday.', 'Write a note on every call before closing it.', 'Lead two training sessions on difficult calls for the team.'],
 };
 
 // Python starts slowly on Windows, so every case runs at once (each in its own directory: a run
@@ -110,7 +113,7 @@ suite('review meaning', { concurrency: true }, () => {
     assert.equal(s.code, 0, s.out);
     assert.equal(a.out, s.out);
     assert.match(a.out, /^MEANING CHECK: PASS$/m);
-    assert.match(a.out, /^Passed: S1, S2, W1, Core Message, Guidance 1, Guidance 2$/m);
+    assert.match(a.out, /^Passed: S1, S2, S3, W1, W2, Core Message, Guidance 1, Guidance 2, Guidance 3$/m);
     assert.match(a.out, /^Jev: ran/m);
   });
 
@@ -131,7 +134,7 @@ suite('review meaning', { concurrency: true }, () => {
     assert.match(r.out, /^Passed: .*Guidance 4$/m);
   });
 
-  t('an example with two dated events fails one example; a date range is one figure and passes', async () => {
+  t('an example with two dated events fails one example; a date range, or a due date and its close date, is one and passes', async () => {
     const two = await docx({ strengths: [BOB.strengths[0], 'Bob documents every escalation. He wrote up a billing dispute on 3/4/2026 and a refund case on 5/6/2026.'] });
     let r = await meaning(AUDIT_PY, two, await stubFor(two));
     assert.equal(r.code, 1, r.out);
@@ -139,13 +142,18 @@ suite('review meaning', { concurrency: true }, () => {
     const range = await docx({ strengths: [BOB.strengths[0], 'Bob documents every escalation. He wrote up 140 billing disputes from 7/24/2025 through 7/23/2026.'] });
     r = await meaning(AUDIT_PY, range, await stubFor(range));
     assert.equal(r.code, 0, r.out);
+    // One late report stated with its due date and the date it arrived is one example (issue 1247).
+    const due = await docx({ weaknesses: ['Bob turns in his weekly call reports late. Three of the last five reports arrived after the Friday deadline. The March 6 report was due March 6, 2026 and did not arrive until March 10, 2026. His reports are often late.'] });
+    r = await meaning(AUDIT_PY, due, await stubFor(due));
+    assert.equal(r.code, 0, r.out);
+    assert.doesNotMatch(r.out, /dated events/);
   });
 
   t('comma counts are a note and never change the exit code', async () => {
     const file = await docx({ strengths: ['Bob, my best rep, is calm on hard calls. He listens, waits, and then answers. He recently saved a difficult call after three other reps had failed. He stays calm when a call turns hard.', BOB.strengths[1]] });
     const r = await meaning(AUDIT_PY, file, await stubFor(file));
     assert.equal(r.code, 0, r.out);
-    assert.match(r.out, /^Note: Commas per item \(fewer is better\): S1 4, S2 0, W1 0\.$/m);
+    assert.match(r.out, /^Note: Commas per item \(fewer is better\): S1 4, S2 0, W1 0, W2 0\.$/m);
     assert.doesNotMatch(r.out, /^  - .*comma/im);
   });
 
@@ -162,11 +170,11 @@ suite('review meaning', { concurrency: true }, () => {
   // [question, the answer that fails it, an answer in the read band (Noul only), the fix line].
   const JEV = [
     ['S1.s1_behavior', 'trait', null, /^  - S1: sentence 1 names a trait, motive or attitude; it must name a behavior or work product\. \(Jev\)$/m],
-    ['S1.s1_pattern', 0.1, 0.4, /^  - S1: sentence 1 is a one-off event; it must state a pattern, with the event as the example\. \(Jev\)$/m],
+    ['S1.s1_pattern', 0.1, 0.3, /^  - S1: sentence 1 is a one-off event; it must state a pattern, with the event as the example\. \(Jev\)$/m],
     ['S1.s2_elaborate', 'new_theme', null, /^  - S1: sentence 2 opens a new theme; it must add detail about the behavior in sentence 1 \(Elaborate\)\. \(Jev\)$/m],
     ['S1.example_one', 0.1, 0.4, /^  - S1: sentence 3 is not one specific thing that happened; it must be one event or figure\. \(Jev\)$/m],
-    ['S2.example_demonstrates', 0.05, 0.35, /^  - S2: the example in sentence 2 is not an instance of sentence 1; the item must be about one of them\. \(Jev\)$/m],
-    ['S1.s4_restate', 0.1, 0.4, /^  - S1: sentence 4 does not restate sentence 1; it must say the same thing again with no new theme\. \(Jev\)$/m],
+    ['S2.example_demonstrates', 0.05, 0.45, /^  - S2: the example in sentence 2 is not an instance of sentence 1; the item must be about one of them\. \(Jev\)$/m],
+    ['S1.s4_restate', 0.1, 0.3, /^  - S1: sentence 4 does not restate sentence 1; it must say the same thing again with no new theme\. \(Jev\)$/m],
     ['core.ramification', 0.95, 0.6, /^  - Core Message: the Ramification lists his Weaknesses or his current work; it must name what changes for him next year\. \(Jev\)$/m],
     ['W1.weakness_guidance', 'none', null, /^  - W1: has no Guidance point; every Weakness has at least one\. \(Jev\)$/m],
     ['Guidance 2.s1.instruction', 0.1, 0.4, /^  - Guidance 2: sentence 1 is not an instruction for next year; it must tell Bob what to do\. \(Jev\)$/m],
