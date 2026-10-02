@@ -22,11 +22,11 @@ A task is agent-doable when all three hold. Read the source thread to its last m
 
 A task that is part judgment, part legwork qualifies for the legwork only: the question names that half, and the ball holder keeps the rest.
 
-Not sure it passes? Leave it out. Every wrong candidate costs Dan a click.
+Ask only about a task that clearly passes: every wrong candidate costs Dan a click.
 
 ## Ask — always tier 2
 
-Never applied without asking. One card per task, never two: two cards would each replace the task's labels from a stale copy.
+One card per task: two cards would each replace the task's labels from a stale copy.
 
 The question names what the agent would produce, from which inputs, and the skill it would use where one fits (`aac-contract-package`, `aac-sop`, `research`, `aac-house-writing-standard` for anything another person reads). One clause each.
 
@@ -41,7 +41,7 @@ The agent does the legwork whoever holds the ball.
 
 On the Day Board this is an ordinary `triage/<taskId>` card per [`day-board.md`](day-board.md) § Publish the run. The board's own **Rule out** button still moves the task to Wontfix — it kills the task, it is not the agent "no" — so the question text names **I'll do it** (or **Me: …**) as the way to keep the task and decline the agent.
 
-An answer that arrives as a note (the board's Note only, the reason typed beside any option, or prose in the session) and declines the agent is still a "no": the run writes `no-agent` on the task itself, then acts on the rest of the note.
+A decline that arrives as a note is still a "no": on the board ([`day-board.md`](day-board.md) § Read the answers) or as prose in the session, the run writes `no-agent` on the task itself, then acts on the rest of the note.
 
 ## What the labels mean
 
@@ -73,18 +73,17 @@ task:
 The run record names every session started and every start that failed; a run that finds no
 `agent` task writes none. The method lives in aac-routines `src/aac_routines/agent_launcher.py`.
 
-The board's **Launch agents** button starts nothing: it counts the open tasks labelled `agent` and
-says the routine starts them within 30 minutes. On 2026-10-01 every `create_session` call from the
-page rejected `blocked_by_policy` ("Your organization blocks this Claude Code Remote call"), and
-no account or organization toggle lifts it (claude-dotfiles issue 1162 holds the reading and the
-decision).
+The board's **Launch agents** button only counts and links: [`day-board.md`](day-board.md)
+§ Launch agents has why it starts nothing.
 
 **Fallback, for a PC without the routine.** A Claude Code session launches the tasks when Dan asks
 ("launch my agent tasks"): read every open task labelled `agent`, start one cloud session per task
 on "Run an approved task" (`claude --cloud "<prompt>"`, or a background agent where the CLI has no
 `--cloud`), and swap `agent` for `agent-running` with a comment naming the session as each starts.
-A task whose session did not start keeps `agent` and gains a comment with the error. Never report
-an agent as started without that label swap on the task.
+A task whose session did not start keeps `agent` and gains a comment with the error. Report an
+agent as started only once the label swap is on its task.
+
+## Links, not ids
 
 Every record mentioned in a reply to Dan, in a launch report, in an agent's result or in a draft
 he will paste elsewhere carries its link in its own system of record, never a bare id or number
@@ -104,7 +103,7 @@ The session the launcher starts works one Todoist task:
 1. Run `python3 .claude/hooks/check_payload.py`. A `STOP` naming the dotfiles credential means `add_repo` `surreptakos/claude-dotfiles`, then carry on.
 2. Read the task, its comments, and its source thread to the last message; a meeting, by its Fathom transcript (§ Meeting content).
 3. Do the legwork the card described. Load `aac-house-writing-standard` for anything another person reads, and the skill the card named.
-4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made. Never send, file, sign, approve or pay anything.
+4. Leave the result where the ball holder works: a comment on the task with the draft inline, or a link to an Outlook draft or a Drive file the session made, every record in it linked (§ Links, not ids). Never send, file, sign, approve or pay anything.
 5. Swap `agent-running` for `agent-done` on the task, keeping every other label.
 6. If the work cannot be done from what the session can reach, say why in the comment and swap `agent-running` for `no-agent`, so the task is Dan's again.
 

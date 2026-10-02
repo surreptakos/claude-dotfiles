@@ -139,6 +139,16 @@ test("confidential means amounts, pay, health, leave, discipline, identity - not
     .forEach(t => assert(!G.isConfidential(t), "should allow: " + t));
 });
 
+// Issue 1199: a merged PR or closed issue is report evidence on its own, and its number is the work, not an amount.
+test("a report line resting on a GitHub PR or issue passes the evidence and confidentiality checks", async () => {
+  const d0 = draft({report: [{text: "Fixed the overdue-backlog scan in the day board", evidence: "GitHub PR claude-dotfiles#1191, #1193"},
+                             {text: "Completed the token-aware bootstrap rollout", evidence: "GitHub PR 1048 and issue 1046"}]});
+  const {ask} = mockClaude(judgeAll(), () => { throw new Error("no repair expected"); });
+  const r = await G.gateLoop(d0, lastPost, now, ask, ctx);
+  assert.strictEqual(r.passed, true, JSON.stringify(r.violations));
+  assert.deepStrictEqual(r.d.report, d0.report);
+});
+
 test("every overdue item must be named; missing ones are added by a targeted call, not a redraft", async () => {
   const mustCover = ["Approve or decline vendor Quote #013157 (battery backup, second unit)", "Decide on the customer's reduction request and call him back"];
   const d0 = draft();

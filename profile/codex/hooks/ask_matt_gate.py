@@ -26,28 +26,42 @@ STATE_DIR = Path(
 CLAUDE_HOME = Path(
     os.environ.get("GOVERNANCE_CLAUDE_HOME") or Path.home() / ".claude"
 )
+# Issue 1193: every route the ask-matt map (aac-skills/ask-matt/SKILL.md) names, plus direct-answer,
+# the gate's own "no engineering flow" route. test_allowed_flows_follow_the_map reads both files, so
+# a route added to the map and not here, or the reverse, fails the suite.
 ALLOWED_FLOWS = {
     "code-review",
     "codebase-design",
+    "consistency-audit",
     "diagnosing-bugs",
     "direct-answer",
     "domain-modeling",
     "grill-me",
     "grill-with-docs",
+    "grilling",
     "handoff",
     "implement",
     "improve-codebase-architecture",
+    "maintain-repo",
+    "pr",
     "project-harness",
     "prototype",
     "research",
+    "resolving-merge-conflicts",
+    "retro",
     "session-end",
+    "session-start",
     "setup-matt-pocock-skills",
+    "simplify",
     "tdd",
     "teach",
+    "to-questionnaire",
     "to-spec",
     "to-tickets",
     "triage",
+    "wait-what",
     "wayfinder",
+    "wizard",
     # mattpocock/skills renamed writing-great-skills to writing-for-agents (1fc6573); the vendored
     # copy of the old name left aac-skills on 2026-10-01 and the skill now loads from the
     # mattpocock-skills marketplace entry under the new name.
@@ -512,6 +526,19 @@ ROUTE_TREE: dict[str, dict[str, Any]] = {
                        "route": "code-review"},
             "research": {"means": "Investigating a topic against outside sources and writing it up.",
                          "route": "research"},
+            # Issue 1193: the four standalone routes the map names, so Jev can pick them too.
+            "ask-others": {"means": "A questionnaire for someone else to fill in: what is needed is"
+                           " in another person's head, not the user's or the code.",
+                           "route": "to-questionnaire"},
+            "human-steps": {"means": "Steps only a human can take: provisioning infrastructure,"
+                            " setting up credentials or secrets, clicking through a third-party"
+                            " dashboard, a one-off cutover.", "route": "wizard"},
+            "re-explain": {"means": "The user did not follow the assistant's last message and wants"
+                           " it said again in plain words (\"wait, what?\", \"I'm lost\").",
+                           "route": "wait-what"},
+            "agent-docs": {"means": "How to write a document agents read (a skill, AGENTS.md,"
+                           " CLAUDE.md, a pointed-at doc), where the wording itself is the work.",
+                           "route": "writing-for-agents"},
         },
     },
     "settled": {
