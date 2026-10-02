@@ -119,6 +119,9 @@ function New-Fixture {
     Write-Utf8NoBom (Join-Path $config 'gpt-sheets-access-475817-853f8648243b.json') ($key | ConvertTo-Json)
     $client = [ordered]@{ installed = [ordered]@{ client_id = 'fixture'; client_secret = $Sentinel } }
     Write-Utf8NoBom (Join-Path $config 'client_secret_594980791877-fixture.apps.googleusercontent.com.json') ($client | ConvertTo-Json)
+    # The Todoist token where the aac-routines mirror reads it (issue 1194).
+    New-Item -ItemType Directory -Path (Join-Path $config 'aac') -Force | Out-Null
+    Write-Utf8NoBom (Join-Path $config 'aac\todoist_api_token') $Sentinel
 
     # Each stub answers from a marker file in its own directory, so a case flips one probe by
     # creating one file. pyyaml-install creates the marker pyyaml reads, as pip would.
@@ -169,13 +172,16 @@ Join-Path $PSScriptRoot 'desktop-plugins'
         }
     }
     # jev-key answers with where TYPESAFE_API_KEY is set (the jev-key-source file; empty = unset);
-    # jev-live fails when jev-live.dead exists.
+    # jev-live fails when jev-live.dead exists, and exits with the code in jev-live.code when that
+    # exists (2 = HTTP 402, issue 1194).
     Write-Utf8NoBom (Join-Path $stubs 'jev-key-source') 'user'
     Write-Utf8NoBom (Join-Path $stubs 'jev-key.ps1') @'
 [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'jev-key-source'))
 '@
     Write-Utf8NoBom (Join-Path $stubs 'jev-live.ps1') @'
 if (Test-Path (Join-Path $PSScriptRoot 'jev-live.dead')) { exit 1 }
+$f = Join-Path $PSScriptRoot 'jev-live.code'
+if (Test-Path $f) { exit ([int](Get-Content $f)) }
 exit 0
 '@
     # Profile probes: master's plugin version comes from a file; caveman-live exits with the code
@@ -274,16 +280,19 @@ function Set-Routines {
 }
 
 function Invoke-Check {
-    param($Fixture, [switch]$Fix, [switch]$NoStubs, [string]$HomeOverride = '')
+    param($Fixture, [switch]$Fix, [switch]$NoStubs, [string]$HomeOverride = '', [string]$TodoistTokenFile = '')
     $h = if ($HomeOverride) { $HomeOverride } else { $Fixture.Home }
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $Tool, '-UserHome', $h)
     if ($Fix) { $argList += '-Fix' }
     $prevStubs = $env:SETUP_CHECK_STUBS
     $prevSkip = $env:CAVEMAN_DESKTOP_SKIP_CLI
     $prevKey = $env:TYPESAFE_API_KEY
+    $prevTokenFile = $env:TODOIST_API_TOKEN_FILE
     $prevEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
+        # This machine's own TODOIST_API_TOKEN_FILE never reaches a fixture; a case sets its own.
+        $env:TODOIST_API_TOKEN_FILE = $(if ($TodoistTokenFile) { $TodoistTokenFile } else { $null })
         # The check's environment carries the sentinel as the TypeSafe key, so a line that ever
         # echoed the key would fail the no-secret assertion below.
         $env:TYPESAFE_API_KEY = $Sentinel
@@ -296,6 +305,7 @@ function Invoke-Check {
         $env:SETUP_CHECK_STUBS = $prevStubs
         $env:CAVEMAN_DESKTOP_SKIP_CLI = $prevSkip
         $env:TYPESAFE_API_KEY = $prevKey
+        $env:TODOIST_API_TOKEN_FILE = $prevTokenFile
         $ErrorActionPreference = $prevEap
     }
     Assert ("no secret value in the output (case {0})" -f $script:Case) (-not $out.Contains($Sentinel)) $out
@@ -374,6 +384,41 @@ try {
     $r = Invoke-Check $f
     Assert 'a key Jev refuses is a STOP whose to-do replaces the key' `
         (($r.Exit -eq 1) -and ($r.Out -match 'STOP  Jev did not answer a live call') -and (Test-Todo $r.Out 'Replace the TypeSafe key')) $r.Out
+    $f = New-Fixture
+    Write-Utf8NoBom (Join-Path $f.Stubs 'jev-live.code') '2'
+    $r = Invoke-Check $f
+    Assert 'a Jev HTTP 402 is a STOP naming no credits, its to-do tops up TypeSafe and keeps the key (issue 1194)' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  Jev answered HTTP 402 .*no credits') -and (Test-Todo $r.Out 'Top up TypeSafe') -and
+         ($r.Out -notmatch 'Replace the TypeSafe key') -and ($r.Out -notmatch 'Jev did not answer')) $r.Out
+
+    Write-Host 'Todoist token for the aac-routines mirror (issue 1194)'
+    $f = New-Fixture
+    $want = Join-Path $f.Config 'aac\todoist_api_token'
+    $r = Invoke-Check $f
+    Assert 'a token at ~/.config/aac/todoist_api_token is ok under Projects' `
+        ($r.Out -match ('(?ms)^Projects\s*$.*ok    Todoist token for the aac-routines mirror  \(' + [regex]::Escape($want) + '\)')) $r.Out
+    Remove-Item -LiteralPath $want
+    $r = Invoke-Check $f -Fix
+    Assert 'a missing token with no copy to take is a STOP, even with -Fix' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  Todoist token missing') -and (-not (Test-Path -LiteralPath $want))) $r.Out
+    Assert 'its to-do says where to copy the token' (Test-Todo $r.Out ('Copy the Todoist API token .*into ' + [regex]::Escape($want))) $r.Out
+    $legacy = Join-Path $f.Config 'todoist_api_token'
+    Write-Utf8NoBom $legacy $Sentinel
+    $r = Invoke-Check $f
+    Assert 'with a token at ~/.config/todoist_api_token, report-only is a STOP that names it and copies nothing' `
+        (($r.Exit -eq 1) -and ($r.Out -match 'STOP  Todoist token missing where the aac-routines mirror reads it') -and
+         (Test-Todo $r.Out 'Copy-Item') -and (-not (Test-Path -LiteralPath $want))) $r.Out
+    $r = Invoke-Check $f -Fix
+    Assert '-Fix copies ~/.config/todoist_api_token into place and exits 0' `
+        (($r.Exit -eq 0) -and ($r.Out -match 'ok    Todoist token for the aac-routines mirror .*copied by -Fix') -and
+         (Test-Path -LiteralPath $want) -and ([System.IO.File]::ReadAllText($want) -eq $Sentinel)) $r.Out
+    $f = New-Fixture
+    Remove-Item -LiteralPath (Join-Path $f.Config 'aac\todoist_api_token')
+    $elsewhere = Join-Path $f.Stubs 'todoist-token-elsewhere'
+    Write-Utf8NoBom $elsewhere $Sentinel
+    $r = Invoke-Check $f -TodoistTokenFile $elsewhere
+    Assert 'TODOIST_API_TOKEN_FILE naming a token file is ok' `
+        (($r.Exit -eq 0) -and ($r.Out -match ('ok    Todoist token for the aac-routines mirror  \(' + [regex]::Escape($elsewhere) + '\)'))) $r.Out
 
     Write-Host 'Prerequisites'
     foreach ($t in $Tools) {

@@ -9,9 +9,8 @@ command whose text it cannot prove is not git: "... inside a construct too compl
 what it runs cannot be shown not to be git. Refusing to run it". The guard rules on the command's
 *text*, not on what the command would do, so a shape that is provably harmless - a read-only
 `gh api`, a `node` run with one variable set in front of it - is refused all the same. Each
-refusal costs a turn, so reach for the working spelling first. Observed in the waves 4/5 triage
-(issue 358), again in waves 6/7 (issue 373), again in the wave 16 triage (issue 402), and again in
-run 6aaafad4's triage and the 2026-09-17 fleet worktrees (issue 494):
+refusal costs a turn, so reach for the working spelling first (seen in four separate waves:
+issues 358, 373, 402, 494):
 
 | Refused shape | Working spelling |
 | --- | --- |

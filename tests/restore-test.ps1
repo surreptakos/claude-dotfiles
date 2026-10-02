@@ -469,11 +469,13 @@ $StaleSkillText = "---`nname: pre-734-stale`ndescription: written by a pull from
 [System.IO.File]::WriteAllText($StaleSkill, $StaleSkillText, (New-Object System.Text.UTF8Encoding($false)))
 
 # Issue 1068: install.ps1 ends in the setup check, which STOPs (exit 1) on a missing secret file,
-# so the fake home gets stand-ins for the two files the owner copies by hand. They only have to
-# parse; they hold nothing credential-shaped, so the secret guard in section 8 stays meaningful.
+# so the fake home gets stand-ins for the files the owner copies by hand. The JSON ones only have
+# to parse; they hold nothing credential-shaped, so the secret guard in section 8 stays meaningful.
 $SeededSecrets = @(
     @{ Name = 'gpt-sheets-access-475817-853f8648243b.json'; Text = '{"type":"service_account","project_id":"restore-test"}' },
-    @{ Name = 'client_secret_594980791877-restore-test.apps.googleusercontent.com.json'; Text = '{"installed":{"client_id":"restore-test"}}' }
+    @{ Name = 'client_secret_594980791877-restore-test.apps.googleusercontent.com.json'; Text = '{"installed":{"client_id":"restore-test"}}' },
+    # Issue 1194: the Todoist token where the aac-routines mirror reads it.
+    @{ Name = 'aac\todoist_api_token'; Text = 'restore-test' }
 ) | ForEach-Object {
     $path = Join-Path $FakeHome ('.config\' + $_.Name)
     New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null

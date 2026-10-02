@@ -28,7 +28,8 @@ and in aac-routines' `config/desktop-routines.json`, so nothing else would land 
 flipped to enabled on 2026-10-01 (aac-routines PR 677) and the lander's first tick landed the batch.
 
 **How to apply:** the landing path is the `rulings-lander` task on the anchor PC, never the
-session that happens to hold a watch; a Submit comment reaching a session is a courtesy. Name the receiver from `ArtifactComments` `read` on the page, the publisher from
+session that happens to hold a watch; since issue 1239 the rulings page's Submit sends no comment
+at all and the page declares `db` only. For any other page that sends to Claude, name the receiver from `ArtifactComments` `read` on the page, the publisher from
 the session record that lists the artifact (`list_sessions`, `external_metadata.artifacts`) or the
 publish result in that session's own transcript, and the publish time from `Artifact` `list` with
 `scope: files`. A session that cannot land never publishes or watches the rulings page (rule in
