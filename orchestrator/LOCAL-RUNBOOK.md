@@ -247,7 +247,8 @@ slot does this:
    slot 13h45m on 2026-10-01 when "no transcript" read as idle -1m). Every alive line names the
    first transcript write, or `none yet` for a launch that never wrote one.
 3. **Launch the next repo — drain order (Dan, 2026-09-30).** With nothing alive, walk the served
-   rows of `lib/repos.json` in priority order (dotfiles, routines, osh-rfp, sales-cockpit) and
+   rows of `lib/repos.json` in their `priority` order (the file is the only list; Dan reorders it
+   there, as on 2026-10-02 when osh-rfp went first until the CVS bid) and
    take the FIRST that still has work, read from its state issue's JSON block:
    - `lastPassOutcome` null (never served), `success` or `worked`: has work.
    - `empty`, `stalled-*`, `blocked-*`: drained. Has work again only when an issue or PR in that
