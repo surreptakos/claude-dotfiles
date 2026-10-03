@@ -2,8 +2,10 @@
 /**
  * Session start / end checks — for ANY project, not one.
  *
- *   node "$HOME/.agents/skills/session-check/check.js"
- *   node "$HOME/.agents/skills/session-check/check.js" --end
+ *   desktop, the aac-skills plugin (`${CLAUDE_PLUGIN_ROOT}` is the <version> directory):
+ *     node ~/.claude/plugins/cache/claude-dotfiles/aac-skills/<version>/skills/session-check/check.js [--end]
+ *   container, the bootstrap copy (issues 733, 734):
+ *     node ~/.claude/skills/session-check/check.js [--end]
  *
  * Nothing here is hardcoded to a repo. Everything is either universal (git), auto-detected from
  * files that are already there, or read from an optional `.claude/session.json`. A project with
@@ -1137,7 +1139,7 @@ function harnessChecks() {
   // behind
   const shown = s.v1Implicit ? 'v1 (no docs/agents/harness-version.md; pre-marker)' : `v${s.repo}`;
   stop(`harness ${shown} is behind v${s.current} — run \`/project-harness\` (upgrade path, step 7)`);
-  note('the upgrade table lives in project-harness/SKILL.md ("Upgrading an existing install")');
+  note('the upgrade table lives in project-harness/UPGRADES.md');
 }
 
 /* -------------------------------------------------------------- bootstrap ------------------ */
