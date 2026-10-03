@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-10-02T22:22:48Z'
-  previous-modified: '2026-10-02T22:14:43Z'
-  revision: '48'
-  content-sha: 1797b453d359
+  modified: '2026-10-03T19:21:58Z'
+  previous-modified: '2026-10-02T22:22:48Z'
+  revision: '49'
+  content-sha: dedabc725404
 ---
 
 # todoist-triage
@@ -41,7 +41,7 @@ Every open task carries exactly one ball label, or it is in the triage queue.
 
 **Wontfix is where a task-shaped ruling sticks.** It is the `Wontfix` Todoist project (`wontfix_project_id` in the routine repository's `config/task-capture.json`). This skill's queue and the `aac-forgotten-tasks` guard read it through the same matcher with the same evidence bound, so a ruled-out item stays suppressed on both sides until evidence newer than the ruling arrives, then resurfaces (ADR 0009 in the routine repository).
 
-- File one in the same turn Dan rules an item done, dead, not his, or not to be raised again: title, the ruling and its date, the `aac-topic` key, and the regenerating source to suppress. Then delete the live task. Both are one `wontfix` entry in step 5's plan.
+- Move the live task into Wontfix in the same turn Dan rules an item done, dead, not his, or not to be raised again, as one `wontfix` entry in step 5's plan. The task keeps its id, comments, links and `aac-source`/`aac-topic` markers, so they are what suppresses the regenerating source.
 - Dan's word is the only trigger. An item that merely looks stale to you stays in the queue.
 - A task already in Wontfix is Dan's to take out: leave it unmoved, uncompleted, undeleted.
 
@@ -122,7 +122,7 @@ Every write goes through the aac-routines guard, as one plan file (aac-routines 
 
 - **`update`** touches only: `labels` (full replacement — keep `claude` and other non-ball labels), `project_id` (Inbox moves belong to the router), `do_date`, `deadline` when the source names one, `priority` when approved. A `do_date` on a recurring task is refused and the rest of the update still goes: the task keeps its recurrence, and the status names it for Dan to move in Todoist.
 - **`delete`** — a task whose delete the source proves.
-- **`wontfix`** — Dan's in-session ruling on a live task (Wontfix, above): the entry's `title`, and a `ruling` carrying the ruling, its date and the task's `aac-source`/`aac-topic` markers verbatim. The guard files it in the Wontfix project, then deletes the live task only after the entry landed.
+- **`wontfix`** — Dan's in-session ruling on a live task (Wontfix, above): the `task_id`, and a `ruling` carrying what Dan said and its date. The guard comments the ruling on the task, then moves the task into the Wontfix project only after the comment landed. Nothing is copied or deleted, and a blank ruling is refused.
 - **`merge`** — the survivor, the duplicate, and a comment carrying the duplicate's unique text and its `aac-source`/`aac-topic` markers copied verbatim (both routines match a marker as a plain substring, so a paraphrase breaks dedupe). The guard refuses a comment that drops a marker, and deletes the duplicate only after the comment landed — every merge, routine-created duplicates included.
 - **Keep tasks flat** (Dan, 2026-09-21): the guard refuses a `parent_id`, for a merge or a breakdown. A breakdown Dan dictates that needs tracking is a **`breakdown`**: its own Todoist project and the tasks in it; anything smaller stays one task.
 - The guard refuses any write to a task already in Wontfix. Exit 1 lists each refusal and failure: name them in the status. Exit 2 means the plan or the mirror could not be read and nothing was written.
