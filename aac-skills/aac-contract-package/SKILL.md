@@ -2,10 +2,10 @@
 name: aac-contract-package
 description: Create, review or audit an Active Alarm Company (AAC) customer contract package (Schedule of Equipment and Services, master agreement, Rider for Additional Locations). Use when a rep or Sales Admin asks for a contract, schedule or paperwork for a named job, customer or job folder (including a forwarded "please create contract"); when a package needs rebuilding after a fact changes (price, purchase vs. financed, designation, scope); when a package needs reviewing, or the jobs drive sweeping for defects; or for questions on AAC clarifications, exclusions, RMR names and prices, SOW wording, the $5,000 deposit rule, permit responsibility or the Schedule-to-Master mapping. Prefer it over generic document generation or contract review for anything touching an AAC package.
 metadata:
-  modified: "2026-10-02T15:37:28Z"
-  previous-modified: "2026-09-26T03:38:45Z"
-  revision: "2"
-  content-sha: "f60911bfac4e"
+  modified: "2026-10-03T21:40:16Z"
+  previous-modified: "2026-10-02T15:37:28Z"
+  revision: "3"
+  content-sha: "138b3f3afd41"
 ---
 
 # AAC Contract Package
@@ -50,8 +50,8 @@ The procedure is `references/SCHEDULE-GENERATION-PROCEDURE.md`; § numbers below
 5. **Write `_facts.json`** in the job folder: `python scripts/build_package.py "<job folder>" --facts`.
 6. **Build**, which also verifies: `python scripts/build_package.py "<job folder>"`.
 7. **Fix every FAIL, judge every WARN.** Change a fact in `_facts.json` and rebuild; the three documents are only ever written by the builder.
-8. **Run the export pass** (§11a), every step in order, ending with every interim file deleted. The deliverable is the PDF: cell checks cannot stand in for a render.
-9. **Hand off** per §12, showing the stop-slop score.
+8. **Run the export pass** (§11a), every step in order, ending with every interim file deleted. The deliverable is the PDF: cell checks cannot stand in for a render. Its writing step loads `aac-house-writing-standard` (AAC-WR-001), runs `../aac-house-writing-standard/scripts/wr001-lint.js` over the schedule text, and closes on the Rule 166 release check.
+9. **Hand off** per §12. Draft the email under `aac-house-writing-standard`, run `wr001-lint.js` on it until it exits 0, and release it only once Rule 166 passes item by item.
 
 ## Reviewing a package
 

@@ -22,7 +22,7 @@ Everything else below is resolved, and where execution was pending it is recorde
 
 **3. Generation procedure §11, verification discipline.** ~~New.~~ **Resolved 2026-08-19** (wayfinder ticket #4): ratified, §11a included, plus one line in the handoff email for each dismissed WARN.
 
-**4. Generation procedure §12, the handoff email.** ~~New.~~ **Resolved 2026-08-19** (wayfinder ticket #4): ratified as written; the stop-slop scoring rubric is vendored at `skill/stop-slop/` so the 42/60 threshold cites an in-repo file.
+**4. Generation procedure §12, the handoff email.** ~~New.~~ **Resolved 2026-08-19** (wayfinder ticket #4): ratified as written; the stop-slop scoring rubric is vendored at `skill/stop-slop/` so the 42/60 threshold cites an in-repo file. **Superseded 2026-10-02** (Dan, issue 1289): AAC-WR-001 is the only writing authority. The scored pass and its 42/60 threshold are dropped; every writing step in the flow loads `aac-house-writing-standard`, runs `wr001-lint.js`, and closes on the Rule 166 release check. Governed bullet wording from `clarifications.json` stays Dan's as written.
 
 **5. The LEAF SOP.** ~~Issue as v1.0 or hold.~~ **Resolved 2026-08-20** (wayfinder ticket #9): **issued v1.0.** Lender facts rest on LEAF's own lease form and quoting tool; the nine process steps carry no live precedent yet, and the first real financed deal amends the SOP by PR. Status flipped in `00-INDEX.md`; the builder's financed-deal shape (full price in the pricing block, deposit $0.00, LEAF payable clarification, no deposit clarification) now cites an issued SOP.
 

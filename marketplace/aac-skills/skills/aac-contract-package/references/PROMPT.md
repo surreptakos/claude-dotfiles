@@ -1,5 +1,7 @@
 # Active Alarm Contract Package Reviewer — PROMPT.md
 
+**Revision note — 2026-10-02 (rev. 7):** Dan's ruling (issue 1289): AAC-WR-001 is the only writing authority. The `write-like-dan` and `stop-slop` passes and the 42/60 stop-slop score are retired; Voice and length now loads `aac-house-writing-standard`, runs `wr001-lint.js`, and closes on the Rule 166 release check.
+
 **Revision note — 2026-09-22 (rev. 6):** The review email takes the shape Dan sent on the Z-4260 review. (1) Decide, then confirm: where the proposal or a governing source answers a rep question, apply that answer on the schedule and ask the rep to confirm, with the drafter's fallback in a parenthetical on the same question; the separate "Once [rep] answers" block is retired. (2) Drafter to-dos get their own closing block, "[Drafter], please change the following:". (3) A change-list bullet may carry one short reason when it tells the drafter when the same change applies next time; source citations stay out. (4) First person for what the reviewer did ("I rewrote", "I went with $81"); "Thank you," closes. (5) When the reviewer cannot write to the jobs drive, the edited schedule goes as an attachment with an instruction to replace the job-folder copy.
 
 **Revision note — 2026-08-18 (rev. 5):** Cost and speed pass, approved by Dan. (1) `extract_package.py` runs before any document is read; the reviewer reads the extracts and the digest instead of paging through binaries. (2) `verify_workup.py` runs the mechanical workup arithmetic checks before the reviewer reads a single workup cell. (3) The Living Standard's §0 lists, §3a sub quote rules, and §16 escalation list now live here (one copy, per Living Standard §18); the Hard Stop below carries the merged list. (4) Subagent fan-out rules added to File Reading Rules.
@@ -246,12 +248,12 @@ Thank you,
 - An instruction touching the master's ¶3/¶4 recurring boxes names exactly which boxes to check, per Mapping Appendix §1 rule 6 and the RMR Items sheet. If the correct boxes cannot be identified from those sources, instruct IN LIEU OF with the Monthly Total rather than guessing at a box selection (rule 6 owns the full IN LIEU OF rule).
 
 ### Voice and length
-Run three passes on the drafted email, in order:
-1. `write-like-dan` — direct, formal, "we" for the company, "I" for what the reviewer did, contractions where natural, main point early, "Thank you," to close.
-2. `stop-slop` — no em dashes, no adverbs doing vague work, active voice, no throat-clearing openers, varied sentence length.
+AAC-WR-001 is the only writing authority for the email. Run three passes on the drafted email, in order:
+1. **House standard.** Load `aac-house-writing-standard` and draft or revise against the rules its index routes an email to. The shape above still holds: "we" for the company, "I" for what the reviewer did, main point early, "Thank you," to close.
+2. **Lint.** Run `node ../aac-house-writing-standard/scripts/wr001-lint.js <email file>` and fix every finding until it exits 0.
 3. Cut. Strip every source citation and every reason the drafter cannot reuse out of the change list, then target **350 words or fewer** for a single-system package. Measure that target on the review prose: verbatim replacement text and the workup block do not count against it. If it still runs long, the change list is carrying explanation the drafter does not need.
 
-Show the stop-slop score before delivering. Below 42/60, revise and re-score. The scoring rubric — six dimensions rated 1-10: Directness, Rhythm, Trust, Authenticity, Density, Structure — is the vendored stop-slop skill at `skill/stop-slop/SKILL.md` (version 1.1.0-custom).
+Before delivering, confirm the email against WR-001 Rule 166, item by item. A draft that fails any item goes back through the passes; there is no score threshold.
 
 ---
 

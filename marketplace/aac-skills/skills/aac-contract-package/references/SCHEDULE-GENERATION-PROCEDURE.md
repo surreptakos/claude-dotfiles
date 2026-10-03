@@ -295,7 +295,7 @@ Added 2026-08-13 per Dan; expanded the same day after a second round of render f
 
 After the verifier runs clean, run these steps in order. The deliverable that leaves the folder is the **PDF**, not the workbook.
 
-**1. Stop-slop the schedule text.** Run the stop-slop pass over every cell the drafter authored: the SOW, equipment and service descriptions, job-specific clarifications. No em dashes anywhere on the schedule. Set off an aside with a colon, parentheses, or a comma instead. Governed bullet wording from clarifications.json is Dan's and stays as written unless he directs otherwise.
+**1. Hold the schedule text to AAC-WR-001.** Load `aac-house-writing-standard` and apply it to every cell the drafter authored: the SOW, equipment and service descriptions, job-specific clarifications. Export those cells to a text file and run `node ../aac-house-writing-standard/scripts/wr001-lint.js <file> --formal` until it exits 0, then confirm the text against Rule 166 item by item. No em dashes anywhere on the schedule. Set off an aside with a colon, parentheses, or a comma instead. Governed bullet wording from clarifications.json is Dan's and stays as written unless he directs otherwise.
 
 **2. Clean the grid.**
 - Hide unused blank rows in the Equipment and Labor and Services sections. Hide, never delete: the pricing formulas sum fixed ranges, and deleting rows breaks them.
@@ -325,7 +325,7 @@ The Output Contract in PROMPT.md governs the review email, where a reviewer edit
 
 **When the drafter and the reviewer are the same person, the change list drops out.** There is nothing to report; the recipient opens the file. What remains is questions for the rep, what is still the recipient's work in imperative voice, and the conditionals with both branches carrying exact replacement text.
 
-Everything else in the Output Contract still applies: questions first and numbered with one polite lead-in, no workup block when the workup is internally consistent, the customer named by entity or role and never by first name, no reasons and no sources in the instruction lists, and `write-like-dan` then `stop-slop` then cut, with the score shown before delivery.
+Everything else in the Output Contract still applies: questions first and numbered with one polite lead-in, no workup block when the workup is internally consistent, the customer named by entity or role and never by first name, no reasons and no sources in the instruction lists, and the three Voice and length passes (the house standard, `wr001-lint.js` to exit 0, then cut), released only once Rule 166 passes.
 
 ---
 
