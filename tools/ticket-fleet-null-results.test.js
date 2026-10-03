@@ -77,6 +77,32 @@ test('a priorProbe entry with no items array is a failed attempt, not a TypeErro
   assert.match(result.verdict.failures[0], /priorProbe entry for this ticket holds no items array/);
 });
 
+// Run wf_0b138fa5-528: the runtime resolves a subagent that died on the session limit to null.
+// The probe lane reads that as the run's halt (issue 812) rather than burning its attempts.
+test('a prober that resolves null halts the run and starts no further attempt', async () => {
+  const labels = [];
+  const runHalt = helpers.createRunHalt(() => {});
+  const { runProbeLane } = await load(['FLEET-PROBE-LANE'], 'runProbeLane', async (_p, opts) => { labels.push(opts.label); return null; },
+    [], { runHalt, cfg: { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y' } });
+  const result = await runProbeLane(PROBE_TICKET, 0);
+  assert.deepEqual(labels, ['probe:#77.1']);
+  assert.ok(runHalt.halted());
+  assert.ok(result.verdict.failures.some((f) => /run halted after an agent resolved null/.test(f)), JSON.stringify(result.verdict));
+});
+
+test('a probe verifier that resolves null is not re-run and starts no further attempt', async () => {
+  const labels = [];
+  const runHalt = helpers.createRunHalt(() => {});
+  const { runProbeLane } = await load(['FLEET-PROBE-LANE'], 'runProbeLane', async (_p, opts) => {
+    labels.push(opts.label);
+    return opts.label.startsWith('probe:') ? PROBE_RESULT : null;
+  }, [], { runHalt, revParse: async () => 'a'.repeat(40), worktreeMismatch: helpers.worktreeMismatch, cfg: { maxAttempts: 3, deliver: true, implModel: 'x', verifyModel: 'y' } });
+  const result = await runProbeLane(PROBE_TICKET, 0);
+  assert.deepEqual(labels, ['probe:#77.1', 'verify:#77.1']);
+  assert.equal(result.done, false);
+  assert.ok(runHalt.halted());
+});
+
 test('a probe deliverer that returns null is a named delivery failure, not a ticket missing from the result', async () => {
   const logs = [];
   const { runProbeLane } = await load(['FLEET-PROBE-LANE'], 'runProbeLane', async (_p, opts) => {

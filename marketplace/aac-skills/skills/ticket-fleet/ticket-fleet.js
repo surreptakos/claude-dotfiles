@@ -998,12 +998,14 @@ function quotaFailure(message) {
  * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
  * is the line a ticket's failures carry when the halt stopped its retries.
  *
- * `noteDead(who)` is the halt for an agent that resolved null. The Workflow runtime does not reject
- * agent() on a terminal API error: it logs "[label] failed: <message>" and resolves null, so the
- * limit text never reaches the script and `note` never sees it (run wf_0b138fa5-528: 94 agents
- * died on a session limit and no halt was recorded). Only the isolation checkpoint calls it: its
- * agent runs one fixed command, so a null there is a dead agent (the quota, or a user skip), and a
- * checkpoint follows every implementer, so a quota death halts the run one agent later. Returns true.
+ * `noteDead(who)` is the halt for an agent that resolved null. As observed in run wf_0b138fa5-528
+ * (runId 6ac0333b), the Workflow runtime does not reject agent() on a terminal API error: it logs
+ * "[label] failed: <message>" and resolves null, so the limit text never reaches the script and
+ * `note` never sees it (94 agents died on a session limit there and no halt was recorded). The
+ * lanes call it for a null implementer, prober, push or verifier, and the isolation checkpoint for
+ * a null read. A null is a dead agent - the quota, or a user skip - and a skip halting the run is
+ * the cheaper mistake. A later rejection that does carry the limit text fills in the reason and
+ * reset time. Returns true.
  */
 function createRunHalt(log) {
   let halt = null;
@@ -1011,23 +1013,28 @@ function createRunHalt(log) {
     note(message, who) {
       const q = quotaFailure(message);
       if (!q) return false;
-      if (!halt) {
-        halt = Object.assign({ who: who || null }, q);
-        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      if (!halt || halt.dead) {
+        const upgrade = halt !== null;
+        halt = Object.assign({ who: (halt && halt.who) || who || null }, q);
+        if (typeof log === 'function') log(upgrade
+          ? `RUN HALT reason (issue 812): ${who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''} - the limit the earlier null results died on. Message: ${halt.message}`
+          : `RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
       }
       return true;
     },
     noteDead(who) {
       if (!halt) {
-        halt = { who: who || null, reason: 'agent that resolved null (a terminal API error such as the account quota, or a skip)', resetsAt: null, message: `${who || 'an agent'} resolved null; the run log's "[${who || 'label'}] failed:" line names the error` };
-        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} resolved null - the Workflow runtime's answer for a subagent that died on a terminal API error (a session, weekly or rate limit kills every later agent the same way) or was skipped. The error text never reaches the script: the "[label] failed:" log line above names the limit and its reset. No further attempt or ticket starts; agents already in flight settle, then the run reports.`);
+        halt = { who: who || null, dead: true, reason: 'agent that resolved null (a terminal API error such as the account quota, or a skip)', resetsAt: null, message: `${who || 'an agent'} resolved null; the run log's "[${who || 'label'}] failed:" line names the error` };
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} resolved null - the Workflow runtime's answer for a subagent that died on a terminal API error (a session, weekly or rate limit kills every later agent the same way) or was skipped. The error text never reaches the script: the "[label] failed:" log line names the limit and its reset. No further attempt or ticket starts; agents already in flight settle, then the run reports.`);
       }
       return true;
     },
     halted() { return halt !== null; },
     get() { return halt; },
     failure() {
-      return halt ? `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812` : '';
+      if (!halt) return '';
+      if (halt.dead) return 'no further attempt: run halted after an agent resolved null (a terminal API error such as the account quota) - issue 812';
+      return `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812`;
     },
   };
 }
@@ -1471,6 +1478,8 @@ const breaches = []
 const attributed = new Set()
 // Issue 1020: one entry per restored root-tree write - { label, observedBy, who, entries, quarantine }.
 const treeRestores = []
+// Run wf_0b138fa5-528: a root-tree write whose restore agent died on the halt - { label, observedBy, who, entries }.
+const treeLeftDirty = []
 // A leaked path, and the guard's statePath (issue 1207: a fork's guard prints `C:\Users\...`, whose
 // backslashes an unquoted bash word eats), goes into a bash command as ONE word, whatever it holds.
 const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
@@ -1499,6 +1508,7 @@ let orchestratorHead = null      // { branch: string|null, sha } at Setup
 let headWatchUnusable = null     // reason, when the Setup measurement failed
 const headRestores = []          // { label, observedBy, from, to } - one per restore, for the report
 const headRestoreSeen = new Set()
+const headLeftMoved = []         // { label, observedBy, from, target } - a moved HEAD whose restore died on the halt
 
 // Issue 1093: the HEAD read is no longer its own agent. It rides in the checkpoint's one command
 // (checkpointCommand, in the generated block) as two tagged lines - `head <branch|DETACHED>` and
@@ -1817,14 +1827,25 @@ async function treeGuardCheck(label, ticketNumber) {
   // Issue 1020: restore and continue, as issue 1006 does for a moved HEAD. The guard tool moves
   // the tree's copy of each entry into a quarantine inside .git (nothing is deleted), puts the path
   // back as HEAD had it, and re-reads the tree; only an entry it cannot put back ends the chain.
-  let restore = null, restoreError = null
+  const restoreWho = `tree-guard:restore:${label}#${ticketNumber}`
+  let restore = null, restoreError = null, restoreDied = false
   try {
     restore = await agent(
       guardAgentPrompt(`${GUARD_CMD} restore --cwd ${orchestratorCwd} --state ${shellWord(guardStatePath)} ${fresh.map(e => `--path ${shellWord(e.path)}`).join(' ')}`),
-      { label: `tree-guard:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
+      { label: restoreWho, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort }
     )
+    if (restore == null) restoreDied = runHalt.noteDead(restoreWho)
   } catch (err) {
-    restoreError = unusableReason(`tree-guard:restore:${label}#${ticketNumber}`, (err && err.message) || err)
+    restoreError = unusableReason(restoreWho, (err && err.message) || err)
+    restoreDied = runHalt.note((err && err.message) || err, restoreWho) === true || runHalt.halted()
+  }
+  // Run wf_0b138fa5-528: a restore agent that died on the run's halt restored nothing. The write
+  // the read saw is real, so it reaches the run result - as NOT AUDITED and left dirty, not a
+  // breach; the halt already stops every delivery.
+  if (restoreDied) {
+    treeLeftDirty.push({ label, observedBy: ticketNumber, who, entries })
+    log(`Orchestrator tree LEFT DIRTY at ${label} (ticket #${ticketNumber}): ${who} wrote ${entries.join('; ')} into ${orchestratorCwd}, and ${restoreWho} died on the halt (issue 812) before it could put them back; NOT AUDITED, not a breach - check ${orchestratorCwd}'s status and restore it by hand before the next run (RECOVERY.md).`)
+    return
   }
   let restored = null
   try { restored = JSON.parse(String((restore && restore.stdout) || '')) } catch (e) { restored = null }
@@ -1883,6 +1904,7 @@ async function headCheck(label, ticketNumber, now) {
   // re-read would die the same way. That is NOT AUDITED, never a breach - but a HEAD the read did
   // see moved is said out loud, since nothing put it back.
   if (restoreDied) {
+    headLeftMoved.push({ label, observedBy: ticketNumber, from: now.head ? describeHead(now.head) : `unreadable at ${label}`, target })
     log(`Orchestrator HEAD LEFT MOVED at ${label} (ticket #${ticketNumber}): the read found it ${now.head ? `on ${describeHead(now.head)}` : 'unreadable'}, and ${restoreWho} died on the halt (issue 812) before it could put it back onto ${target}; NOT AUDITED, not a breach - check ${orchestratorCwd}'s HEAD and status, and restore it by hand before the next run (RECOVERY.md).`)
     return 'halted'
   }
@@ -2519,6 +2541,8 @@ Return structured output only.`,
       probeError = unusableReason(`probe:#${t.number}.${attempt}`, (err && err.message) || err)
       probe = null
     }
+    // Run wf_0b138fa5-528: a null prober is the runtime's terminal API error - halt the run.
+    if (probe == null && !reuse && probeError === null) runHalt.noteDead(`probe:#${t.number}.${attempt}`)
     // `items` is schema-checked on an agent result but not on a priorProbe entry, which arrives
     // verbatim from args: an entry without an array there is no probe output, not a TypeError.
     if (!probe || !Array.isArray(probe.items) || !probe.items.length) {
@@ -2526,6 +2550,7 @@ Return structured output only.`,
         ? unusableVerdict(probeError, `probe:#${t.number}.${attempt}`)
         : { pass: false, evidence: 'prober returned null or no items', failures: [reuse ? 'args.priorProbe entry for this ticket holds no items array - no probe output produced' : 'no probe output produced'] }
       if (probeError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      if (runHalt.halted()) { haltedAt = attempt; break }
       continue
     }
 
@@ -2566,6 +2591,9 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
         runHalt.note((err && err.message) || err, verifyLabel)
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
+      // Run wf_0b138fa5-528: a null verdict is the runtime's terminal API error, not one to re-run.
+      const verdictDied = lastVerdict == null
+      if (verdictDied) runHalt.noteDead(verifyLabel)
 
       // Probe-lane isolation checkpoint (aac-routines issue 192, claude-dotfiles issue 493): the
       // probe lane's verifier is the one probe-lane agent that is NOT worktree-isolated - the
@@ -2581,6 +2609,7 @@ Clean up your scratch worktree (git worktree remove) when done. Make no reposito
       // later read (the retry prompt, the run report) sees an array.
       if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
       if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      if (verdictDied) { haltedAt = attempt; mismatch = null; break }
       mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of origin/${scout.defaultBranch}`)
       if (!mismatch) break
       log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
@@ -3015,6 +3044,9 @@ Return structured output only.`,
       implError = unusableReason(`impl:#${t.number}.${attempt}`, (err && err.message) || err)
       impl = null
     }
+    // Run wf_0b138fa5-528: a null implementer is how the runtime reports a terminal API error such
+    // as the session limit - halt here, independent of the checkpoint (which may be off).
+    if (impl == null && implError === null) runHalt.noteDead(`impl:#${t.number}.${attempt}`)
 
     // Checkpoint 1 of 4 (aac-routines issue 192): the orchestrator's own tree, right after this
     // ticket's implementer returned. A throw here drops the ticket out of the pipeline, so its
@@ -3026,6 +3058,7 @@ Return structured output only.`,
         ? unusableVerdict(implError, `impl:#${t.number}.${attempt}`)
         : { pass: false, evidence: 'implementer returned null or nothing committed', failures: ['no commit produced'] }
       if (implError) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      if (runHalt.halted()) { haltedAt = attempt; break }
       continue
     }
     // The implementer's self-reported branch never reaches a prompt: it is an agent result, so
@@ -3063,11 +3096,15 @@ Do not cd anywhere first. Do not create, edit, stage, commit, amend, rebase or d
       } catch (err) {
         runHalt.note((err && err.message) || err, `push:#${t.number}.${attempt}`)
         log(`${unusableReason(`push:#${t.number}.${attempt}`, (err && err.message) || err)} - ${branch} may exist only in this container until Deliver pushes it.`)
-        pushBack = null
+        pushBack = false
       }
+      // Run wf_0b138fa5-528: null (not the catch's false) is the runtime's terminal API error.
+      if (pushBack == null) runHalt.noteDead(`push:#${t.number}.${attempt}`)
       if (pushBack && pushBack.pushed) branchPushed = true
       if (pushBack && pushBack.pushed) log(`#${t.number}.${attempt}: ${branch} is on origin before verification (issue 405) - the implementer did not push it, the run did.`)
       else log(`#${t.number}.${attempt}: ${branch} could NOT be pushed to origin - ${stableText(pushBack && pushBack.output) || 'no git output reported'}. The branch is local only until Deliver pushes it; a container death before then loses it.`)
+      // Issue 812: no verifier starts on a run halted while this push was in flight.
+      if (runHalt.halted()) { haltedAt = attempt; lastVerdict = null; break }
     }
 
     // Blind verifier: gets branch + criteria ONLY - never the implementer's self-report (conformity
@@ -3114,6 +3151,10 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
         runHalt.note((err && err.message) || err, verifyLabel)
         lastVerdict = unusableVerdict((err && err.message) || err, verifyLabel)
       }
+      // Run wf_0b138fa5-528: a null verdict is the runtime's terminal API error, not a verdict to
+      // re-run; the halt stops the rerun and the next attempt.
+      const verdictDied = lastVerdict == null
+      if (verdictDied) runHalt.noteDead(verifyLabel)
 
       // Checkpoint 2 of 4 (aac-routines issue 192): straight after the verifier, the one fleet
       // sub-session that runs unisolated in the orchestrator's own checkout - the phase the
@@ -3128,6 +3169,7 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       // later read (the retry prompt, the run report) sees an array.
       if (lastVerdict && !Array.isArray(lastVerdict.failures)) lastVerdict.failures = []
       if (lastVerdict.unusable) log(`${lastVerdict.failures[0]} - attempt recorded as failed.`)
+      if (verdictDied) { haltedAt = attempt; mismatch = null; break }
       mismatch = worktreeMismatch(lastVerdict, expectedHead, `the tip of ${branch}`)
       if (!mismatch) break
       log(`#${t.number}.${attempt}: verdict rejected - ${mismatch}.${pass === 1 ? ' Re-running the verifier once.' : ''}`)
@@ -3479,6 +3521,12 @@ return {
     .concat(headWatchUnusable ? [{ ticket: null, kind: 'orchestrator-head', branch: null, detail: headWatchUnusable }] : [])
     .concat(headRestores.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
       detail: `orchestrator isolation breach: HEAD ${/^unreadable/.test(h.from) ? h.from : `moved to ${h.from}`} during the wave; restored onto ${h.to} at ${h.label} and the wave continued (issues 807, 1006). Check the orchestrator checkout's reflog and stash list for what the move left behind.` })))
+    // Run wf_0b138fa5-528: a moved HEAD whose restore agent died on the halt - not a breach, and
+    // not put back either, so the result says so rather than leaving it to the log.
+    .concat(headLeftMoved.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
+      detail: `orchestrator HEAD found ${/^unreadable/.test(h.from) ? h.from : `on ${h.from}`} at ${h.label}; its restore onto ${h.target} died on the run's halt (issue 812), so it is NOT restored - check the orchestrator checkout's HEAD and status and restore it by hand before the next run (RECOVERY.md).` })))
+    .concat(treeLeftDirty.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
+      detail: `${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout, caught at ${t.label}; its restore died on the run's halt (issue 812), so it is NOT restored - check the checkout's status and restore it by hand before the next run (RECOVERY.md).` })))
     // Issue 1020: a root-tree write a checkpoint caught and put back.
     .concat(treeRestores.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
       detail: `orchestrator isolation breach: ${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout; caught at ${t.label}, moved to ${t.quarantine || 'the guard quarantine'} and restored, and the wave continued (issues 1006, 1020).` })))

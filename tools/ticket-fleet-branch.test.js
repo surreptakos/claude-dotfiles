@@ -2787,7 +2787,7 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}, scopeOverrides = {})
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
   const logs = [];
-  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable };\n}`);
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, headLeftMoved, treeLeftDirty };\n}`);
   const inner = await wrapper(laneScope(Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
@@ -2797,6 +2797,8 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}, scopeOverrides = {})
     }, cfgOverrides),
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     checkpointCommand, parseCheckpointOutput,
+    // A real, un-halted run halt: the permissive stub answers halted() with a truthy proxy.
+    runHalt: createRunHalt(() => {}),
   }, scopeOverrides)));
   return Object.assign(inner, { logs });
 }
@@ -3353,12 +3355,67 @@ test('treeGuardCheck: a moved HEAD whose restore agent dies is logged as left mo
     return null;
   };
   const runHalt = createRunHalt(() => {});
-  const { treeGuardCheck, breaches, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  const { treeGuardCheck, breaches, logs, headLeftMoved } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
   await treeGuardCheck('deliver', 7);
   assert.deepEqual(breaches, []);
+  assert.deepEqual(headLeftMoved, [{ label: 'deliver', observedBy: 7, from: 'detached bbbbbbbbbbbb', target: 'main (aaaaaaaaaaaa)' }],
+    'the unrestored HEAD reaches the run result, not only the log');
   assert.ok(runHalt.halted());
   assert.deepEqual(labels, ['isolation:setup', 'isolation:deliver#7', 'orchestrator-head:restore:deliver#7']);
   assert.ok(logs.some((l) => /HEAD LEFT MOVED at deliver/.test(l) && /restore it by hand/.test(l)), JSON.stringify(logs));
+});
+
+test('treeGuardCheck: a root-tree write whose restore agent dies is listed as left dirty and halts the run, not a breach (wf_0b138fa5-528)', async () => {
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label === 'isolation:setup') return QUOTA_SETUP;
+    if (opts.label === 'isolation:deliver#8') return { exitCode: 1, stdout: isolationStdout({ head: MAIN_HEAD, guard: { newEntries: [{ status: 'M ', path: 'README.md' }] } }), stderr: '' };
+    return null;
+  };
+  const runHalt = createRunHalt(() => {});
+  const { treeGuardCheck, breaches, treeLeftDirty, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  await treeGuardCheck('deliver', 8);
+  assert.deepEqual(breaches, []);
+  assert.ok(runHalt.halted());
+  assert.equal(treeLeftDirty.length, 1);
+  assert.deepEqual(treeLeftDirty[0].entries, ['M  README.md']);
+  assert.ok(logs.some((l) => /tree LEFT DIRTY at deliver/.test(l)), JSON.stringify(logs));
+});
+
+// Reviewer finding on PR 1365: with the tree guard and the HEAD watch both off, no checkpoint
+// runs, so the lane itself must read a null implementer or verifier as the halt.
+test('code lane: a null implementer halts the run with no checkpoint and no retry (wf_0b138fa5-528)', async () => {
+  const calls = [];
+  const runHalt = createRunHalt(() => {});
+  const { result } = await driveCodeLane(FLEET_SCRIPT, async (_p, opts) => { calls.push(opts.label); return null; },
+    { number: 5, title: 't', criteria: 'c', kind: 'code' }, 0, {}, 'inv1', null, { runHalt });
+  assert.deepEqual(calls, ['impl:#5.1'], 'no attempt 2 or 3 after the runtime reported a dead implementer');
+  assert.ok(runHalt.halted());
+  assert.ok(result.verdict.failures.some((f) => /run halted after an agent resolved null/.test(f)), JSON.stringify(result.verdict));
+});
+
+test('code lane: a null verifier is not re-run and starts no further attempt (wf_0b138fa5-528)', async () => {
+  const calls = [];
+  const runHalt = createRunHalt(() => {});
+  await driveCodeLane(FLEET_SCRIPT, async (prompt, opts) => {
+    calls.push(opts.label);
+    if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    return null;
+  }, { number: 6, title: 't', criteria: 'c', kind: 'code' }, 0, {}, 'inv1', null, { runHalt, revParse: async () => 'a'.repeat(40) });
+  assert.deepEqual(calls, ['impl:#6.1', 'verify:#6.1']);
+  assert.ok(runHalt.halted());
+});
+
+test('runHalt: a null-agent halt takes the limit and reset time from a later rejection that carries them', () => {
+  const logs = [];
+  const runHalt = createRunHalt((m) => logs.push(m));
+  runHalt.noteDead('impl:#1.1');
+  assert.match(runHalt.failure(), /resolved null/);
+  assert.equal(runHalt.note("You've hit your session limit · resets 8:10pm (America/Chicago)", 'verify:#2.1'), true);
+  assert.deepEqual([runHalt.get().reason, runHalt.get().resetsAt, runHalt.get().who], ['session limit', '8:10pm (America/Chicago)', 'impl:#1.1']);
+  assert.match(runHalt.failure(), /run halted on the session limit \(resets 8:10pm/);
+  runHalt.note('HTTP 429 Too Many Requests', 'x');
+  assert.equal(runHalt.get().reason, 'session limit', 'a real limit is never overwritten');
+  assert.equal(logs.filter((m) => m.startsWith('RUN HALTED')).length, 1);
 });
 
 test('a wave that hits the session limit after one implementer ends halted with no breach, the rest not attempted (wf_0b138fa5-528)', async () => {

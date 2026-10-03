@@ -47,11 +47,13 @@ treated as a failed attempt 1: attempt 2 runs the stage normally.
 Run `6ac0333b` (`wf_0b138fa5-528`, 2026-10-02) hit the account's session limit mid-wave and
 threw "orchestrator worktree isolation breached" with twenty entries reading `orchestrator HEAD
 unreadable at implement-attempt1 and a restore ... did not put it back (exit=null stderr=)`. No
-breach had happened. The Workflow runtime resolves `agent()` to null when a subagent dies on a
-terminal API error, and logs `[<label>] failed: You've hit your session limit ...` without
-handing the script the text, so the isolation reads, restores and re-reads all came back null.
-The fleet now treats a null checkpoint agent as NOT AUDITED and halts the run (issue 812). An
-older copy of the script, or a run whose log shows `[isolation:...] failed:` lines naming a limit
+breach had happened. As observed in that run, the Workflow runtime resolved `agent()` to null for
+each subagent that died on the limit and logged `[<label>] failed: You've hit your session limit
+...` itself, so the script never saw the text, and the isolation reads, restores and re-reads all
+came back null. The fleet now treats a null implementer, prober, push, verifier or checkpoint
+agent as a dead agent: the run halts (issue 812), the checkpoint is NOT AUDITED, and a moved HEAD
+or tree write that a dead restore left in place is listed under `inconsistent`. An older copy of
+the script, or a run whose log shows `[isolation:...] failed:` lines naming a limit
 beside the breach, still needs this check:
 
 1. Check the orchestrator checkout first: `git -C <checkout> symbolic-ref --short HEAD`,

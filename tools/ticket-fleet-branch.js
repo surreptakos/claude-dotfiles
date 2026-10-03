@@ -928,12 +928,14 @@ function quotaFailure(message) {
  * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
  * is the line a ticket's failures carry when the halt stopped its retries.
  *
- * `noteDead(who)` is the halt for an agent that resolved null. The Workflow runtime does not reject
- * agent() on a terminal API error: it logs "[label] failed: <message>" and resolves null, so the
- * limit text never reaches the script and `note` never sees it (run wf_0b138fa5-528: 94 agents
- * died on a session limit and no halt was recorded). Only the isolation checkpoint calls it: its
- * agent runs one fixed command, so a null there is a dead agent (the quota, or a user skip), and a
- * checkpoint follows every implementer, so a quota death halts the run one agent later. Returns true.
+ * `noteDead(who)` is the halt for an agent that resolved null. As observed in run wf_0b138fa5-528
+ * (runId 6ac0333b), the Workflow runtime does not reject agent() on a terminal API error: it logs
+ * "[label] failed: <message>" and resolves null, so the limit text never reaches the script and
+ * `note` never sees it (94 agents died on a session limit there and no halt was recorded). The
+ * lanes call it for a null implementer, prober, push or verifier, and the isolation checkpoint for
+ * a null read. A null is a dead agent - the quota, or a user skip - and a skip halting the run is
+ * the cheaper mistake. A later rejection that does carry the limit text fills in the reason and
+ * reset time. Returns true.
  */
 function createRunHalt(log) {
   let halt = null;
@@ -941,23 +943,28 @@ function createRunHalt(log) {
     note(message, who) {
       const q = quotaFailure(message);
       if (!q) return false;
-      if (!halt) {
-        halt = Object.assign({ who: who || null }, q);
-        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      if (!halt || halt.dead) {
+        const upgrade = halt !== null;
+        halt = Object.assign({ who: (halt && halt.who) || who || null }, q);
+        if (typeof log === 'function') log(upgrade
+          ? `RUN HALT reason (issue 812): ${who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''} - the limit the earlier null results died on. Message: ${halt.message}`
+          : `RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
       }
       return true;
     },
     noteDead(who) {
       if (!halt) {
-        halt = { who: who || null, reason: 'agent that resolved null (a terminal API error such as the account quota, or a skip)', resetsAt: null, message: `${who || 'an agent'} resolved null; the run log's "[${who || 'label'}] failed:" line names the error` };
-        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} resolved null - the Workflow runtime's answer for a subagent that died on a terminal API error (a session, weekly or rate limit kills every later agent the same way) or was skipped. The error text never reaches the script: the "[label] failed:" log line above names the limit and its reset. No further attempt or ticket starts; agents already in flight settle, then the run reports.`);
+        halt = { who: who || null, dead: true, reason: 'agent that resolved null (a terminal API error such as the account quota, or a skip)', resetsAt: null, message: `${who || 'an agent'} resolved null; the run log's "[${who || 'label'}] failed:" line names the error` };
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} resolved null - the Workflow runtime's answer for a subagent that died on a terminal API error (a session, weekly or rate limit kills every later agent the same way) or was skipped. The error text never reaches the script: the "[label] failed:" log line names the limit and its reset. No further attempt or ticket starts; agents already in flight settle, then the run reports.`);
       }
       return true;
     },
     halted() { return halt !== null; },
     get() { return halt; },
     failure() {
-      return halt ? `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812` : '';
+      if (!halt) return '';
+      if (halt.dead) return 'no further attempt: run halted after an agent resolved null (a terminal API error such as the account quota) - issue 812';
+      return `no further attempt: run halted on the ${halt.reason}${halt.resetsAt ? ` (resets ${halt.resetsAt})` : ''} - issue 812`;
     },
   };
 }
