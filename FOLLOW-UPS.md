@@ -856,3 +856,73 @@ ode --test\ on the Windows desktop. It spawns python3 and splits on '\n'. Python
 - Assumption: for to-tickets' sub-issue row I named `sub_issue_write` method `add` and said it takes the child's `sub_issue_id` (the issue ID from `issue_read`, not its number), because the MCP schema says 'ID is not the same as issue number'. `issue_write` method `create` also accepts `parent_issue_number` to attach the new issue at creation. I did not add that alternative because the ticket asked only for the rename.
 - tools/aac-design-doc-audit.test.js (tests 90, 91) and tools/aac-design-drive-audit.test.js (tests 96, 97) fail in this cloud container with 'doc_audit: LibreOffice could not convert the file under Carlito'. soffice is installed but the Carlito font is not (fc-list finds no carlito), so `node --test tools/*.test.js tests/*.test.js` exits 1 here whatever the branch changes. The fix is either to install the Carlito font in the container setup or to have those tests skip when Carlito is missing.
 - Assumption for issue 1291: the old ask-matt line said not to use the /anthropic-skills: copy. The new one still says so, but as 'this repo's copy, not the Anthropic plugin's', without spelling out the prefixed command name. That way the criterion that ask-matt never routes to anthropic-skills:consolidate-memory holds under a plain grep. The closing sentence also changed from 'reach for the two above' to 'reach for one of the three alone', because the maintain-repo entry now lists three steps. ask-matt has no entry of its own for /ticket-reaper.
+
+## Triage: runs 6abfca3e and 6abee17d discoveries (issue 1318)
+
+One outcome per bullet. A is run 6abfca3e (17 bullets, PR 1295) and B is run 6abee17d (22 bullets, PR 1280), each numbered in its section's order. The tracker was read on 2026-10-03. Nothing was posted from this pass: claude-dotfiles is a public repo, and this worker had no owner go-ahead to post issues or comments. The two comments and one ticket the bullets need are drafted under "To post" with their targets, ready to send as written.
+
+### Run 6abfca3e
+
+- A1 (Day Board republish): covered by open #1352, criterion 3. PR 1344 makes every triage run republish the board from master's day-board.html with the header's capabilities. The part #1352 does not name, connecting a "GitHub" connector and checking the first draft, is draft comment C1.
+- A2 (GitHub connector name, tool names and result shape not checked live): draft comment C1 on #1352.
+- A3 (scope user:surreptakos; review comments not built): struck. The reading is recorded in merged PR 1287, and #1199 closed with every box ticked.
+- A4 (report-evidence check accepts github/pr; the money pattern skips pr/issue numbers): struck. This describes merged PR 1287 behaviour, and no defect is named.
+- A5 (69-character fixture line; grouped outcome lines): struck. This describes the existing gate rule and the prompt's grouping instruction, and no defect is named.
+- A6 (issue 1190: no script-side shell exists; carried checkpoint reads instead): draft comment C2 on #1190. The ticket has no comment, and attempt 3 is only on branch agent/issue-1190-attempt3-wf_6abfca3e-w1.
+- A7 (trade-off of carried checkpoint reads): draft comment C2 on #1190.
+- A8 (budget scope of 20 or 21 agents): draft comment C2 on #1190.
+- A9 (the aac-routines and aac-sales-cockpit forks keep per-checkpoint agents until re-copied): draft comment C2 on #1190.
+- A10 (pre-PR-1167 cloud master wrote state issue 76 through a shell script): struck as superseded. #1140 closed 2026-10-02: the 2026-10-02 cloud pass wrote its heartbeats on #959 through issue_write (https://github.com/surreptakos/claude-dotfiles/issues/1140#issuecomment-5962677318).
+- A11 (unnumbered heartbeat and state-only edits on issue 76 from the same session): struck as superseded. The same 2026-10-02 pass wrote "Heartbeat 1 — <UTC>" in the runbook format, as cited on #1140.
+- A12 (no recurring cloud master Routine, so #1140 had no recheck event): struck as moot. A cloud pass ran on 2026-10-02, and #1140 closed on it.
+- A13 (criterion 2 of #1087 not met, 15 ids reproducible): already on #1087. The verifier comment https://github.com/surreptakos/claude-dotfiles/issues/1087#issuecomment-5955758808 lists the 15 ids, the byte-identical comparison and "Criterion 2 is therefore NOT met". Whether those 15 need an owner ruling, and so the ready-for-human label, is triage's call on #1087.
+- A14 (criterion 4 met only on the unmerged cockpit branch): already on #1087 in the same comment, which says the comparison "is pushed on a cockpit branch only. It has no PR and is not on main".
+- A15 (unmerged branch agent/issue-1087-attempt3-wf_6abee17d-w33, never run against the rep board): already on #1087 in the same comment, which says ledger_run.py exists only on the unmerged attempt 1 to 3 branches and names merging one as the unblock.
+- A16 (pr753.diff not committed; path filter only in prose): already on #1087 in the same comment, which records the exact diff command and its 26-file pathspec.
+- A17 (master web_audit.js writes no styles.json; review_set of 11 files): already on #1087 in the same comment ("Master's bundle review_set is 11 files"; styles.json comes from the unmerged attempt 2 branch).
+
+### Run 6abee17d
+
+- B1 (meaning: --direct required, --end required, name match on the first word): struck. #1243 closed with PR 1257 merged, and the assumption is recorded there.
+- B2 (a date range counts as two dates): struck as superseded. Issue 1247's eval (https://github.com/surreptakos/claude-dotfiles/issues/1247#issuecomment-5947249611) changed it: separate_dates in review_meaning.py now counts a range, or a due date and its close date, as one event.
+- B3 (CLI tests are a Python unittest in their own workflow): struck. This describes landed test layout, and no defect is named.
+- B4 (an unguarded `from docx import Document` makes a missing python-docx exit 1, read as fixes, not 2): new ticket T1 drafted below. No open ticket covers it, and #1246, which the bullet pointed to, is closed.
+- B5 (cp1252 cannot read the review scripts as text): struck. The scripts run, and no tool that reads them without encoding='utf-8' was found failing.
+- B6 (Gate 1 `check` and `meaning` overlap on a Guidance point's first word): struck. The overlap is deliberate.
+- B7 (#1243 to #1246 to be checked against the branch and closed): done on the tracker. #1243 and #1246 are closed. #1244 and #1245 were checked on 2026-10-02 and reopened for one unmet box each.
+- B8 (live fixture run; s4_restate weak): comment on #1247 (https://github.com/surreptakos/claude-dotfiles/issues/1247#issuecomment-5947269067). #1247's eval then set the marks in PR 1286.
+- B9 (thresholds provisional; private eval not run): done. #1247 closed when PR 1286 set the thresholds from the eval over the private reviews.
+- B10 (the stub answers a Choice question one-hot, so the read band is untested): on the reopened tickets. See https://github.com/surreptakos/claude-dotfiles/issues/1244#issuecomment-5956659400 and https://github.com/surreptakos/claude-dotfiles/issues/1245#issuecomment-5956659858. Both name the jev.py stub change.
+- B11 (the Bob SEER model ends with "ought to"): ticket #1282, with owner ruling https://github.com/surreptakos/claude-dotfiles/issues/1282#issuecomment-5956198809.
+- B12 (assumptions (a) to (f) where the spec was thin): struck. These are recorded in merged PR 1257, and (f) matches separate_dates today. #1348 (two-project examples) is about example_one, not the account-list rule in (a).
+- B13 (CI installs python-docx with REVIEW_MEANING_REQUIRE_DOCX=1): struck as landed. See .github/workflows/skill-tests.yml.
+- B14 (osh-rfp-access named a database that was only planned): comment on #1241 (https://github.com/surreptakos/claude-dotfiles/issues/1241#issuecomment-5947269304). PR 1353 then rewrote the skill from osh-rfp main (https://github.com/surreptakos/claude-dotfiles/issues/1241#issuecomment-5962756997).
+- B15 (the 'data/ files' wording read as record/*/data/): struck. The assumption is recorded, and PR 1353 re-read osh-rfp main for the skill's sources.
+- B16 (the base64 trap is in no osh-rfp memory note): struck. The skill states the trap from the connector's own schema, so no reader misses it. A note in osh-rfp is optional and belongs to that repo.
+- B17 (public-repo boundary kept for the osh-rfp skill): struck. This describes a boundary that was followed, and no defect is named.
+- B18 (osh-rfp's CLAUDE.md has no pointer to the skill): struck. The skill loads through its description, and osh-rfp's CLAUDE.md still names nothing about it (read 2026-10-03), so a pointer would prevent no mistake.
+- B19 (claude-md-lint flags the new SKILL.md): struck. That linter gates CLAUDE.md files, not skills.
+- B20 (criterion 3 told Dan to run `claude plugin update`): struck. The standing ruling in CLAUDE.md is that the marketplace's autoUpdate delivers on merge.
+- B21 (rulings page not republished): comment on #1239 (https://github.com/surreptakos/claude-dotfiles/issues/1239#issuecomment-5947269524). The desktop attempt is blocked on the organization login (https://github.com/surreptakos/claude-dotfiles/issues/1239#issuecomment-5962699051).
+- B22 (nothing else in the rulings template used `comments`): struck. The assumption is recorded, PR 1251 merged, and rulings-page.md says the page declares `db` only.
+
+### To post
+
+C1, a comment on #1352 (from A1 and A2):
+
+> From fleet run 6abfca3e (PR 1287, Day Board GitHub source): when you read the board version this run publishes, also check the huddle draft's GitHub source. The page calls a claude.ai connector shown as "GitHub" with search_pull_requests and search_issues ({query, perPage}). It reads the REST search shape, which was never checked against a live call. Until a connector of that name is connected on Dan's account, the draft names the source under "Could not read: GitHub: <code>" and drafts from the other four sources. Per day-board.md, the connector is not done until one real call from the published page succeeds.
+
+C2, a comment on #1190 (from A6 to A9):
+
+> Attempt 3 (branch agent/issue-1190-attempt3-wf_6abfca3e-w1, fleet run 6abfca3e) took one reading of criteria 1 and 2: the Workflow runtime has no script-side shell, since its reference says scripts have no filesystem or Node.js API access. So each one-command read now rides in an agent the wave already starts: the implementer and push step return remoteTip, the prober returns the default branch's tip, the verifier runs the Implement checkpoint first, the deliverer runs Deliver last, and the post-wave guard runs pre-report first. A read that is missing, refused, not whole, or older than a restore falls back to an isolation agent. Trade-offs: the Implement verdict arrives after the verifier runs, and the 20-agent count holds only for a 4-ticket wave with no blocker edges. The aac-routines and aac-sales-cockpit forks keep the old per-checkpoint agents until re-copied, as INTERNALS.md says. If the ticket means a runtime-level shell, that is a Workflow runtime feature request outside this repo, and it needs the owner's ruling before another attempt.
+
+T1, a new ticket (from B4):
+
+> Title: Review scripts exit 1 (fixes) instead of 2 (could not check) when python-docx is missing
+>
+> `aac-skills/aac-performance-review-audit/review_gate_tools.py` (line 27) and `aac-skills/aac-review-self-check/review_format_check.py` (line 21) run `from docx import Document` at module top. On a machine without python-docx, every command, `meaning` included, dies with an ImportError traceback and exit 1. The usage text defines exit 1 as fixes and exit 2 as could not check, so a missing dependency reads as a review defect.
+>
+> Acceptance criteria:
+> - [ ] With python-docx absent, every command of both scripts prints one line naming the missing dependency and exits 2
+> - [ ] A test drives that path (for example, by hiding the module) and asserts exit 2
+> - [ ] The byte-identical copies stay identical, and the stamps check exits 0
