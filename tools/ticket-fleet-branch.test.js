@@ -31,6 +31,7 @@ const {
   LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
   quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
+  foreignClosingKeywords, prBodyLintCommand,
 } = require('./ticket-fleet-branch.js');
 // Issue 488: every slice between two literals in this file goes through these, so a renamed anchor
 // fails the assertion that depends on it instead of silently slicing to end-of-file.
@@ -337,6 +338,43 @@ test(`fleet script ${FLEET_SCRIPT_REL} opens PRs through REST on the gh instrume
   assert.match(ghRules.prCreate(bodyFile), /NEVER `gh pr create`/,
     'the prompt must name the GraphQL-backed spelling it forbids (HTTP 403 here - issues 130, 322)');
   assert.match(loadTrackerRules(FLEET_SCRIPT, 'mcp').prCreate(bodyFile), /mcp__github__create_pull_request/);
+});
+
+// Issue 1361: osh-rfp PR #169 wrote that the owner "closed #34, #39, ..." and its merge closed two
+// unfinished issues. The deliverer lints the body file before the PR call, and the lint refuses a
+// closing keyword aimed at any issue but the delivered ticket.
+test('foreignClosingKeywords flags prose closing another issue, allows the delivered ticket only', () => {
+  const body = 'Corrects the claim that the owner closed #34, #39 and #41.\n\nCloses #169\n`fixes #7` in code is ignored.';
+  assert.deepEqual(foreignClosingKeywords(body, 169), ['closed #34']);
+  assert.deepEqual(foreignClosingKeywords('Fixes: other/repo#169 and resolved #12', 169), ['Fixes: other/repo#169', 'resolved #12']);
+  assert.deepEqual(foreignClosingKeywords('Closes #169', null), ['Closes #169'], 'a Refs-only PR closes nothing, its own ticket included');
+  assert.deepEqual(foreignClosingKeywords('#34 was closed; Refs #169', 169), []);
+});
+
+test(`fleet script ${FLEET_SCRIPT_REL} refuses a PR body closing another issue before the PR is opened (issue 1361)`, (t) => {
+  if (BASH.skip) { t.skip(BASH.skip); return; }
+  const dir = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'pr-body-lint-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'bad.md'), 'Corrects the claim that the owner closed #34.\n\nCloses #169\n');
+    fs.writeFileSync(path.join(dir, 'good.md'), 'Plain prose; #34 was closed earlier.\n\nCloses #169\n');
+    const refused = BASH.run(['-c', prBodyLintCommand('bad.md', 169)], { cwd: dir, encoding: 'utf8' });
+    assert.equal(refused.status, 1, refused.stderr);
+    assert.match(refused.stderr, /REFUSED[^\n]*closed #34/);
+    const passed = BASH.run(['-c', prBodyLintCommand('good.md', 169)], { cwd: dir, encoding: 'utf8' });
+    assert.equal(passed.status, 0, passed.stderr);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  for (const mode of ['gh', 'mcp']) {
+    const text = loadTrackerRules(FLEET_SCRIPT, mode).prCreate('/tmp/fleet-x/pr-169-body.md', 169);
+    const lintAt = text.indexOf(prBodyLintCommand('/tmp/fleet-x/pr-169-body.md', 169));
+    const openAt = text.indexOf(mode === 'gh' ? 'gh api --method POST' : 'mcp__github__create_pull_request');
+    assert.ok(lintAt >= 0 && lintAt < openAt, `${mode} prCreate must run the lint before the PR call`);
+    assert.match(text, /never open the PR on a non-zero exit/);
+  }
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  assert.match(extractMarked(src, 'FLEET-DELIVER-PROMPT'), /rules\.prCreate\(scratchFile\(`pr-\$\{t\.number\}-body\.md`\), keepOpen \|\| unmet\.length \? null : t\.number\)/,
+    'the deliverer lints against the delivered ticket, or against none when the PR says Refs');
+  assert.match(extractMarked(src, 'FLEET-REPORT'), /rules\.prCreate\(scratchFile\('discoveries-pr-body\.md'\), null\)/,
+    'the discoveries PR delivers no ticket, so it closes none');
 });
 
 // Issue 439: the scratchpad a sub-agent is told is "session-specific" is keyed by project and

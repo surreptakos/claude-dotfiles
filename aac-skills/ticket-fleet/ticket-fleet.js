@@ -1075,6 +1075,45 @@ function parseCheckpointOutput(stdout) {
   if (branch && sha && /^[0-9a-f]{40,64}$/.test(sha)) out.head = { branch: branch === 'DETACHED' ? null : branch, sha };
   return out;
 }
+
+/**
+ * Issue 1361: the closing keywords in a PR body that aim at an issue the PR does not deliver.
+ * GitHub reads "closed #N", "fixes #N" and "resolves #N" anywhere in a PR body or squash commit
+ * body as a closing claim, so prose ABOUT another issue closes it: osh-rfp PR #169 wrote that the
+ * owner "closed #34, #39, ..." and its merge closed two issues nobody had finished. Pure: body and
+ * `allowed` (the one same-repo issue number this PR may close, or null for none) in, the offending
+ * phrases out, in order. Code spans and fences are dropped first, as GitHub ignores them; a
+ * cross-repo `owner/repo#N` or an issue URL is always foreign. Self-contained and free of single
+ * quotes: prBodyLintCommand ships its source text inside a single-quoted `node -e`.
+ */
+function foreignClosingKeywords(body, allowed) {
+  const text = String(body == null ? '' : body).replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+  const rx = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:([\w.-]+\/[\w.-]+)?#(\d+)|https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)\b/gi;
+  const ok = Number(allowed) > 0 ? Number(allowed) : null;
+  const out = [];
+  let m;
+  while ((m = rx.exec(text)) !== null) {
+    const sameRepoAllowed = m[2] !== undefined && !m[1] && Number(m[2]) === ok;
+    if (!sameRepoAllowed) out.push(m[0].replace(/\s+/g, ' '));
+  }
+  return out;
+}
+
+/**
+ * Issue 1361: the shell command a deliverer runs over its PR body file before it opens the PR.
+ * It carries foreignClosingKeywords' own source, so it needs nothing but node in the served repo.
+ * Exit 0 prints `pr-body-lint: ok`; exit 1 names every offending phrase on stderr; exit 2 is an
+ * unreadable body file. `allowed` is the ticket the PR delivers, or null when it closes nothing.
+ */
+function prBodyLintCommand(bodyFile, allowed) {
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const program = `const f = (${foreignClosingKeywords.toString()}); let b; ` +
+    `try { b = require("fs").readFileSync(process.argv[1], "utf8"); } catch (e) { console.error("pr-body-lint: cannot read " + process.argv[1]); process.exit(2); } ` +
+    `const hits = f(b, Number(process.argv[2]) || null); ` +
+    `if (hits.length) { console.error("pr-body-lint: REFUSED - closing keyword(s) aimed at an issue this PR does not deliver: " + hits.join("; ")); process.exit(1); } ` +
+    `console.log("pr-body-lint: ok");`;
+  return `node -e ${q(program)} ${q(bodyFile)} ${Number(allowed) > 0 ? Number(allowed) : 0}`;
+}
 // [FLEET-GENERATED-END]
 // `verifierAgentType` is resolved right after the env probe in the Scout phase below. The
 // workflow runtime does not expose `process.env` (issue 322), so nothing here sniffs it: the
@@ -1096,6 +1135,10 @@ function trackerRules(mode) {
   // Every MCP tool here takes owner and repo as arguments; a prompt that never names them leaves
   // the agent to guess, and a guessed owner stalled run 6ab4840f for 106 minutes (issue 757).
   const REPO = `owner and repo: take them from ${gitSpelling(mode, 'remote get-url origin')} (https://github.com/<owner>/<repo>) and pass exactly those - never guess them from an account or user name (issue 757).`
+  // Issue 1361: GitHub closes whatever a closing keyword names anywhere in a PR body (and in the
+  // squash commit body it becomes), so prose about another issue closes it. The lint runs on the
+  // body file before either instrument opens the PR; `allowed` is the delivered ticket or null.
+  const LINT = (bodyFile, allowed) => `before opening the PR, lint that body: \`${prBodyLintCommand(bodyFile, allowed)}\`. Exit 0 is the pass. A non-zero exit names each closing keyword (close, fix or resolve in any tense, directly before an issue reference) aimed at ${allowed ? `an issue other than #${allowed}` : 'any issue - this PR closes none'}: GitHub closes every issue such prose names, whatever the sentence means (issue 1361). Reword each one so no keyword sits before the number ("#34 was closed", "the earlier ticket #34"), rewrite the file and lint again; never open the PR on a non-zero exit.`
   if (mode === 'mcp') return {
     repoNote: REPO,
     scoutList: (label) => `${REPO} mcp__github__list_issues with label "${label}", state open, perPage 100, paging until the tool reports no next page - take EVERY matching ticket, the wave has no cap; list_issues reads GraphQL issues and should never return a pull request, but drop any entry that carries a pull_request key or links to a /pull/ URL - a labelled PR is not a ticket (issue 813) (then mcp__github__issue_read with method get_comments per ticket - comments carry criteria the body lacks).`,
@@ -1105,7 +1148,7 @@ function trackerRules(mode) {
     commentPost: (_bodyFile) => `${REPO} Use mcp__github__add_issue_comment - the body is an argument here, so no scratch file is written.`,
     labelSwap: (n, target = 'ready-for-human') => `${REPO} Read the ticket's current labels with mcp__github__issue_read (method "get_labels", issue_number ${n}), then call mcp__github__issue_write (method "update", issue_number ${n}) ONCE with labels = that list with every other state label removed (${otherStateLabels(target).map(l => `"${l}"`).join(', ')}) and "${target}" added - a ticket holds exactly one state label (issue 1009). labels replaces the whole set, so send every non-state label the ticket keeps. Whichever of those state labels were or were not there, "${target}" must end up the ticket's only state label.`,
     blockerState: (nums) => `${REPO} Per number N in ${nums.join(', ')}: mcp__github__issue_read with method "get", issue_number N, and report the "state" field it returns verbatim.`,
-    prCreate: (_bodyFile) => `mcp__github__create_pull_request (${REPO}) - the body is an argument here, so no scratch file is written.`,
+    prCreate: (bodyFile, allowed = null) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first (issue 439) - then ${LINT(bodyFile, allowed)} Then open the PR with mcp__github__create_pull_request (${REPO}), passing that same linted text as the body.`,
     prComment: (_bodyFile) => `mcp__github__add_issue_comment (${REPO}) on issue`,
     // Issue 770: the deliverer merges its own PR, so the run needs the PR's head, its checks, its
     // reviews and the merge call in the same instrument the rest of the stage uses.
@@ -1125,7 +1168,7 @@ function trackerRules(mode) {
     commentPost: (bodyFile) => `Write the comment body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first: the scratchpad the harness names for you is shared with every other worker of this run, so a bare name there is overwritten mid-task and you post another worker's text (issue 439). Then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\` with {owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}; never \`gh issue comment\`/\`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
     labelSwap: (n, target = 'ready-for-human') => `Make \`${target}\` the ticket's only state label in ONE edit with REST ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}) - a ticket holds exactly one state label (issue 1009): read the current labels with \`gh api repos/{owner}/{repo}/issues/${n}/labels --jq '.[].name'\`, then replace the whole set with \`gh api --method PUT repos/{owner}/{repo}/issues/${n}/labels -f "labels[]=${target}"\` plus one \`-f "labels[]=<name>"\` for every label read EXCEPT the other state labels (${otherStateLabels(target).map(l => `\`${l}\``).join(', ')}) - PUT replaces the set, so a label left out is removed. Never \`gh issue edit\` (GraphQL, HTTP 403 here - issue 130).`,
     blockerState: (nums) => `Per number N in ${nums.join(', ')}: \`gh api repos/{owner}/{repo}/issues/N --jq .state\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}), and report what it prints verbatim; never \`gh issue view\` (GraphQL, HTTP 403 here - issue 130).`,
-    prCreate: (bodyFile) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
+    prCreate: (bodyFile, allowed = null) => `write the PR body to \`${bodyFile}\` - that exact path, \`mkdir -p\` its directory first, never a bare name in the shared scratchpad (issue 439) - then ${LINT(bodyFile, allowed)} Then open the PR with REST: \`gh api --method POST repos/{owner}/{repo}/pulls -f head=<branch> -f base=<base> -f title=<title> -F body=@${bodyFile}\` ({owner}/{repo} from the origin remote url; NEVER \`gh pr create\` - GraphQL-backed, HTTP 403 here, issues 130 and 322)`,
     prComment: (bodyFile) => `write the comment to \`${bodyFile}\` (that exact path - issue 439), then \`gh api --method POST repos/{owner}/{repo}/issues/<N>/comments -F body=@${bodyFile}\``,
     // Issue 770: REST only - `gh pr checks`, `gh pr view` and `gh pr merge` are GraphQL-backed and
     // HTTP 403 through the proxy (issue 130).
@@ -2794,7 +2837,7 @@ A9. DELIVER THROUGH THE CONNECTOR (issue 1139) - for a refused command that no s
 
 STEP B - push and open the PR (only when STEP A ended clean, resolved, or unmerged-by-classifier):
 B1. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}. The Implement step pushed it already, so this is normally up to date or a fast-forward - but it MUST succeed here, and "the branch does not exist" is never the answer. A non-zero exit stops delivery loudly: run AL's lookups and \`git branch -a --list '*${branch}*'\`, then return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed" when no lookup printed the ref ("blocked" when one did - the push itself failed), conflictPaths:[], branchLookup:[every run], blockedReason:"push failed: <the git output of all three commands, VERBATIM>"}. Never report a delivery that pushed nothing, and never conclude that the branch, or the issue, does not exist: say what git said. A push rejected as non-fast-forward is never forced - that is STEP C. A push the permission layer REFUSES is not a failed push (A0): read the remote tip (\`git ls-remote --heads origin ${branch}\`, or \`gh api repos/{owner}/{repo}/git/refs/heads/${branch}\` / the GitHub MCP file-contents route when that spelling is refused too) and compare it with the tip you would have pushed - the Implement step already pushed this branch, so on the A8 path, where you added no commit, they match. When they match, the branch IS on origin: report pushed true and go on to B2. When origin holds the tip the verifier passed and lacks only STEP A's merge commit, go to A9. Only when the remote tip is missing or behind the verified tip does a refused push come back as {pushed:false, ...}.
-B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`))} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY. Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused (A0), open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
+B2. ${rules.prCreate(scratchFile(`pr-${t.number}-body.md`), keepOpen || unmet.length ? null : t.number)} - title "fix: ${t.title} (#${t.number})"; body covering: what changed; exactly how verified, quoting this independent-verifier evidence verbatim: ${JSON.stringify(stableText(evidence))}; if STEP A ended "resolved", one sentence naming the paths the merge resolved and that the generated files were rebuilt and the tests re-run; if STEP A ended "unmerged-by-classifier", a paragraph headed "Not merged with ${defaultBranch}: classifier refusal" that quotes the refusal text VERBATIM and says that this branch is verified as it stands and only needs origin/${defaultBranch} merged into it before the merge button (issue 544); what remains for the human (merge + any release gates); and ${issueRef} in the PR body ONLY - never a closing keyword (close, fix or resolve in any tense) before any other issue's number, even in a sentence about that issue: GitHub closes it at merge (issue 1361). Write the PR body in plain, direct prose for a human reader: no mannered prose, no metaphor or flourish where a literal phrase exists. If the PR call itself is refused (A0), open the PR with \`mcp__github__create_pull_request\` - that route goes through in containers where the Bash one is refused (issue 245's own evidence), and the refusal of a PR call is never the end of a delivery.
 B3. ${rules.prComment(scratchFile(`pr-${t.number}-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
 B4. Return conflictPaths: [] and the real mergeStatus ("clean", "resolved", or "unmerged-by-classifier" with blockedReason holding the refusal text).
 
@@ -3350,7 +3393,7 @@ async function runReport(discoveries, defaultBranch) {
   if (!discoveries.length) return null
   const branch = `agent/fleet-discoveries-wf_${runId}`
   const deliverStep = cfg.deliver
-    ? `7. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'))}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. Return its URL as prUrl.`
+    ? `7. Push the branch: ${gitSpelling(instrument, `push -u origin ${branch}`)}, then ${rules.prCreate(scratchFile('discoveries-pr-body.md'), null)}${instrument === 'mcp' ? ' (there is no `gh` CLI here - git plus the GitHub MCP tools only)' : ''} with base ${defaultBranch} and head ${branch} - title "chore(follow-ups): ticket-fleet run ${runId} discoveries (${discoveries.length} bullets)"; body names the branch, the commit sha and the bullet count, and says in plain prose that the PR carries discovery bullets only and no code. This PR delivers no ticket, so its body puts no closing keyword (close, fix or resolve in any tense) before any issue number - to say an issue was closed, write "#N was closed", never "closed #N" (issue 1361). Return its URL as prUrl.`
     : `7. deliver is off: do NOT push and do NOT open a PR. Return prUrl as an empty string.`
   // Wrapped (aac-routines issue 270): a writer that blows the StructuredOutput retry cap used
   // to lose the whole run report; it is now a named error on the discovery report instead.

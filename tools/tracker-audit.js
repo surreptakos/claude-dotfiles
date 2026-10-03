@@ -428,6 +428,7 @@ if (require.main !== module) {
     PARKED_MILESTONE,
     landedCommits,
     landedFindings,
+    landedButOpenAcks,
     stalePremiseFindings,
     citingSentences,
     jevCitationClassifier,
@@ -1088,6 +1089,30 @@ function landedCommits(logText) {
   return out;
 }
 
+/** The commits an issue body acknowledges as a closing keyword that did not finish it (issue 1361).
+ *
+ *  `<!-- tracker-audit-ignore: landed-but-open <sha> [<sha> ...] -->` in the body names each commit,
+ *  7 to 40 hex characters. GitHub reads "closed #N" anywhere in a squash commit body, so prose about
+ *  an issue closes it; once reopened, that commit stays on the default branch and the audit would
+ *  fail on it forever. The marker names the commit, never the class: a marker with no sha silences
+ *  nothing, and a NEW commit claiming to close the issue still fails the run. Returns lowercase shas. Pure. */
+function landedButOpenAcks(body) {
+  const rx = /tracker-audit-ignore:\s*landed-but-open((?:[ \t,]+[0-9a-f]{7,40}\b)*)/gi;
+  const out = [];
+  let m;
+  while ((m = rx.exec(String(body || '')))) {
+    (m[1].match(/[0-9a-f]{7,40}/gi) || []).forEach((s) => out.push(s.toLowerCase()));
+  }
+  return out;
+}
+
+/** Two abbreviations of one commit: the shorter is a prefix of the longer, and both are 7+ hex. Pure. */
+function shaPrefixMatch(a, b) {
+  const x = String(a || '').toLowerCase(), y = String(b || '').toLowerCase();
+  if (x.length < 7 || y.length < 7) return false;
+  return x.length <= y.length ? y.startsWith(x) : x.startsWith(y);
+}
+
 /** OPEN issues whose implementing work is already on the default branch, as findings.
  *
  *  Takes ALL issues and filters to open itself, so "a closed issue produces no finding" is a property of
@@ -1099,8 +1124,13 @@ function landedFindings(allIssues, landed, ref) {
   const show = (list) => list.slice(0, 4).map((c) => c.sha + ' "' + c.subject.slice(0, 72) + '"').join(', ') +
     (list.length > 4 ? ', and ' + (list.length - 4) + ' more' : '');
   (allIssues || []).filter((i) => i.state === 'OPEN').forEach((i) => {
-    const hit = landed.get(i.number);
-    if (!hit) return;
+    const found = landed.get(i.number);
+    if (!found) return;
+    // A closing keyword the issue body acknowledges by commit is prose, not a claim (issue 1361).
+    const acks = landedButOpenAcks(i.body);
+    const hit = { closing: found.closing.filter((c) => !acks.some((a) => shaPrefixMatch(a, c.sha))),
+                  mention: found.mention };
+    if (!hit.closing.length && !hit.mention.length) return;
     // A closing keyword that reached the default branch without closing the issue is the strongest signal
     // there is, so it fails the run. Reported once: the reader must see the strong claim, not the weak one.
     if (hit.closing.length) {
@@ -1111,7 +1141,9 @@ function landedFindings(allIssues, landed, ref) {
         'so the work landed while the ticket stayed on the startable frontier — which is how merged work ' +
         'gets built a second time. Read the commit, walk the acceptance boxes, then either tick them and ' +
         'close it (gh issue close ' + i.number + ' --comment "Landed in <sha>; verified <how>"), or say on ' +
-        'the issue which box the commit did not meet.' });
+        'the issue which box the commit did not meet. A keyword that was prose ABOUT this issue, not a claim ' +
+        'to have finished it, is acknowledged per commit in the issue body: ' +
+        '<!-- tracker-audit-ignore: landed-but-open <sha> -->.' });
       return;
     }
     out.push({ kind: 'landed-but-open?', issue: i, detail:

@@ -1006,6 +1006,45 @@ function parseCheckpointOutput(stdout) {
   return out;
 }
 
+/**
+ * Issue 1361: the closing keywords in a PR body that aim at an issue the PR does not deliver.
+ * GitHub reads "closed #N", "fixes #N" and "resolves #N" anywhere in a PR body or squash commit
+ * body as a closing claim, so prose ABOUT another issue closes it: osh-rfp PR #169 wrote that the
+ * owner "closed #34, #39, ..." and its merge closed two issues nobody had finished. Pure: body and
+ * `allowed` (the one same-repo issue number this PR may close, or null for none) in, the offending
+ * phrases out, in order. Code spans and fences are dropped first, as GitHub ignores them; a
+ * cross-repo `owner/repo#N` or an issue URL is always foreign. Self-contained and free of single
+ * quotes: prBodyLintCommand ships its source text inside a single-quoted `node -e`.
+ */
+function foreignClosingKeywords(body, allowed) {
+  const text = String(body == null ? '' : body).replace(/```[\s\S]*?```/g, ' ').replace(/`[^`\n]*`/g, ' ');
+  const rx = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(?:([\w.-]+\/[\w.-]+)?#(\d+)|https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/\d+)\b/gi;
+  const ok = Number(allowed) > 0 ? Number(allowed) : null;
+  const out = [];
+  let m;
+  while ((m = rx.exec(text)) !== null) {
+    const sameRepoAllowed = m[2] !== undefined && !m[1] && Number(m[2]) === ok;
+    if (!sameRepoAllowed) out.push(m[0].replace(/\s+/g, ' '));
+  }
+  return out;
+}
+
+/**
+ * Issue 1361: the shell command a deliverer runs over its PR body file before it opens the PR.
+ * It carries foreignClosingKeywords' own source, so it needs nothing but node in the served repo.
+ * Exit 0 prints `pr-body-lint: ok`; exit 1 names every offending phrase on stderr; exit 2 is an
+ * unreadable body file. `allowed` is the ticket the PR delivers, or null when it closes nothing.
+ */
+function prBodyLintCommand(bodyFile, allowed) {
+  const q = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
+  const program = `const f = (${foreignClosingKeywords.toString()}); let b; ` +
+    `try { b = require("fs").readFileSync(process.argv[1], "utf8"); } catch (e) { console.error("pr-body-lint: cannot read " + process.argv[1]); process.exit(2); } ` +
+    `const hits = f(b, Number(process.argv[2]) || null); ` +
+    `if (hits.length) { console.error("pr-body-lint: REFUSED - closing keyword(s) aimed at an issue this PR does not deliver: " + hits.join("; ")); process.exit(1); } ` +
+    `console.log("pr-body-lint: ok");`;
+  return `node -e ${q(program)} ${q(bodyFile)} ${Number(allowed) > 0 ? Number(allowed) : 0}`;
+}
+
 // [FLEET-INLINE-END]
 
 /**
@@ -1036,4 +1075,5 @@ module.exports = {
   LIVE_TREE_ROOTS, LIVE_TREE_EXCLUSIONS, liveTreeFindCommand, liveTreeExclusionNote,
   buildTipLookupCommand, parseLsRemoteSha, parseTipLookupOutput,
   quotaFailure, createRunHalt, haltReport, checkpointCommand, parseCheckpointOutput,
+  foreignClosingKeywords, prBodyLintCommand,
 };

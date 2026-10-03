@@ -39,6 +39,9 @@ const {
   pageFromUrl,
   stalePremiseFindings,
   stalePremiseIgnores,
+  landedCommits,
+  landedFindings,
+  landedButOpenAcks,
   citingSentences,
   jevCitationClassifier,
   isExampleCitation,
@@ -748,4 +751,26 @@ test('usesMilestones: a real milestone in use still turns unmilestoned on, parke
   const mk = (n, m) => normalizeIssue({ number: n, state: 'open', labels: [], milestone: m ? { title: m } : null });
   assert.equal(usesMilestones([mk(1, 'v2'), mk(2, null)]), true);
   assert.equal(usesMilestones([mk(1, 'Maybe Someday'), mk(2, 'v2'), mk(3, null)]), true);
+});
+
+// Issue 1361: osh-rfp PR #169's squash body read "the owner closed #34, ... #44", which closed #44
+// at merge; reopened, that commit stays on main and failed every audit run. The issue body names
+// the commit to acknowledge it; a different commit claiming to close the issue still fails.
+test('landedFindings honours a landed-but-open acknowledgment that names the commit, and only that commit', () => {
+  const rec = (sha, subject, body) => sha + '\u0000' + subject + '\u0000' + subject + '\n\n' + body + '\u001e';
+  const prose = rec('a1b2c3d', 'chore: discovery triage (#169)', 'Corrects the claim that the owner closed #34 and closed #44.');
+  const later = rec('e4f5a6b', 'fix: the real work', 'Fixes #44');
+  const issue = (body) => ({ number: 44, state: 'OPEN', title: 't', url: 'u', labels: [], body });
+  const ack = '<!-- tracker-audit-ignore: landed-but-open a1b2c3d4e5f6 -->';
+  assert.deepStrictEqual(landedFindings([issue('')], landedCommits(prose), 'origin/main').map((f) => f.kind), ['landed-but-open']);
+  assert.deepStrictEqual(landedFindings([issue(ack)], landedCommits(prose), 'origin/main'), []);
+  const both = landedFindings([issue(ack)], landedCommits(prose + later), 'origin/main');
+  assert.deepStrictEqual(both.map((f) => f.kind), ['landed-but-open']);
+  assert.match(both[0].detail, /e4f5a6b/);
+  assert.doesNotMatch(both[0].detail, /a1b2c3d "/);
+  const bare = '<!-- tracker-audit-ignore: landed-but-open -->';
+  assert.deepStrictEqual(landedFindings([issue(bare)], landedCommits(prose), 'origin/main').map((f) => f.kind), ['landed-but-open'],
+    'a marker that names no commit silences nothing');
+  assert.deepStrictEqual(landedButOpenAcks(ack + '\n<!-- tracker-audit-ignore: landed-but-open BEEF123, 0123456 -->'),
+    ['a1b2c3d4e5f6', 'beef123', '0123456']);
 });
