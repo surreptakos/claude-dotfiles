@@ -515,7 +515,7 @@ def stamp_source(entry, history_paths, mirror_dir, home, write):
     the bytes of `entry`/SKILL.md are the same after this call as before (nothing written, or
     --no-stamp-write), otherwise a dict naming the path written, the revision it held and holds,
     and whether the write put the published stamp back rather than rotating past it (content
-    that returned to HEAD's version, see skill_stamps.compute_stamp). A line that named a file
+    that returned to the published version, see skill_stamps.compute_stamp). A line that named a file
     the packager did not write made the real rotations harder to trust (issue 484).
     """
     path = Path(entry) / "SKILL.md"
