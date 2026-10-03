@@ -274,7 +274,10 @@ slot does this:
 
 Every decision is appended to `~/.claude/hook-state/master-watchdog/watchdog.log` with a UTC
 stamp. A scheduled task's stdout goes nowhere, and the 22:30 kill above had to be reconstructed
-from process tables and issue timestamps; read the log first next time.
+from process tables and issue timestamps; read the log first next time. A tick that hits a
+terminating error writes `tick FAILED at <file>:<line>` and its call stack, then exits 1 (issue
+1156); a tick that stops with neither a decision line nor that line was killed, hung or crashed
+outside PowerShell's error handling.
 
 `-Only <slug>` restricts the candidates; `-WhatIf` prints every decision and neither stops nor
 launches anything; `-Force` skips the guards and launches the next repo regardless. The launched
