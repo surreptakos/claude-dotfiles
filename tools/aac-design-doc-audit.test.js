@@ -100,6 +100,27 @@ test('the .pdf fixture is judged from its page images and text layer, listing it
   assert.match(fs.readFileSync(path.join(runs.pdf.out, 'text.txt'), 'utf8'), /Approved by/);
 });
 
+// Issue 1356: a host with the renderer but without a stand-in font refuses (exit 3, naming the font,
+// no bundle) rather than render under a fallback font. Stub tools on PATH stand in for that host.
+test('an audit refuses, naming the font, when the Aptos stand-in fonts are not installed', () => {
+  const bin = path.join(root, 'no-fonts-bin');
+  fs.mkdirSync(bin);
+  for (const b of ['soffice', 'pdfinfo', 'pdftoppm', 'pdffonts', 'fc-list']) {
+    const say = b === 'fc-list' ? 'DejaVu Sans' : '';
+    fs.writeFileSync(path.join(bin, b), `#!/bin/sh
+echo "${say}"
+`, { mode: 0o755 });
+    fs.writeFileSync(path.join(bin, `${b}.cmd`), `@echo ${say || 'off'}
+`);
+  }
+  const out = path.join(root, 'evidence-no-fonts');
+  const env = { ...process.env, PATH: bin + path.delimiter + process.env.PATH, WINDIR: bin, LOCALAPPDATA: bin };
+  const r = spawnSync('python3', [ADAPTER, file('docx'), '--out', out], { encoding: 'utf8', env });
+  assert.equal(r.status, 3, r.stderr + r.stdout);
+  assert.match(r.stderr, /stand-in font\(s\) Carlito, Liberation Sans are needed/);
+  assert.ok(!fs.existsSync(path.join(out, 'bundle.json')), 'no bundle is written');
+});
+
 // ------------------------------------------------------------------ ledger, score, stamp
 // A complete ledger on the fixture's surface: every applicable id, the planted fault open for Code.
 function ledger(ext) {

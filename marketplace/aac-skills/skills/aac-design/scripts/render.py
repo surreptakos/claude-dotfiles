@@ -28,6 +28,24 @@ def soffice_bin():
     return None
 
 
+def missing_fonts():
+    """Stand-in fonts this host lacks: in neither fontconfig's list, LibreOffice's own font folder nor
+    the Windows font folders. A render under a missing stand-in falls back to another font and
+    misstates the page count, so callers refuse instead (issue 1356)."""
+    have = set()
+    fc = shutil.which('fc-list')
+    if fc:
+        out = subprocess.run([fc, ':', 'family'], capture_output=True, text=True).stdout
+        have |= {f.strip().replace(' ', '').lower() for line in out.splitlines() for f in line.split(',')}
+    dirs = [os.path.join(os.environ[v], *sub) for v, sub in
+            (('WINDIR', ['Fonts']), ('LOCALAPPDATA', ['Microsoft', 'Windows', 'Fonts'])) if os.environ.get(v)]
+    if soffice_bin():
+        dirs.append(os.path.join(os.path.dirname(os.path.realpath(soffice_bin())), '..', 'share', 'fonts'))
+    files = [os.path.basename(f).lower() for d in dirs for f in glob.glob(os.path.join(d, '**', '*.[ot]tf'), recursive=True)]
+    key = lambda font: font.replace(' ', '').lower()
+    return [f for f in STAND_INS.values() if key(f) not in have and not any(n.startswith(key(f)) for n in files)]
+
+
 def replacement_table(font):
     """registrymodifications.xcu for a fresh profile: Aptos always replaced by the stand-in."""
     pair = lambda i, src: (

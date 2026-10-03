@@ -26,7 +26,8 @@ rendering runs over it.
 
 Needs LibreOffice (Office files) and poppler-utils (pdfinfo, pdftoppm, pdftotext, pdffonts) on PATH.
 The Linux sandbox has both; on Windows, LibreOffice (which ships both stand-in fonts) and a poppler
-build do the same job. Exit 0 = bundle written (faults or not), 2 = usage, 3 = no renderer, or the
+build do the same job. Both stand-in fonts must be installed (fonts-crosextra-carlito and
+fonts-liberation on Linux); without one the run refuses rather than render under another font. Exit 0 = bundle written (faults or not), 2 = usage, 3 = no renderer, or the
 file did not render or read.
 """
 import argparse, os, re, shutil, subprocess, sys, zipfile
@@ -61,6 +62,11 @@ def office(path, out, adapter, surface, max_pages, catalog):
     if not render.soffice_bin() or not all(shutil.which(b) for b in POPPLER):
         raise Refused('LibreOffice (soffice) and poppler-utils (pdfinfo, pdftoppm, pdffonts) are needed to '
                       'render; run in the Linux sandbox, or put both on PATH')
+    missing = render.missing_fonts()
+    if missing:
+        raise Refused(f'the Aptos stand-in font(s) {", ".join(missing)} are needed to render and are not installed '
+                      'here (fonts-crosextra-carlito, fonts-liberation); a render under another font misstates '
+                      'the page count')
     faults, measures, structure, text = [], {}, [], []
     with zipfile.ZipFile(path) as z:
         names = set(z.namelist())
