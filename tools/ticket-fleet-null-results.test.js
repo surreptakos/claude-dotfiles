@@ -144,6 +144,49 @@ test('a finish-mode delivery blocked at the pre-push merge is failed with a reas
   assert.ok(logs.some((m) => /deliver:#5: pre-push merge of origin\/main blocked/.test(m)), 'the run log names the blocked merge');
 });
 
+test('a finish-mode deliverer refused at spawn is retried once, then listed inconsistent with the replayed run as its recovery (issue 1359)', async () => {
+  const labels = [];
+  const { runFinish } = await load(['FLEET-DELIVER-PROMPT', 'FLEET-REPORT', 'FLEET-FINISH'], 'runFinish', async (_p, opts) => {
+    labels.push(opts.label);
+    return null;
+  }, [], { cfg: { deliver: true, deliverModel: 'z', reportModel: 'r', followupsFile: 'FOLLOW-UPS.md', finishRunId: 'deadrun' } });
+  const out = await runFinish({ defaultBranch: 'main', tickets: [{ number: 5, title: 't', branch: 'agent/issue-5-attempt1-wf_deadrun-w0', verified: true, pushed: true, evidence: 'ok', delivered: false, deliveryRef: '' }], discoveries: [] });
+  assert.deepEqual(labels, ['deliver:#5', 'deliver-fallback:#5']);
+  assert.equal(out.failed.length, 0, 'not failed with "pushed=null prUrl=(none)"');
+  assert.equal(out.inconsistent.length, 1);
+  assert.equal(out.inconsistent[0].branch, 'agent/issue-5-attempt1-wf_deadrun-w0');
+  assert.match(out.inconsistent[0].recovery, /^relaunch ticket-fleet with finishRunId: 'deadrun'/);
+});
+
+test('the follow-ups writer has an append-only command for a repo without tools/followups-append.js, in that script\'s format (issue 1359)', async () => {
+  const prompts = [];
+  const { runReport, followupsAppendInline } = await load(['FLEET-REPORT'], 'runReport, followupsAppendInline', async (p) => { prompts.push(p); return { branch: 'b', sha: 'abc', prUrl: '', appended: 1 }; }, []);
+  await runReport(['finding-A'], 'main');
+  assert.match(prompts[0], /WHERE tools\/followups-append\.js DOES NOT EXIST/);
+  assert.match(prompts[0], /Never return appended 0 or an empty sha without an error/);
+  const cmd = followupsAppendInline('F.md', 'r1', 'b.json');
+  assert.ok(prompts[0].includes(followupsAppendInline('FOLLOW-UPS.md', 'testrun', '/tmp/fleet-testrun/discoveries-bullets.json')), 'the prompt carries the command');
+  const code = cmd.slice('node -e "'.length, cmd.lastIndexOf('" F.md r1 b.json'));
+  const os = require('node:os');
+  const { execFileSync } = require('node:child_process');
+  const { appendFollowupsSection } = require('./followups-append.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fleet-1359-'));
+  try {
+    const file = path.join(dir, 'FOLLOW-UPS.md');
+    const bullets = path.join(dir, 'b.json');
+    fs.writeFileSync(bullets, JSON.stringify(['one', 'two']));
+    fs.writeFileSync(file, '# Follow-ups\n\nolder bullet\n');
+    const before = fs.readFileSync(file, 'utf8');
+    execFileSync(process.execPath, ['-e', code, file, 'r1', bullets]);
+    execFileSync(process.execPath, ['-e', code, file, 'r2', bullets]);
+    const date = new Date().toISOString().slice(0, 10);
+    const expected = appendFollowupsSection(appendFollowupsSection(before, 'r1', ['one', 'two'], date).text, 'r2', ['one', 'two'], date).text;
+    assert.equal(fs.readFileSync(file, 'utf8'), expected, 'byte-identical to tools/followups-append.js, existing text untouched');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the Jev request logs the tickets whose criteria it cut', async () => {
   const logs = [];
   const long = 'x'.repeat(helpers.DIFFICULTY_TEXT_CAP + 1);

@@ -93,6 +93,13 @@ the ticket comment with `mcp__github__add_issue_comment`, and returns
 records it as delivered, with a `mergeNote` carrying the refusal, and STEP D leaves the PR open
 for the orchestrator to merge the default branch into it, as it does after A8.
 
+A9 lives inside a running deliverer, so it cannot help one refused at spawn: cloud run `6ac03f2a`
+(issue 1359) saw `agent()` return null for `deliver:#1` (journal `{"type":"failed","agentId":""}`).
+The lane now retries such a null once with a short PR-only deliverer (`deliver-fallback:#N`) that
+opens the PR and the ticket comment and is recorded as `unmerged-by-classifier`. When that
+delivers nothing either, the ticket sits under `inconsistent` with the branch and a one-line
+`recovery` naming the `finishRunId` relaunch.
+
 A result that still reads `did not deliver: pushed=null prUrl=(none)` over a verified branch
 means the deliverer returned nothing at all. The branch is on origin: open its PR with the
 connector (head the branch, base the default branch, the verifier's evidence from the journal in

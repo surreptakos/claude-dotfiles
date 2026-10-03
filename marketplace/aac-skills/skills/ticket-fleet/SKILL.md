@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-02T17:46:10Z'
-  previous-modified: '2026-10-02T16:53:02Z'
-  revision: '76'
-  content-sha: 7fec0ba3b084
+  modified: '2026-10-03T19:35:47Z'
+  previous-modified: '2026-10-02T17:46:10Z'
+  revision: '77'
+  content-sha: c8abb67d4f0b
 ---
 
 # ticket-fleet
@@ -125,6 +125,11 @@ its launch; Dan asked whether that was true before anyone had looked.
    the served repo from this session, not a subagent: the journal dies with the container. Where
    the repo gitignores `state/`, post the record's digest on the repo's tracking issue. Done when
    `state/fleet-runs/<runId>.json` exists, plus the posted digest where `state/` is ignored.
+   Where the served repo has no `tools/fleet-run-record.js` (it lacks the fleet's helper scripts,
+   as aac-legal did in run 6ac03f2a), write no record by hand: post the workflow's returned result
+   (each step 5 key with its tickets, `discoveryList`, `followupsError`) and the journal path
+   as a comment on the repo's tracking issue, or in your reply where it has none, and say the
+   record tool is absent. Done when that comment or reply exists.
 
 5. **Account for every ticket.** The run log has one line per ticket, `MERGED <sha>` or
    `open, not merged: <prState>`, and the result sorts every candidate into one row below:
@@ -133,7 +138,7 @@ its launch; Dan asked whether that was true before anyone had looked.
    | --- | --- | --- |
    | `delivered` | PR or comment posted; a `mergeNote` means the PR still owes a merge of the default branch | merge the default branch into it, then the PR |
    | `failed` | no verified pass, or delivery blocked; `conflictPaths` names a real merge conflict | read `failures`, re-run the ticket |
-   | `inconsistent` | verified and pushed, but the deliverer could not find the branch | deliver it by hand or via `finishRunId` |
+   | `inconsistent` | verified and pushed, but the deliverer could not find the branch, or no deliverer started (`recovery` names the step) | deliver it by hand or via `finishRunId` |
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
    | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time | relaunch after the reset; bullets are in `discoveryList` |

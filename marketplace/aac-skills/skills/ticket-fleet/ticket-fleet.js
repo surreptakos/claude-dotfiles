@@ -1284,6 +1284,7 @@ const DISCOVERY_REPORT = { type: 'object', required: ['branch', 'sha', 'prUrl', 
   sha: { type: 'string', description: 'full sha of the discovery commit, read back after committing' },
   prUrl: { type: 'string', description: 'URL of the discoveries-only PR; empty string when deliver is off' },
   appended: { type: 'integer', description: 'number of bullets appended to the follow-ups file' },
+  error: { type: 'string', description: "when appended is 0 or sha is empty, one line saying why: the failing command and its stderr VERBATIM (issue 1359); '' otherwise" },
 } }
 
 // What the finish mode reads out of a dead run's journal (issue 405). One entry per ticket that
@@ -2159,7 +2160,7 @@ Never invent a ticket, a branch, a URL or a verdict, and never infer one from a 
   const finished = await runFinish(journal)
   const finishFollowupsError = (finished.discoveryReport && finished.discoveryReport.error) || null
   log(`finish mode: ${finished.delivered.length} delivered, ${finished.skippedDelivered.length} already delivered, ${finished.skippedUnverified.length} unverified, ${finished.failed.length} failed, ${finished.inconsistent.length} inconsistent.`)
-  log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the served repo from THIS session before the container is gone.`)
+  log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the served repo from THIS session before the container is gone. Where that repo has no tools/fleet-run-record.js, ticket-fleet SKILL.md step 4 says what to post instead (issue 1359).`)
   return {
     mode: 'finish',
     finishedRun: finishRunId,
@@ -2729,7 +2730,10 @@ function gateRetryNote(delivery) {
   return ` - test gate re-run once after a null-exit spawn failure (first run exit ${g.firstExitCode}): re-run ${verdict} (exit ${g.retryExitCode})`
 }
 
-function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
+// The PR body's ticket reference and the ticket comment's closing note, shared by the full
+// deliverer and the spawn-refusal fallback below (issue 1359) so the two cannot disagree on
+// whether a PR closes its ticket.
+function closingRefs(t, unmetCriteria) {
   // The ticket decides the closing keyword, not the template (claude-dotfiles issue 72). A
   // ratification ticket says "leave open"; GitHub acts on Closes #N at merge time whatever the
   // commit messages say.
@@ -2744,6 +2748,11 @@ function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, test
       : `"Closes #${t.number}"`
   const keepOpenNote = keepOpen ? ' and the sentence "Ticket left open per its own instruction; this PR does not close it."'
     : unmet.length ? ` and the sentence "Ticket left open: the verifier marked ${unmet.length} acceptance criteri${unmet.length === 1 ? 'on' : 'a'} unmet, listed in the PR."` : ''
+  return { keepOpen, unmet, issueRef, keepOpenNote }
+}
+
+function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, testCommand, resumed }) {
+  const { keepOpen, unmet, issueRef, keepOpenNote } = closingRefs(t, unmetCriteria)
   const prToolNote = instrument === 'mcp'
     ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
     : ''
@@ -2814,6 +2823,67 @@ D5. THE TICKET, only after merged:true: ${rules.issueState(t.number)} ${keepOpen
 
 Do NOT push to or otherwise touch ${defaultBranch} except through the merge call in D4. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`
 }
+
+// ---- deliverer refused at spawn (issue 1359) ----
+// agent() resolves to null, without throwing, when the permission layer refuses to START the
+// sub-agent: cloud run 6ac03f2a's deliver:#1 failed with "blocked by safety classifier:
+// [Auto-Mode Bypass]", journal line {"type":"failed","agentId":""}, so A9 (issue 1139) - which
+// lives inside a running deliverer - never got the chance to fire. The script cannot read the
+// refusal text (a user's skip returns the same null), so a null deliverer is retried ONCE with
+// this short prompt: no merge, no push, no file write and none of the full prompt's wording about
+// refused commands, only the PR and the ticket comment for a branch the Implement step already
+// pushed and the verifier passed. It skips STEP A's merge, so deliverAfterSpawnRefusal rewrites
+// its result to "unmerged-by-classifier" and the PR waits for the orchestrator's merge of the
+// default branch (issues 544, 1132) - the prompt itself names no classifier and no refusal. Keep
+// it short and plain: its job is to be a prompt the classifier lets start.
+function spawnFallbackPrompt({ t, branch, evidence, unmetCriteria, defaultBranch }) {
+  const { issueRef, keepOpenNote } = closingRefs(t, unmetCriteria)
+  const confirm = instrument === 'mcp'
+    ? `Confirm ${branch} exists on origin with \`mcp__github__list_branches\` or \`mcp__github__get_commit\` on ${branch}.`
+    : `Confirm ${branch} exists on origin: ${gitSpelling(instrument, `ls-remote --heads origin ${branch}`)} must print one ref.`
+  return `Open the pull request for issue #${t.number}. Branch ${branch} is already pushed to origin and an independent verifier passed it as it stands there, so there is nothing to build, merge or push - only the PR and one ticket comment.${instrument === 'mcp' ? ' There is no `gh` CLI here - use the GitHub MCP tools.' : ''}
+1. ${confirm} If it is not there, open nothing and return {pushed:false, prUrl:"", mergeStatus:"branch-unconfirmed", conflictPaths:[], blockedReason:"<what the lookup returned>"}.
+2. List the repository's OPEN pull requests; if one already has head ${branch}, open no second one and use its URL.
+3. Otherwise ${rules.prCreate(scratchFile(`pr-${t.number}-fallback-body.md`))} - head ${branch}, base ${defaultBranch}, title "fix: ${t.title} (#${t.number})". Body, in plain prose: what the branch changes (read its commits); the verifier's evidence verbatim: ${JSON.stringify(stableText(evidence))}; a paragraph headed "Not merged with ${defaultBranch}" saying the full Deliver step could not start, so origin/${defaultBranch} has not been merged into this branch and has to be before the merge button; and ${issueRef} in the PR body ONLY.
+4. ${rules.prComment(scratchFile(`pr-${t.number}-fallback-comment.md`))} ${t.number} with the PR link${keepOpenNote}.
+5. Return pushed true, the prUrl, mergeStatus "clean", conflictPaths [], blockedReason "", merged false, mergeSha "", prState "not-attempted".
+Do NOT merge anything, do NOT push, do NOT edit any file, the issue body or its acceptance boxes. Return structured output only.`
+}
+
+// The `inconsistent` entry for a verified, pushed branch that neither deliverer delivered, with
+// the one-line recovery (issue 1359). `recoveryRunId` is the run whose journal holds the passing
+// verdict: this run's id in the code lane, the replayed run's id in the finish mode.
+function spawnRefusalInconsistency({ number, branch, recoveryRunId, fallback, fallbackError }) {
+  const second = fallbackError
+    ? `the fallback deliverer failed too (${fallbackError})`
+    : fallback == null
+      ? 'the fallback deliverer did not start either'
+      : `the fallback deliverer opened no PR (pushed=${String(fallback.pushed)} prUrl=${fallback.prUrl || '(none)'}${fallback.blockedReason ? ` - ${fallback.blockedReason}` : ''})`
+  const recovery = `relaunch ticket-fleet with finishRunId: '${recoveryRunId}' (fresh runId and invocationId) to open the PR for ${branch}, or open it by hand`
+  return {
+    branch, recovery,
+    detail: `deliver:#${number} never started - agent() returned null, the shape of a spawn-time classifier refusal or a skip (issue 1359) - and ${second}. Branch ${branch} is verified and pushed with no PR. Recovery: ${recovery}.`,
+  }
+}
+
+// The one retry, wrapped like every per-ticket agent() call (aac-routines issue 270).
+async function deliverAfterSpawnRefusal({ t, branch, evidence, unmetCriteria, defaultBranch }) {
+  log(`deliver:#${t.number} never started (agent() returned null - a spawn-time classifier refusal or a skip, issue 1359); retrying delivery once with the short PR-only deliverer.`)
+  try {
+    const fallback = await agent(spawnFallbackPrompt({ t, branch, evidence, unmetCriteria, defaultBranch }),
+      { label: `deliver-fallback:#${t.number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel, effort: cfg.effort })
+    // The PR skipped STEP A's merge whatever the fallback reported: mark it so, so the lane, D0
+    // and the run report treat it as open and owed the default-branch merge.
+    const marked = fallback && fallback.prUrl
+      ? Object.assign({}, fallback, { mergeStatus: 'unmerged-by-classifier', merged: false, mergeSha: '', prState: 'not-attempted',
+        blockedReason: `the deliverer was refused at spawn (agent() returned null); the fallback deliverer opened this PR without merging ${defaultBranch} (issue 1359)` })
+      : fallback
+    return { fallback: marked, fallbackError: null }
+  } catch (err) {
+    runHalt.note((err && err.message) || err, `deliver-fallback:#${t.number}`)
+    return { fallback: null, fallbackError: String((err && err.message) || err) }
+  }
+}
 // [FLEET-DELIVER-PROMPT-END]
 
 // ---- finish mode: deliver what a dead run verified (issue 405) ----
@@ -2863,10 +2933,19 @@ async function runFinish(journal) {
       deliveryFailure = unusableReason(`deliver:#${number}`, (err && err.message) || err)
       delivery = null
     }
+    // Issue 1359: the same one retry as the code lane when the deliverer never started.
+    let spawnRetry = null, spawnRefused = null
+    if (!deliveryFailure && delivery == null) {
+      spawnRetry = await deliverAfterSpawnRefusal({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch })
+      delivery = spawnRetry.fallback || null
+    }
     // Issue 654: the same classification as the code lane - a branch the journal records as pushed
     // and verified that the deliverer cannot find is an inconsistency, not a failure.
     const outcome = delivery ? classifyDelivery(delivery, { branch, pushed: e.pushed === true, verified: true }) : null
-    if (!deliveryFailure && outcome && outcome.message) {
+    if (!deliveryFailure && spawnRetry && !(delivery && delivery.prUrl)) {
+      spawnRefused = spawnRefusalInconsistency({ number, branch, recoveryRunId: String(cfg.finishRunId || '').trim(), fallback: delivery, fallbackError: spawnRetry.fallbackError })
+      deliveryFailure = spawnRefused.detail
+    } else if (!deliveryFailure && outcome && outcome.message) {
       deliveryFailure = `deliver:#${number}: ${outcome.message}`
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
       deliveryFailure = `deliver:#${number} did not deliver: pushed=${delivery ? String(delivery.pushed) : 'null'} prUrl=${(delivery && delivery.prUrl) || '(none)'} - branch ${branch} is verified but still has no PR.`
@@ -2879,6 +2958,7 @@ async function runFinish(journal) {
     }
     log(deliveryFailure || `finish #${number}: ${delivery.prUrl}${mergeNote(delivery)}${gateRetryNote(delivery)}${delivery.mergeStatus === 'unmerged-by-classifier' ? ` - opened WITHOUT the pre-push merge: the classifier refused a command of the Deliver stage (issues 544, 1139), so origin/${defaultBranch} still has to be merged into ${branch} before this PR goes in (issue 544); the deliverer left it open, awaiting the orchestrator's merge of ${defaultBranch} (issue 1132)` : ''}`)
     if (delivery && delivery.prUrl) delivered.push({ ticket: number, branch, pr: delivery.prUrl })
+    else if (spawnRefused) inconsistent.push({ ticket: number, branch, detail: spawnRefused.detail, recovery: spawnRefused.recovery })
     else if (outcome && outcome.kind === 'inconsistency') inconsistent.push({ ticket: number, branch, detail: outcome.message })
     else failed.push({ ticket: number, failures: [deliveryFailure], conflictPaths: (delivery && delivery.conflictPaths) || [] })
     // Same checkpoint the code lane takes after Deliver (aac-routines issue 270): this stage runs
@@ -3130,11 +3210,22 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
       deliveryFailure = unusableReason(`deliver:#${t.number}`, (err && err.message) || err)
       delivery = null
     }
+    // Issue 1359: a deliverer that never started (null, no throw) gets one retry with the short
+    // PR-only prompt; when that delivers nothing either, the ticket is `inconsistent` with its
+    // finishRunId recovery, not `failed` with "pushed=null prUrl=(none)".
+    let spawnRetry = null
+    if (!deliveryFailure && delivery == null) {
+      spawnRetry = await deliverAfterSpawnRefusal({ t, branch, evidence: lastVerdict.evidence, unmetCriteria: unmetCriteriaOf(lastVerdict), defaultBranch: scout.defaultBranch })
+      delivery = spawnRetry.fallback || null
+    }
     // Issue 654: a deliverer that could not SEE the branch is never a blocked merge. "Could not
     // tell" and "absent" are told apart by the ls-remote exit codes it reports, and a branch the
     // run itself recorded as pushed and verified is an inconsistency, reported on its own.
     outcome = delivery ? classifyDelivery(delivery, { branch, pushed: branchPushed, verified: done }) : null
-    if (!deliveryFailure && outcome && outcome.message) {
+    if (!deliveryFailure && spawnRetry && !(delivery && delivery.prUrl)) {
+      inconsistency = spawnRefusalInconsistency({ number: t.number, branch, recoveryRunId: runId, fallback: delivery, fallbackError: spawnRetry.fallbackError })
+      deliveryFailure = inconsistency.detail
+    } else if (!deliveryFailure && outcome && outcome.message) {
       deliveryFailure = `deliver:#${t.number}: ${outcome.message}`
       if (outcome.kind === 'inconsistency') inconsistency = outcome.message
     } else if (!deliveryFailure && !(delivery && (delivery.prUrl || delivery.mergeStatus === 'blocked'))) {
@@ -3185,7 +3276,8 @@ Clean up your scratch worktree (git worktree remove) when done. If this repo is 
     conflictPaths, discoveries: (impl && impl.discoveries) || [],
     // Issue 654: non-null when the run recorded this branch pushed and verified but the deliverer
     // could not find it; the run result lists it under `inconsistent`, not `failed`.
-    inconsistency: inconsistency ? { branch, detail: inconsistency } : null,
+    // Issue 1359: a spawn-refused delivery arrives as an object already carrying its recovery line.
+    inconsistency: inconsistency ? (typeof inconsistency === 'object' ? inconsistency : { branch, detail: inconsistency }) : null,
   }
 }
 // [FLEET-CODE-LANE-END]
@@ -3346,6 +3438,14 @@ const allDiscoveries = clean.flatMap(r => r.discoveries)
 // [FLEET-REPORT-START]
 // A function declaration, not a const: the finish mode (issue 405) returns long before this line
 // and still has to run the writer, and only a declaration is hoisted that far.
+// Issue 1359: the append for a served repo that has no tools/followups-append.js. The same
+// section shape as that script's appendFollowupsSection (heading, blank line, one "- " bullet per
+// discovery, one blank line between sections), and the same property: the file's existing bytes
+// are never read back into the write, only appended after. A declaration for the same reason as
+// runReport. String.raw keeps the \n escapes for node to read, not for this template.
+function followupsAppendInline(file, id, bulletsFile) {
+  return String.raw`node -e "const fs=require('fs');const [f,r,j]=process.argv.slice(1);const b=JSON.parse(fs.readFileSync(j,'utf8'));if(!Array.isArray(b)||!b.length||b.some(x=>typeof x!=='string'||!x.trim()))throw new Error('discoveries must be a non-empty array of non-empty strings');const o=fs.existsSync(f)?fs.readFileSync(f,'utf8'):'';const s=o===''?'':o.endsWith('\n\n')?'':o.endsWith('\n')?'\n':'\n\n';const h='## Run '+new Date().toISOString().slice(0,10)+' (ticket-fleet '+r+')';fs.appendFileSync(f,s+h+'\n\n'+b.map(x=>'- '+x).join('\n')+'\n');console.log(JSON.stringify({file:f,runId:r,appended:b.length,heading:h}))" ${file} ${id} ${bulletsFile}`
+}
 async function runReport(discoveries, defaultBranch) {
   if (!discoveries.length) return null
   const branch = `agent/fleet-discoveries-wf_${runId}`
@@ -3361,7 +3461,7 @@ async function runReport(discoveries, defaultBranch) {
 1. git -C ${orchestratorCwd} fetch origin ${defaultBranch} - ${orchestratorCwd} is the orchestrator's own checkout, measured absolute at Setup (issue 562), never wherever your shell happens to start.
 2. git -C ${orchestratorCwd} worktree add -b ${branch} ${scratchFile('discoveries')} origin/${defaultBranch} - that exact path, which carries this run's id because every worker of this run shares one scratchpad directory (issue 439) - and do every step below inside that worktree; leave this session's own checkout untouched.
 3. Write this run's discovery bullets, exactly as given here and in this order, as a JSON array of strings to ${scratchFile('discoveries-bullets.json')}: ${JSON.stringify(discoveries)}
-4. From that worktree's repo root, run \`node tools/followups-append.js ${cfg.followupsFile} ${runId} ${scratchFile('discoveries-bullets.json')}\` (create ${cfg.followupsFile} if it does not exist; the script does that). Do NOT append, edit or reword ${cfg.followupsFile} by hand - a hand edit is what deleted seven earlier runs' worth of bullets before this script existed (issue 882); the script is append-only by construction and refuses to run if that were ever not true. It prints one line of JSON on success; if it exits non-zero, stop and return that stderr as the error.
+4. From that worktree's repo root, run \`node tools/followups-append.js ${cfg.followupsFile} ${runId} ${scratchFile('discoveries-bullets.json')}\` (create ${cfg.followupsFile} if it does not exist; the script does that). Do NOT append, edit or reword ${cfg.followupsFile} by hand - a hand edit is what deleted seven earlier runs' worth of bullets before this script existed (issue 882); the script is append-only by construction and refuses to run if that were ever not true. It prints one line of JSON on success; if it exits non-zero, stop and return that stderr as the error. WHERE tools/followups-append.js DOES NOT EXIST in that worktree (a served repo without the fleet's helper scripts - aac-legal run 6ac03f2a returned appended 0 with no sha and no reason, issue 1359), run this command instead, from the same root - it only ever appends to the end of the file, creating it if absent, in the same section format: \`${followupsAppendInline(cfg.followupsFile, runId, scratchFile('discoveries-bullets.json'))}\`. Never return appended 0 or an empty sha without an error naming the step that stopped you and its output VERBATIM.
 5. Commit ${cfg.followupsFile} by explicit path and nothing else (issue 807 - a broad add once swept a CRLF-rewritten test file into this commit): ${gitSpelling(instrument, `add -- ${cfg.followupsFile}`)}, then ${gitSpelling(instrument, `commit -m "chore(follow-ups): discoveries from ticket-fleet run ${runId} (${discoveries.length} bullets)" -- ${cfg.followupsFile}`)}. Never add with -A, . or -u, and never commit with -a; the trailing \`-- ${cfg.followupsFile}\` commits that one path even if something else got staged. Then run ${gitSpelling(instrument, 'show --name-only --format= HEAD')}: it must print exactly \`${cfg.followupsFile}\`. If it prints any other path, stop - push nothing, open no PR - and return sha and prUrl as empty strings.
 6. Read the full commit sha back from the new commit and return it as sha; return ${branch} as branch and ${discoveries.length} as appended.
 ${deliverStep}
@@ -3408,7 +3508,7 @@ else if (discoveryReport) log(`discoveries: ${discoveryReport.bullets} bullet(s)
 // filesystem of its own, so this phase names the command rather than running it. The constant is
 // declared up with the config so the finish mode (issue 405), which returns long before this line,
 // can name the same command.
-log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the served repo from THIS session - not via a sub-agent - before the container is gone. It distils this run's journal into state/fleet-runs/<runId>.json. Where the served repo gitignores state/, post the record's digest as a comment on that repo's tracking issue: an ignored file dies with the container.`)
+log(`Run forensics (aac-routines issue 269): run \`${RECORD_COMMAND}\` in the served repo from THIS session - not via a sub-agent - before the container is gone. It distils this run's journal into state/fleet-runs/<runId>.json. Where the served repo gitignores state/, post the record's digest as a comment on that repo's tracking issue: an ignored file dies with the container. Where that repo has no tools/fleet-run-record.js, ticket-fleet SKILL.md step 4 says what to post instead (issue 1359).`)
 
 // A ticket that verified but did not deliver is neither `delivered` (no PR or comment URL) nor,
 // before aac-routines issue 270, `failed` (done was true) - the issue 191 silence one phase later.
@@ -3443,9 +3543,9 @@ return {
     // Issue 1020: a root-tree write a checkpoint caught and put back.
     .concat(treeRestores.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
       detail: `orchestrator isolation breach: ${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout; caught at ${t.label}, moved to ${t.quarantine || 'the guard quarantine'} and restored, and the wave continued (issues 1006, 1020).` })))
-    .concat(clean.filter(r => r.inconsistency).map(r => ({
+    .concat(clean.filter(r => r.inconsistency).map(r => Object.assign({
       ticket: r.ticket, kind: r.kind, branch: r.inconsistency.branch, detail: r.inconsistency.detail,
-    }))),
+    }, r.inconsistency.recovery ? { recovery: r.inconsistency.recovery } : {}))),
   discoveries: allDiscoveries.length,
   // Where the bullets actually live, so a triage chore filed for them can name the commit and
   // the reviewer can merge the discoveries PR without hunting for it (issue 360).

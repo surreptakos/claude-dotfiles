@@ -111,3 +111,57 @@ test('runCodeLane records a delivery opened by A9 after a refused command as del
   assert.ok(logs.some((m) => m.includes('https://github.com/x/y/pull/1139') && /WITHOUT the pre-push merge: the classifier refused a command of the Deliver stage/.test(m)),
     'the deliver log line names the PR and says it still owes the default-branch merge');
 });
+
+// Issue 1359: cloud run 6ac03f2a's deliver:#1 was refused at SPAWN ("blocked by safety classifier:
+// [Auto-Mode Bypass]", journal {"type":"failed","agentId":""}), so agent() returned null and A9
+// above never ran. The lane now retries once with the short PR-only deliverer, and a second
+// null lands under `inconsistent` with the finishRunId recovery instead of "pushed=null prUrl=(none)".
+function spawnRefusedMock(labels, fallbackReply) {
+  return async (_prompt, opts) => {
+    labels.push(opts.label);
+    if (opts.label.startsWith('impl:')) return { branch: BRANCH, committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (opts.label.startsWith('deliver:')) return null;
+    if (opts.label.startsWith('deliver-fallback:')) return fallbackReply;
+    throw new Error('unexpected label: ' + opts.label);
+  };
+}
+
+test('runCodeLane retries a deliverer refused at spawn once with the PR-only deliverer, and records its PR (issue 1359)', async () => {
+  const labels = [];
+  const logs = [];
+  const fallbackReply = { pushed: true, prUrl: 'https://github.com/x/y/pull/11', mergeStatus: 'clean', conflictPaths: [],
+    blockedReason: '', merged: false, mergeSha: '', prState: 'not-attempted' };
+  const { runCodeLane } = await loadFleet(spawnRefusedMock(labels, fallbackReply), logs, 'mcp');
+  const result = await runCodeLane(TICKET, 0);
+  assert.deepEqual(labels.filter((l) => l.startsWith('deliver')), ['deliver:#1139', 'deliver-fallback:#1139'], 'exactly one retry');
+  assert.equal(result.prUrl, 'https://github.com/x/y/pull/11');
+  assert.equal(result.deliveryFailure, null);
+  assert.equal(result.inconsistency, null);
+  assert.equal(result.mergeStatus, 'unmerged-by-classifier', 'the fallback skipped the pre-push merge, whatever it reported');
+  assert.match(result.mergeNote, /refused at spawn/, 'the PR still owes the merge of the default branch');
+  assert.ok(logs.some((m) => /deliver:#1139 never started .* retrying delivery once/.test(m)), 'the retry is logged');
+});
+
+test('runCodeLane puts a spawn-refused ticket whose retry also fails under inconsistent with a finishRunId recovery (issue 1359)', async () => {
+  const labels = [];
+  const { runCodeLane } = await loadFleet(spawnRefusedMock(labels, null), [], 'mcp');
+  const result = await runCodeLane(TICKET, 0);
+  assert.equal(labels.filter((l) => l.startsWith('deliver')).length, 2, 'one retry, never a second');
+  assert.equal(result.prUrl, null);
+  assert.ok(result.inconsistency, 'listed under inconsistent, not failed');
+  assert.equal(result.inconsistency.branch, BRANCH);
+  assert.match(result.inconsistency.recovery, /^relaunch ticket-fleet with finishRunId: 'testrun'/);
+  assert.doesNotMatch(result.inconsistency.recovery, /\n/, 'the recovery is one line');
+  assert.doesNotMatch(result.deliveryFailure, /did not deliver: pushed=null/, 'not the 6ac03f2a message');
+});
+
+test('the spawn fallback prompt opens the PR only, without the wording that can stop a spawn (issue 1359)', () => {
+  const src = block('FLEET-DELIVER-PROMPT');
+  const body = src.slice(src.indexOf('function spawnFallbackPrompt('), src.indexOf('function spawnRefusalInconsistency('));
+  const returned = body.slice(body.indexOf('return `'));
+  assert.ok(returned.length > 0, 'spawnFallbackPrompt lives in the deliver-prompt block');
+  assert.doesNotMatch(returned, /classifier|bypass|refus/i, 'no refusal wording in the fallback text');
+  assert.match(returned, /Do NOT merge anything, do NOT push/);
+  assert.ok(returned.includes('a paragraph headed "Not merged with ${defaultBranch}"'), 'the PR body says the default branch still has to be merged in');
+});
