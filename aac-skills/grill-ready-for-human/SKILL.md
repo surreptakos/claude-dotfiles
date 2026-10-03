@@ -3,10 +3,10 @@ name: grill-ready-for-human
 description: Walk every ready-for-human ticket — read them all, ask every ruling in one batch, then land each as a comment and relabel or close.
 disable-model-invocation: true
 metadata:
-  modified: "2026-10-02T17:55:58Z"
-  previous-modified: "2026-10-01T23:01:43Z"
-  revision: "17"
-  content-sha: "2ef587f79494"
+  modified: "2026-10-03T00:35:24Z"
+  previous-modified: "2026-10-02T17:55:58Z"
+  revision: "18"
+  content-sha: "681df0c365b0"
 ---
 
 # Grill ready-for-human
@@ -43,7 +43,7 @@ Once the batch is answered, land every ruling in turn — comment, relabel or cl
 
 ### Landing one ruling
 
-Write the ruling to a temp file: verbatim quote plus one-sentence context (`from grill session <YYYY-MM-DD>`). Post with `gh issue comment N --repo <repo> --body-file <path>`.
+Write the ruling to a temp file. Its first line is exactly `**Owner ruling** (grill session <YYYY-MM-DD>)`, then the verbatim quote plus one-sentence context. Post with `gh issue comment N --repo <repo> --body-file <path>`. The rulings page opens with the same `**Owner ruling**` marker, and it is what the ticket-fleet worker and `/triage` read the comments for: a ruling without it looks unanswered, so the ticket can go back to the owner (issue 1293).
 
 Follow-through by ruling shape:
 

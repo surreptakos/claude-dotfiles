@@ -1837,6 +1837,12 @@ test('triage skill and fleet scout name the owner-ruling markers before any read
   }
 });
 
+test('grill-ready-for-human lands its ruling comment under the **Owner ruling** marker the readers match (issue 1293)', () => {
+  const grill = fs.readFileSync(path.join(__dirname, '..', 'aac-skills', 'grill-ready-for-human', 'SKILL.md'), 'utf8');
+  const land = grill.split('### Landing one ruling')[1].split('\n## ')[0];
+  assert.ok(land.includes('`**Owner ruling** (grill session <YYYY-MM-DD>)`'), 'the Land step opens the comment with the marker');
+});
+
 test(`${FLEET_SCRIPT_REL} wave selection parks a ticket whose latest comment is an unanswered fleet handoff`, () => {
   const parked = { number: 266, kind: 'human', blockedBy: [], handoffPending: true };
   const fresh = { number: 267, kind: 'human', blockedBy: [], handoffPending: false };
