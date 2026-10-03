@@ -913,7 +913,7 @@ function quotaFailure(message) {
   let reason = null;
   const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
   if (hit) reason = hit[1].toLowerCase();
-  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\bexceed(?:s|ed)? (?:your |the )?(?:account's |organization's )?rate limit\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|(?<!\bnot |n[\x27’]t )\bexceed(?:s|ed)? (?:your |the )?(?:account[\x27’]s |organization[\x27’]s )?rate limit\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
   else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
   if (!reason) return null;
   const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);

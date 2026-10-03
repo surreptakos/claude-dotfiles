@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-03T19:45:22Z'
-  previous-modified: '2026-10-03T19:19:22Z'
-  revision: '78'
-  content-sha: db26d6b8a4fb
+  modified: '2026-10-03T20:13:57Z'
+  previous-modified: '2026-10-03T19:45:22Z'
+  revision: '79'
+  content-sha: 1bc843f9cc53
 ---
 
 # ticket-fleet
@@ -136,7 +136,7 @@ its launch; Dan asked whether that was true before anyone had looked.
    | `inconsistent` | verified and pushed, but the deliverer could not find the branch | deliver it by hand or via `finishRunId` |
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
-   | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time | relaunch after the reset; bullets are in `discoveryList` |
+   | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time; a halt on an agent that resolved null carries a prose reason and `resetsAt: null` (the run log's `[label] failed:` line names the limit) | relaunch after the reset; bullets are in `discoveryList` |
    | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / waiting on the owner after a handoff | nothing |
 
    Done when every ticket the scout listed sits in one row above.

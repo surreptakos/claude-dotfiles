@@ -103,6 +103,28 @@ test('a probe verifier that resolves null is not re-run and starts no further at
   assert.ok(runHalt.halted());
 });
 
+test('a finish pass whose deliverer resolves null halts: no further deliverer or report writer starts', async () => {
+  const labels = [];
+  const runHalt = helpers.createRunHalt(() => {});
+  const { runFinish } = await load(['FLEET-DELIVER-PROMPT', 'FLEET-REPORT', 'FLEET-FINISH'], 'runFinish', async (_p, opts) => {
+    labels.push(opts.label);
+    return null;
+  }, [], { runHalt });
+  const ticket = (n) => ({ number: n, title: 't', branch: `agent/issue-${n}-attempt1-wf_dead-w0`, verified: true, pushed: true, evidence: 'ok', delivered: false, deliveryRef: '' });
+  const out = await runFinish({ defaultBranch: 'main', tickets: [ticket(5), ticket(6)], discoveries: ['a bullet'] });
+  assert.deepEqual(labels, ['deliver:#5'], 'the second deliverer and the report writer must not start');
+  assert.ok(runHalt.halted());
+  assert.deepEqual(out.failed.map((f) => f.ticket), [5, 6]);
+  assert.match(out.failed[1].failures[0], /deliver:#6 not started - no further attempt: run halted after an agent resolved null/);
+  assert.match(out.discoveryReport.error, /^followups-writer not started/);
+});
+
+test('finish mode result carries the halt and what a dead restore left behind', () => {
+  assert.match(SRC, /inconsistent: finished\.inconsistent\.concat\(isolationLeftBehind\(\)\)/);
+  assert.match(SRC, /halt: haltReport\(runHalt\.get\(\), \[\]\)\.halt,/);
+  assert.match(SRC, /\.concat\(isolationLeftBehind\(\)\)\n\s*\/\/ Issue 1020/, 'the wave result too');
+});
+
 test('a probe deliverer that returns null is a named delivery failure, not a ticket missing from the result', async () => {
   const logs = [];
   const { runProbeLane } = await load(['FLEET-PROBE-LANE'], 'runProbeLane', async (_p, opts) => {

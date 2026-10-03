@@ -2195,6 +2195,8 @@ async function driveFinish(scriptPath, agentMock, journal, cfgOverrides = {}) {
     classifyDelivery,
     DELIVERED: {},
     DISCOVERY_REPORT: {},
+    // A real, un-halted run halt: the permissive stub answers halted() with a truthy proxy.
+    runHalt: createRunHalt(() => {}),
   }));
   return { result: await runFinish(journal), logs, checkpoints };
 }
@@ -2787,7 +2789,7 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}, scopeOverrides = {})
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
   const logs = [];
-  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, headLeftMoved, treeLeftDirty };\n}`);
+  const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable, headLeftMoved, treeLeftDirty, isolationLeftBehind };\n}`);
   const inner = await wrapper(laneScope(Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
@@ -3405,6 +3407,50 @@ test('code lane: a null verifier is not re-run and starts no further attempt (wf
   assert.ok(runHalt.halted());
 });
 
+test('code lane: a null push agent halts the run before any verifier starts (wf_0b138fa5-528)', async () => {
+  const calls = [];
+  const runHalt = createRunHalt(() => {});
+  const { result } = await driveCodeLane(FLEET_SCRIPT, async (_p, opts) => {
+    calls.push(opts.label);
+    if (opts.label.startsWith('impl:')) return { branch: 'b', committed: true, pushed: false, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    return null;
+  }, { number: 9, title: 't', criteria: 'c', kind: 'code' }, 0, {}, 'inv1', null, { runHalt });
+  assert.deepEqual(calls, ['impl:#9.1', 'push:#9.1']);
+  assert.ok(runHalt.halted());
+  assert.equal(result.done, false);
+});
+
+test('treeGuardCheck: with the HEAD watch off, a halted run\'s failed checkpoint agent is NOT AUDITED, not a could-not-audit throw (issue 812)', async () => {
+  const agentMock = async (_prompt, opts) => {
+    // No head line at Setup: the HEAD watch turns itself off and only the tree guard runs.
+    if (opts.label === 'isolation:setup') return { exitCode: 0, stdout: isolationStdout({ guard: { statePath: '/m/s.json', baselineCount: 0 } }), stderr: '' };
+    throw new Error('StructuredOutput retry cap (5) exceeded');
+  };
+  const runHalt = createRunHalt(() => {});
+  runHalt.noteDead('impl:#1.1');
+  const { treeGuardCheck, breaches, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  assert.ok(logs.some((l) => /orchestrator-head: unusable/.test(l)), 'fixture: the HEAD watch is off');
+  await treeGuardCheck('implement-attempt1', 4);
+  assert.deepEqual(breaches, []);
+  assert.ok(logs.some((l) => /isolation:implement-attempt1#4 NOT AUDITED/.test(l)), JSON.stringify(logs));
+});
+
+test('isolationLeftBehind: a dead restore\'s moved HEAD is listed once under inconsistent, however many checkpoints read it', async () => {
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label === 'isolation:setup') return QUOTA_SETUP;
+    if (opts.label.startsWith('isolation:')) return { exitCode: 0, stdout: isolationStdout({ head: { branch: null, sha: 'b'.repeat(40) }, guard: CLEAN }), stderr: '' };
+    return null;
+  };
+  const runHalt = createRunHalt(() => {});
+  const { treeGuardCheck, isolationLeftBehind } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  await treeGuardCheck('deliver', 7);
+  await treeGuardCheck('pre-report', 0);
+  const left = isolationLeftBehind();
+  assert.equal(left.length, 1);
+  assert.equal(left[0].kind, 'orchestrator-head');
+  assert.match(left[0].detail, /NOT restored/);
+});
+
 test('runHalt: a null-agent halt takes the limit and reset time from a later rejection that carries them', () => {
   const logs = [];
   const runHalt = createRunHalt((m) => logs.push(m));
@@ -3671,6 +3717,10 @@ test('quotaFailure recognises the limit messages runs have died on, with their r
   assert.equal(quotaFailure('rate_limit_error: status 429').resetsAt, null);
   // wf_0b138fa5-528: "rate limit" is not followed by "exceeded" here.
   assert.equal((quotaFailure("API Error: This request would exceed your account's rate limit. Please try again later.") || {}).reason, 'rate limit');
+  assert.equal((quotaFailure('API Error: This request would exceed your account’s rate limit.') || {}).reason, 'rate limit', 'a typographic apostrophe too');
+  for (const negated of ['this batch would not exceed your rate limit', 'the request does not exceed the rate limit', "it won't exceed the rate limit"]) {
+    assert.equal(quotaFailure(negated), null, `${negated} is not a limit hit`);
+  }
   for (const ordinary of ['no reply matching its schema', 'issue #429 is still open', '', null]) {
     assert.equal(quotaFailure(ordinary), null, `${ordinary} is an ordinary failure, not a halt`);
   }

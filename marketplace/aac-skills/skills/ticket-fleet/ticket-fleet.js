@@ -983,7 +983,7 @@ function quotaFailure(message) {
   let reason = null;
   const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
   if (hit) reason = hit[1].toLowerCase();
-  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\bexceed(?:s|ed)? (?:your |the )?(?:account's |organization's )?rate limit\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|(?<!\bnot |n[\x27’]t )\bexceed(?:s|ed)? (?:your |the )?(?:account[\x27’]s |organization[\x27’]s )?rate limit\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
   else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
   if (!reason) return null;
   const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);
@@ -1480,6 +1480,15 @@ const attributed = new Set()
 const treeRestores = []
 // Run wf_0b138fa5-528: a root-tree write whose restore agent died on the halt - { label, observedBy, who, entries }.
 const treeLeftDirty = []
+// The `inconsistent` entries for what a dead restore left in place (headLeftMoved is declared with
+// the HEAD watch below; this runs only once the wave or the finish pass is over). Both the wave's
+// result and finish mode's carry them.
+function isolationLeftBehind() {
+  return headLeftMoved.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
+    detail: `orchestrator HEAD found ${/^unreadable/.test(h.from) ? h.from : `on ${h.from}`} at ${h.label}; its restore onto ${h.target} died on the run's halt (issue 812), so it is NOT restored - check the orchestrator checkout's HEAD and status and restore it by hand before the next run (RECOVERY.md).` }))
+    .concat(treeLeftDirty.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
+      detail: `${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout, caught at ${t.label}; its restore died on the run's halt (issue 812), so it is NOT restored - check the checkout's status and restore it by hand before the next run (RECOVERY.md).` })))
+}
 // A leaked path, and the guard's statePath (issue 1207: a fork's guard prints `C:\Users\...`, whose
 // backslashes an unquoted bash word eats), goes into a bash command as ONE word, whatever it holds.
 const shellWord = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
@@ -1904,7 +1913,9 @@ async function headCheck(label, ticketNumber, now) {
   // re-read would die the same way. That is NOT AUDITED, never a breach - but a HEAD the read did
   // see moved is said out loud, since nothing put it back.
   if (restoreDied) {
-    headLeftMoved.push({ label, observedBy: ticketNumber, from: now.head ? describeHead(now.head) : `unreadable at ${label}`, target })
+    const leftFrom = now.head ? describeHead(now.head) : `unreadable at ${label}`
+    // One entry per moved HEAD: every later checkpoint of a halted run can read the same move.
+    if (!headLeftMoved.some(h => h.from === leftFrom)) headLeftMoved.push({ label, observedBy: ticketNumber, from: leftFrom, target })
     log(`Orchestrator HEAD LEFT MOVED at ${label} (ticket #${ticketNumber}): the read found it ${now.head ? `on ${describeHead(now.head)}` : 'unreadable'}, and ${restoreWho} died on the halt (issue 812) before it could put it back onto ${target}; NOT AUDITED, not a breach - check ${orchestratorCwd}'s HEAD and status, and restore it by hand before the next run (RECOVERY.md).`)
     return 'halted'
   }
@@ -2231,9 +2242,12 @@ Never invent a ticket, a branch, a URL or a verdict, and never infer one from a 
     skippedDelivered: finished.skippedDelivered,
     skippedUnverified: finished.skippedUnverified,
     failed: finished.failed,
-    inconsistent: finished.inconsistent,
+    // Run wf_0b138fa5-528: what a dead restore left in place, as in a wave's result.
+    inconsistent: finished.inconsistent.concat(isolationLeftBehind()),
     discoveryReport: finished.discoveryReport,
     followupsError: finishFollowupsError,
+    // Issue 812: the halt, named once, as in a wave's result (a finish pass starts no new ticket).
+    halt: haltReport(runHalt.get(), []).halt,
     recordCommand: RECORD_COMMAND,
   }
 }
@@ -2920,6 +2934,14 @@ async function runFinish(journal) {
       failed.push({ ticket: number, failures: ['journal records a passing verdict but no branch for this ticket'], conflictPaths: [] })
       continue
     }
+    // Issue 812 / run wf_0b138fa5-528: once the pass is halted no deliverer starts - it would die on
+    // the same limit. The branch stays verified; this same finish pass delivers it after the reset.
+    if (runHalt.halted()) {
+      const notStarted = `deliver:#${number} not started - ${runHalt.failure()}; ${branch} is verified: re-run this finish pass after the reset`
+      log(notStarted)
+      failed.push({ ticket: number, failures: [notStarted], conflictPaths: [] })
+      continue
+    }
     const t = { number, title: stableText(e.title), criteria: stableText(e.criteria), keepOpen: e.keepOpen === true }
     let delivery = null, deliveryFailure = null
     try {
@@ -2927,7 +2949,10 @@ async function runFinish(journal) {
       deliverPrompt({ t, branch, evidence: e.evidence, unmetCriteria: e.unmetCriteria, defaultBranch, testCommand: finishTestCommand, resumed: true }),
       { label: `deliver:#${number}`, phase: 'Deliver', schema: DELIVERED, model: cfg.deliverModel, effort: cfg.effort }
       )
+      // A null deliverer is the runtime's terminal API error (run wf_0b138fa5-528): halt the pass.
+      if (delivery == null) runHalt.noteDead(`deliver:#${number}`)
     } catch (err) {
+      runHalt.note((err && err.message) || err, `deliver:#${number}`)
       deliveryFailure = unusableReason(`deliver:#${number}`, (err && err.message) || err)
       delivery = null
     }
@@ -2953,7 +2978,11 @@ async function runFinish(journal) {
     // unisolated in the orchestrator's own checkout.
     await treeGuardCheck('finish-deliver', number)
   }
-  const discoveryReport = await runReport(stableList(journal && journal.discoveries), defaultBranch)
+  const finishDiscoveries = stableList(journal && journal.discoveries)
+  // Issue 812: a halted pass starts no report writer either; the bullets stay in the dead run's journal.
+  const discoveryReport = runHalt.halted() && finishDiscoveries.length
+    ? { branch: null, sha: null, prUrl: null, bullets: finishDiscoveries.length, error: `followups-writer not started - ${runHalt.failure()}` }
+    : await runReport(finishDiscoveries, defaultBranch)
   return { delivered, skippedDelivered, skippedUnverified, failed, inconsistent, discoveryReport }
 }
 // [FLEET-FINISH-END]
@@ -3521,12 +3550,9 @@ return {
     .concat(headWatchUnusable ? [{ ticket: null, kind: 'orchestrator-head', branch: null, detail: headWatchUnusable }] : [])
     .concat(headRestores.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
       detail: `orchestrator isolation breach: HEAD ${/^unreadable/.test(h.from) ? h.from : `moved to ${h.from}`} during the wave; restored onto ${h.to} at ${h.label} and the wave continued (issues 807, 1006). Check the orchestrator checkout's reflog and stash list for what the move left behind.` })))
-    // Run wf_0b138fa5-528: a moved HEAD whose restore agent died on the halt - not a breach, and
-    // not put back either, so the result says so rather than leaving it to the log.
-    .concat(headLeftMoved.map(h => ({ ticket: h.observedBy, kind: 'orchestrator-head', branch: null,
-      detail: `orchestrator HEAD found ${/^unreadable/.test(h.from) ? h.from : `on ${h.from}`} at ${h.label}; its restore onto ${h.target} died on the run's halt (issue 812), so it is NOT restored - check the orchestrator checkout's HEAD and status and restore it by hand before the next run (RECOVERY.md).` })))
-    .concat(treeLeftDirty.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
-      detail: `${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout, caught at ${t.label}; its restore died on the run's halt (issue 812), so it is NOT restored - check the checkout's status and restore it by hand before the next run (RECOVERY.md).` })))
+    // Run wf_0b138fa5-528: a moved HEAD or root-tree write whose restore agent died on the halt -
+    // not a breach, and not put back either, so the result says so rather than leaving it to the log.
+    .concat(isolationLeftBehind())
     // Issue 1020: a root-tree write a checkpoint caught and put back.
     .concat(treeRestores.map(t => ({ ticket: t.observedBy, kind: 'tree-guard', branch: null,
       detail: `orchestrator isolation breach: ${t.who} wrote ${t.entries.join('; ')} into the orchestrator checkout; caught at ${t.label}, moved to ${t.quarantine || 'the guard quarantine'} and restored, and the wave continued (issues 1006, 1020).` })))
