@@ -3,10 +3,10 @@ name: session-check
 description: The session-gate engine (check.js). Run it by hand only to debug the engine; /session-start and /session-end read its report.
 metadata:
   disable-model-invocation: 'true'
-  modified: '2026-10-02T20:04:56Z'
-  previous-modified: '2026-10-02T15:34:34Z'
-  revision: '52'
-  content-sha: 38b6c9ee5d2f
+  modified: '2026-10-03T20:18:46Z'
+  previous-modified: '2026-10-02T20:04:56Z'
+  revision: '53'
+  content-sha: cff1db92538a
 ---
 
 # Session check (engine)

@@ -54,7 +54,20 @@ test('CLAUDE.md teaches the stamp command with the home CI checks against', () =
 
 test("skill-stamps.yml's remediation teaches CLAUDE.md's spelling verbatim", () => {
   assert.deepEqual(stampRecipe(WORKFLOW, true), stampRecipe(CLAUDE_MD));
-  assert.deepEqual(buildRecipe(WORKFLOW, true), buildRecipe(CLAUDE_MD));
+});
+
+test('only master builds the payload, with the stamp recipe and the home CI checks against (issue 1308)', () => {
+  // A branch that commits its own build conflicts with every open PR on the version line, so
+  // neither the branch recipe nor the PR job's remediation teaches the build; the master job runs it.
+  assert.deepEqual(buildRecipe(CLAUDE_MD), [], 'CLAUDE.md must not teach a branch to build the payload');
+  assert.deepEqual(buildRecipe(WORKFLOW, true), [], "skill-stamps.yml's remediation must not teach the build");
+  const master = fs.readFileSync(path.join(ROOT, '.github/workflows/plugin-payload.yml'), 'utf8');
+  const runs = lines(master, 'skill-stamps.py').concat(lines(master, 'build-cloud-plugin.py'));
+  assert.ok(runs.some((l) => l === stampRecipe(CLAUDE_MD)[0]), 'plugin-payload.yml must stamp with the CLAUDE.md recipe');
+  assert.ok(runs.some((l) => l === `python3 tools/build-cloud-plugin.py --home '${ciHomes[0]}'`),
+    'plugin-payload.yml must build with the home CI checks against');
+  assert.match(master, /\[skip ci\]/, 'the bot commit must carry [skip ci] so it cannot retrigger a push run');
+  assert.match(master, /github\.actor != 'github-actions\[bot\]'/, 'the job must skip pushes made by the bot');
 });
 
 test('the check drift hint echoes back the --home it ran with', () => {

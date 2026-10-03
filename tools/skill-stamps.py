@@ -20,9 +20,9 @@ or a second edit) still lands one revision bump with `previous-modified` naming 
 version. `check` only reports, exit 1 on any skill that was edited without a re-stamp or never
 stamped.
 
-The packager (tools/build-cloud-plugin.py) stamps every source skill on each build, so rebuilding
-the plugin keeps the stamps current with no one remembering to. This CLI exists for checking a
-branch that edited aac-skills/ without rebuilding, and for CI.
+The packager (tools/build-cloud-plugin.py) stamps every source skill on each build, but it runs on
+master only (plugin-payload.yml, issue 1308): a branch that edits aac-skills/ stamps with this CLI,
+and CI checks it with `check`.
 
 Usage (`--home` names the OWNER's home, not the container's - see below):
     python3 tools/skill-stamps.py stamp aac-skills aac-skills claude/skills --home 'C:\\Users\\Dan'
@@ -499,8 +499,8 @@ def main(argv=None):
             home_arg = f" --home '{args.home}'" if args.home is not None else ""
             print(f"\n{bad} skill(s) edited without a re-stamp or never stamped. Run:"
                   f"\n  python3 tools/skill-stamps.py stamp {' '.join(args.paths)}{home_arg}"
-                  f"\nA skill edited on a branch needs every tree that carries it stamped and the"
-                  f" plugin rebuilt - see CLAUDE.md, \"Skill stamps\".", file=sys.stderr)
+                  f"\nA skill edited on a branch needs every tree that carries it stamped; master"
+                  f" rebuilds the plugin - see CLAUDE.md, \"Skill stamps\".", file=sys.stderr)
     return 1 if bad else 0
 
 

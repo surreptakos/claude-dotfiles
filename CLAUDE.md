@@ -9,14 +9,15 @@ The Claude Code setup itself, under version control: global rules, skills, hooks
 retired the `claude/`, `codex/` and `memory/` mirrors and `sync.ps1 -Mode push` with them).
 
 Edit `aac-skills/<name>/` for a skill and `profile/` for the consumer profile — the global rules
-text, `settings.json`, the hook scripts, the Codex half. Do it on a branch, run the two commands
-below, commit, and merge: **the merge to master is the release**, and it is what a cloud container
-installs; a desktop takes them on its own: `profile/claude/settings.json` registers the marketplace with
+text, `settings.json`, the hook scripts, the Codex half. Do it on a branch, run the stamp below,
+commit, and merge: **the merge to master is the release** (master then builds the payload), and it
+is what a cloud container installs; a desktop takes them on its own: `profile/claude/settings.json` registers the marketplace with
 `autoUpdate: true`, so Claude Code's background refresh installs the new payload version after the next
 session start with no command (Dan, 2026-09-29: never tell him to run `claude plugin update`; pull
 restores the rest).
 
-Generated, and never hand-edited: `marketplace/`, `.claude-plugin/marketplace.json` and the
+Generated, and never hand-edited: `marketplace/`, `.claude-plugin/marketplace.json` (both built
+on master only, never on a branch) and the
 `aac-skills/project-harness/templates/` files the two generators own. `DASHBOARD.md` too — see
 the harness section.
 
@@ -51,9 +52,9 @@ as a `[skip ci]` bot commit. A PR that commits its own build conflicts with ever
 the version line. Tests that pin the payload to its sources build a fresh one
 (`tools/fresh-payload.js`) instead of reading `marketplace/`.
 
-The stamp is idempotent, and so is a second edit after it: run it as often as you like, the
-commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
-never from an intermediate one, so `previous-modified` names the published version (issue 363).
+Stamp as often as you like, after a second edit or not: the commit still carries one revision
+bump. A rotation is measured from the last *committed* stamp, never from an intermediate one, so
+`previous-modified` names the published version (issue 363).
 
 ## Layout
 

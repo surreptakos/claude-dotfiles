@@ -56,12 +56,12 @@ Edit `aac-skills/<name>/` or `profile/`, on a branch. Then, from the repo root:
 
 ```bash
 python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
-python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
 ```
 
-Commit both the source and the rebuilt `marketplace/`, and merge. **The merge is the release** —
-every cloud container installs the payload from master at session start, and a desktop takes the
-same change with:
+Commit the source, and merge. A branch never commits `marketplace/` (issue 1308): after each
+merge, `plugin-payload.yml` rebuilds the payload on master and commits it. **The merge is the
+release** — every cloud container installs the payload from master at session start, and a
+desktop takes the same change with:
 
 ```powershell
 .\sync.ps1 -Mode pull    # repo -> this machine, backing up first
@@ -216,7 +216,7 @@ stays in the plugin as a standing probe so a future surface change is noticed.
 `tools/build-cloud-plugin.py` packages the repo's `aac-skills/` tree into that shape:
 
 ```powershell
-python3 tools/build-cloud-plugin.py   # rewrites marketplace/ and emits dist/ (gitignored)
+python3 tools/build-cloud-plugin.py   # rewrites marketplace/ and emits dist/ (gitignored); master's plugin-payload.yml runs it
 ```
 
 It rewrites each `SKILL.md` to survive the claude.ai upload validator, which enforces three rules the local loader does not: frontmatter may

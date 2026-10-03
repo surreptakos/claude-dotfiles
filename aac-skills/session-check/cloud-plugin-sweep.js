@@ -195,14 +195,14 @@ const EXIT = {
   unknown: 2,
 };
 
-// The one fix that covers every drift state now (issue 214): rebuild marketplace/ from the repo's
-// aac-skills/ tree on a branch and merge it, and every surface picks it up on the next
-// `claude plugin marketplace update`. No claude.ai upload step, no per-account choice — the merge
-// IS the upload for skills the plugin serves.
+// The one fix that covers every drift state now (issue 214): merge the skill change to master,
+// where plugin-payload.yml rebuilds marketplace/ from the repo's aac-skills/ tree (issue 1308),
+// and every surface picks it up on the next `claude plugin marketplace update`. No claude.ai
+// upload step, no per-account choice — the merge IS the upload for skills the plugin serves.
 const FIX_LINES = [
-  'fix: in a claude-dotfiles checkout, on a branch,',
-  "     `python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'`, then commit and merge",
-  '     (the packager stamps the sources and rewrites marketplace/; the merge publishes it).',
+  'fix: in a claude-dotfiles checkout, on a branch, stamp the skill',
+  "     (`python3 tools/skill-stamps.py stamp aac-skills --home 'C:\\Users\\Dan'`), commit and merge;",
+  '     plugin-payload.yml then runs tools/build-cloud-plugin.py on master and commits marketplace/.',
   '     `node cloud-plugin-sweep.js --stamp` then records that publish for this machine.',
 ];
 

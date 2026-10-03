@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-02T17:46:10Z'
-  previous-modified: '2026-10-02T16:53:02Z'
-  revision: '76'
-  content-sha: 7fec0ba3b084
+  modified: '2026-10-03T20:15:54Z'
+  previous-modified: '2026-10-02T17:46:10Z'
+  revision: '77'
+  content-sha: f44fc5373c0f
 ---
 
 # ticket-fleet
@@ -89,14 +89,16 @@ serves one repo and skips a ticket labelled for a local agent, or one that chang
      `[]` (issue 814), so without it a Deliver stage that regenerates a skill's stamp pushes it
      unchecked. `regenCommands` defaults to `null`, and then the implementer and verifier pick a
      `--home` themselves (PR 1169 went red that way, issue 1195); set, the implementer, verifier
-     and Deliver prompts carry it verbatim:
+     and Deliver prompts carry it verbatim. It stamps and does not build: master rebuilds the
+     plugin payload after each merge (`plugin-payload.yml`), so a branch that commits its own
+     build conflicts with every other open PR on the version line (issue 1308):
 
      ```
      regenCheckCommands: ["python3 tools/skill-stamps.py check aac-skills --home 'C:\\Users\\Dan'"]
      ```
 
      ```
-     regenCommands: ["python3 tools/skill-stamps.py stamp aac-skills --home 'C:\\Users\\Dan'", "python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'"]
+     regenCommands: ["python3 tools/skill-stamps.py stamp aac-skills --home 'C:\\Users\\Dan'"]
      ```
 
      From a Linux container add this `testCommand` (the PowerShell restore test has no shell there):

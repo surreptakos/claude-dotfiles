@@ -576,8 +576,8 @@ function stampGate(py) {
   const bad = r.out.split(/\r?\n/).map((l) => l.trim())
     .filter((l) => l && !/^ok\s/.test(l) && !/^stamped\s/.test(l));
   bad.slice(0, 12).forEach((l) => note(l));
-  note(`\`python3 tools/skill-stamps.py stamp aac-skills --home '${OWNER_HOME}'\``
-    + ` && \`python3 tools/build-cloud-plugin.py --home '${OWNER_HOME}'\``);
+  // The stamp alone: master builds the payload after the merge (plugin-payload.yml, issue 1308).
+  note(`\`python3 tools/skill-stamps.py stamp aac-skills --home '${OWNER_HOME}'\``);
 }
 
 /** Everything this session could have put in front of the secret guard: the working tree's
@@ -859,7 +859,7 @@ function cloudSkillChecks() {
     ? 'no upload recorded — cloud sessions may be running without your skills'
     : 'cloud plugin is STALE — cloud sessions load the skills as they were at the last upload');
   lines.forEach((l) => note(l));
-  note("fix: in a claude-dotfiles checkout, `python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'` on a branch, then merge");
+  note('fix: merge the skill change to claude-dotfiles master - plugin-payload.yml runs tools/build-cloud-plugin.py there and commits the payload (issue 1308)');
 }
 
 /* --------------------------------------------------------- pull nudge ------------------------

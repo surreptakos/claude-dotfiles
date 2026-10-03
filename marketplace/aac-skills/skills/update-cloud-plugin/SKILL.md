@@ -2,10 +2,10 @@
 name: update-cloud-plugin
 description: Republish the aac-skills plugin, or upload a skill zip to a claude.ai Skills page. Use when the cloud-plugin sweep reports drift, a cloud or Cowork session is missing a skill, or an edited skill must reach claude.ai/code.
 metadata:
-  modified: '2026-10-02T15:37:15Z'
-  previous-modified: '2026-09-29T22:36:17Z'
-  revision: '12'
-  content-sha: 870adaeb1775
+  modified: '2026-10-03T20:19:08Z'
+  previous-modified: '2026-10-02T15:37:15Z'
+  revision: '13'
+  content-sha: 091b44417a1c
 ---
 
 # Update the cloud plugin
@@ -34,30 +34,30 @@ node "${CLAUDE_PLUGIN_ROOT}/skills/session-check/cloud-plugin-sweep.js"
 Exit 0 in sync, 1 drift or never uploaded, 2 could not check — **2 is never a pass**. In sync
 means there is nothing to do; say so and stop.
 
-## 2. Rebuild the plugin
+## 2. Stamp, and check it packages
 
-From a claude-dotfiles checkout — its `aac-skills/` is the only skill source, on the desktop and in
-a container alike:
+From a claude-dotfiles checkout, on a branch — its `aac-skills/` is the only skill source, on the
+desktop and in a container alike:
 
 ```bash
-python3 tools/build-cloud-plugin.py
+python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
+python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan' --no-marketplace --no-stamp-write
 ```
 
-`--home` defaults to the owner's home, the one CI checks against; pass it only when that home has
-moved. CI (`skill-stamps.yml`) checks that a rebuild from `aac-skills/` reproduces the committed
-payload.
+The second line builds into the gitignored `dist/` only. A branch never writes or commits
+`marketplace/` or `.claude-plugin/marketplace.json` (issue 1308): master builds those.
 
-Done when it exits 0. Non-zero names each skill that could not be packaged and why; fix those first,
-because a partial plugin silently drops skills from every surface it reaches. Note the version it
-prints (e.g. `2026.9.112109`) to match against the surface later.
+Done when both exit 0. A non-zero build names each skill that could not be packaged and why; fix
+those first, because a partial plugin silently drops skills from every surface it reaches.
 
 ## 3. Publish through the marketplace
 
-Commit the rebuild on a branch and merge it to `master`. The packager has already refreshed
-`marketplace/aac-skills/` and `.claude-plugin/marketplace.json` and rotated the skill stamps on any
-skill whose content hash moved, so the branch carries the whole publish. **The merge is the
-release**: every machine with the plugin installed and every cloud session with the repo declared
-picks it up on its next marketplace refresh.
+Commit the sources on the branch and merge it to `master`. `plugin-payload.yml` then rebuilds
+`marketplace/aac-skills/` and `.claude-plugin/marketplace.json` on master and commits them; done
+when its run on the merge is green, and note the version that commit carries (e.g.
+`2026.9.112109`) to match against the surface later. **The merge is the release**: every machine
+with the plugin installed and every cloud session with the repo declared picks it up on its next
+marketplace refresh.
 
 A desktop refreshes itself: the profile's `settings.json` registers the marketplace with
 `autoUpdate: true`, so the background refresh after the next session start installs the new
