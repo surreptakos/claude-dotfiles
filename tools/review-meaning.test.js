@@ -167,7 +167,8 @@ suite('review meaning', { concurrency: true }, () => {
     }
   });
 
-  // [question, the answer that fails it, an answer in the read band (Noul only), the fix line].
+  // [question, the answer that fails it, an answer in the read band (null where no answer reaches
+  // it), the fix line]. A Choice reaches its band through a stub with probabilities (issue 1245).
   const JEV = [
     ['S1.s1_behavior', 'trait', null, /^  - S1: sentence 1 names a trait, motive or attitude; it must name a behavior or work product\. \(Jev\)$/m],
     ['S1.s1_pattern', 0.1, 0.3, /^  - S1: sentence 1 is a one-off event; it must state a pattern, with the event as the example\. \(Jev\)$/m],
@@ -176,7 +177,7 @@ suite('review meaning', { concurrency: true }, () => {
     ['S2.example_demonstrates', 0.05, 0.45, /^  - S2: the example in sentence 2 is not an instance of sentence 1; the item must be about one of them\. \(Jev\)$/m],
     ['S1.s4_restate', 0.1, 0.3, /^  - S1: sentence 4 does not restate sentence 1; it must say the same thing again with no new theme\. \(Jev\)$/m],
     ['core.ramification', 0.95, 0.6, /^  - Core Message: the Ramification lists his Weaknesses or his current work; it must name what changes for him next year\. \(Jev\)$/m],
-    ['W1.weakness_guidance', 'none', null, /^  - W1: has no Guidance point; every Weakness has at least one\. \(Jev\)$/m],
+    ['W1.weakness_guidance', 'none', { choice: 'none', probabilities: { guidance_1: 0.4, none: 0.6 } },/^  - W1: has no Guidance point; every Weakness has at least one\. \(Jev\)$/m],
     ['Guidance 2.s1.instruction', 0.1, 0.4, /^  - Guidance 2: sentence 1 is not an instruction for next year; it must tell Bob what to do\. \(Jev\)$/m],
   ];
 
