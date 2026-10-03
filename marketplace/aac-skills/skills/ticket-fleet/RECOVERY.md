@@ -1,6 +1,6 @@
 # ticket-fleet: recovering a dead run
 
-Reached from SKILL.md when a wave died before it delivered. Both paths hand the dead run's own results back rather than re-running finished work.
+Reached from SKILL.md when a wave died before it delivered. Each path hands the dead run's own results back rather than re-running finished work.
 
 ## Finishing a run whose verifiers died
 
@@ -41,6 +41,31 @@ Pass the same `tickets` list as the dead run, a **new** `runId` (branch names fo
 that does re-implement must not collide with the dead run's), and the `testCommand` the dead
 run should have used. An entry whose `committed` is false, or a probe entry with no items, is
 treated as a failed attempt 1: attempt 2 runs the stage normally.
+
+## A breach reported while the run hit its quota
+
+Run `6ac0333b` (`wf_0b138fa5-528`, 2026-10-02) hit the account's session limit mid-wave and
+threw "orchestrator worktree isolation breached" with twenty entries reading `orchestrator HEAD
+unreadable at implement-attempt1 and a restore ... did not put it back (exit=null stderr=)`. No
+breach had happened. As observed in that run, the Workflow runtime resolved `agent()` to null for
+each subagent that died on the limit and logged `[<label>] failed: You've hit your session limit
+...` itself, so the script never saw the text, and the isolation reads, restores and re-reads all
+came back null. The fleet now treats a null implementer, prober, push, verifier or checkpoint
+agent as a dead agent: the run halts (issue 812), the checkpoint is NOT AUDITED, and a moved HEAD
+or tree write that a dead restore left in place is listed under `inconsistent`. An older copy of
+the script, or a run whose log shows `[isolation:...] failed:` lines naming a limit
+beside the breach, still needs this check:
+
+1. Check the orchestrator checkout first: `git -C <checkout> symbolic-ref --short HEAD`,
+   `git -C <checkout> rev-parse HEAD` and `git -C <checkout> status --short`. Compare them with
+   the run's `Orchestrator HEAD at Setup:` log line.
+2. On the start branch, at the start commit, with an empty status: it was a quota casualty, not
+   a breach. Nothing needs restoring.
+3. Anything else is a real breach: restore the checkout by hand before any run starts.
+
+After the reset time, relaunch with a **new** `runId` and the same `tickets`. Build `priorImpl`
+from the dead run's journal as above: every attempt-1 `impl:#<N>.1` result with `committed: true`
+(and its branch on origin) skips that ticket's implementer and goes straight to its verifier.
 
 ## Finishing a run whose Deliver step died
 
