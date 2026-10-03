@@ -14,10 +14,11 @@ the skill directory (SKILL.md's own stamp keys stripped, CRLF folded to LF, the 
 folded to the sync tokens so the live tree and the repo mirror hash alike). When the hash on disk
 no longer matches the recorded one, the skill was edited after its last stamp. `stamp` then
 rotates `modified` into `previous-modified`, sets `modified` from the newest file mtime, bumps the
-revision and records the new hash. The rotation is measured from the last COMMITTED stamp, so
-stamping the same skill several times before the commit (the documented stamp-then-package flow,
-or a second edit) still lands one revision bump with `previous-modified` naming the published
-version. `check` only reports, exit 1 on any skill that was edited without a re-stamp or never
+revision and records the new hash. The rotation is measured from the last PUBLISHED stamp (the
+copy at the default branch's merge base), so stamping the same skill several times before the
+merge (the documented stamp-then-package flow, a second edit, a second stamp commit on a PR
+branch, a re-stamp after merging master in) still lands one revision bump with
+`previous-modified` naming the published version. `check` only reports, exit 1 on any skill that was edited without a re-stamp or never
 stamped.
 
 The packager (tools/build-cloud-plugin.py) stamps every source skill on each build, so rebuilding
@@ -338,17 +339,42 @@ def _baseline_paths(skill_dir, repo, history_paths):
     return own + [p for p in (history_paths or []) if p not in own]
 
 
-def published_stamp(repo, rel_paths):
-    """The stamp in the last committed SKILL.md for this skill, or {} when there is none.
+DEFAULT_BRANCH_REFS = ("origin/master", "origin/main", "master", "main")
 
-    HEAD is the published version, so a rotation is rebased on it: every re-stamp between two
-    commits collapses into one revision bump and `previous-modified` keeps naming the version
-    that was last published rather than an intermediate stamp minutes old (issue 363).
+
+def published_ref(repo):
+    """The commit holding the published version: the default branch's merge base with this tree.
+
+    On the default branch that is HEAD. On a PR branch it is the default-branch commit the branch
+    last took in, never one of the branch's own stamp commits, which were never published (issue
+    1299). A merge not yet committed counts as made: `git merge-base A B C` is A's merge base
+    with a hypothetical merge of B and C, so a re-stamp after resolving a merge of master rotates
+    from master's stamp. With no default branch to find, or no merge base in a shallow clone, it
+    falls back to HEAD.
+    """
+    sym = (_git(repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or "").strip()
+    merging = (_git(repo, "rev-parse", "-q", "--verify", "MERGE_HEAD") or "").strip()
+    tips = ["HEAD"] + ([merging] if merging else [])
+    for ref in dict.fromkeys(([sym] if sym else []) + list(DEFAULT_BRANCH_REFS)):
+        out = _git(repo, "merge-base", ref, *tips)
+        if out and out.strip():
+            return out.split()[0]
+    return "HEAD"
+
+
+def published_stamp(repo, rel_paths):
+    """The stamp in the published SKILL.md for this skill, or {} when there is none.
+
+    The published copy is the one at `published_ref`, so a rotation is rebased on it: every
+    re-stamp before the merge to the default branch collapses into one revision bump, however
+    many stamp commits the branch carries, and `previous-modified` keeps naming the version that
+    was last published rather than an intermediate stamp minutes old (issues 363, 1299).
     """
     if not repo:
         return {}
+    ref = published_ref(repo)
     for rel in rel_paths or []:
-        out = _git(repo, "show", f"HEAD:{str(rel).replace(os.sep, '/')}/SKILL.md")
+        out = _git(repo, "show", f"{ref}:{str(rel).replace(os.sep, '/')}/SKILL.md")
         if out is None:
             continue
         try:
@@ -373,7 +399,8 @@ def compute_stamp(skill_dir, *, home=None, repo=None, history_paths=None, mirror
         return old, False
     now = now or newest_mtime(skill_dir) or _utc(datetime.now(timezone.utc))
     if old.get("content-sha"):
-        # Rotate away from the last COMMITTED stamp, not from whatever the working tree holds:
+        # Rotate away from the last PUBLISHED stamp, not from whatever the working tree (or the
+        # branch's own unmerged stamp commits, issue 1299) holds:
         # the documented stamp-then-package flow (and any second edit before the commit) stamps
         # the same file twice, and rotating twice leaves `previous-modified` naming a stamp
         # seconds old instead of the published version (issue 363).

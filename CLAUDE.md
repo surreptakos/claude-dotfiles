@@ -49,8 +49,10 @@ payload, not the clock, so only a moved payload takes a fresh UTC stamp (issue 4
 `.claude-plugin/marketplace.json` repeats that version and is outside the check.
 
 Both commands stamp, and so does a second edit after them: run them as often as you like, the
-commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
-never from an intermediate one, so `previous-modified` names the published version (issue 363).
+commit still carries one revision bump. A rotation is measured from the *published* stamp, the
+copy at the default branch's merge base (an uncommitted merge counts), never from an intermediate
+one or the branch's own stamp commits, so `previous-modified` names the published version
+(issues 363, 1299).
 
 ## Layout
 

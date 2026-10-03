@@ -254,6 +254,46 @@ class GitDates(unittest.TestCase):
             self.assertEqual(stamp, published)
             self.assertEqual(ss.check_skill(a)[0], "ok")
 
+    def test_restamp_after_merging_master_rotates_from_masters_stamp(self):
+        """A branch's own stamp commits are unpublished: the baseline is master's (issue 1299)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self._git(repo, "init", "-q")
+            self._git(repo, "symbolic-ref", "HEAD", "refs/heads/master")
+            a = make_skill(repo / "aac-skills", "a", extra={"ref.md": "one\n"})
+            hist = ["aac-skills/a"]
+
+            def stamp(now):
+                return ss.stamp_skill(a, repo=repo, history_paths=hist, now=now)[0]
+
+            def commit(msg):
+                self._git(repo, "add", ".")
+                self._git(repo, "commit", "-qm", msg)
+
+            stamp("2026-10-01T00:00:00Z"); commit("published")
+            self._git(repo, "checkout", "-qb", "feature")
+            for i, now in enumerate(("2026-10-02T15:30:00Z", "2026-10-02T15:37:26Z")):
+                (a / "ref.md").write_bytes(f"branch {i}\n".encode())
+                stamp(now); commit(f"branch stamp {i}")
+            self._git(repo, "checkout", "-q", "master")
+            (a / "master.md").write_bytes(b"master edit\n")
+            master = stamp("2026-10-02T15:26:58Z"); commit("master stamp")
+            self._git(repo, "checkout", "-q", "feature")
+            merge = subprocess.run(["git", "-C", str(repo), "merge", "-q", "--no-edit", "master"],
+                                   capture_output=True, env=clean_env(
+                                       GIT_COMMITTER_NAME="t", GIT_COMMITTER_EMAIL="t@x"))
+            self.assertNotEqual(merge.returncode, 0)  # both sides moved the stamp block
+            self._git(repo, "checkout", "master", "--", "aac-skills/a/SKILL.md")  # take master's
+
+            merged = stamp("2026-10-02T16:00:00Z")  # re-stamp before the merge is committed
+            self.assertEqual(merged["previous-modified"], master["modified"])
+            self.assertEqual(merged["revision"], str(int(master["revision"]) + 1))
+            commit("merge master")
+            (a / "ref.md").write_bytes(b"branch after merge\n")
+            again = stamp("2026-10-02T16:10:00Z")  # and after it is committed
+            self.assertEqual(again["previous-modified"], master["modified"])
+            self.assertEqual(again["revision"], merged["revision"])
+
     def test_first_stamp_with_uncommitted_edits_takes_mtime_and_last_commit(self):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
