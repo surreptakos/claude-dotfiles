@@ -15,9 +15,11 @@ api.typesafe.ai, so the request goes out without a header and a 401 means "no cr
 `TYPESAFE_JEV_STUB` replaces the network for tests and for switching Jev off:
   unset       - call the service
   "off"       - unavailable; every caller falls back to its regexes
-  a JSON map  - {question_id: probability} for a Noul, {question_id: "option"} for a Choice; an id
-                missing from the map, or an option the Choice does not offer, makes the call
-                unavailable
+  a JSON map  - {question_id: probability} for a Noul, {question_id: "option"} for a Choice (that
+                option at 1.0, the rest at 0.0), or {question_id: {"choice": "option",
+                "probabilities": {option: p}}} for a Choice answered with its own distribution
+                (issue 1244); an id missing from the map, or an option the Choice does not offer,
+                makes the call unavailable
   a file path - a file holding that JSON map
 """
 
@@ -50,6 +52,13 @@ def _choice_answer(question: dict[str, Any], picked: Any, probabilities: Any = N
     return {"choice": picked, "probabilities": distribution}
 
 
+def _stub_choice(question: dict[str, Any], value: Any) -> dict[str, Any]:
+    """A stubbed Choice: a bare option, or {"choice": option, "probabilities": {option: p}}."""
+    if isinstance(value, dict):
+        return _choice_answer(question, value["choice"], value.get("probabilities"))
+    return _choice_answer(question, value)
+
+
 def _stub(questions: dict[str, Any]) -> dict[str, Any] | None | bool:
     """The stubbed answers, None for unavailable, or False when no stub is configured."""
     raw = os.environ.get("TYPESAFE_JEV_STUB")
@@ -61,7 +70,7 @@ def _stub(questions: dict[str, Any]) -> dict[str, Any] | None | bool:
         text = raw if raw.lstrip().startswith("{") else open(raw, encoding="utf-8").read()
         table = json.loads(text)
         return {
-            qid: _choice_answer(q, table[qid]) if _is_choice(q) else float(table[qid])
+            qid: _stub_choice(q, table[qid]) if _is_choice(q) else float(table[qid])
             for qid, q in questions.items()
         }
     except Exception:

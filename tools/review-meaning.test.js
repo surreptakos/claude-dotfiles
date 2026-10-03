@@ -167,11 +167,12 @@ suite('review meaning', { concurrency: true }, () => {
     }
   });
 
-  // [question, the answer that fails it, an answer in the read band (Noul only), the fix line].
+  // [question, the answer that fails it, an answer in the read band, the fix line]. A Choice read
+  // answer carries its own probabilities (issue 1244): 1 - P(passing option) lands in the band.
   const JEV = [
-    ['S1.s1_behavior', 'trait', null, /^  - S1: sentence 1 names a trait, motive or attitude; it must name a behavior or work product\. \(Jev\)$/m],
+    ['S1.s1_behavior', 'trait', { choice: 'behavior', probabilities: { behavior: 0.45, trait: 0.4, circumstance: 0.15 } }, /^  - S1: sentence 1 names a trait, motive or attitude; it must name a behavior or work product\. \(Jev\)$/m],
     ['S1.s1_pattern', 0.1, 0.3, /^  - S1: sentence 1 is a one-off event; it must state a pattern, with the event as the example\. \(Jev\)$/m],
-    ['S1.s2_elaborate', 'new_theme', null, /^  - S1: sentence 2 opens a new theme; it must add detail about the behavior in sentence 1 \(Elaborate\)\. \(Jev\)$/m],
+    ['S1.s2_elaborate', 'new_theme', { choice: 'why_it_matters', probabilities: { detail: 0.3, why_it_matters: 0.5, new_theme: 0.1, example: 0.05, instruction: 0.05 } }, /^  - S1: sentence 2 opens a new theme; it must add detail about the behavior in sentence 1 \(Elaborate\)\. \(Jev\)$/m],
     ['S1.example_one', 0.1, 0.4, /^  - S1: sentence 3 is not one specific thing that happened; it must be one event or figure\. \(Jev\)$/m],
     ['S2.example_demonstrates', 0.05, 0.45, /^  - S2: the example in sentence 2 is not an instance of sentence 1; the item must be about one of them\. \(Jev\)$/m],
     ['S1.s4_restate', 0.1, 0.3, /^  - S1: sentence 4 does not restate sentence 1; it must say the same thing again with no new theme\. \(Jev\)$/m],
