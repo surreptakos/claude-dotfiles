@@ -80,10 +80,11 @@ a cloud container installs at session start and what a desktop takes with `.\syn
 In order, no skipping:
 
 1. Edit `aac-skills/` or `profile/` on a branch. After any change under `aac-skills/`, run
-   `python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'` and then
-   `python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'`, and commit the rebuilt
-   `marketplace/` with the source.
-2. Merge the branch to master.
+   `python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'` and commit the source.
+   Do not run `tools/build-cloud-plugin.py` or commit `marketplace/` or
+   `.claude-plugin/marketplace.json`: master builds those (step 2).
+2. Merge the branch to master. `plugin-payload.yml` then rebuilds the payload and commits it to
+   master as a bot commit; its run on the merge is green before step 3.
 3. Run the restore test against `origin`, not against your working tree. The question is whether
    what you merged restores:
 

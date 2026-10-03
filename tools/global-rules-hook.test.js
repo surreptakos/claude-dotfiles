@@ -27,7 +27,9 @@ const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
 
 const REPO = path.resolve(__dirname, '..');
-const PAYLOAD = path.join(REPO, 'marketplace', 'aac-skills');
+// A fresh build, not the committed marketplace/ copy: master rebuilds that after each merge, so on
+// a branch that edits profile/claude/CLAUDE.md it is behind by design (issue 1308).
+const PAYLOAD = require('./fresh-payload.js').freshPayload();
 const RULES = path.join(PAYLOAD, 'rules', 'global-rules.md');
 const DIGEST = path.join(PAYLOAD, 'rules', 'global-rules-digest.md');
 const SCRIPT = path.join(PAYLOAD, 'hooks', 'scripts', 'global-rules.js');

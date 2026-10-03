@@ -43,9 +43,21 @@ jobs:
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the packager reads first-stamp dates and master's version from history
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      # Issue 1308: a branch commits sources only and master builds the payload after the merge,
+      # so the committed marketplace/aac-skills can be behind this branch's own change. Build it
+      # here, in the runner's checkout and never committed, so the gate asserts the payload this
+      # branch would ship rather than the one it was cut from.
+      - name: Build the payload this branch would ship
+        run: python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan' --no-stamp-write
       - name: Bootstrap gate
         run: tests/bootstrap-test.sh
       - name: Fault injection — a missing governance hook entry must turn this red

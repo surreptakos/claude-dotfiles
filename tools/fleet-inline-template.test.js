@@ -21,7 +21,9 @@ const { sliceBetweenTags } = require('./source-slice.js');
 const module_ = require('./ticket-fleet-branch.js');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const PACKAGED = path.join(REPO_ROOT, 'marketplace', 'aac-skills', 'skills', 'ticket-fleet',
+// A fresh build, not the committed marketplace/ copy, which master rebuilds after each merge and so
+// is behind a branch's own regenerate by design (issue 1308).
+const PACKAGED = path.join(require('./fresh-payload.js').freshPayload(), 'skills', 'ticket-fleet',
                            'ticket-fleet.js');
 
 /** The text between the fleet script's FLEET-GENERATED markers. */
@@ -40,7 +42,7 @@ test('the fleet script holds the generated copy of tools/ticket-fleet-branch.js,
   assert.strictEqual(
     generatedBlock(PACKAGED),
     generatedBlock(TARGET),
-    'the packaged fleet script carries an older generated block — rebuild marketplace/ per CLAUDE.md'
+    'a fresh build of the fleet script carries a different generated block than its source'
   );
 });
 

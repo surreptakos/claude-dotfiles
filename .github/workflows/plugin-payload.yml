@@ -1,0 +1,94 @@
+name: Plugin payload
+
+# Issue 1308. The plugin payload (marketplace/aac-skills/) and the two files that repeat its version
+# (.claude-plugin/marketplace.json, marketplace/aac-skills/.claude-plugin/plugin.json) are build
+# output, and master is the only place they are built. A pull request changes sources only
+# (aac-skills/, profile/, tools/); this job runs the stamp and build tools after every push to
+# master and commits what they regenerate back to master. The desktop marketplace and the cloud
+# containers both read master, so delivery is unchanged.
+#
+# Why: every PR used to commit its own build, and the version line is stamped fresh on each
+# build, so all open PRs conflicted on the same two files and every merge re-created the conflict
+# in the rest. 20 PRs on 2026-10-02 took about 3 hours, merged strictly one at a time.
+#
+# NO LOOP, three guards deep:
+#   1. The commit is pushed with the built-in github.token, and GitHub starts no workflow run for
+#      a push made with that token.
+#   2. The commit message carries [skip ci], which GitHub honours for push-triggered workflows.
+#   3. The job is skipped when the pushing actor is github-actions[bot].
+# And past all three, the build is idempotent: a rebuild of this job's own output changes nothing,
+# so "payload already current" ends the run without a commit.
+#
+# A RACE with a second merge: the checkout takes master's tip, not the triggering commit, and the
+# concurrency group queues runs instead of cancelling them. When master moves between checkout
+# and push, the push that moved it queued its own run of this job, which rebuilds from the newer
+# tip, so this run stands down instead of rebasing generated files.
+#
+# The commands are CLAUDE.md's "Skill stamps" pair, --home and all: the owner's home, never the
+# runner's (issue 492).
+#   python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
+#   python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plugin-payload
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0   # first-time stamps read their dates from the history; the version
+                           # resolver compares against origin/master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      - name: Stamp the sources and build the payload
+        run: |
+          python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
+          python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
+      - name: The payload about to be committed matches a fresh build
+        # Nothing reaches master that a second, independent build does not reproduce byte for
+        # byte, plugin.json's version included (issue 432's rule, moved here from the PR check).
+        run: |
+          python3 tools/skill-stamps.py check aac-skills --home 'C:\Users\Dan'
+          python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan' \
+            --out "$RUNNER_TEMP/verify" --no-marketplace --no-stamp-write
+          diff -r --exclude=__pycache__ --exclude=.pytest_cache "$RUNNER_TEMP/verify/aac-skills" marketplace/aac-skills
+      - name: Commit the payload to master
+        run: |
+          git add -A -- aac-skills marketplace .claude-plugin/marketplace.json
+          if git diff --cached --quiet; then
+            echo "payload already current at $(git rev-parse --short HEAD) - nothing to commit"
+            exit 0
+          fi
+          built_from=$(git rev-parse HEAD)
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -q -m "chore(plugin): rebuild the aac-skills payload for ${built_from:0:8} [skip ci]" \
+            -m "Built on master by plugin-payload.yml (issue 1308); pull requests commit sources only."
+          git diff --stat HEAD~1 HEAD | tail -1
+          if git push origin HEAD:master; then
+            echo "payload committed to master as $(git rev-parse --short HEAD)"
+            exit 0
+          fi
+          git fetch -q origin master
+          if [ "$(git rev-parse origin/master)" != "$built_from" ]; then
+            echo "::notice::master moved past ${built_from:0:8} during the build; the run its new tip queued rebuilds from there"
+            exit 0
+          fi
+          echo "::error::the push to master failed and master has not moved - read the push output above"
+          exit 1

@@ -67,7 +67,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python3 -m pip install python-docx
+      # pyyaml: tools/fresh-payload.js runs the packager, because a branch's committed payload is
+      # behind its own sources until master rebuilds it (issue 1308).
+      - run: python3 -m pip install python-docx pyyaml
       - name: tests/*.test.js and tools/*.test.js
         env:
           REVIEW_MEANING_REQUIRE_DOCX: '1'

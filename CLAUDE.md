@@ -34,21 +34,24 @@ Never edit the four by hand and never bump one to make a check pass: the hash is
 dates believable. The previous text of any skill is `git log -p -- <skill>/SKILL.md`; the stamp
 tells you it is there to look for.
 
-After editing anything under `aac-skills/`, run both, or CI (`skill-stamps.yml`) fails the branch:
+After editing anything under `aac-skills/`, stamp, or CI (`skill-stamps.yml`) fails the branch:
 
 ```bash
 python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
-python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
 ```
 
-`--home` names the owner's home on both (their default too: `OWNER_HOME` in
-`tools/skill-stamps.py`, never the running user's home, issue 492): the stamper folds it into the
-sync tokens before hashing. CI checks that a rebuild reproduces the committed payload, `diff -r`
-over the whole of `marketplace/aac-skills`, `plugin.json` included: the plugin version follows the
-payload, not the clock, so only a moved payload takes a fresh UTC stamp (issue 432).
-`.claude-plugin/marketplace.json` repeats that version and is outside the check.
+`--home` names the owner's home (the default too: `OWNER_HOME` in `tools/skill-stamps.py`, never
+the running user's home, issue 492): the stamper folds it into the sync tokens before hashing.
 
-Both commands stamp, and so does a second edit after them: run them as often as you like, the
+**A branch never builds the payload** (issue 1308). `marketplace/aac-skills/` and
+`.claude-plugin/marketplace.json` are built on master after each merge by `plugin-payload.yml`,
+which stamps, runs `tools/build-cloud-plugin.py --home 'C:\Users\Dan'`, checks a second build
+reproduces it byte for byte (`plugin.json`'s version included, issue 432) and commits the result
+as a `[skip ci]` bot commit. A PR that commits its own build conflicts with every other open PR on
+the version line. Tests that pin the payload to its sources build a fresh one
+(`tools/fresh-payload.js`) instead of reading `marketplace/`.
+
+The stamp is idempotent, and so is a second edit after it: run it as often as you like, the
 commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
 never from an intermediate one, so `previous-modified` names the published version (issue 363).
 
