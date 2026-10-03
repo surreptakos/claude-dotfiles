@@ -60,8 +60,12 @@ CHECKS = {
                              "form": "Noul over sentence 1 and the example"},
     "s4_restate":           {"check": "SEER sentence 4 restates sentence 1", "kind": "rule+jev", "high": 0.8, "low": 0.6,
                              "form": "Banned-modal rule; Noul for same claim, no new theme"},
+    "s4_ought":             {"check": "SEER sentence 4 \"ought to\" recommends recognition", "kind": "jev", "high": 0.7, "low": 0.5,
+                             "form": "Choice: recognition of the direct or an instruction to him; asked only when sentence 4 "
+                                     "says \"ought to\" (issue 1282; marks not yet set by an eval)"},
     "observation_only":     {"check": "Observation only", "kind": "rule+reader", "high": None, "low": None,
-                             "form": "Gate 1 bans the modals; a \"rather than\" or \"instead of\" clause goes on the read list"},
+                             "form": "Gate 1 bans the modals, except \"ought to\" in a SEER sentence 4 (s4_ought); a "
+                                     "\"rather than\" or \"instead of\" clause goes on the read list"},
     "repeat_flagged":       {"check": "Repeat flagged (Weaknesses)", "kind": "reader", "high": None, "low": None,
                              "form": "Needs the prior review, which is not on the page"},
     "framing":              {"check": "No framing past the record", "kind": "reader", "high": None, "low": None,
@@ -127,6 +131,11 @@ S1_OPTIONS = {
     "circumstance": "A circumstance: something about his situation, not something he does, such as an assignment, role or responsibility he holds (\"he owns the reporting\", \"he is in charge of X\")",
 }
 S1_FIX = {"trait": "names a trait, motive or attitude", "circumstance": "names a circumstance"}
+OUGHT_OPTIONS = {
+    "recognition": "Recommends recognizing the direct for the behavior sentence 1 names, as in \"He's an example we "
+                   "ought to put on training videos\"",
+    "instruction": "Tells the direct what he ought to do, or do differently",
+}
 
 READ_TEXT = {
     "s1_behavior": "sentence 1: behavior or work product, not a trait, motive or circumstance?",
@@ -136,6 +145,7 @@ READ_TEXT = {
     "named_accounts": "sentence {n}: one example, not a list of accounts ({names})?",
     "example_demonstrates": "the example in sentence {n}: an instance of the pattern in sentence 1?",
     "s4_restate": "sentence 4: restates sentence 1 with no new theme?",
+    "s4_ought": "sentence 4: its \"ought to\" recommends recognizing him, not an instruction to him?",
     "ramification": "the Ramification: names what changes for him, not his Weaknesses or current work?",
     "weakness_guidance": "has a Guidance point that answers it?",
     "guidance_instruction": "sentence {n}: an instruction for next year?",
@@ -428,10 +438,21 @@ class Run:
                  lambda a: f"sentence 2 {S2_FIX.get(self.worst(a, 'detail'), 'is not Elaborate')}; it must add detail about the behavior in sentence 1 (Elaborate).",
                  "detail", lambda a: 1.0 - a["probabilities"].get("detail", 0.0))
         self.example(lbl, s, 3)
-        m = next((re.search(p, s[3], re.I) for p in self.host.PRESCRIPTIVE if re.search(p, s[3], re.I)), None)
+        m = next((re.search(p, s[3], re.I) for p in self.host.PRESCRIPTIVE
+                  if p != self.host.OUGHT and re.search(p, s[3], re.I)), None)
         if m:
             self.fix(lbl, f"sentence 4 is an instruction (\"{m.group(0)}\"); it must restate sentence 1.")
         else:
+            if re.search(self.host.OUGHT, s[3], re.I):
+                # Dan, 10/2/26 (issue 1282): Gate 1 passes "ought to" here; recognition passes, an instruction fails.
+                self.ask(f"{lbl}.s4_ought",
+                         choice(f"{SEER}\n\nSentence 4 of review item {lbl} (`items.{lbl}.sentences[3]`) says \"ought to\". "
+                                "Does it recommend recognizing the direct, or tell him what he ought to do?"
+                                + quoted(s, 1, 4), OUGHT_OPTIONS),
+                         "s4_ought", lbl,
+                         lambda a: "sentence 4 tells him what he ought to do (\"ought to\"); it must restate sentence 1, "
+                                   "and an instruction belongs in Guidance.",
+                         "recognition", lambda a: a["probabilities"].get("instruction", 0.0))
             self.ask(f"{lbl}.s4_restate",
                      noul(f"{SEER}\n\nDoes sentence 4 of review item {lbl} (`items.{lbl}.sentences[3]`) restate sentence 1 "
                           f"(`items.{lbl}.sentences[0]`): the same claim in a new way, with no new theme and no instruction?"

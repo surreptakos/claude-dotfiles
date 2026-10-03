@@ -25,6 +25,9 @@ RATINGS = ["exceeded expectations", "met expectations", "not met expectations", 
 RESULTS = ["promotion", "vertical growth", "horizontal growth", "no change", "current role and responsibilities"]
 PRESCRIPTIVE = [r"\bneeds? to\b", r"\bshould\b", r"\bmust\b",
                 r"\bwould benefit from\b", r"\bought to\b", r"\bis expected to\b", r"\bshall\b"]
+# Dan, 10/2/26 (issue 1282): "ought to" in a SEER sentence 4 can recommend recognition ("an example we
+# ought to put on training videos"), so this check skips it there and the meaning command decides it.
+OUGHT = r"\bought to\b"
 ABBR = ["Mr", "Ms", "Mrs", "Dr", "Inc", "Corp", "Co", "Mfg", "St", "Ave", "Blvd", "Jr", "Sr", "vs", "etc", "No", "Dept",
         "a.m", "p.m", "U.S", "e.g", "i.e", "Q1", "Q2", "Q3", "Q4"]
 MONTHS = "January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec"
@@ -199,8 +202,9 @@ def format_check(argv):
                 fixes.append(f"{name}: {n} sentences; must be two (Sum-Ex) or four (SEER).")
             # 9/23/26: no date, figure or name is required here. Manager Tools asks for a
             # specific example, not an anchor; Gate 2 reads whether the example is specific.
+            restate_free = " ".join(sentences(txt)[:3]) if n == 4 else txt
             for pat in PRESCRIPTIVE:
-                m = re.search(pat, txt, re.I)
+                m = re.search(pat, restate_free if pat == OUGHT else txt, re.I)
                 if m:
                     fixes.append(f"{name}: contains \"{m.group(0)}\"; not allowed in a Strength or Weakness (write the behavior; an instruction belongs in Guidance).")
                     break

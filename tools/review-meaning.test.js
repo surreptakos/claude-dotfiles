@@ -25,11 +25,13 @@ if (!HAVE_DOCX && process.env.REVIEW_MEANING_REQUIRE_DOCX === '1') {
 }
 
 // The fixture meets the SEER minimum (30% rounded down, never fewer than one; Dan, October 2, 2026), so Gate 1 passes it as a whole review.
+// S1 is the Manager Tools SEER model from standards.md word for word, "ought to" included (issue 1282).
+const BOB_SEER = "Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He's an example we ought to put on training videos.";
 const BOB = {
   direct: 'Bob', start: '7/24/2025', end: '7/23/2026',
   core: "Bob's results have met expectations since his last review. I am recommending he is ready for vertical growth in his role, in the areas of quality control and reporting.",
   strengths: [
-    'Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He is the rep the rest of the team learns from on hard calls.',
+    BOB_SEER,
     'Bob documents every escalation. Recently he wrote up a billing dispute so clearly that finance closed it the same day.',
     'Bob keeps the call queue moving at the end of a shift. He takes the last open calls himself before he logs off. During a storm this spring he cleared eleven waiting calls after his shift ended. He leaves the queue empty for the next shift.',
   ],
@@ -92,6 +94,7 @@ async function stubFor(file, overrides = {}) {
 
 const meaning = (script, file, stub) => py(script, ['meaning', file, '--direct', 'Bob'], stub);
 const check = (file) => py(AUDIT_PY, ['check', file, '--end', '7/23/2026', '--start', '7/24/2025', '--direct', 'Bob', '--no-render']);
+const selfFormat = (file) => py(SELF_PY, [file, '--end', '7/23/2026', '--start', '7/24/2025', '--direct', 'Bob', '--no-render']);
 
 const suite = HAVE_DOCX ? describe : describe.skip;
 
@@ -214,6 +217,29 @@ suite('review meaning', { concurrency: true }, () => {
     assert.match(r.out, /^  - S2: sentence 2: one example, not a list of accounts \(Acme Foods, Corex Health, Delta Storage\)\?/m);
     r = await meaning(AUDIT_PY, file, await stubFor(file));
     assert.equal(r.code, 0, r.out);
+  });
+
+  t('"ought to": the verbatim Bob Restate passes Gate 1 and meaning; one that instructs him fails with a (Jev) line; elsewhere Gate 1 fails it', async () => {
+    assert.ok(fs.readFileSync(path.join(SELF, 'standards.md'), 'utf8').includes(`"${BOB_SEER}"`), 'the Bob fixture is not the standards.md SEER model');
+    const bob = await docx();
+    for (const gate of [await check(bob), await selfFormat(bob)]) assert.equal(gate.code, 0, gate.out);
+    const pass = await meaning(AUDIT_PY, bob, await stubFor(bob));
+    assert.equal(pass.code, 0, pass.out);
+    assert.match(pass.out, /^Passed: S1, /m);
+
+    const told = await docx({ strengths: ['Bob is my best customer service rep. He consistently exceeds every standard. He recently saved a difficult call after three other reps had failed. He ought to coach the newer reps on hard calls.', ...BOB.strengths.slice(1)] });
+    for (const gate of [await check(told), await selfFormat(told)]) assert.equal(gate.code, 0, gate.out);
+    for (const script of [AUDIT_PY, SELF_PY]) {
+      const r = await meaning(script, told, await stubFor(told, { 'S1.s4_ought': 'instruction' }));
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /^  - S1: sentence 4 tells him what he ought to do \("ought to"\); it must restate sentence 1, and an instruction belongs in Guidance\. \(Jev\)$/m);
+    }
+
+    const early = await docx({ strengths: ['Bob is my best customer service rep. He ought to take more of the hard calls. He recently saved a difficult call after three other reps had failed. He is the rep the team learns from.', ...BOB.strengths.slice(1)] });
+    for (const r of [await check(early), await selfFormat(early)]) {
+      assert.equal(r.code, 1, r.out);
+      assert.match(r.out, /^  - S1: contains "ought to"; not allowed in a Strength or Weakness/m);
+    }
   });
 
   t('a Weakness with no Guidance at all fails by rule', async () => {
