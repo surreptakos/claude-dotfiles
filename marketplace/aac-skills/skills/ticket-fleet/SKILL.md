@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-03T20:13:57Z'
-  previous-modified: '2026-10-03T19:45:22Z'
-  revision: '79'
-  content-sha: 1bc843f9cc53
+  modified: '2026-10-03T20:21:39Z'
+  previous-modified: '2026-10-03T20:13:57Z'
+  revision: '80'
+  content-sha: 789178c30a4b
 ---
 
 # ticket-fleet
@@ -133,7 +133,7 @@ its launch; Dan asked whether that was true before anyone had looked.
    | --- | --- | --- |
    | `delivered` | PR or comment posted; a `mergeNote` means the PR still owes a merge of the default branch | merge the default branch into it, then the PR |
    | `failed` | no verified pass, or delivery blocked; `conflictPaths` names a real merge conflict | read `failures`, re-run the ticket |
-   | `inconsistent` | verified and pushed, but the deliverer could not find the branch | deliver it by hand or via `finishRunId` |
+   | `inconsistent` | verified and pushed, but the deliverer could not find the branch; or an `orchestrator-head` / `tree-guard` entry for an isolation breach the run restored, or a move or write a halted run could NOT restore | deliver it by hand or via `finishRunId`; an entry saying NOT restored: restore the checkout by hand (RECOVERY.md) |
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
    | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time; a halt on an agent that resolved null carries a prose reason and `resetsAt: null` (the run log's `[label] failed:` line names the limit) | relaunch after the reset; bullets are in `discoveryList` |

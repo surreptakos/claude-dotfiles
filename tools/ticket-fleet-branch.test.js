@@ -3718,7 +3718,7 @@ test('quotaFailure recognises the limit messages runs have died on, with their r
   // wf_0b138fa5-528: "rate limit" is not followed by "exceeded" here.
   assert.equal((quotaFailure("API Error: This request would exceed your account's rate limit. Please try again later.") || {}).reason, 'rate limit');
   assert.equal((quotaFailure('API Error: This request would exceed your account’s rate limit.') || {}).reason, 'rate limit', 'a typographic apostrophe too');
-  for (const negated of ['this batch would not exceed your rate limit', 'the request does not exceed the rate limit', "it won't exceed the rate limit"]) {
+  for (const negated of ['this batch would not exceed your rate limit', 'the request does not exceed the rate limit', "it won't exceed the rate limit", 'a batch cannot exceed the rate limit', 'this can never exceed the rate limit']) {
     assert.equal(quotaFailure(negated), null, `${negated} is not a limit hit`);
   }
   for (const ordinary of ['no reply matching its schema', 'issue #429 is still open', '', null]) {
