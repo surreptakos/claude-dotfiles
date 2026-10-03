@@ -262,6 +262,11 @@ PR body says:
   (a ratification ticket). Do NOT close the ticket. Relabel it `ready-for-human` (remove
   `ready-for-agent`) so the next scout does not re-implement it and the grill phase surfaces it.
 
+- Either way, tick each acceptance box the PR body's verifier evidence confirms, with a one-line
+  pointer to the PR and the evidence item, and leave the rest unticked with the ticket open and a
+  comment naming them: the deliver stage's D5 and D6, done by hand because this merge was not its
+  own (issue 1283).
+
 A PR that fails the bar stays open and is the next pass's first work item.
 
 **A fleet PR merges itself (issue 770).** The deliver stage's STEP D waits for CI on the PR it

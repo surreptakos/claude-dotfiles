@@ -244,7 +244,11 @@ about a tracker that had drift (issue 437).
 
 ## Who ticks the acceptance boxes
 
-Not the agent that opens the PR. A ticked box claims the work shipped, and it ships at merge — so
+Whoever merges the PR, never before the merge. A fleet PR merges itself, so its deliverer ticks the
+boxes the blind verifier confirmed straight after that merge (STEP D5 in the deliver prompt), each
+with a one-line pointer to the PR and the evidence item, and keeps the ticket open with a comment
+naming every box it could not tick (issue 1283) — that covers a served repo with no workflow. Here,
+too, a ticked box claims the work shipped, and it ships at merge — so
 `.github/workflows/tick-acceptance-boxes.yml` runs `tools/tick-acceptance-boxes.js` on the
 `pull_request_target` closed+merged event, ticks every box the audit would report on each issue the
 PR's closing keywords name, appends `— verified in PR #N` to each, and comments on the issue saying

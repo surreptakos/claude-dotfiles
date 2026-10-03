@@ -111,3 +111,48 @@ test('runCodeLane records a delivery opened by A9 after a refused command as del
   assert.ok(logs.some((m) => m.includes('https://github.com/x/y/pull/1139') && /WITHOUT the pre-push merge: the classifier refused a command of the Deliver stage/.test(m)),
     'the deliver log line names the PR and says it still owes the default-branch merge');
 });
+
+// Issue 1283: the osh-rfp pass of October 1-2 closed five fleet tickets with every acceptance box
+// unticked and left two open over boxes whose evidence was already on the ticket. The deliverer
+// merges its own PR (STEP D), so D5 ticks what the verifier confirmed, each box with a pointer,
+// and D6 keeps the ticket open with a comment naming any box it could not tick.
+for (const instrument of ['gh', 'mcp']) {
+  test(`deliver prompt (${instrument}) ticks confirmed boxes after the merge and keeps the ticket open over the rest (issue 1283)`, async () => {
+    const { deliverPrompt } = await loadFleet(async () => null, [], instrument);
+    const unmet = ['A recipe-match comment is posted on the ticket'];
+    const prompt = deliverPrompt({ t: TICKET, branch: BRANCH, evidence: 'ran the gate; exit 0', unmetCriteria: unmet, defaultBranch: 'main', testCommand: 'echo ok' });
+    const d5 = prompt.slice(prompt.indexOf('D5. THE ACCEPTANCE BOXES'), prompt.indexOf('D6. THE TICKET'));
+    assert.ok(d5.length > 0 && prompt.indexOf('D4. MERGE') < prompt.indexOf('D5. THE ACCEPTANCE BOXES'), 'D5 must follow the merge in D4');
+    assert.match(d5, /only after merged:true/, 'no box is ticked before the work ships (aac-routines issue 264)');
+    assert.match(d5, /closed-with-open-boxes/, 'D5 names the audit finding it prevents');
+    assert.match(d5, /carries ONE pointer on the same line/, 'each ticked box carries a one-line pointer');
+    assert.match(d5, / - verified in <prUrl>: <the evidence item/, 'the pointer names the PR and the verifier evidence item');
+    assert.ok(d5.includes(JSON.stringify(unmet)), 'the verifier-unmet criteria are handed to D5 verbatim');
+    assert.match(d5, /\(i\) The box is one of those unmet criteria: leave it unticked/, 'an unconfirmed box stays unticked');
+    assert.match(d5, /not confirmed by the verifier/, 'a box the evidence does not speak to stays unticked too');
+    assert.match(d5, /TRACKER ACTION[\s\S]*do it now[\s\S]*never skip it silently/, 'a tracker-action box is done or named, never skipped');
+    const d6 = prompt.slice(prompt.indexOf('D6. THE TICKET'), prompt.indexOf('Do NOT push to or otherwise touch'));
+    assert.match(d6, /WHENEVER D5 left any box unticked, the ticket stays OPEN/, 'an unticked box keeps the ticket open');
+    assert.match(d6, /reopen it/, 'a ticket the merge closed over an unticked box is reopened');
+    assert.match(d6, /one bullet per unticked box, its text verbatim/, 'the comment names each unticked box');
+    assert.match(prompt, /Do NOT tick any acceptance box before D4 returned merged:true/);
+  });
+}
+
+test('runCodeLane names the boxes D5 left unticked in the merge note (issue 1283)', async () => {
+  const logs = [];
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label.startsWith('impl:')) return { branch: BRANCH, committed: true, pushed: true, testExitCode: 0, testTail: 'ok', discoveries: [] };
+    if (opts.label.startsWith('verify:')) return { pass: true, evidence: 'ran the gate; exit 0', failures: [] };
+    if (opts.label.startsWith('deliver:')) {
+      return { pushed: true, prUrl: 'https://github.com/x/y/pull/1283', mergeStatus: 'clean', conflictPaths: [], merged: true, mergeSha: 'abc123',
+        prState: 'merged', ticketState: 'open', boxesTicked: ['the gate passes'], boxesUnticked: ['a sibling is closed - refused'] };
+    }
+    throw new Error('unexpected label: ' + opts.label);
+  };
+  const { runCodeLane } = await loadFleet(agentMock, logs, 'gh');
+  const result = await runCodeLane(TICKET, 0);
+  assert.equal(result.merged, true);
+  assert.ok(logs.some((m) => /MERGED abc123 \(ticket open\) - boxes: 1 ticked, 1 left unticked \(a sibling is closed - refused\)/.test(m)),
+    'the deliver log line names the box left unticked');
+});

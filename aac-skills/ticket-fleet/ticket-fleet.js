@@ -1137,6 +1137,10 @@ function trackerRules(mode) {
     prMerge: (n, title) => `${REPO} mcp__github__merge_pull_request (pullNumber ${n}, merge_method "squash", expectedHeadSha = the head sha the checks ran on, commit_title ${JSON.stringify(title)}). The result's "sha" is mergeSha.`,
     issueState: (n) => `${REPO} mcp__github__issue_read (method "get", issue_number ${n}): the "state" field verbatim.`,
     issueClose: (n, prUrl) => `${REPO} mcp__github__add_issue_comment (issue_number ${n}) with the one line "Merged in ${prUrl}; closing." then mcp__github__issue_write (method "update", issue_number ${n}, state "closed", state_reason "completed").`,
+    // Issue 1283: the deliverer ticks the boxes the verifier confirmed once the PR has merged.
+    issueBodyRead: (n) => `${REPO} mcp__github__issue_read (method "get", issue_number ${n}): the "body" field verbatim, and mcp__github__issue_read (method "get_comments", issue_number ${n}) for its comments.`,
+    issueBodyWrite: (n, _bodyFile) => `${REPO} mcp__github__issue_write (method "update", issue_number ${n}, body = the whole edited body) - the body is an argument here, so no scratch file is written.`,
+    issueReopen: (n) => `${REPO} mcp__github__issue_write (method "update", issue_number ${n}, state "open").`,
   }
   return {
     repoNote: REPO,
@@ -1157,6 +1161,9 @@ function trackerRules(mode) {
     prMerge: (n, title) => `\`gh api --method PUT repos/{owner}/{repo}/pulls/${n}/merge -f merge_method=squash -f sha=<head sha the checks ran on> -f commit_title=${JSON.stringify(title)}\` (never \`gh pr merge\`). The response's "sha" is mergeSha.`,
     issueState: (n) => `\`gh api repos/{owner}/{repo}/issues/${n} --jq .state\`.`,
     issueClose: (n, prUrl) => `\`gh api --method POST repos/{owner}/{repo}/issues/${n}/comments -f body="Merged in ${prUrl}; closing."\` then \`gh api --method PATCH repos/{owner}/{repo}/issues/${n} -f state=closed -f state_reason=completed\`.`,
+    issueBodyRead: (n) => `\`gh api repos/{owner}/{repo}/issues/${n} --jq .body\` and \`gh api repos/{owner}/{repo}/issues/${n}/comments --jq '[.[]|{html_url,body}]'\` ({owner}/{repo} from ${gitSpelling(mode, 'remote get-url origin')}; never \`gh issue view\`).`,
+    issueBodyWrite: (n, bodyFile) => `write the whole edited body to \`${bodyFile}\` (that exact path, \`mkdir -p\` its directory first - issue 439), then \`gh api --method PATCH repos/{owner}/{repo}/issues/${n} -F body=@${bodyFile}\` (never \`gh issue edit\` - GraphQL, HTTP 403 here, issue 130).`,
+    issueReopen: (n) => `\`gh api --method PATCH repos/{owner}/{repo}/issues/${n} -f state=open\`.`,
   }
 }
 // [FLEET-TRACKER-RULES-END]
@@ -1294,6 +1301,9 @@ const DELIVERED = { type: 'object', required: ['pushed', 'prUrl', 'mergeStatus',
   mergeSha: { type: 'string', description: 'the sha the merge call returned; "" when not merged' },
   prState: { type: 'string', enum: ['merged', 'ci-pending', 'ci-red', 'changes-requested', 'dirty-unresolved', 'not-attempted'], description: 'STEP D outcome: merged; ci-pending = the wait bound passed with checks still running; ci-red = a check run failed; changes-requested = a review in state CHANGES_REQUESTED; dirty-unresolved = mergeable_state stayed dirty after the re-merge; not-attempted = no PR was opened, or the PR is unmerged-by-classifier and waits for the orchestrator to merge the default branch into it (issue 1132)' },
   ticketState: { type: 'string', description: 'the issue "state" read after STEP D ("open" or "closed"), "" when STEP D did not run' },
+  // Issue 1283: D5 ticks the boxes the verifier confirmed after the merge and names the rest.
+  boxesTicked: { type: 'array', items: { type: 'string' }, description: 'D5: every acceptance box ticked after the merge, quoted by its own text; [] when none was or STEP D did not merge' },
+  boxesUnticked: { type: 'array', items: { type: 'string' }, description: 'D5: every acceptance box left unticked after the merge, quoted by its own text with the reason after " - "; any entry keeps the ticket open (D6)' },
 } }
 
 const COMMENTED = { type: 'object', required: ['commented', 'commentUrl'], properties: {
@@ -2796,11 +2806,19 @@ function classifierCategoriesSeen() {
 // Issue 770: one clause for the run log saying what STEP D did with the PR.
 function mergeNote(delivery) {
   if (!delivery || !delivery.prUrl) return ''
-  if (delivery.merged === true) return ` - MERGED ${delivery.mergeSha || ''}${delivery.ticketState ? ` (ticket ${delivery.ticketState})` : ''}`
+  if (delivery.merged === true) return ` - MERGED ${delivery.mergeSha || ''}${delivery.ticketState ? ` (ticket ${delivery.ticketState})` : ''}${boxNote(delivery)}`
   // Issue 907: a PR left dirty names the paths the orchestrator has to merge by hand.
   const paths = delivery.prState === 'dirty-unresolved' && Array.isArray(delivery.conflictPaths) && delivery.conflictPaths.length
     ? ` (conflicts: ${delivery.conflictPaths.join(', ')})` : ''
   return ` - open, not merged: ${delivery.prState || 'prState not reported'}${paths}${delivery.blockedReason ? ' - ' + delivery.blockedReason : ''}`
+}
+
+// Issue 1283: what D5 did with the acceptance boxes, so a box left open is named in the run log.
+function boxNote(delivery) {
+  const ticked = Array.isArray(delivery.boxesTicked) ? delivery.boxesTicked.length : 0
+  const open = Array.isArray(delivery.boxesUnticked) ? delivery.boxesUnticked : []
+  if (!ticked && !open.length) return ''
+  return ` - boxes: ${ticked} ticked${open.length ? `, ${open.length} left unticked (${open.join('; ')})` : ''}`
 }
 
 // Issue 1008: one clause for the run log saying the gate was re-run after a null-exit spawn failure.
@@ -2829,11 +2847,14 @@ function deliverPrompt({ t, branch, evidence, unmetCriteria, defaultBranch, test
   const prToolNote = instrument === 'mcp'
     ? `There is no \`gh\` CLI here - use git and the GitHub MCP tools.`
     : ''
-  // Deliver DOES NOT TICK ACCEPTANCE BOXES (aac-routines issue 264). It used to, straight after
-  // the PR was created, which meant every fleet issue read `- verified in PR #N` while #N was
+  // Deliver ticks NO acceptance box before its own merge (aac-routines issue 264). It used to, straight
+  // after the PR was created, which meant every fleet issue read `- verified in PR #N` while #N was
   // open and the default branch carried none of the change. A ticked box is a claim that the
-  // work shipped, so it waits for the merge: where the served repo has a tick-acceptance-boxes
-  // merge workflow, that workflow ticks the boxes on the `pull_request` closed+merged event.
+  // work shipped, so it waits for the merge. Since issue 1283 the merge is the deliverer's own
+  // (STEP D), so D5 ticks the boxes the verifier confirmed right after it, each with a pointer,
+  // and leaves the rest unticked on an open ticket: the osh-rfp pass of October 1-2 closed five
+  // tickets with every box unticked because nothing in a served repo without a tick workflow
+  // ever ticked them, and left two open over boxes whose evidence was already on the ticket.
   // Pre-push merge (issue 318). A wave's branches all fork from the same commit; by the time
   // the last one is verified, master has moved and every branch that touched a skill carries a
   // rotated stamp block and a rebuilt marketplace payload. Merging here, with the four safe
@@ -2892,9 +2913,18 @@ D1. WAIT FOR CI. ${rules.prState('<PR number>')} Then ${rules.prChecks('<PR numb
 D2. THE BAR (orchestrator/RUNBOOK.md "Merge"): every check run's conclusion is "success", "skipped" or "neutral"; mergeable_state is "clean"; ${rules.prReviews('<PR number>')} has no review in state "CHANGES_REQUESTED". Any conclusion "failure", "cancelled", "timed_out" or "action_required": return merged false, prState "ci-red", blockedReason naming each failing check by name. A CHANGES_REQUESTED review: prState "changes-requested", blockedReason naming the reviewer. Never re-run a job, never edit, skip or quarantine a test, never push an empty commit, never merge a head with a red check.
 D3. DIRTY: mergeable_state "dirty" means ${defaultBranch} moved under the PR after STEP A. Run STEP A once more on ${branch} exactly as above (A1-A7, the same four resolvable classes, the same regeneration and gate, the same marker scan), push with a plain ${gitSpelling(instrument, `push origin ${branch}`)} (no force flag), then go back to D1 with the NEW head sha. At most two such rounds; after that return merged false, prState "dirty-unresolved", conflictPaths from the last STEP A. A merge the classifier refuses in a D3 round does NOT go to A8 - the PR is already open, and pushing it again unmerged changes nothing (issue 907): when it is refused (A0), list the paths the PR conflicts on with ${gitSpelling(instrument, `merge-tree --write-tree --name-only --no-messages origin/${branch} origin/${defaultBranch}`)} (it moves no ref and touches no checkout; every line after the first is a conflicted path) and return merged false, prState "dirty-unresolved", conflictPaths those paths, blockedReason "merge of origin/${defaultBranch} refused by the classifier: <the refusal text VERBATIM, both if they differed>" - that is the orchestrator's cue to merge ${defaultBranch} into the PR itself. mergeable_state "unknown" is GitHub still computing: wait 30 seconds and read D1 again.
 D4. MERGE: when the bar holds, ${rules.prMerge('<PR number>', `fix: ${t.title} (#${t.number})`)} Pass the head sha you read in D1 and that the checks ran on: a merge call for a head that moved fails, and that failure means go back to D1, never retry blind. Never a branch delete: delete_branch_on_merge is on for every fleeted repo. On merged:true, return merged true, mergeSha, prState "merged".
-D5. THE TICKET, only after merged:true: ${rules.issueState(t.number)} ${keepOpen || unmet.length ? `This ticket stays OPEN (${keepOpen ? 'its own instruction' : 'unmet acceptance criteria are listed in the PR'}): if it reads "closed", it was closed by mistake - say so in blockedReason and leave it; if "open", ${rules.labelSwap(t.number)}` : `The PR body's "Closes #${t.number}" closes it at merge; if it still reads "open" one read later (wait 30 seconds), ${rules.issueClose(t.number, '<prUrl>')}`} Report the final state as ticketState.
+D5. THE ACCEPTANCE BOXES (issue 1283), only after merged:true; otherwise return boxesTicked [] and boxesUnticked [] and leave the issue body alone. The audit (tools/tracker-audit.js) reports a closed ticket with an unticked box as \`closed-with-open-boxes\`, and its boxes are the \`- [ ]\` lines under a heading "Acceptance criteria", "Acceptance" or "Done when", up to the next \`## \` heading - those, and no other line of the body.
+D5a. Read the body and the comments: ${rules.issueBodyRead(t.number)}
+D5b. Decide every unticked box, one at a time, against the verifier evidence quoted in B2 and these criteria the verifier marked unmet: ${unmet.length ? JSON.stringify(unmet) : '(none)'}.
+    (i) The box is one of those unmet criteria: leave it unticked; it goes in boxesUnticked.
+    (ii) The box is a TRACKER ACTION - a comment on this ticket, closing, relabelling or filing a sibling ticket, a link posted somewhere - which no branch and no verifier can do. If the comments or the sibling's own state already show it done, tick it with the URL that shows it. Otherwise do it now with the same instrument (${rules.repoNote}) and tick it with the URL of the comment or the sibling. If you cannot do it (refused, or it needs an owner's decision), leave it unticked and put it in boxesUnticked with the reason; never skip it silently.
+    (iii) An item of the verifier evidence confirms it: tick it.
+    (iv) Nothing in the evidence speaks to it: leave it unticked; it goes in boxesUnticked with the reason "not confirmed by the verifier".
+    A ticked box becomes \`- [x]\` and carries ONE pointer on the same line, after its last word - after the last indented continuation line when the criterion wraps: " - verified in <prUrl>: <the evidence item, one short line: the command and its exit code, or the URL from (ii)>". Change nothing else in the body: no other line, no rewording, never untick a box.
+D5c. When D5b ticked anything, re-read the body just before writing and apply the ticks only to boxes still unticked (a tick-acceptance-boxes merge workflow in the repo may have ticked some meanwhile), then write it back in ONE edit: ${rules.issueBodyWrite(t.number, scratchFile(`issue-${t.number}-body.md`))} Return boxesTicked and boxesUnticked, each box quoted by its own text.
+D6. THE TICKET, only after merged:true: ${rules.issueState(t.number)} ${keepOpen || unmet.length ? `This ticket stays OPEN (${keepOpen ? 'its own instruction' : 'unmet acceptance criteria are listed in the PR'}): if it reads "closed", it was closed by mistake - say so in blockedReason and leave it; if "open", ${rules.labelSwap(t.number)}` : `The PR body's "Closes #${t.number}" closes it at merge; when D5 left boxesUnticked EMPTY and it still reads "open" one read later (wait 30 seconds), ${rules.issueClose(t.number, '<prUrl>')}`} WHENEVER D5 left any box unticked, the ticket stays OPEN, whatever the PR body said: if it reads "closed", reopen it - ${rules.issueReopen(t.number)} - then ${rules.prComment(scratchFile(`issue-${t.number}-unmet.md`))} ${t.number} with "Merged in <prUrl>; left open: these acceptance boxes are not confirmed:" and one bullet per unticked box, its text verbatim and the reason, and ${rules.labelSwap(t.number)} Report the final state as ticketState.
 
-Do NOT push to or otherwise touch ${defaultBranch} except through the merge call in D4. Do NOT edit the issue body at all and do NOT tick any acceptance box, ticked or otherwise (aac-routines issue 264): a ticked box claims the work shipped, the work ships at merge, and where this repo has a tick-acceptance-boxes merge workflow that workflow ticks them then. Return structured output only.`
+Do NOT push to or otherwise touch ${defaultBranch} except through the merge call in D4. Do NOT tick any acceptance box before D4 returned merged:true, and edit the issue body only in D5 (aac-routines issue 264): a ticked box claims the work shipped, and the work ships at merge. Return structured output only.`
 }
 // [FLEET-DELIVER-PROMPT-END]
 

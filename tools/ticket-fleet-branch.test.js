@@ -932,19 +932,30 @@ for (const file of RESUME_GUARD_PAIR) {
     }
   });
 
-  // ---- Deliver never ticks acceptance boxes (aac-routines issue 264) ----
+  // ---- Deliver ticks no acceptance box before its own merge (aac-routines issue 264, issue 1283) ----
 
-  test(`${rel} Deliver prompt forbids ticking acceptance boxes`, () => {
+  test(`${rel} Deliver prompt ticks acceptance boxes only after its merge`, () => {
     // The prompt moved into its own marked block in issue 405 - the finish mode sends the same
     // text - so it is read from there rather than from the lane body.
     const prompt = extractMarked(fs.readFileSync(file, 'utf8'), 'FLEET-DELIVER-PROMPT');
     assert.match(prompt, /`Deliver verified branch/, 'the deliver-prompt block must build the Deliver prompt');
-    assert.match(prompt, /do NOT tick any acceptance box/,
-      'Deliver prompt must forbid ticking acceptance boxes: the boxes wait for the merge (aac-routines issue 264)');
+    assert.match(prompt, /Do NOT tick any acceptance box before D4 returned merged:true/,
+      'the boxes wait for the merge (aac-routines issue 264)');
+    assert.match(prompt, /D5\. THE ACCEPTANCE BOXES \(issue 1283\), only after merged:true/,
+      'after the merge the deliverer ticks the confirmed boxes itself (issue 1283)');
     assert.doesNotMatch(prompt, /tick-acceptance-boxes\.js/,
-      'Deliver must not run the acceptance-box ticker itself; the merge workflow owns that step');
-    assert.doesNotMatch(prompt, /tick (?:each|the|every) (?:unticked )?acceptance box/i,
-      'Deliver prompt must carry no instruction to tick a box');
+      'a served repo has no copy of this repo\'s ticker script; the prompt spells the step out');
+  });
+
+  test(`${rel} tracker rules carry the D5 body read, body write and reopen in both instruments (issue 1283)`, () => {
+    const gh = loadTrackerRules(file, 'gh');
+    const mcp = loadTrackerRules(file, 'mcp');
+    assert.match(gh.issueBodyWrite(7, '/tmp/b.md'), /gh api --method PATCH repos\/\{owner\}\/\{repo\}\/issues\/7 -F body=@\/tmp\/b\.md/);
+    assert.match(gh.issueReopen(7), /issues\/7 -f state=open/);
+    assert.match(gh.issueBodyRead(7), /issues\/7 --jq \.body/);
+    assert.match(mcp.issueBodyWrite(7, '/tmp/b.md'), /mcp__github__issue_write \(method "update", issue_number 7, body =/);
+    assert.match(mcp.issueReopen(7), /state "open"/);
+    assert.match(mcp.issueBodyRead(7), /git remote get-url origin/, 'mcp rules name where owner/repo come from (issue 757)');
   });
 
   // ---- every per-ticket agent() call is wrapped (aac-routines issues 191, 270) ----
