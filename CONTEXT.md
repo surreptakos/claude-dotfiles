@@ -84,6 +84,20 @@ Helpers are exempt (Dan, 2026-09-25): a tool call carrying the hook input's `age
 subagent calls, per the Claude Code hooks docs) skips the route limits. Starting the helper already
 passed the gate, and a helper's skill load never shows in the main transcript.
 
+## Skill pick
+
+The one installed skill the prompt hook names for a message, if any: its qualified name
+(`<plugin>:<skill>`, or the bare name for a user skill), its description, and the instruction to
+open it with the Skill tool before acting. It sits beside the route and never changes it. Every
+installed plugin's skills are candidates, read from disk (the user plugin registry's active install
+paths, the Desktop org plugin folders beside the running plugin, the user skills folder), so the
+pick does not depend on the session's skill listing, which on 2026-10-02 described only ~45 of ~270
+skills. A `disable-model-invocation: true` skill is never a candidate. A local word-overlap score
+shortlists at most eight and Jev picks one or `none` in the prompt hook's one request; nothing
+shortlisted asks nothing, and Jev unavailable names nothing. Each prompt logs its pick, shortlist
+and Jev confidence. Unlike the route gate, it covers every kind of work, not only engineering
+(issue 1302). Decision record: `docs/adr/0003-jev-picks-a-skill-beside-the-route.md`.
+
 ## Scheduled run
 
 A turn started by a scheduled task, not typed by the user; its prompt carries the task file's text

@@ -1057,7 +1057,9 @@ def main():
             {"hooks": [
                 _hook("node", "governance-reminder.js", [], 5,
                       "Asserting governance..."),
-                _hook("python3", "ask_matt_gate.py", ["claude-prompt"], 5,
+                # 15 s (issue 1302): one Jev request of up to 10 s carries the route tree and the
+                # skill pick, and the skill scan reads every installed SKILL.md head first.
+                _hook("python3", "ask_matt_gate.py", ["claude-prompt"], 15,
                       "Locking Ask Matt, Yes, and caveman ultra..."),
                 _hook("node", "session-gate.js", ["prompt"], 200,
                       "Checking session gate..."),

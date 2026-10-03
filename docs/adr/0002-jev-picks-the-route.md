@@ -17,6 +17,8 @@ The decision:
   the prompt hook's 5-second budget.
 - **The gate covers engineering work only.** Other work (contract packages, review audits, Todoist
   triage) runs as before.
+  (Amended 2026-10-03 by ADR 0003 for skills, not routes: the skill pick names a skill for any
+  kind of work, beside the route.)
 - **The model may appeal once per turn** through a gate command that logs the wanted route and the
   reason; the pre-send lint then refuses the reply until its first line states the appeal. A
   committed setting can turn appeals off, making Jev's pick final.

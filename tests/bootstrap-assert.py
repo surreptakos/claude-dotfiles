@@ -148,6 +148,7 @@ if settings is not None:
     # Only the entries this bootstrap merged count; anything else in a container's settings is
     # not the payload's doing.
     merged = {}
+    merged_entries = []
     untagged = []
     for event, groups in events.items():
         for group in groups or []:
@@ -157,6 +158,8 @@ if settings is not None:
                         if isinstance(h, dict)]
             if group.get('_source') == SOURCE_TAG:
                 merged.setdefault(event, []).extend(commands)
+                merged_entries.extend((event, h) for h in (group.get('hooks') or [])
+                                      if isinstance(h, dict))
             else:
                 untagged.append((event, commands))
 
@@ -168,6 +171,17 @@ if settings is not None:
     else:
         pass_(f'all {len(REQUIRED_HOOKS)} governance hook entries merged into user settings, '
               f'tagged _source={SOURCE_TAG}')
+
+    # Issue 1302: the prompt gate's one Jev request (up to 10 s) carries the route tree and the
+    # skill pick, so its hook needs 15 s; at the old 5 s Claude Code kills it before Jev answers.
+    prompt_gate = [h for event, h in merged_entries if event == 'UserPromptSubmit'
+                   and re.search(r'ask_matt_gate\.py"?\s+claude-prompt', h.get('command', ''))]
+    if not prompt_gate:
+        fail('no merged ask-matt prompt gate entry to read a timeout from')
+    elif any(h.get('timeout') != 15 for h in prompt_gate):
+        fail(f"the ask-matt prompt gate timeout is {[h.get('timeout') for h in prompt_gate]}, not 15 s (issue 1302)")
+    else:
+        pass_('the ask-matt prompt gate runs with a 15 s timeout (issue 1302)')
 
     # Seated for settings.json (issue 614). Claude Code refuses a settings.json hook whose command
     # carries the literal ${CLAUDE_PLUGIN_ROOT} ("not associated with a plugin"), which is what

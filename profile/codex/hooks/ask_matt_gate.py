@@ -488,7 +488,7 @@ CORRECTION_JEV_QUESTION = (
     " text such as a report, a log or another agent's output."
 )
 CORRECTION_JEV_FLOOR = 0.5
-CORRECTION_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
+CORRECTION_JEV_TIMEOUT = 10.0  # seconds; the prompt hook's whole budget is 15 (issue 1302)
 
 
 def _jev_module() -> Any:
@@ -507,7 +507,7 @@ def _jev_module() -> Any:
 # names the next level ("then") or ends the walk at a route ("route"; None = no route, the gate
 # stays as it was before Jev). Every level is asked in the same request as the correction Noul and
 # the tree is walked in code afterwards, so the prompt hook spends one Jev call of at most
-# PROMPT_JEV_TIMEOUT seconds inside its 5-second budget. Adding a route or a level is one edit here.
+# PROMPT_JEV_TIMEOUT seconds inside its 15-second budget. Adding a route or a level is one edit here.
 ROUTE_TREE_ROOT = "scope"
 ROUTE_TREE: dict[str, dict[str, Any]] = {
     "scope": {
@@ -599,7 +599,9 @@ MAP_MOVES: dict[str, tuple[str, ...]] = {
     "wayfinder": ("to-spec",),
 }
 LAST_QUESTION_CHARS = 1500  # the tail of the last message kept for the continuation question
-PROMPT_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
+# Issue 1302 (Dan, 2026-10-02): the request now carries the skill pick too, so its limit rose from 3
+# to 10 seconds and the prompt hook's own timeout from 5 to 15 (the plugin build and Codex hooks.json).
+PROMPT_JEV_TIMEOUT = 10.0
 # A scheduled run's prompt carries its task file inside this block; it gets no route (for now).
 SCHEDULED_TASK_PATTERN = re.compile(r"<scheduled-task\b", re.IGNORECASE)
 # Issue 844: nothing in a scheduled run's hook input, environment or transcript marks it as
@@ -784,18 +786,22 @@ def _in_repository(cwd: str) -> bool:
 
 
 def _prompt_verdicts(
-    prompt: str, in_repository: bool = False, previous: dict[str, Any] | None = None
-) -> tuple[bool, dict[str, Any] | None]:
-    """(correction?, Jev's route pick) from ONE Jev request; the pick is None when Jev is unavailable.
+    prompt: str,
+    in_repository: bool = False,
+    previous: dict[str, Any] | None = None,
+    shortlist: list[dict[str, str]] | None = None,
+) -> tuple[bool, dict[str, Any] | None, dict[str, Any] | None]:
+    """(correction?, Jev's route pick, Jev's skill answer) from ONE Jev request; the pick and the
+    skill answer are None when Jev is unavailable.
 
     A scheduled run, or a message naming its route by slash command, is not routed, so its request
-    carries the correction question alone. When Jev cannot answer, the correction verdict is the
-    regex and there is no pick. `previous` ({"route", "last_question"}, issue 840) adds the
-    continuation question to the same request.
+    carries no route questions. When Jev cannot answer, the correction verdict is the regex and
+    there is no pick. `previous` ({"route", "last_question"}, issue 840) adds the continuation
+    question to the same request; a non-empty skill `shortlist` (issue 1302) adds the skill pick.
     """
     prompt = prompt or ""
     if not prompt.strip():
-        return False, None
+        return False, None, None
     unrouted = SCHEDULED_TASK_PATTERN.search(prompt) is not None or _user_named_route(prompt)
     questions: dict[str, Any] = {"correction": CORRECTION_JEV_QUESTION}
     state: dict[str, Any] = {"prompt": prompt, "in_repository": in_repository}
@@ -806,16 +812,19 @@ def _prompt_verdicts(
         questions["route.continuation"] = CONTINUATION_QUESTION
         state["previous_route"] = previous_route
         state["last_question"] = str((previous or {}).get("last_question") or "")
+    if shortlist:
+        questions["skill"] = _skill_question(shortlist)
     jev = _jev_module()
     answers = None if jev is None else jev.ask(state, questions, timeout=PROMPT_JEV_TIMEOUT)
     if answers is None:
-        return CORRECTION_PATTERN.search(prompt) is not None, None
+        return CORRECTION_PATTERN.search(prompt) is not None, None, None
     correction = answers["correction"] >= CORRECTION_JEV_FLOOR
+    skill = answers.get("skill") if shortlist else None
     if unrouted:
-        return correction, {"route": None, "path": ["not routed"]}
+        return correction, {"route": None, "path": ["not routed"]}, skill
     if previous_route:
-        return correction, _continued_route(answers, previous_route)
-    return correction, _walk_route_tree(answers)
+        return correction, _continued_route(answers, previous_route), skill
+    return correction, _walk_route_tree(answers), skill
 
 
 def _previous_route(previous: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -833,6 +842,222 @@ def _previous_route(previous: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _is_correction(prompt: str) -> bool:
     return _prompt_verdicts(prompt)[0]
+
+
+# ---------------------------------------------------------------------------- skill pick
+# Issue 1302 (ADR 0003, glossary `CONTEXT.md` **Skill pick**): on 2026-10-02 the session's skill
+# listing gave a description to only the first ~45 of ~270 skills, so the model could not see that
+# code-review or to-tickets fit a message. The prompt hook now names the one installed skill that
+# fits, read from disk: the user plugin registry's active install paths (one per plugin, so old
+# versions and trash under the plugin cache are never read), the Desktop org plugin folders beside
+# the running plugin (`rpm/plugin_<id>/`), and the user skills folder. A local word-overlap score
+# shortlists at most SKILL_PICK_SHORTLIST; Jev picks one or `none` as a Choice in the prompt hook's
+# one request. Nothing shortlisted asks nothing; Jev unavailable names nothing (fail open). The
+# skill pick sits beside the route and never changes it.
+SKILL_PICK_SHORTLIST = 8
+SKILL_PICK_NONE = "none"
+SKILL_PICK_DESCRIPTION_CHARS = 500
+SKILL_PICK_HEAD_BYTES = 8192  # the frontmatter is at the top; never read a whole skill per prompt
+SKILL_PICK_QUESTION = (
+    "Which installed skill, if any, should the assistant open before acting on `prompt`, the"
+    " user's message? Pick a skill only when its description fits what the message asks for."
+)
+SKILL_PICK_NONE_MEANS = (
+    "No listed skill fits: the message needs no skill, or one whose description is not listed here."
+)
+_SKILL_WORD = re.compile(r"[a-z0-9]+")
+_SKILL_STOPWORDS = frozenset("""
+    a about after again all also an and any are as ask asks at be been before being but by can
+    could did do does doing for from get got had has have help her here him his how i if in into
+    is it its just let lets like make me more most my need needs new no not now of on one only or
+    other our out over per please she should so some such than that the their them then there
+    these they this those to too use used user users using very via want wants was we were what
+    when where which while who why will with would yes you your skill skills
+""".split())
+_FRONTMATTER_KEY = re.compile(r"^([\w-]+):\s*(.*)$")
+_BLOCK_SCALARS = {">", "|", ">-", "|-", ">+", "|+"}
+
+
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+        return value[1:-1]
+    return value
+
+
+def _skill_frontmatter(text: str) -> dict[str, str]:
+    """The top-level keys of a SKILL.md frontmatter, plus `metadata.<key>` for that block's keys.
+    A folded, literal or wrapped value is joined onto one line."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return {}
+    fields: dict[str, str] = {}
+    key = None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        if not line.strip():
+            continue
+        if not line[0].isspace():
+            match = _FRONTMATTER_KEY.match(line)
+            key = match.group(1) if match else None
+            if key is not None:
+                value = match.group(2).strip()
+                fields[key] = "" if value in _BLOCK_SCALARS else _unquote(value)
+            continue
+        if key is None:
+            continue
+        nested = _FRONTMATTER_KEY.match(line.strip())
+        if key == "metadata" and nested:
+            fields[f"metadata.{nested.group(1)}"] = _unquote(nested.group(2))
+        else:
+            fields[key] = (fields[key] + " " + _unquote(line.strip())).strip()
+    return fields
+
+
+def _plugin_manifest_name(install: Path) -> str:
+    try:
+        manifest = json.loads((install / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError):
+        return ""
+    name = manifest.get("name") if isinstance(manifest, dict) else None
+    return name if isinstance(name, str) else ""
+
+
+def _registry_installs() -> list[tuple[str, Path]]:
+    """(plugin name, install path) per plugin in the user plugin registry: its first user-scoped
+    entry, so one version per plugin."""
+    try:
+        registry = json.loads(
+            (CLAUDE_HOME / "plugins" / "installed_plugins.json").read_text(encoding="utf-8-sig")
+        )
+    except (OSError, ValueError):
+        return []
+    plugins = registry.get("plugins") if isinstance(registry, dict) else None
+    installs: list[tuple[str, Path]] = []
+    for key, entries in (plugins.items() if isinstance(plugins, dict) else []):
+        for entry in entries if isinstance(entries, list) else [entries]:
+            if isinstance(entry, dict) and entry.get("scope", "user") == "user" and entry.get("installPath"):
+                installs.append((str(key).split("@")[0], Path(str(entry["installPath"]))))
+                break
+    return installs
+
+
+def _org_installs() -> list[tuple[str, Path]]:
+    """(plugin name, folder) for each Desktop org plugin beside the running plugin. Only an `rpm`
+    folder counts: the plugin cache's siblings of a running version are its old versions."""
+    plugin_root = SCRIPT.parent.parent.parent  # <plugin>/hooks/scripts/ask_matt_gate.py
+    if plugin_root.parent.name.lower() != "rpm":
+        return []
+    installs: list[tuple[str, Path]] = []
+    try:
+        folders = sorted(plugin_root.parent.iterdir())
+    except OSError:
+        return []
+    for folder in folders:
+        name = _plugin_manifest_name(folder) if folder.is_dir() else ""
+        if name:
+            installs.append((name, folder))
+    return installs
+
+
+def _read_head(path: Path) -> str:
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(SKILL_PICK_HEAD_BYTES).decode("utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _skill_candidates() -> list[dict[str, str]]:
+    """Every model-invocable installed skill with a description: {"name": qualified, "description"}."""
+    sources = [(plugin, install / "skills") for plugin, install in _registry_installs() + _org_installs()]
+    sources.append(("", CLAUDE_HOME / "skills"))
+    candidates: dict[str, dict[str, str]] = {}
+    for plugin, skills_root in sources:
+        try:
+            files = sorted(skills_root.glob("*/SKILL.md"))
+        except OSError:
+            continue
+        for skill_md in files:
+            fields = _skill_frontmatter(_read_head(skill_md))
+            disabled = fields.get("disable-model-invocation") or fields.get("metadata.disable-model-invocation")
+            description = " ".join((fields.get("description") or "").split())
+            if str(disabled).strip().lower() == "true" or not description:
+                continue
+            name = fields.get("name") or skill_md.parent.name
+            qualified = f"{plugin}:{name}" if plugin else name
+            if qualified != SKILL_PICK_NONE:
+                candidates.setdefault(qualified, {"name": qualified, "description": description})
+    return list(candidates.values())
+
+
+def _skill_words(text: str) -> set[str]:
+    words = set()
+    for word in _SKILL_WORD.findall(text.lower()):
+        for suffix in ("ing", "ed", "s"):
+            if word.endswith(suffix) and not word.endswith("ss") and len(word) - len(suffix) >= 3:
+                word = word[: -len(suffix)]
+                break
+        if len(word) >= 3 and word not in _SKILL_STOPWORDS:
+            words.add(word)
+    return words
+
+
+def _skill_shortlist(prompt: str, candidates: list[dict[str, str]]) -> list[dict[str, str]]:
+    """At most SKILL_PICK_SHORTLIST candidates sharing a word with `prompt`, best first. A word in
+    the skill's name counts twice."""
+    words = _skill_words(prompt)
+    if not words:
+        return []
+    scored = []
+    for candidate in candidates:
+        named = _skill_words(candidate["name"])
+        described = _skill_words(candidate["description"])
+        score = sum(2 if word in named else 1 if word in described else 0 for word in words)
+        if score:
+            scored.append((-score, candidate["name"], candidate))
+    return [candidate for _, _, candidate in sorted(scored, key=lambda row: row[:2])[:SKILL_PICK_SHORTLIST]]
+
+
+def _skill_question(shortlist: list[dict[str, str]]) -> dict[str, Any]:
+    criteria = {c["name"]: c["description"][:SKILL_PICK_DESCRIPTION_CHARS] for c in shortlist}
+    criteria[SKILL_PICK_NONE] = SKILL_PICK_NONE_MEANS
+    return {"type": "choice", "instructions": SKILL_PICK_QUESTION, "criteria": criteria}
+
+
+def _skill_pick(
+    session_id: str,
+    shortlist: list[dict[str, str]],
+    answer: dict[str, Any] | None,
+    jev_answered: bool,
+) -> dict[str, str] | None:
+    """The shortlisted skill Jev picked, or None; appends this prompt's line to the skill-pick log."""
+    picked = answer.get("choice") if isinstance(answer, dict) else None
+    probabilities = answer.get("probabilities") if isinstance(answer, dict) else None
+    confidence = probabilities.get(picked) if isinstance(probabilities, dict) else None
+    skill = next((c for c in shortlist if c["name"] == picked), None)
+    if not shortlist:
+        reason = "nothing shortlisted"
+    elif not jev_answered or picked is None:
+        reason = "Jev unavailable"
+    else:
+        reason = "picked" if skill else "Jev picked none"
+    _append_log(
+        _skill_pick_log_path(),
+        session_id,
+        json.dumps({
+            "pick": picked if shortlist and jev_answered else None,
+            "confidence": confidence,
+            "shortlist": [c["name"] for c in shortlist],
+            "reason": reason,
+        }),
+    )
+    return skill
+
+
+def _skill_pick_log_path() -> Path:
+    return STATE_DIR / "skill-pick.log"
 
 
 def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
@@ -856,11 +1081,19 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
         # Issue 608: the once-per-session release for a shell-less surface survives the turn.
         "unknown_tool_denied": (previous or {}).get("unknown_tool_denied"),
     }
-    correction, pick = _prompt_verdicts(
+    try:
+        shortlist = _skill_shortlist(str(event.get("prompt") or ""), _skill_candidates())
+    except Exception:
+        shortlist = []  # the skill pick fails open: a scan error names no skill and blocks nothing
+    correction, pick, skill_answer = _prompt_verdicts(
         str(event.get("prompt") or ""),
         _in_repository(str(event.get("cwd") or "")),
         _previous_route(previous),
+        shortlist,
     )
+    skill = _skill_pick(session_id, shortlist, skill_answer, pick is not None)
+    if skill:
+        state["skill_pick"] = skill["name"]
     if correction:
         state["correction_nonce"] = nonce
     jev_route = (pick or {}).get("route")
@@ -932,6 +1165,12 @@ def _claude_prompt(event: dict[str, Any]) -> dict[str, Any]:
             f"ROUTE UNCHECKED: Jev could not answer this turn, so you are picking the route "
             f'yourself. Open your reply with the exact line "{ROUTE_UNCHECKED_OPENER}" — the '
             "pre-send lint refuses a reply on this turn without it. "
+        )
+    if skill:
+        description = skill["description"][:SKILL_PICK_DESCRIPTION_CHARS]
+        context += (
+            f"SKILL PICKED BY JEV: {skill['name']} ({description}). Open it with the Skill tool "
+            f'(skill: "{skill["name"]}") before acting on this message. '
         )
     if routine is not None:
         context += (

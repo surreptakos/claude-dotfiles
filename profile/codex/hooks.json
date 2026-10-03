@@ -8,7 +8,7 @@
             "type": "command",
             "command": "python3 \"$HOME/.claude/plugins/marketplaces/claude-dotfiles/marketplace/aac-skills/hooks/scripts/ask_matt_gate.py\" prompt",
             "commandWindows": "py -3 \"__USERHOME_JSON__\\.claude\\plugins\\marketplaces\\claude-dotfiles\\marketplace\\aac-skills\\hooks\\scripts\\ask_matt_gate.py\" prompt",
-            "timeout": 5,
+            "timeout": 15,
             "statusMessage": "Starting Ask Matt route gate",
             "additionalContextLimit": 1200
           }

@@ -15,6 +15,7 @@
 #   2  the payload's skills are on disk under <home>/.claude/skills
 #   3  every governance hook entry the spec names is merged into <home>/.claude/settings.json,
 #      tagged, and points at a script the payload actually carries
+#   3a the ask-matt prompt gate entry carries a 15 s timeout (issue 1302: its Jev request has 10 s)
 #   4  the global rules text file is in the payload and a UserPromptSubmit entry delivers it
 #   5  gh is installed and reachable through the PATH the hook exported via $CLAUDE_ENV_FILE
 #   5c session-check started while the bootstrap is still installing reports the post-bootstrap
