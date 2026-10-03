@@ -4,10 +4,10 @@ description: >
   Run a ticket-fleet wave over the ready-for-agent queue. Use when asked to run the fleet or
   clear the queue, or when an orchestrator worker cycle launches it.
 metadata:
-  modified: "2026-10-03T20:21:39Z"
-  previous-modified: "2026-10-03T20:13:57Z"
-  revision: "80"
-  content-sha: "789178c30a4b"
+  modified: "2026-10-03T22:53:35Z"
+  previous-modified: "2026-10-03T20:21:39Z"
+  revision: "81"
+  content-sha: "bd355e55dcdd"
 ---
 
 # ticket-fleet
@@ -180,6 +180,11 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
 - Dropped before selection: tickets with an open `agent/issue-<N>-` PR, and, in a label-driven
   wave, tickets in the Maybe Someday milestone.
 - A ticket whose latest comment is an unanswered fleet handoff is parked.
+- **A wave serves the default branch only.** The scout reads `defaultBranch` from `origin/HEAD`
+  and no arg overrides it: implementers branch from it and deliverers merge into it. A ticket whose
+  code exists only on an unmerged PR's branch (a Design sync awaiting its logic keys) cannot run
+  in a wave. Keep it out of `tickets` and work it on that branch outside the wave. A label-driven
+  wave still picks it up, so say so in the launch reply (aac-sales-cockpit PR 882, 2026-10-03).
 
 **Lanes.** The scout gives each ticket a kind:
 - **code** - implementer (pushes its branch on commit), blind refuting verifier per attempt, then
