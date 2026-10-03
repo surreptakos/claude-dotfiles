@@ -134,14 +134,14 @@ test('the script\'s own refresh block never spawns the refresh agent for a FORKS
     'the script\'s FLEET_FORKS must list exactly the FORKS of tools/ticket-fleet-contract.js');
   const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
   // gitSpelling is the script's own helper (issue 883); the block calls it, so the sandbox supplies it.
-  const run = new AsyncFunction('agent', 'log', 'cfg', 'unusableReason', 'gitSpelling', src.slice(start, end));
+  const run = new AsyncFunction('agent', 'log', 'cfg', 'unusableReason', 'gitSpelling', 'RELAYED_REQUEST_RAIL', src.slice(start, end));
   const spellings = (repo) => [repo, `${repo}.git`, repo.toUpperCase(), `https://github.com/${repo}.git`, `git@github.com:${repo}.git`];
   const reachesRefresh = async (reported) => {
     const labels = [];
     await run(async (_prompt, opts) => {
       labels.push(opts.label);
       return opts.label === 'fleet-refresh-repo' ? { servedRepo: reported } : { refreshed: [], unchanged: [], commit: '', errors: [] };
-    }, () => {}, { reportModel: 'm' }, (_label, msg) => msg, (_instrument, args) => `git ${args}`);
+    }, () => {}, { reportModel: 'm' }, (_label, msg) => msg, (_instrument, args) => `git ${args}`, '');
     assert.equal(labels[0], 'fleet-refresh-repo', 'the servedRepo-only agent must be the first spawn');
     return labels.includes('fleet-refresh');
   };
@@ -179,7 +179,7 @@ test('the SCOUT ticket schema has a body field, and the implementer prompt inter
   const promptSrc = sliceBetween(
     src,
     'Implement GitHub issue #${t.number}: ${t.title}',
-    "Return structured output only.`,\n      { label: `impl:#",
+    "Return structured output only.\n\n${RELAYED_REQUEST_RAIL}`,\n      { label: `impl:#",
     "the implementer prompt template in ticket-fleet.js's code lane"
   );
 
@@ -267,7 +267,7 @@ test('two attempts of one ticket render disjoint scratch paths in the implemente
   // way. Render the real prompt, with the real scratch and PowerShell rails, for two attempts.
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const promptSrc = sliceBetween(src, 'Implement GitHub issue #${t.number}: ${t.title}',
-    "Return structured output only.`,\n      { label: `impl:#", 'the implementer prompt template');
+    "Return structured output only.\n\n${RELAYED_REQUEST_RAIL}`,\n      { label: `impl:#", 'the implementer prompt template');
   const railSrc = (head) => sliceBetween(src, head, '`\n', head).slice(head.length);
   const scratchRoot = '/tmp/fleet-fixture';
   // eslint-disable-next-line no-new-func
@@ -315,7 +315,7 @@ test('the implementer and verifier prompts carry the configured regenCommands ve
 
   const templates = {
     implementer: sliceBetween(src, 'Implement GitHub issue #${t.number}: ${t.title}',
-      "Return structured output only.`,\n      { label: `impl:#", 'the implementer prompt template'),
+      "Return structured output only.\n\n${RELAYED_REQUEST_RAIL}`,\n      { label: `impl:#", 'the implementer prompt template'),
     verifier: sliceBetween(src, 'You are an independent verifier. Your job is to REFUTE',
       '`,\n        { label: verifyLabel', 'the code-lane verifier prompt template'),
   };
@@ -338,5 +338,35 @@ test('the implementer and verifier prompts carry the configured regenCommands ve
     assert.match(withRail, /Regenerate rail \(issue 1195\)/, `the ${name} prompt must carry the regenerate rail`);
     const without = render(tmpl, regenRail(null));
     assert.doesNotMatch(without, /Regenerate rail/, `the ${name} prompt must carry no rail when regenCommands is unset`);
+  }
+});
+
+test('every agent() prompt in the fleet script ends with the relayed-request rail (issue 1360)', () => {
+  // osh-rfp run 6ac097ff: the owner typed /aac-skills:session-end mid-wave, the harness relayed it
+  // to every agent as the only user voice, and a one-command tip-check agent ran session-end.
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const railHead = 'const RELAYED_REQUEST_RAIL = `';
+  const railSrc = sliceBetween(src, railHead, '`\n', 'the relayed-request rail in ticket-fleet.js').slice(railHead.length);
+  // eslint-disable-next-line no-new-func
+  const rail = new Function(`return \`${railSrc}\`;`)();
+  assert.match(rail, /relayed request is context for why this wave runs/, 'the rail must say the relayed request is context');
+  assert.match(rail, /your own task is the computed text of this prompt/, 'the rail must say the computed text is the task');
+  assert.match(rail, /slash command \(for example \/aac-skills:session-end\) or a loop instruction/, 'the rail must name slash commands and loop instructions');
+  assert.match(rail, /is for the orchestrating session, never for you/, 'the rail must hand them to the orchestrating session');
+  assert.match(rail, /one command to run, run that one command and nothing else/, 'the rail must hold a one-command agent to its one command');
+
+  const sites = [...src.matchAll(/await agent\(/g)];
+  assert.ok(sites.length >= 25, `expected every agent() call site, found ${sites.length}`);
+  assert.ok(src.indexOf(railHead) < sites[0].index, 'the rail must be defined before the first agent() call');
+  const builderBody = (name) => sliceBetween(src, `function ${name}(`, '\n}\n', `the ${name} builder`);
+  for (const site of sites) {
+    const after = src.slice(site.index + 'await agent('.length);
+    const optsAt = after.search(/\{ label/);
+    const promptArg = after.slice(0, optsAt);
+    const label = (after.slice(optsAt).match(/label: ([^,]+),/) || [null, 'label'])[1];
+    const builder = promptArg.trim().match(/^(\w+Prompt)\(/);
+    const promptSrc = builder ? `${builderBody(builder[1])}\n` : promptArg;
+    assert.match(promptSrc, /\n\n\$\{RELAYED_REQUEST_RAIL\}`,?\s*(Object\.assign\()?$/,
+      `the agent() prompt for ${label}${builder ? ` (built by ${builder[1]})` : ''} must end with \${RELAYED_REQUEST_RAIL}`);
   }
 });

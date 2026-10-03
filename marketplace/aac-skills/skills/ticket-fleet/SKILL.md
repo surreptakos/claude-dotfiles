@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-02T17:46:10Z'
-  previous-modified: '2026-10-02T16:53:02Z'
-  revision: '76'
-  content-sha: 7fec0ba3b084
+  modified: '2026-10-03T19:35:12Z'
+  previous-modified: '2026-10-02T17:46:10Z'
+  revision: '77'
+  content-sha: 34f4984596f5
 ---
 
 # ticket-fleet
@@ -20,6 +20,14 @@ result; every ticket is worked by subagents.
 
 **One fleet at a time (Dan, 2026-09-26).** Wait for a running wave's result before launching
 another in the same repo.
+
+**Hold a command typed mid-wave until the wave returns (issue 1360).** The harness relays this
+session's latest chat message to every agent of a running wave as the only user voice. Every fleet
+prompt tells its agent that a slash command or loop instruction in it is this session's, not its
+own, but that rail is a backstop. When Dan types a command such as `/aac-skills:session-end` while
+a wave runs, tell him it is held and run it once the Workflow result is back. In osh-rfp run
+6ac097ff a one-command agent ran session-end off the relay, deleted the orchestrator branch and
+closed six issues.
 
 **A desktop session runs the `ready-for-local-agent` tickets itself (Dan, 2026-09-30).** The wave
 serves one repo and skips a ticket labelled for a local agent, or one that changes another repo.

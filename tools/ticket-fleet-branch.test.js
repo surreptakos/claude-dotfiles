@@ -2101,9 +2101,9 @@ async function driveBlockerState(tickets, blockerReply, { mode = 'gh' } = {}) {
   const logs = [];
   const prompts = [];
   const agentMock = async (prompt, opts) => { prompts.push([opts.label, prompt]); return blockerReply(prompt, opts); };
-  const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'log',
+  const wrapper = new AsyncFunction('agent', 'cfg', 'rules', 'log', 'RELAYED_REQUEST_RAIL',
     body + '\nreturn { resolveBlockerStates, applyBlockerStates };');
-  const fns = await wrapper(agentMock, { reportModel: 'r' }, loadTrackerRules(FLEET_SCRIPT, mode), (m) => logs.push(m));
+  const fns = await wrapper(agentMock, { reportModel: 'r' }, loadTrackerRules(FLEET_SCRIPT, mode), (m) => logs.push(m), '');
   const resolved = await fns.resolveBlockerStates(tickets);
   return { resolved, logs, prompts, applyBlockerStates: fns.applyBlockerStates };
 }
