@@ -13,6 +13,7 @@ A do date on a recurring task goes through reschedule-tasks (date only): update-
 Every Todoist write stores an undo record; no confirm()/alert() (the artifact frame blocks them).
 "Launch agents" counts the open Todoist tasks labelled agent and says the agent-launcher desktop routine opens each one as a titled Opus 5.5 session in Dan's sidebar (a one-time scheduled task, "Agent: task name") within about 40 minutes; the page calls no session connector (Claude Code Remote rejects blocked_by_policy on this account, issue 1162; todoist-triage agent-sweep.md § Launch, issue 1202).
 The huddle draft reads the huddle channel and Sent Items from today's newest aacx-inbox export; a live Microsoft 365 read covers only the hour after that export's stamp, and before the day's first export the panel waits (issue 1039, aac-routines ADR 0010).
+The "From your team" panel reads the same huddle__global export and capped live tail on every refresh, names a span past the hour under "Could not read", and waits with no Microsoft 365 call before the day's first export (issue 1300).
 The huddle draft also asks the GitHub connector for the pull requests merged and issues closed in surreptakos repos since Dan's last post; each is report evidence on its own, named by repo#number (issue 1199).
 Every huddle draft is saved to db huddle_drafts/<YYYY-MM-DDTHHMMSS> so a Claude session can read what was generated.
 The drafter learns from Dan's edits (issue 848): each draft first compares his last post with the draft he worked from, Claude proposes lessons to db huddle_lessons (status proposed), only his Keep click confirms one, and every draft is sent the kept lessons; huddle_feedback/<post stamp> logs each compare.
@@ -614,24 +615,32 @@ footer{font-size:12px;color:var(--muted)}
     });
     return {risks, mentions};
   }
+  // Issue 1300: the posts come from today's newest huddle__global export plus the capped one-hour live tail
+  // (huddleMessages, aac-routines ADR 0010), never a live read on its own; before that export the panel waits.
+  const TEAM_WAIT = "Waiting for today's first export of the huddle channel (08:15 CT on weekdays). Your team's posts are read from it.";
   async function refreshTeam(){
     try {
-      const res = await call("ms365", "teams_list_channel_messages", {teamId:HUDDLE.teamId, channelId:HUDDLE.channelId, limit:25});
-      const todayKey = ymd(new Date());
-      const posts = objectsOf(res).filter(o => o.from && o.from.userId && o.from.userId !== HUDDLE.danId && o.createdDateTime && ymd(new Date(o.createdDateTime)) === todayKey);
+      const dayStart = new Date(); dayStart.setHours(0,0,0,0);
+      const file = await newestExport(HUD_SOURCES.huddle, dayStart);
+      if (!file){ $("team-body").innerHTML = '<div class="empty">' + esc(TEAM_WAIT) + '</div>'; return; }
+      const now = new Date(), gaps = [];
+      const msgs = await huddleMessages(file, now, gaps);
+      const todayKey = ymd(now);
+      const posts = msgs.filter(m => m.userId && m.userId !== HUDDLE.danId && !m.system && m.at && ymd(new Date(m.at)) === todayKey);
       const rows = [];
-      posts.sort((a,b) => String(a.createdDateTime).localeCompare(String(b.createdDateTime))).forEach(o => {
-        const who = String(o.from.displayName || "Someone").split(" ")[0];
-        const {risks, mentions} = linesOfPost(o.bodyPreview);
+      posts.sort((a,b) => new Date(a.at) - new Date(b.at)).forEach(m => {
+        const who = String(m.name || "Someone").split(" ")[0];
+        const {risks, mentions} = linesOfPost(m.html);
         risks.forEach(t => rows.push({who, t, you:/\bDan\b/.test(t)}));
         mentions.forEach(t => rows.push({who, t, you:true}));
       });
-      const names = [...new Set(posts.map(o => String(o.from.displayName || "").split(" ")[0]))].filter(Boolean);
-      $("team-body").innerHTML = rows.length
+      const names = [...new Set(posts.map(m => String(m.name || "").split(" ")[0]))].filter(Boolean);
+      $("team-body").innerHTML = (rows.length
         ? rows.map(r => '<div class="blk"><span class="who">' + esc(r.who) + '</span><span>' + esc(r.t) + (r.you ? '<span class="you">names you</span>' : '') + '</span></div>').join("")
-        : '<div class="empty">' + (posts.length ? "No blockers in today's posts from " + esc(names.join(", ")) + "." : "No posts from your team yet today.") + '</div>';
+        : '<div class="empty">' + (posts.length ? "No blockers in today's posts from " + esc(names.join(", ")) + "." : "No posts from your team yet today.") + '</div>')
+        + (gaps.length ? '<div class="empty">Could not read: ' + esc(gaps.join("; ")) + '</div>' : '');
     } catch(err){
-      $("team-body").innerHTML = '<div class="empty">' + esc(explain(err, "ms365")) + '</div>';
+      $("team-body").innerHTML = '<div class="empty">' + esc(explain(err, "Google Drive")) + '</div>';
     }
   }
 
@@ -2131,4 +2140,4 @@ footer{font-size:12px;color:var(--muted)}
 })();
 </script>
 
-</body></html>
+</body></html>

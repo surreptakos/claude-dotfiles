@@ -30,14 +30,15 @@ const mdEscape = s => s.replace(/[\\<>&\[\]#_]/g, c => "\\" + c);
 
 // exportAgoMin: how long before NOW today's newest exports were stamped; null means none has landed yet.
 // github: the GitHub connector's search results, {prs: [...], issues: [...]} in the REST search item shape.
-function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], waiting = [], meta = null, todoist = () => undefined, github = {prs: [], issues: []}, sentMail, collections = {}}){
+// teamPosts: extra messages in the huddle export (Graph shape); liveHuddle: the live channel listing.
+function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail = [], triage = [], waiting = [], meta = null, todoist = () => undefined, github = {prs: [], issues: []}, sentMail, collections = {}, teamPosts = [], liveHuddle}){
   const els = {};
   const $ = id => (els[id] = els[id] || element(id));
   const prompts = [], m365 = [];
   const now = NOW;
   const stamp = exportAgoMin == null ? null : new Date(now - exportAgoMin * 60000);
   const exported = {
-    huddle: {value: [{id: "1", from: {user: {id: DAN, displayName: "Dan"}}, createdDateTime: new Date(now - 86400000).toISOString(), body: {contentType: "html", content: lastPostHtml}}]},
+    huddle: {value: [{id: "1", from: {user: {id: DAN, displayName: "Dan"}}, createdDateTime: new Date(now - 86400000).toISOString(), body: {contentType: "html", content: lastPostHtml}}].concat(teamPosts)},
     sent: sentMail ? {value: sentMail} : {value: [{subject: "RE: vendor setup", sentDateTime: new Date(now - 2 * 3600000).toISOString(), body: {contentType: "html", content: "<html><body><p>Sent the vendor the setup documents</p></body></html>"}}]}
   };
   const calls = [];
@@ -53,7 +54,7 @@ function buildPage({tasks, lastPostHtml, onPrompt, exportAgoMin = 10, liveMail =
       return text({files: [{id: id + "-old", title: stampTitle(src, new Date(stamp - 3600000))}, {id, title: stampTitle(src, stamp)}]});
     }
     if (tool === "read_file_content") return text({fileContent: mdEscape(JSON.stringify(exported[input.fileId] || {value: []}))});
-    if (tool === "teams_list_channel_messages") return text([{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: "<p>live read of an old post</p>", messageType: "message"}]);
+    if (tool === "teams_list_channel_messages") return text(liveHuddle || [{from: {userId: DAN, displayName: "Dan"}, createdDateTime: new Date(now - 86400000).toISOString(), bodyPreview: "<p>live read of an old post</p>", messageType: "message"}]);
     if (tool === "find-tasks") return text({tasks: tasks.filter(t => t.projectId === input.projectId), hasMore: false});
     if (tool === "find-activity") return text({events: []});
     if (tool === "outlook_email_search") return text(liveMail);
@@ -211,6 +212,8 @@ test("before the day's first export the panel waits and makes no Microsoft 365 c
   await new Promise(r => setImmediate(r));
   assert.match(page.$("hud-status").textContent, /^Waiting for today's first export/);
   assert.strictEqual(page.$("hud-go").disabled, true);
+  assert.match(page.$("team-body").innerHTML, /Waiting for today&#39;s first export of the huddle channel/, "the team panel waits too");
+  assert.deepStrictEqual(page.m365.filter(c => c.tool === "teams_list_channel_messages"), [], "no panel reads the huddle channel live");
   page.m365.length = 0;
   await page.$("hud-go").fire("click");
   assert.match(page.$("hud-status").textContent, /^Waiting for today's first export/);
@@ -231,6 +234,23 @@ test("a live read stops one hour after a stale export, and the span past it is n
   assert.match(sent, /inside the tail/);
   assert.doesNotMatch(sent, /past the tail/);
   assert.match(page.$("hud-status").textContent, /Could not read: .*huddle channel [^;]*past the one-hour live tail.*sent mail [^;]*past the one-hour live tail/);
+});
+
+// Issue 1300: the team panel reads today's posts from the huddle export plus the capped live tail, never the
+// channel live on its own, and names the span past the hour under its Could not read.
+test("the team panel reads the huddle export, and its live read covers only the hour after the export stamp", async () => {
+  const at = min => new Date(NOW - 180 * 60000 + min * 60000).toISOString();
+  const teamPosts = [{id: "t1", from: {user: {id: "sam-id", displayName: "Sam Export"}}, createdDateTime: at(-5), body: {contentType: "html", content: "<p>Risks/Blockers</p>"}}];
+  const live = (id, name, min) => ({id, from: {userId: id + "-id", displayName: name}, createdDateTime: at(min), bodyPreview: "<p>Risks/Blockers</p>", messageType: "message"});
+  const page = buildPage({tasks: noTasks, lastPostHtml, onPrompt: passAll, exportAgoMin: 180, teamPosts,
+    liveHuddle: [live("pat", "Pat Tail", 30), live("lee", "Lee Late", 120)]});
+  await new Promise(r => setImmediate(r));
+  const body = page.$("team-body").innerHTML;
+  assert.match(body, /Sam/, "a post from the export is read: " + body);
+  assert.match(body, /Pat/, "a post inside the one-hour tail is read: " + body);
+  assert.doesNotMatch(body, /Lee/, "a post past the one-hour tail is not read live: " + body);
+  assert.match(body, /Could not read: huddle channel [^;]*past the one-hour live tail/);
+  assert.strictEqual(page.m365.filter(c => c.tool === "teams_list_channel_messages").length, 1, "one capped live read");
 });
 
 // Issue 1199: GitHub is the fifth report source. Merged PRs and closed issues since the last post reach the drafter,

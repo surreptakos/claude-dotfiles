@@ -2,10 +2,10 @@
 name: todoist-triage
 description: Triage Dan's Todoist work tasks. Use for the daily or Friday pass, clearing the backlog, or deciding what to delegate.
 metadata:
-  modified: '2026-10-02T22:22:48Z'
-  previous-modified: '2026-10-02T22:14:43Z'
-  revision: '48'
-  content-sha: 1797b453d359
+  modified: '2026-10-03T20:18:19Z'
+  previous-modified: '2026-10-02T22:22:48Z'
+  revision: '49'
+  content-sha: 38954a75f136
 ---
 
 # todoist-triage
