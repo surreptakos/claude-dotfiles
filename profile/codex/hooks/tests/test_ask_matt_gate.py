@@ -1582,6 +1582,81 @@ class AskMattGateTests(unittest.TestCase):
             self.assertIn("CORRECTION DETECTED", turn["context"])
             self.assertIn("CORRECTION NOT CLOSED", turn["state"]["pending_correction"])
 
+    # Issue 1298: PR 1288's CI wakes were read as corrections and routed to wizard or triage.
+    MACHINE_WAKES = {
+        "cloud-pr": "<github-webhook-activity>PR #1288: check \"tests\" failed (wrong exit code)"
+                    "</github-webhook-activity>",
+        "desktop-pr": "<ci-monitor-event>PR 1288: CI failed; you should have seen it.</ci-monitor-event>",
+        "check-in": "<<autonomous-loop-dynamic>>",
+    }
+
+    def test_a_machine_wake_is_no_correction_and_routes_to_direct_answer_without_an_appeal(self) -> None:
+        # Jev off (the regex would fire on "wrong" and "should have") and Jev saying "correction,
+        # wizard": neither is asked, because a wake is not a user message.
+        stubs = ("off", self._canned(correction=0.97, kind="human-steps"))
+        for stub in stubs:
+            for name, prompt in self.MACHINE_WAKES.items():
+                with self.subTest(stub=stub, wake=name), tempfile.TemporaryDirectory() as folder:
+                    state_dir = Path(folder)
+                    turn = self._routed_turn(state_dir, f"s-wake-{name}", prompt, stub)
+                    self.assertEqual(turn["state"]["flow"], "direct-answer")
+                    self.assertEqual(turn["state"]["jev_route"], "direct-answer")
+                    self.assertNotIn("route_unchecked", turn["state"])
+                    self.assertNotIn("correction_nonce", turn["state"])
+                    self.assertNotIn("CORRECTION DETECTED", turn["context"])
+                    declared = self.run_claude_declare(
+                        f"s-wake-{name}", turn["state"]["nonce"], "direct-answer", state_dir
+                    )
+                    self.assertEqual(declared.returncode, 0, declared.stderr)
+        # A user's words beside the notification are a user message: routed by Jev as before.
+        with tempfile.TemporaryDirectory() as folder:
+            mixed = self.MACHINE_WAKES["cloud-pr"] + "\nfix it"
+            turn = self._routed_turn(Path(folder), "s-mixed", mixed, self._canned(kind="broken"))
+            self.assertEqual(turn["state"]["flow"], "diagnosing-bugs")
+
+    def test_a_wake_after_the_durable_fix_landed_does_not_reraise_correction_not_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            state_dir = Path(folder)
+            fixed = self._correction_turn(state_dir, "s-landed", "Wrong, links not IDs", [
+                ("Bash", {"command": 'git commit -m "fix(to-tickets): links"'}),
+            ])
+            self.assertIn("CORRECTION DETECTED", fixed["context"])
+            self.assertNotIn("pending_correction", fixed["state"])
+            for _ in range(2):  # each CI wake reads PR state only and changes no file
+                wake = self._correction_turn(
+                    state_dir, "s-landed", self.MACHINE_WAKES["cloud-pr"], ["Bash"]
+                )
+                self.assertNotIn("CORRECTION", wake["context"])
+                self.assertNotIn("pending_correction", wake["state"])
+
+    def test_the_correction_question_reads_the_users_prompt_never_the_assistants_text(self) -> None:
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("gate_under_test_own_words", SCRIPT)
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        asked: list[tuple[dict, dict]] = []
+
+        class FakeJev:
+            @staticmethod
+            def ask(state, questions, timeout=0):
+                asked.append((state, questions))
+                answers = {"correction": 0.03, **{f"route.{k}": {"choice": v}
+                           for k, v in self.ROUTE_DEFAULTS.items()},
+                           "route.continuation": {"choice": "same"}}
+                return answers
+
+        gate._jev_module = lambda: FakeJev
+        previous = {"route": "direct-answer",
+                    "last_question": "Correction to the previous reply: CI is green, not red."}
+        correction, pick = gate._prompt_verdicts("ok, thanks", True, previous)
+        self.assertFalse(correction)
+        self.assertEqual(pick["route"], "direct-answer")
+        state, questions = asked[0]
+        self.assertEqual(state["prompt"], "ok, thanks")  # the user's message is what is judged
+        self.assertIn("Judge `prompt` alone", questions["correction"])
+        self.assertIn("assistant's own words", questions["correction"])
+
     def test_jev_unavailable_detection_is_exactly_the_regex(self) -> None:
         import importlib.util
 
@@ -1908,6 +1983,20 @@ class AskMattGateTests(unittest.TestCase):
             path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
             names = gate._turn_tool_names(str(path))
             self.assertIn("get_reviews", names)
+            # Issue 1298: a cloud container reads over REST; the same-turn read counts too.
+            for endpoint, method in (("reviews", "get_reviews"), ("comments", "get_review_comments")):
+                records[1]["message"]["content"][0] = {
+                    "type": "tool_use", "name": "Bash",
+                    "input": {"command": f"gh api repos/o/r/pulls/1288/{endpoint} --jq length"},
+                }
+                path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+                rest = gate._turn_tool_names(str(path))
+                self.assertIn(method, rest)
+                self.assertFalse(any("review claim" in v for v in gate._yes_lint(claim, rest, [])))
+            records[1]["message"]["content"][0]["input"] = {"command": "gh api repos/o/r/pulls/1288"}
+            path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
+            plain = gate._turn_tool_names(str(path))
+            self.assertTrue(any("review claim" in v for v in gate._yes_lint(claim, plain, [])))
             self.assertFalse(any("review claim" in v for v in gate._yes_lint(claim, names, [])))
 
     def test_lint_exempts_the_mandated_pylons_prefix_but_no_other_fence(self) -> None:

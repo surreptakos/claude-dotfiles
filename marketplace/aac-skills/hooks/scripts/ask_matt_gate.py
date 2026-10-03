@@ -494,8 +494,27 @@ CORRECTION_JEV_QUESTION = (
     "Does `prompt`, a message the user sent to an AI assistant, say that the assistant's earlier"
     " claim, action or output was wrong or incomplete? A question or request about something else"
     " being wrong (a build, a test, a file, a system) is not a correction, and neither is pasted"
-    " text such as a report, a log or another agent's output."
+    " text such as a report, a log or another agent's output. Judge `prompt` alone:"
+    " `last_question` and `previous_route` are the assistant's own words and state, and the"
+    " assistant correcting itself there (\"Correction to the previous reply\") is never the user"
+    " correcting it."
 )
+# Issue 1298: a turn whose only input is a machine wake is not a user message, so it is never a
+# correction and only reads state: it routes to direct-answer with no Jev call. PR 1288's session
+# (2026-10-02) had CI wakes read as corrections (the regex hit "wrong exit code" in a check name,
+# Jev read the assistant's own "Correction to the previous reply") and routed to wizard or triage.
+# A wake is a desktop PR-watch event, a cloud PR subscription event, or a /loop check-in sentinel.
+MACHINE_WAKE_BLOCK = re.compile(
+    r"<(ci-monitor-event|github-webhook-activity)\b[^>]*>.*?(?:</\1\s*>|\Z)", re.IGNORECASE | re.DOTALL
+)
+LOOP_WAKE_SENTINEL = re.compile(r"<<autonomous-loop(?:-dynamic)?>>")
+MACHINE_WAKE_ROUTE = "direct-answer"
+
+
+def _machine_wake(prompt: str) -> bool:
+    """Whether `prompt` is nothing but queued PR notifications and /loop check-in sentinels."""
+    rest = LOOP_WAKE_SENTINEL.sub("", MACHINE_WAKE_BLOCK.sub("", prompt or ""))
+    return rest != (prompt or "") and not rest.strip()
 CORRECTION_JEV_FLOOR = 0.5
 CORRECTION_JEV_TIMEOUT = 3.0  # seconds; the prompt hook's whole budget is 5
 
@@ -805,6 +824,8 @@ def _prompt_verdicts(
     prompt = prompt or ""
     if not prompt.strip():
         return False, None
+    if _machine_wake(prompt):
+        return False, {"route": MACHINE_WAKE_ROUTE, "path": ["machine wake"]}
     unrouted = SCHEDULED_TASK_PATTERN.search(prompt) is not None or _user_named_route(prompt)
     questions: dict[str, Any] = {"correction": CORRECTION_JEV_QUESTION}
     state: dict[str, Any] = {"prompt": prompt, "in_repository": in_repository}
@@ -2066,6 +2087,10 @@ def _turn_refusals(transcript_path: str) -> list[str] | None:
 # also folds the method argument in, as its own entry, whenever this tool is the one called.
 PR_REVIEW_READ_TOOL_NAMES = {"pull_request_read", "mcp__github__pull_request_read"}
 PR_REVIEW_READ_METHODS = {"get_reviews", "get_review_comments"}
+# Issue 1298: a cloud container reads reviews over REST (`gh api repos/<o>/<r>/pulls/<n>/reviews`,
+# or curl against the same path), so a shell command naming that path counts as the same read.
+REST_REVIEW_READ_PATTERN = re.compile(r"\bpulls/\d+/(reviews|comments)\b")
+REST_REVIEW_READ_METHODS = {"reviews": "get_reviews", "comments": "get_review_comments"}
 
 
 def _turn_tool_names(transcript_path: str) -> set[str] | None:
@@ -2100,6 +2125,10 @@ def _turn_tool_names(transcript_path: str) -> set[str] | None:
                             method = str((item.get("input") or {}).get("method") or "")
                             if method in PR_REVIEW_READ_METHODS:
                                 names.add(method)
+                        command = (item.get("input") or {}).get("command")
+                        if _is_shell_tool(name) and isinstance(command, str):
+                            for found in REST_REVIEW_READ_PATTERN.finditer(command):
+                                names.add(REST_REVIEW_READ_METHODS[found.group(1)])
     except Exception:
         return None
     return names
@@ -2237,7 +2266,8 @@ def _yes_lint(
             found.append((
                 "review-read",
                 "YES review claim before the read: \"" + review_absent.group(0)
-                + "\" — call get_reviews or get_review_comments before saying there are none"
+                + "\" — call get_reviews or get_review_comments (or read pulls/<n>/reviews over REST)"
+                + " before saying there are none"
             ))
     verdicts = _yes_jev_verdicts(prose, [rule for rule, _ in found])
     if verdicts is None:
