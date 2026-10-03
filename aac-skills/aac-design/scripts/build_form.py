@@ -21,7 +21,7 @@ T = {
     'accent': '1161A0', 'tint': 'E8F0F8', 'caption': '595959', 'border': '7F7F7F', 'text': '000000',
     'border_sz': 4,     # 0.5 pt cell border, in eighths of a point (Word's unit)
     'font': 'Aptos',
-    # type, in half-points (Word's unit): AAC-WR-001 Rule 77, including its fill-in form clause (v0.11)
+    # type, in half-points (Word's unit): AAC-STD-001 Rule 77, including its fill-in form clause (v0.11)
     'sz_heading': 22,   # 11 pt, bold, accent: Section heading (Rule 77, third level)
     'sz_role': 20,      # 10 pt, bold, black; step number in accent: Signer and HR card heading
     'sz_value': 21,     # 10.5 pt, regular, black: Prefilled values, choice text

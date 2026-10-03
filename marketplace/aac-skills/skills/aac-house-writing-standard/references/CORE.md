@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 1-74. Governing rules, house style, punctuation, capitalization, numbers, abbreviations, spelling, grammar
+# AAC-STD-001 - Rules 1-74. Governing rules, house style, punctuation, capitalization, numbers, abbreviations, spelling, grammar
 
 # How to use this standard
 
@@ -42,9 +42,9 @@ Do not change contract language, statutory language, quotations, manufacturer te
 
 A document-specific standard or template may override a house rule only through an explicit, approved exception that identifies its scope. Its owner must record the exception in the decision log. Other provisions of this standard continue to apply; a template does not authorize changes to legal obligations or technical requirements.
 
-As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (standards.md in the aac-review-self-check skill: SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and Part XXVI of this standard, which carries their layout and mechanics. Where the review standards conflict with WR-001, they control for that material, and Part XXVI controls over the rest of WR-001 for that material. If the review standards and Part XXVI conflict, the AAC performance review standards control.
+As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (standards.md in the aac-review-self-check skill: SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and Part XXVI of this standard, which carries their layout and mechanics. Where the review standards conflict with STD-001, they control for that material, and Part XXVI controls over the rest of STD-001 for that material. If the review standards and Part XXVI conflict, the AAC performance review standards control.
 
-This exception includes Rule 16 (serial comma; see Rule 175), Rule 37 (headings and titles; see Rule 182), Rule 3’s treatment of “should” (see Rule 175), Rule 66 (e.g. and i.e.; see Rule 178), Rule 43 (numeric dates; see Rule 174), and Rule 47 (percentages; see Rule 178), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other WR-001 requirements remain in force. The higher authorities listed above still control.
+This exception includes Rule 16 (serial comma; see Rule 175), Rule 37 (headings and titles; see Rule 182), Rule 3’s treatment of “should” (see Rule 175), Rule 66 (e.g. and i.e.; see Rule 178), Rule 43 (numeric dates; see Rule 174), and Rule 47 (percentages; see Rule 178), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other STD-001 requirements remain in force. The higher authorities listed above still control.
 
 ## 3. Mandatory terms used in this standard
 

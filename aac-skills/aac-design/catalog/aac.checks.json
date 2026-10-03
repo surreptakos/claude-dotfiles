@@ -1,5 +1,5 @@
 {
-  "note": "Hand-edited. The house rows (issue 1085): AAC-WR-001 Rules 75 to 102 and every token in DESIGN-SYSTEM.md's Tokens tables. A row cites its rule by number or its token by name and never restates it; the generator finds the file and line. Surfaces and checks are ours.",
+  "note": "Hand-edited. The house rows (issue 1085): AAC-STD-001 Rules 75 to 102 and every token in DESIGN-SYSTEM.md's Tokens tables. A row cites its rule by number or its token by name and never restates it; the generator finds the file and line. Surfaces and checks are ours.",
   "wr001": [
     { "id": "AAC-WR-075", "rule": 75, "surfaces": ["document", "form"], "checks": [{ "reviewer": "aac-house-writing-standard" }] },
     { "id": "AAC-WR-076", "rule": 76, "surfaces": ["document", "form"], "checks": [{ "reviewer": "aac-house-writing-standard" }] },

@@ -11,7 +11,7 @@
     { "token": "border", "hex": "7F7F7F", "width_pt": 0.5, "use": "Every cell border",
       "contrast": [{ "on": "white", "note": "non-text minimum 3:1" }], "source": "Approved 2026-09-30" },
     { "token": "text", "hex": "000000", "name": "black", "use": "Everything else, including the intro (Rule 78)",
-      "contrast": [], "source": "AAC-WR-001 Rule 78" }
+      "contrast": [], "source": "AAC-STD-001 Rule 78" }
   ],
   "color_rule": "One accent hue per deliverable. No color carries meaning alone.",
   "font": "Aptos",

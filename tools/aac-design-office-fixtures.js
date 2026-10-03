@@ -40,7 +40,7 @@ const rels = (...r) => `${XML}<Relationships xmlns="${PKG}">${r.map(([id, type, 
   `<Relationship Id="${id}" Type="${REL}/${type}" Target="${target}"/>`).join('')}</Relationships>`;
 const para = (text, ppr = '', rpr = '') => `<w:p><w:pPr>${ppr}</w:pPr><w:r><w:rPr>${rpr}</w:rPr><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`;
 
-// The fault: a justified paragraph (designlint D01, AAC-WR-001 Rule 79).
+// The fault: a justified paragraph (designlint D01, AAC-STD-001 Rule 79).
 function docx(edited = false) {
   return zip({
     '[Content_Types].xml': `${XML}<Types xmlns="${CT}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
@@ -80,7 +80,7 @@ const THEME = `${XML}<a:theme xmlns:a="http://schemas.openxmlformats.org/drawing
   + `<a:effectStyleLst>${'<a:effectStyle><a:effectLst/></a:effectStyle>'.repeat(3)}</a:effectStyleLst>`
   + `<a:bgFillStyleLst>${fill.repeat(3)}</a:bgFillStyleLst></a:fmtScheme></a:themeElements></a:theme>`;
 
-// The fault: 10 pt text on a slide (designlint D07, under the 12 pt slide floor of AAC-WR-001 Rule 77).
+// The fault: 10 pt text on a slide (designlint D07, under the 12 pt slide floor of AAC-STD-001 Rule 77).
 function pptx(edited = false) {
   return zip({
     '[Content_Types].xml': `${XML}<Types xmlns="${CT}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>`
@@ -111,7 +111,7 @@ function pptx(edited = false) {
   });
 }
 
-// The fault: an underscore fill line (designlint D13, AAC-WR-001 Rule 81), found on the text layer.
+// The fault: an underscore fill line (designlint D13, AAC-STD-001 Rule 81), found on the text layer.
 function pdf(edited = false) {
   const lines = [[18, 720, 'Room booking request'], [11, 690, edited ? 'Book a room two days ahead.' : 'Book a room at least one day ahead.'],
     [11, 660, 'Approved by ____________________']];

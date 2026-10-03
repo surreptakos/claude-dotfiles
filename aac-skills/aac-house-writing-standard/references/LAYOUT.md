@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 75-99. Page layout, lists, tables, Word styles
+# AAC-STD-001 - Rules 75-99. Page layout, lists, tables, Word styles
 
 # Part IX - Document layout
 

@@ -128,7 +128,7 @@ function renderPython(src) {
   const border = src.color.find((c) => c.token === 'border');
   o.push(`    ${col(`'border_sz': ${Math.round(border.width_pt * 8)},`, 20)}# ${num(border.width_pt)} pt cell border, in eighths of a point (Word's unit)`,
     `    'font': '${src.font}',`,
-    "    # type, in half-points (Word's unit): AAC-WR-001 Rule 77, including its fill-in form clause (v0.11)");
+    "    # type, in half-points (Word's unit): AAC-STD-001 Rule 77, including its fill-in form clause (v0.11)");
   for (const t of src.type) {
     o.push(`    ${col(`'sz_${t.token}': ${Math.round(t.pt * 2)},`, 20)}# ${num(t.pt)} pt, ${t.style}: ${t.use}`);
   }

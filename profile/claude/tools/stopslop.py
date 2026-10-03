@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-stopslop - the deterministic half of AAC-WR-001 Part XXV (Rules 153-169).
+stopslop - the deterministic half of AAC-STD-001 Part XXV (Rules 153-169).
 
 `profile/claude/hooks/stopslop-write.py` and `stopslop-stop.py` import this
 module and call `scan(text, technical=False)`. Both were written against a
@@ -47,13 +47,13 @@ Hit shape (the keys the two hooks read)
     line      1-based; 0 for a document-level finding
     col       1-based; 0 for a document-level finding
     id        register cell, e.g. "G1", "H8", "R165"
-    rule      AAC-WR-001 rule number this cites (int)
+    rule      AAC-STD-001 rule number this cites (int)
     severity  "ERROR" or "WARN"
     match     the matched text
     message   what to do about it
     source    where in the controlled copy the pattern is registered
 
-Pinned to AAC-WR-001 v0.12, the version TERMINOLOGY.md records for Rules
+Pinned to AAC-STD-001 v0.12, the version TERMINOLOGY.md records for Rules
 168-170 and Appendix G12, the latest change to Part XXV.
 """
 import re
@@ -871,7 +871,7 @@ def _blank_uncheckable(lines):
 
 
 def scan(text, technical=False, informal=False):
-    """Scan `text` for the mechanically decidable patterns of AAC-WR-001
+    """Scan `text` for the mechanically decidable patterns of AAC-STD-001
     Part XXV. Returns a list of hit dicts (see the module docstring).
 
     technical=True drops the checks that honest technical prose trips: the
@@ -983,7 +983,7 @@ def _main(argv):
             % (h["line"], h["col"], h["severity"], h["id"], h["rule"],
                h["match"], h["message"], h["source"]))
     errors = [h for h in hits if h["severity"] == "ERROR"]
-    sys.stdout.write("%d ERROR, %d WARN  [AAC-WR-001 v%s Part XXV]\n"
+    sys.stdout.write("%d ERROR, %d WARN  [AAC-STD-001 v%s Part XXV]\n"
                      % (len(errors), len(hits) - len(errors),
                         STANDARD_VERSION))
     return 1 if errors else 0

@@ -2,10 +2,10 @@
 name: "aac-performance-review-audit"
 description: "Audit a reviewing manager's AAC One Page performance review draft and write the skip-level's email back. Use when Dan shares a review draft, revision or self-appraisal, asks to audit or gate a review, or asks for its rejection or coaching email."
 metadata:
-  modified: "2026-10-02T21:14:40Z"
-  previous-modified: "2026-10-02T20:39:08Z"
-  revision: "16"
-  content-sha: "b350be32b340"
+  modified: "2026-10-03T20:06:22Z"
+  previous-modified: "2026-10-02T21:14:40Z"
+  revision: "17"
+  content-sha: "b69c9045f95e"
 ---
 
 # AAC performance review audit
@@ -20,7 +20,7 @@ The "Performance Review Audits" project folder, when mounted, holds prior review
 
 ## Before anything
 
-0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). The House Layout Standard is now WR-001 Part XXVI, read through `aac-house-writing-standard`, so the project's layout file is no longer on this list. standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked a manager to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
+0. When the "Performance Review Audits" project folder is mounted, read its reference files in full before the first audit of a session: "AAC Common Failure Modes.md", "AAC_Audit_Standards_Reference.md", "Gate Email Templates.md", both Dan anchor files, and the Manager Tools PDFs (OnePage, Preparing, Delivering, No Surprises, Shot Across The Bow, Aggregated Behaviors). The House Layout Standard is now STD-001 Part XXVI, read through `aac-house-writing-standard`, so the project's layout file is no longer on this list. standards.md wins where they differ, but they carry rulings it does not: Failure Mode 19 (never re-verify a figure the manager states) was on file when an audit asked a manager to confirm one (Dan, October 1, 2026). Name in the Notes any of them you did not read.
 1. Identify by exact filename: target review, self-appraisal, prior review, supporting documentation. Ask for the prior review if the direct has one and it is missing; the Gate 2 repeat check cannot run without it.
 2. Compute the period start and end by the review-period rule in `standards.md`.
 3. Run both checks on the draft, whatever gate it stops at:
@@ -88,7 +88,7 @@ Only after Gates 1 and 2 pass. **Read `gate3.md` before writing anything.** It h
 Every gate email, the coaching email, and any review text the audit writes or rewrites (a model item, a full rewrite, a rebuilt review docx) passes this gate before it leaves; until then it is unfinished, whatever the three gates said. Dan made it mandatory on 9/24/26 after an email went out having been only spot-checked.
 
 1. Review text the audit writes or rebuilds is held to the same runs as a manager's draft: put it in a review docx, run `check` and `meaning`, then `python3 review_gate_tools.py gate REVIEW.docx`, which exits 0 only when both exited 0 on that exact file.
-2. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md` and `REVIEW.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards (`standards.md`) and to WR-001's own review part, Rules 171 to 185 in `REVIEW.md`, where they conflict with the rest of WR-001: the serial comma and "should" in review cells (Rule 175), numeric dates (Rule 174), e.g./i.e. and the % sign (Rule 178), email headings (Rule 182). The same part carries the review page, the audit email's salutation, numbered fix lists, subject line and attachments, and the templates and gate script. Every other WR-001 rule applies.
+2. Invoke `aac-house-writing-standard`. Read `references/00-INDEX.md`, then `CORE.md`, `DELIVERABLES.md`, `DRAFT-QUALITY.md` and `REVIEW.md`. Rule 2 hands performance reviews, their audits and coaching emails to the AAC review standards (`standards.md`) and to STD-001's own review part, Rules 171 to 185 in `REVIEW.md`, where they conflict with the rest of STD-001: the serial comma and "should" in review cells (Rule 175), numeric dates (Rule 174), e.g./i.e. and the % sign (Rule 178), email headings (Rule 182). The same part carries the review page, the audit email's salutation, numbered fix lists, subject line and attachments, and the templates and gate script. Every other STD-001 rule applies.
 3. Lint each text with the house skill's own linter, `../aac-house-writing-standard/scripts/wr001-lint.js` (a pinned copy beside this file sat at WR-001 v0.6 while the standard reached v0.10, and was deleted 2026-09-29). For a docx, extract the paragraphs and table cells to a .md file first. Email: `node ../aac-house-writing-standard/scripts/wr001-lint.js EMAIL.md`. Review: `node ../aac-house-writing-standard/scripts/wr001-lint.js REVIEW.md --prose`. Exit 0 is required: fix every error and every warning that is not a Rule 2 exception.
 4. Read for what the linter cannot see, and confirm Rule 166 item by item: voice preserved, filler and empty adverbs cut, no manufactured insight, every attributed claim sourced, one name per actor, no kicker, no recap. Also Rule 106 (the attachment is named) and Rule 107 (an email that asks for action ends with how Dan learns it is done).
 5. Record under the Notes line: the `check`, `meaning` and `gate` exit codes for any review text, the linter exit code and counts for each text, the Rule 166 items confirmed, and each fix made. "Linted" with no exit code does not pass.

@@ -5,16 +5,17 @@ Document Standard
 
 Company-wide editorial, correspondence, document layout, and controlled-writing standard
 
-| **VERSION 0.15 \| ACTIVE** |
+| **VERSION 0.16 \| ACTIVE** |
 |---|
 
-| **Document number** | AAC-WR-001 |
+| **Document number** | AAC-STD-001 |
 |---|---|
+| **Former number** | AAC-WR-001, retired in version 0.16; citations of it refer to this standard |
 | **Document owner** | General Manager |
 | **Approver** | General Manager |
-| **Version** | 0.15 |
+| **Version** | 0.16 |
 | **Status** | Active |
-| **Effective date** | 2026-10-02 |
+| **Effective date** | 2026-10-03 |
 | **Review cycle** | Annual, or upon material change |
 | **Primary reference** | The Gregg Reference Manual, 11th U.S. edition |
 
@@ -28,6 +29,7 @@ The approved electronic master of this standard is the controlled copy. Printed 
 | 0.2 | 2026-09-09 | Editorial and layout refinements; see Appendix F. | Pending |
 | 0.3 | 2026-09-09 | Performance-review exception in Part I; decision register updated. | Pending |
 | 0.4 | 2026-09-10 | Merged concurrent edits: Aptos/type scale, ordinals, and telephone format. | Pending |
+| 0.5 | 2026-09-11 | Draft quality and AI tells: Part XXV, Rules 153–166; Rule 23 em-dash treatment; Appendices F, G, and H. Row restored in version 0.16 from Appendix F and References. | Pending |
 | 0.6 | 2026-09-18 | Delegation-email shape: Rules 5, 101, 104, 107; Appendices A and F. | Pending |
 | 0.7 | 2026-09-23 | Run-in headings limited to legal documents and end with a colon: Rule 37; Appendix F. | Pending |
 | 0.8 | 2026-09-25 | Main point stated early; a short courtesy opening may come first: Rule 5; Appendix F. | Pending |
@@ -38,6 +40,7 @@ The approved electronic master of this standard is the controlled copy. Printed 
 | 0.13 | 2026-10-01 | AI-drafted messages state only what the record shows and hedge the rest; internal requests due soon name the next O3: Rules 8 and 104; Appendix F. | Pending |
 | 0.14 | 2026-10-01 | Controlled-document header without a signature table; approval by merge; effective date in the header: Appendix F. | General Manager |
 | 0.15 | 2026-10-02 | Performance review layout and mechanics folded in from the retired layout draft: Rule 2; Part XXVI, Rules 171–185; Appendix F; References. | General Manager |
+| 0.16 | 2026-10-03 | Renumbered from AAC-WR-001 to AAC-STD-001; the former number stays in the header so earlier citations resolve. Missing 0.5 row restored: Appendix F. | General Manager |
 
 # How to use this standard
 
@@ -81,9 +84,9 @@ Do not change contract language, statutory language, quotations, manufacturer te
 
 A document-specific standard or template may override a house rule only through an explicit, approved exception that identifies its scope. Its owner must record the exception in the decision log. Other provisions of this standard continue to apply; a template does not authorize changes to legal obligations or technical requirements.
 
-As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (standards.md in the aac-review-self-check skill: SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and Part XXVI of this standard, which carries their layout and mechanics. Where the review standards conflict with WR-001, they control for that material, and Part XXVI controls over the rest of WR-001 for that material. If the review standards and Part XXVI conflict, the AAC performance review standards control.
+As an exception, performance review documents, their audits, and coaching emails about them follow the AAC performance review standards (standards.md in the aac-review-self-check skill: SEER, Sum-Ex, Core Message form, third person, one example per item, and minimal commas inside review cells) and Part XXVI of this standard, which carries their layout and mechanics. Where the review standards conflict with STD-001, they control for that material, and Part XXVI controls over the rest of STD-001 for that material. If the review standards and Part XXVI conflict, the AAC performance review standards control.
 
-This exception includes Rule 16 (serial comma; see Rule 175), Rule 37 (headings and titles; see Rule 182), Rule 3’s treatment of “should” (see Rule 175), Rule 66 (e.g. and i.e.; see Rule 178), Rule 43 (numeric dates; see Rule 174), and Rule 47 (percentages; see Rule 178), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other WR-001 requirements remain in force. The higher authorities listed above still control.
+This exception includes Rule 16 (serial comma; see Rule 175), Rule 37 (headings and titles; see Rule 182), Rule 3’s treatment of “should” (see Rule 175), Rule 66 (e.g. and i.e.; see Rule 178), Rule 43 (numeric dates; see Rule 174), and Rule 47 (percentages; see Rule 178), to the extent they conflict with the specialized standards. Apply review-cell requirements only inside review cells and other requirements within their stated scope. All other STD-001 requirements remain in force. The higher authorities listed above still control.
 
 ## 3. Mandatory terms used in this standard
 
@@ -1379,7 +1382,7 @@ The General Manager, or another formally designated document-control owner, owns
 
 Each approved revision must record the version, effective date, description of change, and approver. The current approved version controls. Retain superseded versions when legal, contractual, audit, or document-history requirements justify retention.
 
-A controlled document opens with a header naming its document number, owner, approver, version, status, and effective date. It carries no signature table. Approval is the merge of the revision into the document's controlled repository, made by the owner or by an agent the owner directs. Write the effective date in the header before the merge; never infer it from the merge.
+A controlled document opens with a header naming its document number, owner, approver, version, status, and effective date. It carries no signature table. Approval is the merge of the revision into the document's controlled repository, made by the owner or by an agent the owner directs. Write the effective date in the header before the merge; never infer it from the merge. A renumbered document keeps each former number in its header so earlier citations still resolve.
 
 Document-specific standards and templates must name their owner, scope, approval, version, and any exceptions to this standard. Keep performance-review methods and template-specific limits in their own controlled documents. Review-material layout and mechanics are Part XXVI, within the scope Rule 2 gives them. Templates implement the applicable rules; they do not establish new company-wide rules by accident.
 
@@ -1417,6 +1420,7 @@ Table F1. House decision register
 | 26 | Straight-quote mandate considered and rejected. Rule 26 continues to govern quotation use; glyph choice stays unruled. | Owner ruling, September 22, 2026 (issue 626): "The straight quotes thing dies." It would flag every document typed in Word, which inserts curly quotes by default. Recorded so a future comparison against `blader/humanizer` or `petergyang/no-ai-slop` does not re-open it. | 0.10 |
 | 43; 77; 85; 98; 99 | Fill-in forms: full cell borders with labels inside, 9 pt labels, MM/DD/YYYY dates, N/A initialed, continuation headers. | Owner ruling, September 30, 2026 (issue 1090), approving the amendment as drafted. A label inside a cell floats without all four borders; forms need a consistent, fillable treatment the table rules did not give. Implemented by the `aac-design` skill (DESIGN-SYSTEM.md). | 0.11 |
 | 2; 171–185 | Performance review layout and mechanics are Part XXVI of this standard: the review page, review cells, Guidance points, dates, audit email mechanics, file names, and the canonical templates and gate script. Rule 2 names the AAC performance review standards and Part XXVI, not a separate layout document. The review page takes Aptos 10 pt from the approved review template; other review material stays Aptos 11 pt under Rule 77. | Owner ruling, October 1, 2026 (issue 1235): "AAC House Layout Standard (Gregg-based)" was to be folded into this standard and never was, and it lived only in the review project folder, so a session that never opened the folder never saw it. Its review-material house rules became Rules 171 through 185. Its restatements of Gregg mechanics that this standard does not state stay with Gregg under Rule 152; where it differed from this standard outside review material, this standard already controlled. The draft's Aptos 11 pt for everything conflicts with the approved review template (2026-09-23) at Aptos 10 pt; the template is proposed to win on the review page, pending owner confirmation. A figure the manager states is taken as stated unless a source contradicts it (owner ruling, October 1, 2026). | 0.15 |
+| F | Document number AAC-STD-001, formerly AAC-WR-001. The header keeps the former number so earlier citations resolve. | Owner ruling, October 2, 2026, grill session: "you can change AAC-WR to something else." Company document numbers take the form AAC-type-number, recorded in aac-nexus ADR 0005. Issue 1349. | 0.16 |
 
 # Appendix G - Phrase register
 

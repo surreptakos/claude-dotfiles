@@ -2,10 +2,10 @@
 name: aac-design
 description: AAC design gate for anything an AAC reader will look at (form, Word document, letter, report, slide deck, web page, HTML artifact). Use when creating, revising or auditing one, when asked whether something looks right or is hard to look at, and whenever the design gate blocks a turn.
 metadata:
-  modified: "2026-10-02T17:38:49Z"
-  previous-modified: "2026-10-02T00:23:45Z"
-  revision: "14"
-  content-sha: "9243de124331"
+  modified: "2026-10-03T20:08:20Z"
+  previous-modified: "2026-10-02T17:38:49Z"
+  revision: "15"
+  content-sha: "840725254f06"
 ---
 
 # AAC design
@@ -28,7 +28,7 @@ Reference files, each loaded when its step needs it:
 
 - [DESIGN-SYSTEM.md](DESIGN-SYSTEM.md): the approved AAC tokens, spacing scale, form components, document parts and web tokens (`assets/aac-tokens.css`).
 - [TELLS.md](TELLS.md): every catalog rule grouped by surface, tagged with the linter rule that catches it, with the precedence order and the catalogued conflicts. Generated from `catalog/CATALOG.json` by `node tools/build-design-catalog.js`, never by hand.
-- `catalog/CATALOG.json`: one row per rule, citing its source file and line. The sources are AAC-WR-001 Rules 75 to 102 and the tokens (cited, never restated), and six design skills vendored as rule text under `vendor/` (pins in `vendor/PROVENANCE.json`).
+- `catalog/CATALOG.json`: one row per rule, citing its source file and line. The sources are AAC-STD-001 Rules 75 to 102 and the tokens (cited, never restated), and six design skills vendored as rule text under `vendor/` (pins in `vendor/PROVENANCE.json`).
   - For audits the vendored `accessibility-review` pin supersedes the undated session copy at `aac-skills/accessibility-review`.
   - `scripts/fetch_engine.py` fetches a source's engine or data, such as impeccable's detector, and hash-checks it against the pin.
 - [CRITIQUE.md](CRITIQUE.md): the scoring protocol.
@@ -44,7 +44,7 @@ Reference files, each loaded when its step needs it:
 
 ## Steps
 
-1. **Load the standards.** Load `aac-house-writing-standard` and read CORE, LAYOUT, CONTROL and DRAFT-QUALITY; it governs every word on the deliverable. Its fill-in form clauses are Rules 43, 77, 85, 98 and 99 (added in v0.11; `assets/AAC-WR-001-amendment-forms.md` is the record of that amendment). Done when those four files are read this session.
+1. **Load the standards.** Load `aac-house-writing-standard` and read CORE, LAYOUT, CONTROL and DRAFT-QUALITY; it governs every word on the deliverable. Its fill-in form clauses are Rules 43, 77, 85, 98 and 99 (added in v0.11; `assets/AAC-STD-001-amendment-forms.md` is the record of that amendment). Done when those four files are read this session.
 
 2. **Inventory the content.** List every section, field and sentence with its source. Tag each one:
    - *keep*;
@@ -75,12 +75,12 @@ Reference files, each loaded when its step needs it:
    Report in the order CRITIQUE.md gives, ending on the targeted questions or the `Questions skipped` line. Done when score.py exits 0 and has written `.design/<file>.json`. If it exits 1, go to step 7. If it exits 3, the critique file is invalid: fix it and rerun.
 
 7. **Fix once, confirm once.** Fix every priority issue and linter error in one batch, rebuild, and repeat steps 4–6 once. A third round is the user's call. Deliver when the stamp exists:
-   - Confirm AAC-WR-001 Rule 166 item by item.
+   - Confirm AAC-STD-001 Rule 166 item by item.
    - Name the file per Rule 145 and bump its revision.
    - Present it with its rendered page.
 
 ## Rules the steps depend on
 
 - **The stamp is bound to the bytes.** Any edit after stamping, even a typo fix, makes the gate block until steps 4–6 run again. Batch edits before critiquing.
-- **Precedence decides a conflict.** AAC tokens and AAC-WR-001 first, then the design skills, then the brief (the catalog's `precedence` field; Dan, 2026-09-30). When two rules conflict, report the rule that won and why: a catalogued conflict carries both in TELLS.md, and an audit's report names it. When the user asks for a pattern a rule refuses, name the rule, and record any exception they confirm in the report.
+- **Precedence decides a conflict.** AAC tokens and AAC-STD-001 first, then the design skills, then the brief (the catalog's `precedence` field; Dan, 2026-09-30). When two rules conflict, report the rule that won and why: a catalogued conflict carries both in TELLS.md, and an audit's report names it. When the user asks for a pattern a rule refuses, name the rule, and record any exception they confirm in the report.
 - **Cut before you squeeze.** Reduce type sizes or spacing to meet the page budget only after the duplicate and parked content is gone.

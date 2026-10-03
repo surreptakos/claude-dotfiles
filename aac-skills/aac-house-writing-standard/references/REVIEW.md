@@ -1,4 +1,4 @@
-# AAC-WR-001 - Rules 171-185. Performance review material: the review page, audit and coaching email mechanics, review file names, templates and the gate script
+# AAC-STD-001 - Rules 171-185. Performance review material: the review page, audit and coaching email mechanics, review file names, templates and the gate script
 
 # Part XXVI - Performance review material
 

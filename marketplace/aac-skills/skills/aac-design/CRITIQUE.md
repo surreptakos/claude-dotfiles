@@ -62,7 +62,7 @@ A 4 means genuinely excellent. Most real forms land at 20–32 of 40. Heuristic 
 
 | 0 | 1 | 2 | 3 | 4 |
 |---|---|---|---|---|
-| Stitched together | Many inconsistencies | Main areas match, details drift | One minor deviation | Fully consistent with DESIGN-SYSTEM.md and AAC-WR-001 |
+| Stitched together | Many inconsistencies | Main areas match, details drift | One minor deviation | Fully consistent with DESIGN-SYSTEM.md and AAC-STD-001 |
 
 ### 5. Error prevention
 *Does the layout stop wrong entries before they happen?* Check: units stated, choices instead of free text where values are known, constant values prefilled, enough space for the longest real answer.

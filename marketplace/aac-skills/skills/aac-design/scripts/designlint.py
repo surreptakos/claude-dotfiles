@@ -19,24 +19,24 @@ q = lambda t: f'{{{W}}}{t}'
 qa = lambda t: f'{{{A}}}{t}'
 
 RULES = {
-    'D01': ('error', 'justified text', 'AAC-WR-001 Rule 79'),
-    'D02': ('error', 'repeated spaces used for alignment', 'AAC-WR-001 Rule 81'),
+    'D01': ('error', 'justified text', 'AAC-STD-001 Rule 79'),
+    'D02': ('error', 'repeated spaces used for alignment', 'AAC-STD-001 Rule 81'),
     'D03': ('error', 'all-caps or tracked-caps label (eyebrow)', 'TELLS: eyebrow / all-caps label'),
     'D04': ('error', 'text glyph standing in for a checkbox or icon', 'TELLS: glyph controls'),
     'D05': ('error', 'more than one accent hue', 'TELLS: one accent'),
     'D06': ('error', 'text contrast below WCAG AA', 'WCAG 1.4.3'),
-    'D07': ('error', 'text below the size floor', 'AAC-WR-001 Rule 77: 9 pt print floor, 12 pt slides'),
+    'D07': ('error', 'text below the size floor', 'AAC-STD-001 Rule 77: 9 pt print floor, 12 pt slides'),
     'D08': ('error', 'colored side stripe wider than 1 pt', 'TELLS: side-stripe border'),
     'D09': ('warn', 'more than one numbered sequence', 'TELLS: numbering collision'),
-    'D10': ('error', 'heading with no more space above than below', 'AAC-WR-001 Rule 82'),
-    'D11': ('warn', 'stacked empty paragraphs used as spacing', 'AAC-WR-001 Rule 80'),
-    'D12': ('warn', 'more than two font families', 'AAC-WR-001 Rule 77'),
-    'D13': ('error', 'underscore fill line', 'AAC-WR-001 Rule 81'),
+    'D10': ('error', 'heading with no more space above than below', 'AAC-STD-001 Rule 82'),
+    'D11': ('warn', 'stacked empty paragraphs used as spacing', 'AAC-STD-001 Rule 80'),
+    'D12': ('warn', 'more than two font families', 'AAC-STD-001 Rule 77'),
+    'D13': ('error', 'underscore fill line', 'AAC-STD-001 Rule 81'),
     'D14': ('warn', 'signature field with no date field', 'forms: a signature needs its date'),
     'D15': ('warn', 'text color outside black, gray and the accent', 'TOKENS: palette drift'),
     'D16': ('error', 'form field cell missing borders', 'forms: joined grid, every field boxed'),
     'D18': ('error', 'font resolves only through the theme', 'previews without theme support fall back to Times New Roman; name the font'),
-    'D19': ('error', 'body text in gray', 'AAC-WR-001 Rule 78'),
+    'D19': ('error', 'body text in gray', 'AAC-STD-001 Rule 78'),
     'D17': ('warn', 'decorative accent stripe (card top border or heading rule)', 'TELLS: stripes read as a web template'),
     'H01': ('error', 'transition: all', 'web-interface-guidelines'),
     'H02': ('error', 'focus outline removed with no focus-visible replacement', 'web-interface-guidelines'),
@@ -359,7 +359,7 @@ def lint(path):
             lint_pptx(z, f)
     else:
         raise ValueError('unsupported type (use .docx, .pptx, .html)')
-    # AAC-WR-001 Rule 2 and 137: legal drafting keeps its layout (justified clauses, conspicuous
+    # AAC-STD-001 Rule 2 and 137: legal drafting keeps its layout (justified clauses, conspicuous
     # capitals). In a contract or acknowledgment those findings are reported, not blocking.
     if low.endswith('.docx') and _is_legal(path):
         for x in f:

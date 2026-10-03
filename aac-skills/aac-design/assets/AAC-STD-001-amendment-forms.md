@@ -1,6 +1,6 @@
-# AAC-WR-001 amendment: fill-in forms
+# AAC-STD-001 amendment: fill-in forms
 
-For the controlled revision process. Apply to the master `docs/standards/AAC-WR-001.md`, then regenerate the skill references with `scripts/build_references.py`, as `aac-house-writing-standard/SKILL.md` describes. Each change adds text to an existing rule; no rule is renumbered.
+For the controlled revision process. Apply to the master `docs/standards/AAC-STD-001.md`, then regenerate the skill references with `scripts/build_references.py`, as `aac-house-writing-standard/SKILL.md` describes. Each change adds text to an existing rule; no rule is renumbered.
 
 Owner and approver: Dan Gatsakos, General Manager. Proposed 2026-09-30.
 

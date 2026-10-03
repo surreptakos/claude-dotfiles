@@ -12,7 +12,7 @@ Approved by Dan Gatsakos on 2026-09-30, line by line. The tokens apply to every 
 | `tint` | #E8F0F8 | Fill for signer cards and the HR card; nothing else | Black on tint 18.25:1 | Approved 2026-09-30 |
 | `caption` | #595959 | Field labels and signer statements only | 7.00:1 on white, 6.09:1 on tint | Approved 2026-09-30 |
 | `border` | #7F7F7F, 0.5 pt | Every cell border | 4.00:1 on white (non-text minimum 3:1) | Approved 2026-09-30 |
-| `text` | black | Everything else, including the intro (Rule 78) | n/a | AAC-WR-001 Rule 78 |
+| `text` | black | Everything else, including the intro (Rule 78) | n/a | AAC-STD-001 Rule 78 |
 
 One accent hue per deliverable. No color carries meaning alone.
 
@@ -83,7 +83,7 @@ Spec top level: `title`, `footer`, `max_pages` (the budget `render.py` enforces 
 
 ## Document parts (document branch)
 
-Documents are built with the `docx` skill on the AAC template, using the tokens above and AAC-WR-001 Appendix B and E. Nothing below is new; it maps the standard onto the tokens.
+Documents are built with the `docx` skill on the AAC template, using the tokens above and AAC-STD-001 Appendix B and E. Nothing below is new; it maps the standard onto the tokens.
 
 | Part | Treatment |
 |---|---|
@@ -97,9 +97,9 @@ Documents are built with the `docx` skill on the AAC template, using the tokens 
 
 `assets/aac-tokens.css` carries the same tokens as CSS custom properties for HTML artifacts and pages: the colors, the type scale in rem, and the spacing scale. Pages import or inline it and build only from those variables. The Vercel web interface guidelines, fetched each run, govern interaction.
 
-## Relation to AAC-WR-001
+## Relation to AAC-STD-001
 
-The house writing standard governs every word and the release; this file governs layout. AAC-WR-001 v0.11 adopted the amendment in `assets/AAC-WR-001-amendment-forms.md` (issue 1090), so the form system has no exceptions left:
+The house writing standard governs every word and the release; this file governs layout. AAC-STD-001 v0.11 adopted the amendment in `assets/AAC-STD-001-amendment-forms.md` (issue 1090), so the form system has no exceptions left:
 
 | Standard | How the system meets it |
 |---|---|

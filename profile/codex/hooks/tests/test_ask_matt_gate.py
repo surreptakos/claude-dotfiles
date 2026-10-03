@@ -1744,7 +1744,7 @@ class AskMattGateTests(unittest.TestCase):
         self.assertEqual(done.returncode, 1)
         self.assertIn("bash fence in a reply: Dan runs Windows only", done.stdout)
 
-    # Issue 1212: a Teams draft written to AAC-WR-001, 300 words, one sentence over the 28-word cap.
+    # Issue 1212: a Teams draft written to AAC-STD-001, 300 words, one sentence over the 28-word cap.
     QUOTED_DRAFT = (
         "Nick, the Tampa panel job is ready for your sign-off. The crew finished the rough-in on "
         "Tuesday and passed the city inspection on Wednesday morning. We still need three items from "
@@ -1813,7 +1813,7 @@ class AskMattGateTests(unittest.TestCase):
             for fenced in (False, True):
                 done = self.run_presend_lint("", self._quoted_reply(draft, fenced), state_dir)
                 self.assertEqual(done.returncode, 1, done.stdout)
-                self.assertIn("quoted deliverable 1 breaks AAC-WR-001 Rule 62", done.stdout)
+                self.assertIn("quoted deliverable 1 breaks AAC-STD-001 Rule 62", done.stdout)
 
     def test_lint_never_requires_the_pylons_prefix_because_it_is_a_canary(self) -> None:
         # Dan, 2026-09-25: the prefix lives only in the global CLAUDE.md so its absence shows him a

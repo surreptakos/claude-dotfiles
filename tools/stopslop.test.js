@@ -3,7 +3,7 @@
  * node --test tools/stopslop.test.js
  *
  * Issue 887: the stopslop-write PostToolUse hook reported ~86 ERROR findings on every edit to
- * `docs/standards/AAC-WR-001.md` - all of them the standard's own quoted or bolded example
+ * `docs/standards/AAC-STD-001.md` - all of them the standard's own quoted or bolded example
  * phrases (Appendix G/H's bulleted register, the "Avoid: ..." lines under each numbered rule,
  * and Rule 167's vocabulary list written out as a sentence), never original AAC prose. Rule 153
  * says this part of the standard "does not reach ... quotations"; `stopslop.py` did not honor
@@ -13,7 +13,7 @@
  * same stdin JSON shape Claude Code's PostToolUse event sends), the same style as
  * ask-matt-gate-adhd.test.js:
  *
- *   1. An edit to `docs/standards/AAC-WR-001.md` reports 0 findings (exit 0).
+ *   1. An edit to `docs/standards/AAC-STD-001.md` reports 0 findings (exit 0).
  *   2. An edit to an ordinary markdown file that contains "Here's the thing" in plain prose
  *      still reports the finding (exit 2, with the finding on stderr).
  */
@@ -28,7 +28,7 @@ const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const HOOK = path.join(REPO_ROOT, 'profile', 'claude', 'hooks', 'stopslop-write.py');
-const STANDARD = path.join(REPO_ROOT, 'docs', 'standards', 'AAC-WR-001.md');
+const STANDARD = path.join(REPO_ROOT, 'docs', 'standards', 'AAC-STD-001.md');
 
 /** Run the write hook as Claude Code's PostToolUse event would, cwd at the repo root so a
  * relative file_path resolves the same way the hook resolves it in a real session. */
@@ -41,7 +41,7 @@ function runHook(filePath) {
   });
 }
 
-test('AAC-WR-001.md: the controlled copy quoting its own prohibited phrases reports 0 findings', () => {
+test('AAC-STD-001.md: the controlled copy quoting its own prohibited phrases reports 0 findings', () => {
   assert.ok(fs.existsSync(STANDARD), `expected ${STANDARD} to exist`);
   const res = runHook(STANDARD);
   assert.equal(res.status, 0, `expected exit 0, got ${res.status}\nstderr: ${res.stderr}`);
