@@ -975,14 +975,15 @@ function gitSpelling(instrument, args) {
  * { reason, resetsAt, message } - reason is the limit named in the message ("session limit",
  * "weekly limit", "rate limit"), resetsAt the reset time it carries or null, message its first
  * line. A bare "429" is not enough (issue #429 is a ticket, not an HTTP status): it must read as
- * a status or sit next to "Too Many Requests".
+ * a status or sit next to "Too Many Requests". "This request would exceed your account's rate
+ * limit" reads as a rate limit too (run wf_0b138fa5-528).
  */
 function quotaFailure(message) {
   const text = String(message == null ? '' : message);
   let reason = null;
   const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
   if (hit) reason = hit[1].toLowerCase();
-  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\bexceed(?:s|ed)? (?:your |the )?(?:account's |organization's )?rate limit\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
   else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
   if (!reason) return null;
   const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);
@@ -996,6 +997,13 @@ function quotaFailure(message) {
  * once through `log`) and answers whether this message was one; `halted()` is what every lane
  * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
  * is the line a ticket's failures carry when the halt stopped its retries.
+ *
+ * `noteDead(who)` is the halt for an agent that resolved null. The Workflow runtime does not reject
+ * agent() on a terminal API error: it logs "[label] failed: <message>" and resolves null, so the
+ * limit text never reaches the script and `note` never sees it (run wf_0b138fa5-528: 94 agents
+ * died on a session limit and no halt was recorded). Only the isolation checkpoint calls it: its
+ * agent runs one fixed command, so a null there is a dead agent (the quota, or a user skip), and a
+ * checkpoint follows every implementer, so a quota death halts the run one agent later. Returns true.
  */
 function createRunHalt(log) {
   let halt = null;
@@ -1006,6 +1014,13 @@ function createRunHalt(log) {
       if (!halt) {
         halt = Object.assign({ who: who || null }, q);
         if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      }
+      return true;
+    },
+    noteDead(who) {
+      if (!halt) {
+        halt = { who: who || null, reason: 'agent that resolved null (a terminal API error such as the account quota, or a skip)', resetsAt: null, message: `${who || 'an agent'} resolved null; the run log's "[${who || 'label'}] failed:" line names the error` };
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} resolved null - the Workflow runtime's answer for a subagent that died on a terminal API error (a session, weekly or rate limit kills every later agent the same way) or was skipped. The error text never reaches the script: the "[label] failed:" log line above names the limit and its reset. No further attempt or ticket starts; agents already in flight settle, then the run reports.`);
       }
       return true;
     },
@@ -1854,11 +1869,23 @@ async function headCheck(label, ticketNumber, now) {
   if (now.head && !moved(now.head)) return now
 
   const target = describeHead(start)
-  let res = null
+  const restoreWho = `orchestrator-head:restore:${label}#${ticketNumber}`
+  let res = null, restoreDied = false
   try {
     res = await agent(headAgentPrompt(restoreCommand(orchestratorCwd, start)),
-      { label: `orchestrator-head:restore:${label}#${ticketNumber}`, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
-  } catch (err) { res = null }
+      { label: restoreWho, phase: 'Isolation guard', schema: TREE_GUARD, model: cfg.reportModel, effort: cfg.effort })
+    if (res == null) restoreDied = runHalt.noteDead(restoreWho)
+  } catch (err) {
+    res = null
+    restoreDied = runHalt.note((err && err.message) || err, restoreWho) === true || runHalt.halted()
+  }
+  // Run wf_0b138fa5-528: a restore agent that died on the run's quota restored nothing, and the
+  // re-read would die the same way. That is NOT AUDITED, never a breach - but a HEAD the read did
+  // see moved is said out loud, since nothing put it back.
+  if (restoreDied) {
+    log(`Orchestrator HEAD LEFT MOVED at ${label} (ticket #${ticketNumber}): the read found it ${now.head ? `on ${describeHead(now.head)}` : 'unreadable'}, and ${restoreWho} died on the halt (issue 812) before it could put it back onto ${target}; NOT AUDITED, not a breach - check ${orchestratorCwd}'s HEAD and status, and restore it by hand before the next run (RECOVERY.md).`)
+    return 'halted'
+  }
   const after = await isolationRead(`${label}-restored`, ticketNumber)
   if (after === 'halted') return 'halted'
   if (!after.head || moved(after.head)) {
@@ -1876,8 +1903,9 @@ async function headCheck(label, ticketNumber, now) {
 /**
  * Issue 1093: the one agent a checkpoint starts - HEAD (while the HEAD watch is on) and the tree
  * guard's `check` (while the guard is on) in a single command against the Setup-measured path.
- * Returns 'halted' when the agent died on the run's quota (issue 812: logged as not audited, never
- * a verdict), else { res, agentError, head, report }: head null when unreadable, report the
+ * Returns 'halted' when the agent died on the run's quota - rejected with the limit text, failed at
+ * all once the run is halted, or resolved null, which is how the Workflow runtime reports a
+ * terminal API error (run wf_0b138fa5-528) - logged as not audited, never a verdict (issue 812); else { res, agentError, head, report }: head null when unreadable, report the
  * guard's parsed JSON or null (a could-not-audit for the caller to throw on).
  */
 async function isolationRead(tag, ticketNumber) {
@@ -1894,10 +1922,21 @@ async function isolationRead(tag, ticketNumber) {
       { label: who, phase: 'Isolation guard', schema: ISOLATION_READ, model: cfg.reportModel, effort: cfg.effort })
   } catch (err) {
     agentError = unusableReason(who, (err && err.message) || err)
-    if (runHalt.note((err && err.message) || err, who) === true) {
+    // Once the run is halted, any failed checkpoint agent is a casualty of the halt, not a verdict.
+    if (runHalt.note((err && err.message) || err, who) === true || runHalt.halted()) {
       log(`${who} NOT AUDITED - its agent hit the limit the run halted on (issue 812); nothing is delivered after the halt, and the next session should run the guard before trusting this tree.`)
       return 'halted'
     }
+  }
+  // Run wf_0b138fa5-528: the Workflow runtime RESOLVES agent() to null when a subagent dies on a
+  // terminal API error (the session limit, there) - it never rejects with the limit text. A null
+  // here is a dead agent, not a HEAD that could not be read: read as "unreadable" it started a
+  // restore and a re-read that died the same way, and the run reported a breach over a clean
+  // checkout. It halts the run instead (issue 812), and the checkpoint is NOT AUDITED.
+  if (res == null && agentError === null) {
+    runHalt.noteDead(who)
+    log(`${who} NOT AUDITED - its agent resolved null (the runtime's answer for a terminal API error such as the account quota, or a skip; its "[${who}] failed:" line names which), so the run is halted (issue 812); nothing is delivered after the halt, and the next session should check this checkout's HEAD and status before trusting it (RECOVERY.md).`)
+    return 'halted'
   }
   const snap = parseCheckpointOutput(res && res.stdout)
   return { res, agentError, head: res ? snap.head : null, report: res ? snap.guard : null }

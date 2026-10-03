@@ -905,14 +905,15 @@ function gitSpelling(instrument, args) {
  * { reason, resetsAt, message } - reason is the limit named in the message ("session limit",
  * "weekly limit", "rate limit"), resetsAt the reset time it carries or null, message its first
  * line. A bare "429" is not enough (issue #429 is a ticket, not an HTTP status): it must read as
- * a status or sit next to "Too Many Requests".
+ * a status or sit next to "Too Many Requests". "This request would exceed your account's rate
+ * limit" reads as a rate limit too (run wf_0b138fa5-528).
  */
 function quotaFailure(message) {
   const text = String(message == null ? '' : message);
   let reason = null;
   const hit = /\bhit your ((?:[a-z-]+ )?limit)\b/i.exec(text);
   if (hit) reason = hit[1].toLowerCase();
-  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
+  else if (/\brate[ _]limit(?:ed)?\b[^\n]{0,20}\bexceeded\b|\bexceed(?:s|ed)? (?:your |the )?(?:account's |organization's )?rate limit\b|\brate_limit_error\b|\btoo many requests\b|\b(?:status(?: code)?|http|error|code)[\s:=]*429\b|\b429[\s:-]+too many/i.test(text)) reason = 'rate limit';
   else if (/\b(?:usage|quota) (?:limit )?(?:reached|exceeded|exhausted)\b|\bquota exceeded\b/i.test(text)) reason = 'quota';
   if (!reason) return null;
   const reset = /\bresets?\s+(?:at\s+)?([^·\n]+)/i.exec(text) || /\b(?:try again|retry) (?:in|after) ([^.·\n]+)/i.exec(text);
@@ -926,6 +927,13 @@ function quotaFailure(message) {
  * once through `log`) and answers whether this message was one; `halted()` is what every lane
  * asks before it starts another agent; `get()` is the record the run result carries; `failure()`
  * is the line a ticket's failures carry when the halt stopped its retries.
+ *
+ * `noteDead(who)` is the halt for an agent that resolved null. The Workflow runtime does not reject
+ * agent() on a terminal API error: it logs "[label] failed: <message>" and resolves null, so the
+ * limit text never reaches the script and `note` never sees it (run wf_0b138fa5-528: 94 agents
+ * died on a session limit and no halt was recorded). Only the isolation checkpoint calls it: its
+ * agent runs one fixed command, so a null there is a dead agent (the quota, or a user skip), and a
+ * checkpoint follows every implementer, so a quota death halts the run one agent later. Returns true.
  */
 function createRunHalt(log) {
   let halt = null;
@@ -936,6 +944,13 @@ function createRunHalt(log) {
       if (!halt) {
         halt = Object.assign({ who: who || null }, q);
         if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} failed on the account's ${halt.reason}${halt.resetsAt ? `, which resets ${halt.resetsAt}` : ''}. No further attempt or ticket starts; agents already in flight settle, then the run reports. Message: ${halt.message}`);
+      }
+      return true;
+    },
+    noteDead(who) {
+      if (!halt) {
+        halt = { who: who || null, reason: 'agent that resolved null (a terminal API error such as the account quota, or a skip)', resetsAt: null, message: `${who || 'an agent'} resolved null; the run log's "[${who || 'label'}] failed:" line names the error` };
+        if (typeof log === 'function') log(`RUN HALTED (issue 812): ${halt.who || 'an agent'} resolved null - the Workflow runtime's answer for a subagent that died on a terminal API error (a session, weekly or rate limit kills every later agent the same way) or was skipped. The error text never reaches the script: the "[label] failed:" log line above names the limit and its reset. No further attempt or ticket starts; agents already in flight settle, then the run reports.`);
       }
       return true;
     },

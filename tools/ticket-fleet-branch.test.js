@@ -2783,12 +2783,12 @@ const CLEAN = { newEntries: [] };
 // session's `cd` after Setup (simulated by never letting anything downstream re-consult
 // cfg.orchestratorCwd or a live cwd) cannot misdirect a later checkpoint, because the absolute
 // path was already baked into the command as a literal string at Setup.
-async function driveTreeGuard(agentMock, cfgOverrides = {}) {
+async function driveTreeGuard(agentMock, cfgOverrides = {}, scopeOverrides = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const body = treeGuardSetupBody(src);
   const logs = [];
   const wrapper = new AsyncFunction('scope', `with (scope) {\n${body}\nreturn { treeGuardCheck, treeRestores, breaches, treeGuardUnusable };\n}`);
-  const inner = await wrapper(laneScope({
+  const inner = await wrapper(laneScope(Object.assign({
     agent: agentMock,
     log: (m) => logs.push(m),
     cfg: Object.assign({
@@ -2797,7 +2797,7 @@ async function driveTreeGuard(agentMock, cfgOverrides = {}) {
     }, cfgOverrides),
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
     checkpointCommand, parseCheckpointOutput,
-  }));
+  }, scopeOverrides)));
   return Object.assign(inner, { logs });
 }
 
@@ -3181,7 +3181,7 @@ test('treeGuardCheck: the start branch moved to another sha at deliver is reset 
 // A whole wave - Setup, the lanes, the pre-report checkpoint and the report writer - with the
 // real guard block and a mocked agent. `wave` is ticket numbers; `hooks.deliver(n)` runs inside
 // each deliverer; `hooks.isolation(label)` may answer an isolation read before the default does.
-async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', hooks = {}, head = () => 'a'.repeat(40) } = {}) {
+async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', hooks = {}, head = () => 'a'.repeat(40), agentWrap = null } = {}) {
   const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
   const helpers = loadStableHelpers(FLEET_SCRIPT);
   const calls = [], restores = [];
@@ -3213,9 +3213,10 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     + "const discoveryReport = await runReport(results.flatMap(r => (r && r.discoveries) || []), 'main')\n"
     + 'return { results, breaches, headRestores, discoveryReport }';
   const logs = [];
+  const runHalt = createRunHalt((m) => logs.push(m));
   const run = new AsyncFunction('scope', `with (scope) {\n${body}\n${tail}\n}`);
   const out = await run(laneScope({
-    agent: agentMock, log: (m) => logs.push(m),
+    agent: agentWrap ? agentWrap(agentMock) : agentMock, log: (m) => logs.push(m),
     cfg: {
       treeGuard: 'auto', treeGuardScript: 'tools/orchestrator-tree-guard.js', treeGuardStateDir: '.git/orchestrator-tree-guard',
       orchestratorCwd: '.', reportModel: 'r', maxAttempts: 1, deliver: true, implModel: 'x', verifyModel: 'y', deliverModel: 'z',
@@ -3225,7 +3226,7 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     instrument: 'gh', rules: new Proxy({}, { get: () => () => '' }), verifierAgentType,
     dedupeBrief: () => '', testCommand: 'echo ok', revParse: async () => null, classifyDelivery, worktreeMismatch,
     unusableReason: (who, detail) => `${who} output unusable: ${detail}`,
-    runHalt: createRunHalt(() => {}),
+    runHalt,
     stableJson: helpers.stableJson, stableText: helpers.stableText, stableList: helpers.stableList,
     priorFindingsBlock: helpers.priorFindingsBlock, unmetCriteriaOf: helpers.unmetCriteriaOf, gitSpelling: helpers.gitSpelling,
     checkpointCommand, parseCheckpointOutput,
@@ -3233,7 +3234,7 @@ async function driveGuardedWave(wave, { verifierAgentType = 'fleet-verifier', ho
     buildLanes, chainGate, DISCOVERY_REPORT: {},
     pipeline: async (items, fn) => { const res = []; for (const i of items) res.push(await fn(i)); return res; },
   }));
-  return { out, calls, restores, logs, src };
+  return { out, calls, restores, logs, src, runHalt };
 }
 
 test('a wave whose deliverer merges and resets the orchestrator checkout still delivers every other ticket and runs the report writer, and the run result names the breach (issue 1006)', async () => {
@@ -3290,6 +3291,90 @@ test('a 2-ticket wave with one attempt each starts at most 8 guard or probe agen
   }
   // The worktree canary rides in the env probe (Scout) now: no Setup agent of its own.
   assert.ok(!unpinned.src.includes("label: 'worktree-canary'"), 'the worktree canary is not a separate agent any more');
+});
+
+// Run wf_0b138fa5-528 (2026-10-02): the account hit its session limit mid-wave. The Workflow
+// runtime does not reject agent() on a terminal API error: it logs "[label] failed: <message>" and
+// RESOLVES null, so the script never sees the limit text. Every checkpoint agent came back null,
+// the HEAD watch read that as "HEAD unreadable", its restore and re-read came back null too, and
+// the run threw "orchestrator worktree isolation breached" over a checkout that was on its start
+// commit and clean. A checkpoint that cannot run is NOT AUDITED and halts the run (issue 812);
+// it is never a breach.
+const QUOTA_SETUP = { exitCode: 0, stdout: isolationStdout({ head: MAIN_HEAD, guard: { statePath: '/m/s.json', baselineCount: 0 } }), stderr: '' };
+
+test('treeGuardCheck: checkpoint agents that resolve null (the runtime\'s quota death) halt the run, never a breach (wf_0b138fa5-528)', async () => {
+  const labels = [];
+  const agentMock = async (_prompt, opts) => {
+    labels.push(opts.label);
+    return opts.label === 'isolation:setup' ? QUOTA_SETUP : null;
+  };
+  const runHalt = createRunHalt(() => {});
+  const { treeGuardCheck, breaches, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  await treeGuardCheck('implement-attempt1', 1316);
+  assert.deepEqual(breaches, [], 'a dead checkpoint agent is not evidence the checkout moved');
+  assert.ok(runHalt.halted(), 'the run halts: every later agent would die the same way');
+  assert.ok(logs.some((l) => /isolation:implement-attempt1#1316 NOT AUDITED/.test(l)), JSON.stringify(logs));
+  assert.ok(!logs.some((l) => /ISOLATION BREACH/.test(l)), JSON.stringify(logs));
+  assert.deepEqual(labels, ['isolation:setup', 'isolation:implement-attempt1#1316'],
+    'no restore agent is started off a read that never happened');
+});
+
+test('treeGuardCheck: a checkpoint agent rejected with "would exceed your account\'s rate limit" halts the run on the rate limit (wf_0b138fa5-528)', async () => {
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label === 'isolation:setup') return QUOTA_SETUP;
+    throw new Error("API Error: This request would exceed your account's rate limit. Please try again later.");
+  };
+  const runHalt = createRunHalt(() => {});
+  const { treeGuardCheck, breaches } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  await treeGuardCheck('implement-attempt1', 1349);
+  assert.deepEqual(breaches, []);
+  assert.equal(runHalt.get() && runHalt.get().reason, 'rate limit');
+});
+
+test('treeGuardCheck: once the run is halted, a checkpoint agent that fails for any reason is NOT AUDITED, not a breach (issue 812)', async () => {
+  const agentMock = async (_prompt, opts) => {
+    if (opts.label === 'isolation:setup') return QUOTA_SETUP;
+    throw new Error('StructuredOutput retry cap (5) exceeded');
+  };
+  const runHalt = createRunHalt(() => {});
+  runHalt.note("You've hit your session limit · resets 8:10pm (America/Chicago)", 'impl:#1300.1');
+  const { treeGuardCheck, breaches, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  await treeGuardCheck('implement-attempt1', 1316);
+  assert.deepEqual(breaches, []);
+  assert.ok(logs.some((l) => /NOT AUDITED/.test(l)), JSON.stringify(logs));
+});
+
+test('treeGuardCheck: a moved HEAD whose restore agent dies is logged as left moved and halts the run, not a breach (wf_0b138fa5-528)', async () => {
+  const labels = [];
+  const agentMock = async (_prompt, opts) => {
+    labels.push(opts.label);
+    if (opts.label === 'isolation:setup') return QUOTA_SETUP;
+    if (opts.label === 'isolation:deliver#7') return { exitCode: 0, stdout: isolationStdout({ head: { branch: null, sha: 'b'.repeat(40) }, guard: CLEAN }), stderr: '' };
+    return null;
+  };
+  const runHalt = createRunHalt(() => {});
+  const { treeGuardCheck, breaches, logs } = await driveTreeGuard(agentMock, { orchestratorCwd: '/m' }, { runHalt });
+  await treeGuardCheck('deliver', 7);
+  assert.deepEqual(breaches, []);
+  assert.ok(runHalt.halted());
+  assert.deepEqual(labels, ['isolation:setup', 'isolation:deliver#7', 'orchestrator-head:restore:deliver#7']);
+  assert.ok(logs.some((l) => /HEAD LEFT MOVED at deliver/.test(l) && /restore it by hand/.test(l)), JSON.stringify(logs));
+});
+
+test('a wave that hits the session limit after one implementer ends halted with no breach, the rest not attempted (wf_0b138fa5-528)', async () => {
+  let dead = false;
+  const { out, runHalt, logs } = await driveGuardedWave([1316, 1333, 1346], {
+    agentWrap: (inner) => async (prompt, opts) => {
+      if (dead) return null; // what the runtime hands the script once the limit is hit
+      const res = await inner(prompt, opts);
+      if (opts.label === 'impl:#1316.1') dead = true;
+      return res;
+    },
+  });
+  assert.deepEqual(out.breaches, [], 'the run must not report a breach');
+  assert.ok(runHalt.halted());
+  assert.deepEqual(out.results.filter((r) => r && r.notAttempted).map((r) => r.ticket), [1333, 1346]);
+  assert.ok(!logs.some((l) => /ISOLATION BREACH/.test(l)), JSON.stringify(logs));
 });
 
 test(`${FLEET_SCRIPT_REL}: the report writer commits the follow-ups file by explicit path only (issue 807)`, () => {
@@ -3527,6 +3612,8 @@ test('quotaFailure recognises the limit messages runs have died on, with their r
   assert.equal(quotaFailure('gh: API rate limit already exceeded for user ID 1').reason, 'rate limit');
   assert.equal(quotaFailure('HTTP 429 Too Many Requests').reason, 'rate limit');
   assert.equal(quotaFailure('rate_limit_error: status 429').resetsAt, null);
+  // wf_0b138fa5-528: "rate limit" is not followed by "exceeded" here.
+  assert.equal((quotaFailure("API Error: This request would exceed your account's rate limit. Please try again later.") || {}).reason, 'rate limit');
   for (const ordinary of ['no reply matching its schema', 'issue #429 is still open', '', null]) {
     assert.equal(quotaFailure(ordinary), null, `${ordinary} is an ordinary failure, not a halt`);
   }
