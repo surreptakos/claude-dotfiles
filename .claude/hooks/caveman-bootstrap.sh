@@ -270,6 +270,17 @@ if [ -z "${CAVEMAN_BOOTSTRAP_SKIP_CLI:-}" ]; then
       enable_out="$("$BIN_DIR/caveman" enable claude 2>&1 || true)"
       if printf '%s' "$enable_out" | grep -q 'native Caveman enabled\|already'; then
         enable_state="enabled (shrink hook + native hooks + recovery MCP in ~/.claude)"
+        # Issue 1363: gate the shrink hook so a git command in a linked worktree runs unwrapped;
+        # the worktree-isolation guard refuses `caveman shrink -- git ...`. Re-run after every
+        # enable, which re-adds the bare entry.
+        gate_src="$(dirname "${BASH_SOURCE[0]}")/caveman-shrink-gate.js"
+        gate_dst="$CLAUDE_DIR/hooks/caveman-shrink-gate.js"
+        if mkdir -p "$CLAUDE_DIR/hooks" && cp "$gate_src" "$gate_dst" \
+          && node "$gate_dst" --install "$CLAUDE_DIR/settings.json" "$gate_dst"; then
+          enable_state="$enable_state, git gated in worktrees"
+        else
+          problem "shrink-hook git gate not installed (worktree workers' git will be refused)"
+        fi
       else
         problem "caveman enable claude did not confirm: $(printf '%s' "$enable_out" | tail -1)"
         enable_state="failed"
