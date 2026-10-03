@@ -295,6 +295,38 @@ function dropParkedTickets(tickets, explicitNumbers) {
 }
 
 /**
+ * Drop every candidate labelled `prd` from a label-driven listing (issue 1362).
+ *
+ * A PRD is a container, not buildable work: `prd` + `ready-for-agent` means "decomposed into child
+ * tickets that are themselves ready" (docs/agents/triage-labels.md), and the PRD keeps the label
+ * until its last child closes. A code lane on one burns every attempt on "no commit produced" or
+ * writes code the children own, and a "loop until no ready-for-agent remains" request re-spins it
+ * every wave. Its children carry the work; the container closes when they do.
+ *
+ * Like dropParkedTickets, this only gates the label-driven listing: a `prd` issue named explicitly
+ * in `args.tickets` still runs, so an owner can force one.
+ *
+ * @param {Array<{number:number, labels?:Array<string>|null}>|null|undefined} tickets
+ * @param {Array<number|string>|null|undefined} explicitNumbers - `args.tickets`, parsed; a
+ *   non-empty list means every candidate was named explicitly and none are dropped
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, label:string}>}} the surviving tickets
+ *   in order, and the dropped ones, for the run result's `skippedPrd`
+ */
+function dropPrdContainers(tickets, explicitNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (Array.isArray(explicitNumbers) && explicitNumbers.length > 0) return { tickets: list, skipped: [] };
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const labels = Array.isArray(t && t.labels) ? t.labels : [];
+    const prd = labels.map((l) => String(l || '').trim()).find((l) => l.toLowerCase() === 'prd');
+    if (!prd) return true;
+    skipped.push({ ticket: parseInt(t.number, 10), label: prd });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
  * Drop blockers that have already closed (issue 403).
  *
  * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
@@ -1028,7 +1060,7 @@ function difficultyEvalSet(branchNames) {
 
 module.exports = {
   generateRunId, buildBranchName, workerSuffix, pickInstrument,
-  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
+  ISSUE_BRANCH_PREFIX, DISCOVERIES_BRANCH_PREFIX, FLEET_BRANCH_PREFIXES, buildDiscoveriesBranchName, isFleetBranch, confineToCandidates, dropParkedTickets, dropPrdContainers, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   DIFFICULTY_LEVELS, DIFFICULTY_CONFIDENCE_FLOOR, IMPL_FALLBACK_MODEL, DIFFICULTY_CRITERIA, JEV_ENDPOINT, difficultyRequest, parseDifficulty, pickImplModel, implementerModel, difficultyEvalSet,

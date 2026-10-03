@@ -397,6 +397,16 @@ reaper's first sweep parked #4 #5 #22 #38 #41 and a label-driven run would have 
 five against the owner's speed-over-robustness ruling had the caller not passed `tickets: [...]`
 explicitly (issue 786).
 
+## A `prd` container never enters a label-driven wave
+
+`prd` + `ready-for-agent` means a PRD decomposed into child tickets that are themselves ready, not
+buildable work, and the PRD keeps the label until its last child closes. The scout reports each
+ticket's labels, and a label-driven listing drops any candidate labelled `prd` before wave
+selection, named in the run result under `skippedPrd` (`dropPrdContainers`). A `prd` issue named in
+`args.tickets` still runs, so an owner can force one. On aac-sales-commissions on 2026-10-03 the
+scout gave PRD #19 a code lane, three attempts ended "no commit produced", and PRD #84's
+implementer wrote `src/` code its children owned (issue 1362).
+
 ## Branch names
 
 `agent/issue-<N>-attempt<A>-wf_<runId>-w<workerN>` (see the block comment at the top of the

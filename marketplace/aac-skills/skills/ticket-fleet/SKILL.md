@@ -4,10 +4,10 @@ description: 'Run a ticket-fleet wave over the ready-for-agent queue. Use when a
 
   '
 metadata:
-  modified: '2026-10-02T17:46:10Z'
-  previous-modified: '2026-10-02T16:53:02Z'
-  revision: '76'
-  content-sha: 7fec0ba3b084
+  modified: '2026-10-03T19:24:07Z'
+  previous-modified: '2026-10-02T17:46:10Z'
+  revision: '77'
+  content-sha: 15015901917d
 ---
 
 # ticket-fleet
@@ -137,7 +137,7 @@ its launch; Dan asked whether that was true before anyone had looked.
    | `skippedBlocked` | an open blocker outside the wave | waits for the blocker |
    | `skippedChained` | chained behind an in-wave blocker that did not merge | next wave |
    | `notAttempted` | never started: `halt` names the quota or rate limit that ended the run and its reset time | relaunch after the reset; bullets are in `discoveryList` |
-   | `skippedOpenPR` / `skippedParked` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / waiting on the owner after a handoff | nothing |
+   | `skippedOpenPR` / `skippedParked` / `skippedPrd` / `skippedAwaitingOwner` | already has a PR / in Maybe Someday / a `prd` container / waiting on the owner after a handoff | nothing |
 
    Done when every ticket the scout listed sits in one row above.
 
@@ -178,7 +178,9 @@ Required: `contractVersion` (integer, must equal the script's, 2 today), `runId`
   blocker's lane: it starts after the blocker's PR merges, from `origin/<defaultBranch>`
   (issue 854).
 - Dropped before selection: tickets with an open `agent/issue-<N>-` PR, and, in a label-driven
-  wave, tickets in the Maybe Someday milestone.
+  wave, tickets in the Maybe Someday milestone and issues labelled `prd` (a decomposed container:
+  its children carry the work, and it closes when they do; issue 1362). A `prd` issue named in
+  `tickets: [...]` still runs.
 - A ticket whose latest comment is an unanswered fleet handoff is parked.
 
 **Lanes.** The scout gives each ticket a kind:

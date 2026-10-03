@@ -23,7 +23,7 @@ const BASH = shell('bash');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 const {
-  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, dropParkedTickets, resolveVerifierAgent, pickVerifierAgent,
+  generateRunId, buildBranchName, workerSuffix, pickInstrument, confineToCandidates, dropParkedTickets, dropPrdContainers, resolveVerifierAgent, pickVerifierAgent,
   applyBlockerStates, shaMatches, worktreeMismatch, applyOpenPrs, selectWave, buildLanes, chainGate,
   stableJson, stableText, stableList, priorFindingsBlock, unmetCriteriaOf,
   FLEET_BRANCH_PREFIXES, DISCOVERIES_BRANCH_PREFIX, buildDiscoveriesBranchName, isFleetBranch,
@@ -1534,6 +1534,29 @@ test('dropParkedTickets leaves an explicit args.tickets list untouched (issue 78
 test('dropParkedTickets handles absent input', () => {
   assert.deepEqual(dropParkedTickets(null, null), { tickets: [], skipped: [] });
   assert.deepEqual(dropParkedTickets(undefined, []), { tickets: [], skipped: [] });
+});
+
+test('dropPrdContainers drops a prd container from a label-driven listing (issue 1362)', () => {
+  const tickets = [
+    { number: 19, labels: ['prd', 'ready-for-agent'] },
+    { number: 20, labels: ['ready-for-agent'] },
+    { number: 84, labels: ['ready-for-agent', 'PRD'] },
+    { number: 85 },
+  ];
+  const applied = dropPrdContainers(tickets, []);
+  assert.deepEqual(applied.tickets.map((t) => t.number), [20, 85],
+    'a prd container never reaches an implementer from a label-driven listing');
+  assert.deepEqual(applied.skipped, [{ ticket: 19, label: 'prd' }, { ticket: 84, label: 'PRD' }],
+    'the dropped containers are named, for skippedPrd');
+  assert.deepEqual(dropPrdContainers(null, null), { tickets: [], skipped: [] });
+});
+
+test('dropPrdContainers leaves an explicit args.tickets list untouched (issue 1362)', () => {
+  const tickets = [{ number: 19, labels: ['prd', 'ready-for-agent'] }];
+  const applied = dropPrdContainers(tickets, [19]);
+  assert.deepEqual(applied.tickets.map((t) => t.number), [19],
+    'a prd issue named explicitly by number still runs - the owner forced it');
+  assert.deepEqual(applied.skipped, []);
 });
 
 test('selectWave takes every runnable ticket - no cap - and names the two reasons the rest do not run', () => {

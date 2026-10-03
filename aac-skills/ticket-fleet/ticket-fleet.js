@@ -365,6 +365,38 @@ function dropParkedTickets(tickets, explicitNumbers) {
 }
 
 /**
+ * Drop every candidate labelled `prd` from a label-driven listing (issue 1362).
+ *
+ * A PRD is a container, not buildable work: `prd` + `ready-for-agent` means "decomposed into child
+ * tickets that are themselves ready" (docs/agents/triage-labels.md), and the PRD keeps the label
+ * until its last child closes. A code lane on one burns every attempt on "no commit produced" or
+ * writes code the children own, and a "loop until no ready-for-agent remains" request re-spins it
+ * every wave. Its children carry the work; the container closes when they do.
+ *
+ * Like dropParkedTickets, this only gates the label-driven listing: a `prd` issue named explicitly
+ * in `args.tickets` still runs, so an owner can force one.
+ *
+ * @param {Array<{number:number, labels?:Array<string>|null}>|null|undefined} tickets
+ * @param {Array<number|string>|null|undefined} explicitNumbers - `args.tickets`, parsed; a
+ *   non-empty list means every candidate was named explicitly and none are dropped
+ * @returns {{tickets:Array, skipped:Array<{ticket:number, label:string}>}} the surviving tickets
+ *   in order, and the dropped ones, for the run result's `skippedPrd`
+ */
+function dropPrdContainers(tickets, explicitNumbers) {
+  const list = Array.isArray(tickets) ? tickets : [];
+  if (Array.isArray(explicitNumbers) && explicitNumbers.length > 0) return { tickets: list, skipped: [] };
+  const skipped = [];
+  const kept = list.filter((t) => {
+    const labels = Array.isArray(t && t.labels) ? t.labels : [];
+    const prd = labels.map((l) => String(l || '').trim()).find((l) => l.toLowerCase() === 'prd');
+    if (!prd) return true;
+    skipped.push({ ticket: parseInt(t.number, 10), label: prd });
+    return false;
+  });
+  return { tickets: kept, skipped };
+}
+
+/**
  * Drop blockers that have already closed (issue 403).
  *
  * The scout lifts "Blocked by #N" numbers out of a ticket body, and at
@@ -1188,6 +1220,7 @@ const SCOUT = { type: 'object', required: ['candidateNumbers', 'tickets', 'repoM
     body: { type: 'string', description: "the ticket's issue body, verbatim from the tracker (not the extracted criteria) - the implementer prompt shows this beside criteria so an implementer is not left guessing the fix from criteria alone (issue 886); \"\" only when the issue truly has no body" },
     blockedBy: { type: 'array', items: { type: 'integer' }, description: 'every blocker issue number the ticket names, whatever its state - the run resolves open vs closed itself (issue 403)' },
     milestone: { type: 'string', description: 'the ticket\'s milestone title, verbatim from the tracker (mcp list_issues/issue_read or gh api both return milestone.title); "" when the ticket has none. A milestone of "Maybe Someday" parks the ticket - dropped from a label-driven listing before the wave (issue 786) - so report it even when nothing else here reads it' },
+    labels: { type: 'array', items: { type: 'string' }, description: 'every label name on the ticket, verbatim from the tracker. A ticket labelled "prd" is a decomposed PRD container, not buildable work - dropped from a label-driven listing before the wave (issue 1362) - so report them even when nothing else here reads them' },
   } } },
   repoMap: { type: 'string', description: '15-line map: key dirs, test command, conventions, rails' },
   testCommand: { type: 'string' },
@@ -2189,7 +2222,7 @@ try {
 2. Collect the tickets: ${scoutSource}
    That one listing is the WHOLE candidate set. Do not widen it under any circumstances: not another label, not a sweep of open issues, not a search, not a ticket you happened to read elsewhere. Report every number it returned in candidateNumbers, before any filtering, and return no ticket whose number is absent from it.
    A listing that comes back with zero tickets is a valid and complete answer, not a cue to go looking: return candidateNumbers: [] and tickets: [] and stop. The run ending with nothing to do is the correct outcome there.
-3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report the ticket's full issue body verbatim as body ("" only when the issue truly has none) - the implementer is pinned to a fresh worktree with no other access to the tracker, so a body left out of the scout's report is a body the implementer never sees. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false. Report the ticket's milestone title verbatim (mcp list_issues/issue_read and gh api both return milestone.title; "" when it has none) - this run drops a Maybe Someday ticket from a label-driven listing before the wave (issue 786).
+3. For each ticket extract acceptance criteria verbatim and any "Blocked by #N" edges. Report the ticket's full issue body verbatim as body ("" only when the issue truly has none) - the implementer is pinned to a fresh worktree with no other access to the tracker, so a body left out of the scout's report is a body the implementer never sees. Report EVERY blocker number the ticket names, whatever state you believe that issue is in: this run reads each blocker's state itself after you return and drops the closed ones (issue 403). Do not judge the state and do not leave a number out because it looks landed. Per ticket set keepOpen to true only when the ticket body, its comments or its labels instruct that the issue stay open after its PR merges ("leave open", "keep open", a ratification ticket, a keep-open label); otherwise false. Report the ticket's milestone title verbatim (mcp list_issues/issue_read and gh api both return milestone.title; "" when it has none) - this run drops a Maybe Someday ticket from a label-driven listing before the wave (issue 786). Report every label name on the ticket in labels - this run drops a ticket labelled \`prd\` (a decomposed PRD container: its children carry the work) from a label-driven listing before the wave (issue 1362).
 4. Classify each ticket's kind, and put the deciding words in kindReason:
    - probe: the ticket resolves by quoting command output, research or evidence in a comment, and asks for no repository change.
    - human: the ticket is labelled ready-for-human, or its body says the owner performs the steps.
@@ -2227,9 +2260,17 @@ if (offListing > 0) log(`${offListing} ticket(s) dropped: not in the ${explicitT
 // block above.
 const parkedFilter = dropParkedTickets(scoutTickets, explicitTickets)
 const skippedParked = parkedFilter.skipped
-const eligibleTickets = parkedFilter.tickets
 if (skippedParked.length) log(`${skippedParked.length} ticket(s) skipped: parked in the Maybe Someday milestone - ${skippedParked.map(s => '#' + s.ticket).join(', ')}.`)
-if (!scout || !eligibleTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, skippedParked, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
+// A `prd` + `ready-for-agent` issue is a decomposed PRD container: its children carry the work
+// and it keeps the label until the last one closes, so a code lane on it produces no commit (or
+// writes code its children own) and every wave re-spins it. A label-driven listing drops it; a
+// `prd` issue named in args.tickets still runs, so an owner can force one (issue 1362). The pure
+// filter is dropPrdContainers in the generated block above.
+const prdFilter = dropPrdContainers(parkedFilter.tickets, explicitTickets)
+const skippedPrd = prdFilter.skipped
+const eligibleTickets = prdFilter.tickets
+if (skippedPrd.length) log(`${skippedPrd.length} ticket(s) skipped: labelled prd, a decomposed container whose children carry the work - ${skippedPrd.map(s => '#' + s.ticket).join(', ')}.`)
+if (!scout || !eligibleTickets.length) { log('No eligible tickets found.'); return { ran: 0, results: [], instrument, skippedParked, skippedPrd, note: explicitTickets.length ? 'scout returned none of the requested tickets: ' + explicitTickets.join(', ') : 'scout found no open tickets with label ' + cfg.label } }
 // [FLEET-SCOUT-GATE-END]
 
 // ---- test command override (issue 317) ----
@@ -3467,6 +3508,9 @@ return {
   // Candidates parked in the Maybe Someday milestone by the ticket reaper, dropped from a
   // label-driven listing before the wave (issue 786); an explicit args.tickets number still runs.
   skippedParked,
+  // Candidates labelled `prd` - decomposed PRD containers whose children carry the work - dropped
+  // from a label-driven listing before the wave (issue 1362); an explicit args.tickets number still runs.
+  skippedPrd,
   // Issue 725: per code ticket, its Jev difficulty level (null = unscored, implModel throughout)
   // and the model each implementer attempt ran on.
   implModels: clean.filter(r => r.kind === 'code').map(r => ({ ticket: r.ticket, difficulty: r.difficulty || null, models: r.implModels || [] })),
