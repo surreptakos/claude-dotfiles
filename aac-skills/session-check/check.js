@@ -576,8 +576,8 @@ function stampGate(py) {
   const bad = r.out.split(/\r?\n/).map((l) => l.trim())
     .filter((l) => l && !/^ok\s/.test(l) && !/^stamped\s/.test(l));
   bad.slice(0, 12).forEach((l) => note(l));
-  note(`\`python3 tools/skill-stamps.py stamp aac-skills --home '${OWNER_HOME}'\``
-    + ` && \`python3 tools/build-cloud-plugin.py --home '${OWNER_HOME}'\``);
+  // The stamp alone: a branch carries sources, and master rebuilds the payload (issue 1308).
+  note(`\`python3 tools/skill-stamps.py stamp aac-skills --home '${OWNER_HOME}'\``);
 }
 
 /** Everything this session could have put in front of the secret guard: the working tree's

@@ -1,0 +1,94 @@
+name: Payload rebuild
+
+# Issue 1308. A pull request carries sources only: aac-skills/, profile/, tools. The plugin
+# payload under marketplace/aac-skills and the two version files (its .claude-plugin/plugin.json
+# and .claude-plugin/marketplace.json) are build output, and this job is the only thing that
+# writes them. Every PR used to commit its own build, so every PR conflicted with master on the
+# version line and every merge re-created the conflict in all the others (20 PRs, about 3 hours,
+# 2026-10-02). Now master rebuilds after each merge and commits the result back, so two PRs that
+# change different skills merge in either order with no rebuild between them. The desktop
+# marketplace and cloud containers read master, so delivery is unchanged.
+#
+# The version only moves forward: a payload that moved takes a fresh UTC reading on master
+# (tools/build-cloud-plugin.py resolve_version), so a revert ships a newer version too.
+#
+# It cannot trigger itself in a loop, for four reasons, any one of which is enough:
+#   1. its commit is pushed with GITHUB_TOKEN, and GitHub starts no workflow for such a push;
+#   2. the job skips a push made by github-actions[bot];
+#   3. the job skips a head commit carrying the [payload-rebuild] marker, and that commit also
+#      carries [skip ci];
+#   4. a rebuild of a current payload changes nothing (issue 432), so there is nothing to commit.
+#
+# Its commands are the two regeneration commands, exactly (CLAUDE.md, "Skill stamps"). The stamp
+# step is normally a no-op, because skill-stamps.yml already fails a PR with a stale stamp.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# One rebuild at a time. A merge that lands mid-run queues its own run, which checks out the new
+# tip and rebuilds everything up to it.
+concurrency:
+  group: payload-rebuild
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    if: >-
+      github.actor != 'github-actions[bot]' &&
+      !contains(github.event.head_commit.message, '[payload-rebuild]')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master        # the tip now, not the pushed sha: a queued run rebuilds the latest merge
+          fetch-depth: 0     # a first-time stamp reads its dates from the git history
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      - name: Stamp and build
+        run: |
+          python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
+          python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
+      - name: Commit the payload back to master
+        run: |
+          git add -A -- aac-skills marketplace .claude-plugin/marketplace.json
+          if git diff --cached --quiet; then
+            echo "payload and version already match a fresh build - nothing to commit"
+            exit 0
+          fi
+          built_from=$(git rev-parse HEAD)
+          version=$(python3 -c "import json; print(json.load(open('marketplace/aac-skills/.claude-plugin/plugin.json'))['version'])")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore(payload): rebuild plugin payload $version for ${built_from:0:8} [payload-rebuild] [skip ci]"
+          if git push origin HEAD:master; then exit 0; fi
+          # A rejected push means master moved under us, or something refused the push. A newer
+          # merge has its own queued run that rebuilds from that tip, so hand off to it; anything
+          # else is a real failure.
+          git fetch origin master
+          if [ "$(git rev-parse origin/master)" != "$built_from" ]; then
+            echo "::notice::master moved during the rebuild; the run for the newer push rebuilds it"
+            exit 0
+          fi
+          echo "::error::could not push the rebuilt payload to master"
+          exit 1
+      - name: Master matches a fresh build
+        run: |
+          git fetch origin master
+          if [ "$(git rev-parse origin/master)" != "$(git rev-parse HEAD)" ]; then
+            echo "master moved on; the queued run checks the newer tip"
+            exit 0
+          fi
+          python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan' \
+            --out /tmp/verify --no-marketplace --no-stamp-write
+          if ! diff -r --exclude=__pycache__ --exclude=.pytest_cache /tmp/verify/aac-skills marketplace/aac-skills; then
+            echo "::error::marketplace/aac-skills on master does not match a fresh build"
+            exit 1
+          fi
+          python3 tools/skill-stamps.py check aac-skills --home 'C:\Users\Dan'

@@ -128,8 +128,10 @@ pushes. A clean merge pushes as before. A conflicting merge has exactly four res
   non-zero, which stops the ticket as before. The gate's full test run below is what proves the
   two additions live together.
 
-After resolving, the stage re-runs the repo's stamp-and-rebuild commands (`regenCommands`, or
-the ones CLAUDE.md names), then passes a two-part gate before anything is pushed: the
+After resolving, the stage re-runs the repo's regenerate commands (`regenCommands`, or the ones
+CLAUDE.md names). In claude-dotfiles that is the stamp command alone: a branch carries sources,
+and `payload-rebuild.yml` rebuilds the plugin payload on master after each merge (issue 1308), so
+Deliver never builds it before the push. The stage then passes a two-part gate before anything is pushed: the
 `regenCheckCommands` stamps check, and the test command. It commits the merge after both; the PR
 body says which paths the merge resolved.
 

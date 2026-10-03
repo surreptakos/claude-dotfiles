@@ -56,10 +56,11 @@ Edit `aac-skills/<name>/` or `profile/`, on a branch. Then, from the repo root:
 
 ```bash
 python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
-python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
 ```
 
-Commit both the source and the rebuilt `marketplace/`, and merge. **The merge is the release** —
+Commit the source with its stamps, and merge. The branch carries no `marketplace/` changes:
+`payload-rebuild.yml` rebuilds the plugin payload and version on master after each merge (issue
+1308), so open PRs never conflict on them. **The merge is the release** —
 every cloud container installs the payload from master at session start, and a desktop takes the
 same change with:
 

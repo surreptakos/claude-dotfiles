@@ -308,10 +308,11 @@ test('the implementer and verifier prompts carry the configured regenCommands ve
   const launchLine = skillDoc.match(/^\s*regenCommands: (\[.*\])\s*$/m);
   assert.ok(launchLine, "SKILL.md step 3 must give claude-dotfiles' regenCommands launch value");
   const commands = JSON.parse(launchLine[1]);
+  // Issue 1308: the stamp command alone. A branch carries sources and master rebuilds the plugin
+  // payload after each merge, so neither the implementer nor Deliver builds it before a push.
   assert.deepEqual(commands, [
     "python3 tools/skill-stamps.py stamp aac-skills --home 'C:\\Users\\Dan'",
-    "python3 tools/build-cloud-plugin.py --home 'C:\\Users\\Dan'",
-  ], "the launch value must be the two CLAUDE.md commands with the owner's home");
+  ], "the launch value must be CLAUDE.md's stamp command with the owner's home, and no payload build");
 
   const templates = {
     implementer: sliceBetween(src, 'Implement GitHub issue #${t.number}: ${t.title}',

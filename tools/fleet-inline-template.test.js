@@ -20,9 +20,12 @@ const { renderScript, SOURCE, TARGET, TARGET_START, TARGET_END } = require('./bu
 const { sliceBetweenTags } = require('./source-slice.js');
 const module_ = require('./ticket-fleet-branch.js');
 
-const REPO_ROOT = path.resolve(__dirname, '..');
-const PACKAGED = path.join(REPO_ROOT, 'marketplace', 'aac-skills', 'skills', 'ticket-fleet',
-                           'ticket-fleet.js');
+const { freshPayload } = require('./fresh-payload.js');
+
+// A fresh build of the payload, not the committed one: a branch carries sources only and master
+// rebuilds marketplace/ after the merge (issue 1308), so the committed copy is behind any branch
+// that regenerated the block.
+const packaged = () => path.join(freshPayload(), 'skills', 'ticket-fleet', 'ticket-fleet.js');
 
 /** The text between the fleet script's FLEET-GENERATED markers. */
 function generatedBlock(file) {
@@ -38,9 +41,9 @@ test('the fleet script holds the generated copy of tools/ticket-fleet-branch.js,
     'the fleet script\'s generated block is stale — run: node tools/build-fleet-inline.js'
   );
   assert.strictEqual(
-    generatedBlock(PACKAGED),
+    generatedBlock(packaged()),
     generatedBlock(TARGET),
-    'the packaged fleet script carries an older generated block — rebuild marketplace/ per CLAUDE.md'
+    'the packager ships a fleet script whose generated block differs from the source'
   );
 });
 

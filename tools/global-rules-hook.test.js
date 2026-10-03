@@ -25,6 +25,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const { test } = require('node:test');
+const { freshPayload } = require('./fresh-payload.js');
 
 const REPO = path.resolve(__dirname, '..');
 const PAYLOAD = path.join(REPO, 'marketplace', 'aac-skills');
@@ -79,9 +80,12 @@ test('the payload rules file is the whole CLAUDE.md verbatim, not a hand copy', 
   const whole = `${md.trimEnd()}\n`;
   // The payload carries the owner's real home where the mirror holds __USERHOME__ (the packager's
   // --home substitution); re-tokenize so the comparison does not depend on whose home built it.
-  const shipped = fs.readFileSync(RULES, 'utf8').replace(/[A-Za-z]:\\Users\\[^\\"]+/g, '__USERHOME__');
+  // A fresh build, not the committed payload: a branch carries sources only and master rebuilds
+  // the payload after the merge (issue 1308), so the committed copy is behind any rules edit.
+  const built = path.join(freshPayload(), 'rules', 'global-rules.md');
+  const shipped = fs.readFileSync(built, 'utf8').replace(/[A-Za-z]:\\Users\\[^\\"]+/g, '__USERHOME__');
   assert.equal(shipped, whole,
-    'marketplace/aac-skills/rules/global-rules.md drifted from profile/claude/CLAUDE.md — rerun the packager');
+    'the packager no longer ships profile/claude/CLAUDE.md verbatim as rules/global-rules.md');
   assert.ok(shipped.includes('### Four standing disciplines'),
     'the disciplines heading is the contract the packager and the digest marks depend on');
 });

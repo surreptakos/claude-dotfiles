@@ -9,7 +9,7 @@ The Claude Code setup itself, under version control: global rules, skills, hooks
 retired the `claude/`, `codex/` and `memory/` mirrors and `sync.ps1 -Mode push` with them).
 
 Edit `aac-skills/<name>/` for a skill and `profile/` for the consumer profile — the global rules
-text, `settings.json`, the hook scripts, the Codex half. Do it on a branch, run the two commands
+text, `settings.json`, the hook scripts, the Codex half. Do it on a branch, run the stamp command
 below, commit, and merge: **the merge to master is the release**, and it is what a cloud container
 installs; a desktop takes them on its own: `profile/claude/settings.json` registers the marketplace with
 `autoUpdate: true`, so Claude Code's background refresh installs the new payload version after the next
@@ -18,7 +18,10 @@ restores the rest).
 
 Generated, and never hand-edited: `marketplace/`, `.claude-plugin/marketplace.json` and the
 `aac-skills/project-harness/templates/` files the two generators own. `DASHBOARD.md` too — see
-the harness section.
+the harness section. A branch never commits the first two (issue 1308): `payload-rebuild.yml`
+rebuilds them on master after each merge and commits the result as `github-actions[bot]`, and
+`skill-stamps.yml` fails a PR that touches them. Building one locally to look at it is fine;
+`git checkout -- marketplace .claude-plugin/marketplace.json` before you commit.
 
 This repo's memory notes are hand-written at `docs/agents/memory/` with `MEMORY.md` as the index,
 and the plugin's SessionStart hook (`tools/repo-memory-load.js`) injects that index, so cloud
@@ -34,22 +37,22 @@ Never edit the four by hand and never bump one to make a check pass: the hash is
 dates believable. The previous text of any skill is `git log -p -- <skill>/SKILL.md`; the stamp
 tells you it is there to look for.
 
-After editing anything under `aac-skills/`, run both, or CI (`skill-stamps.yml`) fails the branch:
+After editing anything under `aac-skills/`, run this, or CI (`skill-stamps.yml`) fails the branch:
 
 ```bash
 python3 tools/skill-stamps.py stamp aac-skills --home 'C:\Users\Dan'
-python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan'
 ```
 
-`--home` names the owner's home on both (their default too: `OWNER_HOME` in
-`tools/skill-stamps.py`, never the running user's home, issue 492): the stamper folds it into the
-sync tokens before hashing. CI checks that a rebuild reproduces the committed payload, `diff -r`
-over the whole of `marketplace/aac-skills`, `plugin.json` included: the plugin version follows the
-payload, not the clock, so only a moved payload takes a fresh UTC stamp (issue 432).
-`.claude-plugin/marketplace.json` repeats that version and is outside the check.
+`--home` names the owner's home (the default too: `OWNER_HOME` in `tools/skill-stamps.py`, never
+the running user's home, issue 492): the stamper folds it into the sync tokens before hashing.
 
-Both commands stamp, and so does a second edit after them: run them as often as you like, the
-commit still carries one revision bump. A rotation is measured from the last *committed* stamp,
+A PR's CI checks the stamps and runs the payload tests against a build made in the runner, never
+the committed payload, so one behind master passes. `payload-rebuild.yml` runs this command and
+`tools/build-cloud-plugin.py --home 'C:\Users\Dan'` on master, then diffs master against a fresh
+build. Only a moved payload takes a fresh UTC version (issue 432).
+
+Run the stamper as often as you like, after as many edits as you like: the commit still carries
+one revision bump. A rotation is measured from the last *committed* stamp,
 never from an intermediate one, so `previous-modified` names the published version (issue 363).
 
 ## Layout

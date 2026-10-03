@@ -46,6 +46,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyyaml
+      # Issue 1308: a PR carries sources only and payload-rebuild.yml rebuilds the payload on
+      # master after the merge, so the gate bootstraps from a build of this branch made here -
+      # what a container will get once it merges - not the PR's committed copy.
+      - name: Build the payload this branch would ship (runner checkout only, never committed)
+        run: python3 tools/build-cloud-plugin.py --home 'C:\Users\Dan' --no-stamp-write
       - name: Bootstrap gate
         run: tests/bootstrap-test.sh
       - name: Fault injection — a missing governance hook entry must turn this red
