@@ -154,6 +154,20 @@ test('the script\'s own refresh block never spawns the refresh agent for a FORKS
   assert.equal(await reachesRefresh('surreptakos/some-other-repo'), true, 'a non-fork served repo must still be refreshed');
 });
 
+test('the runbook\'s fleetArgs name only keys the script reads, and maxTickets is not one (issue 1285)', () => {
+  const src = fs.readFileSync(FLEET_SCRIPT, 'utf8');
+  const cfgBlock = sliceBetween(src, 'const cfg = Object.assign({', '}, args || {})', 'fleet cfg block');
+  const cfgKeys = new Set([...cfgBlock.matchAll(/^ {2}([A-Za-z]+):/gm)].map((m) => m[1]));
+  assert.ok(cfgKeys.has('maxAttempts') && !cfgKeys.has('maxTickets'),
+    'the fleet reads maxAttempts and has no ticket cap, so no maxTickets key');
+  const runbook = fs.readFileSync(path.join(REPO_ROOT, 'orchestrator', 'RUNBOOK.md'), 'utf8');
+  const template = sliceBetween(runbook, '"fleetArgs": {', '}', 'RUNBOOK.md state template fleetArgs');
+  const keys = [...template.matchAll(/"([A-Za-z]+)":/g)].map((m) => m[1]).filter((k) => k !== 'fleetArgs');
+  assert.ok(keys.length > 0, 'the template must name at least one fleetArgs key');
+  for (const k of keys) assert.ok(cfgKeys.has(k), `the runbook passes fleetArgs.${k}, which the script never reads`);
+  assert.match(runbook, /`maxTickets` is not one/, 'the launch line must say maxTickets is dropped, not passed');
+});
+
 test('the INTERNALS.md ripple table names every fork holder, runbook and the current version', () => {
   const skill = fs.readFileSync(FLEET_SKILL, 'utf8');
   assert.match(skill, new RegExp(`contract v${CONTRACT_VERSION}\\b`),

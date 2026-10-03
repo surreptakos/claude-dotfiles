@@ -179,7 +179,10 @@ In this order:
    every implementer identically with `Cannot create agent worktree: not in a git repository`, 0
    delivered, no branches created (measured 2026-09-23, `surreptakos/claude-dotfiles` memory note
    `workflow-runtime-quirks`). — and `args` from the
-   state issue's `config.fleetArgs`, plus the three contract args: `contractVersion: 2`, a `runId`
+   state issue's `config.fleetArgs` (issue #44's when the state issue sets none), keeping only the
+   keys the script's `cfg` block reads and dropping the rest: `maxTickets` is not one, because a
+   wave has no ticket cap (Dan, 2026-09-26, PR 860), and the only way to narrow a wave is an
+   explicit `tickets` list (issue 1285). Add the three contract args: `contractVersion: 2`, a `runId`
    minted inline (`printf %x $(date +%s)`) and an `invocationId` minted fresh on every launch,
    resume included (`printf %x%x $(date +%s) $$`), never equal to the `runId`. The workflow runtime
    forbids `Date.now()` and `Math.random()` in scripts, so the caller mints both ids; a launch that
